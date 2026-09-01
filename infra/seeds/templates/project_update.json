@@ -1,0 +1,78 @@
+{
+  "code": "project_update",
+  "name": "Project update",
+  "language": "en",
+  "specialty": "projects",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "status_summary",
+      "name": "Status summary",
+      "voice_aliases": ["status", "summary", "tl dr"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Project status summary. Project name, milestone, sprint, release, overall health, headline, percent complete.",
+      "min_chars": 10,
+      "order": 0,
+      "synthesis_prompt": "Two or three sentences a stakeholder can read in ten seconds: where the project stands and the single most important thing to know."
+    },
+    {
+      "id": "overall_status",
+      "name": "Overall status",
+      "voice_aliases": ["overall status", "health"],
+      "required": true,
+      "field_type": "choice",
+      "asr_prompt": "Overall project health. On track, at risk, off track.",
+      "min_chars": 0,
+      "order": 1,
+      "options": [
+        {"value": "on_track", "label": "On track", "voice_aliases": ["on track", "green"]},
+        {"value": "at_risk", "label": "At risk", "voice_aliases": ["at risk", "yellow"]},
+        {"value": "off_track", "label": "Off track", "voice_aliases": ["off track", "red"]}
+      ]
+    },
+    {
+      "id": "progress",
+      "name": "Progress since last update",
+      "voice_aliases": ["progress", "done since last time"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Progress since the last update. Completed, shipped, merged, deployed, tested, reviewed, milestone reached, ahead of schedule.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Bullet list of completed work, most significant first."
+    },
+    {
+      "id": "risks",
+      "name": "Risks and blockers",
+      "voice_aliases": ["risks", "blockers", "issues"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Risks and blockers. Blocked by, dependency, slipping, scope creep, resource gap, technical debt, vendor delay, mitigation.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "One bullet per risk: the risk, its impact, and the mitigation or decision needed."
+    },
+    {
+      "id": "next_steps",
+      "name": "Next steps",
+      "voice_aliases": ["next steps", "plan"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Planned next steps. Next sprint, upcoming milestone, deliverable, owner, due date, dependency to resolve.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "One bullet per step in the form 'Owner: step — date'."
+    },
+    {
+      "id": "target_date",
+      "name": "Target date",
+      "voice_aliases": ["target date", "deadline"],
+      "required": false,
+      "field_type": "date",
+      "asr_prompt": "Target completion date for the current milestone or release.",
+      "min_chars": 0,
+      "order": 5
+    }
+  ]
+}

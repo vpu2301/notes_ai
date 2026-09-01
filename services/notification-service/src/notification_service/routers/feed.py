@@ -140,9 +140,7 @@ async def mark_read(
         # `read_at = coalesce(read_at, now())` — marking an already-read
         # row again succeeds and does not move the timestamp, so a
         # double-click is not an error and does not rewrite history.
-        found = await repo.mark_read(
-            conn, user_id=claims.sub, notification_id=notification_id
-        )
+        found = await repo.mark_read(conn, user_id=claims.sub, notification_id=notification_id)
         if not found:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -150,9 +148,7 @@ async def mark_read(
             )
         count = await repo.unread_count(conn, user_id=claims.sub)
 
-    await publish_unread_changed(
-        state.redis, tenant_id=claims.tid, recipient_user_id=claims.sub
-    )
+    await publish_unread_changed(state.redis, tenant_id=claims.tid, recipient_user_id=claims.sub)
     return ReadResult(updated=1, unread_count=count)
 
 
@@ -165,7 +161,5 @@ async def mark_all_read(
         updated = await repo.mark_all_read(conn, user_id=claims.sub)
         count = await repo.unread_count(conn, user_id=claims.sub)
 
-    await publish_unread_changed(
-        state.redis, tenant_id=claims.tid, recipient_user_id=claims.sub
-    )
+    await publish_unread_changed(state.redis, tenant_id=claims.tid, recipient_user_id=claims.sub)
     return ReadResult(updated=updated, unread_count=count)

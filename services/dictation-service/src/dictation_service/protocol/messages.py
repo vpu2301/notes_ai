@@ -1,7 +1,7 @@
-"""Pydantic discriminated unions for the medical-dictation.v1 wire protocol.
+"""Pydantic discriminated unions for the dictation.v1 wire protocol.
 
 Strict (`extra="forbid"`) on every model. The strictness is the point:
-sprint 14 will fork to `medical-dictation.v2` for diarization fields; a
+sprint 14 will fork to `dictation.v2` for diarization fields; a
 v1 client receiving a v2 message must reject it cleanly, and an attacker
 must not be able to smuggle `is_admin`-style fields through.
 
@@ -20,7 +20,7 @@ from .error_catalogue import ErrorCode
 
 # Bumping this is the only way to break v1 compatibly — see ADR-0012.
 PROTOCOL_VERSION_V1: int = 1
-# Sprint 14: medical-dictation.v2 — diarization fields + conversation
+# Sprint 14: dictation.v2 — diarization fields + conversation (meeting)
 # mode. Negotiated via the Sec-WebSocket-Protocol header; a session is
 # exactly one version for its whole lifetime. See docs/api/dictation-ws-v2.md.
 PROTOCOL_VERSION_V2: int = 2
@@ -31,11 +31,13 @@ PROTOCOL_VERSION_V2: int = 2
 # and with nlp-service's ``ProcessingContext.language``.
 LANGUAGE_PATTERN = "^(uk|en|de)$"
 
-# Anonymous diarization labels (raw clustering output). The doctor/
-# patient interpretation is a SEPARATE, overridable mapping — see
-# SpeakerMappingUpdated / SetSpeakerMapping.
+# Anonymous diarization labels (raw clustering output). The display
+# name a label maps to is a SEPARATE, client-controlled mapping — see
+# SpeakerMappingUpdated / SetSpeakerMapping. Until the client names a
+# speaker, labels render as the neutral SPEAKER_1..N defaults.
 SpeakerLabel = Literal["S1", "S2", "UNKNOWN"]
-SpeakerRole = Literal["doctor", "patient"]
+# Free-text display name for a speaker (e.g. "Alice", "SPEAKER_1").
+SpeakerName = Annotated[str, Field(min_length=1, max_length=128)]
 
 
 class _StrictModel(BaseModel):
@@ -111,7 +113,7 @@ class VoiceCommand(_StrictModel):
 
 
 class WarningMessage(_StrictModel):
-    """Non-fatal warning. Frontend may surface to the clinician."""
+    """Non-fatal warning. Frontend may surface to the user."""
 
     type: Literal["warning"] = "warning"
     session_id: UUID
@@ -167,10 +169,11 @@ ServerMessage = Annotated[
 class StartSession(_StrictModel):
     type: Literal["start_session"] = "start_session"
     protocol_version: int = PROTOCOL_VERSION_V1
-    prompt_id: UUID
     language: str = Field(pattern=LANGUAGE_PATTERN)
     target_kind: str = Field(default="generic")
-    encounter_id: UUID | None = None
+    # Optional free-text vocabulary hint (product terms, names, jargon)
+    # fed to Whisper's initial_prompt for this session. Empty = none.
+    vocabulary_hint: str = Field(default="", max_length=2000)
     template_id: UUID | None = None
     resume_session_id: UUID | None = None
 
@@ -242,7 +245,7 @@ class AudioFrame(_StrictModel):
 
 
 # ──────────────────────────────────────────────────────────────────────
-# medical-dictation.v2 (sprint 14) — diarization + conversation mode.
+# dictation.v2 (sprint 14) — diarization + conversation (meeting) mode.
 #
 # v1 stays byte-stable: none of the classes above changed. The v2
 # unions swap in subclasses for the messages that gained fields and add
@@ -264,39 +267,39 @@ class PartialV2(Partial):
 
     speaker: SpeakerLabel | None = None
     speaker_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    speaker_mapping_hint: dict[str, SpeakerRole | None] | None = None
+    speaker_mapping_hint: dict[str, SpeakerName | None] | None = None
 
 
 class FinalV2(Final):
     """v2 final: committed segment with its speaker proposal. The label
     itself is still a PROPOSAL (confidence + UNKNOWN honesty) — only the
-    clinician's review makes it ground truth."""
+    user's review makes it ground truth."""
 
     speaker: SpeakerLabel | None = None
     speaker_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    speaker_mapping_hint: dict[str, SpeakerRole | None] | None = None
+    speaker_mapping_hint: dict[str, SpeakerName | None] | None = None
 
 
 class SpeakerMappingUpdated(_StrictModel):
-    """Server → client: the doctor/patient mapping inference changed its
-    hypothesis (or acknowledges a manual set). The FE relabels
-    already-rendered turns. Never emitted again after a manual set,
-    except as the ``manual=True`` acknowledgement itself."""
+    """Server → client: acknowledges a manual ``set_speaker_mapping``.
+    The FE relabels already-rendered turns with the new display names.
+    Labels default to neutral SPEAKER_1..N until a client names them."""
 
     type: Literal["speaker_mapping_updated"] = "speaker_mapping_updated"
     session_id: UUID
-    mapping: dict[str, SpeakerRole | None]
+    mapping: dict[str, SpeakerName | None]
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = ""
     manual: bool = False
 
 
 class SetSpeakerMapping(_StrictModel):
-    """Client → server: the clinician's manual assignment. Authoritative
-    from the moment received — the server stops re-inferring."""
+    """Client → server: the user's naming of diarized speakers (e.g.
+    ``{"S1": "Alice", "S2": "Bob"}``). Authoritative from the moment
+    received."""
 
     type: Literal["set_speaker_mapping"] = "set_speaker_mapping"
-    mapping: dict[str, SpeakerRole]
+    mapping: dict[str, SpeakerName]
 
 
 class StartSessionV2(StartSession):

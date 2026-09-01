@@ -12,7 +12,7 @@
 #                  -f infra/compose/dev.yml  \
 #                  -f infra/compose/gpu.yml  up -d
 # ──────────────────────────────────────────────────────────────
-name: medical-dictation
+name: notes-ai
 
 services:
   asr-worker:

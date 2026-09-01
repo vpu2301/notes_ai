@@ -22,7 +22,7 @@ Two stranded shapes, one sweep:
 Both are worse than cosmetic. ``count_active_jobs`` gates
 ``per_tenant_concurrent_jobs``, so every stranded row permanently burns a
 slot in the tenant's upload budget — enough of them and the tenant cannot
-submit at all — and each one shows a clinician a job that will never
+submit at all — and each one shows the user a job that will never
 resolve.
 
 The reaper lives in asr-service, not in asr-worker, for the obvious
@@ -38,7 +38,7 @@ case the worker allows itself (``max_duration_seconds`` ×
 ``asr_max_inference_seconds_multiplier``, plus a redelivery or two), or
 the reaper will fail jobs that were merely slow. Reaping early is not
 catastrophic — the worker's idempotency check sees the terminal row on
-redelivery and skips — but it does cost the clinician a transcript that
+redelivery and skips — but it does cost the user a transcript that
 was on its way.
 """
 

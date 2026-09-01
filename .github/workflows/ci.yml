@@ -91,12 +91,6 @@ jobs:
           make check-no-object-storage
           make check-no-crypto
           make validate-templates
-          make check-corpus
-          make check-autocomplete-corpus
-          # S16: the sprint-09 dev-signing gate was in `make ci` but had
-          # never been added to this sweep — extended here alongside the
-          # new demo-envvars gate so prod-config guards actually gate PRs.
-          make check-no-dev-signing-in-prod-config
           make check-no-demo-envvars-in-prod
 
   # ──────────────────────────────────────────────────────────────

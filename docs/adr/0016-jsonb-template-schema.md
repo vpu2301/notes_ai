@@ -8,17 +8,17 @@
 
 ## Context
 
-Sprint-06 introduces clinical templates — the structural definition of
-what clinicians dictate (sections, prompts, voice aliases, billing
-metadata). Sprint-8 reports persist `template_id` + `schema_version`
-at finalization; sprint-11 encounters reference reports; sprint-17 FHIR
-emits Composition.section structure from template metadata.
+Sprint-06 introduces note templates — the structural definition of
+what users dictate (sections, prompts, voice aliases, metadata).
+Sprint-8 notes persist `template_id` + `schema_version` at
+finalization; later export features emit document structure from
+template metadata.
 
 The schema design space:
 
 | Approach          | Schema-change cost | Authoring workflow | Query patterns | Notes |
 | ----------------- | ------------------ | ------------------ | -------------- | ----- |
-| Relational (one table per field type) | high (migrations) | clinical content team needs DBA help | strong | rigid |
+| Relational (one table per field type) | high (migrations) | content team needs DBA help | strong | rigid |
 | Star schema (template + sections tables) | medium | OK | strong | every section is a row → 16 templates × 5-8 sections = 80-128 rows; admin UI is harder |
 | JSONB (one document per template version) | low (Pydantic at boundaries) | YAML/JSON authoring | weaker (need ->>) | fast iteration |
 | Document store (Mongo) | low | OK | weak | adds infra |
@@ -41,21 +41,21 @@ flipped, `min_chars` increased.
 
 ## Why this distinction matters
 
-Sprint-8 reports reference templates by ID. If a clinical content edit
-removes a section that 1,000 existing reports populated, those reports
+Sprint-8 notes reference templates by ID. If a content edit
+removes a section that 1,000 existing notes populated, those notes
 must remain readable as-they-were. Forcing structural changes to create
-a new row preserves the lineage; existing reports point at the old row.
+a new row preserves the lineage; existing notes point at the old row.
 
 If we'd let a cosmetic edit silently change the section list, sprint-8
-reports would suddenly have an "orphan section" (data without a
+notes would suddenly have an "orphan section" (data without a
 home in the template) and a missing section (template field with no
-data). Clinical content leads would discover this only when a
-clinician notices their report layout broke.
+data). Content leads would discover this only when a
+user notices their note layout broke.
 
 ## Consequences
 
-- **Authoring workflow**: clinical content lead edits a JSON file, runs
-  `make seed-templates`, the seed function `upsert_system_template`
+- **Authoring workflow**: the content lead edits a JSON file, runs
+  `make seed`, and the seed function `upsert_system_template`
   takes care of either cosmetic update (in place, version bump) or
   structural new-row. The 16 sprint-06 templates pass validation in
   CI on every PR.
@@ -99,7 +99,7 @@ the same.
 
 ## Amendment (2026-06-23) — `SwitchSection` is v1-additive
 
-The `medical-dictation.v1` protocol gains a `SwitchSection` client
+The `dictation.v1` protocol gains a `SwitchSection` client
 message. Sprint-04 ADR-0012 reserved subprotocol version bumps for
 breaking changes; `SwitchSection` is **additive**:
 
@@ -110,7 +110,7 @@ breaking changes; `SwitchSection` is **additive**:
   exactly as before).
 - `extra="forbid"` on every message means a future v2-additive field
   on `SwitchSection` would be rejected by v1 servers — which is the
-  correct semantics: a v2 client must connect with `medical-dictation.v2`
+  correct semantics: a v2 client must connect with `dictation.v2`
   to use v2-additive fields.
 
 No subprotocol bump. Documented in `docs/api/dictation-ws-v1.md`.

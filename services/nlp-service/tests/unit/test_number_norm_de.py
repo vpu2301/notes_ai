@@ -37,10 +37,10 @@ CASES_DE: list[tuple[str, str]] = [
     # ── Pass-through ───────────────────────────────────────────
     ("eine Tablette", "eine Tablette"),
     ("acht Stunden", "acht Stunden"),
-    # ── Clinical safety (ADR-0015): no fabricated numbers ──────
+    # ── Figure safety (ADR-0015): no fabricated numbers ────────
     # "zu" outside a BP context must not become a slash.
     ("drei zu vier", "drei zu vier"),
-    ("der Patient kam um acht", "der Patient kam um acht"),
+    ("der Gast kam um acht", "der Gast kam um acht"),
     # Decimal fractions keep leading zeros — 5,05 must not collapse to 5,5.
     ("fünf Komma null fünf Milligramm", "5,05 mg"),
     # Ordinary words that merely CONTAIN a numeral substring stay words.

@@ -35,8 +35,8 @@ from .messages import (
     Final as FinalMessage,
 )
 
-SUBPROTOCOL: Final = "medical-dictation.v1"
-SUBPROTOCOL_V2: Final = "medical-dictation.v2"
+SUBPROTOCOL: Final = "dictation.v1"
+SUBPROTOCOL_V2: Final = "dictation.v2"
 PROTOCOL_VERSION: Final = PROTOCOL_VERSION_V1
 
 # Subprotocol name <-> wire version. The client offers a list in

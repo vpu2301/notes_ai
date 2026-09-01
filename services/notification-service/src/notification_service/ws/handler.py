@@ -30,9 +30,7 @@ from .upgrade import UpgradeContext
 logger = logging.getLogger(__name__)
 
 
-async def run_session(
-    websocket: WebSocket, *, upgrade: UpgradeContext, state: Any
-) -> None:
+async def run_session(websocket: WebSocket, *, upgrade: UpgradeContext, state: Any) -> None:
     """Serve one authenticated socket until the peer goes away."""
     claims = upgrade.claims
     user_id: UUID = claims.sub
@@ -82,9 +80,7 @@ async def _handle_command(
         async with tenant_connection(state.app_pool, tenant_id) as conn:
             # RLS plus the recipient predicate mean a user cannot mark
             # someone else's notification read even by guessing its id.
-            await repo.mark_read(
-                conn, user_id=user_id, notification_id=command.notification_id
-            )
+            await repo.mark_read(conn, user_id=user_id, notification_id=command.notification_id)
             count = await repo.unread_count(conn, user_id=user_id)
         await websocket.send_text(
             ReadAckFrame(

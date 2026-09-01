@@ -1,0 +1,48 @@
+# ── note-service runtime ───────────────────────────────────────────
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+        `# weasyprint native deps — A3 PDF render` \
+        libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
+        libffi8 shared-mime-info fonts-dejavu-core \
+        `# sprint-15 audio replay: clip decode/opus encode (ADR-0037)` \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 65532 nonroot \
+    && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
+
+RUN pip install --no-cache-dir --upgrade pip uv==0.4.29
+
+WORKDIR /build
+COPY pyproject.toml uv.lock /build/
+COPY libs/ /build/libs/
+COPY services/note-service/ /build/services/note-service/
+
+RUN uv pip install --system --no-cache \
+    --target /deps \
+    /build/services/note-service \
+    /build/libs/observability \
+    /build/libs/auth \
+    /build/libs/audit \
+    /build/libs/db \
+    /build/libs/template_models \
+    /build/libs/note_models \
+    /build/libs/secret
+
+# Editable workspace libs install as .pth files, which Python only honors
+# in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
+# /deps is on PYTHONPATH; it re-registers /deps as a site dir so the editable
+# .pth files (asr_models, audit, observability, …) actually activate.
+RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
+
+ENV PYTHONPATH=/deps \
+    PATH="/deps/bin:${PATH}"
+
+USER nonroot
+WORKDIR /app
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "note_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

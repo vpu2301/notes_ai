@@ -10,7 +10,7 @@ class ValidationCode(StrEnum):
     """Stable rejection codes — also the RFC 9457 ``type`` URI suffix.
 
     Every submit-time rejection names one of these, including the ones the
-    router raises itself (linkage and rate limits). They used to be bare
+    router raises itself (rate limits). They used to be bare
     string literals inline, which meant the wire vocabulary was whatever
     the last edit happened to type; a client matching on ``code`` needs it
     in one place, and so does the docs table in
@@ -33,11 +33,6 @@ class ValidationCode(StrEnum):
     CODEC_NOT_ALLOWED = "codec_not_allowed"
     SAMPLE_RATE_TOO_LOW = "sample_rate_too_low"
     CHANNELS_EXCEEDED = "channels_exceeded"
-
-    # ── Referential: does what it points at exist, in this tenant? ───
-    PROMPT_INVALID = "prompt_invalid"
-    ENCOUNTER_INVALID = "encounter_invalid"
-    ENCOUNTER_CLOSED = "encounter_closed"
 
     # ── Budget: may this tenant spend more transcription now? ────────
     QUOTA_EXCEEDED = "quota_exceeded"

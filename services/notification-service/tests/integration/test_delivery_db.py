@@ -26,16 +26,12 @@ pytestmark = pytest.mark.skipif(
     reason="set RUN_DB_INTEGRATION=1 to run; needs dev-up + migrate-up",
 )
 
-DSN = os.environ.get(
-    "DB_APP_ROLE_DSN", "postgresql://app_role:app_role@localhost:5432/medical_dictation"
-)
-ADMIN_DSN = os.environ.get(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/medical_dictation"
-)
+DSN = os.environ.get("DB_APP_ROLE_DSN", "postgresql://app_role:app_role@localhost:5432/notes")
+ADMIN_DSN = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/notes")
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
-CLINICIAN_A = UUID("0c000000-0000-0000-0000-00000000000a")
-NURSE_A = UUID("0d000000-0000-0000-0000-00000000000a")
+MEMBER_A = UUID("0c000000-0000-0000-0000-00000000000a")
+VIEWER_A = UUID("0d000000-0000-0000-0000-00000000000a")
 
 
 @pytest.fixture
@@ -51,13 +47,13 @@ def _event(**over) -> NotificationEvent:
     base = {
         "event_id": uuid4(),
         "tenant_id": TENANT_A,
-        "category": Category.REPORT_SIGNED,
-        "actor_user_id": CLINICIAN_A,
-        "resource_type": "report",
+        "category": Category.NOTE_SHARED_WITH_YOU,
+        "actor_user_id": MEMBER_A,
+        "resource_type": "note",
         "resource_id": uuid4(),
         "occurred_at": datetime.now(UTC),
-        "payload": {"report_code": "RPT-DELIV-1", "signature_level": "qualified"},
-        "recipient_hints": (NURSE_A,),
+        "payload": {"note_code": "NOTE-DELIV-1", "shared_by_display": "A colleague"},
+        "recipient_hints": (VIEWER_A,),
     }
     base.update(over)
     return NotificationEvent(**base)
@@ -76,9 +72,7 @@ async def _purge(event_id) -> None:
                 "(SELECT id FROM notifications WHERE dedupe_key LIKE $1)",
                 f"{event_id}%",
             )
-            await conn.execute(
-                "DELETE FROM notifications WHERE dedupe_key LIKE $1", f"{event_id}%"
-            )
+            await conn.execute("DELETE FROM notifications WHERE dedupe_key LIKE $1", f"{event_id}%")
             await conn.execute(
                 "DELETE FROM notification_digest_progress WHERE tenant_id = $1", TENANT_A
             )
@@ -113,42 +107,36 @@ async def test_email_is_sent_once_and_is_idempotent(pool) -> None:
         nid = result.created[0].notification_id
 
         provider = MockProvider()
-        await deliver_once(
-            app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None
-        )
+        await deliver_once(app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None)
         assert len(provider.sent) == 1
-        assert "RPT-DELIV-1" in provider.sent[0].subject
+        assert "NOTE-DELIV-1" in provider.sent[0].subject
 
         row = await _outbox(pool, nid, "email")
         assert row["status"] == "sent"
 
         # Re-driving must NOT produce a second send: the row is no longer
         # `pending`, which is the delivery-idempotency anchor (E3).
-        await deliver_once(
-            app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None
-        )
+        await deliver_once(app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None)
         assert len(provider.sent) == 1
     finally:
         await _purge(event.event_id)
 
 
-async def test_email_carries_no_phi(pool) -> None:
-    """The rendered mail holds a code and a link, nothing clinical."""
+async def test_email_carries_no_note_content(pool) -> None:
+    """The rendered mail holds a code and a link, no content."""
     event = _event(
         payload={
-            "report_code": "RPT-DELIV-2",
-            "signature_level": "qualified",
+            "note_code": "NOTE-DELIV-2",
+            "shared_by_display": "A colleague",
         }
     )
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await materialize(event, conn=conn, app_base_url="http://app")
         provider = MockProvider()
-        await deliver_once(
-            app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None
-        )
+        await deliver_once(app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None)
         body = provider.sent[0].text_body + provider.sent[0].subject
-        assert "RPT-DELIV-2" in body
+        assert "NOTE-DELIV-2" in body
         for token in ("Іваненко", "діабет", "3216549870"):
             assert token not in body
     finally:
@@ -186,9 +174,7 @@ async def test_transient_failure_retries_then_succeeds(pool) -> None:
                     nid,
                 )
 
-        await deliver_once(
-            app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None
-        )
+        await deliver_once(app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None)
         row = await _outbox(pool, nid, "email")
         assert row["status"] == "sent"
         assert len(provider.sent) == 1
@@ -241,16 +227,16 @@ async def test_exhausted_retries_dead_letter(pool) -> None:
 async def test_digest_sends_once_and_suppresses_empty(pool) -> None:
     """E6: one digest per user-day, and never a 'you have 0 things' mail."""
     event = _event(
-        category=Category.REPORT_FINALIZED,
-        payload={"report_code": "RPT-DIGEST-1"},
+        category=Category.NOTE_FINALIZED,
+        payload={"note_code": "NOTE-DIGEST-1"},
     )
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await repo.upsert_preference(
                 conn,
                 tenant_id=TENANT_A,
-                user_id=NURSE_A,
-                category=Category.REPORT_FINALIZED,
+                user_id=VIEWER_A,
+                category=Category.NOTE_FINALIZED,
                 in_app_enabled=True,
                 email_mode=EmailMode.DIGEST,
             )
@@ -265,7 +251,7 @@ async def test_digest_sends_once_and_suppresses_empty(pool) -> None:
         )
         assert sent == 1
         assert len(provider.sent) == 1
-        assert "RPT-DIGEST-1" in provider.sent[0].text_body
+        assert "NOTE-DIGEST-1" in provider.sent[0].text_body
 
         # Second run the same day must claim nothing.
         sent_again = await run_digest_for_tenant(
@@ -277,23 +263,21 @@ async def test_digest_sends_once_and_suppresses_empty(pool) -> None:
         async with tenant_connection(pool, TENANT_A) as conn:
             await conn.execute(
                 "DELETE FROM notification_preferences WHERE user_id=$1 AND category=$2",
-                NURSE_A,
-                str(Category.REPORT_FINALIZED),
+                VIEWER_A,
+                str(Category.NOTE_FINALIZED),
             )
         await _purge(event.event_id)
 
 
 async def test_digest_not_due_before_local_hour(pool) -> None:
-    event = _event(
-        category=Category.REPORT_FINALIZED, payload={"report_code": "RPT-DIGEST-2"}
-    )
+    event = _event(category=Category.NOTE_FINALIZED, payload={"note_code": "NOTE-DIGEST-2"})
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await repo.upsert_preference(
                 conn,
                 tenant_id=TENANT_A,
-                user_id=NURSE_A,
-                category=Category.REPORT_FINALIZED,
+                user_id=VIEWER_A,
+                category=Category.NOTE_FINALIZED,
                 in_app_enabled=True,
                 email_mode=EmailMode.DIGEST,
             )
@@ -311,8 +295,8 @@ async def test_digest_not_due_before_local_hour(pool) -> None:
         async with tenant_connection(pool, TENANT_A) as conn:
             await conn.execute(
                 "DELETE FROM notification_preferences WHERE user_id=$1 AND category=$2",
-                NURSE_A,
-                str(Category.REPORT_FINALIZED),
+                VIEWER_A,
+                str(Category.NOTE_FINALIZED),
             )
         await _purge(event.event_id)
 

@@ -1,10 +1,10 @@
 """Stage 3 — number & unit normalization.
 
 Rule-based per-language modules implement word-tagging + pattern
-matching. Sprint 5 shipped UK + EN and German joined them with the
+matching. UK + EN shipped first and German joined them with the
 dictation language rollout; all three deliberately err on the side of
 "pass through unchanged" rather than "normalize aggressively wrong" —
-clinical correctness on BP/dosage is the gate.
+correctness of dictated figures is the gate.
 """
 
 from __future__ import annotations

@@ -31,7 +31,7 @@ require_version() {
 }
 
 echo "==================================================================="
-echo " Medical Dictation Backend — Environment Doctor"
+echo " Notes AI Backend — Environment Doctor"
 echo "==================================================================="
 echo ""
 

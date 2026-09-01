@@ -18,7 +18,7 @@ from .config import settings
 from .diarization.engine import DiarizationEngine
 from .inference import InferenceQueue
 from .integrations.nlp_client import NlpClient, NlpClientConfig
-from .integrations.report_client import ReportClient, ReportClientConfig
+from .integrations.note_client import NoteClient, NoteClientConfig
 from .integrations.template_client import TemplateClient, TemplateClientConfig
 from .session.manager import SessionManager
 
@@ -43,10 +43,10 @@ class ServiceState:
     # MDX_CONVERSATION_ENABLED=false and never touch torch.
     diarization_engine: DiarizationEngine
     nlp_client: NlpClient
-    report_client: ReportClient
+    note_client: NoteClient
     # Sprint-06 client, actually wired in sprint 14 (was dead code: no
     # instance and no bearer existed before the upgrade began retaining
-    # the clinician's token).
+    # the caller's token).
     template_client: TemplateClient
 
 
@@ -145,15 +145,13 @@ async def build_state() -> ServiceState:
             timeout_seconds=settings.finalize_nlp_timeout_seconds,
         )
     )
-    report_client = ReportClient(
-        config=ReportClientConfig(
-            base_url=settings.report_base_url,
-            timeout_seconds=settings.report_draft_timeout_seconds,
+    note_client = NoteClient(
+        config=NoteClientConfig(
+            base_url=settings.note_base_url,
+            timeout_seconds=settings.note_draft_timeout_seconds,
         )
     )
-    template_client = TemplateClient(
-        config=TemplateClientConfig(base_url=settings.report_base_url)
-    )
+    template_client = TemplateClient(config=TemplateClientConfig(base_url=settings.note_base_url))
 
     return ServiceState(
         jwks_cache=jwks_cache,
@@ -170,7 +168,7 @@ async def build_state() -> ServiceState:
         session_manager=session_manager,
         diarization_engine=diarization_engine,
         nlp_client=nlp_client,
-        report_client=report_client,
+        note_client=note_client,
         template_client=template_client,
     )
 
@@ -183,5 +181,5 @@ async def teardown_state(state: ServiceState) -> None:
     await state.crypto_pool.close()
     await state.s3.aclose()
     await state.nlp_client.aclose()
-    await state.report_client.aclose()
+    await state.note_client.aclose()
     await state.template_client.aclose()

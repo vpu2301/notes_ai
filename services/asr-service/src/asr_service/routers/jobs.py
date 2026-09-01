@@ -45,7 +45,7 @@ from asr_models import (
     TranscriptResultView,
 )
 from audit import Severity
-from auth import Claims, can_claims
+from auth import Claims
 from db import tenant_connection
 from storage import ObjectNotFoundError
 
@@ -89,7 +89,7 @@ def _reject(
 ) -> HTTPException:
     """Build one submit-time rejection.
 
-    Every reject on this endpoint — file shape, linkage, budget — leaves
+    Every reject on this endpoint — file shape or budget — leaves
     through here, so ``type``/``code``/``detail`` are assembled once and a
     client can switch on ``code`` alone. Counting happens here too: a
     rejection that is raised but never counted is a rejection nobody sees
@@ -123,9 +123,8 @@ def _reject(
 )
 async def submit_job(
     audio: Annotated[UploadFile, File(description="Audio file to transcribe.")],
-    prompt_id: Annotated[UUID, Form()],
     language: Annotated[str, Form(pattern="^(uk|en)$")],
-    encounter_id: Annotated[UUID | None, Form()] = None,
+    vocabulary_hint: Annotated[str | None, Form(max_length=2000)] = None,
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> TranscriptionJobView:
     state = get_state()
@@ -136,40 +135,11 @@ async def submit_job(
     # Steps 2–7: synchronous file-shape validation.
     result, facts = await run_all(mime_type=mime_type, payload=payload)
     if not result.ok:
-        raise _reject(
-            result.code, result.detail, title="audio rejected by validation"
-        )
+        raise _reject(result.code, result.detail, title="audio rejected by validation")
 
-    # S11 step 02: a named encounter must exist in-tenant (RLS makes a
-    # foreign one look nonexistent) and not be cancelled — rejected before
-    # the ciphertext is even uploaded. Prompt check and rate limit share
-    # the connection.
+    # Per-tenant concurrency cap, checked before the ciphertext is
+    # even uploaded.
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        if encounter_id is not None:
-            enc_status = await repository.fetch_encounter_status(
-                conn, encounter_id=encounter_id
-            )
-            if enc_status is None:
-                raise _reject(
-                    ValidationCode.ENCOUNTER_INVALID,
-                    "encounter not found in this tenant",
-                    title="encounter linkage rejected",
-                )
-            if enc_status == "cancelled":
-                raise _reject(
-                    ValidationCode.ENCOUNTER_CLOSED,
-                    "encounter is cancelled; upload is not allowed",
-                    title="encounter linkage rejected",
-                )
-        # The FK on transcription_jobs.prompt_id would otherwise turn a
-        # stale prompt id into a 500 at INSERT time, after the audio had
-        # already been encrypted and uploaded.
-        if not await repository.prompt_exists(conn, prompt_id=prompt_id):
-            raise _reject(
-                ValidationCode.PROMPT_INVALID,
-                f"prompt {prompt_id} is not in the prompt catalogue",
-                title="prompt rejected",
-            )
         active = await repository.count_active_jobs(conn, tenant_id=claims.tid)
         if active >= settings.per_tenant_concurrent_jobs:
             raise _reject(
@@ -231,7 +201,6 @@ async def submit_job(
             sha256=facts.sha256,
             envelope_metadata=_header_to_json(header),
             storage_uri=f"minio://{state.audio_store.bucket}/{storage_key}",
-            encounter_id=encounter_id,
         )
         await repository.insert_job_row(
             conn,
@@ -239,7 +208,6 @@ async def submit_job(
             tenant_id=claims.tid,
             audio_id=audio_id,
             requester_sub=claims.sub,
-            prompt_id=prompt_id,
             language=language,
             model="large-v3",
         )
@@ -257,7 +225,6 @@ async def submit_job(
             "duration_ms": facts.duration_ms,
             "sample_rate_hz": facts.sample_rate_hz,
             "codec": facts.codec,
-            "encounter_id": str(encounter_id) if encounter_id else None,
         },
         severity=Severity.INFO,
     )
@@ -266,7 +233,7 @@ async def submit_job(
         job_id=job_id,
         tenant_id=claims.tid,
         audio_id=audio_id,
-        prompt_id=prompt_id,
+        vocabulary_hint=vocabulary_hint or None,
         language=language,
         model="large-v3",
         requester_sub=claims.sub,
@@ -285,7 +252,7 @@ async def submit_job(
         # The row exists and the audio is stored, but nothing will ever
         # transcribe it. Left as-is the job sits in `queued` forever, holds
         # a slot in the tenant's concurrency budget, and shows the
-        # clinician a spinner for work that was never handed to anyone.
+        # user a spinner for work that was never handed to anyone.
         # Fail it here, where we still know why.
         logger.error(
             "asr.enqueue_failed",
@@ -328,7 +295,6 @@ async def submit_job(
         target_id=str(job_id),
         payload={
             "audio_id": str(audio_id),
-            "prompt_id": str(prompt_id),
             "language": language,
         },
         severity=Severity.INFO,
@@ -342,7 +308,6 @@ async def submit_job(
         tenant_id=claims.tid,
         audio_id=audio_id,
         requester_sub=claims.sub,
-        prompt_id=prompt_id,
         language=language,
         model="large-v3",
         status=JobStatus.QUEUED,
@@ -540,9 +505,7 @@ async def _enriched_result_view(
             merged = prev.text.rstrip()
             if not merged.endswith(text):
                 merged += text
-            enriched[-1] = prev.model_copy(
-                update={"text": merged, "end_ms": raw_seg.end_ms}
-            )
+            enriched[-1] = prev.model_copy(update={"text": merged, "end_ms": raw_seg.end_ms})
             continue
         enriched.append(
             EnrichedSegment(
@@ -578,38 +541,15 @@ async def list_jobs(
     status_filter: Annotated[JobStatus | None, Query(alias="status")] = None,
     since: Annotated[datetime | None, Query()] = None,
 ) -> list[TranscriptionJobView]:
-    """S14 — two standings reach this list.
-
-    `asr.read` (clinician / nurse) gets the clinical list, and since S14
-    each row names the patient whose recording it is. `stats.read`
-    (tenant_admin, who holds no clinical read) gets the same rows with
-    every patient reference and every pointer AT the audio stripped:
-    enough to count jobs and chart throughput on the business dashboard,
-    not enough to identify or open anything.
+    """One view for every caller. Reachable by a member with `asr.read`
+    and by a tenant_admin with only `stats.read` (job counts and
+    throughput for the business dashboard). The row carries no
+    transcript content; the transcript itself stays behind `asr.read`
+    on the result endpoint.
     """
     state = get_state()
-    clinical = can_claims(claims, "asr.read", "asr_job")
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        jobs = await repository.list_jobs(
-            conn, limit=limit, status=status_filter, since=since
-        )
-    if clinical:
-        return jobs
-    return [
-        job.model_copy(
-            update={
-                "patient_id": None,
-                "patient_name_uk": None,
-                "patient_name_en": None,
-                # A presigned result URL is a door to the transcript, and
-                # `error_detail` is free text built from an exception that
-                # may quote the audio it choked on.
-                "result_url": None,
-                "error_detail": None,
-            }
-        )
-        for job in jobs
-    ]
+        return await repository.list_jobs(conn, limit=limit, status=status_filter, since=since)
 
 
 @router.delete(

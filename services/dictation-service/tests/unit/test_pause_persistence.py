@@ -4,7 +4,7 @@ As built, ``Pause``/``Resume`` mutated ``ctx.state`` and nothing else. The
 ``'paused'`` value in the 0010 CHECK constraint was therefore dead in the
 DB: ``GET /dictate/sessions`` reported a paused session as active, and so
 did ``count_active_for_tenant``, which gates the per-tenant cap. Anything
-outside the owning worker process — the reaper, the encounter's
+outside the owning worker process — the reaper, the session's
 "is a recording still live?" check, another tab — reads the row, so the row
 has to be true.
 """

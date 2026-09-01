@@ -8,12 +8,12 @@ Sprint: 15 (delivers the ADR-0021 named follow-up)
 
 ADR-0021 accepted `simple` FTS (no stemming, no synonyms) and named
 sprint 15 for "a `query_expansion` layer" plus the search-tips content.
-Clinicians write «ІМ» and search «інфаркт міокарда» — or the reverse —
-and `simple` matches neither direction.
+Users write an abbreviation («ІМ») and search for its expansion — or
+the reverse — and `simple` matches neither direction.
 
 ## Decision
 
-- **`medical_synonyms` table** (migration 0063): `{group_id, term,
+- **`synonyms` table**: `{group_id, term,
   lexemes text[], language uk|en, source system|tenant}`, RLS+FORCE with
   the autocomplete-phrases policy shape (PERMISSIVE visibility: system ∪
   own tenant; PERMISSIVE tenant-writes for app_role — the 0038-migration
@@ -25,7 +25,7 @@ and `simple` matches neither direction.
 - **Expansion wraps — never forks — the sprint-08 builder**
   (`domain/query_expansion.py`): normalize the raw query in one
   roundtrip (`tsvector_to_array(to_tsvector('simple', $1))`, the
-  icd10_query.py apostrophe-safe precedent), match lexemes against
+  apostrophe-safe bind-parameter precedent), match lexemes against
   synonym rows, assemble `('ім' | ('інфаркт' & 'міокарда') | 'mi')`
   OR-groups per matched lexeme, AND across query lexemes, and pass the
   string as a **bind parameter** to `to_tsquery('simple', $n)`. One
@@ -38,16 +38,15 @@ and `simple` matches neither direction.
   ГКС (гострий коронарний синдром | глюкокортикостероїди) is seeded
   deliberately; recall over precision, and the response's
   `expanded_terms` field shows the user exactly what happened.
-- **Seed**: 171 system groups / 464 terms
-  (`infra/seeds/synonyms/uk-medical-synonyms.json` → generated migration
-  0064 with deterministic group UUIDs; `make check-synonym-corpus`
-  enforces fixture↔migration sync). Authored in-sprint, **flagged for
-  clinical-lead review**; growth = fixture entries + a new migration.
+- **Seed**: system groups ship as migration rows with deterministic
+  group UUIDs. (The original 171-group medical seed corpus was removed
+  with the medical vertical; current system groups are business-generic
+  and English/Ukrainian.) Growth = new migration rows.
 - **Not** nlp-service's `abbreviations_global`: that dictionary rewrites
   transcript text at dictation time (direction-aware,
   replay-deterministic); this one broadens search recall at query time
   and is tenant-extendable. Merging them would couple a
-  clinical-correctness surface to a recall surface.
+  transcript-correctness surface to a recall surface.
 - `GET /v1/search/tips` serves the honest what-search-does content
   (typed models, uk/en) so FE copy cannot drift; `/v1/synonyms` CRUD
   (new `synonym.read`/`synonym.write` permissions, tenant_admin writes)
@@ -58,22 +57,22 @@ and `simple` matches neither direction.
   to push it into an index condition ahead of the security quals —
   **app_role search has never used the GIN index**; the sprint-08
   "canonical GIN plan" was captured as superuser. The production
-  app_role plan is tenant-driven (reports tenant index → versions pkey,
+  app_role plan is tenant-driven (notes tenant index → versions pkey,
   FTS as filter), which is the right shape while tenant slices stay
   small. The test therefore asserts BOTH honestly: the expanded tsquery
   is GIN-indexable (Bitmap Index Scan on
-  `report_versions_search_vector_idx`, RLS aside), and the RLS plan
+  `note_versions_search_vector_idx`, RLS aside), and the RLS plan
   keeps its tenant-first shape with expansion applied. The ADR-0021
   revisit triggers (p95 > 500 ms) now have a concrete lever: a
   SECURITY DEFINER search function or leakproof-wrapped operator.
-- Opportunistic gap fix: `mdx_reports_search_latency_ms` is now actually
-  emitted — the sprint-08 dashboard panel and ReportSearchLatencyHigh
+- Opportunistic gap fix: `mdx_notes_search_latency_ms` is now actually
+  emitted — the sprint-08 dashboard panel and NoteSearchLatencyHigh
   alert had queried an instrument no code ever created.
 
 ## Consequences
 
 - Aggregated `search.expanded` audit (count only, never query text);
-  `report.searched` unchanged.
+  `note.searched` unchanged.
 - Worst-case tsquery grows to ~8 OR-groups; the GIN bitmap plan absorbs
   OR-of-lexemes, EXPLAIN-verified.
 - ADR-0021's "no synonyms" consequence is superseded for recall, not

@@ -42,26 +42,18 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # reports `warmed: false` (503) meanwhile.
     state.warmed = not settings.prewarm_enabled
     warm_task: asyncio.Task[None] | None = None
-    if (
-        settings.prewarm_enabled
-        and settings.layer_c_enabled
-        and not settings.testing
-    ):
+    if settings.prewarm_enabled and settings.layer_c_enabled and not settings.testing:
 
         async def _prewarm() -> None:
             while True:
                 try:
                     if state.inference is not None and await state.inference.ready():
-                        await state.inference.complete(
-                            prompt="Warmup.", max_tokens=1
-                        )
+                        await state.inference.complete(prompt="Warmup.", max_tokens=1)
                         state.warmed = True
                         logger.info("warmup.generation_ready")
                         return
                 except Exception as exc:  # noqa: BLE001 — keep retrying
-                    logger.warning(
-                        "warmup.generation_retry", extra={"error": str(exc)}
-                    )
+                    logger.warning("warmup.generation_retry", extra={"error": str(exc)})
                 await asyncio.sleep(settings.prewarm_retry_seconds)
 
         warm_task = asyncio.create_task(_prewarm(), name="generation-prewarm")

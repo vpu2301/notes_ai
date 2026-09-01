@@ -9,8 +9,8 @@
 
 ## Context
 
-Ukrainian medical-record retention law and Article 30 of GDPR require
-tamper-evident audit logs of access and mutation to personal-health
+Data-retention obligations and Article 30 of GDPR require
+tamper-evident audit logs of access and mutation to personal
 data. "Tamper-evident" means: an actor with administrative database
 access who silently edits a row leaves a detectable trace. A plain
 append-only table is not tamper-evident — a superuser can `UPDATE` or

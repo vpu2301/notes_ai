@@ -72,9 +72,7 @@ async def ensure_partitions(app_pool: asyncpg.Pool) -> list[str]:
     names: list[str] = []
     async with app_pool.acquire() as conn:
         for start, end in _partition_bounds(now):
-            names.append(
-                await repo.create_next_telemetry_partition(conn, start=start, end=end)
-            )
+            names.append(await repo.create_next_telemetry_partition(conn, start=start, end=end))
     return names
 
 
@@ -129,8 +127,7 @@ async def archive_partition(conn: asyncpg.Connection, store: Any, name: str) -> 
     """
     rows = await conn.fetch(f'SELECT * FROM "{name}"')  # noqa: S608 — relname from pg_class
     lines = "\n".join(
-        json.dumps({k: _jsonable(v) for k, v in dict(r).items()}, ensure_ascii=False)
-        for r in rows
+        json.dumps({k: _jsonable(v) for k, v in dict(r).items()}, ensure_ascii=False) for r in rows
     )
     payload = gzip.compress(lines.encode("utf-8"))
     key = f"autocomplete_telemetry/{name}.jsonl.gz"

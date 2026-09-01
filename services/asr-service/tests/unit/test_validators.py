@@ -72,7 +72,7 @@ def test_size_over_cap_rejected() -> None:
 
 def test_empty_upload_named_as_such() -> None:
     # Not `mime_mismatch`: a zero-byte body is a recording that never
-    # arrived, and telling the clinician their file is the wrong format
+    # arrived, and telling the user their file is the wrong format
     # sends them looking for a codec problem that does not exist.
     r = validate_size(0, max_mb=100)
     assert not r.ok
@@ -105,9 +105,7 @@ def test_duration_under_floor_rejected() -> None:
     # A tapped record button. Whisper answers a fraction of a second of
     # noise with a confident hallucination, and a hallucination in a chart
     # is worse than a rejected upload.
-    probe = ProbeOutput(
-        duration_ms=120, sample_rate_hz=16000, channels=1, codec="pcm_s16le"
-    )
+    probe = ProbeOutput(duration_ms=120, sample_rate_hz=16000, channels=1, codec="pcm_s16le")
     r = validate_duration(probe, max_seconds=1800, min_ms=400)
     assert not r.ok
     assert r.code == "duration_too_short"
@@ -115,9 +113,7 @@ def test_duration_under_floor_rejected() -> None:
 
 def test_duration_floor_defaults_off() -> None:
     # Callers that don't pass a floor keep the old behaviour exactly.
-    probe = ProbeOutput(
-        duration_ms=120, sample_rate_hz=16000, channels=1, codec="pcm_s16le"
-    )
+    probe = ProbeOutput(duration_ms=120, sample_rate_hz=16000, channels=1, codec="pcm_s16le")
     assert validate_duration(probe, max_seconds=1800).ok
 
 

@@ -1,1 +1,1 @@
-"""dictation-service — Sprint-04 streaming ASR over WebSockets (medical-dictation.v1)."""
+"""dictation-service — streaming ASR over WebSockets (dictation.v1)."""

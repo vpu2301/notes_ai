@@ -223,27 +223,21 @@ async def bump_coalesced(
 ) -> None:
     """Refresh a storm-coalescing row's text in place (E1)."""
     await conn.execute(
-        "UPDATE notifications SET title = $2, body_text = $3, read_at = NULL "
-        "WHERE id = $1",
+        "UPDATE notifications SET title = $2, body_text = $3, read_at = NULL WHERE id = $1",
         notification_id,
         title,
         body_text,
     )
 
 
-async def notification_id_for_dedupe(
-    conn: asyncpg.Connection, *, dedupe_key: str
-) -> UUID | None:
-    row = await conn.fetchrow(
-        "SELECT id FROM notifications WHERE dedupe_key = $1", dedupe_key
-    )
+async def notification_id_for_dedupe(conn: asyncpg.Connection, *, dedupe_key: str) -> UUID | None:
+    row = await conn.fetchrow("SELECT id FROM notifications WHERE dedupe_key = $1", dedupe_key)
     return None if row is None else row["id"]
 
 
 async def unread_count(conn: asyncpg.Connection, *, user_id: UUID) -> int:
     count: int = await conn.fetchval(
-        "SELECT count(*) FROM notifications "
-        "WHERE recipient_user_id = $1 AND read_at IS NULL",
+        "SELECT count(*) FROM notifications WHERE recipient_user_id = $1 AND read_at IS NULL",
         user_id,
     )
     return count
@@ -289,9 +283,7 @@ async def list_feed(
     )
 
 
-async def mark_read(
-    conn: asyncpg.Connection, *, user_id: UUID, notification_id: UUID
-) -> bool:
+async def mark_read(conn: asyncpg.Connection, *, user_id: UUID, notification_id: UUID) -> bool:
     """Idempotent: marking an already-read row again is a no-op success."""
     row = await conn.fetchrow(
         "UPDATE notifications SET read_at = coalesce(read_at, now()) "
@@ -346,9 +338,7 @@ async def insert_outbox(
     return None if row is None else row["id"]
 
 
-async def claim_due_outbox(
-    conn: asyncpg.Connection, *, limit: int
-) -> list[asyncpg.Record]:
+async def claim_due_outbox(conn: asyncpg.Connection, *, limit: int) -> list[asyncpg.Record]:
     """Claim due rows for this worker.
 
     FOR UPDATE SKIP LOCKED is what makes two delivery workers safe to run
@@ -399,9 +389,7 @@ async def mark_outbox_retry(
     )
 
 
-async def mark_outbox_dead(
-    conn: asyncpg.Connection, *, outbox_id: UUID, error: str
-) -> None:
+async def mark_outbox_dead(conn: asyncpg.Connection, *, outbox_id: UUID, error: str) -> None:
     await conn.execute(
         "UPDATE notification_outbox "
         "   SET status = 'dead', attempt_count = attempt_count + 1, "

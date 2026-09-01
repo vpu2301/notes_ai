@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 
-# Known medical units; lowercase canonical form.
+# Known measurement units frequently dictated after numbers; lowercase
+# canonical form.
 _UNITS_UK = {
     "мг",
     "мл",

@@ -9,7 +9,7 @@ structlog event-dict payloads:
 
 * **Mask list** — fields whose key matches are replaced with the string
   ``<redacted>``. Used for PII whose presence/absence is informative but
-  whose value is not (email, phone, MRN, name, …).
+  whose value is not (email, phone, name, …).
 
 The filter does **not** parse free-form ``message`` strings for content;
 mask your message templates explicitly. Best-effort regex masking on JSON
@@ -22,8 +22,6 @@ Design notes:
   false positives — ``token_count`` in a metric should not be dropped.
 * Recursion depth is capped at 10 to prevent pathological nested logs from
   blowing the stack.
-* The ``patient_*`` family is implemented as a prefix rule, since clinical
-  systems naturally namespace patient fields.
 """
 
 from __future__ import annotations
@@ -68,7 +66,7 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "encryption_key",
         "kek",
         "dek",
-        # Clinical content (raw)
+        # User content (raw)
         "audio",
         "audio_data",
         "audio_content",
@@ -98,8 +96,6 @@ _MASK_NAMES: frozenset[str] = frozenset(
         "phone",
         "phone_number",
         "msisdn",
-        "mrn",
-        "medical_record_number",
         "dob",
         "date_of_birth",
         "first_name",
@@ -113,9 +109,6 @@ _MASK_NAMES: frozenset[str] = frozenset(
         "passport_number",
     }
 )
-
-# Field-name prefixes that always mask. The patient_* family is the canonical case.
-_MASK_PREFIXES: tuple[str, ...] = ("patient_",)
 
 # Regex to redact JSON-style fragments inside string messages.
 _JSON_FIELD_NAMES = sorted(_DROP_NAMES | _MASK_NAMES)
@@ -134,8 +127,6 @@ def _classify(name: str) -> str:
     if lname in _DROP_NAMES:
         return "drop"
     if lname in _MASK_NAMES:
-        return "mask"
-    if any(lname.startswith(p) for p in _MASK_PREFIXES):
         return "mask"
     return "keep"
 

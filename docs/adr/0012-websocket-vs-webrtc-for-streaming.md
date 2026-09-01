@@ -28,13 +28,13 @@ Options:
 
 ## Decision
 
-Use **WebSocket** with subprotocol `medical-dictation.v1`. The wire is:
+Use **WebSocket** with subprotocol `dictation.v1`. The wire is:
 
 - text frames: JSON discriminated-union messages (`StartSession`,
   `Partial`, `Final`, …).
 - binary frames: `[4-byte BE seq][opaque Opus payload]`.
 
-Subprotocol negotiation gives us a versioning hook (`medical-dictation.v2`
+Subprotocol negotiation gives us a versioning hook (`dictation.v2`
 in sprint 14 for diarization).
 
 ## Consequences
@@ -59,7 +59,7 @@ in sprint 14 for diarization).
 ## Migration path off WebSocket
 
 If a regulator or a future proxy generation forces a move, the
-`medical-dictation.v1` protocol is transport-agnostic (JSON + binary
+`dictation.v1` protocol is transport-agnostic (JSON + binary
 frames). It can run over HTTP/2 chunked POST (sprint 16 considers as
 a fallback for WS-blocked networks) or gRPC-Web with minimal code
 changes — the messages and codec layers don't care which carrier

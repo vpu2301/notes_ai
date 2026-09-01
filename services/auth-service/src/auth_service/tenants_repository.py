@@ -1,4 +1,4 @@
-"""SQL for tenants (clinic profile / branding) and tenant memberships.
+"""SQL for tenants (company profile / branding) and tenant memberships.
 
 Two connection roles are used, mirroring the rest of auth-service:
 
@@ -60,9 +60,7 @@ UPDATABLE_TENANT_COLUMNS = frozenset(
 
 
 async def get_tenant(conn: asyncpg.Connection, *, tenant_id: UUID) -> asyncpg.Record | None:
-    return await conn.fetchrow(
-        f"SELECT {TENANT_COLUMNS} FROM tenants WHERE id = $1", tenant_id
-    )
+    return await conn.fetchrow(f"SELECT {TENANT_COLUMNS} FROM tenants WHERE id = $1", tenant_id)
 
 
 async def create_tenant(
@@ -165,9 +163,7 @@ async def set_logo(
     )
 
 
-async def get_logo(
-    conn: asyncpg.Connection, *, tenant_id: UUID
-) -> tuple[bytes, str] | None:
+async def get_logo(conn: asyncpg.Connection, *, tenant_id: UUID) -> tuple[bytes, str] | None:
     row = await conn.fetchrow(
         "SELECT logo_bytes, logo_content_type FROM tenants WHERE id = $1",
         tenant_id,
@@ -216,9 +212,7 @@ async def get_membership(
     )
 
 
-async def list_members(
-    conn: asyncpg.Connection, *, tenant_id: UUID
-) -> list[asyncpg.Record]:
+async def list_members(conn: asyncpg.Connection, *, tenant_id: UUID) -> list[asyncpg.Record]:
     """Roster of a tenant's members, joined to the local ``users`` row for
     display where available. LEFT JOIN so a cross-tenant member (whose
     ``users`` home row lives elsewhere) still lists, with null profile."""
@@ -278,9 +272,7 @@ async def update_member_role(
     )
 
 
-async def remove_member(
-    conn: asyncpg.Connection, *, tenant_id: UUID, user_sub: UUID
-) -> bool:
+async def remove_member(conn: asyncpg.Connection, *, tenant_id: UUID, user_sub: UUID) -> bool:
     result = await conn.execute(
         "DELETE FROM tenant_memberships WHERE tenant_id = $1 AND user_sub = $2",
         tenant_id,
@@ -305,9 +297,7 @@ async def count_active_owners(
     return int(n or 0)
 
 
-async def resolve_sub_by_email(
-    conn: asyncpg.Connection, *, email: str
-) -> UUID | None:
+async def resolve_sub_by_email(conn: asyncpg.Connection, *, email: str) -> UUID | None:
     """Best-effort global email → sub lookup for adding an existing platform
     user by email. Runs on the ``tenant_writer`` pool (unrestricted). Email is
     unique per tenant, not globally; the deterministic ordering picks the

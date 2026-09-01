@@ -5,10 +5,9 @@ set -euo pipefail
 
 : "${ASR_SERVICE_URL:=http://localhost:8001}"
 : "${KEYCLOAK_URL:=http://localhost:8088}"
-: "${REALM:=medical-dictation}"
-: "${USERNAME:=clinician@a.test}"
-: "${PASSWORD:=clinician}"
-: "${PROMPT_ID:?set PROMPT_ID to a UUID from medical_prompts (uk/general default works)}"
+: "${REALM:=notes}"
+: "${USERNAME:=dev-member}"
+: "${PASSWORD:=dev-password}"
 
 # 1. Get a token via mdx-dev-cli direct grant.
 TOKEN=$(curl -fsS -X POST \
@@ -29,7 +28,6 @@ RESP=$(curl -fsS -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -F "audio=@$TMPDIR/silence.wav;type=audio/wav" \
   -F "language=uk" \
-  -F "prompt_id=$PROMPT_ID" \
   "$ASR_SERVICE_URL/asr/jobs")
 
 JOB_ID=$(echo "$RESP" | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')

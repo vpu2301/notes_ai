@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mdx-test.sh — a structured CLI for exercising the medical-dictation backend
+# mdx-test.sh — a structured CLI for exercising the Notes AI backend
 # end to end from the terminal.
 #
 # Every subcommand prints what it runs, the HTTP status / response it got, and
@@ -10,24 +10,26 @@
 #   bash scripts/dev/mdx-test.sh help
 #
 # Most commands honour env overrides so you can point at non-default ports:
-#   KEYCLOAK_URL  AUTH_URL  ASR_URL  DICTATION_URL  NLP_URL  REPORT_URL
-#   SIGNING_URL   AUTOCOMPLETE_URL  USERNAME  PASSWORD  REALM  CLIENT_ID
+#   KEYCLOAK_URL  AUTH_URL  ASR_URL  DICTATION_URL  NLP_URL  NOTE_URL
+#   AUTOCOMPLETE_URL  NOTIFICATION_URL  GENERATION_URL
+#   USERNAME  PASSWORD  REALM  CLIENT_ID
 set -uo pipefail
 
 # ── Config (override via env) ─────────────────────────────────────────────
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8088}"
-REALM="${REALM:-medical-dictation}"
+REALM="${REALM:-notes}"
 CLIENT_ID="${CLIENT_ID:-mdx-dev-cli}"
-USERNAME="${USERNAME:-dev-clinician}"
+USERNAME="${USERNAME:-dev-member}"
 PASSWORD="${PASSWORD:-dev-password}"
 
 AUTH_URL="${AUTH_URL:-http://localhost:8000}"          # make run-auth-service
 ASR_URL="${ASR_URL:-http://localhost:8001}"            # compose dev overlay
 DICTATION_URL="${DICTATION_URL:-http://localhost:8002}"
+NOTIFICATION_URL="${NOTIFICATION_URL:-http://localhost:8004}"
 NLP_URL="${NLP_URL:-http://localhost:8005}"
-REPORT_URL="${REPORT_URL:-http://localhost:8006}"
-SIGNING_URL="${SIGNING_URL:-http://localhost:8007}"    # run manually
-AUTOCOMPLETE_URL="${AUTOCOMPLETE_URL:-http://localhost:8008}"  # run manually
+NOTE_URL="${NOTE_URL:-http://localhost:8006}"
+AUTOCOMPLETE_URL="${AUTOCOMPLETE_URL:-http://localhost:8007}"
+GENERATION_URL="${GENERATION_URL:-http://localhost:8009}"
 
 JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
@@ -115,8 +117,9 @@ cmd_health() {
   info "Service liveness / readiness (skipped = not started)"
   for pair in \
     "auth-service|$AUTH_URL" "asr-service|$ASR_URL" "dictation-service|$DICTATION_URL" \
-    "nlp-service|$NLP_URL" "report-service|$REPORT_URL" \
-    "signing-service|$SIGNING_URL" "autocomplete-service|$AUTOCOMPLETE_URL"; do
+    "nlp-service|$NLP_URL" "note-service|$NOTE_URL" \
+    "notification-service|$NOTIFICATION_URL" "autocomplete-service|$AUTOCOMPLETE_URL" \
+    "generation-service|$GENERATION_URL"; do
     local name=${pair%%|*} url=${pair##*|}
     check_get "$name /healthz" "$url/healthz" '"status":"ok"'
     check_get "$name /readyz"  "$url/readyz"
@@ -160,13 +163,8 @@ except Exception: pass')
 cmd_asr() {
   info "Batch ASR smoke (1s silent WAV → poll job)"
   need ffmpeg
-  if [[ -z "${PROMPT_ID:-}" ]]; then
-    skip "set PROMPT_ID to a UUID from medical_prompts first, e.g.:"
-    echo "${DIM}  PROMPT_ID=\$(psql ... -c \"select id from medical_prompts limit 1\")${X}"
-    return
-  fi
   ASR_SERVICE_URL="$ASR_URL" KEYCLOAK_URL="$KEYCLOAK_URL" REALM="$REALM" \
-    USERNAME="$USERNAME" PASSWORD="$PASSWORD" PROMPT_ID="$PROMPT_ID" \
+    USERNAME="$USERNAME" PASSWORD="$PASSWORD" \
     bash "$(dirname "$0")/asr-smoke.sh"
 }
 
@@ -193,13 +191,8 @@ cmd_autocomplete() {
   t=$(get_token) || return 1
   resp=$(curl -s --max-time 8 -X POST "$AUTOCOMPLETE_URL/autocomplete/suggest" \
     -H "Authorization: Bearer $t" -H "Content-Type: application/json" \
-    -d '{"prefix":"паці","language":"uk","limit":5}')
+    -d '{"prefix":"meet","language":"en","limit":5}')
   printf '%s\n' "$resp" | python3 -m json.tool 2>/dev/null && pass "suggest returned" || fail "suggest error: $resp"
-}
-
-cmd_signing() {
-  info "signing-service public /verify (expects 404 for an unknown token)"
-  check_get "verify(unknown)" "$SIGNING_URL/verify/0000000000000000" || true
 }
 
 cmd_all() {
@@ -216,7 +209,7 @@ summary() {
 
 usage() {
   cat <<EOF
-${B}mdx-test${X} — structured CLI for testing the medical-dictation backend
+${B}mdx-test${X} — structured CLI for testing the Notes AI backend
 
 ${B}Usage:${X} bash scripts/dev/mdx-test.sh <command>
 
@@ -233,13 +226,13 @@ ${B}Auth:${X}
   auth          auth-service /auth/login then /auth/me
 
 ${B}Per-service flows:${X}
-  asr           Batch ASR smoke (needs ffmpeg + PROMPT_ID)
+  asr           Batch ASR smoke (needs ffmpeg)
   nlp           Run the NLP pipeline on one segment
   autocomplete  Autocomplete suggest
-  signing       Public /verify reachability
 
-${B}Env overrides:${X} KEYCLOAK_URL AUTH_URL ASR_URL NLP_URL REPORT_URL
-  SIGNING_URL AUTOCOMPLETE_URL USERNAME PASSWORD REALM CLIENT_ID PROMPT_ID
+${B}Env overrides:${X} KEYCLOAK_URL AUTH_URL ASR_URL NLP_URL NOTE_URL
+  AUTOCOMPLETE_URL NOTIFICATION_URL GENERATION_URL
+  USERNAME PASSWORD REALM CLIENT_ID
 EOF
 }
 
@@ -257,7 +250,6 @@ main() {
     asr)          cmd_asr ;;
     nlp)          cmd_nlp; summary ;;
     autocomplete) cmd_autocomplete; summary ;;
-    signing)      cmd_signing; summary ;;
     help|-h|--help) usage ;;
     *)            echo "${R}unknown command: $cmd${X}"; echo; usage; exit 2 ;;
   esac

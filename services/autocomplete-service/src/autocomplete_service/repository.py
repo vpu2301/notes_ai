@@ -31,12 +31,10 @@ async def fetch_corpus(
     rows = await conn.fetch(
         """
         SELECT id::text, phrase, source::text,
-               impression_count, acceptance_count, last_accepted_at,
-               specialty, section_hint
+               impression_count, acceptance_count, last_accepted_at
         FROM autocomplete_phrases
         WHERE language = $1
           AND enabled  = TRUE
-          AND review_state = 'accepted'
           AND (
               source = 'system'
               OR tenant_id = current_setting('app.tenant_id', true)::uuid
@@ -54,8 +52,6 @@ async def fetch_corpus(
                 impression_count=int(r["impression_count"]),
                 acceptance_count=int(r["acceptance_count"]),
                 last_accepted_at=r["last_accepted_at"],
-                specialty=r["specialty"],
-                section_hint=r["section_hint"],
             )
         )
     return out
@@ -66,8 +62,6 @@ async def insert_phrase(
     *,
     phrase: str,
     language: str,
-    specialty: str | None,
-    section_hint: str | None,
     source: str,
     tenant_id: UUID,
     owner_user_id: UUID | None,
@@ -75,16 +69,14 @@ async def insert_phrase(
     return await conn.fetchval(
         """
         INSERT INTO autocomplete_phrases
-            (tenant_id, owner_user_id, phrase, language, specialty, section_hint, source)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::autocomplete_source)
+            (tenant_id, owner_user_id, phrase, language, source)
+        VALUES ($1, $2, $3, $4, $5::autocomplete_source)
         RETURNING id
         """,
         tenant_id,
         owner_user_id,
         phrase,
         language,
-        specialty,
-        section_hint,
         source,
     )
 
@@ -98,45 +90,22 @@ async def soft_delete_phrase(conn: asyncpg.Connection, *, phrase_id: UUID) -> bo
     return row is not None
 
 
-async def retire_phrase(
-    conn: asyncpg.Connection, *, phrase_id: UUID
-) -> asyncpg.Record | None:
-    """Sprint 21: retire replaces delete for corpus-governed rows — the row
-    (and its provenance) survives, it just stops serving (the trie predicate
-    is review_state='accepted'). RLS scopes this to tenant/user rows; system
-    (released) rows are retired by the corpus operator, not this API."""
-    return await conn.fetchrow(
-        """
-        UPDATE autocomplete_phrases
-        SET review_state = 'retired', updated_at = now()
-        WHERE id = $1 AND source <> 'system' AND review_state <> 'retired'
-        RETURNING id, corpus_release
-        """,
-        phrase_id,
-    )
-
-
 async def list_phrases(
     conn: asyncpg.Connection,
     *,
     language: str | None,
-    specialty: str | None,
     source: str | None,
     limit: int,
 ) -> list[asyncpg.Record]:
     sql_parts = [
-        "SELECT id, phrase, language, specialty, section_hint, source, "
-        "impression_count, acceptance_count, last_accepted_at, enabled, created_at, "
-        "review_state, tier, source_kind, corpus_release "
+        "SELECT id, phrase, language, source, "
+        "impression_count, acceptance_count, last_accepted_at, enabled, created_at "
         "FROM autocomplete_phrases WHERE enabled = TRUE"
     ]
     args: list[Any] = []
     if language:
         args.append(language)
         sql_parts.append(f"AND language = ${len(args)}")
-    if specialty:
-        args.append(specialty)
-        sql_parts.append(f"AND specialty = ${len(args)}")
     if source:
         args.append(source)
         sql_parts.append(f"AND source = ${len(args)}::autocomplete_source")

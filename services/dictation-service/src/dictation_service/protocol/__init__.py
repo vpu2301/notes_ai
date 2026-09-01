@@ -1,4 +1,4 @@
-"""Wire protocol for `medical-dictation.v1` and `medical-dictation.v2`.
+"""Wire protocol for `dictation.v1` and `dictation.v2`.
 
 See docs/api/dictation-ws-v1.md and docs/api/dictation-ws-v2.md.
 """

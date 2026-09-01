@@ -1,4 +1,4 @@
-# WebSocket protocol `medical-notifications.v1`
+# WebSocket protocol `notifications.v1`
 
 Sprint 12. This document is the **byte-for-byte frontend contract**. The
 authoritative source is
@@ -15,7 +15,7 @@ Default port in compose: `8004` (host) → `8000` (container).
 
 ## Handshake
 
-The client **MUST** offer the subprotocol `medical-notifications.v1`.
+The client **MUST** offer the subprotocol `notifications.v1`.
 The subprotocol string *is* the version negotiation: a client that does
 not offer it is rejected before `accept()`, because serving it would
 mean guessing which frame shape it understands.
@@ -23,7 +23,7 @@ mean guessing which frame shape it understands.
 ```js
 const ws = new WebSocket(
   `${base}/ws/notifications?token=${accessToken}`,
-  ["medical-notifications.v1"],
+  ["notifications.v1"],
 );
 ```
 
@@ -87,7 +87,7 @@ Sent immediately after `accept()`.
 
 ```json
 { "type": "connected",
-  "subprotocol": "medical-notifications.v1",
+  "subprotocol": "notifications.v1",
   "unread_count": 3 }
 ```
 
@@ -98,11 +98,11 @@ A newly materialised notification for this user.
 { "type": "notification",
   "notification": {
     "id": "0f9c…",
-    "category": "report.signed",
-    "title": "Звіт RPT-2026-0042 підписано",
-    "body_text": "Кваліфікований електронний підпис … накладено.",
-    "deep_link": "https://app.example/reports/8a1f…",
-    "resource_type": "report",
+    "category": "note.finalized",
+    "title": "Note NOTE-2026-00042 finalized",
+    "body_text": "The note was finalized.",
+    "deep_link": "https://app.example/notes/8a1f…",
+    "resource_type": "note",
     "resource_id": "8a1f…",
     "severity": "info",
     "created_at": "2026-07-19T09:14:03.221Z",
@@ -119,15 +119,14 @@ rendering code path serves both a pushed frame and a fetched page.
 
 | category | resource_type | addressed to |
 | --- | --- | --- |
-| `report.finalized` | `report` | author + co-authors, **including the actor** |
-| `report.signed` | `report` | author + co-authors, including the signer |
-| `report.signing_failed` | `report` | author + co-authors, including the actor |
-| `report.amended` | `report` | author + co-authors, minus the actor |
-| `report.chain_failure` | `report` | tenant admins |
-| `report.shared_with_you` | `report` | the named recipients |
-| `dictation.completed` | `dictation_session` | the dictating clinician only |
+| `note.finalized` | `note` | author + co-authors, **including the actor** |
+| `note.amended` | `note` | author + co-authors, minus the actor |
+| `note.chain_failure` | `note` | tenant admins |
+| `note.shared_with_you` | `note` | the named recipients |
+| `dictation.completed` | `dictation_session` | the dictating user only |
 | `transcription.completed` | `transcription_job` | the submitting user only |
 | `transcription.failed` | `transcription_job` | the submitting user only (severity `warning`) |
+| `security.mfa_reminder` | — | the named user (severity `warning`) |
 | `system.digest` | — | one named user |
 
 A client MUST ignore a category it does not recognise rather than
@@ -137,8 +136,8 @@ after the first clients shipped.
 
 Note the "including the actor" rows. Categories that are a *receipt* for
 something you did yourself deliberately do not exclude you — excluding
-the actor from `report.finalized` meant a solo clinician finalizing
-their own report generated no notification at all.
+the actor from `note.finalized` meant a solo author finalizing
+their own note generated no notification at all.
 
 #### `unread_count`
 The badge changed without a specific new notification — e.g. the user
@@ -204,5 +203,5 @@ through an idle proxy should ping.
 
 Adding an optional field to an existing frame is **not** breaking.
 Removing a field, renaming one, or changing a discriminator value **is**
-— those require `medical-notifications.v2` as a new subprotocol string,
+— those require `notifications.v2` as a new subprotocol string,
 run alongside v1 for a deprecation window.

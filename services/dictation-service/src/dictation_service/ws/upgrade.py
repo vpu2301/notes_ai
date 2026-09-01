@@ -58,11 +58,11 @@ class UpgradeContext:
     subprotocol: str
     client_ip: str
     origin: str | None
-    # Sprint 14: negotiated wire version (1 = medical-dictation.v1,
-    # 2 = .v2) and the raw bearer. The bearer is retained because
-    # conversation finalize creates the report draft over HTTP with the
-    # CLINICIAN's identity (report-service enforces report.write on the
-    # caller), matching the repo's forward-the-caller's-bearer pattern.
+    # Sprint 14: negotiated wire version (1 = dictation.v1, 2 = .v2)
+    # and the raw bearer. The bearer is retained because conversation
+    # finalize creates the note draft over HTTP with the CALLER's
+    # identity (note-service enforces note.write on the caller),
+    # matching the repo's forward-the-caller's-bearer pattern.
     protocol_version: int = VERSION_BY_SUBPROTOCOL[SUBPROTOCOL]
     bearer: str | None = None
 

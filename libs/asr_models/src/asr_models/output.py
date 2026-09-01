@@ -30,7 +30,6 @@ class Segment(BaseModel):
 
 class TranscriptionMetadata(BaseModel):
     model: str
-    prompt_id: UUID | None = None
     vad_seconds_speech: NonNegativeFloat
     infer_seconds: NonNegativeFloat
     gpu_seconds: NonNegativeFloat = 0.0
@@ -53,8 +52,8 @@ class TranscriptionOutput(BaseModel):
 
 class ConfidenceSpanView(BaseModel):
     """A character range in an enriched segment's ``text`` flagged by the
-    NLP confidence stage (low word-probability regions, clinically risky
-    numbers, …)."""
+    NLP confidence stage (low word-probability regions, risky numbers,
+    …)."""
 
     start_char: NonNegativeInt
     end_char: NonNegativeInt

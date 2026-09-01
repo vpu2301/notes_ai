@@ -1,6 +1,6 @@
 {
-  "realm": "medical-dictation",
-  "displayName": "Medical Dictation",
+  "realm": "notes",
+  "displayName": "Notes AI",
   "enabled": true,
   "sslRequired": "NONE",
   "registrationAllowed": false,
@@ -39,12 +39,12 @@
         "description": "Tenant administrator — manages users and tenant config"
       },
       {
-        "name": "clinician",
-        "description": "Clinical staff who create and sign dictations"
+        "name": "member",
+        "description": "Workspace member — creates, dictates and edits notes"
       },
       {
-        "name": "nurse",
-        "description": "Nursing staff with limited create permissions"
+        "name": "viewer",
+        "description": "Limited member — same note surfaces with reduced write capability"
       },
       {
         "name": "auditor",
@@ -53,10 +53,6 @@
       {
         "name": "service",
         "description": "Service-to-service identity for backend daemons"
-      },
-      {
-        "name": "knowledge_admin",
-        "description": "Knowledge administrator — curates the tenant evidence corpus (EVA-S01)"
       }
     ],
     "client": {}
@@ -475,7 +471,7 @@
       ],
       "realmRoles": [
         "tenant_admin",
-        "clinician"
+        "member"
       ]
     },
     {
@@ -508,10 +504,10 @@
     },
     {
       "id": "0c000000-0000-0000-0000-00000000000a",
-      "username": "dev-clinician",
-      "email": "clinician@tenant-a.example",
+      "username": "dev-member",
+      "email": "member@tenant-a.example",
       "firstName": "Dev",
-      "lastName": "Clinician",
+      "lastName": "Member",
       "enabled": true,
       "emailVerified": true,
       "attributes": {
@@ -531,15 +527,15 @@
         }
       ],
       "realmRoles": [
-        "clinician"
+        "member"
       ]
     },
     {
       "id": "0d000000-0000-0000-0000-00000000000a",
-      "username": "dev-nurse",
-      "email": "nurse@tenant-a.example",
+      "username": "dev-viewer",
+      "email": "viewer@tenant-a.example",
       "firstName": "Dev",
-      "lastName": "Nurse",
+      "lastName": "Viewer",
       "enabled": true,
       "emailVerified": true,
       "attributes": {
@@ -559,7 +555,7 @@
         }
       ],
       "realmRoles": [
-        "nurse"
+        "viewer"
       ]
     },
     {
@@ -592,10 +588,10 @@
     },
     {
       "id": "0c000000-0000-0000-0000-00000000000b",
-      "username": "dev-clinician-b",
-      "email": "clinician@tenant-b.example",
+      "username": "dev-member-b",
+      "email": "member@tenant-b.example",
       "firstName": "Dev",
-      "lastName": "ClinicianB",
+      "lastName": "MemberB",
       "enabled": true,
       "emailVerified": true,
       "attributes": {
@@ -615,7 +611,7 @@
         }
       ],
       "realmRoles": [
-        "clinician"
+        "member"
       ]
     },
     {
@@ -644,7 +640,7 @@
       ],
       "realmRoles": [
         "tenant_admin",
-        "clinician"
+        "member"
       ]
     },
     {
@@ -688,62 +684,6 @@
           "view-realm"
         ]
       }
-    },
-    {
-      "id": "1a000000-0000-0000-0000-00000000000a",
-      "username": "dev-knowledge",
-      "email": "knowledge_admin@tenant-a.example",
-      "firstName": "Dev",
-      "lastName": "Knowledge",
-      "enabled": true,
-      "emailVerified": true,
-      "attributes": {
-        "tenant_id": [
-          "00000000-0000-0000-0000-00000000000a"
-        ],
-        "mfa_enrolled_at": [],
-        "recovery_codes_hash_count": [
-          "0"
-        ]
-      },
-      "credentials": [
-        {
-          "type": "password",
-          "value": "dev-password",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "knowledge_admin"
-      ]
-    },
-    {
-      "id": "1a000000-0000-0000-0000-00000000000b",
-      "username": "dev-knowledge-b",
-      "email": "knowledge_admin@tenant-b.example",
-      "firstName": "Dev",
-      "lastName": "Knowledge",
-      "enabled": true,
-      "emailVerified": true,
-      "attributes": {
-        "tenant_id": [
-          "00000000-0000-0000-0000-00000000000b"
-        ],
-        "mfa_enrolled_at": [],
-        "recovery_codes_hash_count": [
-          "0"
-        ]
-      },
-      "credentials": [
-        {
-          "type": "password",
-          "value": "dev-password",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "knowledge_admin"
-      ]
     }
   ]
 }

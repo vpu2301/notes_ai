@@ -19,7 +19,7 @@ Four public-facing acts, three of which run with no session at all.
 **1. Never confirm whether an account exists.** ``/forgot`` returns the
 same 202 and the same body for a real address, an unknown one, a
 deactivated one, and one that tripped the rate limiter. Anything else
-turns the endpoint into a membership oracle for a clinical system,
+turns the endpoint into a membership oracle for a business system,
 where "is this doctor a Klarnote user" is itself worth knowing. The
 uniform response costs nothing; the timing difference between a real
 and unknown address is not eliminated, and is noted as accepted
@@ -180,14 +180,10 @@ def _enabled_or_404() -> None:
     what is switched off.
     """
     if not settings.password_reset_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
 
-def _reject_weak(
-    password: str, *, email: str = "", display_name: str = ""
-) -> None:
+def _reject_weak(password: str, *, email: str = "", display_name: str = "") -> None:
     result = password_policy.check_password(
         password,
         min_length=settings.password_min_length,
@@ -261,9 +257,7 @@ async def _revoke_all_sessions(state: Any, sub: UUID) -> bool:
         )
     if state.denylist is not None:
         try:
-            await state.denylist.revoke_sub(
-                str(sub), ttl_seconds=settings.revoked_sub_ttl_seconds
-            )
+            await state.denylist.revoke_sub(str(sub), ttl_seconds=settings.revoked_sub_ttl_seconds)
         except Exception as exc:  # noqa: BLE001
             ok = False
             logger.error(
@@ -360,9 +354,7 @@ async def password_policy_info() -> PolicyResponse:
     """
     _enabled_or_404()
     return PolicyResponse(
-        min_length=max(
-            settings.password_min_length, password_policy.MIN_LENGTH_FLOOR
-        ),
+        min_length=max(settings.password_min_length, password_policy.MIN_LENGTH_FLOOR),
         max_length=password_policy.MAX_LENGTH,
     )
 
@@ -388,9 +380,7 @@ async def forgot_password(body: ForgotRequest, request: Request) -> ForgotRespon
         allowed = await state.password_rate_limiter.check(ip=ip, email=email)
         if not allowed:
             _password_counter.add(1, {"act": "forgot", "result": "rate_limited"})
-            logger.warning(
-                "auth.password.reset_rate_limited", extra={"ip_hash": ip_hash}
-            )
+            logger.warning("auth.password.reset_rate_limited", extra={"ip_hash": ip_hash})
             # Same 202 as every other outcome. A 429 here would confirm
             # nothing about the account, but it WOULD tell an attacker
             # their sweep is being counted, which is free intelligence.
@@ -403,9 +393,7 @@ async def forgot_password(body: ForgotRequest, request: Request) -> ForgotRespon
         # Unknown or deactivated. No token, no mail, no audit row — see
         # the note in audit_kinds about enumeration.
         _password_counter.add(1, {"act": "forgot", "result": "no_account"})
-        logger.info(
-            "auth.password.reset_requested_unknown", extra={"ip_hash": ip_hash}
-        )
+        logger.info("auth.password.reset_requested_unknown", extra={"ip_hash": ip_hash})
         return ForgotResponse()
 
     tenant_id = UUID(str(account["tenant_id"]))
@@ -502,9 +490,7 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
     # (Found by running the flow rather than by a test: the 422 came
     # back, and the very next request with a good password was refused.)
     async with state.app_pool.acquire() as conn:
-        peeked = await repo.peek_token(
-            conn, token_hash=token_hash, purpose=PURPOSE_RESET
-        )
+        peeked = await repo.peek_token(conn, token_hash=token_hash, purpose=PURPOSE_RESET)
     if peeked is None:
         raise _invalid()
 
@@ -513,8 +499,7 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
 
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         row = await conn.fetchrow(
-            "SELECT email, COALESCE(display_name, '') AS display_name "
-            "FROM users WHERE sub = $1",
+            "SELECT email, COALESCE(display_name, '') AS display_name FROM users WHERE sub = $1",
             sub,
         )
     email = str(row["email"]) if row else ""
@@ -527,9 +512,7 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
     # two concurrent redemptions of one link produce exactly one winner
     # and the loser gets the same 400 as an expired link.
     async with state.app_pool.acquire() as conn:
-        claimed = await repo.consume_token(
-            conn, token_hash=token_hash, purpose=PURPOSE_RESET
-        )
+        claimed = await repo.consume_token(conn, token_hash=token_hash, purpose=PURPOSE_RESET)
     if claimed is None:
         raise _invalid()
 
@@ -604,8 +587,7 @@ async def change_password(
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await conn.fetchrow(
-            "SELECT email, COALESCE(display_name, '') AS display_name "
-            "FROM users WHERE sub = $1",
+            "SELECT email, COALESCE(display_name, '') AS display_name FROM users WHERE sub = $1",
             claims.sub,
         )
     email = str(row["email"]) if row else ""
@@ -622,9 +604,7 @@ async def change_password(
     # holder is the one at the keyboard, and this is the one act that
     # locks everyone else out — including the real owner.
     try:
-        await state.keycloak.password_grant(
-            username=username, password=body.current_password
-        )
+        await state.keycloak.password_grant(username=username, password=body.current_password)
     except KeycloakError as exc:
         _password_counter.add(1, {"act": "change", "result": "bad_current"})
         await _audit(
@@ -637,7 +617,7 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current password does not match",
-            headers={"WWW-Authenticate": 'Bearer realm="medical-dictation"'},
+            headers={"WWW-Authenticate": 'Bearer realm="notes"'},
         ) from exc
 
     _reject_weak(body.new_password, email=email, display_name=display_name)
@@ -701,9 +681,7 @@ async def change_password(
     response_model=LockdownResponse,
     summary="'This wasn't me' — end every session and retake the account",
 )
-async def account_lockdown(
-    body: LockdownRequest, request: Request
-) -> LockdownResponse:
+async def account_lockdown(body: LockdownRequest, request: Request) -> LockdownResponse:
     """The button in the security-notification email.
 
     Ordered so the destructive half happens first: sessions die, then

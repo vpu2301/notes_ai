@@ -1,0 +1,3 @@
+{% extends "_base.txt" %}
+{% block heading %}Version-chain integrity failure{% endblock %}
+{% block body %}The automatic check "{{ fields.get('check_name', 'chain_reconciler') }}" found a mismatch in the version chain of note {{ fields.get('note_code', '—') }}. Administrator action is required.{% endblock %}

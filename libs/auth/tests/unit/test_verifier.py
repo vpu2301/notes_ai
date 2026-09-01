@@ -35,7 +35,7 @@ async def test_valid_token_returns_claims(
         jwks_cache=jwks_cache,
     )
     assert isinstance(claims, Claims)
-    assert claims.roles == ["clinician"]
+    assert claims.roles == ["member"]
     assert claims.mfa is False  # absence ⇒ default false
 
 
@@ -117,7 +117,7 @@ async def test_missing_kid_raises_kid_not_found(
     payload = {
         "sub": "11111111-1111-1111-1111-111111111111",
         "tid": "00000000-0000-0000-0000-00000000000a",
-        "roles": ["clinician"],
+        "roles": ["member"],
         "sid": "s",
         "iss": ISSUER,
         "aud": AUDIENCE,
@@ -220,7 +220,7 @@ async def test_missing_tid_raises_malformed_claims(
     payload = {
         "sub": "11111111-1111-1111-1111-111111111111",
         # tid intentionally missing
-        "roles": ["clinician"],
+        "roles": ["member"],
         "sid": "s",
         "iss": ISSUER,
         "aud": AUDIENCE,

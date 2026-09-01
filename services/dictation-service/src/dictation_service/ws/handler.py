@@ -22,7 +22,7 @@ import logging
 import time
 from contextlib import suppress
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import WebSocketDisconnect
 
@@ -41,8 +41,8 @@ from ..audio import (
 from ..audio.gap import GapDecision
 from ..config import settings
 from ..diarization.engine import DiarizationUnavailableError
-from ..diarization.mapping import SpeakerMappingInference
-from ..domain import consents, encounters, repository
+from ..diarization.mapping import SpeakerNaming
+from ..domain import repository
 from ..inference import StreamingWindower
 from ..notifications import emit_dictation_completed
 from ..protocol import (
@@ -198,29 +198,9 @@ async def _new_session(
         )
         return None
 
-    # Conversation records the PATIENT: hard-require an encounter (the
-    # consent lives on the encounter's patient). Same error code as a
-    # missing consent — the fix for both is the consent flow.
-    if mode == "conversation" and start.encounter_id is None:
-        await _refuse_consent(
-            websocket, state, upgrade, detail="conversation mode requires encounter_id"
-        )
-        return None
-
-    # Per-tenant active cap + encounter linkage + recording consent
-    # (one tenant-scoped trip).
-    encounter_status: str | None = None
-    recording_consent: dict[str, Any] | None = None
+    # Per-tenant active cap (one tenant-scoped trip).
     async with tenant_connection(state.app_pool, upgrade.claims.tid) as conn:
         active = await repository.count_active_for_tenant(conn, tenant_id=upgrade.claims.tid)
-        if start.encounter_id is not None:
-            encounter_status = await encounters.fetch_encounter_status(
-                conn, encounter_id=start.encounter_id
-            )
-            if mode == "conversation":
-                recording_consent = await consents.fetch_recording_consent(
-                    conn, encounter_id=start.encounter_id
-                )
     if active >= settings.per_tenant_max_active_sessions:
         await _send_and_close(
             websocket,
@@ -233,43 +213,10 @@ async def _new_session(
         )
         return None
 
-    # S11 step 02: a named encounter must exist in-tenant (RLS makes a
-    # foreign encounter look nonexistent) and not be cancelled — rejected
-    # here, before a single audio frame is accepted. Conversation mode
-    # additionally needs the visit to still be open (0058).
-    if start.encounter_id is not None:
-        gate = encounters.encounter_gate(encounter_status, mode=mode)
-        if gate is not None:
-            if gate is ErrorCode.ENCOUNTER_INVALID:
-                detail = "encounter not found in this tenant"
-            elif encounter_status == "cancelled":
-                detail = "encounter is cancelled; dictation is not allowed"
-            else:
-                detail = (
-                    f"visit is already {encounter_status}; "
-                    "start a new visit to record a conversation"
-                )
-            await _send_and_close(
-                websocket,
-                Error(code=gate, detail=detail, recoverable=False),
-                protocol_version=upgrade.protocol_version,
-            )
-            return None
-
-    # S14: conversation requires a granted 'recording' consent for the
-    # encounter's patient — refused before a single audio frame.
+    # Conversation (meeting) mode needs no precondition beyond auth, but
+    # the diarizer must actually be loadable — fail loud at start, never
+    # mid-meeting with silently unlabeled audio.
     if mode == "conversation":
-        if consents.consent_gate(recording_consent) is not None:
-            await _refuse_consent(
-                websocket,
-                state,
-                upgrade,
-                encounter_id=start.encounter_id,
-                detail="no granted 'recording' consent for the encounter's patient",
-            )
-            return None
-        # Diarizer must actually be loadable — fail loud at start, never
-        # mid-consultation with silently unlabeled audio.
         try:
             await state.diarization_engine.ensure_loaded()
         except DiarizationUnavailableError as exc:
@@ -281,19 +228,9 @@ async def _new_session(
             )
             return None
 
-    # Fetch the requested prompt's text.
-    prompt_text = await _fetch_prompt_text(state, upgrade.claims.tid, start.prompt_id)
-    if prompt_text is None:
-        await _send_and_close(
-            websocket,
-            Error(
-                code=ErrorCode.BAD_MESSAGE,
-                detail="prompt_id not found",
-                recoverable=False,
-            ),
-            protocol_version=upgrade.protocol_version,
-        )
-        return None
+    # Whisper initial_prompt: the session's free-text vocabulary hint,
+    # falling back to the service-wide config default.
+    vocabulary_hint = start.vocabulary_hint or settings.default_vocabulary_hint
 
     session_id = uuid4()
     ctx = SessionContext(
@@ -301,10 +238,8 @@ async def _new_session(
         tenant_id=upgrade.claims.tid,
         user_id=upgrade.claims.sub,
         language=start.language,
-        prompt_id=start.prompt_id,
-        prompt_text=prompt_text,
+        vocabulary_hint=vocabulary_hint,
         target_kind=start.target_kind,
-        encounter_id=start.encounter_id,
         template_id=start.template_id,
         claims=upgrade.claims,
         token_exp_ts=upgrade.claims.exp,
@@ -312,7 +247,6 @@ async def _new_session(
         protocol_version=upgrade.protocol_version,
         bearer=upgrade.bearer,
         capacity_weight=weight,
-        patient_id=(recording_consent or {}).get("patient_id"),
     )
     ctx.ws = websocket
     ctx.state = SessionState.ACTIVE
@@ -321,11 +255,11 @@ async def _new_session(
     ctx.decoder = OpusDecoder()
     if mode == "conversation":
         ctx.diarization = state.diarization_engine.new_stream()
-        ctx.mapping_inference = SpeakerMappingInference(language=ctx.language)
+        ctx.speaker_naming = SpeakerNaming()
 
     # Sprint-06: load template for section-aware dictation. Sprint-14
     # wires it for real: the client is built in main_deps and the call
-    # forwards the CLINICIAN's own bearer (the repo's cross-service
+    # forwards the CALLER's own bearer (the repo's cross-service
     # pattern) — the old service-account plumbing never existed.
     template_client = getattr(state, "template_client", None)
     s2s_bearer = upgrade.bearer
@@ -375,9 +309,7 @@ async def _new_session(
             tenant_id=ctx.tenant_id,
             user_id=ctx.user_id,
             language=ctx.language,
-            prompt_id=ctx.prompt_id,
             target_kind=ctx.target_kind,
-            encounter_id=ctx.encounter_id,
             template_id=ctx.template_id,
             worker_id=settings.worker_id,
             mode=ctx.mode,
@@ -392,8 +324,6 @@ async def _new_session(
         payload={
             "language": ctx.language,
             "target_kind": ctx.target_kind,
-            "prompt_id": str(ctx.prompt_id),
-            "encounter_id": str(ctx.encounter_id) if ctx.encounter_id else None,
             "mode": ctx.mode,
             "protocol_version": ctx.protocol_version,
         },
@@ -417,32 +347,6 @@ async def _new_session(
         started = SessionStarted(**started_kwargs)  # type: ignore[assignment]
     await websocket.send_text(encode_server(started, ctx.protocol_version))
     return ctx
-
-
-async def _refuse_consent(
-    websocket: Any,
-    state: Any,
-    upgrade: UpgradeContext,
-    *,
-    encounter_id: UUID | None = None,
-    detail: str = "",
-) -> None:
-    """Audit + refuse a conversation start without a recording consent."""
-    metrics.session_drops.add(1, {"reason": "consent_refused"})
-    await state.audit_writer.write_event(
-        tenant_id=upgrade.claims.tid,
-        kind=audit_kinds.CONSENT_REFUSED,
-        actor_sub=upgrade.claims.sub,
-        target_kind="encounter",
-        target_id=str(encounter_id) if encounter_id else "none",
-        payload={"detail": detail},
-        severity=Severity.WARN,
-    )
-    await _send_and_close(
-        websocket,
-        Error(code=ErrorCode.CONSENT_REQUIRED, detail=detail, recoverable=False),
-        protocol_version=upgrade.protocol_version,
-    )
 
 
 # ── Resume ────────────────────────────────────────────────────────────
@@ -553,7 +457,7 @@ async def _resume_session(
 
 async def _run_loop(ctx: SessionContext, websocket: Any, state: Any) -> None:
     windower = StreamingWindower(
-        base_prompt=ctx.prompt_text,
+        base_prompt=ctx.vocabulary_hint,
         language=ctx.language,
     )
     # Reachable from the finalize paths, which do not take the windower.
@@ -668,9 +572,9 @@ async def _on_text(
         return True
 
     if isinstance(msg, SetSpeakerMapping):
-        # Sprint-14: the clinician's manual doctor/patient assignment —
-        # authoritative from this moment; inference stops permanently.
-        if ctx.mode != "conversation" or ctx.mapping_inference is None:
+        # Sprint-14: the user's manual speaker naming — authoritative
+        # from this moment; the neutral SPEAKER_N defaults are replaced.
+        if ctx.mode != "conversation" or ctx.speaker_naming is None:
             await websocket.send_text(
                 encode_server(
                     Error(
@@ -682,7 +586,7 @@ async def _on_text(
                 )
             )
             return True
-        ctx.mapping_inference.freeze(dict(msg.mapping))
+        ctx.speaker_naming.set_names(dict(msg.mapping))
         ctx.mapping_manual = True
         ctx.speaker_mapping_manual_sets += 1
         metrics.speaker_mapping_updates.add(1, {"source": "manual"})
@@ -703,7 +607,7 @@ async def _on_text(
                 encode_server(
                     SpeakerMappingUpdated(
                         session_id=ctx.session_id,
-                        mapping=dict(msg.mapping),
+                        mapping=ctx.speaker_naming.current.mapping,
                         confidence=1.0,
                         rationale="manual override",
                         manual=True,
@@ -908,7 +812,7 @@ async def _window_loop(
     """Tick the windower every N ms; emit partials + finals.
 
     This loop IS the transcript: if it stops, the session keeps accepting
-    audio, keeps looking healthy to the clinician, and finalizes empty.
+    audio, keeps looking healthy to the user, and finalizes empty.
     It ran as a bare ``create_task`` with no error path, so a single
     unhandled exception in one tick killed the transcript for the rest of
     the session and left nothing in the log (that is exactly how the
@@ -944,7 +848,7 @@ async def _window_loop(
             )
             if consecutive_failures >= _MAX_CONSECUTIVE_TICK_FAILURES:
                 # Never let a session go on "recording" with a dead
-                # transcriber — tell the clinician instead.
+                # transcriber — tell the user instead.
                 await _on_failed(
                     ctx,
                     state,
@@ -1084,8 +988,6 @@ async def _window_tick_locked(
         )
 
     await _emit_tick(ctx, tick)
-    if ctx.mode == "conversation":
-        await _maybe_emit_mapping_update(ctx, state)
 
 
 def _wire_words(words: Any) -> list[TokenTiming]:
@@ -1182,7 +1084,6 @@ async def _emit_tick(ctx: SessionContext, tick: Any) -> None:
         }
         if v2:
             speaker, speaker_conf = _attribute_segment(ctx, seg, count=True)
-            _feed_mapping_inference(ctx, seg)
             final_message: Any = FinalV2(
                 **final_kwargs,
                 speaker=speaker,
@@ -1223,61 +1124,15 @@ def _attribute_segment(
     return speaker, conf
 
 
-def _feed_mapping_inference(ctx: SessionContext, seg: Any) -> None:
-    """Committed words feed the doctor/patient inference (word-level
-    attribution — a segment straddling a turn boundary must not vote
-    all its words for one side)."""
-    if ctx.mapping_inference is None or ctx.diarization is None or ctx.mapping_manual:
-        return
-    ctx.mapping_inference.observe_segments(ctx.diarization.segments)
-    for w in getattr(seg, "words", []) or []:
-        speaker, _conf = ctx.diarization.attribute(int(w.start_ms), int(w.end_ms))
-        ctx.mapping_inference.observe_word(w.text, speaker)
-
-
 def _current_mapping_hint(ctx: SessionContext) -> dict[str, Any] | None:
-    if ctx.mapping_inference is None:
+    """The label → display-name mapping riding on every v2 frame.
+
+    Neutral SPEAKER_1..N defaults until the client names speakers via
+    ``set_speaker_mapping`` — there is no server-side identity guess.
+    """
+    if ctx.speaker_naming is None:
         return None
-    current = ctx.mapping_inference.current
-    return dict(current.mapping) if current is not None else None
-
-
-async def _maybe_emit_mapping_update(ctx: SessionContext, state: Any) -> None:
-    """Emit SpeakerMappingUpdated when the hypothesis changes (never
-    after a manual set — freeze() makes evaluate() return None)."""
-    if ctx.mapping_inference is None or ctx.mapping_manual or ctx.ws is None:
-        return
-    hypothesis = ctx.mapping_inference.evaluate()
-    if hypothesis is None:
-        return
-    ctx.speaker_mapping_updates += 1
-    metrics.speaker_mapping_updates.add(1, {"source": "inferred"})
-    await state.audit_writer.write_event(
-        tenant_id=ctx.tenant_id,
-        kind=audit_kinds.SPEAKER_MAPPING_INFERRED,
-        actor_sub=ctx.user_id,
-        target_kind="dictation_session",
-        target_id=str(ctx.session_id),
-        payload={
-            "mapping": dict(hypothesis.mapping),
-            "confidence": hypothesis.confidence,
-            "rationale": hypothesis.rationale,
-        },
-        severity=Severity.INFO,
-    )
-    with suppress(Exception):
-        await ctx.ws.send_text(
-            encode_server(
-                SpeakerMappingUpdated(
-                    session_id=ctx.session_id,
-                    mapping=dict(hypothesis.mapping),
-                    confidence=hypothesis.confidence,
-                    rationale=hypothesis.rationale,
-                    manual=False,
-                ),
-                ctx.protocol_version,
-            )
-        )
+    return dict(ctx.speaker_naming.current.mapping)
 
 
 # ── Closure paths ────────────────────────────────────────────────────
@@ -1327,8 +1182,8 @@ async def _finalize_normal(ctx: SessionContext, state: Any, *, reason: str) -> N
         await _on_failed(ctx, state, kind="internal", detail=f"finalize: {exc}")
         return
 
-    # Sprint-14: conversation sessions land a report draft through the
-    # EXISTING POST /v1/reports (sprint-08 hand-off; no parallel write
+    # Sprint-14: conversation sessions land a note draft through the
+    # EXISTING POST /v1/notes (sprint-08 hand-off; no parallel write
     # path). Completion paths only — failure/abandon never draft.
     if ctx.mode == "conversation":
         from ..session.draft import create_conversation_draft  # local import — avoid cycle
@@ -1467,12 +1322,3 @@ async def _on_failed(ctx: SessionContext, state: Any, *, kind: str, detail: str)
         ctx.buffer.close()
         ctx.buffer = None
     await state.session_manager.unregister(ctx.session_id)
-
-
-async def _fetch_prompt_text(state: Any, tenant_id: UUID, prompt_id: UUID) -> str | None:
-    async with state.app_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT prompt_text FROM medical_prompts WHERE id = $1",
-            prompt_id,
-        )
-    return str(row["prompt_text"]) if row is not None else None

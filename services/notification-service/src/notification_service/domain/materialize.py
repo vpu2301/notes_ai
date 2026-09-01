@@ -50,9 +50,7 @@ class MaterializeResult:
     recipients_considered: int = 0
 
 
-async def resolve_recipients(
-    event: NotificationEvent, conn: asyncpg.Connection
-) -> list[UUID]:
+async def resolve_recipients(event: NotificationEvent, conn: asyncpg.Connection) -> list[UUID]:
     """Who hears about this fact.
 
     Producer-supplied hints are always filtered through the tenant's own
@@ -63,20 +61,20 @@ async def resolve_recipients(
 
     match spec.recipient_rule:
         case RecipientRule.TENANT_ADMINS:
-            # Resolved HERE, not by the producer: report-service has no
+            # Resolved HERE, not by the producer: note-service has no
             # business querying who the tenant's admins are.
             recipients = await repo.tenant_admin_ids(conn)
-        case RecipientRule.REPORT_PARTICIPANTS | RecipientRule.EXPLICIT_HINTS:
-            # The producer owns the report row and already knows its
+        case RecipientRule.NOTE_PARTICIPANTS | RecipientRule.EXPLICIT_HINTS:
+            # The producer owns the note row and already knows its
             # author and co-authors, so it sends them as hints. That
-            # keeps notification-service out of report-service's tables
+            # keeps notification-service out of note-service's tables
             # — a cross-service read would couple their schemas.
             recipients = await repo.filter_to_tenant_members(conn, event.recipient_hints)
 
     if spec.exclude_actor and event.actor_user_id is not None:
         recipients = [r for r in recipients if r != event.actor_user_id]
 
-    # Deduplicate while preserving order: a report whose author is also
+    # Deduplicate while preserving order: a note whose author is also
     # listed as a co-author must not be notified twice.
     seen: set[UUID] = set()
     unique: list[UUID] = []
@@ -106,7 +104,7 @@ async def materialize(
     result.recipients_considered = len(recipients)
     if not recipients:
         # Not an error: plenty of facts legitimately interest nobody (a
-        # solo author finalizing their own report).
+        # solo author finalizing their own note).
         logger.debug(
             "materialize.no_recipients",
             extra={"event_id": str(event.event_id), "category": str(event.category)},
@@ -167,9 +165,7 @@ async def materialize(
             result.duplicates += 1
             continue
 
-        result.created.append(
-            Created(notification_id=notification_id, recipient_user_id=recipient)
-        )
+        result.created.append(Created(notification_id=notification_id, recipient_user_id=recipient))
         result.suppressed += await _write_outbox(
             conn,
             event=event,
@@ -204,9 +200,7 @@ async def _write_outbox(
     at: datetime,
 ) -> int:
     """Write one outbox row per channel. Returns the suppressed count."""
-    preference = await repo.load_preference(
-        conn, user_id=recipient, category=event.category
-    )
+    preference = await repo.load_preference(conn, user_id=recipient, category=event.category)
     settings = await repo.load_settings(conn, user_id=recipient)
     email = await repo.user_email(conn, recipient)
 

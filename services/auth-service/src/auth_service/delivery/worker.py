@@ -133,14 +133,10 @@ async def deliver_one(
                 "error": str(exc),
             },
         )
-        await repo.mark_retry(
-            conn, mail_id=mail_id, error=str(exc), delay_seconds=delay
-        )
+        await repo.mark_retry(conn, mail_id=mail_id, error=str(exc), delay_seconds=delay)
         return True
 
-    await repo.mark_sent(
-        conn, mail_id=mail_id, provider_message_id=result.provider_message_id
-    )
+    await repo.mark_sent(conn, mail_id=mail_id, provider_message_id=result.provider_message_id)
     logger.info(
         "auth.mail.sent",
         extra={"mail_id": str(mail_id), "kind": kind, "lang": lang},
@@ -219,7 +215,5 @@ async def run_forever(
             # The loop must outlive any single failure — a worker that
             # dies on one bad poll stops all account mail until the next
             # deploy, and nothing else in the system would notice.
-            logger.exception(
-                "auth.mail.drain_failed", extra={"error": str(exc)}
-            )
+            logger.exception("auth.mail.drain_failed", extra={"error": str(exc)})
         await asyncio.sleep(interval_s)

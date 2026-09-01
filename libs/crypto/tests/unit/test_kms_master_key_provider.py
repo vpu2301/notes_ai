@@ -36,7 +36,9 @@ class FakeTransit:
     assert the token header and payload framing.
     """
 
-    def __init__(self, *, token: str = "root", mount: str = "transit", key: str = "mdx-master") -> None:
+    def __init__(
+        self, *, token: str = "root", mount: str = "transit", key: str = "mdx-master"
+    ) -> None:
         self.token = token
         self.mount = mount
         self.key = key
@@ -64,9 +66,7 @@ class FakeTransit:
             if not ct.startswith("vault:v1:"):
                 return httpx.Response(400, json={"errors": ["invalid ciphertext"]})
             raw = self._xor(base64.b64decode(ct[len("vault:v1:") :]))
-            return httpx.Response(
-                200, json={"data": {"plaintext": base64.b64encode(raw).decode()}}
-            )
+            return httpx.Response(200, json={"data": {"plaintext": base64.b64encode(raw).decode()}})
         return httpx.Response(404, json={"errors": [f"no handler for {path}"]})
 
 
@@ -149,15 +149,11 @@ def file_key(tmp_path: Path) -> Path:
     return p
 
 
-async def test_composite_routes_unwrap_by_master_id(
-    transit: FakeTransit, file_key: Path
-) -> None:
+async def test_composite_routes_unwrap_by_master_id(transit: FakeTransit, file_key: Path) -> None:
     file_provider = FileMasterKeyProvider(path=file_key)
     await file_provider.startup_self_check()
     vault_provider = _provider(transit)
-    composite = CompositeMasterKeyProvider(
-        primary=vault_provider, fallbacks=(file_provider,)
-    )
+    composite = CompositeMasterKeyProvider(primary=vault_provider, fallbacks=(file_provider,))
 
     kek = os.urandom(MASTER_KEY_SIZE_BYTES)
     file_id, file_wrapped = await file_provider.wrap(kek)
@@ -186,9 +182,7 @@ async def test_composite_self_check_fails_closed_on_primary(
         await composite.startup_self_check()
 
 
-async def test_composite_tolerates_broken_fallback(
-    transit: FakeTransit, tmp_path: Path
-) -> None:
+async def test_composite_tolerates_broken_fallback(transit: FakeTransit, tmp_path: Path) -> None:
     # Fallback file missing → warn, not fail: it only serves legacy rows.
     composite = CompositeMasterKeyProvider(
         primary=_provider(transit),
@@ -277,6 +271,4 @@ async def test_fetch_kv_secrets_fails_closed_on_404(
 
     monkeypatch.setattr(httpx, "AsyncClient", patched)
     with pytest.raises(MasterKeyError, match="404"):
-        await fetch_kv_secrets(
-            addr="http://vault.local", token="root", path="mdx/signing"
-        )
+        await fetch_kv_secrets(addr="http://vault.local", token="root", path="mdx/signing")

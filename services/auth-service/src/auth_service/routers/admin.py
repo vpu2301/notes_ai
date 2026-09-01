@@ -29,12 +29,12 @@ from ..notifications import emit_mfa_reminder
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_ROLE_VALUES: frozenset[str] = frozenset({"tenant_admin", "clinician", "nurse", "auditor"})
+_ROLE_VALUES: frozenset[str] = frozenset({"tenant_admin", "member", "viewer", "auditor"})
 
 # Highest-privilege-wins order used to collapse a multi-role set into the
 # single ``users.role`` column (the table stores one role; Keycloak holds the
 # full set). Keep in sync with the realm role catalogue.
-_ROLE_PRECEDENCE: tuple[str, ...] = ("tenant_admin", "clinician", "nurse", "auditor", "service")
+_ROLE_PRECEDENCE: tuple[str, ...] = ("tenant_admin", "member", "viewer", "auditor", "service")
 
 
 def _primary_role(roles: set[str]) -> str:
@@ -164,9 +164,7 @@ async def deactivate_user(
     # stay valid up to 15 more minutes.
     if state.denylist is not None:
         try:
-            await state.denylist.revoke_sub(
-                str(sub), ttl_seconds=settings.revoked_sub_ttl_seconds
-            )
+            await state.denylist.revoke_sub(str(sub), ttl_seconds=settings.revoked_sub_ttl_seconds)
             await state.audit_writer.write_event(
                 tenant_id=tenant_id,
                 kind=audit_kinds.AUTH_SESSION_REVOKED,
@@ -402,7 +400,7 @@ def _reminder_role(claims: Claims) -> str:
     status_code=status.HTTP_201_CREATED,
     summary="Ask a user to enrol MFA; the request stands until they do",
     # NOT MFA-gated, and that is deliberate. Every other mutation here
-    # demands a verified-MFA session — but this one is how a clinic climbs
+    # demands a verified-MFA session — but this one is how a company climbs
     # OUT of having no second factors, and an auditor who has not yet
     # enrolled would otherwise be unable to raise the very finding that
     # gets everyone enrolled. The act grants nothing and changes no
@@ -551,8 +549,7 @@ async def set_user_roles(
     if "tenant_admin" in old_app_roles and "tenant_admin" not in desired_set:
         async with tenant_connection(state.app_pool, tenant_id) as conn:
             n_admins = await conn.fetchval(
-                "SELECT count(*) FROM users "
-                "WHERE role = 'tenant_admin' AND status <> 'deactivated'"
+                "SELECT count(*) FROM users WHERE role = 'tenant_admin' AND status <> 'deactivated'"
             )
         if n_admins is not None and n_admins <= 1:
             raise HTTPException(

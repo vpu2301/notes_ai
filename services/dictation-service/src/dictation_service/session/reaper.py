@@ -8,7 +8,7 @@ held parked in ``active`` / ``paused`` / ``reconnecting`` **forever**. Those
 rows are not cosmetic — ``count_active_for_tenant`` gates
 ``per_tenant_max_active_sessions``, so each stranded row permanently burns a
 slot in the tenant's capacity budget, and each one keeps showing up in the
-clinician's "still recording" list.
+user's "still recording" list.
 
 The reaper is the out-of-process backstop. Its single safety interlock is
 the worker heartbeat in Redis: a session is collected **only** when the
@@ -103,9 +103,6 @@ async def reap_tenant(state: Any, tenant_id: UUID, *, grace_seconds: float) -> i
                         "reason": "reaped_dead_worker",
                         "prior_status": row["status"],
                         "owner_worker": owner or "",
-                        "encounter_id": str(row["encounter_id"])
-                        if row["encounter_id"]
-                        else None,
                     },
                     severity=Severity.WARN,
                 )

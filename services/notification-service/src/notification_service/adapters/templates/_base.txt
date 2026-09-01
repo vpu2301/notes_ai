@@ -2,9 +2,9 @@
 
 {% block body %}{% endblock %}
 {% if deep_link %}
-Відкрити: {{ deep_link }}
+Open: {{ deep_link }}
 {% endif %}
 
 --
-Це автоматичне повідомлення системи медичного диктування.
-Воно навмисно не містить медичних даних пацієнта.
+This is an automated message from Klarnote.
+It deliberately contains no note content or personal data.

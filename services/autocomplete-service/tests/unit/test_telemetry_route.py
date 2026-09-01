@@ -24,8 +24,15 @@ pytestmark = pytest.mark.asyncio
 
 def _claims() -> Claims:
     return Claims(
-        sub=uuid4(), tid=uuid4(), roles=["clinician"], scope="openid",
-        sid="s", iss="test", aud="mdx-api", exp=2_000_000_000, iat=1,
+        sub=uuid4(),
+        tid=uuid4(),
+        roles=["member"],
+        scope="openid",
+        sid="s",
+        iss="test",
+        aud="mdx-api",
+        exp=2_000_000_000,
+        iat=1,
     )
 
 
@@ -65,8 +72,11 @@ def test_accepted_without_id_rejected():
 def test_both_ids_rejected():
     with pytest.raises(ValidationError, match="mutually exclusive"):
         TelemetryRequest(
-            request_id=uuid4(), event="shown_only", prefix="x",
-            phrase_id=uuid4(), snippet_id=uuid4(),
+            request_id=uuid4(),
+            event="shown_only",
+            prefix="x",
+            phrase_id=uuid4(),
+            snippet_id=uuid4(),
         )
 
 
@@ -89,8 +99,8 @@ async def test_prefix_and_context_scrubbed_before_entering_buffer():
     body = TelemetryRequest(
         request_id=uuid4(),
         event="rejected",
-        prefix="пацієнт ivan@example.com тел +380501234567",
-        context={"field": "anamnesis", "note": "ІПН 1234567890"},
+        prefix="reach ivan@example.com tel +380501234567",
+        context={"field": "summary", "note": "tax id 1234567890"},
     )
     resp = await receive_telemetry(body, claims)
     assert resp.status_code == 204
@@ -123,24 +133,28 @@ async def test_buffer_failure_never_surfaces():
 
 
 def test_layer_c_accepted_without_ids_is_valid():
-    TelemetryRequest(
-        request_id=uuid4(), event="accepted", prefix="Пацієнт скарж", source="layer_c"
-    )
+    TelemetryRequest(request_id=uuid4(), event="accepted", prefix="Пацієнт скарж", source="layer_c")
 
 
 def test_layer_c_with_phrase_id_rejected():
     with pytest.raises(ValidationError, match="layer_c events must not carry"):
         TelemetryRequest(
-            request_id=uuid4(), event="shown_only", prefix="x",
-            phrase_id=uuid4(), source="layer_c",
+            request_id=uuid4(),
+            event="shown_only",
+            prefix="x",
+            phrase_id=uuid4(),
+            source="layer_c",
         )
 
 
 def test_layer_c_with_snippet_id_rejected():
     with pytest.raises(ValidationError, match="layer_c events must not carry"):
         TelemetryRequest(
-            request_id=uuid4(), event="rejected", prefix="x",
-            snippet_id=uuid4(), source="layer_c",
+            request_id=uuid4(),
+            event="rejected",
+            prefix="x",
+            snippet_id=uuid4(),
+            source="layer_c",
         )
 
 
@@ -170,8 +184,6 @@ async def test_layer_c_row_carries_source_and_is_scrubbed():
 async def test_autocomplete_row_carries_default_source():
     state = _FakeState()
     install_state(state)
-    body = TelemetryRequest(
-        request_id=uuid4(), event="accepted", prefix="зад", phrase_id=uuid4()
-    )
+    body = TelemetryRequest(request_id=uuid4(), event="accepted", prefix="зад", phrase_id=uuid4())
     await receive_telemetry(body, _claims())
     assert state.telemetry_buffer.rows[0][8] == "autocomplete"

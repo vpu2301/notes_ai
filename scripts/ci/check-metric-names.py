@@ -28,8 +28,8 @@ Two checks, one per direction of the drift:
 
 This does NOT require every referenced ``mdx_*`` name to be a declared
 instrument: several are legitimately produced outside the services, by
-Prometheus textfile exporters (``scripts/eval/run_wer.py``,
-``infra/k8s/mdx/files/jobs/nightly_verify.py``).
+Prometheus textfile exporters (``scripts/jobs/nightly_verify.py`` and its
+chart copy ``infra/k8s/notes/files/jobs/nightly_verify.py``).
 
 Exit codes:
     0 — no violations
@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 COLLECTOR_CONFIGS = (
     "infra/otel/otel-collector-config.yaml",
-    "infra/k8s/mdx/templates/observability.yaml",
+    "infra/k8s/notes/templates/observability.yaml",
 )
 
 RULE_DIRS = ("infra/prometheus/rules",)
@@ -161,8 +161,7 @@ def main() -> int:
         for err in errors:
             print(f"  {err}", file=sys.stderr)
         print(
-            f"\n{len(errors)} violation(s). See "
-            "infra/otel/otel-collector-config.yaml for the why.",
+            f"\n{len(errors)} violation(s). See infra/otel/otel-collector-config.yaml for the why.",
             file=sys.stderr,
         )
         return 1

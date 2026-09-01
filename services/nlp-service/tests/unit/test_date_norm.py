@@ -17,7 +17,7 @@ def _ctx(language: str, ref: date) -> ProcessingContext:
     return ProcessingContext(
         tenant_id=__import__("uuid").UUID("00000000-0000-0000-0000-000000000001"),
         language=language,
-        specialty=None,
+        category=None,
         reference_date=ref,
         is_partial=False,
         abbreviation_snapshot=AbbreviationSnapshot(entries=(), fingerprint="x"),

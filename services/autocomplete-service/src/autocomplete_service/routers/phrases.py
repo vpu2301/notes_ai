@@ -32,8 +32,6 @@ class CreatePhraseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phrase: str = Field(min_length=1, max_length=80)
     language: Literal["uk", "en"]
-    specialty: str | None = None
-    section_hint: str | None = None
     source: Literal["user", "tenant"] = "user"
 
 
@@ -42,15 +40,13 @@ class PhraseDTO(BaseModel):
     id: UUID
     phrase: str
     language: str
-    specialty: str | None
-    section_hint: str | None
     source: str
     impression_count: int
     acceptance_count: int
 
 
 class PhraseListItemDTO(BaseModel):
-    """Row of the sprint-17 admin listing (GET). Distinct from PhraseDTO:
+    """Row of the admin listing (GET). Distinct from PhraseDTO:
     the listing carries the roll-up counters + timestamps the console
     shows; the POST echo never has real counter values."""
 
@@ -58,40 +54,29 @@ class PhraseListItemDTO(BaseModel):
     id: UUID
     phrase: str
     language: str
-    specialty: str | None
-    section_hint: str | None
     source: str
     impression_count: int
     acceptance_count: int
     last_accepted_at: datetime | None
     created_at: datetime
-    # Sprint 21 corpus provenance (ADR-0043) — admin filters/columns.
-    review_state: str
-    tier: int | None
-    source_kind: str
-    corpus_release: str | None
 
 
 @router.get("/phrases", response_model=list[PhraseListItemDTO])
 async def list_phrases(
     claims: Annotated[Claims, Depends(requires("autocomplete.read", "phrase"))],
     language: Annotated[Literal["uk", "en"] | None, Query()] = None,
-    specialty: Annotated[str | None, Query(max_length=64)] = None,
     source: Annotated[Literal["system", "tenant", "user"] | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[PhraseListItemDTO]:
-    """Admin corpus listing. Visibility is the RLS policy's (system +
+    """Admin phrase listing. Visibility is the RLS policy's (system +
     own-tenant + own-user rows); a read needs no audit event."""
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         await conn.execute("SELECT set_config('app.user_id',   $1, true)", str(claims.sub))
-        await conn.execute(
-            "SELECT set_config('app.user_role', $1, true)", role_for_rls(claims)
-        )
+        await conn.execute("SELECT set_config('app.user_role', $1, true)", role_for_rls(claims))
         rows = await repo.list_phrases(
             conn,
             language=language,
-            specialty=specialty,
             source=source,
             limit=limit,
         )
@@ -100,72 +85,20 @@ async def list_phrases(
             id=r["id"],
             phrase=r["phrase"],
             language=r["language"],
-            specialty=r["specialty"],
-            section_hint=r["section_hint"],
             source=str(r["source"]),
             impression_count=int(r["impression_count"]),
             acceptance_count=int(r["acceptance_count"]),
             last_accepted_at=r["last_accepted_at"],
             created_at=r["created_at"],
-            review_state=r["review_state"],
-            tier=r["tier"],
-            source_kind=r["source_kind"],
-            corpus_release=r["corpus_release"],
         )
         for r in rows
     ]
 
 
-class RetirePhraseResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: UUID
-    review_state: Literal["retired"]
-    corpus_release: str | None  # non-null = the phrase shipped in a release
-
-
-@router.post("/phrases/{phrase_id}/retire", response_model=RetirePhraseResponse)
-async def retire_phrase(
-    phrase_id: UUID,
-    claims: Annotated[Claims, Depends(requires("autocomplete.write", "phrase"))],
-) -> RetirePhraseResponse:
-    """Sprint 21: retire, never delete — provenance survives, serving stops
-    (the trie feeds only review_state='accepted'). Tenant/user rows only;
-    system (released) rows are retired by the corpus operator (see
-    docs/runbooks/corpus.md), so the admin console can't silently edit the
-    global corpus."""
-    state = get_state()
-    async with tenant_connection(state.app_pool, claims.tid) as conn:
-        await conn.execute("SELECT set_config('app.user_id',   $1, true)", str(claims.sub))
-        await conn.execute(
-            "SELECT set_config('app.user_role', $1, true)", role_for_rls(claims)
-        )
-        row = await repo.retire_phrase(conn, phrase_id=phrase_id)
-    if row is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail="phrase not found in tenant scope, already retired, "
-            "or system-scope (operator-managed)",
-        )
-    await state.audit_writer.write_event(
-        tenant_id=claims.tid,
-        kind=audit_kinds.PHRASE_UPDATED,
-        actor_sub=claims.sub,
-        actor_role=(claims.roles[0] if claims.roles else None),
-        target_kind="phrase",
-        target_id=phrase_id,
-        payload={"action": "retire", "corpus_release": row["corpus_release"]},
-    )
-    return RetirePhraseResponse(
-        id=row["id"], review_state="retired", corpus_release=row["corpus_release"]
-    )
-
-
-async def _reject_pii(
-    state, claims: Claims, *, field: str, text: str, target_kind: str
-) -> None:
-    """PII in a corpus write: 422 naming the pattern class ONLY (never the
-    match), a security audit event (text length, not text), a metric the
-    step-07 spike alert reads."""
+async def _reject_pii(state, claims: Claims, *, field: str, text: str, target_kind: str) -> None:
+    """PII in a phrase/snippet write: 422 naming the pattern class ONLY
+    (never the match), a security audit event (text length, not text), a
+    metric the spike alert reads."""
     pii_hits = contains_pii(text)
     if not pii_hits:
         return
@@ -187,7 +120,7 @@ async def _reject_pii(
             "error": "pii_detected",
             "patterns": pii_hits,
             "field": field,
-            "message": "містить дані, схожі на персональні — не збережено",
+            "message": "looks like it contains personal data — not saved",
         },
     )
 
@@ -210,16 +143,17 @@ async def create_phrase(
     state = get_state()
     await _check_rate_limit(state, claims)
     await _reject_pii(
-        state, claims, field="phrase", text=body.phrase,
+        state,
+        claims,
+        field="phrase",
+        text=body.phrase,
         target_kind="autocomplete_phrases",
     )
 
     owner_user_id = claims.sub if body.source == "user" else None
     try:
         async with tenant_connection(state.app_pool, claims.tid) as conn:
-            await conn.execute(
-                "SELECT set_config('app.user_id',   $1, true)", str(claims.sub)
-            )
+            await conn.execute("SELECT set_config('app.user_id',   $1, true)", str(claims.sub))
             await conn.execute(
                 "SELECT set_config('app.user_role', $1, true)",
                 role_for_rls(claims),
@@ -228,8 +162,6 @@ async def create_phrase(
                 conn,
                 phrase=body.phrase,
                 language=body.language,
-                specialty=body.specialty,
-                section_hint=body.section_hint,
                 source=body.source,
                 tenant_id=claims.tid,
                 owner_user_id=owner_user_id,
@@ -240,7 +172,7 @@ async def create_phrase(
             detail={"error": "phrase_already_exists"},
         ) from None
     except asyncpg.InsufficientPrivilegeError:
-        # RLS WITH CHECK rejection (e.g. clinician posting source='tenant').
+        # RLS WITH CHECK rejection (e.g. a member posting source='tenant').
         # Authority lives in the DB; map to a stable code, never SQLSTATE.
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -267,8 +199,6 @@ async def create_phrase(
         id=phrase_id,
         phrase=body.phrase,
         language=body.language,
-        specialty=body.specialty,
-        section_hint=body.section_hint,
         source=body.source,
         impression_count=0,
         acceptance_count=0,
@@ -310,7 +240,9 @@ class CreateSnippetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # Mirrors the DB trigger_format CHECK: latin slug, typed as /trigger.
     trigger: str = Field(
-        min_length=2, max_length=32, pattern=r"^[a-z][a-z0-9_-]{0,30}$",
+        min_length=2,
+        max_length=32,
+        pattern=r"^[a-z][a-z0-9_-]{0,30}$",
         description="Latin slug (DB CHECK ^[a-z][a-z0-9_-]{0,30}$); typed with a leading / at request time.",
     )
     expansion: str = Field(min_length=1, max_length=4000)
@@ -359,12 +291,8 @@ async def list_snippets(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         await conn.execute("SELECT set_config('app.user_id',   $1, true)", str(claims.sub))
-        await conn.execute(
-            "SELECT set_config('app.user_role', $1, true)", role_for_rls(claims)
-        )
-        rows = await repo.list_snippets(
-            conn, language=language, source=source, limit=limit
-        )
+        await conn.execute("SELECT set_config('app.user_role', $1, true)", role_for_rls(claims))
+        rows = await repo.list_snippets(conn, language=language, source=source, limit=limit)
     return [
         SnippetListItemDTO(
             id=r["id"],
@@ -387,20 +315,24 @@ async def create_snippet(
     state = get_state()
     await _check_rate_limit(state, claims)
     await _reject_pii(
-        state, claims, field="trigger", text=body.trigger,
+        state,
+        claims,
+        field="trigger",
+        text=body.trigger,
         target_kind="autocomplete_snippets",
     )
     await _reject_pii(
-        state, claims, field="expansion", text=body.expansion,
+        state,
+        claims,
+        field="expansion",
+        text=body.expansion,
         target_kind="autocomplete_snippets",
     )
 
     owner_user_id = claims.sub if body.source == "user" else None
     try:
         async with tenant_connection(state.app_pool, claims.tid) as conn:
-            await conn.execute(
-                "SELECT set_config('app.user_id',   $1, true)", str(claims.sub)
-            )
+            await conn.execute("SELECT set_config('app.user_id',   $1, true)", str(claims.sub))
             await conn.execute(
                 "SELECT set_config('app.user_role', $1, true)",
                 role_for_rls(claims),

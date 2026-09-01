@@ -1,11 +1,28 @@
 {
   "__inputs": [],
   "__requires": [
-    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
-    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"},
-    {"type": "datasource", "id": "loki", "name": "Loki", "version": "1.0.0"}
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "loki",
+      "name": "Loki",
+      "version": "1.0.0"
+    }
   ],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -13,14 +30,36 @@
   "links": [],
   "panels": [
     {
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2}},
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2
+          }
+        },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
-      "options": {"legend": {"displayMode": "list"}, "tooltip": {"mode": "single"}},
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "expr": "sum(rate(http_server_duration_count{job=\"template-service\"}[2m])) by (http_route, http_method)",
@@ -32,12 +71,28 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "red"}, "custom": {"lineWidth": 2}},
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "custom": {
+            "lineWidth": 2
+          }
+        },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "id": 2,
       "targets": [
         {
@@ -50,12 +105,25 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
-        "defaults": {"unit": "ms", "custom": {"lineWidth": 2}},
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "id": 3,
       "targets": [
         {
@@ -73,8 +141,16 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "loki", "uid": "${DS_LOKI}"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "id": 4,
       "options": {
         "dedupStrategy": "none",
@@ -95,14 +171,38 @@
   ],
   "refresh": "10s",
   "schemaVersion": 38,
-  "tags": ["template-service", "medical-dictation"],
+  "tags": [
+    "template-service",
+    "notes-ai"
+  ],
   "templating": {
     "list": [
-      {"current": {}, "hide": 0, "includeAll": false, "name": "DS_PROMETHEUS", "options": [], "query": "prometheus", "refresh": 1, "type": "datasource"},
-      {"current": {}, "hide": 0, "includeAll": false, "name": "DS_LOKI", "options": [], "query": "loki", "refresh": 1, "type": "datasource"}
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "DS_LOKI",
+        "options": [],
+        "query": "loki",
+        "refresh": 1,
+        "type": "datasource"
+      }
     ]
   },
-  "time": {"from": "now-30m", "to": "now"},
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Template Service",

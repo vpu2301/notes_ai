@@ -28,7 +28,7 @@ pytestmark = [
 ]
 
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://localhost:8088")
-REALM = "medical-dictation"
+REALM = "notes"
 CLIENT_ID = "mdx-dev-cli"
 AUDIENCE = "mdx-api"
 ISSUER = f"{KEYCLOAK_URL}/realms/{REALM}"
@@ -61,7 +61,7 @@ async def jwks_cache():
 
 
 async def test_real_token_verifies(jwks_cache: JwksCache) -> None:
-    token = await _password_grant("dev-clinician", "dev-password")
+    token = await _password_grant("dev-member", "dev-password")
     claims = await verify_token(
         token,
         expected_audience=AUDIENCE,
@@ -69,13 +69,13 @@ async def test_real_token_verifies(jwks_cache: JwksCache) -> None:
         jwks_cache=jwks_cache,
     )
     assert isinstance(claims, Claims)
-    assert "clinician" in claims.roles
+    assert "member" in claims.roles
     # Tenant A: 00...00a
     assert str(claims.tid).endswith("000a")
 
 
 async def test_real_token_for_tenant_b(jwks_cache: JwksCache) -> None:
-    token = await _password_grant("dev-clinician-b", "dev-password")
+    token = await _password_grant("dev-member-b", "dev-password")
     claims = await verify_token(
         token,
         expected_audience=AUDIENCE,

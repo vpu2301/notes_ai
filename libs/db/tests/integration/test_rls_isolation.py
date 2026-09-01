@@ -40,7 +40,7 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 
 # Running count of cross-tenant SELECT probes that returned zero rows, summed
 # across all Hypothesis examples. The spec (§ 8, AC-A1-3) requires ≥ 1000.
@@ -127,7 +127,7 @@ async def _insert_tenant_and_users(
         return
     async with tenant_connection(writer_pool, tenant_id) as c:
         rows = [
-            (uuid4(), tenant_id, f"u{i}@{tenant_id.hex[:6]}.test", f"User {i}", "clinician")
+            (uuid4(), tenant_id, f"u{i}@{tenant_id.hex[:6]}.test", f"User {i}", "member")
             for i in range(user_count)
         ]
         await c.executemany(
@@ -229,7 +229,7 @@ async def test_restrictive_policy_blocks_cross_tenant_insert(
                 tenant_b,
                 "smuggled@b.test",
                 "Smuggled",
-                "clinician",
+                "member",
             )
 
 
@@ -297,7 +297,7 @@ _ENTITY_TABLES: tuple[str, ...] = (
     "dictation_sessions",  # dictation_session
     "abbreviation_dictionary",  # abbreviation
     "templates",  # template
-    "reports",  # report
+    "notes",  # note
 )
 
 
@@ -307,20 +307,11 @@ async def test_every_entity_table_isolates_tenants(
 ) -> None:
     """For every domain entity table, a tenant-B connection reads zero of
     tenant-A's rows; tenant A still sees its own. Covers asr_job,
-    dictation_session, abbreviation, template and report (incl. the
-    tenant_id-less ``report_versions``, isolated via its parent report)."""
+    dictation_session, abbreviation, template and note (incl. the
+    tenant_id-less ``note_versions``, isolated via its parent note)."""
     su_dsn = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
     a, b = uuid4(), uuid4()
-
-    # A seeded system prompt satisfies the prompt_id FK on dictation_sessions /
-    # transcription_jobs; use its language so the CHECK constraint passes.
-    su = await asyncpg.connect(su_dsn)
-    try:
-        prompt = await su.fetchrow("SELECT id, language FROM medical_prompts LIMIT 1")
-        assert prompt is not None, "no medical_prompts seeded — run `make seed`"
-        prompt_id, lang = prompt["id"], prompt["language"]
-    finally:
-        await su.close()
+    lang = "en"
 
     # Tenants + one user each (writer-scoped, like the users property test).
     await _insert_tenant_and_users(writer_pool, a, 1)
@@ -329,7 +320,7 @@ async def test_every_entity_table_isolates_tenants(
     async with tenant_connection(app_pool, a) as c:
         author_a = (await c.fetchrow("SELECT sub FROM users LIMIT 1"))["sub"]
 
-    report_id = uuid4()
+    note_id = uuid4()
     try:
         # One row per entity table, all under tenant A's scoped connection.
         async with tenant_connection(app_pool, a) as c:
@@ -338,44 +329,55 @@ async def test_every_entity_table_isolates_tenants(
                 "INSERT INTO audio_files (id, tenant_id, uploader_sub, mime_type, "
                 "size_bytes, sha256, envelope_metadata, storage_uri) "
                 "VALUES ($1,$2,$3,'audio/wav',1024,$4,'{\"v\":1}'::jsonb,$5)",
-                audio_id, a, author_a, b"\x00" * 32, f"minio://mdx-audio/{a}/{audio_id}.enc",
+                audio_id,
+                a,
+                author_a,
+                b"\x00" * 32,
+                f"minio://mdx-audio/{a}/{audio_id}.enc",
             )
             await c.execute(
                 "INSERT INTO transcription_jobs (id, tenant_id, audio_id, requester_sub, "
-                "prompt_id, language) VALUES ($1,$2,$3,$4,$5,$6)",
-                uuid4(), a, audio_id, author_a, prompt_id, lang,
+                "language) VALUES ($1,$2,$3,$4,$5)",
+                uuid4(),
+                a,
+                audio_id,
+                author_a,
+                lang,
             )
             await c.execute(
-                "INSERT INTO dictation_sessions (id, tenant_id, user_id, language, prompt_id) "
-                "VALUES ($1,$2,$3,$4,$5)",
-                uuid4(), a, author_a, lang, prompt_id,
+                "INSERT INTO dictation_sessions (id, tenant_id, user_id, language) "
+                "VALUES ($1,$2,$3,$4)",
+                uuid4(),
+                a,
+                author_a,
+                lang,
             )
             await c.execute(
                 "INSERT INTO abbreviation_dictionary (id, tenant_id, language, expanded, "
-                "abbreviated, direction) VALUES ($1,$2,'en','myocardial infarction','MI','compact')",
-                uuid4(), a,
+                "abbreviated, direction) VALUES ($1,$2,'en','for your information','FYI','compact')",
+                uuid4(),
+                a,
             )
             await c.execute(
-                "INSERT INTO templates (id, tenant_id, code, name, language, specialty, "
-                "schema_jsonb) VALUES ($1,$2,$3,'Iso Test','en','cardiology','{\"version\":\"1\"}'::jsonb)",
-                uuid4(), a, f"iso-{a.hex[:8]}",
-            )
-            patient_id = uuid4()
-            await c.execute(
-                "INSERT INTO patients (id, tenant_id, name_uk, created_by) "
-                "VALUES ($1,$2,'Iso Patient',$3)",
-                patient_id, a, author_a,
-            )
-            # reports.patient_id is required + FK'd (migration 0033).
-            await c.execute(
-                "INSERT INTO reports (id, tenant_id, code, primary_author_id, patient_id) "
-                "VALUES ($1,$2,$3,$4,$5)",
-                report_id, a, f"REP-2026-{a.hex[:5]}", author_a, patient_id,
+                "INSERT INTO templates (id, tenant_id, code, name, language, category, "
+                "schema_jsonb) VALUES ($1,$2,$3,'Iso Test','en','meetings','{\"version\":\"1\"}'::jsonb)",
+                uuid4(),
+                a,
+                f"iso-{a.hex[:8]}",
             )
             await c.execute(
-                "INSERT INTO report_versions (id, report_id, version_number, created_by, "
+                "INSERT INTO notes (id, tenant_id, code, primary_author_id) VALUES ($1,$2,$3,$4)",
+                note_id,
+                a,
+                f"NOTE-2026-{a.hex[:5]}",
+                author_a,
+            )
+            await c.execute(
+                "INSERT INTO note_versions (id, note_id, version_number, created_by, "
                 "content_jsonb) VALUES ($1,$2,1,$3,'{}'::jsonb)",
-                uuid4(), report_id, author_a,
+                uuid4(),
+                note_id,
+                author_a,
             )
 
         # Tenant B sees none of tenant A's rows.
@@ -383,11 +385,11 @@ async def test_every_entity_table_isolates_tenants(
             for tbl in _ENTITY_TABLES:
                 leaked = await c.fetch(f"SELECT 1 FROM {tbl} WHERE tenant_id = $1 LIMIT 1", a)
                 assert leaked == [], f"{tbl}: tenant B leaked tenant A rows"
-            # report_versions has no tenant_id; RLS is via the parent report.
+            # note_versions has no tenant_id; RLS is via the parent note.
             leaked_rv = await c.fetch(
-                "SELECT 1 FROM report_versions WHERE report_id = $1 LIMIT 1", report_id
+                "SELECT 1 FROM note_versions WHERE note_id = $1 LIMIT 1", note_id
             )
-            assert leaked_rv == [], "report_versions: tenant B leaked tenant A's version"
+            assert leaked_rv == [], "note_versions: tenant B leaked tenant A's version"
 
         # Tenant A sees its own rows.
         async with tenant_connection(app_pool, a) as c:
@@ -395,19 +397,19 @@ async def test_every_entity_table_isolates_tenants(
                 n = await c.fetchval(f"SELECT count(*) FROM {tbl} WHERE tenant_id = $1", a)
                 assert n >= 1, f"{tbl}: tenant A cannot see its own row"
             own_rv = await c.fetch(
-                "SELECT 1 FROM report_versions WHERE report_id = $1 LIMIT 1", report_id
+                "SELECT 1 FROM note_versions WHERE note_id = $1 LIMIT 1", note_id
             )
-            assert own_rv != [], "report_versions: tenant A cannot see its own version"
+            assert own_rv != [], "note_versions: tenant A cannot see its own version"
     finally:
         # Remove only the rows this test created — never the seed data.
         su = await asyncpg.connect(su_dsn)
         try:
             await su.execute(
-                "DELETE FROM report_versions WHERE report_id IN "
-                "(SELECT id FROM reports WHERE tenant_id = ANY($1::uuid[]))",
+                "DELETE FROM note_versions WHERE note_id IN "
+                "(SELECT id FROM notes WHERE tenant_id = ANY($1::uuid[]))",
                 [a, b],
             )
-            await su.execute("DELETE FROM reports WHERE tenant_id = ANY($1::uuid[])", [a, b])
+            await su.execute("DELETE FROM notes WHERE tenant_id = ANY($1::uuid[])", [a, b])
             for tbl in (
                 "transcription_jobs",
                 "dictation_sessions",

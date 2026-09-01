@@ -27,8 +27,6 @@ import pytest
 
 from auth import Claims
 from dictation_service.config import settings
-from dictation_service.domain import consents as consents_mod
-from dictation_service.domain import encounters as encounters_mod
 from dictation_service.domain import repository as repository_mod
 from dictation_service.protocol.messages import StartSession, StartSessionV2
 from dictation_service.session.manager import SessionManager
@@ -38,7 +36,6 @@ from dictation_service.ws.upgrade import UpgradeContext
 
 TENANT_ID = uuid4()
 USER_ID = uuid4()
-PROMPT_ID = uuid4()
 
 
 class _FakeWebSocket:
@@ -94,10 +91,10 @@ def _claims() -> Claims:
     return Claims(
         sub=USER_ID,
         tid=TENANT_ID,
-        roles=["clinician"],
+        roles=["member"],
         sid="sess-1",
         iss="https://kc.example/realms/mdx",
-        aud="medical-dictation",
+        aud="mdx-api",
         exp=now + 3600,
         iat=now,
     )
@@ -106,7 +103,7 @@ def _claims() -> Claims:
 def _upgrade(*, protocol_version: int) -> UpgradeContext:
     return UpgradeContext(
         claims=_claims(),
-        subprotocol=("medical-dictation.v2" if protocol_version == 2 else "medical-dictation.v1"),
+        subprotocol=("dictation.v2" if protocol_version == 2 else "dictation.v1"),
         client_ip="127.0.0.1",
         origin=None,
         protocol_version=protocol_version,
@@ -123,24 +120,12 @@ def state(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     async def _count_active(_conn: Any, *, tenant_id: UUID) -> int:
         return 0
 
-    async def _fetch_encounter_status(_conn: Any, *, encounter_id: UUID) -> str | None:
-        return "in_progress"
-
-    async def _fetch_recording_consent(_conn: Any, *, encounter_id: UUID) -> dict[str, Any] | None:
-        return {"patient_id": uuid4(), "consent_id": uuid4()}
-
     async def _insert_session(_conn: Any, **kwargs: Any) -> None:
         return None
-
-    async def _fetch_prompt_text(_state: Any, _tid: UUID, _pid: UUID) -> str | None:
-        return "медичний контекст"
 
     monkeypatch.setattr(handler_mod, "tenant_connection", _fake_tenant_connection)
     monkeypatch.setattr(repository_mod, "count_active_for_tenant", _count_active)
     monkeypatch.setattr(repository_mod, "insert_session", _insert_session)
-    monkeypatch.setattr(encounters_mod, "fetch_encounter_status", _fetch_encounter_status)
-    monkeypatch.setattr(consents_mod, "fetch_recording_consent", _fetch_recording_consent)
-    monkeypatch.setattr(handler_mod, "_fetch_prompt_text", _fetch_prompt_text)
     monkeypatch.setattr(handler_mod, "SessionAudioBuffer", _FakeBuffer)
     monkeypatch.setattr(handler_mod, "OpusDecoder", lambda: SimpleNamespace())
 
@@ -160,9 +145,7 @@ async def _start_conversation(state: SimpleNamespace) -> tuple[Any, _FakeWebSock
         ws,
         _upgrade(protocol_version=2),
         state,
-        StartSessionV2(
-            prompt_id=PROMPT_ID, language="uk", encounter_id=uuid4(), mode="conversation"
-        ),
+        StartSessionV2(language="uk", mode="conversation"),
     )
     return ctx, ws
 
@@ -173,7 +156,7 @@ async def _start_dictation(state: SimpleNamespace) -> tuple[Any, _FakeWebSocket]
         ws,
         _upgrade(protocol_version=1),
         state,
-        StartSession(prompt_id=PROMPT_ID, language="uk"),
+        StartSession(language="uk"),
     )
     return ctx, ws
 

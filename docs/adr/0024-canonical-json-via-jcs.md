@@ -1,4 +1,4 @@
-# ADR-0024 — Canonical JSON for signing via RFC 8785 (JCS)
+# ADR-0024 — Canonical JSON via RFC 8785 (JCS)
 
 - Status: accepted
 - Date: 2026-05-14
@@ -7,7 +7,8 @@
 
 ## Context
 
-The bytes that get signed must be deterministic across:
+The bytes that get hashed (audit chain, note-version chain) must be
+deterministic across:
 
 - Python runtimes (3.12, future 3.13).
 - Service replicas (different machines, different glibc).
@@ -27,30 +28,32 @@ Three options:
 ## Decision
 
 Use **RFC 8785 (JSON Canonicalization Scheme)** via the `rfc8785`
-library. Centralise in `audit.canonical.canonicalize`; sprint-09's
-`medical_kep.canonicalize_report` calls into it. One implementation
-for both audit chain and signing.
+library. Centralise in `audit.canonical.canonicalize`. One
+implementation for every hash-chain consumer.
 
-The canonical input shape is captured in
-`medical_kep.canonicalize.CanonicalReportInput`. The shape is the legal
-contract for signing — any change requires a new ADR + a bump of
-`CANONICAL_VERSION` + a forward-only migration (previously-signed
-envelopes keep their original version forever).
+Any change to a canonical input shape requires a new ADR + a version
+bump + a forward-only migration (previously-hashed records keep their
+original version forever).
+
+> **Historical note.** This ADR originally also served the sprint-09
+> e-signature flow (`medical_kep.canonicalize_report`), which was
+> removed with the medical vertical. The canonicalisation decision
+> stands unchanged for the audit chain and note-version hashing.
 
 ## Consequences
 
 Positive:
 - Byte-stable across implementations.
-- The audit chain and signing share the same primitive, so a verifier
-  who validates the audit log gets signing canonicalisation "for free".
+- The audit chain and the note-version chain share the same primitive,
+  so a verifier who validates one gets the other's canonicalisation
+  "for free".
 - The `rfc8785` library is small, vetted, and pure-Python — easy to
   embed in any future external verifier we ship.
 
 Negative / accepted:
-- Adding a field to the canonical shape is not free — we have to bump
-  `CANONICAL_VERSION` and accept that signed envelopes from prior
-  versions are signed against the old shape (and must remain
-  verifiable for 25 years).
+- Adding a field to a canonical shape is not free — we have to bump
+  the canonical version and accept that records hashed under prior
+  versions remain verifiable against the old shape indefinitely.
 - We can't sneak in non-JSON-natural types. UUIDs → strings, datetimes
   → ISO-8601 strings, bytes → base64 strings; the canonicaliser raises
   on anything else.
@@ -58,8 +61,5 @@ Negative / accepted:
 ## Links
 
 - `audit.canonical` (RFC 8785 implementation).
-- `medical_kep.canonicalize` (sprint-09 wrapper).
-- `medical_kep.canonicalize.CanonicalReportInput`.
-- `libs/kep/tests/unit/test_canonicalize.py`.
-- ADR-0022 (PAdES + embedded JSON).
+- ADR-0008 (audit hash chain), ADR-0020 (note-version chain).
 - Sprint-09 spec §2.3, §2.4.

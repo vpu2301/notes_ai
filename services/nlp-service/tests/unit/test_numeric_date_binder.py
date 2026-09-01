@@ -156,7 +156,7 @@ def test_blood_pressure_is_not_bound_as_one_value() -> None:
 
     Honest limitation: compound measurements need two numeric sections
     or a future compound field type. We do NOT special-case BP — a
-    silently-invented single value would be a clinical error. See the
+    silently-invented single value would corrupt the note. See the
     authoring doc + sign-off.
     """
     artifacts = numeric_artifacts_from_output(
@@ -179,7 +179,7 @@ def test_single_date_binds() -> None:
 
 
 def test_multiple_dates_yield_nothing() -> None:
-    """Picking one would silently misdate a clinical record."""
+    """Picking one would silently misdate the note."""
     artifacts = (
         DateArtifact(iso="2026-07-01", char_index=0),
         DateArtifact(iso="2026-07-08", char_index=20),

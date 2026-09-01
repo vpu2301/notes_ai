@@ -16,10 +16,6 @@ the default) — everything below concerns `vault` mode.
 | `MDX_VAULT_TRANSIT_MOUNT` | Transit mount | `transit` |
 | `MDX_MASTER_KEY_PATH` | file fallback for un-migrated rows | `/etc/mdx/master.key` |
 
-Signing-service additionally: `MDX_HMAC_KEYS_FROM_VAULT=true` +
-`MDX_VAULT_HMAC_KV_PATH` (default `mdx/signing`, KV-v2 fields
-`signer_ipn_hmac_key` / `public_verify_ip_hmac_key`).
-
 ## One-time setup (dev parity: a local Vault)
 
 ```bash
@@ -59,22 +55,14 @@ keeps decrypting both masters) and investigate.
 
 Symptom: service exits at startup with
 `MasterKeyError: Vault Transit unreachable …` (fail-closed, same
-posture as master-key-missing) — or, for signing-service HMAC sourcing,
-`Vault KV unreachable`.
+posture as master-key-missing).
 
 1. `curl -s $MDX_VAULT_ADDR/v1/sys/health` — sealed? `vault operator unseal`.
 2. Token expired/revoked → issue a new one with a policy granting
-   `update` on `transit/encrypt/mdx-master` + `transit/decrypt/mdx-master`
-   (+ `read` on `secret/data/mdx/signing` for signing-service).
+   `update` on `transit/encrypt/mdx-master` + `transit/decrypt/mdx-master`.
 3. While Vault is down, already-running workers keep serving: the ≤60 s
    tenant-KEK cache expires, after which decrypts fail loudly. Restore
    Vault; nothing needs re-keying.
-
-## § hmac-keys
-
-Rotation stays an operator action: write new hex values to the KV path,
-rolling-restart signing-service. Remember the ADR-0027 warning — the
-signer-ІПН HMAC key rotation orphans stored HMACs.
 
 ## Key rotation (Transit)
 

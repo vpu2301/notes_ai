@@ -25,12 +25,10 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 SU_DSN = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-AUDIT_DSN = (
-    f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-)
+AUDIT_DSN = f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
 
@@ -58,7 +56,8 @@ async def test_rollup_idempotent_single_vtag_bump_and_greatest():
     )
     baseline = await su.fetchrow(
         "SELECT impression_count, acceptance_count, last_accepted_at "
-        "FROM autocomplete_phrases WHERE id=$1", phrase_id
+        "FROM autocomplete_phrases WHERE id=$1",
+        phrase_id,
     )
     newer_accept = datetime(2026, 7, 1, tzinfo=UTC)
     try:
@@ -68,28 +67,34 @@ async def test_rollup_idempotent_single_vtag_bump_and_greatest():
             "UPDATE autocomplete_phrases SET last_accepted_at=$2, "
             "impression_count=impression_count+1, acceptance_count=acceptance_count+1 "
             "WHERE id=$1",
-            phrase_id, newer_accept,
+            phrase_id,
+            newer_accept,
         )
         await su.execute(
             "INSERT INTO autocomplete_telemetry "
             "(tenant_id, user_id, request_id, event_type, phrase_id, prefix_scrubbed, "
             " context_jsonb, created_at) "
             "VALUES ($1, $2, $3, 'accepted', $4, 'itest', '{}', $5)",
-            TENANT_A, uuid4(), uuid4(), phrase_id,
+            TENANT_A,
+            uuid4(),
+            uuid4(),
+            phrase_id,
             datetime(2026, 6, 15, 12, 0, tzinfo=UTC),
         )
 
-        app_pool = await create_pool(APP_DSN, application_name="rollup-itest",
-                                     min_size=1, max_size=2)
-        audit_pool = await create_pool(AUDIT_DSN, application_name="rollup-itest-a",
-                                       min_size=1, max_size=2)
+        app_pool = await create_pool(
+            APP_DSN, application_name="rollup-itest", min_size=1, max_size=2
+        )
+        audit_pool = await create_pool(
+            AUDIT_DSN, application_name="rollup-itest-a", min_size=1, max_size=2
+        )
         redis = CountingRedis()
         writer = AuditWriter(audit_pool)
         try:
-            n1 = await rollup_all(app_pool=app_pool, audit_writer=writer,
-                                  redis=redis, day=day)
-            n2 = await rollup_all(app_pool=app_pool, audit_writer=writer,
-                                  redis=redis, day=day)  # idempotent re-run
+            n1 = await rollup_all(app_pool=app_pool, audit_writer=writer, redis=redis, day=day)
+            n2 = await rollup_all(
+                app_pool=app_pool, audit_writer=writer, redis=redis, day=day
+            )  # idempotent re-run
         finally:
             await app_pool.close()
             await audit_pool.close()
@@ -99,23 +104,22 @@ async def test_rollup_idempotent_single_vtag_bump_and_greatest():
 
         after = await su.fetchrow(
             "SELECT impression_count, acceptance_count, last_accepted_at "
-            "FROM autocomplete_phrases WHERE id=$1", phrase_id
+            "FROM autocomplete_phrases WHERE id=$1",
+            phrase_id,
         )
         assert after["impression_count"] == baseline["impression_count"] + 2
         assert after["acceptance_count"] == baseline["acceptance_count"] + 2
         # GREATEST: the June roll-up must not regress the July timestamp.
         assert after["last_accepted_at"] == newer_accept
     finally:
-        await su.execute(
-            "DELETE FROM autocomplete_telemetry WHERE prefix_scrubbed='itest'"
-        )
-        await su.execute(
-            "DELETE FROM autocomplete_rollup_progress WHERE rollup_date=$1", day
-        )
+        await su.execute("DELETE FROM autocomplete_telemetry WHERE prefix_scrubbed='itest'")
+        await su.execute("DELETE FROM autocomplete_rollup_progress WHERE rollup_date=$1", day)
         await su.execute(
             "UPDATE autocomplete_phrases SET impression_count=$2, acceptance_count=$3, "
             "last_accepted_at=$4 WHERE id=$1",
-            phrase_id, baseline["impression_count"], baseline["acceptance_count"],
+            phrase_id,
+            baseline["impression_count"],
+            baseline["acceptance_count"],
             baseline["last_accepted_at"],
         )
         await su.close()
@@ -133,7 +137,8 @@ async def test_bump_counters_never_stores_infinity():
     )
     baseline = await su.fetchrow(
         "SELECT impression_count, acceptance_count, last_accepted_at "
-        "FROM autocomplete_phrases WHERE id=$1", phrase_id
+        "FROM autocomplete_phrases WHERE id=$1",
+        phrase_id,
     )
     accept_ts = datetime(2026, 7, 1, tzinfo=UTC)
     try:
@@ -141,8 +146,7 @@ async def test_bump_counters_never_stores_infinity():
             "UPDATE autocomplete_phrases SET last_accepted_at=NULL WHERE id=$1",
             phrase_id,
         )
-        app_pool = await create_pool(APP_DSN, application_name="bump-itest",
-                                     min_size=1, max_size=1)
+        app_pool = await create_pool(APP_DSN, application_name="bump-itest", min_size=1, max_size=1)
         try:
             async with app_pool.acquire() as conn:
                 # impressions but zero accepts on a NULL row → stays NULL
@@ -152,36 +156,46 @@ async def test_bump_counters_never_stores_infinity():
                 )
                 assert found is True
                 assert await su.fetchval(
-                    "SELECT last_accepted_at IS NULL FROM autocomplete_phrases "
-                    "WHERE id=$1", phrase_id
+                    "SELECT last_accepted_at IS NULL FROM autocomplete_phrases WHERE id=$1",
+                    phrase_id,
                 ), "impressions-only bump must not store '-infinity'"
 
                 # real accept → timestamp lands
                 await conn.fetchval(
                     "SELECT autocomplete_bump_phrase_counters($1, 1, 1, $2)",
-                    phrase_id, accept_ts,
-                )
-                assert await su.fetchval(
-                    "SELECT last_accepted_at FROM autocomplete_phrases WHERE id=$1",
                     phrase_id,
-                ) == accept_ts
+                    accept_ts,
+                )
+                assert (
+                    await su.fetchval(
+                        "SELECT last_accepted_at FROM autocomplete_phrases WHERE id=$1",
+                        phrase_id,
+                    )
+                    == accept_ts
+                )
 
                 # older accept (stale roll-up re-run) → GREATEST holds
                 await conn.fetchval(
                     "SELECT autocomplete_bump_phrase_counters($1, 1, 1, $2)",
-                    phrase_id, accept_ts - timedelta(days=10),
-                )
-                assert await su.fetchval(
-                    "SELECT last_accepted_at FROM autocomplete_phrases WHERE id=$1",
                     phrase_id,
-                ) == accept_ts
+                    accept_ts - timedelta(days=10),
+                )
+                assert (
+                    await su.fetchval(
+                        "SELECT last_accepted_at FROM autocomplete_phrases WHERE id=$1",
+                        phrase_id,
+                    )
+                    == accept_ts
+                )
         finally:
             await app_pool.close()
     finally:
         await su.execute(
             "UPDATE autocomplete_phrases SET impression_count=$2, acceptance_count=$3, "
             "last_accepted_at=$4 WHERE id=$1",
-            phrase_id, baseline["impression_count"], baseline["acceptance_count"],
+            phrase_id,
+            baseline["impression_count"],
+            baseline["acceptance_count"],
             baseline["last_accepted_at"],
         )
         await su.close()
@@ -200,8 +214,9 @@ async def test_retention_drops_only_expired_partitions():
             f"FOR VALUES FROM ('{old_start.isoformat()}') "
             f"TO ('{(old_start + timedelta(days=32)).replace(day=1).isoformat()}')"
         )
-        app_pool = await create_pool(APP_DSN, application_name="retention-itest",
-                                     min_size=1, max_size=1)
+        app_pool = await create_pool(
+            APP_DSN, application_name="retention-itest", min_size=1, max_size=1
+        )
         try:
             # S16 changed the return shape to (dropped, archived); archiving
             # is flag-gated off in this test, so archived stays empty.
@@ -255,15 +270,23 @@ async def test_layer_c_rows_ignored_by_phrase_counters_but_feed_acceptance_rate(
                     "(tenant_id, user_id, request_id, event_type, prefix_scrubbed, "
                     " context_jsonb, source, created_at) "
                     "VALUES ($1, $2, $3, $4, 'itest-lc', '{}', 'layer_c', $5)",
-                    TENANT_A, uuid4(), uuid4(), event, ts,
+                    TENANT_A,
+                    uuid4(),
+                    uuid4(),
+                    event,
+                    ts,
                 )
         app_pool = await create_pool(APP_DSN, application_name="itest-lc", min_size=1, max_size=2)
-        audit_pool = await create_pool(AUDIT_DSN, application_name="itest-lc-audit", min_size=1, max_size=2)
+        audit_pool = await create_pool(
+            AUDIT_DSN, application_name="itest-lc-audit", min_size=1, max_size=2
+        )
         redis = CountingRedis()
         try:
             await rollup_all(
-                app_pool=app_pool, audit_writer=AuditWriter(audit_pool),
-                redis=redis, day=day,
+                app_pool=app_pool,
+                audit_writer=AuditWriter(audit_pool),
+                redis=redis,
+                day=day,
             )
         finally:
             await app_pool.close()
@@ -279,10 +302,6 @@ async def test_layer_c_rows_ignored_by_phrase_counters_but_feed_acceptance_rate(
         assert events == {"shown_only": 3, "accepted": 1, "rejected": 1}
         assert rollup_mod.layer_c_acceptance_rate() == pytest.approx(1 / 5)
     finally:
-        await su.execute(
-            "DELETE FROM autocomplete_telemetry WHERE prefix_scrubbed='itest-lc'"
-        )
-        await su.execute(
-            "DELETE FROM autocomplete_rollup_progress WHERE rollup_date=$1", day
-        )
+        await su.execute("DELETE FROM autocomplete_telemetry WHERE prefix_scrubbed='itest-lc'")
+        await su.execute("DELETE FROM autocomplete_rollup_progress WHERE rollup_date=$1", day)
         await su.close()

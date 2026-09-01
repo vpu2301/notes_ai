@@ -6,7 +6,9 @@ depends on. Casual decisions (file layout inside a service, choice of HTTP
 status code for a niche error) do not need ADRs.
 
 Numbering is monotonic and global. Sprint 02 starts at ADR-0006; sprint
-03 starts at ADR-0009.
+03 starts at ADR-0009. Gaps in the sequence (0022–0023, 0026–0028,
+0032–0033, 0043–0044) are ADRs that belonged exclusively to the removed
+medical vertical; the numbers are retired, not reused.
 
 | #     | Title                                                                            | Status   |
 | ----- | -------------------------------------------------------------------------------- | -------- |
@@ -26,23 +28,23 @@ Numbering is monotonic and global. Sprint 02 starts at ADR-0006; sprint
 | 0014  | [Punctuation model selection](0014-punctuation-model-selection.md)               | Accepted |
 | 0015  | [Rule-based number normalization](0015-rule-based-number-normalization.md)       | Accepted |
 | 0016  | [JSONB template schema + cosmetic-vs-structural rule](0016-jsonb-template-schema.md) | Accepted |
-| 0017  | [HF Space embedded demo stack](0017-hf-space-embedded-stack.md)                  | Accepted |
-| 0018  | [Demo privacy contract (tmpfs-only)](0018-demo-privacy-contract.md)              | Accepted |
-| 0019  | [WER standing release gate](0019-wer-standing-release-gate.md)                   | Accepted |
-| 0020  | [Append-only report versioning](0020-append-only-versioning.md)                  | Accepted |
-| 0021  | [Postgres `simple` FTS for reports](0021-postgres-simple-fts.md)                 | Accepted |
-| 0022  | [PAdES-LTV canonical PDF](0022-pades-ltv-canonical-pdf.md)                       | Accepted |
-| 0023  | [Signing provider abstraction](0023-signing-provider-abstraction.md)             | Accepted |
+| 0017  | [HF Space embedded demo stack](0017-hf-space-embedded-stack.md)                  | Deprecated — demo stack removed |
+| 0018  | [Demo privacy contract (tmpfs-only)](0018-demo-privacy-contract.md)              | Deprecated — demo stack removed |
+| 0019  | [WER standing release gate](0019-wer-standing-release-gate.md)                   | Deprecated — eval harness removed |
+| 0020  | [Append-only note versioning](0020-append-only-versioning.md)                    | Accepted |
+| 0021  | [Postgres `simple` FTS for notes](0021-postgres-simple-fts.md)                   | Accepted |
+| 0022  | PAdES-LTV canonical PDF                                                          | Withdrawn — medical vertical removed |
+| 0023  | Signing provider abstraction                                                     | Withdrawn — medical vertical removed |
 | 0024  | [Canonical JSON via JCS](0024-canonical-json-via-jcs.md)                         | Accepted |
 | 0025  | [Autocomplete trie + Redis cache](0025-autocomplete-trie-redis.md)               | Accepted |
-| 0026  | [Server-side file-key signing via UAPKI; dev_password scaffold](0026-file-key-uapki-and-dev-password-scaffold.md) | Accepted |
-| 0027  | [Patient identity (ІПН) & crypto-shredding strategy](0027-patient-identity-and-crypto-shredding.md) | Accepted |
-| 0028  | [Privacy-ops deployment: erasure job isolation, backups vs erasure, export lifecycle](0028-privacy-ops-deployment.md) | Accepted |
+| 0026  | Server-side file-key signing via UAPKI                                           | Withdrawn — medical vertical removed |
+| 0027  | Patient identity & crypto-shredding strategy                                     | Withdrawn — medical vertical removed |
+| 0028  | Privacy-ops deployment                                                           | Withdrawn — medical vertical removed |
 | 0029  | [Redis Streams as the notification event bus](0029-redis-streams-notification-bus.md) | Accepted |
 | 0030  | [Redis pub/sub for cross-worker WebSocket fan-out](0030-redis-pubsub-ws-fanout.md) | Accepted |
-| 0031  | [Notification email carries pointers, never PHI](0031-email-carries-pointers-not-phi.md) | Accepted |
-| 0032  | [Typed anamnesis field extraction stage](0032-field-extraction-stage.md) | Accepted |
-| 0033  | [Administrators are separated from PHI; break-glass is the door](0033-admin-phi-separation-and-break-glass.md) | Accepted |
+| 0031  | [Notification email carries pointers, never content](0031-email-carries-pointers-not-phi.md) | Accepted |
+| 0032  | Typed anamnesis field extraction stage                                           | Withdrawn — medical vertical removed |
+| 0033  | Admin/content separation via break-glass                                         | Withdrawn — medical vertical removed |
 | 0034  | [Speaker-diarization backend — Silero VAD + ECAPA + online clustering](0034-diarization-backend-silero-ecapa.md) | Accepted |
 | 0035  | [Conversation capacity — single mixed worker pool with weighted caps](0035-conversation-fleet-single-mixed-pool.md) | Accepted |
 | 0036  | [Layer C inline completion — local Gemma behind a provider seam](0036-layer-c-inline-completion-local-gemma.md) | Accepted |
@@ -52,8 +54,8 @@ Numbering is monotonic and global. Sprint 02 starts at ADR-0006; sprint
 | 0040  | [Session revocation — auth-service-pushed Redis denylist, fail-open checks](0040-session-revocation-denylist.md) | Accepted |
 | 0041  | [Scheduled jobs — shared in-process runner per service, CLI twin for cron](0041-in-process-scheduler-pattern.md) | Accepted |
 | 0042  | [HTTP/2 POST streaming fallback — closed with data, not built](0042-http2-post-fallback-closed.md) | Accepted |
-| 0043  | [Clinical corpus governance — provenance, tiers, releases](0043-corpus-governance.md) | Accepted |
-| 0044  | [LLM-assisted corpus review — jury, calibration, PHI boundary](0044-llm-assisted-corpus-review.md) | Accepted |
+| 0043  | Clinical corpus governance                                                       | Withdrawn — medical vertical removed |
+| 0044  | LLM-assisted corpus review                                                       | Withdrawn — medical vertical removed |
 
 ## Template
 

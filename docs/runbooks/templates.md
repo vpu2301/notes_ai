@@ -1,4 +1,4 @@
-# Runbook — Templates (report-service sprint-06 slice)
+# Runbook — Templates (note-service sprint-06 slice)
 
 Operational guide for the templates surface.
 
@@ -6,12 +6,12 @@ Operational guide for the templates surface.
 
 | Concern | Path / command |
 | --- | --- |
-| Service code | `services/report-service/` |
+| Service code | `services/note-service/` |
 | Schema models | `libs/template_models/` |
 | Seed files | `infra/seeds/templates/*.json` |
-| Seed runner | `python scripts/seed/seed_templates.py` |
+| Seed runner | `python scripts/seed/seed.py` (templates included) |
 | Validator | `python scripts/validate-templates.py` |
-| Migration | `0013_create_templates.sql`, `0014_seed_system_templates.sql` |
+| Migration | `infra/postgres/migrations/0008_templates.sql` |
 | Cache | in-process TTLCache, key=(tenant_id, template_id), TTL 60s |
 | Dashboard | Grafana → "Sprint 06 — Templates" |
 | Alerts | `infra/prometheus/rules/sprint-06-templates.yml` |
@@ -26,51 +26,42 @@ Either eviction at the maxsize boundary, or massive cross-tenant fan-in.
 
 1. Check `MDX_TEMPLATE_CACHE_MAXSIZE` (default 5000).
 2. If a single tenant has > 1000 templates, raise the per-process cap
-   or shard report-service.
+   or shard note-service.
 3. If cache hit ratio drops after a deploy, suspect a regression in
    the cache key (must include `tenant_id`).
 
 ### § system-template-urgent-edit
 
-A system template ships with a clinical bug (typo in ASR prompt, wrong
-billing code, etc.). Tenant clones may already exist — those don't
-auto-update.
+A system template ships with a content bug (typo in a section prompt,
+wrong field option, etc.). Tenant clones may already exist — those
+don't auto-update.
 
 1. Edit `infra/seeds/templates/<code>.json`.
 2. Run `python scripts/validate-templates.py` — must pass.
-3. PR review by clinical content lead.
-4. Deploy + `make seed-templates`.
+3. PR review by the content lead.
+4. Deploy + `make seed`.
 5. The `upsert_system_template` function detects cosmetic vs
    structural; if structural, a NEW system row is created (clones
    don't migrate; documented contract per E3 in spec).
 
 ### § tenant-deprecation-blocked-by-fk
 
-`DELETE /templates/{id}` returns 409 with `detail: "templates referenced by draft reports cannot be deprecated; ..."`.
+`DELETE /templates/{id}` returns 409 with `detail: "templates referenced by draft notes cannot be deprecated; ..."`.
 
-The tenant has **draft** reports still bound to this template
-(finalized/signed/amended/cancelled reports never block — they keep
+The tenant has **draft** notes still bound to this template
+(finalized/amended/cancelled notes never block — they keep
 their historical binding). Since sprint-17 the resolution is the
 admin-console re-bind flow:
 
-1. `GET /templates/{id}/bound-reports` — PHI-free list
-   (`report_id`, `status`, timestamps) of everything referencing the
+1. `GET /templates/{id}/bound-notes` — content-free list
+   (`note_id`, `status`, timestamps) of everything referencing the
    template; requires `template.update`.
 2. For each `status='draft'` row:
    `POST /templates/{id}/rebind` with
-   `{"report_id": ..., "to_template_id": <successor>}`. Guards: target
+   `{"note_id": ..., "to_template_id": <successor>}`. Guards: target
    must be visible, not deprecated, same language; only drafts move.
    Audited as `template.rebound` (ids only).
 3. Re-run `DELETE /templates/{id}` — succeeds once no drafts remain.
-
-### § wer-regression-on-a-template
-
-Nightly WER eval shows a specific section's WER regressed > 2 pp.
-
-1. Identify the section: `mdx_asr_wer_with_section_prompt{section}` regressed.
-2. Pull the current ASR prompt from `infra/seeds/templates/<code>.json`.
-3. Re-author with linguist + clinical content lead.
-4. Redeploy seed; re-run eval.
 
 ### § section-switch-latency-spike
 

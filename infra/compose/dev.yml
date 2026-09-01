@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────
 # Developer-workstation overlay — exposes ports and starts observability.
 # ──────────────────────────────────────────────────────────────
-name: medical-dictation
+name: notes-ai
 
 services:
   postgres:
@@ -34,11 +34,11 @@ services:
     environment:
       ENVIRONMENT: development
       LOG_LEVEL: INFO
-      AUTH_ISSUER: http://keycloak:8080/realms/medical-dictation
-      AUTH_JWKS_URL: http://keycloak:8080/realms/medical-dictation/protocol/openid-connect/certs
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      AUTH_ISSUER: http://keycloak:8080/realms/notes
+      AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -72,9 +72,9 @@ services:
       MD_ASR_DEVICE: cpu
       MD_ASR_MODEL: /opt/models/whisper-tiny  # baked + offline (Dockerfile.cpu)
       MD_ASR_COMPUTE_TYPE: int8
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -100,11 +100,10 @@ services:
       ENVIRONMENT: development
       LOG_LEVEL: INFO
       MD_ASR_DEVICE: cpu
-      # PLUMBING ONLY — tiny does not produce usable Ukrainian. It invents
-      # words that do not exist in the language ("Добро губня, лікарию, в
-      # житті жди ні бомсь" for "Доброго дня, лікарю, вже тиждень болі"),
-      # so any transcript from this overlay is worthless for judging
-      # quality. It stays tiny here because these are the weights baked
+      # PLUMBING ONLY — tiny does not produce usable Ukrainian (it invents
+      # words that do not exist in the language), so any transcript from
+      # this overlay is worthless for judging quality. It stays tiny here
+      # because these are the weights baked
       # into Dockerfile.cpu, so `make dev-up-asr` works with no host
       # prerequisites.
       #
@@ -116,11 +115,11 @@ services:
       MD_ASR_MODEL: /opt/models/whisper-tiny  # baked + offline (Dockerfile.cpu)
       MD_ASR_COMPUTE_TYPE: int8
       MDX_WORKER_ID: dictation-dev-1
-      AUTH_ISSUER: http://keycloak:8080/realms/medical-dictation
-      AUTH_JWKS_URL: http://keycloak:8080/realms/medical-dictation/protocol/openid-connect/certs
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      AUTH_ISSUER: http://keycloak:8080/realms/notes
+      AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -156,10 +155,10 @@ services:
     environment:
       ENVIRONMENT: development
       LOG_LEVEL: INFO
-      AUTH_ISSUER: http://keycloak:8080/realms/medical-dictation
-      AUTH_JWKS_URL: http://keycloak:8080/realms/medical-dictation/protocol/openid-connect/certs
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
+      AUTH_ISSUER: http://keycloak:8080/realms/notes
+      AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       MDX_NLP_PUNCTUATION_DISABLED: "true"  # dev default — skip the heavy model
@@ -173,18 +172,18 @@ services:
       keycloak:
         condition: service_healthy
 
-  report-service:
+  note-service:
     build:
       context: ../..
-      dockerfile: services/report-service/Dockerfile
+      dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
     environment:
       ENVIRONMENT: development
       LOG_LEVEL: INFO
-      AUTH_ISSUER: http://keycloak:8080/realms/medical-dictation
-      AUTH_JWKS_URL: http://keycloak:8080/realms/medical-dictation/protocol/openid-connect/certs
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
+      AUTH_ISSUER: http://keycloak:8080/realms/notes
+      AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     ports:
       - "8006:8000"

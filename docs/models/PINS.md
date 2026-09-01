@@ -4,7 +4,7 @@ Single source of truth for every model the platform bakes at build time.
 All models are **build-time-only** sources: fetched at a pinned, immutable
 commit revision, checksum-verified (fail-closed), baked into the image, and
 loaded **fully offline** at runtime (`HF_HUB_OFFLINE=1`). Hugging Face is
-never a runtime dependency and never processes PHI.
+never a runtime dependency and never sees tenant content.
 
 Pins resolved from the Hugging Face API on **2026-06-10**.
 
@@ -58,7 +58,7 @@ ENV the Dockerfile bakes. A mismatch, a missing artifact, or a missing
 `hyperparams.yaml` **refuses to start the diarizer** — the worker degrades
 to dictation-only and `/readyz` reports `conversation_ready: false` with the
 reason. Diarizing with weights nobody can account for is not an option for a
-medical product.
+product entrusted with confidential audio.
 
 Whisper is not yet startup-verified — `MD_ASR_MODEL_SHA256` is logged as
 provenance only. Extending the same assertion to the ASR weights is a
@@ -79,7 +79,7 @@ DOCKER_BUILDKIT=1 docker build \
   -f services/asr-worker/Dockerfile -t mdx-asr-worker:gpu .
 ```
 
-Re-baselining the WER gate after a model change is gated by an ADR (ADR-0019).
+Any model change must be validated for transcription-quality regressions before rollout.
 
 ## Verified on 2026-06-10 (CPU/tiny, fully offline)
 

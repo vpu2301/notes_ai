@@ -69,7 +69,7 @@ async def test_write_event_stringifies_uuid_target_id() -> None:
         tenant_id=uuid.uuid4(),
         kind="report.created",
         actor_sub=uuid.uuid4(),
-        actor_role="clinician",
+        actor_role="member",
         target_kind="report",
         target_id=report_id,  # a UUID, not a str
         payload={"code": "R-1"},

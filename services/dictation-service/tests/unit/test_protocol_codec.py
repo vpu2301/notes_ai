@@ -41,15 +41,15 @@ from dictation_service.protocol.messages import (
 
 
 def test_decode_text_start_session_minimal() -> None:
-    prompt = str(uuid4())
-    msg = decode_text(f'{{"type":"start_session","prompt_id":"{prompt}","language":"uk"}}')
+    str(uuid4())
+    msg = decode_text('{"type":"start_session","language":"uk"}')
     assert isinstance(msg, StartSession)
     assert msg.language == "uk"
 
 
 def test_decode_text_start_session_german() -> None:
-    prompt = str(uuid4())
-    msg = decode_text(f'{{"type":"start_session","prompt_id":"{prompt}","language":"de"}}')
+    str(uuid4())
+    msg = decode_text('{"type":"start_session","language":"de"}')
     assert isinstance(msg, StartSession)
     assert msg.language == "de"
 
@@ -57,9 +57,9 @@ def test_decode_text_start_session_german() -> None:
 def test_decode_text_start_session_unsupported_language_rejected() -> None:
     """The wire is the first gate: an unsupported language never reaches
     the DB CHECK or a Whisper call."""
-    prompt = str(uuid4())
+    str(uuid4())
     with pytest.raises(BadMessageError) as exc:
-        decode_text(f'{{"type":"start_session","prompt_id":"{prompt}","language":"fr"}}')
+        decode_text('{"type":"start_session","language":"fr"}')
     assert exc.value.code == ErrorCode.BAD_MESSAGE
 
 
@@ -93,10 +93,7 @@ def test_decode_text_unknown_type_rejected() -> None:
 
 def test_decode_text_wrong_protocol_version_rejected() -> None:
     with pytest.raises(BadMessageError) as exc:
-        decode_text(
-            '{"type":"start_session","protocol_version":2,'
-            '"prompt_id":"00000000-0000-0000-0000-000000000000","language":"uk"}'
-        )
+        decode_text('{"type":"start_session","protocol_version":2,"language":"uk"}')
     assert exc.value.code == ErrorCode.UNSUPPORTED_PROTOCOL
 
 
@@ -113,7 +110,7 @@ def test_decode_text_non_object_rejected() -> None:
 
 def test_decode_text_invalid_language_rejected() -> None:
     with pytest.raises(BadMessageError):
-        decode_text(f'{{"type":"start_session","prompt_id":"{uuid4()}","language":"fr"}}')
+        decode_text('{"type":"start_session","language":"fr"}')
 
 
 def test_decode_binary_happy_path() -> None:

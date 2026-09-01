@@ -24,8 +24,8 @@ CASES_EN: list[tuple[str, str]] = [
     # ── Frequency ──────────────────────────────────────────────
     ("three times a day", "3x/day"),
     # ── Pass-through ──────────────────────────────────────────
-    ("one patient", "one patient"),
-    # ── Clinical-safety: no fabricated / wrong numbers (ADR-0015) ─
+    ("one visitor", "one visitor"),
+    # ── Figure-safety: no fabricated / wrong numbers (ADR-0015) ──
     # Colloquial "one twenty" fusion must NOT fire outside a BP/range
     # structure — "two ten" must not become 210.
     ("two ten", "two ten"),

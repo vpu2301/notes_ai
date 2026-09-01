@@ -51,9 +51,7 @@ async def publish_new_notification(
     )
 
 
-async def publish_unread_changed(
-    redis: Any, *, tenant_id: UUID, recipient_user_id: UUID
-) -> None:
+async def publish_unread_changed(redis: Any, *, tenant_id: UUID, recipient_user_id: UUID) -> None:
     await _publish(
         redis,
         tenant_id=tenant_id,
@@ -121,9 +119,7 @@ class FanoutBridge:
         assert self._pubsub is not None
         while True:
             try:
-                raw = await self._pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=1.0
-                )
+                raw = await self._pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

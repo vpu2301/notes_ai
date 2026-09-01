@@ -78,9 +78,7 @@ async def deliver_once(
                 metrics.delivery_attempts.add(1, {"channel": "in_app"})
                 # In-app has nothing to dispatch: the notification row IS
                 # the delivery. Mark it sent and nudge any live socket.
-                await repo.mark_outbox_sent(
-                    conn, outbox_id=row["id"], provider_message_id=""
-                )
+                await repo.mark_outbox_sent(conn, outbox_id=row["id"], provider_message_id="")
                 continue
 
             await _deliver_email(

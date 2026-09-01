@@ -52,9 +52,7 @@ def layer_c_events_by_type() -> dict[str, int]:
 
 
 def layer_c_acceptance_rate() -> float:
-    impressions = sum(
-        _layer_c_events.get(e, 0) for e in ("shown_only", "accepted", "rejected")
-    )
+    impressions = sum(_layer_c_events.get(e, 0) for e in ("shown_only", "accepted", "rejected"))
     if impressions == 0:
         return 0.0
     return _layer_c_events.get("accepted", 0) / impressions
@@ -177,22 +175,32 @@ def _main() -> None:  # pragma: no cover — manual ops entrypoint
     from redis.asyncio import Redis
 
     parser = argparse.ArgumentParser(description="Run the telemetry roll-up once")
-    parser.add_argument("--day", type=date.fromisoformat, default=None,
-                        help="UTC day to roll up (default: yesterday)")
+    parser.add_argument(
+        "--day",
+        type=date.fromisoformat,
+        default=None,
+        help="UTC day to roll up (default: yesterday)",
+    )
     args = parser.parse_args()
 
     async def _run() -> None:
         app_pool = await create_pool(
             settings.db_app_role_dsn,
-            application_name="autocomplete-rollup-manual", min_size=1, max_size=2)
+            application_name="autocomplete-rollup-manual",
+            min_size=1,
+            max_size=2,
+        )
         audit_pool = await create_pool(
             settings.db_audit_writer_dsn,
-            application_name="autocomplete-rollup-manual-audit", min_size=1, max_size=2)
+            application_name="autocomplete-rollup-manual-audit",
+            min_size=1,
+            max_size=2,
+        )
         redis = Redis.from_url(settings.redis_url, decode_responses=False)
         try:
             n = await rollup_all(
-                app_pool=app_pool, audit_writer=AuditWriter(audit_pool),
-                redis=redis, day=args.day)
+                app_pool=app_pool, audit_writer=AuditWriter(audit_pool), redis=redis, day=args.day
+            )
             print(f"rollup complete: {n} phrase(s) updated")
         finally:
             await redis.aclose()

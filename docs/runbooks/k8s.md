@@ -1,6 +1,6 @@
-# Runbook — Kubernetes deployment (sprint 16)
+# Runbook — Kubernetes deployment
 
-Chart: `infra/k8s/mdx` (staging defaults in `values.yaml`, prod in
+Chart: `infra/k8s/notes` (staging defaults in `values.yaml`, prod in
 `values-prod.yaml`). Gates: `make check-k8s-rendered` (render + prod
 secret-clean + vendored-file drift) runs in `make ci` and the `k8s-render`
 CI job. Companion docs: `docs/deploy/inventory.md`, `hosting-gap.md`,
@@ -14,10 +14,10 @@ docker compose stop             # two full stacks don't share a 14 GiB VM
 scripts/k8s/staging-up.sh       # cluster + secrets + configmaps + helm install
 ```
 
-The script disables k3s's bundled Traefik (it squats :80/:443 ahead of
-the `public-edge` LoadBalancer — found live). KEDA:
-`helm install keda kedacore/keda -n keda --create-namespace`, then
-`helm upgrade mdx ... --set keda.enabled=true`.
+The script disables k3s's bundled Traefik (nothing in the namespace is
+meant to be internet-reachable; public exposure is a hosting decision).
+KEDA: `helm install keda kedacore/keda -n keda --create-namespace`, then
+`helm upgrade notes ... --set keda.enabled=true`.
 
 ## Scale-in drain (dictation)
 
@@ -43,14 +43,6 @@ names are the collector's gauge suffix), threshold 0.75. Verified live:
 4 concurrent sessions on a weight-4 worker → utilisation 1.0 →
 replicas 1→2 inside a minute.
 
-## Edge
-
-`public-edge` carries the S15 three-path allowlist + per-IP rate zones
-that trip BEFORE app limits (verified: 11×200 then 429s on /verify at
-30 r/s vs the app's 60/min), HSTS on every response, TLS terminated at
-the pod (staging self-signed; prod cert-manager). A provider WAF fronts
-the LoadBalancer per hosting-gap.md.
-
 ## Secrets
 
 - Prod material: `scripts/k8s/gen-prod-secrets.py` → Vault;
@@ -68,8 +60,5 @@ the LoadBalancer per hosting-gap.md.
   re-applies `init.sql` idempotently to self-heal half-init stores.
 - If the postgres PVC is ever recreated, restart Keycloak (its schema
   lives in the same server and the pod caches broken state).
-- Mock signing in-cluster needs the pinned test CA
-  (Secret `mdx-mock-test-ca` mounted over the kep fixtures dir) +
-  `TRUST_STORE_INCLUDE_TEST_CA=true` + the trust-store ConfigMap.
 - NetworkPolicies are OFF in k3d (allow rules not honored by the
   embedded controller); MUST be on and verified on the prod CNI.

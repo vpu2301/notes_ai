@@ -7,7 +7,7 @@ Operational guide for the sprint-04 streaming surface.
 | Concern               | Path / command                                                  |
 | --------------------- | --------------------------------------------------------------- |
 | Service code          | `services/dictation-service/`                                   |
-| WS endpoint           | `ws://…/ws/dictate` (subprotocol `medical-dictation.v1`)        |
+| WS endpoint           | `ws://…/ws/dictate` (subprotocol `dictation.v1`)        |
 | Companion HTTP        | `GET/POST /dictate/sessions/...`                                |
 | tmpfs root            | `/run/dictation/<session_id>/audio.bin` (mode 0700, 0600 file)  |
 | Master key            | `/etc/mdx/master.key` (mode 0400)                               |
@@ -21,11 +21,10 @@ Operational guide for the sprint-04 streaming surface.
 ### § transcript-is-nonsense-words
 
 Symptom: the transcript is fluent-looking but the words do not exist in
-the language — e.g. «Добро губня, лікарию, в житті жди ні бомсь» where the
-speaker said «Доброго дня, лікарю, вже тиждень болі». Reported from the
-conversation/scribe surface, because that is the only surface whose text
-comes from this service (Studio dictation uses the browser's Web Speech
-API and batch uploads go through asr-worker).
+the language — invented word-shapes instead of what the speaker said.
+Reported from the conversation surface, because that is the only surface
+whose text comes from this service (Studio dictation uses the browser's
+Web Speech API and batch uploads go through asr-worker).
 
 This is a MODEL problem, not a wire or diarization problem. Check first:
 
@@ -34,23 +33,23 @@ curl -s localhost:8002/healthz | jq .model      # or: docker compose exec dictat
 ```
 
 1. **`whisper-tiny` (or `small`) is fatal for Ukrainian.** It does not
-   degrade gracefully — it invents word-shapes. Measured on
-   `eval/conversations/v1/uk-consult-001`: tiny/int8 → «в житті жди ні
-   бомсь»; small/int8 → «Вжити ж Денибон»; large-v3/int8 → «вже тиждень
-   болі». Only large-v3 is acceptable. Anything else, repoint
+   degrade gracefully — it invents word-shapes (measured on an internal
+   Ukrainian conversation fixture: tiny/int8 and small/int8 both
+   produced fluent nonsense; only large-v3/int8 transcribed the actual
+   words). Only large-v3 is acceptable. Anything else, repoint
    `MD_ASR_MODEL` and bounce.
 2. If the model is right, check `MD_ASR_STREAMING_VAD_FILTER` is not
    `false`. With the VAD off, silence-only windows are decoded and Whisper
    emits its training attractors ("Дякую за перегляд!" / "Thanks for
    watching!") which then commit as if they were speech.
 3. A nonsense run that also shows `initial_prompt` repetition is worth a
-   look at the specialty prompt: a prompt repeated inside `initial_prompt`
+   look at the vocabulary hint: a prompt repeated inside `initial_prompt`
    drives Whisper into repetition loops.
 
 ### § transcript-stops-short-of-what-was-said
 
 Symptom: the persisted transcript is correct but ends early — the closing
-exchange of the consultation is missing.
+exchange of the meeting is missing.
 
 Two independent tails, both funnelled through `_finalize_normal`:
 
@@ -77,7 +76,7 @@ Symptom: `mdx_dictation_partial_latency_ms` p95 > 1500 ms for 5 min.
 3. If 3+ consecutive deadline misses, the queue auto-emits
    `Warning{worker_overloaded}` — reduce `MDX_PER_WORKER_MAX_SESSIONS`
    from 4 to 3 and bounce one replica.
-4. If a recent model bump: roll back; re-run `scripts/eval/run_streaming_latency.py`.
+4. If a recent model bump: roll back; re-run the synthetic streaming-latency probe.
 
 ### § stuck-reconnecting
 
@@ -118,7 +117,7 @@ Confirm from OUTSIDE the container — this is the only place the reason
 is visible:
 
 ```sh
-docker events --filter container=medical-dictation-dictation-service-1 \
+docker events --filter container=notes-ai-dictation-service-1 \
   --since 3m --until 0s
 # → `oom` immediately followed by `die exit=137` on every cycle
 docker info --format '{{.MemTotal}}'   # what the engine actually has
@@ -256,9 +255,7 @@ Each session reserves ~115 MB on tmpfs. 4 concurrent = 460 MB. Sprint
 ### § sessions-stuck-active (capacity leak)
 
 Symptom: `per_tenant_max_active_sessions` is hit while nobody is
-dictating; `GET /dictate/sessions` lists sessions that no client owns;
-clinicians cannot end a visit because core-service reports a live
-recording on it.
+dictating; `GET /dictate/sessions` lists sessions that no client owns.
 
 Cause: the abandon timer lives inside the worker process that owns the
 session, so a worker that dies (OOM, node drain, crash) takes its timers
@@ -292,13 +289,8 @@ redis-cli TTL mdx:dict:worker:<worker_id>:hb
   running at all (`session.reaper_swept`) and that
   `MDX_SESSION_REAPER_ENABLED` is not false. Cross-tenant enumeration
   goes through the `dictation_tenants_with_stale_sessions` SECURITY
-  DEFINER function (0059) — without it RLS silently returns zero rows
-  and the reaper "succeeds" having done nothing (the 0051 failure mode).
-- A clinician blocked from ending a visit by a session that is really
-  dead does not have to wait for the sweep: core-service only counts
-  sessions active within `MDX_ENCOUNTER_LIVE_SESSION_WINDOW_SECONDS`
-  (default 120 s), and `POST /encounters/{id}/complete` accepts
-  `{"force": true}`.
+  DEFINER function — without it RLS silently returns zero rows
+  and the reaper "succeeds" having done nothing.
 
 ## Pre-flight after deploy
 
@@ -312,6 +304,5 @@ redis-cli TTL mdx:dict:worker:<worker_id>:hb
   every replica (a mismatched `MDX_PER_WORKER_MAX_SESSIONS` silently
   changes fleet capacity).
 - A synthetic latency probe completes under target.
-- `make wer-eval-streaming` (or the nightly cron) shows targets met.
-- WS subprotocol negotiation: client offering `medical-dictation.v0`
-  receives 400 (verify via dev-tools).
+- WS subprotocol negotiation: client offering an unknown subprotocol
+  (e.g. `dictation.v0`) receives 400 (verify via dev-tools).

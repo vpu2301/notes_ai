@@ -16,12 +16,10 @@ AUTH_REFRESH_REPLAY_DETECTED: Final[str] = "auth.refresh_replay_detected"
 AUTH_LOGOUT: Final[str] = "auth.logout"
 AUTH_ACCOUNT_LOCKED: Final[str] = "auth.account_locked"
 
-# ── Step-up re-authentication (S14 break-glass) ───────────────────────
-# A password re-entry by an already-authenticated user, proving presence
-# before a high-risk act. Both outcomes are `sec` severity: the failure
-# is a wrong password typed by someone holding a live session, which is
-# exactly the shape of a hijacked tab.
-AUTH_REAUTH_SUCCEEDED: Final[str] = "auth.reauth_succeeded"
+# A failed password re-entry by an already-authenticated user (e.g. the
+# current-password check on a password change). `sec` severity: a wrong
+# password typed by someone holding a live session is exactly the shape
+# of a hijacked tab.
 AUTH_REAUTH_FAILED: Final[str] = "auth.reauth_failed"
 
 # ── MFA (sprint 16) ───────────────────────────────────────────────────
@@ -63,7 +61,7 @@ USER_DEACTIVATED: Final[str] = "user.deactivated"
 USER_REACTIVATED: Final[str] = "user.reactivated"
 USER_ROLE_CHANGED: Final[str] = "user.role_changed"
 
-# ── Tenant (clinic) lifecycle + membership (Sprint 12) ─────────────────
+# ── Tenant (company) lifecycle + membership (Sprint 12) ────────────────
 TENANT_CREATED: Final[str] = "tenant.created"
 TENANT_UPDATED: Final[str] = "tenant.updated"
 TENANT_LOGO_UPDATED: Final[str] = "tenant.logo_updated"

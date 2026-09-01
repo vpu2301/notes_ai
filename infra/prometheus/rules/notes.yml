@@ -1,0 +1,39 @@
+groups:
+  - name: notes
+    interval: 1m
+    rules:
+      - alert: NoteAutosaveConflictRateHigh
+        expr: |
+          (sum(rate(mdx_notes_autosave_conflicts_total[10m]))
+           / clamp_min(sum(rate(mdx_notes_diff_cache_lookups_total[10m])), 1))
+          > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Autosave conflict rate > 5% — likely FE/BE protocol drift"
+          runbook: "docs/runbooks/notes.md#high-autosave-conflict-rate"
+
+      - alert: NoteSearchLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(mdx_notes_search_latency_ms_histogram_bucket[5m])) by (le))
+          > 500
+        for: 5m
+        labels:
+          severity: warning
+          team: sre
+        annotations:
+          summary: "Search p95 above 500ms — investigate FTS index health"
+          runbook: "docs/runbooks/notes.md#search-performance-issue"
+
+      - alert: NoteChainIntegrityFailure
+        expr: increase(mdx_notes_chain_integrity_check_failures_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Amendment chain integrity anomaly detected — page security lead"
+          runbook: "docs/runbooks/notes.md#version-chain-break"

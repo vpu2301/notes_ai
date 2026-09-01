@@ -1,18 +1,17 @@
-"""Frozen-version replay (sprint 13, ADR-0028).
+"""Frozen-version replay (ADR-0028).
 
-The sprint-05/07 contract is byte-equal replay **under a frozen
-``pipeline_version``**. Sprint 13 inserted a stage, so the two versions
+The contract is byte-equal replay **under a frozen
+``pipeline_version``**. v1.1.0 inserted a stage, so the two versions
 are different pipelines and are replayed as such:
 
 - ``nlp-v1.0.0`` fixtures replay through the SIX-stage pipeline —
-  proving a historical session processed before sprint 13 still
-  produces exactly the bytes it produced then.
+  proving a historical session processed before the field-extraction
+  stage still produces exactly the bytes it produced then.
 - ``nlp-v1.1.0`` fixtures replay through the SEVEN-stage pipeline.
 
 Scope: the deterministic stages only. ``punctuation`` is an ML model
 whose bytes are pinned by the model revision, not by this contract
-(see docs/models/PINS.md), so it is excluded here exactly as the
-sprint-07 eval harness excludes it.
+(see docs/models/PINS.md), so it is excluded here.
 
 Regenerate with::
 
@@ -74,7 +73,7 @@ def ctx_from_fixture(doc: dict) -> ProcessingContext:
     return ProcessingContext(
         tenant_id=UUID(c["tenant_id"]),
         language=c["language"],
-        specialty=c["specialty"],
+        category=c["category"],
         reference_date=date.fromisoformat(c["reference_date"]),
         is_partial=c["is_partial"],
         abbreviation_snapshot=AbbreviationSnapshot(entries=(), fingerprint=c["fingerprint"]),

@@ -1,355 +1,176 @@
 role,action,target_kind,allowed,notes
 tenant_admin,tenant.read,tenant,true,sees own tenant settings
-tenant_admin,tenant.update,tenant,true,changes tenant settings
-tenant_admin,user.invite,user,true,invites users into own tenant
-tenant_admin,user.deactivate,user,true,soft-deactivate users in own tenant
-tenant_admin,user.reset_mfa,user,true,clears MFA enrolment (sprint 16+)
-tenant_admin,audit.read,audit,true,read audit trail
-tenant_admin,audit.verify,audit,true,run chain verification
-clinician,tenant.read,tenant,true,sees own tenant context
-clinician,tenant.update,tenant,false,no tenant write capability
-clinician,user.invite,user,false,no admin authority
-clinician,user.deactivate,user,false,no admin authority
-clinician,user.reset_mfa,user,false,no admin authority
-clinician,audit.read,audit,false,not an auditor
-clinician,audit.verify,audit,false,not an auditor
-nurse,tenant.read,tenant,true,sees own tenant context
-nurse,tenant.update,tenant,false,no tenant write capability
-nurse,user.invite,user,false,no admin authority
-nurse,user.deactivate,user,false,no admin authority
-nurse,user.reset_mfa,user,false,no admin authority
-nurse,audit.read,audit,false,not an auditor
-nurse,audit.verify,audit,false,not an auditor
+member,tenant.read,tenant,true,sees own tenant context
+viewer,tenant.read,tenant,true,sees own tenant context
 auditor,tenant.read,tenant,true,sees own tenant context
-auditor,tenant.update,tenant,false,read-only
-auditor,user.invite,user,false,read-only
-auditor,user.deactivate,user,false,read-only
-auditor,user.reset_mfa,user,false,read-only
-auditor,audit.read,audit,true,primary purpose
-auditor,audit.verify,audit,true,primary purpose
 service,tenant.read,tenant,false,S2S today has no user-facing perms
+tenant_admin,tenant.update,tenant,true,changes tenant settings
+member,tenant.update,tenant,false,no tenant write capability
+viewer,tenant.update,tenant,false,no tenant write capability
+auditor,tenant.update,tenant,false,read-only
 service,tenant.update,tenant,false,
-service,user.invite,user,false,
-service,user.deactivate,user,false,
-service,user.reset_mfa,user,false,
-service,audit.read,audit,false,
-service,audit.verify,audit,false,
-tenant_admin,user.read,user,true,CRUD — list/read users in own tenant
-clinician,user.read,user,false,no admin authority
-nurse,user.read,user,false,no admin authority
-auditor,user.read,user,true,read-only visibility of the tenant user roster
-service,user.read,user,false,S2S has no user-facing perms today
-tenant_admin,user.manage_roles,user,true,CRUD — set a user's realm roles (PUT /admin/users/{sub}/roles)
-clinician,user.manage_roles,user,false,no admin authority
-nurse,user.manage_roles,user,false,no admin authority
-auditor,user.manage_roles,user,false,read-only role — cannot change roles
-service,user.manage_roles,user,false,
-tenant_admin,user.reactivate,user,true,CRUD — reactivate a deactivated user (mirror of deactivate)
-clinician,user.reactivate,user,false,no admin authority
-nurse,user.reactivate,user,false,no admin authority
-auditor,user.reactivate,user,false,read-only
-service,user.reactivate,user,false,
-tenant_admin,user.remind_mfa,user,true,S21 — ask a user to enrol MFA (POST /admin/users/{sub}/mfa-reminder)
-clinician,user.remind_mfa,user,false,not an oversight role
-nurse,user.remind_mfa,user,false,not an oversight role
-auditor,user.remind_mfa,user,true,S21 — the access review's one action; changes nothing about the account
-service,user.remind_mfa,user,false,
-tenant_admin,asr.write,asr_job,false,admin ⟂ PHI (S14): ASR is a clinical surface; admins use break-glass instead
-tenant_admin,asr.read,asr_job,false,admin ⟂ PHI (S14): ASR is a clinical surface; admins use break-glass instead
-tenant_admin,asr.cancel,asr_job,false,admin ⟂ PHI (S14): ASR is a clinical surface; admins use break-glass instead
-clinician,asr.write,asr_job,true,sprint 03 — submit own ASR jobs
-clinician,asr.read,asr_job,true,sprint 03 — read own jobs
-clinician,asr.cancel,asr_job,true,sprint 03 — cancel own jobs
-nurse,asr.write,asr_job,true,sprint 03 — nurses submit ASR jobs
-nurse,asr.read,asr_job,true,sprint 03 — nurses read own jobs
-nurse,asr.cancel,asr_job,false,cancellations go through clinician/admin
-auditor,asr.write,asr_job,false,
-auditor,asr.read,asr_job,false,sprint 03 leaves ASR job reads out of audit role
-auditor,asr.cancel,asr_job,false,
-service,asr.write,asr_job,true,sprint 03 — asr-worker needs S2S writes (status, retry enqueue)
-service,asr.read,asr_job,true,sprint 03 — asr-worker reads own jobs to process them
-service,asr.cancel,asr_job,false,
-tenant_admin,dictation.start,dictation_session,false,admin ⟂ PHI (S14): dictation is a clinical surface
-tenant_admin,dictation.read,dictation_session,false,admin ⟂ PHI (S14): dictation is a clinical surface
-tenant_admin,dictation.finalize,dictation_session,false,admin ⟂ PHI (S14): dictation is a clinical surface
-clinician,dictation.start,dictation_session,true,sprint 04 — start own session
-clinician,dictation.read,dictation_session,true,sprint 04 — read own session
-clinician,dictation.finalize,dictation_session,true,sprint 04 — finalize own session
-nurse,dictation.start,dictation_session,true,sprint 04
-nurse,dictation.read,dictation_session,true,sprint 04
-nurse,dictation.finalize,dictation_session,true,sprint 04
-auditor,dictation.start,dictation_session,false,
-auditor,dictation.read,dictation_session,false,
-auditor,dictation.finalize,dictation_session,false,
-service,dictation.start,dictation_session,false,user-only
-service,dictation.read,dictation_session,true,sprint 05 — NLP S2S reads transcripts
-service,dictation.finalize,dictation_session,false,
-tenant_admin,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
-clinician,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
-nurse,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
-service,nlp.process,nlp_text,true,sprint 05 — dictation-service + asr-service S2S
-auditor,nlp.process,nlp_text,false,
-tenant_admin,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
-tenant_admin,nlp.write.abbreviations,abbreviation,true,sprint 05 — upsert/delete tenant rules
-clinician,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
-clinician,nlp.write.abbreviations,abbreviation,false,tenant_admin only
-nurse,nlp.read.abbreviations,abbreviation,true,sprint 05
-nurse,nlp.write.abbreviations,abbreviation,false,tenant_admin only
-auditor,nlp.read.abbreviations,abbreviation,true,sprint 05 — auditors see policy
-auditor,nlp.write.abbreviations,abbreviation,false,
-service,nlp.read.abbreviations,abbreviation,true,sprint 05 — NLP pipeline reads via snapshot
-service,nlp.write.abbreviations,abbreviation,false,user-only
-tenant_admin,template.read,template,true,sprint 06 — read tenant + system templates
-tenant_admin,template.clone,template,true,sprint 06 — clone system into tenant
-tenant_admin,template.update,template,true,sprint 06 — cosmetic or structural edit
-tenant_admin,template.deprecate,template,true,sprint 06 — soft-delete tenant template
-clinician,template.read,template,true,sprint 06 — clinicians read for dictation
-clinician,template.clone,template,false,tenant_admin only
-clinician,template.update,template,false,tenant_admin only
-clinician,template.deprecate,template,false,tenant_admin only
-nurse,template.read,template,true,sprint 06
-nurse,template.clone,template,false,
-nurse,template.update,template,false,
-nurse,template.deprecate,template,false,
-auditor,template.read,template,true,sprint 06 — auditors see catalogue
-auditor,template.clone,template,false,
-auditor,template.update,template,false,
-auditor,template.deprecate,template,false,
-service,template.read,template,true,sprint 06 — dictation-service loads on session start
-service,template.clone,template,false,
-service,template.update,template,false,
-service,template.deprecate,template,false,
-tenant_admin,report.write,report,false,admin ⟂ PHI (S14): admins do not author or edit clinical reports
-tenant_admin,report.read,report,false,admin ⟂ PHI (S14): per-report access goes through phi_access.request (break-glass)
-clinician,report.write,report,true,sprint 08 — authors own reports; sprint 10 — also gates /autocomplete phrase+snippet writes (scope reuse; RLS enforces per-scope authority)
-clinician,report.read,report,true,sprint 08 — reads own reports; sprint 10 — also gates /autocomplete/* (suggest/phrases/telemetry): deliberate reuse of report.read; granular autocomplete.* scopes deferred until a role needs the distinction
-nurse,report.write,report,true,sprint 08 — authors reports; sprint 10 — also gates /autocomplete phrase+snippet writes (scope reuse; RLS enforces per-scope authority)
-nurse,report.read,report,true,sprint 08 — reads reports; sprint 10 — also gates /autocomplete/* (suggest/phrases/telemetry): deliberate reuse of report.read; granular autocomplete.* scopes deferred until a role needs the distinction
-auditor,report.write,report,false,read-only role — no clinical content writes
-auditor,report.read,report,false,clinical content out of audit role (mirrors dictation)
-service,report.write,report,false,user-only authoring
-service,report.read,report,true,sprint 09 — signing-service S2S reads report to sign; sprint 10 — also gates /autocomplete/* (suggest/phrases/telemetry): deliberate reuse of report.read; granular autocomplete.* scopes deferred until a role needs the distinction
-tenant_admin,patient.read,patient,true,sprint 11 — roster list; S15: rows come back REDACTED (name + id) without patient.read_full
-tenant_admin,patient.write,patient,true,sprint 11 — create/update patients/encounters/consents/anamnesis/privacy; S15: update of an existing patient additionally needs a live break-glass grant
-tenant_admin,patient.read_full,patient,false,S15 admin ⟂ PHI — one patient's demographics/timeline go through a per-patient break-glass grant
-clinician,patient.read,patient,true,sprint 11 — reads patients
-clinician,patient.read_full,patient,true,S15 — full single-patient read (demographics + timeline)
-clinician,patient.write,patient,true,sprint 11 — authors patient record
-nurse,patient.read,patient,true,sprint 11 — reads patients
-nurse,patient.read_full,patient,true,S15 — full single-patient read (demographics + timeline)
-nurse,patient.write,patient,true,sprint 11 — authors patient record
-auditor,patient.read,patient,false,PHI out of audit role (mirrors report/dictation)
-auditor,patient.read_full,patient,false,PHI out of audit role
-auditor,patient.write,patient,false,read-only role — no clinical writes
-service,patient.read,patient,false,no S2S patient-read surface today
-service,patient.read_full,patient,false,no S2S patient-read surface today
-service,patient.write,patient,false,user-only authoring
-tenant_admin,privacy.approve,patient,true,S11 step 04 — second person of the erasure two-person rule (never own request)
-tenant_admin,patient.dsar,patient,true,S11 step 06 — trigger/download the complete DSAR package (admin-only)
-clinician,patient.dsar,patient,false,DSAR export is admin-only
-nurse,patient.dsar,patient,false,DSAR export is admin-only
-auditor,patient.dsar,patient,false,read-only role
-service,patient.dsar,patient,false,human decision — no S2S DSAR surface
-clinician,privacy.approve,patient,false,erasure approval is admin-only
-nurse,privacy.approve,patient,false,erasure approval is admin-only
-auditor,privacy.approve,patient,false,read-only role
-service,privacy.approve,patient,false,human decision — no S2S approval
-tenant_admin,note.read,note,false,admin ⟂ PHI (S14): clinical notes are out of the admin role
-tenant_admin,note.write,note,false,admin ⟂ PHI (S14): admins do not author clinical notes
-clinician,note.read,note,true,sprint 11 — reads notes
-clinician,note.write,note,true,sprint 11 — authors notes
-nurse,note.read,note,true,sprint 11 — reads notes
-nurse,note.write,note,true,sprint 11 — authors notes
-auditor,note.read,note,false,PHI out of audit role
-auditor,note.write,note,false,read-only role — no clinical writes
-service,note.read,note,false,no S2S note-read surface today
-service,note.write,note,false,user-only authoring
-tenant_admin,tenant.create,tenant,true,onboard a new clinic/tenant (becomes owner)
-clinician,tenant.create,tenant,false,no tenant lifecycle authority
-nurse,tenant.create,tenant,false,no tenant lifecycle authority
+tenant_admin,tenant.create,tenant,true,onboard a new company/tenant (becomes owner)
+member,tenant.create,tenant,false,no tenant lifecycle authority
+viewer,tenant.create,tenant,false,no tenant lifecycle authority
 auditor,tenant.create,tenant,false,read-only role
 service,tenant.create,tenant,false,S2S has no tenant lifecycle surface
 tenant_admin,tenant.manage_members,tenant,true,invite/remove members and set roles
-clinician,tenant.manage_members,tenant,false,no member-management authority
-nurse,tenant.manage_members,tenant,false,no member-management authority
+member,tenant.manage_members,tenant,false,no member-management authority
+viewer,tenant.manage_members,tenant,false,no member-management authority
 auditor,tenant.manage_members,tenant,false,read-only role
 service,tenant.manage_members,tenant,false,S2S has no member-management surface
+tenant_admin,user.read,user,true,CRUD — list/read users in own tenant
+member,user.read,user,false,no admin authority
+viewer,user.read,user,false,no admin authority
+auditor,user.read,user,true,read-only visibility of the tenant user roster
+service,user.read,user,false,S2S has no user-facing perms today
+tenant_admin,user.invite,user,true,invites users into own tenant
+member,user.invite,user,false,no admin authority
+viewer,user.invite,user,false,no admin authority
+auditor,user.invite,user,false,read-only
+service,user.invite,user,false,
+tenant_admin,user.manage_roles,user,true,CRUD — set a user's realm roles (PUT /admin/users/{sub}/roles)
+member,user.manage_roles,user,false,no admin authority
+viewer,user.manage_roles,user,false,no admin authority
+auditor,user.manage_roles,user,false,read-only role — cannot change roles
+service,user.manage_roles,user,false,
+tenant_admin,user.deactivate,user,true,soft-deactivate users in own tenant
+member,user.deactivate,user,false,no admin authority
+viewer,user.deactivate,user,false,no admin authority
+auditor,user.deactivate,user,false,read-only
+service,user.deactivate,user,false,
+tenant_admin,user.reactivate,user,true,CRUD — reactivate a deactivated user (mirror of deactivate)
+member,user.reactivate,user,false,no admin authority
+viewer,user.reactivate,user,false,no admin authority
+auditor,user.reactivate,user,false,read-only
+service,user.reactivate,user,false,
+tenant_admin,user.reset_mfa,user,true,clears MFA enrolment (sprint 16+)
+member,user.reset_mfa,user,false,no admin authority
+viewer,user.reset_mfa,user,false,no admin authority
+auditor,user.reset_mfa,user,false,read-only
+service,user.reset_mfa,user,false,
+tenant_admin,user.remind_mfa,user,true,S21 — ask a user to enrol MFA (POST /admin/users/{sub}/mfa-reminder)
+member,user.remind_mfa,user,false,not an oversight role
+viewer,user.remind_mfa,user,false,not an oversight role
+auditor,user.remind_mfa,user,true,S21 — the access review's one action; changes nothing about the account
+service,user.remind_mfa,user,false,
+tenant_admin,audit.read,audit,true,read audit trail
+member,audit.read,audit,false,not an auditor
+viewer,audit.read,audit,false,not an auditor
+auditor,audit.read,audit,true,primary purpose
+service,audit.read,audit,false,
+tenant_admin,audit.verify,audit,true,run chain verification
+member,audit.verify,audit,false,not an auditor
+viewer,audit.verify,audit,false,not an auditor
+auditor,audit.verify,audit,true,primary purpose
+service,audit.verify,audit,false,
+tenant_admin,asr.write,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
+member,asr.write,asr_job,true,sprint 03 — submit own ASR jobs
+viewer,asr.write,asr_job,true,sprint 03 — viewers submit ASR jobs
+auditor,asr.write,asr_job,false,
+service,asr.write,asr_job,true,"sprint 03 — asr-worker needs S2S writes (status, retry enqueue)"
+tenant_admin,asr.read,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
+member,asr.read,asr_job,true,sprint 03 — read own jobs
+viewer,asr.read,asr_job,true,sprint 03 — viewers read own jobs
+auditor,asr.read,asr_job,false,sprint 03 leaves ASR job reads out of audit role
+service,asr.read,asr_job,true,sprint 03 — asr-worker reads own jobs to process them
+tenant_admin,asr.cancel,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
+member,asr.cancel,asr_job,true,sprint 03 — cancel own jobs
+viewer,asr.cancel,asr_job,false,cancellations go through member/admin
+auditor,asr.cancel,asr_job,false,
+service,asr.cancel,asr_job,false,
+tenant_admin,dictation.start,dictation_session,false,admin/content separation (S14): dictation is a content surface
+member,dictation.start,dictation_session,true,sprint 04 — start own session
+viewer,dictation.start,dictation_session,true,sprint 04
+auditor,dictation.start,dictation_session,false,
+service,dictation.start,dictation_session,false,user-only
+tenant_admin,dictation.read,dictation_session,false,admin/content separation (S14): dictation is a content surface
+member,dictation.read,dictation_session,true,sprint 04 — read own session
+viewer,dictation.read,dictation_session,true,sprint 04
+auditor,dictation.read,dictation_session,false,
+service,dictation.read,dictation_session,true,sprint 05 — NLP S2S reads transcripts
+tenant_admin,dictation.finalize,dictation_session,false,admin/content separation (S14): dictation is a content surface
+member,dictation.finalize,dictation_session,true,sprint 04 — finalize own session
+viewer,dictation.finalize,dictation_session,true,sprint 04
+auditor,dictation.finalize,dictation_session,false,
+service,dictation.finalize,dictation_session,false,
+tenant_admin,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
+member,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
+viewer,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
+auditor,nlp.process,nlp_text,false,
+service,nlp.process,nlp_text,true,sprint 05 — dictation-service + asr-service S2S
+tenant_admin,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
+member,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
+viewer,nlp.read.abbreviations,abbreviation,true,sprint 05
+auditor,nlp.read.abbreviations,abbreviation,true,sprint 05 — auditors see policy
+service,nlp.read.abbreviations,abbreviation,true,sprint 05 — NLP pipeline reads via snapshot
+tenant_admin,nlp.write.abbreviations,abbreviation,true,sprint 05 — upsert/delete tenant rules
+member,nlp.write.abbreviations,abbreviation,false,tenant_admin only
+viewer,nlp.write.abbreviations,abbreviation,false,tenant_admin only
+auditor,nlp.write.abbreviations,abbreviation,false,
+service,nlp.write.abbreviations,abbreviation,false,user-only
+tenant_admin,template.read,template,true,sprint 06 — read tenant + system templates
+member,template.read,template,true,sprint 06 — members read for dictation
+viewer,template.read,template,true,sprint 06
+auditor,template.read,template,true,sprint 06 — auditors see catalogue
+service,template.read,template,true,sprint 06 — dictation-service loads on session start
+tenant_admin,template.clone,template,true,sprint 06 — clone system into tenant
+member,template.clone,template,false,tenant_admin only
+viewer,template.clone,template,false,
+auditor,template.clone,template,false,
+service,template.clone,template,false,
+tenant_admin,template.update,template,true,sprint 06 — cosmetic or structural edit
+member,template.update,template,false,tenant_admin only
+viewer,template.update,template,false,
+auditor,template.update,template,false,
+service,template.update,template,false,
+tenant_admin,template.deprecate,template,true,sprint 06 — soft-delete tenant template
+member,template.deprecate,template,false,tenant_admin only
+viewer,template.deprecate,template,false,
+auditor,template.deprecate,template,false,
+service,template.deprecate,template,false,
+tenant_admin,note.write,note,false,admin/content separation (S14): admins do not author or edit notes
+member,note.write,note,true,sprint 08 — authors own notes; sprint 10 — also gates /autocomplete phrase+snippet writes (scope reuse; RLS enforces per-scope authority)
+viewer,note.write,note,true,sprint 08 — authors notes; sprint 10 — also gates /autocomplete phrase+snippet writes
+auditor,note.write,note,false,read-only role — no content writes
+service,note.write,note,false,user-only authoring
+tenant_admin,note.read,note,false,"admin/content separation (S14): admins see PII-free aggregates via stats.read, never note content"
+member,note.read,note,true,sprint 08 — reads own notes; sprint 10 — also gates /autocomplete/* (suggest/phrases/telemetry): deliberate reuse of note.read
+viewer,note.read,note,true,sprint 08 — reads notes; sprint 10 — also gates /autocomplete/*
+auditor,note.read,note,false,note content out of audit role (mirrors dictation)
+service,note.read,note,true,S2S note reads (PDF/export pipeline); sprint 10 — also gates /autocomplete/*
 tenant_admin,notification.read,notification,true,reads own notification feed and badge
-clinician,notification.read,notification,true,reads own notification feed and badge
-nurse,notification.read,notification,true,reads own notification feed and badge
-auditor,notification.read,notification,true,own feed only; grants no clinical visibility
+member,notification.read,notification,true,reads own notification feed and badge
+viewer,notification.read,notification,true,reads own notification feed and badge
+auditor,notification.read,notification,true,own feed only; grants no note-content visibility
 service,notification.read,notification,false,S2S publishes events; it has no feed
 tenant_admin,notification.write,notification,true,marks own notifications read; edits own preferences
-clinician,notification.write,notification,true,marks own notifications read; edits own preferences
-nurse,notification.write,notification,true,marks own notifications read; edits own preferences
+member,notification.write,notification,true,marks own notifications read; edits own preferences
+viewer,notification.write,notification,true,marks own notifications read; edits own preferences
 auditor,notification.write,notification,true,marks own notifications read; edits own preferences
 service,notification.write,notification,false,S2S publishes events; it has no preferences
-tenant_admin,stats.read,tenant,true,"S14 — PHI-free aggregate reads (counts, timings) so the business dashboard survives the admin PHI split"
-clinician,stats.read,tenant,false,clinicians read the real lists; no stripped mode needed
-nurse,stats.read,tenant,false,nurses read the real lists; no stripped mode needed
+tenant_admin,stats.read,tenant,true,"S14 — PII-free aggregate reads (counts, timings) so the usage dashboard survives the admin/content split"
+member,stats.read,tenant,false,members read the real lists; no stripped mode needed
+viewer,stats.read,tenant,false,viewers read the real lists; no stripped mode needed
 auditor,stats.read,tenant,false,"audit reach is the audit log, not usage aggregates"
 service,stats.read,tenant,false,no S2S dashboard surface
-tenant_admin,phi_access.request,phi_access_request,true,"S14 — break-glass: reason + password re-entry mints a time-limited, single-report grant"
-clinician,phi_access.request,phi_access_request,false,"2026-08-09 — reverted: standing patient.read_full is once again the whole answer for a clinical role (the relationship is audited, not required), so a clinician has no break-glass door left to walk through and must not hold the power to mint grants"
-nurse,phi_access.request,phi_access_request,false,"2026-08-09 — see clinician: standing clinical read is not relationship-scoped, so break-glass is not a nurse's path either"
-auditor,phi_access.request,phi_access_request,false,"audit role reads the trail of grants, never the reports themselves"
-service,phi_access.request,phi_access_request,false,break-glass is a human act with a human justification
-tenant_admin,phi_access.read,phi_access_request,true,S14 — oversight of who broke glass on what and why
-clinician,phi_access.read,phi_access_request,false,not an oversight role
-nurse,phi_access.read,phi_access_request,false,not an oversight role
-auditor,phi_access.read,phi_access_request,true,S14 — the grant log is exactly what a compliance review needs
-service,phi_access.read,phi_access_request,false,no S2S surface
-tenant_admin,autocomplete.read,phrase,true,"S14 — split out of report.read; admins curate the tenant phrase library"
-clinician,autocomplete.read,phrase,true,S14 — suggestions while dictating
-nurse,autocomplete.read,phrase,true,S14 — suggestions while dictating
+tenant_admin,autocomplete.read,phrase,true,S14 — split out of note.read; admins curate the tenant phrase library
+member,autocomplete.read,phrase,true,S14 — suggestions while dictating
+viewer,autocomplete.read,phrase,true,S14 — suggestions while dictating
 auditor,autocomplete.read,phrase,false,no dictation surface
-service,autocomplete.read,phrase,true,"S14 — S2S trie warm-up / telemetry roll-up"
-tenant_admin,autocomplete.write,phrase,true,"S14 — split out of report.write; tenant-scope phrase curation is administration"
-clinician,autocomplete.write,phrase,true,S14 — own user-scope phrases
-nurse,autocomplete.write,phrase,true,S14 — own user-scope phrases
+service,autocomplete.read,phrase,true,S14 — S2S trie warm-up / telemetry roll-up
+tenant_admin,autocomplete.write,phrase,true,S14 — split out of note.write; tenant-scope phrase curation is administration
+member,autocomplete.write,phrase,true,S14 — own user-scope phrases
+viewer,autocomplete.write,phrase,true,S14 — own user-scope phrases
 auditor,autocomplete.write,phrase,false,read-only role
-tenant_admin,corpus.review,phrase,true,"S21 — admin-console corpus review surface (ADR-0043)"
-clinician,corpus.review,phrase,true,"S21 — the clinical reviewer; tier-3 decisions are human-mandatory (ADR-0044)"
-nurse,corpus.review,phrase,false,corpus review is a clinical-safety judgement surface
-auditor,corpus.review,phrase,false,read-only role
-service,corpus.review,phrase,false,no S2S review path — reviews come from humans or the jury CLI
-knowledge_admin,corpus.review,phrase,false,evidence-corpus curation is a different corpus (ADR-0043 vs EVA)
-tenant_admin,corpus.contribute,phrase,true,"authored ingest — console fill worksheet submits typed/dictated candidates for review"
-clinician,corpus.contribute,phrase,true,"clinical authors contribute candidate phrases; everything lands in the review queue"
-nurse,corpus.contribute,phrase,false,corpus contribution follows clinical authorship roles
-auditor,corpus.contribute,phrase,false,read-only role
-service,corpus.contribute,phrase,false,no S2S submission path — contributions come from humans or the forge CLI
-knowledge_admin,corpus.contribute,phrase,false,evidence-corpus curation is a different corpus (ADR-0043 vs EVA)
-tenant_admin,corpus.promote,phrase,true,"promotion publishes to ALL tenants — admin curation act, separated from reviewing"
-clinician,corpus.promote,phrase,false,reviewer must not single-handedly publish to the serving corpus
-nurse,corpus.promote,phrase,false,not a curation role
-auditor,corpus.promote,phrase,false,read-only role
-service,corpus.promote,phrase,false,no S2S promotion path
-knowledge_admin,corpus.promote,phrase,false,evidence-corpus curation is a different corpus (ADR-0043 vs EVA)
 service,autocomplete.write,phrase,false,user-only authoring
-clinician,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
-nurse,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
-service,synonym.read,synonym,true,S15 — S2S dictionary read
 tenant_admin,synonym.read,synonym,true,S15 — dictionary curation view
-tenant_admin,synonym.write,synonym,true,"S15 — tenant synonym curation; dictionary terms, not PHI"
+member,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
+viewer,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
 auditor,synonym.read,synonym,false,read-only audit role — no search surface
-clinician,synonym.write,synonym,false,curation is administration
-nurse,synonym.write,synonym,false,curation is administration
+service,synonym.read,synonym,true,S15 — S2S dictionary read
+tenant_admin,synonym.write,synonym,true,"S15 — tenant synonym curation; dictionary terms, never note content"
+member,synonym.write,synonym,false,curation is administration
+viewer,synonym.write,synonym,false,curation is administration
 auditor,synonym.write,synonym,false,read-only role
 service,synonym.write,synonym,false,human curation only
-knowledge_admin,asr.cancel,asr_job,false,corpus curation role only (EVA-S01)
-knowledge_admin,asr.read,asr_job,false,corpus curation role only (EVA-S01)
-knowledge_admin,asr.write,asr_job,false,corpus curation role only (EVA-S01)
-knowledge_admin,audit.read,audit,false,corpus curation role only (EVA-S01)
-knowledge_admin,audit.verify,audit,false,corpus curation role only (EVA-S01)
-knowledge_admin,autocomplete.read,phrase,false,corpus curation role only (EVA-S01)
-knowledge_admin,autocomplete.write,phrase,false,corpus curation role only (EVA-S01)
-knowledge_admin,dictation.finalize,dictation_session,false,corpus curation role only (EVA-S01)
-knowledge_admin,dictation.read,dictation_session,false,corpus curation role only (EVA-S01)
-knowledge_admin,dictation.start,dictation_session,false,corpus curation role only (EVA-S01)
-knowledge_admin,nlp.process,nlp_text,false,corpus curation role only (EVA-S01)
-knowledge_admin,nlp.read.abbreviations,abbreviation,false,corpus curation role only (EVA-S01)
-knowledge_admin,nlp.write.abbreviations,abbreviation,false,corpus curation role only (EVA-S01)
-knowledge_admin,note.read,note,false,corpus curation role only (EVA-S01)
-knowledge_admin,note.write,note,false,corpus curation role only (EVA-S01)
-knowledge_admin,notification.read,notification,false,corpus curation role only (EVA-S01)
-knowledge_admin,notification.write,notification,false,corpus curation role only (EVA-S01)
-knowledge_admin,patient.dsar,patient,false,corpus curation role only (EVA-S01)
-knowledge_admin,patient.read,patient,false,corpus curation role only (EVA-S01)
-knowledge_admin,patient.read_full,patient,false,corpus curation role only (EVA-S01)
-knowledge_admin,patient.write,patient,false,corpus curation role only (EVA-S01)
-knowledge_admin,phi_access.read,phi_access_request,false,corpus curation role only (EVA-S01)
-knowledge_admin,phi_access.request,phi_access_request,false,corpus curation role only (EVA-S01)
-knowledge_admin,privacy.approve,patient,false,corpus curation role only (EVA-S01)
-knowledge_admin,report.read,report,false,corpus curation role only (EVA-S01)
-knowledge_admin,report.write,report,false,corpus curation role only (EVA-S01)
-knowledge_admin,stats.read,tenant,false,corpus curation role only (EVA-S01)
-knowledge_admin,synonym.read,synonym,false,corpus curation role only (EVA-S01)
-knowledge_admin,synonym.write,synonym,false,corpus curation role only (EVA-S01)
-knowledge_admin,template.clone,template,false,corpus curation role only (EVA-S01)
-knowledge_admin,template.deprecate,template,false,corpus curation role only (EVA-S01)
-knowledge_admin,template.read,template,false,corpus curation role only (EVA-S01)
-knowledge_admin,template.update,template,false,corpus curation role only (EVA-S01)
-knowledge_admin,tenant.create,tenant,false,corpus curation role only (EVA-S01)
-knowledge_admin,tenant.manage_members,tenant,false,corpus curation role only (EVA-S01)
-knowledge_admin,tenant.read,tenant,false,corpus curation role only (EVA-S01)
-knowledge_admin,tenant.update,tenant,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.deactivate,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.invite,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.manage_roles,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.reactivate,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.read,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.remind_mfa,user,false,corpus curation role only (EVA-S01)
-knowledge_admin,user.reset_mfa,user,false,corpus curation role only (EVA-S01)
-tenant_admin,evidence.ask,evidence,true,generic Q&A only — never patient context (ADR-0033)
-clinician,evidence.ask,evidence,true,asks evidence questions
-nurse,evidence.ask,evidence,true,asks evidence questions
-auditor,evidence.ask,evidence,false,not granted (EVA-S01)
-service,evidence.ask,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.ask,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.context.read,evidence,false,admin-PHI separation — no patient context
-clinician,evidence.context.read,evidence,true,patient context within own tenant/encounters
-nurse,evidence.context.read,evidence,true,additionally gated by per-site flag (S05)
-auditor,evidence.context.read,evidence,false,not granted (EVA-S01)
-service,evidence.context.read,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.context.read,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.acts.manage,evidence,true,manages patient acts per spec S01
-clinician,evidence.acts.manage,evidence,true,uploads/manages patient acts
-nurse,evidence.acts.manage,evidence,false,not granted (EVA-S01)
-auditor,evidence.acts.manage,evidence,false,not granted (EVA-S01)
-service,evidence.acts.manage,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.acts.manage,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.deeptrace.run,evidence,true,runs deep-research jobs (generic mode)
-clinician,evidence.deeptrace.run,evidence,true,runs deep-research jobs
-nurse,evidence.deeptrace.run,evidence,false,not granted (EVA-S01)
-auditor,evidence.deeptrace.run,evidence,false,not granted (EVA-S01)
-service,evidence.deeptrace.run,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.deeptrace.run,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.drugs.read,evidence,true,drug reference cards (no patient context)
-clinician,evidence.drugs.read,evidence,true,drug reference cards
-nurse,evidence.drugs.read,evidence,true,drug reference cards
-auditor,evidence.drugs.read,evidence,false,not granted (EVA-S01)
-service,evidence.drugs.read,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.drugs.read,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.drugs.predict,evidence,false,not granted (EVA-S01)
-clinician,evidence.drugs.predict,evidence,true,TxGemma predictions — additionally flag-gated (S10)
-nurse,evidence.drugs.predict,evidence,false,not granted (EVA-S01)
-auditor,evidence.drugs.predict,evidence,false,not granted (EVA-S01)
-service,evidence.drugs.predict,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.drugs.predict,evidence,false,not granted (EVA-S01)
-tenant_admin,evidence.corpus.manage,evidence_corpus,true,corpus management fallback
-clinician,evidence.corpus.manage,evidence_corpus,false,not granted (EVA-S01)
-nurse,evidence.corpus.manage,evidence_corpus,false,not granted (EVA-S01)
-auditor,evidence.corpus.manage,evidence_corpus,false,not granted (EVA-S01)
-service,evidence.corpus.manage,evidence_corpus,false,not granted (EVA-S01)
-knowledge_admin,evidence.corpus.manage,evidence_corpus,true,uploads/reviews/approves/expires tenant corpus
-tenant_admin,evidence.domains.manage,evidence_corpus,false,not granted (EVA-S01)
-clinician,evidence.domains.manage,evidence_corpus,false,not granted (EVA-S01)
-nurse,evidence.domains.manage,evidence_corpus,false,not granted (EVA-S01)
-auditor,evidence.domains.manage,evidence_corpus,false,not granted (EVA-S01)
-service,evidence.domains.manage,evidence_corpus,false,not granted (EVA-S01)
-knowledge_admin,evidence.domains.manage,evidence_corpus,true,manages web-search domain allowlist entries
-tenant_admin,evidence.ops.read,evidence,true,reads evidence pipeline/ops surfaces
-clinician,evidence.ops.read,evidence,false,not granted (EVA-S01)
-nurse,evidence.ops.read,evidence,false,not granted (EVA-S01)
-auditor,evidence.ops.read,evidence,true,reads evidence pipeline/ops surfaces, no clinical use
-service,evidence.ops.read,evidence,false,not granted (EVA-S01)
-knowledge_admin,evidence.ops.read,evidence,false,not granted (EVA-S01)
-clinician,report.sign,report,true,"HOTFIX — applying a КЕП to a clinical report is a clinician's legal act (Law 2155-VIII); this is the only role that holds it"
-tenant_admin,report.sign,report,false,"HOTFIX — an operational admin signing a clinical report is a compliance breach; admin ⟂ PHI already denies report.write, this denies the act itself"
-nurse,report.sign,report,false,"HOTFIX — a nurse prepares and finalizes (report.write) but may not apply a clinical signature; this was the live defect"
-auditor,report.sign,report,false,read-only role — no clinical acts
-service,report.sign,report,false,"a signature is a human legal act; signing-service S2S reads the report (report.read) but never initiates on its own authority"
-knowledge_admin,report.sign,report,false,corpus curation role only (EVA-S01)
-clinician,report.amend,report,true,"HOTFIX — amending a signed report re-signs it; same clinical act, same authority"
-tenant_admin,report.amend,report,false,HOTFIX — see report.sign
-nurse,report.amend,report,false,HOTFIX — see report.sign
-auditor,report.amend,report,false,read-only role — no clinical acts
-service,report.amend,report,false,human legal act
-knowledge_admin,report.amend,report,false,corpus curation role only (EVA-S01)
-clinician,consent.sign,consent,true,"HOTFIX — КЕП attestation of a patient consent is a clinical act; recording that a consent exists stays under patient.write"
-tenant_admin,consent.sign,consent,false,"HOTFIX — tenant_admin holds patient.write and so could sign consents; that was the live defect"
-nurse,consent.sign,consent,false,"HOTFIX — a nurse may capture the consent (patient.write) but not sign it"
-auditor,consent.sign,consent,false,read-only role — no clinical acts
-service,consent.sign,consent,false,human legal act
-knowledge_admin,consent.sign,consent,false,corpus curation role only (EVA-S01)

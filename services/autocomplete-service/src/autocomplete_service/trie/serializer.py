@@ -44,8 +44,6 @@ def serialize_trie(trie: TenantTrie) -> bytes:
                 "last_accepted_at": (
                     e.last_accepted_at.isoformat() if e.last_accepted_at else None
                 ),
-                "specialty": e.specialty,
-                "section_hint": e.section_hint,
             }
             for eid, e in trie.entries.items()
         },
@@ -76,8 +74,6 @@ def deserialize_trie(blob: bytes) -> TenantTrie:
                 impression_count=int(e["impression_count"]),
                 acceptance_count=int(e["acceptance_count"]),
                 last_accepted_at=datetime.fromisoformat(last) if last else None,
-                specialty=e.get("specialty"),
-                section_hint=e.get("section_hint"),
             )
         return TenantTrie(
             tenant_id=obj["tenant_id"],

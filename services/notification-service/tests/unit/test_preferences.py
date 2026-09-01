@@ -140,7 +140,7 @@ def test_deferral_next_morning_when_after_start() -> None:
 
 
 def test_defaults_apply_when_user_never_expressed_an_opinion() -> None:
-    in_app, email = _resolve(Category.REPORT_SIGNED, None)
+    in_app, email = _resolve(Category.NOTE_SHARED_WITH_YOU, None)
     assert in_app.dispatch is True
     assert email.dispatch is True
 
@@ -148,7 +148,7 @@ def test_defaults_apply_when_user_never_expressed_an_opinion() -> None:
 def test_email_off_is_honoured() -> None:
     """The core E8 case: off means off."""
     _in_app, email = _resolve(
-        Category.REPORT_SIGNED,
+        Category.NOTE_SHARED_WITH_YOU,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.OFF),
     )
     assert email.dispatch is False
@@ -157,7 +157,7 @@ def test_email_off_is_honoured() -> None:
 
 def test_in_app_off_is_honoured() -> None:
     in_app, _email = _resolve(
-        Category.REPORT_AMENDED,
+        Category.NOTE_AMENDED,
         UserPreference(in_app_enabled=False, email_mode=EmailMode.OFF),
     )
     assert in_app.dispatch is False
@@ -166,7 +166,7 @@ def test_in_app_off_is_honoured() -> None:
 
 def test_missing_email_address_suppresses_with_a_distinct_reason() -> None:
     _in_app, email = _resolve(
-        Category.REPORT_SIGNED,
+        Category.NOTE_SHARED_WITH_YOU,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.IMMEDIATE),
         has_email_address=False,
     )
@@ -176,7 +176,7 @@ def test_missing_email_address_suppresses_with_a_distinct_reason() -> None:
 
 def test_quiet_hours_defers_email_but_never_in_app() -> None:
     in_app, email = _resolve(
-        Category.REPORT_SIGNED,
+        Category.NOTE_SHARED_WITH_YOU,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.IMMEDIATE),
         settings=NIGHT,
         now=_at(2026, 7, 19, 23),
@@ -192,7 +192,7 @@ def test_quiet_hours_defers_email_but_never_in_app() -> None:
 
 def test_digest_mode_stands_down_the_immediate_channel() -> None:
     _in_app, email = _resolve(
-        Category.REPORT_AMENDED,
+        Category.NOTE_AMENDED,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.DIGEST),
     )
     assert email.dispatch is False
@@ -202,7 +202,7 @@ def test_digest_mode_stands_down_the_immediate_channel() -> None:
 def test_digest_mode_cannot_downgrade_an_alert_into_nothing() -> None:
     """A preference may batch routine news; it may not mute a failure."""
     _in_app, email = _resolve(
-        Category.REPORT_SIGNING_FAILED,
+        Category.SECURITY_MFA_REMINDER,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.DIGEST),
     )
     assert email.dispatch is True, "a non-digestible category must still send"
@@ -211,13 +211,13 @@ def test_digest_mode_cannot_downgrade_an_alert_into_nothing() -> None:
 
 def test_chain_failure_still_emails_admins_under_digest_preference() -> None:
     _in_app, email = _resolve(
-        Category.REPORT_CHAIN_FAILURE,
+        Category.NOTE_CHAIN_FAILURE,
         UserPreference(in_app_enabled=True, email_mode=EmailMode.DIGEST),
     )
     assert email.dispatch is True
 
 
 def test_decision_channels_are_labelled_correctly() -> None:
-    in_app, email = _resolve(Category.REPORT_SIGNED, None)
+    in_app, email = _resolve(Category.NOTE_SHARED_WITH_YOU, None)
     assert in_app.channel is Channel.IN_APP
     assert email.channel is Channel.EMAIL

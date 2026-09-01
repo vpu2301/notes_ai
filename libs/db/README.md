@@ -10,10 +10,10 @@ Two layers:
 ```python
 from db import create_pool, tenant_connection
 
-pool = await create_pool(dsn, application_name="encounters-service")
+pool = await create_pool(dsn, application_name="dictation-service")
 
 async with tenant_connection(pool, tenant_id) as conn:
-    rows = await conn.fetch("SELECT * FROM encounters")
+    rows = await conn.fetch("SELECT * FROM notes")
     # ↑ RLS guarantees rows belong to tenant_id
 ```
 

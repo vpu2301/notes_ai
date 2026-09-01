@@ -24,24 +24,28 @@ from unit.test_replay_determinism import ctx_from_fixture, stages_for_version  #
 from nlp_service.pipeline.base import StageInput  # noqa: E402
 from nlp_service.pipeline.orchestrator import Orchestrator, _encode_for_cache  # noqa: E402
 
-SMOKING_OPTIONS = [
+SUBSCRIPTION_OPTIONS = [
     {
         "value": "never",
-        "label": "не палить",
-        "aliases": ["не палить", "не курить", "заперечує куріння"],
+        "label": "не підписаний",
+        "aliases": ["не підписаний", "не підписана", "заперечує підписку"],
     },
-    {"value": "current", "label": "палить", "aliases": ["палить", "курить", "активний курець"]},
+    {
+        "value": "current",
+        "label": "підписаний",
+        "aliases": ["підписаний", "підписана", "активний підписник"],
+    },
     {
         "value": "former",
-        "label": "палив у минулому",
-        "aliases": ["кинув палити", "кинула палити", "колишній курець"],
+        "label": "підписаний у минулому",
+        "aliases": ["скасував підписку", "скасувала підписку", "колишній підписник"],
     },
 ]
 
 BASE_CONTEXT = {
     "tenant_id": "00000000-0000-0000-0000-00000000000a",
     "language": "uk",
-    "specialty": None,
+    "category": None,
     "reference_date": "2026-07-22",
     "is_partial": False,
     "fingerprint": "replay-fixture-fp",
@@ -53,11 +57,11 @@ TYPED_CONTEXT = {
     "template_sections": [
         {
             "id": "11111111-2222-3333-4444-555555555555",
-            "name": "Статус куріння",
-            "aliases": ["куріння"],
-            "section_key": "smoking_status",
+            "name": "Статус підписки",
+            "aliases": ["підписка"],
+            "section_key": "subscription_status",
             "field_type": "choice",
-            "options": SMOKING_OPTIONS,
+            "options": SUBSCRIPTION_OPTIONS,
         }
     ],
 }
@@ -67,43 +71,43 @@ CASES: list[tuple[str, str, str, dict]] = [
     (
         "v1_0_0_numbers_and_dates",
         "nlp-v1.0.0",
-        "артеріальний тиск сто сорок на дев'яносто, температура тридцять сім і два",
+        "ширина сто сорок сантиметрів, вага тридцять сім кілограмів",
         BASE_CONTEXT,
     ),
     (
         "v1_0_0_plain_prose",
         "nlp-v1.0.0",
-        "пацієнт скаржиться на головний біль протягом трьох днів",
+        "команда обговорює план проєкту протягом трьох днів",
         BASE_CONTEXT,
     ),
     (
-        "v1_0_0_smoking_prose_no_typed_sections",
+        "v1_0_0_subscription_prose_no_typed_sections",
         "nlp-v1.0.0",
-        "пацієнт не палить, алкоголь заперечує",
+        "клієнт не підписаний, від розсилки відмовився",
         BASE_CONTEXT,
     ),
     (
         "v1_1_0_numbers_and_dates",
         "nlp-v1.1.0",
-        "артеріальний тиск сто сорок на дев'яносто, температура тридцять сім і два",
+        "ширина сто сорок сантиметрів, вага тридцять сім кілограмів",
         BASE_CONTEXT,
     ),
     (
         "v1_1_0_extraction_filled",
         "nlp-v1.1.0",
-        "пацієнт курить, стаж двадцять років",
+        "клієнт підписаний, оплата щомісяця",
         TYPED_CONTEXT,
     ),
     (
         "v1_1_0_extraction_negated",
         "nlp-v1.1.0",
-        "пацієнт не палить, алкоголь заперечує",
+        "клієнт не підписаний, від розсилки відмовився",
         TYPED_CONTEXT,
     ),
     (
         "v1_1_0_extraction_empty",
         "nlp-v1.1.0",
-        "скарги на головний біль протягом трьох днів",
+        "зауваження щодо бюджету протягом трьох днів",
         TYPED_CONTEXT,
     ),
 ]

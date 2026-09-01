@@ -9,39 +9,33 @@
             "title": "Audio",
             "type": "string"
           },
-          "encounter_id": {
+          "language": {
+            "pattern": "^(uk|en)$",
+            "title": "Language",
+            "type": "string"
+          },
+          "vocabulary_hint": {
             "anyOf": [
               {
-                "format": "uuid",
+                "maxLength": 2000,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Encounter Id"
-          },
-          "language": {
-            "pattern": "^(uk|en)$",
-            "title": "Language",
-            "type": "string"
-          },
-          "prompt_id": {
-            "format": "uuid",
-            "title": "Prompt Id",
-            "type": "string"
+            "title": "Vocabulary Hint"
           }
         },
         "required": [
           "audio",
-          "prompt_id",
           "language"
         ],
         "title": "Body_submit_job_asr_jobs_post",
         "type": "object"
       },
       "ConfidenceSpanView": {
-        "description": "A character range in an enriched segment's ``text`` flagged by the\nNLP confidence stage (low word-probability regions, clinically risky\nnumbers, \u2026).",
+        "description": "A character range in an enriched segment's ``text`` flagged by the\nNLP confidence stage (low word-probability regions, risky numbers,\n\u2026).",
         "properties": {
           "end_char": {
             "minimum": 0.0,
@@ -154,36 +148,6 @@
         ],
         "title": "JobStatus",
         "type": "string"
-      },
-      "PromptSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "is_default": {
-            "title": "Is Default",
-            "type": "boolean"
-          },
-          "language": {
-            "title": "Language",
-            "type": "string"
-          },
-          "specialty": {
-            "title": "Specialty",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "language",
-          "specialty",
-          "is_default"
-        ],
-        "title": "PromptSummary",
-        "type": "object"
       },
       "ReadyResponse": {
         "properties": {
@@ -316,7 +280,7 @@
                 "type": "null"
               }
             ],
-            "description": "PHI-free explanation, safe to show.\n\nBuilt from the kind alone. ``error_detail`` is assembled from an\nexception that may quote the audio it choked on, and is not\n(ADR-0031).",
+            "description": "Explanation safe to show \u2014 carries no sensitive content.\n\nBuilt from the kind alone. ``error_detail`` is assembled from an\nexception that may quote the audio it choked on, and is not\n(ADR-0031).",
             "readOnly": true,
             "title": "Error Message"
           },
@@ -371,45 +335,6 @@
             "title": "Model",
             "type": "string"
           },
-          "patient_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Patient Id"
-          },
-          "patient_name_en": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Patient Name En"
-          },
-          "patient_name_uk": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Patient Name Uk"
-          },
-          "prompt_id": {
-            "format": "uuid",
-            "title": "Prompt Id",
-            "type": "string"
-          },
           "queued_at": {
             "format": "date-time",
             "title": "Queued At",
@@ -457,7 +382,6 @@
           "tenant_id",
           "audio_id",
           "requester_sub",
-          "prompt_id",
           "language",
           "model",
           "status",
@@ -496,18 +420,6 @@
             "minimum": 0.0,
             "title": "Peak Gpu Mem Mb",
             "type": "integer"
-          },
-          "prompt_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt Id"
           },
           "vad_seconds_speech": {
             "minimum": 0.0,
@@ -599,7 +511,7 @@
     }
   },
   "info": {
-    "description": "Sprint-03 batch ASR orchestrator (upload, queue, fetch).",
+    "description": "Batch ASR orchestrator (upload, queue, fetch).",
     "title": "ASR Service",
     "version": "0.3.0"
   },
@@ -607,7 +519,7 @@
   "paths": {
     "/asr/jobs": {
       "get": {
-        "description": "S14 \u2014 two standings reach this list.\n\n`asr.read` (clinician / nurse) gets the clinical list, and since S14\neach row names the patient whose recording it is. `stats.read`\n(tenant_admin, who holds no clinical read) gets the same rows with\nevery patient reference and every pointer AT the audio stripped:\nenough to count jobs and chart throughput on the business dashboard,\nnot enough to identify or open anything.",
+        "description": "One view for every caller. Reachable by a member with `asr.read`\nand by a tenant_admin with only `stats.read` (job counts and\nthroughput for the business dashboard). The row carries no\ntranscript content; the transcript itself stays behind `asr.read`\non the result endpoint.",
         "operationId": "list_jobs_asr_jobs_get",
         "parameters": [
           {
@@ -936,92 +848,6 @@
           }
         },
         "summary": "Fetch a completed job's transcript (409 if not ready).",
-        "tags": [
-          "asr"
-        ]
-      }
-    },
-    "/asr/prompts": {
-      "get": {
-        "operationId": "list_prompts_asr_prompts_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "language",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "pattern": "^(uk|en)$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Language"
-            }
-          },
-          {
-            "in": "query",
-            "name": "specialty",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Specialty"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PromptSummary"
-                  },
-                  "title": "Response List Prompts Asr Prompts Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List the medical-prompt catalogue (optionally filtered).",
         "tags": [
           "asr"
         ]

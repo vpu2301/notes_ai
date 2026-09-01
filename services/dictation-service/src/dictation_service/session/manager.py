@@ -40,10 +40,10 @@ class SessionContext:
     tenant_id: UUID
     user_id: UUID
     language: str
-    prompt_id: UUID
-    prompt_text: str
+    # Free-text vocabulary hint fed to Whisper's initial_prompt (from
+    # start_session or the service-wide config default). Empty = none.
+    vocabulary_hint: str
     target_kind: str
-    encounter_id: UUID | None
     template_id: UUID | None
     template_text: str | None = None
 
@@ -94,23 +94,22 @@ class SessionContext:
     active_section_id: str | None = None
     active_section_prompt: str | None = None
 
-    # Sprint-14: conversation mode + protocol v2. The diarization stream
-    # and mapping inference live on the context so an in-process resume
-    # keeps the speaker timeline exactly like `finalized_segments`.
+    # Sprint-14: conversation (meeting) mode + protocol v2. The
+    # diarization stream and speaker naming live on the context so an
+    # in-process resume keeps the speaker timeline exactly like
+    # `finalized_segments`.
     mode: str = "dictation"  # 'dictation' | 'conversation'
     protocol_version: int = 1
-    bearer: str | None = None  # raw token — draft creation forwards the clinician's identity
+    bearer: str | None = None  # raw token — draft creation forwards the caller's identity
     capacity_weight: int = 1
-    patient_id: UUID | None = None  # resolved by the consent gate (conversation only)
     diarization: Any | None = None  # DiarizationStream (Any: torch-free import path)
-    mapping_inference: Any | None = None  # SpeakerMappingInference
-    mapping_manual: bool = False  # a SetSpeakerMapping arrived; inference frozen
+    speaker_naming: Any | None = None  # SpeakerNaming (conversation only)
+    mapping_manual: bool = False  # a SetSpeakerMapping arrived
     # Honesty metrics (Grafana DER proxy). Counted on COMMITTED words
     # only — partials are re-emitted every tick until they commit.
     unknown_speaker_words: int = 0
     labeled_speaker_words: int = 0
     pending_speaker_words: int = 0
-    speaker_mapping_updates: int = 0
     speaker_mapping_manual_sets: int = 0
 
     def touch(self) -> None:

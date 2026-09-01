@@ -2,14 +2,14 @@
 """CI gate — validate every template JSON file in ``infra/seeds/templates/``.
 
 Each file must:
-- Parse against ``TemplateDefinition`` Pydantic model (which enforces
-  the sprint-13 options rules: choice/multi_choice sections carry 2..50
-  options, other field types carry none; values/labels/aliases unique).
+- Parse against the ``TemplateDefinition`` Pydantic model (which enforces
+  the options rules: choice/multi_choice sections carry 2..50 options,
+  other field types carry none; values/labels/aliases unique).
 - Have ``asr_prompt`` ≤ 224 tokens per section (tiktoken cl100k_base).
 - Have unique ``voice_aliases`` across sections (the model enforces this).
 - File name must match ``code.json``.
-- Contain no PII in option labels/aliases (sprint-13): template options
-  are shared clinical vocabulary, same rule as the autocomplete corpus.
+- Contain no personal data in option labels/aliases: template options are
+  shared vocabulary, same rule as the autocomplete corpus.
 
 Run::
 
@@ -40,14 +40,13 @@ except ImportError:
 SEED_DIR = Path(__file__).resolve().parents[1] / "infra" / "seeds" / "templates"
 ASR_PROMPT_MAX_TOKENS = 224
 
-# Mirror of autocomplete_service.scrubber._PATTERNS (same set as
-# scripts/validate-autocomplete-corpus.py) — template options must never
-# contain patient data.
+# Mirror of autocomplete_service.scrubber patterns — template options must
+# never contain personal data (emails, phone numbers, national id numbers,
+# dates of birth).
 PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
-    ("ipn", re.compile(r"\b\d{10}\b")),
-    ("med_id", re.compile(r"\b\d{13}\b")),
-    ("passport", re.compile(r"\b[A-Za-zА-ЯЇІЄҐа-яїієґ]{2}\s?\d{6}\b")),
+    ("national_id", re.compile(r"\b\d{10}\b")),
+    ("long_id", re.compile(r"\b\d{13}\b")),
     ("dob_like", re.compile(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b")),
     ("phone", re.compile(r"(?<![\d+])\+?\d{7,14}(?!\d)")),
 ]
@@ -110,7 +109,7 @@ def main() -> int:
                     f"{n} tokens (max {ASR_PROMPT_MAX_TOKENS})"
                 )
 
-        # Sprint-13: PII sweep over choice options.
+        # Personal-data sweep over choice options.
         n_choice = 0
         for section in tpl.sections:
             if not section.options:
@@ -125,12 +124,12 @@ def main() -> int:
                     if hits:
                         failures.append(
                             f"{path.name} section={section.id} {where}: "
-                            f"PII pattern(s) matched: {', '.join(hits)}"
+                            f"personal-data pattern(s) matched: {', '.join(hits)}"
                         )
 
         suffix = f", {n_choice} choice" if n_choice else ""
         print(
-            f"ok: {path.name} — {tpl.specialty}/{tpl.language} "
+            f"ok: {path.name} — {tpl.category}/{tpl.language} "
             f"({len(tpl.sections)} sections{suffix})"
         )
 

@@ -1,7 +1,7 @@
 """Step-06 §8 — RLS write-authority mapping through the route handlers.
 
 The DB is the authority matrix; the handlers only map its rejections:
-clinician posting source='tenant' → 403 forbidden_scope; tenant_admin
+member posting source='tenant' → 403 forbidden_scope; tenant_admin
 same body → 201; user A deleting user B's row → 404 (no existence
 oracle). Audit events land on the chain for successful writes.
 
@@ -34,11 +34,9 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-AUDIT_DSN = (
-    f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-)
+AUDIT_DSN = f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 SU_DSN = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
@@ -47,8 +45,15 @@ MARK = "itest-s06"
 
 def _claims(sub: UUID, role: str) -> Claims:
     return Claims(
-        sub=sub, tid=TENANT_A, roles=[role], scope="openid",
-        sid="s", iss="test", aud="mdx-api", exp=2_000_000_000, iat=1,
+        sub=sub,
+        tid=TENANT_A,
+        roles=[role],
+        scope="openid",
+        sid="s",
+        iss="test",
+        aud="mdx-api",
+        exp=2_000_000_000,
+        iat=1,
     )
 
 
@@ -79,7 +84,9 @@ class _State:
 @pytest.fixture
 async def env():
     app_pool = await create_pool(APP_DSN, application_name="s06-itest", min_size=1, max_size=2)
-    audit_pool = await create_pool(AUDIT_DSN, application_name="s06-itest-a", min_size=1, max_size=2)
+    audit_pool = await create_pool(
+        AUDIT_DSN, application_name="s06-itest-a", min_size=1, max_size=2
+    )
     su = await asyncpg.connect(SU_DSN)
     users = await su.fetch("SELECT sub FROM users WHERE tenant_id = $1 LIMIT 2", TENANT_A)
     if len(users) < 2:
@@ -93,11 +100,11 @@ async def env():
     await audit_pool.close()
 
 
-async def test_clinician_tenant_scope_maps_to_403(env):
+async def test_member_tenant_scope_maps_to_403(env):
     state, su, user_a, _ = env
     body = CreatePhraseRequest(phrase=f"{MARK} клінічна фраза", language="uk", source="tenant")
     with pytest.raises(HTTPException) as exc:
-        await create_phrase(body, _claims(user_a, "clinician"))
+        await create_phrase(body, _claims(user_a, "member"))
     assert exc.value.status_code == 403
     assert exc.value.detail["error"] == "forbidden_scope"
     n = await su.fetchval(
@@ -123,18 +130,14 @@ async def test_user_a_deleting_user_b_row_gets_404(env):
     state, su, user_a, user_b = env
     dto = await create_phrase(
         CreatePhraseRequest(phrase=f"{MARK} моя фраза юзера б", language="uk"),
-        _claims(user_b, "clinician"),
+        _claims(user_b, "member"),
     )
     with pytest.raises(HTTPException) as exc:
-        await delete_phrase(dto.id, _claims(user_a, "clinician"))
+        await delete_phrase(dto.id, _claims(user_a, "member"))
     assert exc.value.status_code == 404  # indistinguishable from nonexistent
-    enabled = await su.fetchval(
-        "SELECT enabled FROM autocomplete_phrases WHERE id=$1", dto.id
-    )
+    enabled = await su.fetchval("SELECT enabled FROM autocomplete_phrases WHERE id=$1", dto.id)
     assert enabled is True  # untouched
     # owner CAN delete it
-    await delete_phrase(dto.id, _claims(user_b, "clinician"))
-    enabled = await su.fetchval(
-        "SELECT enabled FROM autocomplete_phrases WHERE id=$1", dto.id
-    )
+    await delete_phrase(dto.id, _claims(user_b, "member"))
+    enabled = await su.fetchval("SELECT enabled FROM autocomplete_phrases WHERE id=$1", dto.id)
     assert enabled is False

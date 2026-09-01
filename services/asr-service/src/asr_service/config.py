@@ -38,11 +38,11 @@ class Settings(BaseSettings):
 
     # ── libs/auth (Keycloak) ─────────────────────────────────────────────
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -64,15 +64,15 @@ class Settings(BaseSettings):
 
     # ── Database DSNs ───────────────────────────────────────────────────
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@localhost:5432/medical_dictation",
+        default="postgresql://app_role:app_role@localhost:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_crypto_writer_dsn: str = Field(
-        default="postgresql://crypto_writer:crypto_writer@localhost:5432/medical_dictation",
+        default="postgresql://crypto_writer:crypto_writer@localhost:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
     )
     db_pool_min_size: int = Field(default=1, alias="DB_POOL_MIN_SIZE")
@@ -105,18 +105,16 @@ class Settings(BaseSettings):
     # fallback for rows not yet re-wrapped (scripts/kms/rewrap-tenant-keks.py).
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
-    vault_token: SecretStrEnv = Field(
-        default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN"
-    )
+    vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
     # ── Upload validation ───────────────────────────────────────────────
     max_upload_mb: int = Field(default=100, alias="MD_ASR_MAX_UPLOAD_MB")
     max_duration_seconds: int = Field(default=30 * 60, alias="MD_ASR_MAX_DURATION_SECONDS")
-    # Floor, not a cap: below this an upload cannot carry a clinical
+    # Floor, not a cap: below this an upload cannot carry a usable
     # utterance, and Whisper answers a fraction of a second of noise with a
-    # confident hallucination. Rejecting is safer than charting it.
+    # confident hallucination. Rejecting is safer than storing it.
     min_duration_ms: int = Field(default=400, alias="MD_ASR_MIN_DURATION_MS")
     min_sample_rate_hz: int = Field(default=8000, alias="MD_ASR_MIN_SAMPLE_RATE_HZ")
     max_channels: int = Field(default=2, alias="MD_ASR_MAX_CHANNELS")
@@ -132,7 +130,7 @@ class Settings(BaseSettings):
     # ── Stranded-job reaper ─────────────────────────────────────────────
     # The only terminal writer for a job is the worker that owns it, so a
     # worker killed mid-inference leaves its row in `running` forever —
-    # burning a per_tenant_concurrent_jobs slot and showing the clinician a
+    # burning a per_tenant_concurrent_jobs slot and showing the user a
     # job that never resolves. The reaper is the out-of-process backstop
     # (asr_service.domain.reaper).
     #
@@ -141,9 +139,7 @@ class Settings(BaseSettings):
     # allows itself — max_duration_seconds × the worker's inference
     # multiplier (30 min × 5 = 2.5 h at the defaults), plus a redelivery.
     job_reaper_enabled: bool = Field(default=True, alias="MD_ASR_JOB_REAPER_ENABLED")
-    job_reaper_interval_s: float = Field(
-        default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S"
-    )
+    job_reaper_interval_s: float = Field(default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S")
     job_reaper_running_grace_s: float = Field(
         default=3 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
     )
@@ -166,9 +162,7 @@ class Settings(BaseSettings):
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 
 settings = Settings()

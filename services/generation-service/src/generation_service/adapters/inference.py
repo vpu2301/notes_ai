@@ -1,6 +1,6 @@
 """Inference backend seam (ADR-0036).
 
-Same swap-seam doctrine as report-service ``domain/synthesis.py``: the
+Same swap-seam doctrine as note-service ``domain/synthesis.py``: the
 engine is a Protocol; changing backends is one env var, not a refactor.
 Two real backends ship:
 
@@ -64,9 +64,7 @@ class LlamaCppClient:
             },
         )
         resp.raise_for_status()
-        return CompletionResult(
-            text=resp.json().get("content", ""), model=self._model
-        )
+        return CompletionResult(text=resp.json().get("content", ""), model=self._model)
 
     async def ready(self) -> bool:
         try:
@@ -99,9 +97,7 @@ class OllamaClient:
             },
         )
         resp.raise_for_status()
-        return CompletionResult(
-            text=resp.json().get("response", ""), model=self._model
-        )
+        return CompletionResult(text=resp.json().get("response", ""), model=self._model)
 
     async def ready(self) -> bool:
         try:

@@ -82,7 +82,7 @@ def test_typical_event_record_shape() -> None:
         "seq": 1,
         "created_at": "2026-05-11T12:34:56.789+00:00",
         "actor_sub": "11111111-1111-1111-1111-111111111111",
-        "actor_role": "clinician",
+        "actor_role": "member",
         "kind": "auth.login",
         "target_kind": None,
         "target_id": None,

@@ -487,73 +487,6 @@
         "title": "PolicyResponse",
         "type": "object"
       },
-      "ReauthRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "password": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
-          },
-          "purpose": {
-            "const": "phi_access_request",
-            "default": "phi_access_request",
-            "title": "Purpose",
-            "type": "string"
-          },
-          "totp_code": {
-            "anyOf": [
-              {
-                "maxLength": 8,
-                "minLength": 6,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Totp Code"
-          }
-        },
-        "required": [
-          "password"
-        ],
-        "title": "ReauthRequest",
-        "type": "object"
-      },
-      "ReauthResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "expires_in": {
-            "title": "Expires In",
-            "type": "integer"
-          },
-          "factors": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Factors",
-            "type": "array"
-          },
-          "purpose": {
-            "title": "Purpose",
-            "type": "string"
-          },
-          "reauth_ticket": {
-            "title": "Reauth Ticket",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reauth_ticket",
-          "expires_in",
-          "purpose",
-          "factors"
-        ],
-        "title": "ReauthResponse",
-        "type": "object"
-      },
       "ResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1486,7 +1419,7 @@
     }
   },
   "info": {
-    "description": "Sprint-02 identity, tenant, and audit-read service.",
+    "description": "Identity, tenant, and audit-read service.",
     "title": "Auth Service",
     "version": "0.2.0"
   },
@@ -2707,65 +2640,6 @@
         ]
       }
     },
-    "/auth/reauth": {
-      "post": {
-        "operationId": "reauth_auth_reauth_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReauthRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReauthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Re-enter your password to mint a single-use step-up ticket",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
     "/auth/refresh": {
       "post": {
         "operationId": "refresh_auth_refresh_post",
@@ -3102,7 +2976,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Onboard a new clinic/tenant; the caller becomes its owner",
+        "summary": "Onboard a new company/tenant; the caller becomes its owner",
         "tags": [
           "tenants"
         ]

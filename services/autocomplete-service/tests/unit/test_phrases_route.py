@@ -30,8 +30,15 @@ REPO = Path(__file__).resolve().parents[4]
 
 def _claims() -> Claims:
     return Claims(
-        sub=uuid4(), tid=uuid4(), roles=["clinician"], scope="openid",
-        sid="s", iss="test", aud="mdx-api", exp=2_000_000_000, iat=1,
+        sub=uuid4(),
+        tid=uuid4(),
+        roles=["member"],
+        scope="openid",
+        sid="s",
+        iss="test",
+        aud="mdx-api",
+        exp=2_000_000_000,
+        iat=1,
     )
 
 
@@ -102,13 +109,13 @@ def test_snippet_cursor_beyond_expansion_rejected():
 async def test_pii_phrase_rejected_audited_never_stored():
     state = _State()
     install_state(state)
-    body = CreatePhraseRequest(phrase="пацієнт ІПН 1234567890", language="uk")
+    body = CreatePhraseRequest(phrase="tax id 1234567890", language="uk")
     with pytest.raises(HTTPException) as exc:
         await create_phrase(body, _claims())
     assert exc.value.status_code == 422
     assert exc.value.detail["error"] == "pii_detected"
-    # a 10-digit run hits both the exact-10 IPN class and the 7–14 phone sweep
-    assert exc.value.detail["patterns"] == ["ipn", "phone"]
+    # a 10-digit unbroken run hits the long-digit-run sweep
+    assert exc.value.detail["patterns"] == ["digit_run"]
     # never echo the match
     assert "1234567890" not in str(exc.value.detail)
     # security audit emitted with length, not text
@@ -117,7 +124,7 @@ async def test_pii_phrase_rejected_audited_never_stored():
     assert "1234567890" not in str(event["payload"])
     assert event["payload"]["text_length"] == len(body.phrase)
     # metric labelled by pattern (one add per class)
-    assert state.pii_rejections_metric.added == [{"pattern": "ipn"}, {"pattern": "phone"}]
+    assert state.pii_rejections_metric.added == [{"pattern": "digit_run"}]
     # _NeverPool would have raised if the DB were touched
 
 
@@ -125,7 +132,7 @@ async def test_rate_limited_write_gets_429_before_anything_else():
     state = _State()
     state.phrase_rate_limiter = _Limiter(allowed=False)
     install_state(state)
-    body = CreatePhraseRequest(phrase="звичайна фраза", language="uk")
+    body = CreatePhraseRequest(phrase="an ordinary phrase", language="uk")
     with pytest.raises(HTTPException) as exc:
         await create_phrase(body, _claims())
     assert exc.value.status_code == 429
@@ -142,9 +149,7 @@ def test_every_kind_in_code_is_registered_in_constants_and_docs():
     used = set()
     for p in src_dir.rglob("*.py"):
         used.update(re.findall(r"audit_kinds\.([A-Z_]+)", p.read_text("utf-8")))
-    constants = {
-        name for name in vars(audit_kinds) if name.isupper()
-    }
+    constants = {name for name in vars(audit_kinds) if name.isupper()}
     assert used <= constants, f"kinds used but not declared: {used - constants}"
 
     docs = (REPO / "docs" / "audit" / "event-kinds.md").read_text("utf-8")

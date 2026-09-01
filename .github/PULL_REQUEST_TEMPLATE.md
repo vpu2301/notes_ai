@@ -22,7 +22,7 @@
 ## Security & PII checklist
 
 - [ ] No secrets, credentials, or tokens are committed (not even in tests)
-- [ ] No PII fields (`patient_*`, `transcript`, `audio_*`, `name`, `email`) appear in log messages
+- [ ] No PII fields (`transcript`, `audio_*`, `name`, `email`) appear in log messages
 - [ ] Any new API input is validated by Pydantic before use
 - [ ] SQL queries use parameterised statements (no string interpolation)
 - [ ] New dependencies reviewed for known CVEs (`trivy` / `pip-audit`)

@@ -87,9 +87,7 @@ class ServiceState:
                 min_size=1,
                 max_size=2,
             )
-            kek_repo = TenantKekRepository(
-                pool=self.crypto_pool, master_key_provider=master
-            )
+            kek_repo = TenantKekRepository(pool=self.crypto_pool, master_key_provider=master)
             self.envelope = Envelope(master_key_provider=master, kek_repository=kek_repo)
             return self.envelope
 
@@ -182,9 +180,7 @@ async def build_state() -> ServiceState:
             # at all is the same posture, so it must not stop the service
             # from starting. The router treats None as "no limit" and
             # logs it once here rather than on every request.
-            logging.getLogger(__name__).warning(
-                "auth.password.rate_limiter_unavailable_fail_open"
-            )
+            logging.getLogger(__name__).warning("auth.password.rate_limiter_unavailable_fail_open")
 
     return ServiceState(
         jwks_cache=jwks_cache,

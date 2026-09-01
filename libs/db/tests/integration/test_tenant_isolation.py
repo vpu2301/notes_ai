@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 # the RLS path that production traffic flows through.
 DSN = os.environ.get(
     "TEST_DSN",
-    "postgresql://app_role:app_role@localhost:5432/medical_dictation",
+    "postgresql://app_role:app_role@localhost:5432/notes",
 )
 
 

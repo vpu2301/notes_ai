@@ -1,55 +1,55 @@
 {
   "context": {
+    "category": null,
     "fingerprint": "replay-fixture-fp",
     "is_partial": false,
     "language": "uk",
     "reference_date": "2026-07-22",
-    "specialty": null,
     "template_sections": [
       {
         "aliases": [
-          "куріння"
+          "підписка"
         ],
         "field_type": "choice",
         "id": "11111111-2222-3333-4444-555555555555",
-        "name": "Статус куріння",
+        "name": "Статус підписки",
         "options": [
           {
             "aliases": [
-              "не палить",
-              "не курить",
-              "заперечує куріння"
+              "не підписаний",
+              "не підписана",
+              "заперечує підписку"
             ],
-            "label": "не палить",
+            "label": "не підписаний",
             "value": "never"
           },
           {
             "aliases": [
-              "палить",
-              "курить",
-              "активний курець"
+              "підписаний",
+              "підписана",
+              "активний підписник"
             ],
-            "label": "палить",
+            "label": "підписаний",
             "value": "current"
           },
           {
             "aliases": [
-              "кинув палити",
-              "кинула палити",
-              "колишній курець"
+              "скасував підписку",
+              "скасувала підписку",
+              "колишній підписник"
             ],
-            "label": "палив у минулому",
+            "label": "підписаний у минулому",
             "value": "former"
           }
         ],
-        "section_key": "smoking_status"
+        "section_key": "subscription_status"
       }
     ],
     "tenant_id": "00000000-0000-0000-0000-00000000000a"
   },
-  "expected_encoded": "{\"confidence_spans\":[],\"metadata\":{\"abbreviation.applied\":0,\"abbreviation.snapshot_fingerprint\":\"replay-fixture-fp\",\"confidence.spans\":0,\"date_norm.changed\":false,\"number_norm.changed\":false},\"operations\":[],\"text\":\"скарги на головний біль протягом трьох днів\",\"voice_commands\":[],\"warnings\":[],\"words\":[]}",
+  "expected_encoded": "{\"confidence_spans\":[],\"metadata\":{\"abbreviation.applied\":0,\"abbreviation.snapshot_fingerprint\":\"replay-fixture-fp\",\"confidence.spans\":0,\"date_norm.changed\":false,\"number_norm.changed\":false},\"operations\":[],\"text\":\"зауваження щодо бюджету протягом трьох днів\",\"voice_commands\":[],\"warnings\":[],\"words\":[]}",
   "input": {
-    "text": "скарги на головний біль протягом трьох днів"
+    "text": "зауваження щодо бюджету протягом трьох днів"
   },
   "pipeline_version": "nlp-v1.1.0"
 }

@@ -1,0 +1,75 @@
+{
+  "code": "one_on_one",
+  "name": "One-on-one",
+  "language": "en",
+  "specialty": "people",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "check_in",
+      "name": "Check-in",
+      "voice_aliases": ["check in", "how are you"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Personal check-in. Mood, energy, workload, work-life balance, time off, general wellbeing.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Two or three sentences capturing how the person is doing overall."
+    },
+    {
+      "id": "wins",
+      "name": "Wins since last time",
+      "voice_aliases": ["wins", "highlights", "went well"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Recent wins and highlights. Shipped, delivered, closed, launched, milestone reached, positive feedback, kudos.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Short bullet list of concrete wins, most impactful first."
+    },
+    {
+      "id": "challenges",
+      "name": "Challenges and blockers",
+      "voice_aliases": ["challenges", "blockers", "problems"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Challenges and blockers. Blocked by, waiting on, dependency, unclear priorities, capacity, tooling issues, cross-team friction.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "One bullet per challenge: the problem, its impact, and what help is needed."
+    },
+    {
+      "id": "feedback",
+      "name": "Feedback",
+      "voice_aliases": ["feedback", "two way feedback"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Feedback in both directions. Manager feedback, peer feedback, what to keep doing, what to change, expectations.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Separate 'feedback given' and 'feedback received', each as brief bullets."
+    },
+    {
+      "id": "growth",
+      "name": "Growth and development",
+      "voice_aliases": ["growth", "development", "career"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Growth and career development. Goals, skills, training, mentoring, promotion, new responsibilities, stretch project.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Summarise development goals and any agreed steps towards them."
+    },
+    {
+      "id": "action_items",
+      "name": "Action items",
+      "voice_aliases": ["action items", "actions", "next steps"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Action items. Assignee, task, due date, follow up next one-on-one, check back on.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "One bullet per action item in the form 'Owner: task — due date'."
+    }
+  ]
+}

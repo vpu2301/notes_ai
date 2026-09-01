@@ -25,9 +25,9 @@
             "title": "Language",
             "type": "string"
           },
-          "report_id": {
+          "note_id": {
             "format": "uuid",
-            "title": "Report Id",
+            "title": "Note Id",
             "type": "string"
           },
           "section_key": {
@@ -44,7 +44,7 @@
           }
         },
         "required": [
-          "report_id",
+          "note_id",
           "section_key",
           "text_before_cursor",
           "language"

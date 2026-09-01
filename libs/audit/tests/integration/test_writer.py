@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 
 WRITER_DSN = f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
@@ -78,7 +78,7 @@ async def test_sequential_writes_produce_monotonic_seq(writer_pool: asyncpg.Pool
         r = await writer.write_event(
             tenant_id=tenant,
             kind="test.event",
-            actor_role="clinician",
+            actor_role="member",
             payload={"i": i},
         )
         receipts.append(r)
@@ -107,7 +107,7 @@ async def test_chain_hashes_are_recomputable(
         await writer.write_event(
             tenant_id=tenant,
             kind="test.event",
-            actor_role="clinician",
+            actor_role="member",
             actor_sub=UUID(int=i + 1),
             payload={"i": i},
         )
@@ -266,7 +266,7 @@ async def test_thousand_events_form_continuous_verifiable_chain(
         await writer.write_event(
             tenant_id=tenant,
             kind="bulk.event",
-            actor_role="clinician",
+            actor_role="member",
             payload={"i": i},
         )
 

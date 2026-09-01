@@ -1,0 +1,103 @@
+<!doctype html>
+{% set is_en = (language == "en") %}
+<html lang="{{ language }}">
+<head>
+<meta charset="utf-8" />
+<title>{{ title }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 22mm 18mm;
+    {% if is_draft %}
+    @top-center {
+      content: "{{ "Draft" if is_en else "Чернетка" }}";
+      color: #b00020;
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 9pt;
+      font-weight: bold;
+    }
+    {% endif %}
+  }
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 11pt; line-height: 1.4; }
+  h1   { font-size: 18pt; margin: 0 0 4pt; }
+  h2   { font-size: 13pt; margin: 16pt 0 4pt; border-bottom: 1px solid #888; padding-bottom: 2pt; }
+  .meta { color: #555; font-size: 10pt; margin-bottom: 8pt; }
+  .header-block { margin-bottom: 12pt; }
+  .section-text { white-space: pre-wrap; }
+  .author-block { margin-top: 24pt; padding-top: 10pt; border-top: 1px dashed #888; }
+  .label { color: #555; font-size: 9pt; }
+  {% if is_draft %}
+  .draft-banner {
+    border: 1.5pt solid #b00020;
+    color: #b00020;
+    background: #fdecec;
+    font-weight: bold;
+    text-align: center;
+    padding: 6pt;
+    margin-bottom: 12pt;
+    letter-spacing: 1pt;
+  }
+  .draft-watermark {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    overflow: hidden;
+  }
+  .draft-watermark span {
+    position: absolute;
+    top: 45%;
+    left: -10%;
+    width: 120%;
+    text-align: center;
+    transform: rotate(-35deg);
+    font-size: 90pt;
+    font-weight: bold;
+    color: #b00020;
+    opacity: 0.08;
+    letter-spacing: 12pt;
+  }
+  {% endif %}
+</style>
+</head>
+<body>
+  {% if is_draft %}
+    <div class="draft-watermark">
+      <span>{{ "DRAFT" if is_en else "ЧЕРНЕТКА" }}</span>
+    </div>
+    <div class="draft-banner">
+      {{ "DRAFT — NOT FINALIZED" if is_en else "ЧЕРНЕТКА — НЕ ФІНАЛІЗОВАНО" }}
+    </div>
+  {% endif %}
+
+  <div class="header-block">
+    <h1>{{ title }}</h1>
+    <div class="meta">
+      <div><span class="label">{{ "Code:" if is_en else "Код:" }}</span> {{ code }}</div>
+      <div><span class="label">{{ "Organisation:" if is_en else "Організація:" }}</span> {{ issuer }}</div>
+    </div>
+  </div>
+
+  {% for s in sections %}
+    {% if s.text %}
+      <h2>{{ s.key }}</h2>
+      <div class="section-text">{{ s.text }}</div>
+    {% endif %}
+  {% endfor %}
+
+  <div class="author-block">
+    <div class="label">{{ "Author:" if is_en else "Автор:" }}</div>
+    <div>{{ primary_author }}</div>
+    {% if co_authors %}
+      <div class="label" style="margin-top: 6pt;">{{ "Co-authors:" if is_en else "Спів-автори:" }}</div>
+      <div>{{ co_authors | join(", ") }}</div>
+    {% endif %}
+    {% if finalized_at %}
+      <div class="label" style="margin-top: 6pt;">{{ "Finalized:" if is_en else "Фіналізовано:" }}</div>
+      <div>{{ finalized_at }}</div>
+    {% endif %}
+  </div>
+</body>
+</html>

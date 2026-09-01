@@ -34,7 +34,7 @@ from .voice_command_matcher import CommandSpec, MatchResult, VoiceCommandMatcher
 
 logger = logging.getLogger(__name__)
 
-# Sprint-13 observability for the anamnesis commands. LABEL DISCIPLINE:
+# Observability for the typed-field commands. LABEL DISCIPLINE:
 # ``op`` and ``reason`` are closed enums from operations.py — never an
 # option value, never a section key with free-text provenance.
 _meter = metrics.get_meter("mdx.nlp.commands")
@@ -130,7 +130,7 @@ class VoiceCommandStage:
             ).strip()
 
         # Surface ambiguous matches (a different command intent fit the same
-        # span) so the FE/clinician can confirm rather than trust the
+        # span) so the FE/user can confirm rather than trust the
         # arbitrary longest-first winner.
         ambiguity_warnings = tuple(
             PipelineWarning(

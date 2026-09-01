@@ -29,15 +29,13 @@ async def insert_audio_row(
     sha256: bytes,
     envelope_metadata: dict[str, Any],
     storage_uri: str,
-    encounter_id: UUID | None = None,
 ) -> None:
     await conn.execute(
         """
         INSERT INTO audio_files
             (id, tenant_id, uploader_sub, mime_type, size_bytes,
-             duration_ms, sha256, envelope_metadata, storage_uri, status,
-             encounter_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, 'stored', $10)
+             duration_ms, sha256, envelope_metadata, storage_uri, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, 'stored')
         """,
         audio_id,
         tenant_id,
@@ -48,36 +46,6 @@ async def insert_audio_row(
         sha256,
         json.dumps(envelope_metadata),
         storage_uri,
-        encounter_id,
-    )
-
-
-async def fetch_encounter_status(
-    conn: asyncpg.Connection, *, encounter_id: UUID
-) -> str | None:
-    """Status of the encounter, or None when nonexistent / cross-tenant —
-    RLS scopes the query, so a foreign tenant's encounter is invisible
-    (no existence oracle)."""
-    return await conn.fetchval(
-        "SELECT status FROM encounters WHERE id = $1", encounter_id
-    )
-
-
-async def prompt_exists(conn: asyncpg.Connection, *, prompt_id: UUID) -> bool:
-    """Whether ``prompt_id`` names a row in the global prompt catalogue.
-
-    ``transcription_jobs.prompt_id`` carries a NOT NULL FK to
-    ``medical_prompts``, so an unknown id used to surface as an asyncpg
-    ForeignKeyViolationError from the INSERT — a 500 on the SPA for what is
-    a caller mistake (a stale prompt id cached from a previous release).
-    Checked before any ciphertext is written so the reject costs nothing.
-
-    ``medical_prompts`` is a global catalogue with no RLS (ADR-0007), the
-    same table ``list_prompts`` serves the picker from, so existence here
-    is not a cross-tenant oracle.
-    """
-    return bool(
-        await conn.fetchval("SELECT 1 FROM medical_prompts WHERE id = $1", prompt_id)
     )
 
 
@@ -88,21 +56,19 @@ async def insert_job_row(
     tenant_id: UUID,
     audio_id: UUID,
     requester_sub: UUID,
-    prompt_id: UUID,
     language: str,
     model: str,
 ) -> None:
     await conn.execute(
         """
         INSERT INTO transcription_jobs
-            (id, tenant_id, audio_id, requester_sub, prompt_id, language, model)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (id, tenant_id, audio_id, requester_sub, language, model)
+        VALUES ($1, $2, $3, $4, $5, $6)
         """,
         job_id,
         tenant_id,
         audio_id,
         requester_sub,
-        prompt_id,
         language,
         model,
     )
@@ -135,21 +101,10 @@ async def list_jobs(
         args.append(since)
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     args.append(limit)
-    # S14 — carry the patient through so a dictation list can name whose
-    # recording each row is. LEFT JOINs throughout: a job with no
-    # encounter (a plain upload) and a job whose patient RLS hides must
-    # both still appear. `where_sql` predicates are on transcription_jobs
-    # columns only, so the alias keeps them unambiguous.
     rows = await conn.fetch(
         f"""
-        SELECT j.*,
-               e.patient_id      AS patient_id,
-               p.name_uk         AS patient_name_uk,
-               p.name_en         AS patient_name_en
+        SELECT j.*
         FROM transcription_jobs j
-        LEFT JOIN audio_files a ON a.id = j.audio_id
-        LEFT JOIN encounters  e ON e.id = a.encounter_id
-        LEFT JOIN patients    p ON p.id = e.patient_id
         {where_sql}
         ORDER BY j.queued_at DESC
         LIMIT ${len(args)}
@@ -295,60 +250,12 @@ async def count_active_jobs(conn: asyncpg.Connection, *, tenant_id: UUID) -> int
     return int(row["n"]) if row is not None else 0
 
 
-@dataclass(slots=True)
-class PromptRow:
-    """One ``medical_prompts`` catalogue entry (metadata only — no prompt_text)."""
-
-    id: UUID
-    language: str
-    specialty: str
-    is_default: bool
-
-
-async def list_prompts(
-    conn: asyncpg.Connection, *, language: str | None = None, specialty: str | None = None
-) -> list[PromptRow]:
-    """List the global ``medical_prompts`` catalogue (ADR-0007, no RLS).
-
-    The picker must surface the same UUIDs ``submit_job`` stores, so this
-    reads ``medical_prompts`` directly — not report-service section prompts.
-    """
-    clauses: list[str] = []
-    params: list[Any] = []
-    if language is not None:
-        params.append(language)
-        clauses.append(f"language = ${len(params)}")
-    if specialty is not None:
-        params.append(specialty)
-        clauses.append(f"specialty = ${len(params)}")
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = await conn.fetch(
-        f"""
-        SELECT id, language, specialty, is_default
-        FROM medical_prompts
-        {where}
-        ORDER BY specialty, is_default DESC
-        """,
-        *params,
-    )
-    return [
-        PromptRow(
-            id=r["id"],
-            language=r["language"],
-            specialty=r["specialty"],
-            is_default=bool(r["is_default"]),
-        )
-        for r in rows
-    ]
-
-
 def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
     return TranscriptionJobView(
         id=row["id"],
         tenant_id=row["tenant_id"],
         audio_id=row["audio_id"],
         requester_sub=row["requester_sub"],
-        prompt_id=row["prompt_id"],
         language=row["language"],
         model=row["model"],
         status=JobStatus(row["status"]),
@@ -359,8 +266,4 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
         finished_at=row["finished_at"],
         attempts=int(row["attempts"]),
         cancel_requested=bool(row.get("cancel_requested") or False),
-        # Present only on the list projection, which joins them in.
-        patient_id=row.get("patient_id"),
-        patient_name_uk=row.get("patient_name_uk"),
-        patient_name_en=row.get("patient_name_en"),
     )

@@ -5,15 +5,21 @@ introduces them.
 
 | Term | Meaning |
 | ---- | ------- |
-| **Tenant**            | A clinic or organisation. Isolated end-to-end via row-level security. |
+| **Tenant**            | A company / workspace. Isolated end-to-end via row-level security. |
+| **Workspace**         | User-facing name for a tenant. |
+| **Note**              | The core content object: a template-based structured document with append-only versions (draft / finalized / amended / cancelled). |
+| **Template**          | A JSONB-defined note structure (sections, field types) — e.g. meeting notes, 1-on-1, interview debrief (ADR-0016). |
 | **RLS**               | Row-Level Security — Postgres policy filtering rows by `current_setting('app.tenant_id')`. |
 | **`tenant_connection`** | The single sanctioned helper that scopes a DB connection to a tenant (ADR-0004). |
 | **KEK / DEK**         | Key Encryption Key / Data Encryption Key — envelope encryption (Sprint 03). |
-| **KEP**               | Кваліфікований електронний підпис — Ukrainian Qualified Electronic Signature (Sprint 09). |
 | **ASR**               | Automatic Speech Recognition. |
 | **NLP**               | Natural Language Processing. |
-| **Encounter**         | A clinical visit record (Sprint 11). |
-| **Dictation session** | A real-time WebSocket dictation flow (Sprint 04). |
+| **Dictation session** | A real-time WebSocket dictation flow (Sprint 04). Has a `mode`: `dictation` (single speaker) or `conversation` (meeting). |
+| **Conversation / meeting mode** | Dictation-session mode for multi-speaker audio; adds diarization. Speaker labels are neutral (`SPEAKER_1..N`) with client-supplied naming. |
+| **Diarization**       | Splitting audio by speaker ("who said what") — Silero VAD + ECAPA embeddings + online clustering (ADR-0034). |
+| **Envelope encryption** | The KEK_master → KEK_tenant → DEK_object layering that protects all stored audio and transcripts (ADR-0011). |
+| **Hash chain**        | Append-only integrity scheme: each record embeds the hash of its predecessor, so tampering breaks the chain. Used by the audit log (ADR-0008) and note versions (ADR-0020). |
+| **Layer C**           | Inline ghost-text completion served by generation-service from a local LLM behind a provider seam (ADR-0036). |
 | **Audit chain**       | Hash-chained append-only audit log (Sprint 02). |
 | **JCS**               | JSON Canonicalization Scheme (RFC 8785) — used for stable hashing of structured data. |
 | **OTLP**              | OpenTelemetry Line Protocol — gRPC + HTTP transport for telemetry. |
@@ -21,7 +27,6 @@ introduces them.
 | **Secret[T]**         | Typed wrapper that refuses to leak via repr / str / format / JSON / pickle (ADR-0003). |
 | **Conventional Commits** | Commit-message format (`feat:`, `fix:`, `chore:`, …). Enforced by `commitizen`. |
 | **PII**               | Personally Identifiable Information. |
-| **PHI**               | Protected Health Information — strict subset of PII regulated by HIPAA-equivalents. |
 | **Problem Details**   | RFC 9457 — JSON envelope for HTTP error responses with `type` / `title` / `status` / `detail` / `instance`. |
 | **`urn:uuid:`**       | URN form used for the `instance` field in our Problem Details — ties the user-visible error to the trace. |
 | **JWT**               | JSON Web Token. Compact, signed authentication artefact (RFC 7519). RS256-only in our system. |
@@ -51,7 +56,7 @@ introduces them.
 | **faster-whisper**    | CTranslate2-backed Whisper inference library. Sprint 03's chosen engine (ADR-0009). |
 | **Silero VAD**        | Open-source neural VAD model. Used to find speech regions before Whisper. |
 | **Beam search**       | Whisper decoding strategy that explores N candidate transcripts in parallel; default beam_size=5. |
-| **Initial prompt**    | A short text fed to Whisper at the start of a chunk to bias the transcript toward in-domain vocabulary (e.g., cardiology terminology). |
+| **Initial prompt**    | A short text fed to Whisper at the start of a chunk to bias the transcript toward in-domain vocabulary (e.g., product or industry jargon). |
 | **Realtime factor**   | audio_duration / infer_seconds. > 1 means faster-than-realtime. |
 | **WER**               | Word Error Rate — Levenshtein-based metric (insertions + deletions + substitutions) / ref-word-count. Lower is better. |
 | **Magic-byte sniff**  | Comparing the first few bytes of a file against known format signatures (e.g., `RIFF…WAVE` for WAV). |
@@ -62,7 +67,7 @@ introduces them.
 | **DLQ**               | Dead Letter Queue — sibling stream where messages land after exceeding their retry budget. |
 | **CTranslate2**       | Inference engine library that compiles transformer models for CPU/GPU; faster-whisper builds on it. |
 | **`pcm_s16le`**       | 16-bit little-endian PCM — the default WAV codec; one of the allow-listed codecs in sprint 03. |
-| **WebSocket subprotocol** | Sec-WebSocket-Protocol header value identifying the application-layer contract on top of WS framing. `medical-dictation.v1` is the sprint-04 contract. |
+| **WebSocket subprotocol** | Sec-WebSocket-Protocol header value identifying the application-layer contract on top of WS framing. `dictation.v1` is the sprint-04 contract (`dictation.v2` adds resume + conversation mode). |
 | **Partial vs final**  | A `partial` segment may be revised on the next window; a `final` is immutable. Sprint-04 commitment policy graduates partials → finals. |
 | **IndexedDB ring buffer** | Browser-side ring of recent audio frames that lets the frontend replay after a network drop. Frontend owns the implementation. |
 | **Sliding window**    | The streaming Whisper strategy: each window is `window_s = 4.0` of audio; consecutive windows overlap by `overlap_s = 2.0`. |
@@ -88,16 +93,16 @@ introduces them.
 | **Pipeline stage**    | A single transformation in the sprint-05 NLP chain. 6 stages: voice_commands → punctuation → number_norm → date_norm → abbreviation → confidence. |
 | **Idempotence key**   | A SHA-256 hash over (input, context, pipeline_version, snapshot fingerprint). The orchestrator caches by this key in Redis; same input + same context → byte-equal output. |
 | **Abbreviation snapshot** | Immutable per-request view of the merged (tenant + global) abbreviation dictionary. Read once at request entry; admin edits in-flight don't affect the current request. |
-| **Voice command intent** | The semantic label (`newparagraph`, `period`, `section.diagnosis`, …) carried by a `CommandSlot`. Distinct from the wire `Operation` the frontend executes. |
+| **Voice command intent** | The semantic label (`newparagraph`, `period`, `section.<key>`, …) carried by a `CommandSlot`. Distinct from the wire `Operation` the frontend executes. |
 | **FSM matcher**       | The voice-command detector. Three gates: pause-before, confidence, edit-distance. Sprint-05 ships a longest-match scan over the catalogue; a trie is reserved for sprint-17 if the catalogue grows. |
 | **Edit-distance tolerance** | The matcher accepts at most 1 substitution per phrase, with Levenshtein distance ≤ 2 — defends against Whisper one-letter errors. |
 | **Pause-before**      | Required silence before a command head fires. Defaults from 200 ms (newline) to 350 ms (sections / stop_dictation). |
-| **Voice-command false-positive rate** | Fraction of fired commands the clinician undoes within 600 ms. Alert > 5% / 1 hour. |
+| **Voice-command false-positive rate** | Fraction of fired commands the user undoes within 600 ms. Alert > 5% / 1 hour. |
 | **Undo rate**         | Same as voice-command false-positive rate. Tracked via the `voice_command.undone` audit kind (frontend-emitted). |
 | **Confidence span**   | A character range in the post-processed text with a `high_concern` or `moderate` label, derived from per-word Whisper probabilities. |
 | **Reference date**    | The anchor for relative-date parsing. Caller-supplied; server fills from `now()` with a `missing_reference_date` warning if omitted. |
-| **Ambiguous date**    | A date that fails Python's calendar validation (e.g., `31.04.2026`). Passed through unchanged; emits `Warning{code="ambiguous_date"}` for sprint-08 clinical rules. |
-| **Specialty context** | `ProcessingContext.specialty` — used by the abbreviation stage's domain filter to disambiguate (e.g., `ІМ` in a cardiology session). |
+| **Ambiguous date**    | A date that fails Python's calendar validation (e.g., `31.04.2026`). Passed through unchanged; emits `Warning{code="ambiguous_date"}` for downstream validation. |
+| **Specialty context** | `ProcessingContext.specialty` — optional free-text domain hint used by the abbreviation stage's domain filter to disambiguate ambiguous abbreviations. |
 | **Direction (compact / expand / either)** | Per-row policy in the abbreviation dictionary. `compact` writes the abbreviation; `expand` writes the expansion; `either` passes through. |
 | **Tenant override**   | A row in `abbreviation_dictionary` with `tenant_id IS NOT NULL` — wins on collision with a global rule on the same `(language, expanded, abbreviated)`. |
 | **Pipeline version**  | Constant in code (`PIPELINE_VERSION` = `"nlp-v1.0.0"`) participating in the idempotence cache key. Bump invalidates every cached result. |

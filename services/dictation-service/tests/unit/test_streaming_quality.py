@@ -1,6 +1,6 @@
 """Guards on the streaming ASR quality path.
 
-Background: the conversation/scribe surface produced Ukrainian that was
+Background: the conversation/meeting surface produced Ukrainian that was
 not merely inaccurate but non-existent as language — invented word-shapes
 like "Добро губня" for "Доброго дня". The cause was the model
 (dictation-service ran whisper-tiny long after batch ASR moved to
@@ -91,15 +91,15 @@ def test_flush_provisional_on_untouched_windower_is_empty() -> None:
     assert StreamingWindower(base_prompt="", language="uk").flush_provisional() == []
 
 
-# ── The specialty prompt must reach Whisper exactly once ─────────────
+# ── The vocabulary hint must reach Whisper exactly once ──────────────
 
 
 def test_composed_prompt_contains_the_base_prompt_once() -> None:
-    """`build_prompt` already prepends the specialty prompt.
+    """`build_prompt` already prepends the vocabulary hint.
 
     The window loop also passed it to the engine as `prompt`, and the
     engine concatenates its two prompt arguments — so every window's
-    initial_prompt opened with the specialty prompt twice. A repeated
+    initial_prompt opened with the vocabulary hint twice. A repeated
     initial_prompt is a Whisper repetition/hallucination trigger and the
     duplicate also consumed the budget meant for decoded context.
     """
@@ -146,9 +146,7 @@ def test_wide_window_config_still_commits_and_flushes() -> None:
     assert first is not None and (first.start_ms, first.end_ms) == (0, 28_000)
 
     tick = w.integrate(
-        window_segments=[
-            _segment([_word("артеріальний", 1000, 1800), _word("тиск", 1900, 2400)])
-        ],
+        window_segments=[_segment([_word("артеріальний", 1000, 1800), _word("тиск", 1900, 2400)])],
         window_no_speech_prob=0.1,
         window_start_ms=0,
         window_end_ms=28_000,

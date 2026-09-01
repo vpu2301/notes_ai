@@ -6,19 +6,19 @@ Sprint: 16
 
 ## Context
 
-Three sprints left standing IOUs for a scheduler: idle-draft cleanup
-(sprint 08, report-service), telemetry cold-archive before partition
-drop (sprint 10, autocomplete-service), erasure backup-horizon notices
-(sprint 11, core-service). The spec sketch said "a single lightweight
-scheduler runner … hosting" all three — but one scheduler *process*
-would have to import three services' job code, which the import-linter
+Multiple sprints left standing IOUs for a scheduler: idle-draft
+cleanup (sprint 08, note-service), telemetry cold-archive before
+partition drop (sprint 10, autocomplete-service), among others. The
+spec sketch said "a single lightweight scheduler runner … hosting" all
+of them — but one scheduler *process* would have to import several
+services' job code, which the import-linter
 contracts forbid (libs never import services; services never import
 each other). The repo already holds two working precedents:
 
 - in-process `asyncio` loops behind `MDX_BACKGROUND_JOBS`
   (autocomplete, sprint 10 verification);
 - standalone CLI entrypoints for external cron
-  (`scripts/jobs/*`, report-service chain reconciler — sprints 08/11).
+  (`scripts/jobs/*`, note-service chain reconciler — sprints 08/11).
 
 ## Decision
 
@@ -31,9 +31,8 @@ each other). The repo already holds two working precedents:
   observability lib, so it cannot write audit rows itself.)
 - Each job writes its own per-run audit row
   (`scheduler.job.completed/failed`) under the **reserved global tenant**
-  (nil UUID, migration 0068) — fleet-level runs belong to no clinical
-  tenant. Domain events (report.cancelled,
-  erasure.backup_horizon_reached) stay under the owning tenant.
+  (nil UUID) — fleet-level runs belong to no customer tenant. Domain
+  events (e.g. note.cancelled) stay under the owning tenant.
 - Hosting: service lifespan task behind `MDX_BACKGROUND_JOBS`
   (+ `MDX_BACKGROUND_JOBS_INTERVAL_S`), **off by default in dev**
   except autocomplete, which has run its rotation in-process since

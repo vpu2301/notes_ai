@@ -8,7 +8,7 @@
 
 ## Context
 
-Sprint 03 stores the first PHI bytes (audio recordings) at rest. GDPR
+Sprint 03 stores the first sensitive content bytes (audio recordings) at rest. GDPR
 and Law 2297-VI place hard constraints: data at rest must be encrypted,
 keys must be rotatable, and a single compromised credential must not
 expose all tenants' data.
@@ -99,5 +99,5 @@ The re-wrap procedure above is `scripts/kms/rewrap-tenant-keks.py`
 (transactional per row, resumable, `--dry-run`, verifies the new
 wrapping round-trips before commit, audits `kms.rewrap.completed` sec).
 Fail-closed startup: vault selected + unreachable → the service refuses
-to start (`docs/runbooks/kms.md`). The signing-service system HMAC keys
+to start (`docs/runbooks/kms.md`). System HMAC keys
 ride the same trust root via Vault KV (`MDX_HMAC_KEYS_FROM_VAULT`).

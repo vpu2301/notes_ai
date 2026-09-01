@@ -16,13 +16,12 @@ through the bridge gateway, which Keycloak treats as external, so every realm en
 `403 HTTPS required` — the admin console loaded but could never sign in. The SPA was unaffected
 because auth-service talks to Keycloak inside the Docker network.
 
-Production MUST set this back to `external` and terminate TLS in front of Keycloak; see
-`infra/edge/nginx.conf.template` for how the stack already does that for the public surface.
+Production MUST set this back to `external` and terminate TLS in front of Keycloak.
 
-The `master` realm is created by Keycloak bootstrap and is not covered by this file. Relax it
-separately for local admin-console access:
+The `master` realm is created by Keycloak bootstrap and is not covered by this file (which
+defines the `notes` realm). Relax it separately for local admin-console access:
 
 ```bash
-docker exec medical-dictation-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh \
   update realms/master -s sslRequired=NONE
 ```

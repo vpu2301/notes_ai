@@ -1,7 +1,7 @@
 {% extends "_base.txt" %}
-{% block heading %}Підсумок сповіщень за {{ fields.get('period', 'день') }}{% endblock %}
-{% block body %}Нових сповіщень: {{ fields.get('count', '0') }}.
+{% block heading %}Notification summary for the last {{ fields.get('period', 'day') }}{% endblock %}
+{% block body %}New notifications: {{ fields.get('count', '0') }}.
 {% for line in items %}
 - {{ line }}
 {% endfor %}
-Відкрийте систему, щоб переглянути деталі.{% endblock %}
+Open the app to see the details.{% endblock %}

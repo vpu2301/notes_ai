@@ -1,14 +1,14 @@
-# `medical-dictation.v1` — WebSocket Streaming Protocol
+# `dictation.v1` — WebSocket Streaming Protocol
 
 **Status:** stable (sprint 04). Breaking changes require `v2`.
 **Endpoint:** `wss://<host>/ws/dictate`
-**Subprotocol:** `medical-dictation.v1`
+**Subprotocol:** `dictation.v1`
 
 ## Connection upgrade
 
 The client opens a WebSocket with:
 
-- `Sec-WebSocket-Protocol: medical-dictation.v1`
+- `Sec-WebSocket-Protocol: dictation.v1`
 - `Authorization: Bearer <jwt>` (or `?token=<jwt>` query param —
   browser WebSocket APIs can't set arbitrary headers).
 - `Origin` in the configured allow-list (production-only enforcement).
@@ -64,7 +64,7 @@ fields are rejected (`extra="forbid"`).
 
 | Type              | Fields                                                         | Notes |
 | ----------------- | -------------------------------------------------------------- | ----- |
-| `start_session`   | `prompt_id`, `language` (`uk`|`en`|`de`), `target_kind` (default `generic`), `encounter_id?`, `template_id?`, `resume_session_id?` | First message after upgrade. Adding a language WIDENS the pattern — no v1 client breaks |
+| `start_session`   | `language` (`uk`|`en`|`de`), `target_kind` (default `generic`), `vocabulary_hint?` (free text, ≤ 2000 chars — fed to Whisper's `initial_prompt`), `template_id?`, `resume_session_id?` | First message after upgrade. Adding a language WIDENS the pattern — no v1 client breaks |
 | `refresh_token`   | `token`                                                        | Replaces the bearer; must have same `sub`+`tid` |
 | `end_session`     | —                                                              | Initiates finalize |
 | `pause`           | —                                                              | Audio frames now rejected with `pause_state_mismatch` |
@@ -105,8 +105,6 @@ VOIP profile, 20-ms frames. Limits:
 | `retransmit_too_large`| yes         | Range > 1500 frames (30 s)                |
 | `session_not_found`   | no          | Uniform-failure for resume gate failures  |
 | `rate_limited`        | yes         | Per-IP / per-user / per-tenant limit hit  |
-| `encounter_invalid`   | no          | `start_session.encounter_id` names no encounter visible to the tenant (nonexistent and cross-tenant are indistinguishable — no existence oracle). Rejected before any audio is accepted. |
-| `encounter_closed`    | no          | The named encounter is `cancelled`; dictation into it is a workflow error. (`scheduled`/`in_progress`/`completed` are all dictable — encounters default to `completed` and are routinely recorded post-visit.) |
 | `worker_failed`       | no          | Inference worker died                     |
 | `audio_decode_failed` | yes (≤ 5)   | Opus decode error; 5 consecutive → fatal  |
 | `gpu_full`            | yes         | Per-worker session cap reached            |
@@ -130,12 +128,12 @@ VOIP profile, 20-ms frames. Limits:
 ## Hand-off to sprint 5 (NLP) and sprint 14 (diarization)
 
 - Sprint 5 fills `voice_command` on `final`; field shape locked here.
-- Sprint 14 forks to `medical-dictation.v2` adding diarization fields.
+- Sprint 14 forks to `dictation.v2` adding diarization fields.
   v1 clients reject v2 messages cleanly (`extra="forbid"`).
 
 ---
 
-## Sprint 14: `medical-dictation.v2` has forked
+## Sprint 14: `dictation.v2` has forked
 
 The hand-off promised above is delivered — see **`dictation-ws-v2.md`**.
 Everything in THIS document remains accurate and byte-stable for v1
@@ -143,6 +141,6 @@ clients: no v1 message gained a field, and a v1 client rejects a v2
 frame cleanly via `extra="forbid"` (proven in
 `services/dictation-service/tests/unit/test_protocol_v2.py`).
 
-v2 adds, for conversation mode only: `start_session.mode`, speaker
-fields on `partial`/`final`, the `speaker_mapping_updated` and
-`set_speaker_mapping` messages, and the `consent_required` error code.
+v2 adds, for conversation (meeting) mode only: `start_session.mode`,
+speaker fields on `partial`/`final`, and the `speaker_mapping_updated`
+and `set_speaker_mapping` messages.

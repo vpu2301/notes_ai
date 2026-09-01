@@ -3,7 +3,7 @@
 Sprint 04 surface:
 - ``/healthz`` / ``/readyz``
 - ``/dictate/sessions/...`` HTTP companion endpoints
-- ``/ws/dictate`` WebSocket streaming endpoint (medical-dictation.v1)
+- ``/ws/dictate`` WebSocket streaming endpoint (dictation.v1)
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Dictation Service",
-        description="Sprint-04 streaming ASR over WebSockets (medical-dictation.v1).",
+        description="Streaming ASR over WebSockets (dictation.v1).",
         version="0.4.0",
         openapi_version="3.1.0",
         lifespan=_lifespan,

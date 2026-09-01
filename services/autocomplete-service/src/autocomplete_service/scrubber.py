@@ -1,24 +1,29 @@
 """PII scrubber for telemetry prefixes + phrase writes.
 
-Sprint-10 day-6 surface. Conservative: false positives (over-scrubbing)
-are preferred over false negatives (PII leak into telemetry).
+Scrub-before-store: telemetry rows are scrubbed BEFORE the buffer
+accepts them, so raw prefixes never touch disk. Conservative: false
+positives (over-scrubbing) are preferred over false negatives (PII
+leak into telemetry).
 
-Patterns redacted:
-- 10-digit unbroken (Ukrainian IPN).
-- 7–14 digit unbroken runs, optional leading ``+`` (phone-like, incl.
-  international ``+380…``).
+Patterns redacted (generic — no locale-specific ID formats):
 - Email (RFC-5322-lite).
-- Passport pattern (2 letters + 6 digits).
-- 13-digit medical ID.
-- Dates in DD.MM.YYYY or DD/MM/YYYY format.
+- Credit-card-like sequences: 13-19 digits, optionally grouped by
+  single spaces/dashes ("4111 1111 1111 1111").
+- National-ID-like patterns: a standalone 1-3 letter prefix + 6-9
+  digits (passport / ID-card shaped, any country).
+- Phone numbers: "+" followed by 7-15 digits, or 3+ separator-broken
+  digit groups ("050 123 45 67", "(044) 123-45-67").
+- Long digit runs: any unbroken run of 7+ digits (covers unformatted
+  phones, tax numbers, account numbers).
 
-Known limitation: digit groups broken by spaces/dashes ("050 123 45 67")
-are not caught — extending that far risks eating vitals sequences.
+Known limitations: date-shaped strings with 2+-digit components
+("01.02.2026") are eaten by the phone pattern — accepted over-scrub;
+digit pairs like "2026 2027" (two groups only) are NOT caught.
 
 Replacement: ``<redacted_PII>``.
 
-DPO sign-off captured in ``docs/security/autocomplete-pii-scrubber.md``;
-regex updates require DPO re-review.
+Pattern set documented in ``docs/security/autocomplete-pii-scrubber.md``;
+regex updates require privacy re-review.
 """
 
 from __future__ import annotations
@@ -31,18 +36,25 @@ from typing import Any, Final
 REDACTED: Final = "<redacted_PII>"
 
 # Order matters: more-specific patterns first so they win the
-# substitution before the generic 7-digit pattern eats them.
+# substitution (and keep the redaction counts attributed) before the
+# generic digit_run sweep eats them.
 _PATTERNS: Final[list[tuple[str, re.Pattern[str]]]] = [
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
-    ("ipn", re.compile(r"\b\d{10}\b")),
-    ("med_id", re.compile(r"\b\d{13}\b")),
-    ("passport", re.compile(r"\b[A-Za-zА-ЯЇІЄҐа-яїієґ]{2}\s?\d{6}\b")),
-    ("dob_like", re.compile(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b")),
-    # 7–14 contiguous digits, optional leading "+": covers local numbers
-    # AND international formats (+380501234567 is 12 digits — previously
-    # fell between the exact-10 IPN and exact-13 med-id patterns and
-    # leaked). ipn/med_id run first so their counts stay attributed.
-    ("phone", re.compile(r"(?<![\d+])\+?\d{7,14}(?!\d)")),
+    # 13-19 digits, optional single space/dash between digits — catches
+    # both "4111111111111111" and "4111 1111 1111 1111".
+    ("card_like", re.compile(r"(?<![\d-])(?:\d[ -]?){12,18}\d(?!\d)")),
+    # Standalone 1-3 letter token + 6-9 digits ("AB 123456", "ABC1234567").
+    # The \b keeps it from firing inside ordinary words.
+    ("national_id", re.compile(r"\b[A-Za-z]{1,3}\s?\d{6,9}\b")),
+    # "+" international form, or 3+ separator-broken groups. Contiguous
+    # local numbers without "+" fall through to digit_run below.
+    (
+        "phone",
+        re.compile(r"(?<![\d+])(?:\+\d{7,15}|\+?\(?\d{1,4}\)?(?:[ .-]\d{2,4}){2,5})(?!\d)"),
+    ),
+    # Catch-all: any unbroken run of 7+ digits (phones, tax/account
+    # numbers, government IDs of any length).
+    ("digit_run", re.compile(r"(?<!\d)\d{7,}(?!\d)")),
 ]
 
 

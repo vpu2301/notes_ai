@@ -1,0 +1,1 @@
+Critical: version-chain integrity failure ({{ fields.get('note_code', '—') }})

@@ -26,7 +26,7 @@ def bootstrap(
     """Configure logs / traces / metrics for a service.
 
     Args:
-        service_name: short, kebab-case name (e.g. ``encounters-service``).
+        service_name: short, kebab-case name (e.g. ``dictation-service``).
         otlp_endpoint: OTel collector URL.
         log_level: stdlib level for the root logger.
         deployment_environment: ``development`` / ``staging`` / ``production``.

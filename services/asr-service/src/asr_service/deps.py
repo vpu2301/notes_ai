@@ -92,10 +92,9 @@ def requires_any(
 ) -> Callable[..., Awaitable[Claims]]:
     """Admit a caller holding ANY of the given permissions (S14).
 
-    The job list is reachable both by a clinician with `asr.read` and by
-    a tenant_admin with only `stats.read`; the handler branches on which,
-    and serves a PHI-free projection for the latter. Put the primary
-    permission first — a denial is reported against it.
+    The job list is reachable both by a member with `asr.read` and by
+    a tenant_admin with only `stats.read`. Put the primary permission
+    first — a denial is reported against it.
     """
 
     async def dep(claims: Annotated[Claims, Depends(current_user)]) -> Claims:

@@ -1,0 +1,3 @@
+{% extends "_base.txt" %}
+{% block heading %}Note {{ fields.get('note_code', '—') }} was shared with you{% endblock %}
+{% block body %}{{ fields.get('shared_by_display', 'A colleague') }} gave you access to this note.{% endblock %}

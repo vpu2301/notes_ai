@@ -75,9 +75,7 @@ def _extract_bearer(websocket: WebSocket) -> str | None:
     return token or None
 
 
-async def authorize_upgrade(
-    websocket: WebSocket, *, jwks_cache: JwksCache
-) -> UpgradeContext:
+async def authorize_upgrade(websocket: WebSocket, *, jwks_cache: JwksCache) -> UpgradeContext:
     origin = websocket.headers.get("origin")
     allowed = settings.cors_origins_list
     if allowed and origin is not None and origin not in allowed:
@@ -98,9 +96,7 @@ async def authorize_upgrade(
 
     bearer = _extract_bearer(websocket)
     if bearer is None:
-        raise UpgradeRejected(
-            status.HTTP_401_UNAUTHORIZED, "auth_invalid", "missing bearer token"
-        )
+        raise UpgradeRejected(status.HTTP_401_UNAUTHORIZED, "auth_invalid", "missing bearer token")
 
     try:
         claims = await verify_token(

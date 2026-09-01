@@ -35,11 +35,11 @@ class Settings(BaseSettings):
     otel_sdk_disabled: bool = Field(default=False, alias="OTEL_SDK_DISABLED")
 
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
 
@@ -75,14 +75,10 @@ class Settings(BaseSettings):
 
     @property
     def tenant_allowlist_set(self) -> frozenset[UUID]:
-        return frozenset(
-            UUID(t.strip()) for t in self.tenant_allowlist.split(",") if t.strip()
-        )
+        return frozenset(UUID(t.strip()) for t in self.tenant_allowlist.split(",") if t.strip())
 
     # ── Inference backend (ADR-0036) ────────────────────────────────────
-    gen_backend: Literal["llamacpp", "ollama"] = Field(
-        default="llamacpp", alias="MDX_GEN_BACKEND"
-    )
+    gen_backend: Literal["llamacpp", "ollama"] = Field(default="llamacpp", alias="MDX_GEN_BACKEND")
     gen_base_url: str = Field(default="http://localhost:8089", alias="MDX_GEN_BASE_URL")
     # Model name is used by the Ollama backend (llama-server serves exactly
     # the model it was launched with) and echoed in responses/telemetry.
@@ -90,7 +86,7 @@ class Settings(BaseSettings):
     gen_max_tokens: int = Field(default=24, alias="MDX_GEN_MAX_TOKENS")
     # Hard end-to-end budget: slot wait + inference. On expiry the endpoint
     # answers 204 — a late ghost completion is worthless to a typing
-    # clinician. Production target p95 <= 400 ms is a rig-gated release gate
+    # author. Production target p95 <= 400 ms is a rig-gated release gate
     # (ADR-0036); dev hosts may raise this to keep the feature usable.
     gen_timeout_ms: int = Field(default=600, alias="MDX_GEN_TIMEOUT_MS")
     # Dedicated inline concurrency slots so a future long-synthesis path on
@@ -116,9 +112,7 @@ class Settings(BaseSettings):
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 
 settings = Settings()

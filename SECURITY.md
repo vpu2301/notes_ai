@@ -4,7 +4,7 @@
 
 Please do **not** open a public GitHub issue for a security vulnerability.
 
-Email the security lead directly: **security@medical-dictation.example**
+Email the security lead directly: **security@notes-ai.example**
 (replace once the alias is provisioned).
 
 Include:
@@ -15,7 +15,7 @@ Include:
 - Your contact details.
 
 We aim to acknowledge a report within 48 hours and triage within five
-business days. Critical issues that touch PHI or authentication are
+business days. Critical issues that touch tenant content or authentication are
 prioritised over feature work.
 
 ## Supported versions
@@ -39,7 +39,7 @@ In scope:
 - Authentication / authorisation flows.
 - Tenant-isolation invariants (RLS / `tenant_connection`).
 - Audit-chain integrity.
-- PHI / PII handling — including logs and traces.
+- Sensitive-content / PII handling — including logs and traces.
 - Secret material handling (`Secret[T]`).
 - Container hardening (distroless, nonroot, signing).
 

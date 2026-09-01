@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Generate the production secret material and write it to Vault.
 
-Sprint-16 deployment: every `dev-secret-change-in-prod-*` placeholder
-(threat model) is REGENERATED here with cryptographically random values;
+Every `dev-secret-change-in-prod-*` placeholder (threat model) is
+REGENERATED here with cryptographically random values;
 nothing is printed unless --show is passed, nothing ever lands in the
 repo. The Vault KV layout matches the chart's ExternalSecret templates
-(infra/k8s/mdx/templates/externalsecrets.yaml).
+(infra/k8s/notes/templates/externalsecrets.yaml).
 
 Usage (operator, against the production Vault):
 
@@ -34,21 +34,14 @@ SECRET_LAYOUT: dict[str, dict[str, str]] = {
         "KEYCLOAK_LOGIN_CLIENT_SECRET": "token",
         "KEYCLOAK_ADMIN_CLIENT_SECRET": "token",
     },
-    "hmac-keys": {
-        "SIGNER_IPN_HMAC_KEY": "hex32",
-        "PUBLIC_VERIFY_IP_HMAC_KEY": "hex32",
-        "IIT_CALLBACK_HMAC_KEY": "hex32",
-        "MDX_PATIENT_IPN_HMAC_KEY": "hex32",
-        "DSAR_DOWNLOAD_TOKEN_HMAC_KEY": "hex32",
-    },
     "master-key": {
         # Only for file-provider pods; Transit-mode pods (ADR-0011
         # amendment, the production default) need no key file at all.
         "master.key": "bytes32-b64",
     },
     "infra": {
-        "password": "token",       # postgres superuser
-        "user": "literal:mdx",     # minio root user
+        "password": "token",  # postgres superuser
+        "user": "literal:mdx",  # minio root user
         # minio password + keycloak admin share the postgres row shape;
         # split into per-store paths if the hosting choice separates them.
     },

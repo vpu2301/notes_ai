@@ -62,7 +62,7 @@ async def emit_transcription_failed(
     `error_kind` only — never `error_detail`. The kind is a closed
     vocabulary (corrupt_audio / timeout / gpu_oom); the detail is free
     text built from an exception, and an exception that quotes the audio
-    or the partial transcript it choked on would carry PHI into the feed
+    or the partial transcript it choked on would carry sensitive audio/transcript data into the feed
     (ADR-0031).
     """
     await _emit(

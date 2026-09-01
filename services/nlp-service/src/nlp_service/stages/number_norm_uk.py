@@ -250,7 +250,7 @@ def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
 
     "нуль п'ять" → "05", "п'ять" → "5". The summing run-parser collapses
     "нуль п'ять" to 0 and drops the trailing digit (2.05 → 2.0) — a dropped
-    digit in a dose decimal is patient harm — so the fractional part is
+    digit silently corrupts a dictated figure — so the fractional part is
     rendered digit-by-digit, preserving leading zeros.
     """
     digits: list[str] = []

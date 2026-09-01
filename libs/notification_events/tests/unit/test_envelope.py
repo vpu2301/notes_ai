@@ -15,9 +15,9 @@ def _event(**overrides: object) -> NotificationEvent:
     base: dict[str, object] = {
         "event_id": uuid4(),
         "tenant_id": uuid4(),
-        "category": Category.REPORT_FINALIZED,
+        "category": Category.NOTE_FINALIZED,
         "actor_user_id": uuid4(),
-        "resource_type": "report",
+        "resource_type": "note",
         "resource_id": uuid4(),
         "occurred_at": datetime.now(UTC),
     }
@@ -26,7 +26,7 @@ def _event(**overrides: object) -> NotificationEvent:
 
 
 def test_round_trips_through_json() -> None:
-    event = _event(payload={"report_code": "RPT-2026-0001"})
+    event = _event(payload={"note_code": "NOTE-2026-0001"})
     restored = NotificationEvent.model_validate_json(event.model_dump_json())
     assert restored == event
 
@@ -34,7 +34,7 @@ def test_round_trips_through_json() -> None:
 def test_unknown_field_is_rejected() -> None:
     """extra='forbid' — deploy skew must fail loudly, not drop data."""
     with pytest.raises(ValidationError):
-        _event(patient_name="Іваненко")
+        _event(author_name="Ivanenko")
 
 
 def test_naive_occurred_at_is_rejected() -> None:
@@ -43,9 +43,9 @@ def test_naive_occurred_at_is_rejected() -> None:
 
 
 def test_nested_payload_is_rejected() -> None:
-    """The flat-scalar rule is the first line of the PHI boundary."""
+    """The flat-scalar rule is the first line of the content boundary."""
     with pytest.raises(ValidationError):
-        _event(payload={"body": {"sections": ["diagnosis"]}})
+        _event(payload={"body": {"sections": ["quarterly plan"]}})
 
 
 def test_oversized_payload_value_is_rejected() -> None:

@@ -26,7 +26,7 @@ from auth import Claims
 
 TENANT = uuid4()
 SUB = uuid4()
-EMAIL = "olena@clinic.example"
+EMAIL = "olena@acme.example"
 GOOD_PASSWORD = "correct horse battery staple"
 
 
@@ -44,9 +44,7 @@ class FakeKeycloak:
             raise KeycloakError(status=401, body={"error": "invalid_grant"})
         return SimpleNamespace(access_token="a", refresh_token="r")
 
-    async def set_password(
-        self, sub: UUID, *, new_password: str, temporary: bool = False
-    ) -> None:
+    async def set_password(self, sub: UUID, *, new_password: str, temporary: bool = False) -> None:
         self.set_password_calls.append((sub, new_password))
         self.passwords[sub] = new_password
 
@@ -244,10 +242,10 @@ def _claims() -> Claims:
         sub=SUB,
         tid=TENANT,
         sid="sess-1",
-        roles=["clinician"],
+        roles=["member"],
         email=EMAIL,
         preferred_username=EMAIL,
-        iss="https://kc/realms/medical-dictation",
+        iss="https://kc/realms/notes",
         aud="mdx-api",
         exp=9_999_999_999,
         iat=0,
@@ -290,9 +288,7 @@ def test_forgot_queues_mail_for_a_real_account(env: Any) -> None:
 def test_forgot_is_identical_for_an_unknown_address(env: Any) -> None:
     known = env.client().post("/auth/password/forgot", json={"email": EMAIL})
     env.store.mail.clear()
-    unknown = env.client().post(
-        "/auth/password/forgot", json={"email": "nobody@nowhere.example"}
-    )
+    unknown = env.client().post("/auth/password/forgot", json={"email": "nobody@nowhere.example"})
     assert unknown.status_code == known.status_code == 202
     assert unknown.json() == known.json()
     assert env.store.mail == []
@@ -318,16 +314,12 @@ def test_forgot_is_identical_when_rate_limited(env: Any) -> None:
 def test_forgot_never_audits_an_unknown_address(env: Any) -> None:
     """An audit row per probe would rebuild the enumeration oracle the
     uniform 202 exists to remove."""
-    env.client().post(
-        "/auth/password/forgot", json={"email": "nobody@nowhere.example"}
-    )
+    env.client().post("/auth/password/forgot", json={"email": "nobody@nowhere.example"})
     assert env.audit == []
 
 
 def test_forgot_rejects_unknown_fields(env: Any) -> None:
-    r = env.client().post(
-        "/auth/password/forgot", json={"email": EMAIL, "admin": True}
-    )
+    r = env.client().post("/auth/password/forgot", json={"email": EMAIL, "admin": True})
     assert r.status_code == 422
 
 
@@ -392,9 +384,7 @@ def test_reset_spends_every_other_outstanding_token(env: Any) -> None:
 
 def test_reset_queues_the_security_notification(env: Any) -> None:
     token = _token_for(env, "password_reset")
-    env.client().post(
-        "/auth/password/reset", json={"token": token, "new_password": GOOD_PASSWORD}
-    )
+    env.client().post("/auth/password/reset", json={"token": token, "new_password": GOOD_PASSWORD})
     kinds = [m["kind"] for m in env.store.mail]
     assert "password_changed" in kinds
     notification = next(m for m in env.store.mail if m["kind"] == "password_changed")
@@ -547,23 +537,17 @@ def test_lockdown_spends_outstanding_tokens(env: Any) -> None:
 
 def test_lockdown_token_is_single_use(env: Any) -> None:
     token = _token_for(env, "account_lockdown")
-    assert (
-        env.client().post("/auth/security/lockdown", json={"token": token}).status_code
-        == 200
-    )
-    assert (
-        env.client().post("/auth/security/lockdown", json={"token": token}).status_code
-        == 400
-    )
+    assert env.client().post("/auth/security/lockdown", json={"token": token}).status_code == 200
+    assert env.client().post("/auth/security/lockdown", json={"token": token}).status_code == 400
 
 
 def test_lockdown_returned_token_actually_resets(env: Any) -> None:
     """The handed-back token is the user's way straight into setting a
     new password without waiting for a second email."""
     token = _token_for(env, "account_lockdown")
-    reset_token = env.client().post(
-        "/auth/security/lockdown", json={"token": token}
-    ).json()["reset_token"]
+    reset_token = (
+        env.client().post("/auth/security/lockdown", json={"token": token}).json()["reset_token"]
+    )
     r = env.client().post(
         "/auth/password/reset",
         json={"token": reset_token, "new_password": GOOD_PASSWORD},

@@ -1,10 +1,10 @@
-"""Tenant (clinic) management — the backend for the SPA "Tenant" sidebar.
+"""Tenant (company workspace) management — the backend for the SPA "Tenant" sidebar.
 
 Endpoints
 ---------
 * ``GET    /tenants``                       — tenants the caller can reach
 * ``GET    /tenants/current``               — the caller's active tenant
-* ``POST   /tenants``                       — onboard a new clinic (→ owner)
+* ``POST   /tenants``                       — onboard a new company (→ owner)
 * ``GET    /tenants/{id}``                   — tenant profile / branding
 * ``PATCH  /tenants/{id}``                   — update profile / branding
 * ``PUT    /tenants/{id}/logo``              — upload / replace the logo
@@ -60,9 +60,7 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 # Management roles carried by a membership (distinct from the JWT platform
 # roles). The ones that may administer the tenant.
-MANAGEMENT_ROLES: frozenset[str] = frozenset(
-    {"owner", "admin", "doctor", "nurse", "assistant", "viewer"}
-)
+MANAGEMENT_ROLES: frozenset[str] = frozenset({"owner", "admin", "member", "assistant", "viewer"})
 MANAGER_ROLES: frozenset[str] = frozenset({"owner", "admin"})
 
 _MAX_LOGO_BYTES = 2 * 1024 * 1024
@@ -286,7 +284,7 @@ def _validate_slug(slug: str | None) -> None:
     if slug is not None and slug != "" and not _SLUG_RE.match(slug):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="slug must be lowercase alphanumeric with single hyphens (e.g. 'kyiv-clinic')",
+            detail="slug must be lowercase alphanumeric with single hyphens (e.g. 'acme-inc')",
         )
 
 
@@ -339,7 +337,7 @@ async def get_tenant(
     "",
     response_model=TenantOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Onboard a new clinic/tenant; the caller becomes its owner",
+    summary="Onboard a new company/tenant; the caller becomes its owner",
     dependencies=[Depends(requires_mfa())],
 )
 async def create_tenant(
@@ -422,10 +420,22 @@ async def update_tenant(
     # part of the update surface — lifecycle beyond active/suspended is admin-CLI.
     if "is_active" in fields:
         fields["status"] = "active" if fields["is_active"] else "suspended"
-    for key in ("display_name", "legal_name", "contact_email", "phone_number",
-                "website", "address_line1", "address_line2", "postal_code",
-                "city", "state_or_region", "country", "tax_id",
-                "registration_number", "slug"):
+    for key in (
+        "display_name",
+        "legal_name",
+        "contact_email",
+        "phone_number",
+        "website",
+        "address_line1",
+        "address_line2",
+        "postal_code",
+        "city",
+        "state_or_region",
+        "country",
+        "tax_id",
+        "registration_number",
+        "slug",
+    ):
         if key in fields and isinstance(fields[key], str):
             fields[key] = fields[key].strip()
 
@@ -532,7 +542,9 @@ async def get_logo(
     if logo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no logo set")
     data, content_type = logo
-    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=300"})
+    return Response(
+        content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=300"}
+    )
 
 
 # ── Members ──────────────────────────────────────────────────────────────

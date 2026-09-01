@@ -10,22 +10,22 @@ Sprint-10 deferred generative completion ("Layer C lives beyond this
 service"). The sprint-15 spec presumed it would reuse "the sprint-12
 generation-service / Gemma stack" — **which does not exist in this
 repo**: sprint 12 shipped notifications (ADR-0029..0031); the only LLM
-decision on record is the report-service `Synthesizer` seam with a
+decision on record is the note-service `Synthesizer` seam with a
 deterministic mock default and an Anthropic stub gated on compliance
 sign-off. There is also **no GPU rig** — three release gates (WER, DER,
 streaming latency) are already blocked on the missing A10G machine.
 
 Layer C's requirements are unlike section synthesis: synchronous, tiny
 (≤ 24 tokens), on the typing path (p95 ≤ 400 ms end-to-end, hard 600 ms
-→ 204), and running against text the clinician is typing right now
-(PHI).
+→ 204), and running against text the user is typing right now
+(sensitive note content).
 
 ## Decision
 
 1. **New `generation-service` (:8009)** — the forward-referenced home
    for generation workloads. Inline completion is its first entry point.
 2. **Local Gemma 3 1B (Q4_K_M GGUF), served by `llama-server`**
-   (llama.cpp) beside the service; PHI never leaves the box, matching
+   (llama.cpp) beside the service; note content never leaves the box, matching
    the platform's offline-model doctrine (whisper/ecapa). Pin in
    docs/models/PINS.md. `InferenceClient` is a Protocol (the
    `Synthesizer`/`build_synthesizer` seam shape) with **two real
@@ -56,10 +56,10 @@ Layer C's requirements are unlike section synthesis: synchronous, tiny
    prompt eval) the budget is comfortably met; the number must be pasted
    from the rig before Layer C ships to production. Dev hosts raise
    `MDX_GEN_TIMEOUT_MS` to keep the feature usable; production keeps 600.
-6. **Guardrails** (the model proposes, the clinician disposes):
+6. **Guardrails** (the model proposes, the user disposes):
    completions are ghost text until explicitly accepted; an **output
-   safety filter** drops any completion containing numeric clinical
-   values / dosages / ICD-like codes not verbatim in
+   safety filter** drops any completion containing numeric
+   values / money / code-like identifiers not verbatim in
    `text_before_cursor` (204 + `layer_c.completion.filtered`, warn);
    2-slot pool isolates the typing path; dual-window per-user rate limit
    (burst 10/s, 30/10s); `MDX_LAYER_C_ENABLED` kill switch +

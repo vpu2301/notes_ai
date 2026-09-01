@@ -6,7 +6,7 @@ standing request that a user enrols a second factor. So the tests below
 are as much about what the act does NOT do as about what it does:
 
   · an auditor may raise one (the only write in their whole matrix row),
-  · a clinician and a nurse may not,
+  · a member and a viewer may not,
   · it refuses a user who is already enrolled, deactivated, or is you,
   · a repeat ask escalates the SAME row rather than stacking rows,
   · every ask lands on the audit trail at `sec`.
@@ -216,8 +216,8 @@ def test_an_auditor_who_also_administers_is_recorded_as_the_auditor(
 # ── the refusals ────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("role", ["clinician", "nurse", "knowledge_admin"])
-def test_clinical_roles_cannot_remind(make_client: Any, role: str) -> None:
+@pytest.mark.parametrize("role", ["member", "viewer"])
+def test_non_oversight_roles_cannot_remind(make_client: Any, role: str) -> None:
     client = make_client(_claims(roles=[role], sub=ADMIN))
     assert client.post(f"/admin/users/{TARGET}/mfa-reminder").status_code == 403
 
@@ -247,14 +247,12 @@ def test_unknown_user_is_404(make_client: Any) -> None:
     assert client.post(f"/admin/users/{uuid4()}/mfa-reminder").status_code == 404
 
 
-def test_the_reminder_is_not_mfa_gated(
-    make_client: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The bootstrap case: a clinic where nobody has enrolled yet.
+def test_the_reminder_is_not_mfa_gated(make_client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bootstrap case: a company where nobody has enrolled yet.
 
     Every other admin mutation demands a verified-MFA session. If this one
     did too, the first reviewer would need a second factor to ask anyone
-    else for a second factor, and a clinic with none could never start.
+    else for a second factor, and a company with none could never start.
     """
     from auth_service.config import settings
 

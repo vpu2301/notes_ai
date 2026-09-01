@@ -3,7 +3,7 @@
 Distinct from ``asr_worker.vad`` on purpose: that wrapper merges segments
 < 500 ms apart and caps them at 30 s for Whisper's context window — both
 transformations destroy speaker-turn boundaries. Here we keep turns as
-Silero reports them (250 ms min silence splits a doctor→patient hand-off
+Silero reports them (250 ms min silence splits a speaker hand-off
 into two segments) and never merge across a potential turn change.
 
 Fail-loud policy: diarization with a stubbed VAD would silently produce

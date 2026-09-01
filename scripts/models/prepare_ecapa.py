@@ -65,9 +65,7 @@ def prepare(
     from huggingface_hub import snapshot_download  # lazy: needs network path only
 
     pinned = pinned or PINNED
-    snapshot = Path(
-        snapshot_download(REPO, revision=revision, allow_patterns=sorted(pinned))
-    )
+    snapshot = Path(snapshot_download(REPO, revision=revision, allow_patterns=sorted(pinned)))
     target.mkdir(parents=True, exist_ok=True)
     for name, want in pinned.items():
         src = snapshot / name

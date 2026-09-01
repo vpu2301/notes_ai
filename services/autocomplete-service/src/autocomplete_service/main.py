@@ -18,16 +18,7 @@ from .deps import install_state
 from .jobs import partition_rotation, rollup
 from .main_deps import build_state, teardown_state
 from .middleware import RequestIDMiddleware
-from .routers import (
-    compliance,
-    corpus,
-    corpus_eval,
-    corpus_eval_pipeline,
-    health,
-    phrases,
-    suggest,
-    telemetry,
-)
+from .routers import health, phrases, suggest, telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +48,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 partition_rotation.run_forever(interval_seconds=interval),
                 name="partition-rotation",
             ),
-            asyncio.create_task(
-                rollup.run_forever(interval_seconds=interval), name="rollup"
-            ),
+            asyncio.create_task(rollup.run_forever(interval_seconds=interval), name="rollup"),
         ]
     logger.info(
         "autocomplete-service.started",
@@ -79,7 +68,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Autocomplete Service",
-        description="Sprint-10 autocomplete + snippet expansion.",
+        description="Autocomplete + snippet expansion.",
         version="0.10.0",
         openapi_version="3.1.0",
         lifespan=_lifespan,
@@ -104,10 +93,6 @@ def create_app() -> FastAPI:
     app.include_router(suggest.router)
     app.include_router(phrases.router)
     app.include_router(telemetry.router)
-    app.include_router(corpus.router)
-    app.include_router(corpus_eval.router)
-    app.include_router(corpus_eval_pipeline.router)
-    app.include_router(compliance.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

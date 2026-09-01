@@ -39,7 +39,7 @@ built. The counter stays wired; the trigger to reopen is explicit:
 
 - any sustained non-zero rate of upgrade rejections with reasons that
   indicate proxy interference (as opposed to auth/capacity codes), or
-- a clinic deployment landing behind a known WS-hostile corporate proxy.
+- a customer deployment landing behind a known WS-hostile corporate proxy.
 
 The `DictationUpgradeRejectionRate` alert (sprint-14) is the standing
 tripwire; a fired alert re-opens this ADR with field data attached.
@@ -47,6 +47,6 @@ tripwire; a fired alert re-opens this ADR with field data attached.
 ## Consequences
 
 - Zero speculative transport code to maintain; the WS path stays the
-  single streaming wire (medical-dictation.v1/v2).
+  single streaming wire (dictation.v1/v2).
 - If the trigger fires, ADR-0012's bench design (seq-framed chunked
   POST, same session protocol) is the starting point.

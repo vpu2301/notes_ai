@@ -12,13 +12,13 @@ things make German structurally different from the other two:
 2. **Folding a bare numeral is riskier, not safer.** As in EN, a
    standalone spelled numeral passes through as words; it is only
    rewritten as digits when a unit follows or the numeral is a compound
-   (contains und/hundert/tausend). "Der Patient kam um acht" keeps its
+   (contains und/hundert/tausend). "Der Gast kam um acht" keeps its
    "acht" — that is prose, not a measurement.
 
-Blood pressure is the one place where an aggressive reading is patient
-harm, so the slash form is only emitted with an explicit mmHg unit, a
-BP cue word in front, or two physiologically plausible values — exactly
-the gate the UK/EN modules use.
+Paired "X über Y" readings are the one place where an aggressive
+rewrite silently corrupts a dictated figure, so the slash form is only
+emitted with an explicit mmHg unit, a cue word in front, or two
+plausible paired values — exactly the gate the UK/EN modules use.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
-# Canonical German unit vocabulary. Keys are what a clinician says (or
+# Canonical German unit vocabulary. Keys are what a speaker says (or
 # what Whisper writes); values are what lands in the note.
 _UNITS: Final[dict[str, str]] = {
     "mg": "mg",
@@ -227,7 +227,7 @@ def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
     """Spoken decimal tail as a literal digit string.
 
     "null fünf" → "05". Summing would collapse it to 5 and silently turn
-    5,05 into 5,5 — a dropped digit in a dose is patient harm.
+    5,05 into 5,5 — a dropped digit silently corrupts a dictated figure.
     """
     digits: list[str] = []
     cursor = i

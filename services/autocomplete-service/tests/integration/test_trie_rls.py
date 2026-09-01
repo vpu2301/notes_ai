@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 SU_DSN = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 
@@ -44,11 +44,12 @@ async def test_builder_sees_own_scopes_never_other_tenants():
         await su.execute(
             "INSERT INTO autocomplete_phrases (tenant_id, phrase, language, source) "
             "VALUES ($1, $2, 'uk', 'tenant'), ($3, $4, 'uk', 'tenant')",
-            TENANT_A, MARK_A, TENANT_B, MARK_B,
+            TENANT_A,
+            MARK_A,
+            TENANT_B,
+            MARK_B,
         )
-        pool = await create_pool(
-            APP_DSN, application_name="trie-rls-itest", min_size=1, max_size=1
-        )
+        pool = await create_pool(APP_DSN, application_name="trie-rls-itest", min_size=1, max_size=1)
         try:
             async with tenant_connection(pool, TENANT_A) as conn:
                 rows = await repo.fetch_corpus(conn, language="uk")

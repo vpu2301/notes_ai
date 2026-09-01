@@ -54,9 +54,9 @@ class PasswordResetRateLimiter:
         self._email_salt = email_salt
 
     def _email_key(self, email: str, bucket: int) -> str:
-        digest = hashlib.sha256(
-            f"{self._email_salt}:{email.strip().lower()}".encode()
-        ).hexdigest()[:32]
+        digest = hashlib.sha256(f"{self._email_salt}:{email.strip().lower()}".encode()).hexdigest()[
+            :32
+        ]
         return f"auth:pwreset-rl:email:{digest}:{bucket}"
 
     async def _bump(self, key: str, limit: int) -> bool:
@@ -86,7 +86,5 @@ class PasswordResetRateLimiter:
         ip_ok = True
         if ip:
             ip_ok = await self._bump(f"auth:pwreset-rl:ip:{ip}:{bucket}", self._ip_per_hour)
-        email_ok = await self._bump(
-            self._email_key(email, bucket), self._email_per_hour
-        )
+        email_ok = await self._bump(self._email_key(email, bucket), self._email_per_hour)
         return ip_ok and email_ok

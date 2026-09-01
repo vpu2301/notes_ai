@@ -35,7 +35,6 @@ from .routers import (
     me,
     mfa,
     password,
-    reauth,
     tenants,
 )
 
@@ -112,7 +111,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Auth Service",
-        description="Sprint-02 identity, tenant, and audit-read service.",
+        description="Identity, tenant, and audit-read service.",
         version="0.2.0",
         openapi_version="3.1.0",
         lifespan=_lifespan,
@@ -136,7 +135,6 @@ def create_app() -> FastAPI:
     app.include_router(login.router)
     app.include_router(mfa.router)
     app.include_router(me.router)
-    app.include_router(reauth.router)
     app.include_router(password.router)
     app.include_router(admin.router)
     app.include_router(tenants.router)

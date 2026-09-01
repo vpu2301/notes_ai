@@ -154,7 +154,7 @@ def requires_mfa() -> Callable[..., Awaitable[Claims]]:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="MFA required for this endpoint",
-                headers={"WWW-Authenticate": 'MFA realm="medical-dictation"'},
+                headers={"WWW-Authenticate": 'MFA realm="notes"'},
             )
         return claims
 

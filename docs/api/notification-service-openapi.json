@@ -4,16 +4,13 @@
       "Category": {
         "description": "The v1 notification categories.\n\nAdding a member here is not enough to make it work: every category\nMUST also have an entry in ``notification_service.domain.catalog``.\nA test enforces the 1:1 mapping, so an un-catalogued category is a\nbuild failure rather than a silent no-op at runtime \u2014 the same\n\"unknown intent is a bug\" contract as nlp-service's operations map.",
         "enum": [
-          "report.finalized",
-          "report.signed",
-          "report.signing_failed",
-          "report.amended",
-          "report.chain_failure",
-          "report.shared_with_you",
+          "note.finalized",
+          "note.amended",
+          "note.chain_failure",
+          "note.shared_with_you",
           "dictation.completed",
           "transcription.completed",
           "transcription.failed",
-          "phi_access.granted",
           "security.mfa_reminder",
           "system.digest"
         ],
@@ -354,7 +351,7 @@
     }
   },
   "info": {
-    "description": "Sprint-12 notification fan-out: in-app feed, WebSocket push (medical-notifications.v1), and email.",
+    "description": "Notification fan-out: in-app feed, WebSocket push (notifications.v1), and email.",
     "title": "Notification Service",
     "version": "0.12.0"
   },

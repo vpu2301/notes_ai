@@ -175,7 +175,7 @@ async def login(request: Request, response: Response) -> LoginResponse:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
-            headers={"WWW-Authenticate": 'Bearer realm="medical-dictation"'},
+            headers={"WWW-Authenticate": 'Bearer realm="notes"'},
         ) from exc
 
     # ── Sprint 16: second factor for enrolled users ─────────────────────
@@ -232,7 +232,7 @@ async def _enforce_totp_if_enrolled(state: Any, *, access_token: str, otp: str |
         exc = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,
-            headers={"WWW-Authenticate": 'MFA realm="medical-dictation"'},
+            headers={"WWW-Authenticate": 'MFA realm="notes"'},
         )
         exc.problem_extras = {"code": code}  # type: ignore[attr-defined]
         return exc
@@ -448,9 +448,7 @@ async def logout(
                 severity=Severity.INFO,
             )
         except Exception as push_exc:  # noqa: BLE001 — logout must still succeed
-            logger.warning(
-                "auth.logout.denylist_push_failed", extra={"error": str(push_exc)}
-            )
+            logger.warning("auth.logout.denylist_push_failed", extra={"error": str(push_exc)})
 
     if refresh_token:
         try:

@@ -1,9 +1,8 @@
-"""Per-user hourly rate limiter for corpus writes (Redis-backed).
+"""Per-user hourly rate limiter for phrase/snippet writes (Redis-backed).
 
-Fixed-window INCR+EXPIRE bucket, same shape as the signing-service
-public-verify limiter: a runaway SPA loop must not flood the corpus.
-Fail-open on Redis errors — a Redis outage must not block a clinician
-saving a phrase (the write path is already RLS- and PII-guarded).
+Fixed-window INCR+EXPIRE bucket: a runaway SPA loop must not flood the
+phrase corpus. Fail-open on Redis errors — a Redis outage must not block
+a user saving a phrase (the write path is already RLS- and PII-guarded).
 """
 
 from __future__ import annotations

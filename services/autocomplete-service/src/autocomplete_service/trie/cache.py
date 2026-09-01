@@ -87,16 +87,12 @@ class TrieCache:
         tenant_id: UUID,
         reason: str,
     ) -> tuple[TenantTrie, str]:
-        self._warn_throttled(
-            f"trie_cache.{reason}", tenant_id=str(tenant_id)
-        )
+        self._warn_throttled(f"trie_cache.{reason}", tenant_id=str(tenant_id))
         if self._degraded_metric is not None:
             self._degraded_metric.add(1, {"reason": reason})
         return await build_fn(), "degraded"
 
-    async def _timed_build(
-        self, build_fn: Callable[[], Awaitable[TenantTrie]]
-    ) -> TenantTrie:
+    async def _timed_build(self, build_fn: Callable[[], Awaitable[TenantTrie]]) -> TenantTrie:
         t0 = time.monotonic()
         trie = await build_fn()
         if self._build_seconds is not None:
@@ -215,6 +211,4 @@ class TrieCache:
         try:
             await self._r.incr(tag_key)
         except Exception:  # noqa: BLE001 — staleness is bounded by the TTL
-            self._warn_throttled(
-                "trie_cache.vtag_bump_failed", tenant_id=str(tenant_id)
-            )
+            self._warn_throttled("trie_cache.vtag_bump_failed", tenant_id=str(tenant_id))

@@ -28,19 +28,20 @@ step 9.
 | # | Criterion | Code | HTTP | Why it happens |
 |---|---|---|---|---|
 | 1 | Bearer + `asr.write` on `asr_job` | `scope_missing` | 401 / 403 | Token absent, expired, or a role without dictation upload |
+
+The multipart form takes the audio file, `language`, and an optional
+free-text `vocabulary_hint` (≤ 2000 chars) that feeds Whisper's
+`initial_prompt` — product terms, names, jargon.
 | 2 | Declared MIME in the allow-list | `mime_not_allowed` | 400 | A container we cannot transcribe (video, zip, `application/octet-stream` from a client that did not set the type) |
 | 3 | Not empty | `empty_upload` | 400 | The browser lost the recording before submit; a MediaRecorder stopped before its first flush |
 | 4 | Size ≤ `MD_ASR_MAX_UPLOAD_MB` | `size_exceeded` | 400 | An hour of uncompressed WAV; an accidental whole-session upload |
 | 5 | Magic bytes match the declared MIME | `mime_mismatch` | 400 | A polyglot or mis-declared file — MP3 bytes labelled `audio/wav`. Also a file under 12 bytes |
 | 6 | ffprobe can read it | `unprobeable` | 400 | Truncated header, container we do not recognise, or ffprobe timed out |
-| 7 | Duration ≥ `MD_ASR_MIN_DURATION_MS` | `duration_too_short` | 400 | A tapped record button. Whisper answers a fraction of a second of noise with a **hallucinated phrase** — rejecting is safer than charting it |
-| 7 | Duration ≤ `MD_ASR_MAX_DURATION_SECONDS` | `duration_exceeded` | 400 | A recorder left running; a whole clinic session in one file |
+| 7 | Duration ≥ `MD_ASR_MIN_DURATION_MS` | `duration_too_short` | 400 | A tapped record button. Whisper answers a fraction of a second of noise with a **hallucinated phrase** — rejecting is safer than storing it |
+| 7 | Duration ≤ `MD_ASR_MAX_DURATION_SECONDS` | `duration_exceeded` | 400 | A recorder left running; a whole workday in one file |
 | 8 | Codec in the allow-list | `codec_not_allowed` | 400 | An exotic codec inside an allowed container |
-| 8 | Sample rate ≥ `MD_ASR_MIN_SAMPLE_RATE_HZ` | `sample_rate_too_low` | 400 | Telephony-grade capture below the floor where Ukrainian clinical terms survive |
+| 8 | Sample rate ≥ `MD_ASR_MIN_SAMPLE_RATE_HZ` | `sample_rate_too_low` | 400 | Telephony-grade capture below the floor where speech survives recognisably |
 | 8 | Channels ≤ `MD_ASR_MAX_CHANNELS` | `channels_exceeded` | 400 | A multi-track recorder |
-| 9 | `encounter_id` exists in this tenant | `encounter_invalid` | 400 | A stale id, or another tenant's encounter — RLS makes the two indistinguishable, deliberately (no existence oracle) |
-| 9 | Encounter not cancelled | `encounter_closed` | 400 | Dictation against a visit that was called off |
-| 9 | `prompt_id` in the catalogue | `prompt_invalid` | 400 | A prompt id cached from a previous release. Checked here because the FK would otherwise surface as a 500 *after* the audio was uploaded |
 | 9 | Tenant under the concurrent cap | `concurrency_exceeded` | 429 | `MD_ASR_PER_TENANT_CONCURRENT_JOBS` queued+running jobs already. Body carries `active` and `limit` |
 | 10 | Tenant under the monthly quota | `quota_exceeded` | 429 | `MD_ASR_MONTHLY_QUOTA_BYTES` for the calendar month. A soft billing guard, not a security boundary — parallel uploads can overshoot by the in-flight bytes |
 | 11 | Queue accepted the job | `enqueue_failed` | 503 | Redis unreachable at publish. The row is marked `failed` before the response — a `queued` job nobody will ever transcribe is worse than an error |
@@ -82,8 +83,8 @@ contract. `type` is stable; the concurrency rejection keeps its historical
 | `error_kind` | The closed vocabulary below |
 | `error_stage` | `queue` / `decode` / `inference` / `persist` / `lifecycle` |
 | `error_retryable` | Whether re-running the same job could have succeeded (drives the worker's own retry decision) |
-| `error_message` | PHI-free explanation, safe to show a clinician |
-| `error_detail` | Free text from the underlying exception. **May quote the audio** — never surfaced to the notification feed or to `stats.read` callers (ADR-0031) |
+| `error_message` | Explanation free of sensitive content, safe to show the user |
+| `error_detail` | Free text from the underlying exception. **May quote the audio** — never surfaced to the notification feed (ADR-0031) |
 
 `error_stage` / `error_retryable` / `error_message` are computed from
 `error_kind`, so they cannot drift from it.
@@ -94,11 +95,11 @@ contract. `type` is stable; the concurrency rejection keeps its historical
 | `queue_lost` | queue | no | yes | The row committed and the publish returned, but no worker ever claimed it — a flushed Redis, a trimmed stream, a recreated consumer group. Written by the reaper |
 | `bad_payload` | queue | no | yes | The worker cannot parse the queued job description — asr-service deployed ahead of asr-worker. Goes straight to the DLQ |
 | `job_row_missing` | queue | no | yes | The message names a job id that is not in the database |
-| `audio_missing` | decode | no | yes | The audio object is gone: retention TTL, the S11 erasure engine, or an upload whose row was written but whose object never landed |
+| `audio_missing` | decode | no | yes | The audio object is gone: retention TTL, an erasure request, or an upload whose row was written but whose object never landed |
 | `decrypt_failed` | decode | no | **no** | Envelope failure — wrong AAD, a tenant KEK that will not unwrap, a truncated object. An operator's problem; re-uploading changes nothing |
 | `storage_unavailable` | decode | **yes** | no | MinIO/S3 unreachable while fetching |
 | `corrupt_audio` | decode | no | yes | ffmpeg refused the file that ffprobe accepted — truncated payload, a container whose declared codec the stream does not carry |
-| `no_speech` | decode | no | yes | Decoded cleanly, contains no speech: silence, or a microphone that captured nothing. **Deliberately a failure, not an empty `complete`** — Whisper given silence produces a hallucinated phrase, and a hallucination stored as a transcript reaches the chart looking like dictation |
+| `no_speech` | decode | no | yes | Decoded cleanly, contains no speech: silence, or a microphone that captured nothing. **Deliberately a failure, not an empty `complete`** — Whisper given silence produces a hallucinated phrase, and a hallucination stored as a transcript reaches the note looking like dictation |
 | `model_unavailable` | inference | **yes** | no | The Whisper model is not loaded on the worker that claimed the job |
 | `gpu_oom` | inference | no | yes | CUDA out of memory. Not retried — hammering a full GPU costs the whole queue. The CUDA cache is released before the worker moves on |
 | `timeout` | inference | no | yes | Inference exceeded `max(60s, audio_seconds × MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER)` |
@@ -136,7 +137,7 @@ worst case the worker allows itself (`MD_ASR_MAX_DURATION_SECONDS` ×
 `MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`, ≈ 2.5 h at the defaults) plus
 a redelivery. Reaping early is not catastrophic — the worker's idempotency
 check sees the terminal row on redelivery and skips — but it costs the
-clinician a transcript that was on its way.
+user a transcript that was on its way.
 
 Jobs closed out by the reaper or by the enqueue path do **not** emit a
 notification; only the worker's own failures do (asr-service does not
@@ -174,6 +175,7 @@ transcript with `nlp_applied: false`.
 - **`worker_lost` in bulk** means workers are dying — check the GPU node
   before anything else (`docs/runbooks/asr-worker.md`).
 - **Adding a kind:** add it to `JobErrorKind`, give it a spec (stage,
-  retryable, resubmittable, PHI-free message), add a row here. The
+  retryable, resubmittable, a message free of sensitive content), add a
+  row here. The
   `test_every_kind_has_a_spec` test fails if you forget the spec; nothing
   but review catches a missing row here.

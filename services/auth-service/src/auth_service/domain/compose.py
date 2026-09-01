@@ -94,7 +94,7 @@ def reset_url(*, app_base_url: str, token: str) -> str:
     The token rides in the hash fragment's query, matching the SPA's
     hash router. That placement is also the safer one: a fragment is
     never sent to the server, so the token stays out of access logs on
-    every proxy between the clinic and the app, and out of the Referer
+    every proxy between the office network and the app, and out of the Referer
     header when the reset page loads a third-party resource.
     """
     return f"{_sanitise_base(app_base_url)}/#/reset-password?token={quote(token, safe='')}"
@@ -102,9 +102,7 @@ def reset_url(*, app_base_url: str, token: str) -> str:
 
 def lockdown_url(*, app_base_url: str, token: str) -> str:
     """Deep link into the SPA's "that wasn't me" screen."""
-    return (
-        f"{_sanitise_base(app_base_url)}/#/account-recovery?token={quote(token, safe='')}"
-    )
+    return f"{_sanitise_base(app_base_url)}/#/account-recovery?token={quote(token, safe='')}"
 
 
 def privacy_url(*, app_base_url: str) -> str:
@@ -180,7 +178,7 @@ def password_changed_fields(
 
 
 def _days_label(seconds: int, lang: str) -> str:
-    """"7 days" / "7 Tage" / "7 днів"."""
+    """ "7 days" / "7 Tage" / "7 днів"."""
     days = max(1, round(seconds / 86400))
     if lang == "de":
         return f"{days} Tag" if days == 1 else f"{days} Tage"
@@ -221,9 +219,7 @@ def text_values(
     merged: dict[str, str] = {k: str(v) for k, v in {**fields, **secrets}.items()}
     label = merged.get("client_label", "")
     unknown = set(_UNKNOWN_CLIENT.values())
-    merged["client_line"] = copy_mod.client_line(
-        lang, "" if label in unknown else label
-    )
+    merged["client_line"] = copy_mod.client_line(lang, "" if label in unknown else label)
     return merged
 
 

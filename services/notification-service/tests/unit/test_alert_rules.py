@@ -1,4 +1,4 @@
-"""Sprint-12 alert rules stay loadable and on-contract.
+"""Notification alert rules stay loadable and on-contract.
 
 promtool is not in the venv, so this validates what CI can: the YAML
 parses, the contract rule names exist with fixed severities, and — the
@@ -19,14 +19,9 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[4]
-RULES = REPO / "infra" / "prometheus" / "rules" / "sprint-12-alerts.yml"
+RULES = REPO / "infra" / "prometheus" / "rules" / "notifications.yml"
 METRICS_SRC = (
-    REPO
-    / "services"
-    / "notification-service"
-    / "src"
-    / "notification_service"
-    / "metrics.py"
+    REPO / "services" / "notification-service" / "src" / "notification_service" / "metrics.py"
 )
 
 EXPECTED: dict[str, str] = {
@@ -47,7 +42,7 @@ def _rules() -> list[dict]:
 
 def test_rules_file_parses() -> None:
     doc = yaml.safe_load(RULES.read_text())
-    assert doc["groups"][0]["name"] == "sprint-12-notifications"
+    assert doc["groups"][0]["name"] == "notifications"
 
 
 def test_expected_alerts_exist_with_correct_severity() -> None:
@@ -91,8 +86,6 @@ def test_failure_ratio_alert_does_not_clamp_the_denominator() -> None:
     second the clamped denominator makes the expression read as
     failures/sec, which trips overnight when traffic is near zero.
     """
-    expr = next(
-        r["expr"] for r in _rules() if r["alert"] == "NotificationDeliveryFailureRateHigh"
-    )
+    expr = next(r["expr"] for r in _rules() if r["alert"] == "NotificationDeliveryFailureRateHigh")
     assert "clamp_min" not in expr
     assert "or vector(0)" in expr

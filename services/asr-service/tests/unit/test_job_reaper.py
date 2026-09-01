@@ -2,7 +2,7 @@
 
 Two properties matter, and they pull against each other. It must collect
 jobs no worker is coming back for, because each one permanently burns a
-slot in ``per_tenant_concurrent_jobs`` and shows a clinician a spinner
+slot in ``per_tenant_concurrent_jobs`` and shows the user a spinner
 that will never stop. And it must never collect a job that finished
 between the scan and the write, because a stored transcript being
 overwritten by "the worker looked dead" loses real dictation.
@@ -56,9 +56,7 @@ def _state(tenants: list[UUID]) -> Any:
 
 
 def _stale(status: str) -> repository.StaleJobRow:
-    return repository.StaleJobRow(
-        id=uuid4(), status=status, requester_sub=uuid4(), started_at=None
-    )
+    return repository.StaleJobRow(id=uuid4(), status=status, requester_sub=uuid4(), started_at=None)
 
 
 @pytest.fixture

@@ -20,20 +20,13 @@ class Category(StrEnum):
     "unknown intent is a bug" contract as nlp-service's operations map.
     """
 
-    REPORT_FINALIZED = "report.finalized"
-    REPORT_SIGNED = "report.signed"
-    REPORT_SIGNING_FAILED = "report.signing_failed"
-    REPORT_AMENDED = "report.amended"
-    REPORT_CHAIN_FAILURE = "report.chain_failure"
-    REPORT_SHARED_WITH_YOU = "report.shared_with_you"
+    NOTE_FINALIZED = "note.finalized"
+    NOTE_AMENDED = "note.amended"
+    NOTE_CHAIN_FAILURE = "note.chain_failure"
+    NOTE_SHARED_WITH_YOU = "note.shared_with_you"
     DICTATION_COMPLETED = "dictation.completed"
     TRANSCRIPTION_COMPLETED = "transcription.completed"
     TRANSCRIPTION_FAILED = "transcription.failed"
-    # S14 break-glass: an administrator, who holds no standing clinical
-    # read, opened one of your reports. This is the after-the-fact
-    # control that makes an immediate grant safe, so it is the one
-    # category a recipient cannot be left unaware of.
-    PHI_ACCESS_GRANTED = "phi_access.granted"
     # S21: an access review found this account without a second factor and
     # asked for one. The standing half of the reminder lives in
     # `mfa_reminders` and renders as a banner until enrolment; this is the

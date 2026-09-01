@@ -109,7 +109,7 @@ Every dictation-service worker serves both modes. Rationale:
   +100 %) and +8 % compute per window, neither growing with concurrency.
 
 This decision is explicitly **provisional on the A10G rig re-run**, which
-is a blocking gate before conversation mode reaches real patients (below).
+is a blocking gate before conversation mode reaches real users (below).
 
 ### 2. Weighted capacity, not headcount. Conversation = 2 units.
 
@@ -122,9 +122,9 @@ Weight 2 is **deliberately conservative** and we are keeping it that way.
 On the CPU evidence a conversation session costs ~1.5× a dictation session
 on memory and ~1.1× on compute, so weight 2 under-books the worker. That is
 the intended direction of error: the failure mode of booking too few
-sessions is refused connections that a clinician retries; the failure mode
+sessions is refused connections that a user retries; the failure mode
 of booking too many is degraded transcription latency during a live
-consultation. Re-tune on the rig, downward only with rig evidence.
+meeting. Re-tune on the rig, downward only with rig evidence.
 
 Headcount is retired as the capacity signal. It cannot express this: a
 worker holding 2 conversation sessions is *full* while
@@ -169,7 +169,7 @@ build time — see docs/models/PINS.md § Re-asserted at startup.
   conversation-free workers stay clean, that is the interference signal this
   ADR could not obtain — and the trigger to revisit the split.
 
-## Open — blocking before conversation mode reaches patients
+## Open — blocking before conversation mode reaches users
 
 1. **A10G rig re-run** (`make capacity-probe` + `make der-eval`) with both
    models resident on the GPU: VRAM with Whisper alone vs both, per-window

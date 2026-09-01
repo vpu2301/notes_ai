@@ -1,154 +1,149 @@
 """Labeled uk utterance corpus for choice/multi_choice extraction.
 
-The clinical-safety contract in data form. Each case is
+The extraction-safety contract in data form. Each case is
 ``(utterance, expected_value_or_None, why)`` — ``None`` means the
 extractor MUST leave the field empty (prose preserved). Every negation
-case is a case where filling the field would invert the clinical
-meaning of the note.
+case is a case where filling the field would invert the meaning of the
+note.
 
-Options mirror the shipped ``anamnesis_intake`` system template
-(`infra/seeds/templates/anamnesis_intake.json`) — if that template's
-aliases change, these expectations are the contract that notices.
+The options model a CRM-style intake template (subscription status +
+preferred contact channels) — the same linguistic shapes the extractor
+must survive in any business template: negated aliases that are their
+own option, gendered verb forms, multi-token agent nouns, and
+one-character inflection drift.
 """
 
 from __future__ import annotations
 
 from nlp_service.pipeline.base import ChoiceOption
 
-SMOKING_OPTIONS: tuple[ChoiceOption, ...] = (
+SUBSCRIPTION_OPTIONS: tuple[ChoiceOption, ...] = (
     ChoiceOption(
         value="never",
-        label="не палить",
+        label="не підписаний",
         aliases=(
-            "не палить",
-            "не курить",
-            "ніколи не палив",
-            "ніколи не палила",
-            "ніколи не курив",
-            "ніколи не курила",
-            "заперечує куріння",
-            "never smoked",
-            "non-smoker",
+            "не підписаний",
+            "не підписана",
+            "ніколи не підписувався",
+            "ніколи не підписувалась",
+            "заперечує підписку",
+            "never subscribed",
+            "not subscribed",
         ),
     ),
     ChoiceOption(
         value="current",
-        label="палить",
+        label="підписаний",
         aliases=(
-            "палить",
-            "курить",
-            "активний курець",
-            "продовжує палити",
-            "продовжує курити",
-            "current smoker",
-            "smoker",
+            "підписаний",
+            "підписана",
+            "підписка",
+            "активний підписник",
+            "продовжує підписку",
+            "active subscriber",
+            "subscribed",
         ),
     ),
     ChoiceOption(
         value="former",
-        label="палив у минулому",
+        label="підписаний у минулому",
         aliases=(
-            "кинув палити",
-            "кинула палити",
-            "кинув курити",
-            "кинула курити",
-            "палив у минулому",
-            "курив у минулому",
-            "колишній курець",
-            "раніше палив",
-            "раніше курив",
-            "ex-smoker",
-            "former smoker",
+            "скасував підписку",
+            "скасувала підписку",
+            "відписався",
+            "відписалась",
+            "колишній підписник",
+            "раніше підписаний",
+            "ex-subscriber",
+            "former subscriber",
         ),
     ),
 )
 
-ALLERGY_OPTIONS: tuple[ChoiceOption, ...] = (
+CHANNEL_OPTIONS: tuple[ChoiceOption, ...] = (
     ChoiceOption(
         value="none_known",
-        label="алергії не відомі",
+        label="канали не вказані",
         aliases=(
-            "алергії не відомі",
-            "без алергій",
-            "алергій немає",
-            "алергоанамнез не обтяжений",
-            "no known allergies",
+            "канали не вказані",
+            "без каналів",
+            "каналів немає",
+            "no known channels",
         ),
     ),
     ChoiceOption(
-        value="penicillin",
-        label="пеніцилін",
-        aliases=("пеніцилін", "амоксицилін", "penicillin"),
+        value="email",
+        label="імейл",
+        aliases=("імейл", "електронна пошта", "email"),
     ),
     ChoiceOption(
-        value="nsaids",
-        label="нпзп",
-        aliases=("нпзп", "нестероїдні протизапальні", "аспірин", "ібупрофен", "nsaids"),
+        value="messengers",
+        label="месенджери",
+        aliases=("месенджери", "телеграм", "вайбер", "messengers"),
     ),
     ChoiceOption(
-        value="latex",
-        label="латекс",
-        aliases=("латекс", "latex"),
+        value="phone",
+        label="телефон",
+        aliases=("телефон", "phone"),
     ),
     ChoiceOption(
-        value="pollen",
-        label="пилок",
-        aliases=("пилок", "поліноз", "сезонна алергія", "pollen"),
+        value="sms",
+        label="смс",
+        aliases=("смс", "текстові повідомлення", "sms"),
     ),
 )
 
-# ── choice: smoking status ──────────────────────────────────────────
+# ── choice: subscription status ─────────────────────────────────────
 # (utterance, expected value or None, why)
-SMOKING_CASES: list[tuple[str, str | None, str]] = [
+SUBSCRIPTION_CASES: list[tuple[str, str | None, str]] = [
     # -- straightforward fills
-    ("пацієнт курить", "current", "bare alias, exact"),
-    ("пацієнт палить", "current", "bare alias, exact"),
-    ("хворий активний курець", "current", "multi-token alias"),
-    ("пацієнт продовжує палити", "current", "multi-token alias"),
-    ("пацієнт не курить", "never", "negated alias is its own option"),
-    ("пацієнт не палить", "never", "negated alias is its own option"),
-    ("ніколи не палив", "never", "long negated alias"),
-    ("заперечує куріння", "never", "clinical phrasing"),
-    ("кинув палити п'ять років тому", "former", "alias + trailing detail"),
-    ("кинула курити торік", "former", "gendered form"),
-    ("колишній курець", "former", "noun phrase"),
-    ("раніше палив, зараз ні", "former", "alias with trailing clause"),
+    ("клієнт підписаний", "current", "bare alias, exact"),
+    ("клієнт підписана", "current", "bare alias, gendered form"),
+    ("замовник активний підписник", "current", "multi-token alias"),
+    ("клієнт продовжує підписку", "current", "multi-token alias"),
+    ("клієнт не підписаний", "never", "negated alias is its own option"),
+    ("клієнт не підписана", "never", "negated alias is its own option"),
+    ("ніколи не підписувався", "never", "long negated alias"),
+    ("заперечує підписку", "never", "denial phrasing"),
+    ("скасував підписку минулого року", "former", "alias + trailing detail"),
+    ("скасувала підписку торік", "former", "gendered form"),
+    ("колишній підписник", "former", "noun phrase"),
+    ("раніше підписаний, зараз ні", "former", "alias with trailing clause"),
     # -- inflection tolerance (Levenshtein ≤ 1 on long tokens)
-    ("пацієнт курит", "current", "one-char truncation of курить"),
-    ("хворий палит", "current", "one-char truncation of палить"),
-    ("заперечує куріння", "never", "one-char variant of куріння"),
-    ("кинув палити", "former", "exact multi-token"),
-    # -- nothing said about smoking
-    ("скарги на головний біль протягом трьох днів", None, "unrelated content"),
+    ("клієнт підписани", "current", "one-char truncation of підписаний"),
+    ("замовник підписаня", "current", "one-char variant of підписана"),
+    ("скасував підписку", "former", "exact multi-token"),
+    # -- nothing said about the subscription
+    ("обговорення бюджету на наступний тиждень", None, "unrelated content"),
     ("", None, "empty text"),
-    ("артеріальний тиск сто сорок на дев'яносто", None, "unrelated clinical content"),
+    ("рахунок на сто сорок гривень", None, "unrelated numeric content"),
     # -- garbled beyond tolerance
-    ("пацієнт кржтв", None, "garble, distance > 1"),
-    ("пацієнт пллт", None, "garble, distance > 1"),
+    ("клієнт пдпсн", None, "garble, distance > 1"),
+    ("клієнт підпррр", None, "garble, distance > 1"),
     # -- negation guard: the safety core
-    ("не курець", None, "negator before a non-negated alias blocks it"),
-    ("без ознак куріння", None, "'без' blocks"),
-    ("заперечує палить", None, "negator token before bare alias blocks"),
+    ("не підписник", None, "negator before a non-negated alias blocks it"),
+    ("без підписки", None, "'без' blocks"),
+    ("заперечує підписаний", None, "negator token before bare alias blocks"),
 ]
 
-# ── multi_choice: allergies ─────────────────────────────────────────
+# ── multi_choice: contact channels ──────────────────────────────────
 # (utterance, expected set or None, why)
-ALLERGY_CASES: list[tuple[str, set[str] | None, str]] = [
-    ("алергія на пеніцилін", {"penicillin"}, "single allergen"),
+CHANNEL_CASES: list[tuple[str, set[str] | None, str]] = [
+    ("зв'язок через імейл", {"email"}, "single channel"),
     (
-        "алергія на пеніцилін, латекс та пилок",
-        {"penicillin", "latex", "pollen"},
-        "three allergens in one utterance",
+        "зв'язок через імейл, телефон та телеграм",
+        {"email", "phone", "messengers"},
+        "three channels in one utterance",
     ),
-    ("алергії не відомі", {"none_known"}, "explicit none"),
-    ("алергоанамнез не обтяжений", {"none_known"}, "clinical phrasing for none"),
+    ("канали не вказані", {"none_known"}, "explicit none"),
+    ("без каналів", {"none_known"}, "short phrasing for none"),
     (
-        "алергій немає, окрім латексу",
-        {"latex"},
-        "none_known dropped when a positive finding is also present",
+        "каналів немає, окрім телефону",
+        {"phone"},
+        "none_known dropped when a positive entry is also present",
     ),
-    ("непереносимість аспірину", {"nsaids"}, "alias of the NSAID group"),
-    ("реакція на амоксицилін", {"penicillin"}, "drug-name alias maps to its group"),
-    ("скарги на кашель", None, "nothing allergy-related"),
+    ("написати у вайбер", {"messengers"}, "alias of the messenger group"),
+    ("відповів на електронну пошту", {"email"}, "inflected multi-token alias"),
+    ("обговорили бюджет проєкту", None, "nothing channel-related"),
     ("", None, "empty text"),
 ]

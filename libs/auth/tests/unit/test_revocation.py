@@ -101,7 +101,7 @@ def _claims(sid: str = "sid-1") -> Claims:
     return Claims(
         sub=uuid4(),
         tid=uuid4(),
-        roles=["clinician"],
+        roles=["member"],
         sid=sid,
         iss="https://issuer",
         aud="mdx",

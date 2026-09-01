@@ -1,13 +1,9 @@
 """``POST /asr/jobs`` rejections: every one names a code, and none 500s.
 
 The file-shape validators were always well covered; the rejections the
-*router* owns were not, and two of them were not rejections at all:
-
-- an unknown ``prompt_id`` reached the INSERT and came back as an asyncpg
-  foreign-key violation — a 500 for what is a caller mistake, after the
-  audio had already been encrypted and uploaded;
-- a queue that refused the publish left the row sitting in ``queued``
-  with nothing on the other end, and answered 202.
+*router* owns were not, and one of them was not a rejection at all:
+a queue that refused the publish left the row sitting in ``queued``
+with nothing on the other end, and answered 202.
 
 ``run_all`` is stubbed here: ffprobe's verdict is tested in
 ``test_validators.py``, and what is under test is what the handler does
@@ -31,11 +27,11 @@ from auth import Claims
 _TENANT = uuid4()
 
 
-def _clinician_claims() -> Claims:
+def _member_claims() -> Claims:
     return Claims(
         sub=uuid4(),
         tid=_TENANT,
-        roles=["clinician"],
+        roles=["member"],
         sid="test-session",
         iss="https://test/issuer",
         aud="mdx",
@@ -114,6 +110,10 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         yield None
 
     monkeypatch.setattr(jobs, "tenant_connection", _fake_tenant_conn)
+    # The role→permission matrix lives in libs/auth and is not under test
+    # here; grant everything so the rig is independent of role names.
+    monkeypatch.setattr(deps, "check", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "check_any", lambda *a, **k: None)
 
     async def _run_all(*, mime_type: str, payload: bytes):  # noqa: ANN202
         return ok(), _facts()
@@ -122,9 +122,6 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(jobs, "_header_to_json", lambda _h: {})
 
     # Defaults: everything the handler asks the DB is fine.
-    async def _prompt_exists(_conn: Any, *, prompt_id: Any) -> bool:
-        return True
-
     async def _count_active(_conn: Any, *, tenant_id: Any) -> int:
         return 0
 
@@ -142,7 +139,6 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         failed.append({"job_id": job_id, "kind": error_kind, "detail": error_detail})
         return True
 
-    monkeypatch.setattr(jobs.repository, "prompt_exists", _prompt_exists)
     monkeypatch.setattr(jobs.repository, "count_active_jobs", _count_active)
     monkeypatch.setattr(jobs.repository, "insert_audio_row", _insert)
     monkeypatch.setattr(jobs.repository, "insert_job_row", _insert)
@@ -150,7 +146,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(jobs, "validate_quota", _validate_quota)
 
     app = create_app()
-    app.dependency_overrides[deps.current_user] = _clinician_claims
+    app.dependency_overrides[deps.current_user] = _member_claims
     return SimpleNamespace(
         client=TestClient(app),
         store=store,
@@ -166,7 +162,7 @@ def _post(rig: SimpleNamespace) -> Any:
     return rig.client.post(
         "/asr/jobs",
         files={"audio": ("dictation.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
-        data={"prompt_id": str(uuid4()), "language": "uk"},
+        data={"language": "uk", "vocabulary_hint": "Klarnote roadmap"},
     )
 
 
@@ -174,19 +170,6 @@ def test_accepted_upload_is_queued(rig: SimpleNamespace) -> None:
     resp = _post(rig)
     assert resp.status_code == 202
     assert rig.producer.sent == 1
-
-
-def test_unknown_prompt_is_a_400_not_a_500(rig: SimpleNamespace) -> None:
-    async def _no(_conn: Any, *, prompt_id: Any) -> bool:
-        return False
-
-    rig.monkeypatch.setattr(rig.jobs.repository, "prompt_exists", _no)
-
-    resp = _post(rig)
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "prompt_invalid"
-    # Rejected before the audio was encrypted and uploaded.
-    assert rig.store.deleted == []
 
 
 def test_concurrency_limit_names_a_code_and_keeps_its_type_uri(

@@ -10,21 +10,21 @@ from generation_service.domain.shown_audit import ShownAuditBuffer
 
 def test_prompt_uk_contains_frame_section_and_text():
     prompt = build_prompt(
-        section_key="anamnesis",
-        text_before_cursor="Пацієнт скаржиться на",
+        section_key="Action items",
+        text_before_cursor="Команда домовилася про",
         language="uk",
     )
-    assert "Не вигадуй жодних нових клінічних фактів" in prompt
-    assert "Розділ документа: anamnesis" in prompt
-    assert prompt.endswith("Пацієнт скаржиться на")
+    assert "Не вигадуй жодних нових фактів" in prompt
+    assert "Розділ нотатки: Action items" in prompt
+    assert prompt.endswith("Команда домовилася про")
 
 
 def test_prompt_en_variant():
     prompt = build_prompt(
-        section_key="objective", text_before_cursor="The patient reports", language="en"
+        section_key="Decisions", text_before_cursor="The team agreed to", language="en"
     )
-    assert "Do not invent any new clinical facts" in prompt
-    assert "Document section: objective" in prompt
+    assert "Do not invent any new facts" in prompt
+    assert "Note section: Decisions" in prompt
 
 
 async def test_shown_buffer_aggregates_per_tenant():

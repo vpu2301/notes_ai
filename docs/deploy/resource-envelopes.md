@@ -1,4 +1,4 @@
-# Sprint-16 deployment — measured resource envelopes
+# Deployment — measured resource envelopes
 
 Basis for the chart's requests/limits. Two measurement sources:
 
@@ -13,25 +13,22 @@ Basis for the chart's requests/limits. Two measurement sources:
 | keycloak | 738 MiB | 0.1% | (stateful; operator-managed in prod) |
 | kafka | 311 MiB | 0.8% | dropped (unused — inventory.md) |
 | asr-service | 141 MiB | 0.3% | 192Mi/100m → 768Mi/1 |
-| report-service | 102 MiB | 8.8% | 192Mi/100m → 768Mi/1 |
-| core-service | 96 MiB | 0.2% | 192Mi/100m → 768Mi/1 |
+| note-service | 102 MiB | 8.8% | 192Mi/100m → 768Mi/1 |
 | notification-service | 90 MiB | 0.2% | 128Mi/100m → 512Mi/1 |
 | autocomplete-service | 82 MiB | 8.4% | 160Mi/100m → 512Mi/1 |
 | generation-service | 75 MiB | 9.5% | 128Mi/100m → 512Mi/1 |
 | auth-service | 59 MiB | 2.0% | 128Mi/100m → 512Mi/1 |
-| signing-service | 53 MiB | 0.2% | 128Mi/100m → 512Mi/1 |
 
 2. **Under session load** — 4 concurrent streaming sessions on one
    dictation pod (the KEDA scale-out proof run) stayed inside the 5 Gi
    limit with the tiny model; the compose overlay's measured large-v3
    numbers (3.0 GiB dictation resident incl. diarizer, override-file
    comment) are the CPU floor. **GPU envelopes (prod)** come from the
-   sprint-14 deployment measurements — weight budget
-   `MDX_PER_WORKER_MAX_SESSIONS` per pod, one pod per GPU; re-measure on
-   the real rig at bring-up (asr-worker runbook's standing instruction).
+   measured weight budget — `MDX_PER_WORKER_MAX_SESSIONS` per pod, one
+   pod per GPU; re-measure on the real rig at bring-up (asr-worker
+   runbook's standing instruction).
 
-The k6 suites (sprints 08/10) remain the load source for the CPU
-services' HPA thresholds; the 70% CPU targets in values-prod are
-initial and expected to be tuned against staging k6 runs on the real
-cluster hardware — the numbers above are the measured starting point,
-not folklore.
+The k6 suites remain the load source for the CPU services' HPA
+thresholds; the 70% CPU targets in values-prod are initial and expected
+to be tuned against staging k6 runs on the real cluster hardware — the
+numbers above are the measured starting point, not folklore.

@@ -33,7 +33,7 @@ def test_dash_carries_em_dash_value() -> None:
 
 def test_section_passes_arg_through() -> None:
     slot = CommandSlot(
-        intent="section.diagnosis",
+        intent="section.summary",
         span_start_s=0.0,
         span_end_s=0.5,
         confidence=0.95,

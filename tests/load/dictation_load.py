@@ -1,6 +1,6 @@
 """Concurrency load test for dictation-service.
 
-Scenario A: 4 simulated clinicians on 1 worker — all within latency
+Scenario A: 4 simulated users on 1 worker — all within latency
 targets (partial p95 ≤ 1100 ms, final p95 ≤ 2500 ms).
 Scenario B: 5th attempt → `gpu_full`.
 
@@ -25,7 +25,6 @@ pytestmark = pytest.mark.skipif(
 
 WS_URL = os.environ.get("DICTATION_WS_URL", "ws://localhost:8002/ws/dictate")
 TOKEN = os.environ.get("DICTATION_TOKEN", "")
-PROMPT_ID = os.environ.get("DICTATION_PROMPT_ID", "")
 
 
 async def _one_client(client_id: int, frames: int) -> dict[str, Any]:
@@ -35,12 +34,10 @@ async def _one_client(client_id: int, frames: int) -> dict[str, Any]:
     finals_ms: list[int] = []
     async with websockets.connect(
         WS_URL,
-        subprotocols=["medical-dictation.v1"],
+        subprotocols=["dictation.v1"],
         additional_headers={"Authorization": f"Bearer {TOKEN}"},
     ) as ws:
-        await ws.send(
-            json.dumps({"type": "start_session", "prompt_id": PROMPT_ID, "language": "uk"})
-        )
+        await ws.send(json.dumps({"type": "start_session", "language": "uk"}))
         await ws.recv()  # session_started
 
         async def consumer() -> None:
@@ -93,26 +90,22 @@ async def test_fifth_session_rejected() -> None:
     holders = [
         await websockets.connect(
             WS_URL,
-            subprotocols=["medical-dictation.v1"],
+            subprotocols=["dictation.v1"],
             additional_headers={"Authorization": f"Bearer {TOKEN}"},
         )
         for _ in range(4)
     ]
     try:
         for ws in holders:
-            await ws.send(
-                json.dumps({"type": "start_session", "prompt_id": PROMPT_ID, "language": "uk"})
-            )
+            await ws.send(json.dumps({"type": "start_session", "language": "uk"}))
             await ws.recv()
 
         async with websockets.connect(
             WS_URL,
-            subprotocols=["medical-dictation.v1"],
+            subprotocols=["dictation.v1"],
             additional_headers={"Authorization": f"Bearer {TOKEN}"},
         ) as ws5:
-            await ws5.send(
-                json.dumps({"type": "start_session", "prompt_id": PROMPT_ID, "language": "uk"})
-            )
+            await ws5.send(json.dumps({"type": "start_session", "language": "uk"}))
             raw = await asyncio.wait_for(ws5.recv(), timeout=3.0)
             msg = json.loads(raw)
             assert msg["type"] == "error"

@@ -5,7 +5,7 @@ asr-service sets ``cancel_requested`` and leaves the status alone. Acting on
 it is the worker's job, and before this it only ever looked twice — once
 before claiming the message, once after decoding the audio. Anything
 cancelled after inference started ran to completion and came back
-``complete``, so from the clinician's side the Cancel button did nothing.
+``complete``, so from the user's side the Cancel button did nothing.
 
 These cover the two checkpoints that were missing: between inference chunks,
 and the last look before a transcript becomes a fact.
@@ -45,10 +45,7 @@ def _speech(engine: _FakeEngine, monkeypatch: pytest.MonkeyPatch) -> None:
     from asr_worker import inference as inf
     from asr_worker.vad import SpeechSegment
 
-    segs = [
-        SpeechSegment(start_ms=i * 1000, end_ms=(i + 1) * 1000)
-        for i in range(engine._chunks)
-    ]
+    segs = [SpeechSegment(start_ms=i * 1000, end_ms=(i + 1) * 1000) for i in range(engine._chunks)]
     monkeypatch.setattr(inf, "detect_speech", lambda _pcm: segs)
 
 
@@ -68,9 +65,7 @@ async def test_cancel_between_chunks_stops_inference(
         return calls["n"] >= 3
 
     with pytest.raises(TranscriptionCancelledError):
-        await engine.transcribe(
-            pcm, language="uk", prompt=None, should_cancel=should_cancel
-        )
+        await engine.transcribe(pcm, language="uk", prompt=None, should_cancel=should_cancel)
 
     assert engine.chunks_run == 2, "stopped at the checkpoint, not after the last chunk"
 

@@ -86,24 +86,18 @@ class RedisSessionDenylist:
     # ── push side (logout / deactivate / replay) ────────────────────────
     async def revoke_sid(self, sid: str, *, ttl_seconds: int) -> None:
         """Deny one session. TTL = remaining access-token lifetime."""
-        await self._redis.set(
-            _SID_PREFIX + sid, b"1", ex=max(int(ttl_seconds), _MIN_TTL_SECONDS)
-        )
+        await self._redis.set(_SID_PREFIX + sid, b"1", ex=max(int(ttl_seconds), _MIN_TTL_SECONDS))
 
     async def revoke_sub(self, sub: str, *, ttl_seconds: int) -> None:
         """Deny every live session of a user (deactivation, replay)."""
-        await self._redis.set(
-            _SUB_PREFIX + sub, b"1", ex=max(int(ttl_seconds), _MIN_TTL_SECONDS)
-        )
+        await self._redis.set(_SUB_PREFIX + sub, b"1", ex=max(int(ttl_seconds), _MIN_TTL_SECONDS))
 
     async def clear_sub(self, sub: str) -> None:
         """Lift a user-level deny (reactivation before the TTL lapsed)."""
         await self._redis.delete(_SUB_PREFIX + sub)
 
 
-def build_session_denylist(
-    *, enabled: bool, redis_url: str
-) -> RedisSessionDenylist | None:
+def build_session_denylist(*, enabled: bool, redis_url: str) -> RedisSessionDenylist | None:
     """The settings-gated composition helper every service uses.
 
     Returns ``None`` when the feature is off — ``build_current_user``

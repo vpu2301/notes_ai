@@ -36,12 +36,8 @@ import sys
 
 import asyncpg
 
-DEFAULT_CRYPTO_DSN = (
-    "postgresql://crypto_writer:crypto_writer@localhost:5432/medical_dictation"
-)
-DEFAULT_AUDIT_DSN = (
-    "postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation"
-)
+DEFAULT_CRYPTO_DSN = "postgresql://crypto_writer:crypto_writer@localhost:5432/notes"
+DEFAULT_AUDIT_DSN = "postgresql://audit_writer:audit_writer@localhost:5432/notes"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -62,7 +58,9 @@ def _parse_args() -> argparse.Namespace:
         default=os.environ.get("MDX_MASTER_KEY_PATH", "infra/dev/master.key"),
         help="path to the file master key (source of the re-wrap)",
     )
-    p.add_argument("--vault-addr", default=os.environ.get("MDX_VAULT_ADDR", "http://localhost:8200"))
+    p.add_argument(
+        "--vault-addr", default=os.environ.get("MDX_VAULT_ADDR", "http://localhost:8200")
+    )
     p.add_argument("--vault-token", default=os.environ.get("MDX_VAULT_TOKEN", ""))
     p.add_argument("--vault-key", default=os.environ.get("MDX_VAULT_TRANSIT_KEY", "mdx-master"))
     p.add_argument("--vault-mount", default=os.environ.get("MDX_VAULT_TRANSIT_MOUNT", "transit"))
@@ -144,11 +142,7 @@ async def _run(args: argparse.Namespace) -> int:
                     if locked["kek_master_id"] == target_id:
                         skipped += 1  # raced with a concurrent run — fine
                         continue
-                    src = (
-                        file_provider
-                        if file_provider.handles(locked["kek_master_id"])
-                        else vault
-                    )
+                    src = file_provider if file_provider.handles(locked["kek_master_id"]) else vault
                     plaintext = await src.unwrap(
                         locked["kek_master_id"], bytes(locked["wrapped_kek"])
                     )

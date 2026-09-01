@@ -157,7 +157,9 @@ def test_equidistant_vector_is_unknown_by_ambiguity_margin() -> None:
 
 
 def test_determinism_same_sequence_same_labels() -> None:
-    sequence = _voice_a() + _voice_b() + [_base_a().astype(np.float32), _base_b().astype(np.float32)]
+    sequence = (
+        _voice_a() + _voice_b() + [_base_a().astype(np.float32), _base_b().astype(np.float32)]
+    )
     runs = []
     for _ in range(2):
         clusterer = OnlineSpeakerClusterer()

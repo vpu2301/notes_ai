@@ -8,9 +8,9 @@
 set -euo pipefail
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8088}"
-REALM="${REALM:-medical-dictation}"
+REALM="${REALM:-notes}"
 CLIENT_ID="${CLIENT_ID:-mdx-dev-cli}"
-USERNAME="${USERNAME:-dev-clinician}"
+USERNAME="${USERNAME:-dev-member}"
 PASSWORD="${PASSWORD:-dev-password}"
 
 TOKEN_URL="${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token"

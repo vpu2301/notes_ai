@@ -1,4 +1,4 @@
-"""Stable error codes for the medical-dictation.v1 wire protocol.
+"""Stable error codes for the dictation.v1 wire protocol.
 
 These are PUBLIC. Once a frontend ships against them they're a contract:
 new codes can be added, existing ones can't be renamed or repurposed.
@@ -23,14 +23,6 @@ class ErrorCode(StrEnum):
     RETRANSMIT_TOO_LARGE = "retransmit_too_large"
     SESSION_NOT_FOUND = "session_not_found"
     RATE_LIMITED = "rate_limited"
-    # S11 step 02 — start-time encounter linkage validation. Both are
-    # terminal: the client must fix the encounter reference, not retry.
-    ENCOUNTER_INVALID = "encounter_invalid"
-    ENCOUNTER_CLOSED = "encounter_closed"
-    # S14 — conversation mode requires an encounter with a granted
-    # 'recording' consent for its patient. Terminal: obtain consent
-    # (core-service POST /v1/patients/{id}/consents), then start again.
-    CONSENT_REQUIRED = "consent_required"
 
     # 5xx-ish (server side)
     WORKER_FAILED = "worker_failed"

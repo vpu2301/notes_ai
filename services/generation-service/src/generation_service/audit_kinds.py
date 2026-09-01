@@ -11,5 +11,6 @@ from typing import Final
 # per-keystroke rows would pollute the hash chain.
 LAYER_C_COMPLETION_SHOWN: Final = "layer_c.completion.shown"
 # Warn, immediate: the output safety filter dropped a completion that tried
-# to introduce a clinical value absent from the typed text.
+# to introduce a risky value (money, percent, date, number) absent from the
+# typed text.
 LAYER_C_COMPLETION_FILTERED: Final = "layer_c.completion.filtered"

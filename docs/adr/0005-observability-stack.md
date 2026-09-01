@@ -8,7 +8,7 @@
 
 ## Context
 
-The platform handles PHI under HIPAA-equivalent obligations (Ukrainian
+The platform handles sensitive personal data (Ukrainian
 Закон «Про захист персональних даних» plus contractual EU-GDPR
 alignment). We need traces for latency debugging, metrics for SLOs and
 capacity, and logs for forensics — all three correlatable by trace ID,
@@ -23,7 +23,7 @@ all three filtered for PII before any byte leaves the process.
   replaced with `<redacted>`.
 * **Traces** — OTel SDK with OTLP gRPC → OTel Collector → **Tempo**
   (planned) / Jaeger (Sprint 1). Resource attributes set
-  `service.name`, `service.namespace=medical-dictation`,
+  `service.name`, `service.namespace=notes-ai`,
   `service.version`, `deployment.environment`. W3C `tracecontext` and
   baggage propagators install globally. Auto-instrumentation wired for
   FastAPI, asyncpg, httpx.
@@ -60,13 +60,13 @@ all three filtered for PII before any byte leaves the process.
 - **structlog** — strong choice. The ergonomics of stdlib logging plus a
   JSON formatter are equivalent for our payloads, with one less
   dependency. We may revisit if we need richer event-dict processors.
-- **Datadog / New Relic / Honeycomb agents** — vendor lock-in and PHI
+- **Datadog / New Relic / Honeycomb agents** — vendor lock-in and sensitive-data
   egress problems. OTel + self-hosted Loki/Tempo/Prometheus is the
   default until production economics tell us otherwise.
 
 ## Trigger conditions for revisiting
 
-- A vendor offers a meaningfully better PHI-safe ingestion path.
+- A vendor offers a meaningfully better privacy-safe ingestion path.
 - The PII drop list catches a regression in production (escalates the
   filter to value-content heuristics).
 - Cardinality / volume forces a sampling strategy.

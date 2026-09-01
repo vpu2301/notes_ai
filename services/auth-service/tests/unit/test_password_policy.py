@@ -54,9 +54,7 @@ def test_rejects_blocklisted_and_derived(password: str) -> None:
 
 
 def test_rejects_password_containing_email_local_part() -> None:
-    result = pol.check_password(
-        "kovalenko-is-here-now", email="olena.kovalenko@clinic.example"
-    )
+    result = pol.check_password("kovalenko-is-here-now", email="olena.kovalenko@acme.example")
     assert not result.ok
     assert pol.CONTAINS_IDENTIFIER in result.reasons
 
@@ -124,6 +122,4 @@ def test_score_is_zero_for_rejected_passwords() -> None:
 
 
 def test_score_rises_with_length() -> None:
-    assert pol.strength_score("elephant zoo") < pol.strength_score(
-        "elephant zoo marmalade tuesday"
-    )
+    assert pol.strength_score("elephant zoo") < pol.strength_score("elephant zoo marmalade tuesday")

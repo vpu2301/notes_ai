@@ -61,9 +61,7 @@ class Settings(BaseSettings):
     #
     # The batch path (`transcribe`) does its own VAD segmentation upstream
     # in `vad.detect_speech`, so this applies to the streaming path only.
-    asr_streaming_vad_filter: bool = Field(
-        default=True, alias="MD_ASR_STREAMING_VAD_FILTER"
-    )
+    asr_streaming_vad_filter: bool = Field(default=True, alias="MD_ASR_STREAMING_VAD_FILTER")
     # Below the sprint-04 committer's 500 ms silence-smoothing threshold, so
     # the VAD never swallows a pause the committer wants to see as a
     # segment boundary.
@@ -91,26 +89,24 @@ class Settings(BaseSettings):
 
     # ── Database / queue / storage ──────────────────────────────────────
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@postgres:5432/medical_dictation",
+        default="postgresql://app_role:app_role@postgres:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@postgres:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_crypto_writer_dsn: str = Field(
-        default="postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation",
+        default="postgresql://crypto_writer:crypto_writer@postgres:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
     )
 
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
 
     # Sprint-12 notification event bus (ADR-0029). Same kill switch
-    # report-service and dictation-service carry — publishing is already
+    # note-service and dictation-service carry — publishing is already
     # fire-and-forget, so this is the source-level cut-off for a storm.
-    notifications_enabled: bool = Field(
-        default=True, alias="MDX_NOTIFICATIONS_ENABLED"
-    )
+    notifications_enabled: bool = Field(default=True, alias="MDX_NOTIFICATIONS_ENABLED")
 
     asr_jobs_stream: str = Field(default="asr:jobs", alias="MD_ASR_JOBS_STREAM")
     asr_jobs_dlq_stream: str = Field(default="asr:jobs:dlq", alias="MD_ASR_JOBS_DLQ_STREAM")
@@ -135,9 +131,7 @@ class Settings(BaseSettings):
     # fallback for rows not yet re-wrapped (scripts/kms/rewrap-tenant-keks.py).
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
-    vault_token: SecretStrEnv = Field(
-        default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN"
-    )
+    vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 

@@ -40,7 +40,7 @@ Token alignment between overlapping windows: Levenshtein word-level
 edit alignment; keep the higher-probability transcription per aligned
 pair; drop unaligned words below `keep_threshold=0.3` probability.
 
-Prompt biasing: `initial_prompt` is the clinician's specialty prompt
+Prompt biasing: `initial_prompt` is the session's optional vocabulary hint
 concatenated with the last 150 tokens of finalized text. `<|...|>`
 special tokens and voice-command markers stripped.
 
@@ -71,10 +71,10 @@ special tokens and voice-command markers stripped.
   context. WER regressed ~3 points on internal corpus. Rejected.
 - **Streaming-native model (Conformer-Streaming, Riva)**: would
   eliminate the windowing dance entirely. Not adopted in sprint 4
-  because (a) clinical Ukrainian quality is unknown for these models;
+  because (a) Ukrainian quality is unknown for these models;
   (b) the WhisperEngine abstraction lets us swap later. Backlog.
-- **Per-clinician fine-tuned model**: post-pilot, contingent on a DPIA
-  + clinician audio + consent.
+- **Per-user fine-tuned model**: post-pilot, contingent on a DPIA
+  + user audio + consent.
 
 ## Migration path to a streaming-native model
 
@@ -93,8 +93,8 @@ No protocol or repository changes needed.
 
 - Streaming WER drifts > 1 absolute point above batch on the reference
   set for two consecutive nightly runs.
-- A streaming-native model achieves better quality on Ukrainian clinical
-  audio (validated by clinical content lead).
+- A streaming-native model achieves better quality on Ukrainian
+  audio (validated by the content lead).
 - GPU cost of windowing becomes a budget concern (unlikely — sprint 16
   capacity model has headroom).
 
@@ -126,7 +126,7 @@ criterion, since the next window re-transcribes only the trailing
 **2. The VAD silence gate was unreachable in real speech.** Rule 2
 requires a VAD silence boundary, and `VadConfig.min_silence_frames` was
 25 frames = **500 ms of contiguous silence**. Measured inter-utterance
-pauses in natural clinical dictation and in doctor↔patient turn-taking
+pauses in natural dictation and in conversational turn-taking
 run ~200–450 ms, so `last_silence_boundary_ms` returned `None` for
 every window of real speech.
 *Fix*: 12 frames = **240 ms**, matching the standard inter-pause
@@ -136,7 +136,7 @@ threshold and Silero's own turn-splitting default.
 made transcript progress *conditional on the speaker pausing*. A
 pause-free stretch (fast dictation, an animated consultation) would
 hold words provisional indefinitely and lose them at finalize — data
-loss in a medical record.
+loss in the transcript.
 *Fix*: `commit_max_provisional_ms` (default 4000, 2× the horizon):
 past it a word commits with reason `stale_commit` even without a
 silence boundary. It is already outside the revision horizon, so

@@ -36,11 +36,11 @@ class Settings(BaseSettings):
     otel_sdk_disabled: bool = Field(default=False, alias="OTEL_SDK_DISABLED")
 
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -61,11 +61,11 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@localhost:5432/medical_dictation",
+        default="postgresql://app_role:app_role@localhost:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE")
@@ -80,25 +80,6 @@ class Settings(BaseSettings):
 
     phrase_max_creates_per_hour: int = Field(default=100, alias="MDX_PHRASE_MAX_PER_HOUR")
 
-    # ── eval scoring (migration 0091) ───────────────────────────────────
-    # Where the WER runner sends eval audio. It is asr-service's ordinary
-    # batch path with the caller's own bearer forwarded — same model, same
-    # prompts, same NLP pass a clinician's dictation gets, because a WER
-    # measured against a different pipeline measures a different product.
-    asr_service_base_url: str = Field(
-        default="http://asr-service:8000", alias="ASR_SERVICE_BASE_URL"
-    )
-    asr_request_timeout_seconds: float = Field(
-        default=20.0, alias="MDX_EVAL_ASR_TIMEOUT_S"
-    )
-    # How many eval utterances may sit in asr-service at once. Kept below
-    # the per-tenant concurrent-job cap so an eval run cannot monopolise the
-    # queue a clinician's real dictation is waiting in.
-    eval_max_in_flight: int = Field(default=2, alias="MDX_EVAL_MAX_IN_FLIGHT")
-    # A claimed utterance whose submit never landed (closed tab mid-upload)
-    # goes back in the queue after this long. Only ever claims with no job
-    # id — real transcription is never interrupted, however slow the rig.
-    eval_claim_stale_seconds: int = Field(default=120, alias="MDX_EVAL_CLAIM_STALE_S")
     telemetry_flush_interval_s: float = Field(default=5.0, alias="MDX_TELEMETRY_FLUSH_S")
     telemetry_flush_batch: int = Field(default=100, alias="MDX_TELEMETRY_FLUSH_BATCH")
 
@@ -128,15 +109,13 @@ class Settings(BaseSettings):
     )
     # Envelope wiring (archives are encrypted at rest, rule 3/4).
     db_crypto_writer_dsn: str = Field(
-        default="postgresql://crypto_writer:crypto_writer@localhost:5432/medical_dictation",
+        default="postgresql://crypto_writer:crypto_writer@localhost:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
     )
     master_key_path: str = Field(default="/etc/mdx/master.key", alias="MDX_MASTER_KEY_PATH")
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
-    vault_token: SecretStrEnv = Field(
-        default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN"
-    )
+    vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
@@ -144,9 +123,7 @@ class Settings(BaseSettings):
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 
 settings = Settings()

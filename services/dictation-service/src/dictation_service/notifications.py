@@ -7,7 +7,7 @@ session that died is not a session the user wants congratulated on
 completing. The handler knows which of those it is; the finalizer does
 not.
 
-Fire-and-forget, exactly like report-service's equivalent:
+Fire-and-forget, exactly like note-service's equivalent:
 `publish_event` swallows its own failures and the caller does not wait
 on fan-out. A dictation must not fail to finalize because the
 notification bus is down (ADR-0029).
@@ -35,7 +35,7 @@ async def emit_dictation_completed(
     duration_ms: int,
     segments: int,
 ) -> None:
-    """Tell the dictating clinician their session finished processing.
+    """Tell the dictating user their session finished processing.
 
     The recipient hint is the dictating user and nobody else — this is a
     completion receipt for work they started, not a broadcast. It is
@@ -44,9 +44,9 @@ async def emit_dictation_completed(
     addressing a stranger.
 
     The payload carries a duration and a segment count. It carries NO
-    transcript, not even a leading fragment: the transcript is PHI, and
-    this payload is persisted on the notification row and re-read by the
-    digest renderer (ADR-0031).
+    transcript, not even a leading fragment: the transcript is sensitive
+    content, and this payload is persisted on the notification row and
+    re-read by the digest renderer (ADR-0031).
     """
     if not settings.notifications_enabled:
         return

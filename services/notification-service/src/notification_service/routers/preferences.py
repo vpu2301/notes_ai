@@ -108,9 +108,7 @@ async def get_preferences(
     return PreferencesView(
         categories=categories,
         timezone=settings.timezone,
-        quiet_hours=QuietHours(
-            start=settings.quiet_hours_start, end=settings.quiet_hours_end
-        ),
+        quiet_hours=QuietHours(start=settings.quiet_hours_start, end=settings.quiet_hours_end),
         digest_hour=settings.digest_hour,
     )
 

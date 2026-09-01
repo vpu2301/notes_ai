@@ -1,4 +1,4 @@
-"""The `medical-notifications.v1` wire protocol.
+"""The `notifications.v1` wire protocol.
 
 Text frames only, JSON, a discriminated union on `type`, every model
 `extra="forbid"`. The subprotocol string IS the version: a client that
@@ -17,7 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-SUBPROTOCOL: Final = "medical-notifications.v1"
+SUBPROTOCOL: Final = "notifications.v1"
 
 
 class _Frame(BaseModel):
@@ -80,12 +80,7 @@ class ErrorFrame(_Frame):
 
 
 ServerFrame = Annotated[
-    ConnectedFrame
-    | NotificationFrame
-    | UnreadCountFrame
-    | ReadAckFrame
-    | PongFrame
-    | ErrorFrame,
+    ConnectedFrame | NotificationFrame | UnreadCountFrame | ReadAckFrame | PongFrame | ErrorFrame,
     Field(discriminator="type"),
 ]
 

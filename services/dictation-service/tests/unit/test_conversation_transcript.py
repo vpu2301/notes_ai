@@ -9,8 +9,8 @@ Two promises live here:
   ``UNKNOWN``/null speaker survives into persistence rather than being
   papered over into a party.
 
-Pure: no DB, no models — the diarization stream and mapping inference are
-stubs.
+Pure: no DB, no models — the diarization stream is a stub and the
+speaker naming is the real (pure) state object.
 """
 
 from __future__ import annotations
@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
-from dictation_service.diarization.mapping import MappingHypothesis
+from dictation_service.diarization.mapping import SpeakerNaming
 from dictation_service.session.finalize import _transcript_to_jsonb
 from dictation_service.session.manager import SessionContext
 
 SEGMENT_KEYS = {"text", "start_ms", "end_ms", "avg_confidence", "words", "voice_command"}
 WORD_KEYS = {"text", "start_ms", "end_ms", "probability"}
-CONVERSATION_EXTRA_SEGMENT_KEYS = {"id", "speaker", "speaker_confidence", "speaker_role"}
+CONVERSATION_EXTRA_SEGMENT_KEYS = {"id", "speaker", "speaker_confidence", "speaker_name"}
 CONVERSATION_EXTRA_WORD_KEYS = {"speaker", "speaker_confidence"}
 
 
@@ -62,11 +62,6 @@ class _StubDiarization:
         return self._table.get((start_ms, end_ms), self._default)
 
 
-class _StubMappingInference:
-    def __init__(self, hypothesis: MappingHypothesis | None) -> None:
-        self.current = hypothesis
-
-
 def _segments() -> list[_Segment]:
     return [
         _Segment(
@@ -96,21 +91,19 @@ def _ctx(
     *,
     mode: str = "dictation",
     diarization: Any | None = None,
-    mapping_inference: Any | None = None,
+    speaker_naming: Any | None = None,
 ) -> SessionContext:
     ctx = SessionContext(
         session_id=uuid4(),
         tenant_id=uuid4(),
         user_id=uuid4(),
         language="uk",
-        prompt_id=uuid4(),
-        prompt_text="",
+        vocabulary_hint="",
         target_kind="generic",
-        encounter_id=None,
         template_id=None,
         mode=mode,
         diarization=diarization,
-        mapping_inference=mapping_inference,
+        speaker_naming=speaker_naming,
     )
     ctx.finalized_segments = list(_segments())
     return ctx
@@ -149,21 +142,22 @@ def test_dictation_with_a_diarizer_attached_still_has_no_speaker_keys() -> None:
 def _conversation_ctx(
     table: dict[tuple[int, int], tuple[str | None, float | None]],
     *,
-    mapping: dict[str, str] | None = None,
+    names: dict[str, str] | None = None,
+    naming: bool = True,
 ) -> SessionContext:
-    hypothesis = (
-        MappingHypothesis(mapping=mapping, confidence=0.8, rationale="")
-        if mapping is not None
-        else None
-    )
+    speaker_naming: SpeakerNaming | None = None
+    if naming:
+        speaker_naming = SpeakerNaming()
+        if names:
+            speaker_naming.set_names(names)
     return _ctx(
         mode="conversation",
         diarization=_StubDiarization(table),
-        mapping_inference=_StubMappingInference(hypothesis),
+        speaker_naming=speaker_naming,
     )
 
 
-def test_conversation_adds_ids_speakers_and_roles() -> None:
+def test_conversation_adds_ids_speakers_and_names() -> None:
     ctx = _conversation_ctx(
         {
             (0, 1_000): ("S1", 0.9),
@@ -173,7 +167,7 @@ def test_conversation_adds_ids_speakers_and_roles() -> None:
             (1_000, 1_500): ("S2", 0.76),
             (1_500, 2_000): ("S2", 0.79),
         },
-        mapping={"S1": "doctor", "S2": "patient"},
+        names={"S1": "Alice", "S2": "Bob"},
     )
 
     docs = _transcript_to_jsonb(ctx)
@@ -185,16 +179,16 @@ def test_conversation_adds_ids_speakers_and_roles() -> None:
 
     assert docs[0]["speaker"] == "S1"
     assert docs[0]["speaker_confidence"] == 0.9
-    assert docs[0]["speaker_role"] == "doctor"
+    assert docs[0]["speaker_name"] == "Alice"
     assert docs[1]["speaker"] == "S2"
-    assert docs[1]["speaker_role"] == "patient"
+    assert docs[1]["speaker_name"] == "Bob"
 
     assert [w["speaker"] for w in docs[0]["words"]] == ["S1", "S1"]
     assert [w["speaker_confidence"] for w in docs[1]["words"]] == [0.76, 0.79]
 
 
 def test_segment_ids_are_unique_uuids() -> None:
-    ctx = _conversation_ctx({}, mapping={"S1": "doctor"})
+    ctx = _conversation_ctx({}, names={"S1": "Alice"})
     docs = _transcript_to_jsonb(ctx)
 
     ids = [doc["id"] for doc in docs]
@@ -212,27 +206,36 @@ def test_unknown_and_null_speakers_survive_into_persistence() -> None:
             (500, 1_000): (None, None),
             # segment 2 and its words fall through to the (None, None) default
         },
-        mapping={"S1": "doctor", "S2": "patient"},
+        names={"S1": "Alice", "S2": "Bob"},
     )
 
     docs = _transcript_to_jsonb(ctx)
 
     assert docs[0]["speaker"] == "UNKNOWN"
     assert docs[0]["speaker_confidence"] == 0.2
-    assert docs[0]["speaker_role"] is None  # never guessed into a party
+    assert docs[0]["speaker_name"] is None  # never guessed into a participant
     assert docs[0]["words"][1]["speaker"] is None
     assert docs[0]["words"][1]["speaker_confidence"] is None
 
     assert docs[1]["speaker"] is None
     assert docs[1]["speaker_confidence"] is None
-    assert docs[1]["speaker_role"] is None
+    assert docs[1]["speaker_name"] is None
 
 
-def test_no_mapping_yet_still_emits_speakers_without_roles() -> None:
-    ctx = _conversation_ctx({(0, 1_000): ("S1", 0.9)}, mapping=None)
+def test_unnamed_speakers_get_the_neutral_defaults() -> None:
+    ctx = _conversation_ctx({(0, 1_000): ("S1", 0.9)})
 
     docs = _transcript_to_jsonb(ctx)
 
     assert docs[0]["speaker"] == "S1"
-    assert docs[0]["speaker_role"] is None
+    assert docs[0]["speaker_name"] == "SPEAKER_1"
     assert "id" in docs[0]
+
+
+def test_no_naming_state_emits_speakers_without_names() -> None:
+    ctx = _conversation_ctx({(0, 1_000): ("S1", 0.9)}, naming=False)
+
+    docs = _transcript_to_jsonb(ctx)
+
+    assert docs[0]["speaker"] == "S1"
+    assert docs[0]["speaker_name"] is None

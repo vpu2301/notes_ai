@@ -32,9 +32,9 @@ os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 from auth_service.main import create_app  # noqa: E402
 
 KEYCLOAK = "http://localhost:8088"
-REALM = "medical-dictation"
+REALM = "notes"
 TENANT_A = uuid.UUID("00000000-0000-0000-0000-00000000000a")
-SU_DSN = "postgresql://postgres:postgres@localhost:5432/medical_dictation"
+SU_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 
 
 @pytest_asyncio.fixture
@@ -127,7 +127,7 @@ async def _kc_admin_delete(token: str, path: str):
 
 async def test_login_happy_path(client: AsyncClient, superuser_conn: asyncpg.Connection):
     r = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -148,7 +148,7 @@ async def test_login_happy_path(client: AsyncClient, superuser_conn: asyncpg.Con
 
 
 async def test_login_invalid_password_returns_401(client: AsyncClient):
-    r = await client.post("/auth/login", json={"username": "dev-clinician", "password": "wrong"})
+    r = await client.post("/auth/login", json={"username": "dev-member", "password": "wrong"})
     assert r.status_code == 401
     assert "WWW-Authenticate" in r.headers
 
@@ -163,7 +163,7 @@ async def test_login_unknown_user_returns_401(client: AsyncClient):
 
 async def test_refresh_rotates(client: AsyncClient):
     r1 = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     assert r1.status_code == 200
     old_cookie = client.cookies.get("mdx_rt")
@@ -188,7 +188,7 @@ async def test_refresh_replay_emits_security_audit(
     rejected AND must write an ``auth.refresh_replay_detected`` audit event with
     severity ``sec``."""
     r1 = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     assert r1.status_code == 200
     stale_cookie = client.cookies.get("mdx_rt")
@@ -223,7 +223,7 @@ async def test_refresh_replay_emits_security_audit(
 
 async def test_logout_clears_cookie(client: AsyncClient, superuser_conn):
     login = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     access = login.json()["access_token"]
     # Logout with Authorization header so audit context (tid+sub) is known.
@@ -244,7 +244,7 @@ async def test_logout_without_access_token_still_clears_cookie(client: AsyncClie
     """Logout works even without the access token — the refresh is still
     revoked. The auth.logout audit is skipped because tid is unrecoverable
     from a refresh token alone."""
-    await client.post("/auth/login", json={"username": "dev-clinician", "password": "dev-password"})
+    await client.post("/auth/login", json={"username": "dev-member", "password": "dev-password"})
     r = await client.post("/auth/logout")
     assert r.status_code == 204
     assert "mdx_rt=" in r.headers.get("set-cookie", "")
@@ -255,19 +255,19 @@ async def test_logout_without_access_token_still_clears_cookie(client: AsyncClie
 
 async def test_me_with_valid_token(client: AsyncClient):
     r1 = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     token = r1.json()["access_token"]
     r2 = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200, r2.text
     body = r2.json()
     assert body["claims"]["tid"] == str(TENANT_A)
-    assert "clinician" in body["claims"]["roles"]
-    # dev-clinician is a seeded dev fixture (scripts/seed/seed.sql), so the
+    assert "member" in body["claims"]["roles"]
+    # dev-member is a seeded dev fixture (scripts/seed/seed.sql), so the
     # endpoint joins the token `sub` to its DB row. (db_user stays None only for
     # genuinely Keycloak-only users with no DB record.)
     assert body["db_user"] is not None
-    assert body["db_user"]["role"] == "clinician"
+    assert body["db_user"]["role"] == "member"
     assert body["db_user"]["tenant_id"] == str(TENANT_A)
     assert body["db_user"]["status"] == "active"
 
@@ -282,13 +282,13 @@ async def test_me_without_token_401(client: AsyncClient):
 
 async def test_invite_requires_tenant_admin(client: AsyncClient):
     r1 = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     token = r1.json()["access_token"]
     r2 = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
-        json={"email": "newbie@e2e.test", "display_name": "Newbie", "role": "clinician"},
+        json={"email": "newbie@e2e.test", "display_name": "Newbie", "role": "member"},
     )
     assert r2.status_code == 403
 
@@ -301,12 +301,12 @@ async def test_invite_happy_path(client: AsyncClient, superuser_conn):
     r2 = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
-        json={"email": "newbie@e2e.test", "display_name": "Newbie One", "role": "clinician"},
+        json={"email": "newbie@e2e.test", "display_name": "Newbie One", "role": "member"},
     )
     assert r2.status_code == 201, r2.text
     body = r2.json()
     assert body["email"] == "newbie@e2e.test"
-    assert body["role"] == "clinician"
+    assert body["role"] == "member"
     assert body["status"] == "invited"
 
     # DB row exists under tenant A.
@@ -315,7 +315,7 @@ async def test_invite_happy_path(client: AsyncClient, superuser_conn):
     )
     assert row is not None
     assert row["tenant_id"] == TENANT_A
-    assert row["role"] == "clinician"
+    assert row["role"] == "member"
     assert row["status"] == "invited"
 
     # Audit row.
@@ -346,9 +346,9 @@ async def test_authz_denied_emits_audit_event(
 ):
     """The ``requires()`` dep must emit an ``authz.denied`` audit row with
     severity ``sec`` whenever it rejects a caller with the wrong role."""
-    # Log in as a clinician — has no auditor/tenant_admin permissions.
+    # Log in as a member — has no auditor/tenant_admin permissions.
     r1 = await client.post(
-        "/auth/login", json={"username": "dev-clinician", "password": "dev-password"}
+        "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
     token = r1.json()["access_token"]
 
@@ -374,7 +374,7 @@ async def test_authz_denied_emits_audit_event(
     assert payload["action"] == "audit.read"
     assert payload["target_kind"] == "audit"
     assert payload["reason"] == "role_denied"
-    assert "clinician" in payload["roles_seen"]
+    assert "member" in payload["roles_seen"]
 
 
 async def test_mfa_off_admin_invite_succeeds(
@@ -393,7 +393,7 @@ async def test_mfa_off_admin_invite_succeeds(
     r2 = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
-        json={"email": "mfa-off@e2e.test", "display_name": "MFA Off", "role": "clinician"},
+        json={"email": "mfa-off@e2e.test", "display_name": "MFA Off", "role": "member"},
     )
     assert r2.status_code == 201, r2.text
 
@@ -413,7 +413,7 @@ async def test_mfa_on_admin_invite_rejected_with_mfa_challenge(client: AsyncClie
     r2 = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
-        json={"email": "mfa-on@e2e.test", "display_name": "MFA On", "role": "clinician"},
+        json={"email": "mfa-on@e2e.test", "display_name": "MFA On", "role": "member"},
     )
     assert r2.status_code == 401, r2.text
     assert "MFA" in r2.headers.get("WWW-Authenticate", "")
@@ -444,7 +444,7 @@ async def test_deactivate_happy_path(client: AsyncClient, superuser_conn):
     invite = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
-        json={"email": "doomed@e2e.test", "display_name": "Doomed User", "role": "clinician"},
+        json={"email": "doomed@e2e.test", "display_name": "Doomed User", "role": "member"},
     )
     sub = invite.json()["sub"]
 
@@ -477,7 +477,7 @@ async def _login(client: AsyncClient, username: str) -> str:
     return r.json()["access_token"]  # type: ignore[no-any-return]
 
 
-async def _invite(client: AsyncClient, token: str, *, email: str, role: str = "clinician") -> str:
+async def _invite(client: AsyncClient, token: str, *, email: str, role: str = "member") -> str:
     r = await client.post(
         "/admin/users/invite",
         headers={"Authorization": f"Bearer {token}"},
@@ -506,8 +506,8 @@ async def test_list_users_as_admin(client: AsyncClient):
     assert len(r2.json()) == 1
 
 
-async def test_list_users_denied_for_clinician(client: AsyncClient):
-    token = await _login(client, "dev-clinician")
+async def test_list_users_denied_for_member(client: AsyncClient):
+    token = await _login(client, "dev-member")
     r = await client.get("/admin/users", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
 
@@ -530,7 +530,7 @@ async def test_get_user_happy_and_404(client: AsyncClient):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["email"] == "readme@e2e.test"
-    assert body["role"] == "clinician"
+    assert body["role"] == "member"
     assert body["status"] == "invited"
     assert "created_at" in body
 
@@ -559,9 +559,7 @@ async def test_reactivate_happy_path(client: AsyncClient, superuser_conn):
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "active"
 
-    row = await superuser_conn.fetchrow(
-        "SELECT status FROM users WHERE sub = $1", uuid.UUID(sub)
-    )
+    row = await superuser_conn.fetchrow("SELECT status FROM users WHERE sub = $1", uuid.UUID(sub))
     assert row["status"] == "active"
 
     sev = await superuser_conn.fetchval(
@@ -571,8 +569,8 @@ async def test_reactivate_happy_path(client: AsyncClient, superuser_conn):
     assert sev == "sec"
 
 
-async def test_reactivate_denied_for_clinician(client: AsyncClient):
-    token = await _login(client, "dev-clinician")
+async def test_reactivate_denied_for_member(client: AsyncClient):
+    token = await _login(client, "dev-member")
     r = await client.post(
         f"/admin/users/{uuid.uuid4()}/reactivate", headers={"Authorization": f"Bearer {token}"}
     )
@@ -584,27 +582,27 @@ async def test_reactivate_denied_for_clinician(client: AsyncClient):
 
 async def test_set_roles_happy_path(client: AsyncClient, superuser_conn):
     token = await _login(client, "dev-admin")
-    sub = await _invite(client, token, email="rolechange@e2e.test", role="clinician")
+    sub = await _invite(client, token, email="rolechange@e2e.test", role="member")
 
     r = await client.put(
         f"/admin/users/{sub}/roles",
         headers={"Authorization": f"Bearer {token}"},
-        json={"roles": ["nurse"]},
+        json={"roles": ["viewer"]},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["roles"] == ["nurse"]
+    assert r.json()["roles"] == ["viewer"]
 
     # DB primary role reflects the change.
-    db_role = await superuser_conn.fetchval(
-        "SELECT role FROM users WHERE sub = $1", uuid.UUID(sub)
-    )
-    assert db_role == "nurse"
+    db_role = await superuser_conn.fetchval("SELECT role FROM users WHERE sub = $1", uuid.UUID(sub))
+    assert db_role == "viewer"
 
-    # Keycloak realm roles now hold nurse, not clinician.
+    # Keycloak realm roles now hold viewer, not member.
     admin = await _kc_admin_token()
-    names = {role["name"] for role in await _kc_admin_get(admin, f"users/{sub}/role-mappings/realm")}
-    assert "nurse" in names
-    assert "clinician" not in names
+    names = {
+        role["name"] for role in await _kc_admin_get(admin, f"users/{sub}/role-mappings/realm")
+    }
+    assert "viewer" in names
+    assert "member" not in names
 
     # Audit: user.role_changed at severity sec with old → new.
     row = await superuser_conn.fetchrow(
@@ -617,38 +615,40 @@ async def test_set_roles_happy_path(client: AsyncClient, superuser_conn):
     import json as _json
 
     payload = _json.loads(row["payload"])["payload"]
-    assert payload["old_roles"] == ["clinician"]
-    assert payload["new_roles"] == ["nurse"]
+    assert payload["old_roles"] == ["member"]
+    assert payload["new_roles"] == ["viewer"]
 
 
-async def test_set_roles_multi_role_primary_is_highest_privilege(client: AsyncClient, superuser_conn):
+async def test_set_roles_multi_role_primary_is_highest_privilege(
+    client: AsyncClient, superuser_conn
+):
     token = await _login(client, "dev-admin")
-    sub = await _invite(client, token, email="multirole@e2e.test", role="clinician")
+    sub = await _invite(client, token, email="multirole@e2e.test", role="member")
 
     r = await client.put(
         f"/admin/users/{sub}/roles",
         headers={"Authorization": f"Bearer {token}"},
-        json={"roles": ["clinician", "tenant_admin"]},
+        json={"roles": ["member", "tenant_admin"]},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["roles"] == ["clinician", "tenant_admin"]
+    assert r.json()["roles"] == ["member", "tenant_admin"]
 
-    db_role = await superuser_conn.fetchval(
-        "SELECT role FROM users WHERE sub = $1", uuid.UUID(sub)
-    )
+    db_role = await superuser_conn.fetchval("SELECT role FROM users WHERE sub = $1", uuid.UUID(sub))
     assert db_role == "tenant_admin"  # highest-privilege wins for the single column
 
     admin = await _kc_admin_token()
-    names = {role["name"] for role in await _kc_admin_get(admin, f"users/{sub}/role-mappings/realm")}
-    assert {"clinician", "tenant_admin"} <= names
+    names = {
+        role["name"] for role in await _kc_admin_get(admin, f"users/{sub}/role-mappings/realm")
+    }
+    assert {"member", "tenant_admin"} <= names
 
 
-async def test_set_roles_denied_for_clinician(client: AsyncClient):
-    token = await _login(client, "dev-clinician")
+async def test_set_roles_denied_for_member(client: AsyncClient):
+    token = await _login(client, "dev-member")
     r = await client.put(
         f"/admin/users/{uuid.uuid4()}/roles",
         headers={"Authorization": f"Bearer {token}"},
-        json={"roles": ["nurse"]},
+        json={"roles": ["viewer"]},
     )
     assert r.status_code == 403
 
@@ -669,12 +669,12 @@ async def test_user_crud_audit_coverage(client: AsyncClient, superuser_conn):
     the right kind + severity in the hash-linked chain. Walks
     invite → role-change → deactivate → reactivate in one pass."""
     token = await _login(client, "dev-admin")
-    sub = await _invite(client, token, email="audited@e2e.test", role="clinician")
+    sub = await _invite(client, token, email="audited@e2e.test", role="member")
 
     pr = await client.put(
         f"/admin/users/{sub}/roles",
         headers={"Authorization": f"Bearer {token}"},
-        json={"roles": ["nurse"]},
+        json={"roles": ["viewer"]},
     )
     assert pr.status_code == 200, pr.text
     d = await client.post(
@@ -714,7 +714,7 @@ async def test_set_roles_last_admin_409(client: AsyncClient, superuser_conn):
     in ``finally``) to create the last-admin condition deterministically. The
     guard fires before any Keycloak/DB mutation, so the target is unharmed."""
     token = await _login(client, "dev-admin")
-    sub = await _invite(client, token, email="lastadmin@e2e.test", role="clinician")
+    sub = await _invite(client, token, email="lastadmin@e2e.test", role="member")
     promote = await client.put(
         f"/admin/users/{sub}/roles",
         headers={"Authorization": f"Bearer {token}"},
@@ -738,7 +738,7 @@ async def test_set_roles_last_admin_409(client: AsyncClient, superuser_conn):
         r = await client.put(
             f"/admin/users/{sub}/roles",
             headers={"Authorization": f"Bearer {token}"},
-            json={"roles": ["clinician"]},
+            json={"roles": ["member"]},
         )
         assert r.status_code == 409, r.text
         # Target untouched: still tenant_admin (guard fired before mutation).

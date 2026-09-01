@@ -27,8 +27,6 @@ def _entry(id_: str, phrase: str, **kw) -> PhraseTrieEntry:
         impression_count=kw.get("imp", 0),
         acceptance_count=kw.get("acc", 0),
         last_accepted_at=kw.get("last"),
-        specialty=kw.get("specialty"),
-        section_hint=kw.get("hint"),
     )
 
 
@@ -84,7 +82,7 @@ def test_is_snippet_prefix_detects_slash():
 
 def test_extract_snippet_trigger_lowercases():
     assert extract_snippet_trigger("/CV") == "cv"
-    assert extract_snippet_trigger("//vitals") == "vitals"
+    assert extract_snippet_trigger("//agenda") == "agenda"
 
 
 def test_suggest_from_trie_returns_top_k():
@@ -145,12 +143,19 @@ def test_normalization_nfc_and_case_at_build_and_lookup():
 
     composed = "рИтм синусовий"  # 'и' composed, mixed case
     trie = build_trie_from_phrases(
-        tenant_id="t", language="uk", user_id="u",
-        rows=[PhraseTrieEntry(
-            id="a", phrase=composed, source="system", impression_count=0,
-            acceptance_count=0, last_accepted_at=None, specialty=None,
-            section_hint=None,
-        )],
+        tenant_id="t",
+        language="uk",
+        user_id="u",
+        rows=[
+            PhraseTrieEntry(
+                id="a",
+                phrase=composed,
+                source="system",
+                impression_count=0,
+                acceptance_count=0,
+                last_accepted_at=None,
+            )
+        ],
     )
     # Lookup with a DECOMPOSED (NFD) uppercase prefix.
     nfd_prefix = unicodedata.normalize("NFD", "РИ")

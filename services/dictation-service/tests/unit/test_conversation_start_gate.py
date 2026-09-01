@@ -1,17 +1,15 @@
-"""Sprint-14 conversation start gating in ``_new_session`` (pure).
+"""Conversation (meeting) mode start behaviour in ``_new_session`` (pure).
 
-Conversation mode records the PATIENT, so a start is refused before a
-single audio frame unless there is an encounter AND a granted
-``recording`` consent for its patient. Dictation mode must be entirely
-unaffected — it never even looks a consent up.
+Conversation mode has no precondition beyond auth: a v2 client asks for
+``mode: "conversation"`` and gets a weighted session with a diarization
+stream and neutral speaker naming. The only start-time gate left is the
+diarizer itself — it must be loadable, or the start fails loudly.
+Dictation mode must be entirely unaffected.
 
 Everything below the handler is faked: ``tenant_connection`` is replaced
-with an async CM over a dummy connection and the three domain readers
-(``repository.count_active_for_tenant``, ``encounters.fetch_encounter_status``,
-``consents.fetch_recording_consent``) plus ``repository.insert_session``
-are monkeypatched on their own modules — the handler resolves them as
-module attributes at call time, so the real ``encounter_gate`` /
-``consent_gate`` decision logic still runs. The tmpfs ring buffer and the
+with an async CM over a dummy connection and the domain readers
+(``repository.count_active_for_tenant``, ``repository.insert_session``)
+are monkeypatched on their own modules. The tmpfs ring buffer and the
 Opus decoder are stubbed so no OS resources are touched.
 """
 
@@ -29,8 +27,6 @@ import pytest
 from auth import Claims
 from dictation_service import audit_kinds
 from dictation_service.diarization.engine import DiarizationUnavailableError
-from dictation_service.domain import consents as consents_mod
-from dictation_service.domain import encounters as encounters_mod
 from dictation_service.domain import repository as repository_mod
 from dictation_service.protocol.messages import StartSession, StartSessionV2
 from dictation_service.session.manager import SessionManager
@@ -40,7 +36,6 @@ from dictation_service.ws.upgrade import UpgradeContext
 
 TENANT_ID = uuid4()
 USER_ID = uuid4()
-PROMPT_ID = uuid4()
 
 
 # ── Fakes ────────────────────────────────────────────────────────────
@@ -116,8 +111,6 @@ class _Calls:
 
     def __init__(self) -> None:
         self.count_active = 0
-        self.encounter_status = 0
-        self.consent_fetch = 0
         self.inserted: list[dict[str, Any]] = []
 
 
@@ -126,10 +119,10 @@ def _claims() -> Claims:
     return Claims(
         sub=USER_ID,
         tid=TENANT_ID,
-        roles=["clinician"],
+        roles=["member"],
         sid="sess-1",
-        iss="https://kc.example/realms/mdx",
-        aud="medical-dictation",
+        iss="https://kc.example/realms/notes",
+        aud="mdx-api",
         exp=now + 3600,
         iat=now,
     )
@@ -138,7 +131,7 @@ def _claims() -> Claims:
 def _upgrade(*, protocol_version: int) -> UpgradeContext:
     return UpgradeContext(
         claims=_claims(),
-        subprotocol=("medical-dictation.v2" if protocol_version == 2 else "medical-dictation.v1"),
+        subprotocol=("dictation.v2" if protocol_version == 2 else "dictation.v1"),
         client_ip="127.0.0.1",
         origin=None,
         protocol_version=protocol_version,
@@ -149,8 +142,6 @@ def _upgrade(*, protocol_version: int) -> UpgradeContext:
 def _wire(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    encounter_status: str | None = "in_progress",
-    consent: dict[str, Any] | None = None,
     active_sessions: int = 0,
     engine_raises: Exception | None = None,
 ) -> tuple[SimpleNamespace, _FakeWebSocket, _Calls]:
@@ -164,26 +155,12 @@ def _wire(
         calls.count_active += 1
         return active_sessions
 
-    async def _fetch_encounter_status(_conn: Any, *, encounter_id: UUID) -> str | None:
-        calls.encounter_status += 1
-        return encounter_status
-
-    async def _fetch_recording_consent(_conn: Any, *, encounter_id: UUID) -> dict[str, Any] | None:
-        calls.consent_fetch += 1
-        return consent
-
     async def _insert_session(_conn: Any, **kwargs: Any) -> None:
         calls.inserted.append(kwargs)
-
-    async def _fetch_prompt_text(_state: Any, _tid: UUID, _pid: UUID) -> str | None:
-        return "медичний контекст"
 
     monkeypatch.setattr(handler_mod, "tenant_connection", _fake_tenant_connection)
     monkeypatch.setattr(repository_mod, "count_active_for_tenant", _count_active)
     monkeypatch.setattr(repository_mod, "insert_session", _insert_session)
-    monkeypatch.setattr(encounters_mod, "fetch_encounter_status", _fetch_encounter_status)
-    monkeypatch.setattr(consents_mod, "fetch_recording_consent", _fetch_recording_consent)
-    monkeypatch.setattr(handler_mod, "_fetch_prompt_text", _fetch_prompt_text)
     monkeypatch.setattr(handler_mod, "SessionAudioBuffer", _FakeBuffer)
     monkeypatch.setattr(handler_mod, "OpusDecoder", lambda: SimpleNamespace())
 
@@ -198,95 +175,31 @@ def _wire(
     return state, _FakeWebSocket(), calls
 
 
-def _start_v2(*, encounter_id: UUID | None, mode: str = "conversation") -> StartSessionV2:
+def _start_v2(*, mode: str = "conversation", vocabulary_hint: str = "") -> StartSessionV2:
     return StartSessionV2(
-        prompt_id=PROMPT_ID,
         language="uk",
-        encounter_id=encounter_id,
         mode=mode,
+        vocabulary_hint=vocabulary_hint,
     )
 
 
-# ── a. conversation without an encounter ─────────────────────────────
+# ── a. conversation starts with no precondition beyond auth ──────────
 
 
-async def test_conversation_without_encounter_is_refused(
+async def test_conversation_starts_a_weighted_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state, ws, calls = _wire(monkeypatch)
 
-    ctx = await _new_session(ws, _upgrade(protocol_version=2), state, _start_v2(encounter_id=None))
-
-    assert ctx is None
-    frames = ws.frames()
-    assert len(frames) == 1
-    assert frames[0]["type"] == "error"
-    assert frames[0]["code"] == "consent_required"
-    assert frames[0]["recoverable"] is False
-    assert ws.closed_with == [1008]
-
-    event = state.audit_writer.by_kind(audit_kinds.CONSENT_REFUSED)
-    assert event["kind"] == "conversation.consent_refused"
-    assert event["severity"].value == "warn"
-    assert event["tenant_id"] == TENANT_ID
-    assert event["actor_sub"] == USER_ID
-    assert event["target_id"] == "none"
-
-    # Refused before touching the DB at all.
-    assert calls.encounter_status == 0
-    assert calls.consent_fetch == 0
-    assert state.session_manager.total_weight == 0
-
-
-# ── b. conversation with an encounter but no consent ─────────────────
-
-
-async def test_conversation_without_granted_consent_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state, ws, calls = _wire(monkeypatch, consent=None)
-    encounter_id = uuid4()
-
-    ctx = await _new_session(
-        ws, _upgrade(protocol_version=2), state, _start_v2(encounter_id=encounter_id)
-    )
-
-    assert ctx is None
-    assert calls.consent_fetch == 1
-    frames = ws.frames()
-    assert frames[-1]["type"] == "error"
-    assert frames[-1]["code"] == "consent_required"
-    assert ws.closed_with == [1008]
-
-    event = state.audit_writer.by_kind(audit_kinds.CONSENT_REFUSED)
-    assert event["severity"].value == "warn"
-    assert event["target_kind"] == "encounter"
-    assert event["target_id"] == str(encounter_id)
-    assert state.session_manager.total_weight == 0
-
-
-# ── c. conversation with encounter + consent proceeds ────────────────
-
-
-async def test_conversation_with_consent_starts_a_weighted_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    patient_id = uuid4()
-    state, ws, calls = _wire(monkeypatch, consent={"patient_id": patient_id, "consent_id": uuid4()})
-    encounter_id = uuid4()
-
-    ctx = await _new_session(
-        ws, _upgrade(protocol_version=2), state, _start_v2(encounter_id=encounter_id)
-    )
+    ctx = await _new_session(ws, _upgrade(protocol_version=2), state, _start_v2())
 
     assert ctx is not None
     assert ctx.mode == "conversation"
-    assert ctx.patient_id == patient_id
     assert ctx.protocol_version == 2
     assert ctx.bearer == "tok"
     assert ctx.capacity_weight == 2
     assert ctx.diarization is not None
-    assert ctx.mapping_inference is not None
+    assert ctx.speaker_naming is not None
     assert ctx.mapping_manual is False
 
     # Registered, and it costs two slots.
@@ -311,13 +224,45 @@ async def test_conversation_with_consent_starts_a_weighted_session(
     audit = state.audit_writer.by_kind(audit_kinds.SESSION_STARTED)
     assert audit["payload"]["mode"] == "conversation"
     assert audit["payload"]["protocol_version"] == 2
-    assert audit_kinds.CONSENT_REFUSED not in state.audit_writer.kinds()
 
 
-# ── d. dictation is untouched ────────────────────────────────────────
+# ── b. vocabulary hint reaches the session context ───────────────────
 
 
-async def test_v1_dictation_start_never_looks_up_consent(
+async def test_vocabulary_hint_lands_on_the_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, ws, _calls = _wire(monkeypatch)
+
+    ctx = await _new_session(
+        ws,
+        _upgrade(protocol_version=2),
+        state,
+        _start_v2(mode="dictation", vocabulary_hint="Klarnote OKR roadmap"),
+    )
+
+    assert ctx is not None
+    assert ctx.vocabulary_hint == "Klarnote OKR roadmap"
+
+
+async def test_empty_hint_falls_back_to_the_config_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dictation_service.config import settings
+
+    state, ws, _calls = _wire(monkeypatch)
+    monkeypatch.setattr(settings, "default_vocabulary_hint", "team glossary")
+
+    ctx = await _new_session(ws, _upgrade(protocol_version=1), state, StartSession(language="uk"))
+
+    assert ctx is not None
+    assert ctx.vocabulary_hint == "team glossary"
+
+
+# ── c. dictation is untouched ────────────────────────────────────────
+
+
+async def test_v1_dictation_start_is_weight_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state, ws, calls = _wire(monkeypatch)
@@ -326,20 +271,15 @@ async def test_v1_dictation_start_never_looks_up_consent(
         ws,
         _upgrade(protocol_version=1),
         state,
-        StartSession(prompt_id=PROMPT_ID, language="uk"),
+        StartSession(language="uk"),
     )
 
     assert ctx is not None
     assert ctx.mode == "dictation"
     assert ctx.capacity_weight == 1
     assert ctx.diarization is None
-    assert ctx.mapping_inference is None
-    assert ctx.patient_id is None
+    assert ctx.speaker_naming is None
     assert state.session_manager.total_weight == 1
-
-    # The consent read is conversation-only — not a widened gate.
-    assert calls.consent_fetch == 0
-    assert calls.encounter_status == 0
     assert state.diarization_engine.ensure_loaded_calls == 0
 
     started = ws.frames()[-1]
@@ -348,40 +288,36 @@ async def test_v1_dictation_start_never_looks_up_consent(
     assert "mode" not in started  # v1 wire stays byte-stable
 
 
-async def test_v2_dictation_mode_is_weight_one_and_consent_free(
+async def test_v2_dictation_mode_is_weight_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state, ws, calls = _wire(monkeypatch)
+    state, ws, _calls = _wire(monkeypatch)
 
     ctx = await _new_session(
         ws,
         _upgrade(protocol_version=2),
         state,
-        _start_v2(encounter_id=None, mode="dictation"),
+        _start_v2(mode="dictation"),
     )
 
     assert ctx is not None
     assert ctx.mode == "dictation"
     assert ctx.capacity_weight == 1
-    assert calls.consent_fetch == 0
     assert ws.frames()[-1]["mode"] == "dictation"
 
 
-# ── e. diarizer unavailable ──────────────────────────────────────────
+# ── d. diarizer unavailable ──────────────────────────────────────────
 
 
-async def test_unloadable_diarizer_fails_loud_not_as_a_consent_error(
+async def test_unloadable_diarizer_fails_loud(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state, ws, _calls = _wire(
         monkeypatch,
-        consent={"patient_id": uuid4(), "consent_id": uuid4()},
         engine_raises=DiarizationUnavailableError("ecapa weights missing"),
     )
 
-    ctx = await _new_session(
-        ws, _upgrade(protocol_version=2), state, _start_v2(encounter_id=uuid4())
-    )
+    ctx = await _new_session(ws, _upgrade(protocol_version=2), state, _start_v2())
 
     assert ctx is None
     frame = ws.frames()[-1]
@@ -390,8 +326,4 @@ async def test_unloadable_diarizer_fails_loud_not_as_a_consent_error(
     assert frame["recoverable"] is True
     assert "ecapa weights missing" in frame["detail"]
     assert ws.closed_with == [1013]
-
-    # A loadable-diarizer failure must never be reported as a consent
-    # problem — the clinician would chase the wrong fix.
-    assert audit_kinds.CONSENT_REFUSED not in state.audit_writer.kinds()
     assert state.session_manager.total_weight == 0

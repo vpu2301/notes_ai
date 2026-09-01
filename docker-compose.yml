@@ -1,4 +1,4 @@
-name: medical-dictation
+name: notes-ai
 
 services:
   # ─────────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-medical_dictation}
+      POSTGRES_DB: ${POSTGRES_DB:-notes}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

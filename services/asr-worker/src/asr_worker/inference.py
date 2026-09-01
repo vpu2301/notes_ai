@@ -31,7 +31,7 @@ from .vad import SpeechSegment, detect_speech
 class TranscriptionCancelledError(Exception):
     """The job was cancelled while inference was running.
 
-    Not a failure: the clinician asked for it. The processor turns this
+    Not a failure: the user asked for it. The processor turns this
     into ``status='cancelled'`` rather than ``'failed'``, and no
     transcript is stored.
     """
@@ -148,7 +148,6 @@ class WhisperEngine:
         *,
         language: str,
         prompt: str | None,
-        prompt_id: Any | None = None,
         should_cancel: Callable[[], Awaitable[bool]] | None = None,
     ) -> TranscriptionOutput:
         """Run VAD + Whisper on the full audio.
@@ -156,7 +155,7 @@ class WhisperEngine:
         ``audio_pcm`` is mono 16 kHz float32 in [-1, 1].
         Offloads the (blocking) Whisper call to a thread so the asyncio
         loop stays responsive — which is what makes ``should_cancel``
-        possible: it is awaited between chunks, so a clinician who
+        possible: it is awaited between chunks, so a user who
         presses Cancel on a running job stops it rather than waiting for
         a transcript nobody will read. Raises :class:`TranscriptionCancelledError`
         when it returns true; without the callback the run is
@@ -194,7 +193,6 @@ class WhisperEngine:
         infer_seconds = time.monotonic() - t_start
         meta = TranscriptionMetadata(
             model=settings.asr_model,
-            prompt_id=prompt_id,
             vad_seconds_speech=vad_seconds_speech,
             infer_seconds=infer_seconds,
             gpu_seconds=infer_seconds if settings.asr_device == "cuda" else 0.0,
@@ -370,7 +368,7 @@ def _peak_gpu_mem_mb() -> int:
 
 
 def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:
-    """Join clinician-specialty prompt with the last-finalized text.
+    """Join the vocabulary-hint prompt with the last-finalized text.
 
     Strips any Whisper special tokens (``<|...|>``) defensively. The
     caller is responsible for truncating prev_text to a token budget;

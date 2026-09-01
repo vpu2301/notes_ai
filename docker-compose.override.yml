@@ -14,16 +14,12 @@
 #   auth-service          :8000   (the SPA expects this origin)
 #   asr-service           :8001
 #   dictation-service     :8002   (WebSocket streaming ASR)
-#   core-service          :8003   (patients & per-patient record)
 #   notification-service  :8004   (feed + WebSocket push + email)
 #   nlp-service           :8005
-#   report-service        :8006
+#   note-service          :8006   (notes, templates, versions, search)
 #   autocomplete-service  :8007
-#   signing-service       :8008
-#   generation-service    :8009   (S15 Layer C inline completion)
-#   marketing-service     :8012   (public demo booking funnel — no auth;
-#                                  8010/8011/8013-8015 belong to evidence-backend)
-#   llama-server          :8089   (S15 inference backend — mounts the
+#   generation-service    :8009   (Layer C inline completion)
+#   llama-server          :8089   (inference backend — mounts the
 #                                  host's `ollama pull gemma3:1b` blob)
 #   asr-worker            (no port — Redis-stream consumer)
 #
@@ -36,27 +32,26 @@
 #   asr-worker          2.7 GiB  (whisper large-v3, int8, CPU)
 #   dictation-service   3.0 GiB  (whisper large-v3 + ECAPA diarizer)
 #   everything else     ~2.0 GiB (keycloak, nlp, postgres, kafka, obs)
-# Two large-v3 instances is what moving streaming off tiny cost us (see
-# the dictation-service block below); on Docker Desktop's 8 GiB default
-# the loser is dictation-service, which OOMs while loading the diarizer
-# and is restarted by `restart: unless-stopped` — a silent crash-loop
-# whose only symptom at the SPA is a WebSocket that will not open
-# (conversation mode reports `connect_failed`). Diagnose with
-#   docker events --filter container=medical-dictation-dictation-service-1
+# On Docker Desktop's 8 GiB default the loser is dictation-service,
+# which OOMs while loading the diarizer and is restarted by
+# `restart: unless-stopped` — a silent crash-loop whose only symptom at
+# the SPA is a WebSocket that will not open (meeting mode reports
+# `connect_failed`). Diagnose with
+#   docker events --filter container=notes-ai-dictation-service-1
 # and look for `oom` / `die exit=137`, then raise Docker Desktop →
 # Settings → Resources → Memory. `docker info --format '{{.MemTotal}}'`
 # reports what the engine actually has.
 # ══════════════════════════════════════════════════════════════════
-name: medical-dictation
+name: notes-ai
 
 # ── Shared snippets ────────────────────────────────────────────────
 x-postgres-dsns: &postgres-dsns
-  DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-  DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
+  DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+  DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
 
 x-auth-env: &auth-env
-  AUTH_ISSUER: http://keycloak:8080/realms/medical-dictation
-  AUTH_JWKS_URL: http://keycloak:8080/realms/medical-dictation/protocol/openid-connect/certs
+  AUTH_ISSUER: http://keycloak:8080/realms/notes
+  AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
 
 # Browser origins allowed to call the SPA-facing services WITH credentials
 # (the HttpOnly mdx_rt cookie). Single source of truth — every HTTP service that
@@ -90,24 +85,10 @@ services:
         mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
         mc mb --ignore-existing local/mdx-audio
         mc mb --ignore-existing local/mdx-transcripts
-        mc mb --ignore-existing local/mdx-dsar
-        # 0065 — patient record attachments (referrals, lab PDFs, scans).
-        mc mb --ignore-existing local/mdx-patient-docs
-        mc mb --ignore-existing local/mdx-backups
         mc version enable local/mdx-audio || true
         mc version enable local/mdx-transcripts || true
-        mc version enable local/mdx-patient-docs || true
-        # S11 deployment (ADR-0028): DSAR packages expire at 7 days —
-        # the object-storage backstop under the app-side TTL cron; DB
-        # backups expire at 35 days — the erasure completion horizon
-        # (docs/runbooks/erasure.md). Idempotent: rm any prior rule
-        # for a clean re-add on every up.
-        mc ilm rule rm --all --force local/mdx-dsar 2>/dev/null || true
-        mc ilm rule add --expire-days 7 local/mdx-dsar
-        mc ilm rule rm --all --force local/mdx-backups 2>/dev/null || true
-        mc ilm rule add --expire-days 35 local/mdx-backups
-        # S15 (ADR-0037): replay clips — 5-min token/registry TTL is the
-        # real lifetime; 1-day ILM is the ciphertext backstop.
+        # Replay clips — 5-min token/registry TTL is the real lifetime;
+        # 1-day ILM is the ciphertext backstop (ADR-0037).
         mc mb --ignore-existing local/mdx-audio-clips
         mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
         mc ilm rule add --expire-days 1 local/mdx-audio-clips
@@ -121,42 +102,33 @@ services:
       context: .
       dockerfile: Dockerfile.tools
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/medical_dictation
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/notes
     command: ["python", "scripts/db/migrate.py", "up"]
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
-  # ── Dev data seed (one-shot, after migrate). Also grants LOGIN to the
-  #    signing-service's low-privilege roles (dev_role_logins.sql). ───
+  # ── Dev data seed (one-shot, after migrate) ───────────────────────
   seed:
     build:
       context: .
       dockerfile: Dockerfile.tools
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/medical_dictation
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/notes
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: medical_dictation
+      POSTGRES_DB: notes
     command:
       - /bin/sh
       - -ec
       - |
         echo "seed: granting dev role logins"
         psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/seed/dev_role_logins.sql
-        echo "seed: dev tenants/users (seed.sql)"
+        echo "seed: dev tenants/users + system templates + starter content"
         python scripts/seed/seed.py
-        echo "seed: medical_prompts"
-        psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/seed/medical_prompts.sql
-        echo "seed: global abbreviations"
-        psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/seed/abbreviations_global.sql
-        echo "seed: voice commands"
-        python scripts/seed/seed_voice_commands.py --dsn "$$DATABASE_URL"
-        echo "seed: system templates (16)"
-        python scripts/seed/seed_templates.py --dsn "$$DATABASE_URL"
         echo "seed: complete"
     depends_on:
       migrate:
@@ -171,12 +143,12 @@ services:
     restart: unless-stopped
     environment:
       <<: [*common-env, *auth-env, *cors-env]
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/medical_dictation
-      DB_TENANT_WRITER_DSN: postgresql://tenant_writer:tenant_writer@postgres:5432/medical_dictation
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/medical_dictation
-      DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/medical_dictation
+      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
+      DB_TENANT_WRITER_DSN: postgresql://tenant_writer:tenant_writer@postgres:5432/notes
+      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
+      DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/notes
       KEYCLOAK_BASE_URL: http://keycloak:8080
-      KEYCLOAK_REALM: medical-dictation
+      KEYCLOAK_REALM: notes
       # ── Password recovery ────────────────────────────────────────
       # ON in the dev stack so the flow is exercised locally, with mail
       # captured by Mailpit (http://localhost:8025) rather than sent.
@@ -201,20 +173,17 @@ services:
       # be overridden in staging/prod.
       MDX_PASSWORD_RESET_IP_HASH_SALT: "${MDX_PASSWORD_RESET_IP_HASH_SALT:-dev-ip-hash-salt-change-in-prod}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
-      # ── Notification producer (S21 — the MFA reminder) ───────────
+      # ── Notification producer (the MFA reminder) ─────────────────
       # auth-service publishes `security.mfa_reminder` onto the same
       # Redis stream every other producer uses. Off means the reminder
       # is still recorded and still banners in the SPA; only the bell
       # and the mail go quiet. Same env name across the estate.
       MDX_NOTIFICATIONS_ENABLED: "${MDX_NOTIFICATIONS_ENABLED:-true}"
       # ── MFA (ADR-0039) ───────────────────────────────────────────
-      # The enrolment SURFACE is on in the dev stack so `#/mfa` works
-      # (without this the SPA's "start enrolment" POST 403s with
-      # "not enabled on this deployment" and the page shows the
-      # "this clinic has not switched MFA on" banner). ENFORCEMENT
-      # stays off — enrolment is per-user opt-in here, and a user who
-      # enrols is asked for their TOTP code at login regardless
-      # (login.py enforces on enrolment, not on the flag).
+      # The enrolment SURFACE is on in the dev stack so `#/mfa` works.
+      # ENFORCEMENT stays off — enrolment is per-user opt-in here, and
+      # a user who enrols is asked for their TOTP code at login
+      # regardless (login.py enforces on enrolment, not on the flag).
       MDX_MFA_ENROLMENT_ENABLED: "${MDX_MFA_ENROLMENT_ENABLED:-true}"
       MDX_REQUIRE_MFA: "${MDX_REQUIRE_MFA:-false}"
       MDX_MFA_TOTP_ISSUER: "${MDX_MFA_TOTP_ISSUER:-Klarnote (dev)}"
@@ -222,7 +191,7 @@ services:
       # tenant‖sub‖purpose), so auth-service needs the master key and
       # the crypto_writer pool — lazily built on the first MFA call,
       # 503 "MFA secret store unavailable" without them.
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
@@ -237,9 +206,9 @@ services:
       mailpit:
         condition: service_healthy
       # Both Redis users here are fail-open (the reset limiter and the
-      # S21 notification publisher), so this is about a clean start
-      # rather than correctness — without it the first requests after a
-      # cold `up` log a connection failure and quietly degrade.
+      # notification publisher), so this is about a clean start rather
+      # than correctness — without it the first requests after a cold
+      # `up` log a connection failure and quietly degrade.
       redis:
         condition: service_healthy
       migrate:
@@ -253,7 +222,7 @@ services:
     restart: unless-stopped
     environment:
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
@@ -279,8 +248,8 @@ services:
 
   # ── asr-worker — batch Whisper inference (Redis-stream consumer) ──
   # Runs large-v3 (the production model) on CPU/int8 for real transcript
-  # quality — tiny is unusable for Ukrainian clinical speech. The weights
-  # come from the host's HF cache (same pinned revision as PINS.md, the
+  # quality — tiny is unusable for Ukrainian speech. The weights come
+  # from the host's HF cache (same pinned revision as PINS.md, the
   # model.bin blob name IS the pinned sha256) mounted read-only, so the
   # baked tiny image stays untouched and nothing downloads at runtime.
   # CPU large-v3 runs slower than the default 5× realtime inference
@@ -299,7 +268,7 @@ services:
       MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
       MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "40.0"
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
@@ -320,18 +289,11 @@ services:
 
   # ── dictation-service — real-time streaming ASR over WebSocket ────
   # Runs large-v3, for the same reason asr-worker does: tiny does not
-  # merely transcribe Ukrainian badly, it invents words that do not exist
-  # in the language. Measured on eval/conversations/v1/uk-consult-001,
-  # tiny/int8 returned "Добро губня, лікарию, в житті жди ні бомсь" where
-  # large-v3/int8 returned "Доброго дня, лікарю, вже тиждень болі" — which
-  # is exactly the "builds words that make no sense" report from the
-  # conversation/scribe surface. Batch ASR was moved off tiny earlier;
-  # streaming was left behind, so scribe was the one surface still on it.
-  #
-  # Weights come from the host's HF cache (the same pinned revision as
-  # PINS.md and asr-worker, the model.bin blob name IS the pinned sha256)
-  # mounted read-only, so the baked tiny image stays untouched and nothing
-  # downloads at runtime.
+  # merely transcribe Ukrainian badly, it invents words that do not
+  # exist in the language. Weights come from the host's HF cache (the
+  # same pinned revision as PINS.md and asr-worker) mounted read-only,
+  # so the baked tiny image stays untouched and nothing downloads at
+  # runtime.
   dictation-service:
     build:
       context: .
@@ -350,28 +312,28 @@ services:
       # (large-v3/int8, this CPU): 3.5 s window = 14.2 s compute = 0.25x
       # realtime, i.e. hopelessly behind; 30 s window = ~23.5 s compute.
       # With a 28 s hop that sustains 1.18x realtime over a 193 s
-      # conversation, so the transcript keeps up and stays complete.
+      # meeting, so the transcript keeps up and stays complete.
       #
       # The trade is partial latency: a word can take up to the hop to
-      # appear. That is the honest cost of accurate Ukrainian on CPU and it
-      # is acceptable for scribe (the note is written after the visit).
-      # The GPU overlay (infra/compose/gpu.yml) keeps the low-latency
-      # sprint-04 defaults — do NOT copy these values onto a GPU worker.
+      # appear. That is the honest cost of accurate Ukrainian on CPU and
+      # it is acceptable for meeting capture (the note is written after
+      # the meeting). The GPU overlay (infra/compose/gpu.yml) keeps the
+      # low-latency defaults — do NOT copy these values onto a GPU worker.
       MDX_WINDOW_SECONDS: "30.0"
       MDX_WINDOW_MIN_FOR_PARTIAL_SECONDS: "28.0"
       # Greedy decoding, and this one decides whether the worker keeps up.
-      # Measured on a 28 s window of uk-consult-001: beam 5 = 39.4 s
-      # (0.71x realtime — permanently falling behind), beam 1 = 26.2 s
-      # (1.07x) for BYTE-IDENTICAL text. The beam buys nothing on this
-      # audio and costs 50% more compute. asr-worker keeps beam 5: batch
-      # has no realtime constraint.
+      # Measured on a 28 s window: beam 5 = 39.4 s (0.71x realtime —
+      # permanently falling behind), beam 1 = 26.2 s (1.07x) for
+      # BYTE-IDENTICAL text. The beam buys nothing on this audio and
+      # costs 50% more compute. asr-worker keeps beam 5: batch has no
+      # realtime constraint.
       MD_ASR_BEAM_SIZE: "1"
       # Overlap stays at the 2 s default: it is the commit horizon, so
       # widening it would delay every commit and enlarge the tail that
       # finalize has to flush.
       MDX_WINDOW_OVERLAP_SECONDS: "2.0"
       MDX_WORKER_ID: dictation-dev-1
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
@@ -412,7 +374,7 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ── nlp-service — 6-stage post-processing pipeline ────────────────
+  # ── nlp-service — post-processing pipeline ────────────────────────
   nlp-service:
     build:
       context: .
@@ -435,26 +397,24 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ── report-service — templates + versioned reports + diff/FTS ─────
-  report-service:
+  # ── note-service — templates + versioned notes + diff/FTS ─────────
+  note-service:
     build:
       context: .
-      dockerfile: services/report-service/Dockerfile
+      dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
     environment:
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
-      # The sign surface (S09-rev) delegates envelope creation here.
-      SIGNING_SERVICE_BASE_URL: http://signing-service:8000
-      # "Assign transcription to patient" fetches the transcript here.
+      # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
-      # S12 notification producer — lifecycle transitions publish onto the
+      # Notification producer — lifecycle transitions publish onto the
       # Redis Streams bus (ADR-0029). Without this the config default
       # (redis://localhost:6379/0) resolves to the container itself and
       # every publish silently no-ops, since publish_event never raises.
       REDIS_URL: redis://redis:6379/0
-      # S15 audio replay (ADR-0037): decrypt-slice-encode needs the same
+      # Audio replay (ADR-0037): decrypt-slice-encode needs the same
       # S3 + envelope-crypto wiring dictation-service has.
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
@@ -474,44 +434,7 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # ── core-service — patients & the per-patient clinical record ─────
-  core-service:
-    build:
-      context: .
-      dockerfile: services/core-service/Dockerfile
-    restart: unless-stopped
-    environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
-      # S11 privacy: DSAR export engine (see core_service/config.py).
-      # DB_ERASURE_DSN is deliberately ABSENT — the erasure credential
-      # lives only in the deploy/compose/privacy-ops.yml job containers
-      # (ADR-0028); core-service never builds the erasure runtime.
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/medical_dictation
-      DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/medical_dictation
-      DSAR_PACKAGE_TTL_DAYS: 7
-      S3_ENDPOINT: http://minio:9000
-      MDX_MASTER_KEY_PATH: /etc/mdx/master.key
-      SIGNING_SERVICE_BASE_URL: http://signing-service:8000
-      MDX_CONSENT_TEXTS_DIR: /etc/mdx/consents
-    volumes:
-      - ./infra/dev/master.key:/etc/mdx/master.key:ro
-      - ./infra/seeds/consents:/etc/mdx/consents:ro
-    ports:
-      - "127.0.0.1:8003:8000"
-    healthcheck: *svc-healthcheck
-    depends_on:
-      postgres:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-      migrate:
-        condition: service_completed_successfully
-
-  # ── autocomplete-service — clinical phrase suggestions ────────────
+  # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:
     build:
       context: .
@@ -520,12 +443,6 @@ services:
     environment:
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
       REDIS_URL: redis://redis:6379/0
-      # WER eval scoring transcribes through the ordinary batch path
-      # (migration 0091) with the caller's own bearer forwarded — no
-      # service credential. Without asr-service reachable, recording,
-      # authoring and publishing still work; only scoring reports
-      # 'asr_unreachable'.
-      ASR_SERVICE_BASE_URL: http://asr-service:8000
     ports:
       - "127.0.0.1:8007:8000"
     healthcheck: *svc-healthcheck
@@ -539,13 +456,12 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ── llama-server — Layer C inference backend (S15, ADR-0036) ──────
+  # ── llama-server — Layer C inference backend (ADR-0036) ───────────
   # Serves the pinned gemma3:1b GGUF (docs/models/PINS.md). The blob is
   # mounted from the host's Ollama store — run `ollama pull gemma3:1b`
   # ONCE on the host if it's missing. Containerized inference is
   # CPU-only (no Metal inside the Docker VM), hence the raised dev
-  # timeout on generation-service below; the production bake + GPU
-  # numbers are rig-gated (ADR-0036).
+  # timeout on generation-service below.
   llama-server:
     image: ghcr.io/ggml-org/llama.cpp:server
     restart: unless-stopped
@@ -565,7 +481,7 @@ services:
     ports:
       - "127.0.0.1:8089:8080"
 
-  # ── generation-service — Layer C inline completion (S15) ──────────
+  # ── generation-service — Layer C inline completion ────────────────
   generation-service:
     build:
       context: .
@@ -596,16 +512,10 @@ services:
         # generation-service's own /readyz reflects backend readiness.
         condition: service_started
 
-  # ── public-edge — the ONLY internet-facing surface (S09-rev) ──────
-  # Reverse-proxy allowlist: exactly POST /signing/callbacks/diia,
-  # GET /verify/* and POST /v1/completions/inline (S15 typing path,
-  # per-IP edge cap below the app burst) pass through (TLS + edge rate
-  # limit); every other path 404s at the edge. See
-  # infra/edge/nginx.conf.template.
-  # ── Mailpit — dev SMTP sink (S12) ─────────────────────────────────
+  # ── Mailpit — dev SMTP sink ───────────────────────────────────────
   # Catches every outbound mail so nothing can escape a dev box, and
-  # exposes an HTTP API the PHI gate asserts against. :8025 is the web
-  # inbox used in the demo; :1025 is the SMTP port the service dials.
+  # exposes an HTTP API the PII gate asserts against. :8025 is the web
+  # inbox; :1025 is the SMTP port the services dial.
   mailpit:
     image: axllent/mailpit:v1.20
     restart: unless-stopped
@@ -622,7 +532,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── notification-service — feed, WebSocket push, email (S12) ──────
+  # ── notification-service — feed, WebSocket push, email ────────────
   notification-service:
     build:
       context: .
@@ -635,7 +545,7 @@ services:
       MDX_EMAIL_PROVIDER: smtp
       MDX_SMTP_HOST: mailpit
       MDX_SMTP_PORT: "1025"
-      MDX_EMAIL_FROM: noreply@medical-dictation.local
+      MDX_EMAIL_FROM: noreply@notes-ai.local
       # Unique per replica — two replicas sharing a consumer name share
       # a pending-entries list.
       MDX_NOTIFICATION_CONSUMER_NAME: notification-1
@@ -652,110 +562,4 @@ services:
       mailpit:
         condition: service_healthy
       migrate:
-        condition: service_completed_successfully
-
-  # ── marketing-service — public demo booking funnel (:8010) ────────
-  #
-  # No auth env and no Redis: it authenticates nobody and holds no
-  # tenant data.
-  #
-  # MAIL TARGET IS A SWITCH, not a constant. Every SMTP/IMAP setting
-  # below is `${VAR:-<mailpit default>}`, so with no `.env` present this
-  # behaves exactly as before — mail is captured by Mailpit on :8025 and
-  # reaches no real inbox. Drop a `.env` in this directory (gitignored)
-  # with the sales@klarnote.com App Password and the same stack sends
-  # for real and watches the mailbox for bookings.
-  # See docs/runbooks/demo-booking.md.
-  marketing-service:
-    build:
-      context: .
-      dockerfile: services/marketing-service/Dockerfile
-    restart: unless-stopped
-    environment:
-      <<: [*common-env, *postgres-dsns, *cors-env]
-      MDX_EMAIL_PROVIDER: smtp
-      MDX_MARKETING_SMTP_HOST: ${MDX_MARKETING_SMTP_HOST:-mailpit}
-      MDX_MARKETING_SMTP_PORT: "${MDX_MARKETING_SMTP_PORT:-1025}"
-      MDX_MARKETING_SMTP_USE_TLS: "${MDX_MARKETING_SMTP_USE_TLS:-false}"
-      MDX_MARKETING_SMTP_USERNAME: ${MDX_MARKETING_SMTP_USERNAME:-}
-      MDX_MARKETING_SMTP_PASSWORD: ${MDX_MARKETING_SMTP_PASSWORD:-}
-      MDX_MARKETING_EMAIL_FROM: ${MDX_MARKETING_EMAIL_FROM:-sales@klarnote.com}
-      MDX_MARKETING_EMAIL_FROM_NAME: Klarnote
-      MDX_MARKETING_REPLY_TO: ${MDX_MARKETING_REPLY_TO:-sales@klarnote.com}
-      # Booking watcher — needs the same App Password over IMAP. Off by
-      # default; the service logs a WARNING at startup when it is off so
-      # a missing confirmation can't be mistaken for a broken one.
-      MDX_DEMO_WATCH_ENABLED: "${MDX_DEMO_WATCH_ENABLED:-false}"
-      MDX_DEMO_IMAP_HOST: ${MDX_DEMO_IMAP_HOST:-imap.gmail.com}
-      MDX_DEMO_IMAP_PORT: "${MDX_DEMO_IMAP_PORT:-993}"
-      MDX_DEMO_IMAP_USERNAME: ${MDX_DEMO_IMAP_USERNAME:-}
-      MDX_DEMO_IMAP_PASSWORD: ${MDX_DEMO_IMAP_PASSWORD:-}
-      MDX_DEMO_BOOKING_URL: https://calendar.app.google/336HQrX67TV9UNJr8
-      MDX_PUBLIC_BASE_URL: ${MDX_PUBLIC_BASE_URL:-http://localhost:5173}
-      # Only turn this on once MDX_PUBLIC_BASE_URL actually SERVES
-      # /unsubscribe over HTTPS. Claiming RFC 8058 one-click against a URL
-      # that 404s — or a host with no certificate — gets the mail accepted
-      # with a 250 and then dropped at the far end. Default off.
-      MDX_MARKETING_UNSUBSCRIBE_ONE_CLICK: "${MDX_MARKETING_UNSUBSCRIBE_ONE_CLICK:-false}"
-      MDX_DEMO_IP_HASH_SALT: ${MDX_DEMO_IP_HASH_SALT:-dev-marketing-salt}
-    ports:
-      - "127.0.0.1:8012:8000"
-    healthcheck: *svc-healthcheck
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mailpit:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  public-edge:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    environment:
-      SIGNING_UPSTREAM: signing-service:8000
-      GENERATION_UPSTREAM: generation-service:8000
-    volumes:
-      - ./infra/edge/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ./infra/edge/certs:/etc/nginx/certs:ro
-    ports:
-      - "8443:443"
-    depends_on:
-      signing-service:
-        condition: service_healthy
-      generation-service:
-        condition: service_healthy
-
-  # ── signing-service — Ukrainian KEP e-signature + public /verify ──
-  signing-service:
-    build:
-      context: .
-      dockerfile: services/signing-service/Dockerfile
-    restart: unless-stopped
-    environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
-      DB_PUBLIC_VERIFY_DSN: postgresql://app_public_verify:app_public_verify@postgres:5432/medical_dictation
-      DB_CALLBACK_WRITER_DSN: postgresql://app_callback_writer:app_callback_writer@postgres:5432/medical_dictation
-      REDIS_URL: redis://redis:6379/0
-      TRUST_STORE_DIR: /etc/mdx/trust-store
-      TRUST_STORE_INCLUDE_TEST_CA: "true"
-      ENABLE_MOCK_PROVIDER: "true"
-      # Dev-only password-confirmation signing scaffold (S09-rev). The
-      # config model + provider + CI gate all refuse this in production.
-      SIGNING_DEV_PASSWORD_ENABLED: "true"
-    volumes:
-      - ./infra/trust-store:/etc/mdx/trust-store:ro
-    ports:
-      - "127.0.0.1:8008:8000"
-    healthcheck: *svc-healthcheck
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-      # `seed` (not just migrate): dev_role_logins.sql grants LOGIN to the
-      # app_public_verify / app_callback_writer roles this service connects as.
-      seed:
         condition: service_completed_successfully

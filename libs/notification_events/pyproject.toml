@@ -1,7 +1,7 @@
 [project]
 name = "notification_events"
 version = "0.1.0"
-description = "Sprint-12 notification event envelope — the producer/consumer wire contract"
+description = "Notification event envelope — the producer/consumer wire contract"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",

@@ -28,49 +28,33 @@ from typing import Final
 
 import asyncpg
 
-DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/medical_dictation"
+DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 
 # Tables that legitimately do not need RLS.
 #
 # Two kinds live here:
-#  1. No tenant dimension at all (global catalogues / system tables / public
-#     endpoints) — there is no cross-tenant data to leak.
+#  1. No tenant dimension at all (global catalogues / system tables) —
+#     there is no cross-tenant data to leak.
 #  2. ADR-documented performance exceptions — these DO carry tenant_id and
 #     rely on application-level filtering. They are accepted risks pending
-#     security sign-off (see Sprint A1 report, OBS-A1-1x). Listed explicitly so
-#     the gate stays loud about any *new* unprotected table.
+#     security sign-off. Listed explicitly so the gate stays loud about
+#     any *new* unprotected table.
 EXEMPT: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         ("public", "schema_migrations"),  # migration tracker
         # ── global, no tenant_id ───────────────────────────────────────
-        ("public", "medical_prompts"),  # global prompt catalogue (ADR-0007 RLS exception)
         (
             "public",
             "voice_commands",
-        ),  # global voice-command catalogue (per-tenant overrides: sprint 17)
-        (
-            "public",
-            "signing_provider_health",
-        ),  # global signing-provider health; no tenant dimension
-        ("audit", "eval_baseline"),  # global WER baseline singleton; no tenant dimension
-        # Global МКХ-10 clinical reference (sprint 13, migration 0054).
-        # Read-only for services, loaded by scripts/load-icd10.py; contains
-        # published classification codes only — zero tenant/patient data.
-        # Rationale + reload policy: docs/runbooks/icd10.md; FTS choice:
-        # ADR-0021 amendment.
-        ("public", "icd10_codes"),
-        (
-            "audit",
-            "public_verify_audit",
-        ),  # public/anonymous KEP verify audit; no tenant context by design
+        ),  # global voice-command catalogue (no per-tenant rows yet)
         # ── ADR-0025 perf exception (has tenant_id; app-level filtering) ─
-        # FLAGGED for security/DPO sign-off — see Sprint A1 report.
+        # FLAGGED for security sign-off.
         ("public", "autocomplete_rollup_progress"),
     }
 )
 
 # Name-prefix exemptions within a schema — covers range-partition children whose
-# names carry a date suffix (e.g. autocomplete_telemetry_2026_05, _2026_06, …).
+# names carry a date suffix (e.g. autocomplete_telemetry_2026_09, _2026_10, …).
 EXEMPT_PREFIXES: Final[tuple[tuple[str, str], ...]] = (
     ("public", "autocomplete_telemetry"),  # ADR-0025 perf exception (FLAGGED — see report)
 )

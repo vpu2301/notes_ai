@@ -90,17 +90,47 @@ def greeting(lang: str, display_name: str = "") -> str:
 
 _MONTHS: Final[dict[str, tuple[str, ...]]] = {
     "en": (
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ),
     "de": (
-        "Januar", "Februar", "März", "April", "Mai", "Juni",
-        "Juli", "August", "September", "Oktober", "November", "Dezember",
+        "Januar",
+        "Februar",
+        "März",
+        "April",
+        "Mai",
+        "Juni",
+        "Juli",
+        "August",
+        "September",
+        "Oktober",
+        "November",
+        "Dezember",
     ),
     # Genitive — Ukrainian dates read "5 серпня", not "5 серпень".
     "uk": (
-        "січня", "лютого", "березня", "квітня", "травня", "червня",
-        "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
+        "січня",
+        "лютого",
+        "березня",
+        "квітня",
+        "травня",
+        "червня",
+        "липня",
+        "серпня",
+        "вересня",
+        "жовтня",
+        "листопада",
+        "грудня",
     ),
 }
 
@@ -130,7 +160,7 @@ def format_moment(when: datetime, lang: str) -> str:
 
 
 def minutes_label(seconds: int, lang: str) -> str:
-    """"30 minutes" / "30 Minuten" / "30 хвилин", pluralised properly."""
+    """ "30 minutes" / "30 Minuten" / "30 хвилин", pluralised properly."""
     minutes = max(1, round(seconds / 60))
     if lang == "de":
         return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minuten"
@@ -307,9 +337,7 @@ def client_line(lang: str, client_label: str) -> str:
     label = (client_label or "").strip()
     if not label:
         return ""
-    return _CLIENT_LINE.get(lang, _CLIENT_LINE[DEFAULT_LANG]).format(
-        client_label=label
-    )
+    return _CLIENT_LINE.get(lang, _CLIENT_LINE[DEFAULT_LANG]).format(client_label=label)
 
 
 def text_body(kind: str, lang: str, values: dict[str, str]) -> str:

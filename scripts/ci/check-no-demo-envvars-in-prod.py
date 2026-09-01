@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """CI gate — demo/dev escape hatches can never reach production configs.
 
-Sprint 16 pays the sprint-07 carry-over. The demo stack (HF Space) runs
-with switches that would be catastrophic in production:
+Demo/dev switches would be catastrophic in production:
 
-- ``MD_OBJECT_STORE_DISABLED`` — no audio at rest (privacy posture for
-  the public demo; data loss in a clinic).
+- ``MD_OBJECT_STORE_DISABLED`` — no audio at rest (fine for a throwaway
+  demo; data loss for real workspaces).
 - ``MDX_DEMO_MODE`` / ``DEMO_*`` — demo rate-limit middleware & friends.
 - ``AUTH_BYPASS_DEV`` — disables JWT enforcement outright.
 
-Mirrors ``check-no-dev-signing-in-prod-config``: a violation is any
-production-looking file (path contains prod/production/staging/release)
-that sets one of these truthy, or any config file that sets one truthy
-alongside ``ENVIRONMENT=production|staging`` in the same file.
+A violation is any production-looking file (path contains
+prod/production/staging/release) that sets one of these truthy, or any
+config file that sets one truthy alongside
+``ENVIRONMENT=production|staging`` in the same file.
 
 Exit codes: 0 — clean; 1 — violations printed to stderr.
 """
@@ -35,9 +34,7 @@ TRUTHY = re.compile(
     r"(?P<flag>" + "|".join(FLAGS) + r")\s*[:=]\s*['\"]?(true|1|yes|on)['\"]?",
     re.IGNORECASE,
 )
-PROD_ENV = re.compile(
-    r"ENVIRONMENT\s*[:=]\s*['\"]?(production|prod|staging)['\"]?", re.IGNORECASE
-)
+PROD_ENV = re.compile(r"ENVIRONMENT\s*[:=]\s*['\"]?(production|prod|staging)['\"]?", re.IGNORECASE)
 PRODISH_PATH = re.compile(r"(prod|production|staging|release)", re.IGNORECASE)
 
 SCAN_SUFFIXES = {".yml", ".yaml", ".env", ".toml", ".json", ".conf", ".sh", ""}
@@ -70,9 +67,7 @@ def scan() -> list[str]:
             continue
         flag = m.group("flag")
         if PRODISH_PATH.search(rel_str):
-            violations.append(
-                f"{rel_str}: enables {flag} in a production-looking config file"
-            )
+            violations.append(f"{rel_str}: enables {flag} in a production-looking config file")
         elif PROD_ENV.search(text):
             violations.append(
                 f"{rel_str}: enables {flag} alongside a production/staging ENVIRONMENT"

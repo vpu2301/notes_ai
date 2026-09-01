@@ -3,7 +3,7 @@
 A worker that dies takes its in-process abandon timers with it, stranding
 every session it held in a non-terminal status forever — each one burning a
 slot in ``per_tenant_max_active_sessions`` and each one still showing as
-"recording" to the clinician. These pin the reaper's one safety interlock:
+"recording" to the user. These pin the reaper's one safety interlock:
 it collects a session **only** when the owning worker's heartbeat is gone.
 """
 
@@ -29,7 +29,6 @@ def _row(**over: object) -> dict:
         "user_id": USER_ID,
         "status": "active",
         "worker_id": "worker-dead",
-        "encounter_id": None,
         "last_active_at": None,
     }
     base.update(over)
@@ -94,9 +93,7 @@ def _make_state(
 
 
 async def test_dead_workers_sessions_are_collected(monkeypatch: pytest.MonkeyPatch) -> None:
-    state, audit, abandoned = _make_state(
-        monkeypatch, candidates=[_row()], alive_workers=set()
-    )
+    state, audit, abandoned = _make_state(monkeypatch, candidates=[_row()], alive_workers=set())
     reaped = await reaper.reap_tenant(state, TENANT_ID, grace_seconds=300.0)
     assert reaped == 1
     assert abandoned == [SESSION_ID]
@@ -107,7 +104,7 @@ async def test_dead_workers_sessions_are_collected(monkeypatch: pytest.MonkeyPat
 async def test_a_long_pause_on_a_live_worker_is_never_collected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The whole point of the heartbeat interlock: a clinician who stepped
+    """The whole point of the heartbeat interlock: a user who stepped
     out for an hour must come back to their session, not to a tombstone."""
     state, audit, abandoned = _make_state(
         monkeypatch,
@@ -177,9 +174,7 @@ async def test_one_bad_tenant_does_not_stop_the_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     good = UUID("00000000-0000-0000-0000-0000000000bb")
-    state, _audit, abandoned = _make_state(
-        monkeypatch, candidates=[_row()], alive_workers=set()
-    )
+    state, _audit, abandoned = _make_state(monkeypatch, candidates=[_row()], alive_workers=set())
 
     async def _tenants(_state, _grace):  # noqa: ANN001
         return [TENANT_ID, good]

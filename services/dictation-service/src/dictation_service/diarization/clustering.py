@@ -99,9 +99,7 @@ class OnlineSpeakerClusterer:
             self._embeddings.append(embedding.copy())
         idx = len(self._embeddings) - 1
 
-        groups = _complete_linkage_split(
-            self._embeddings, cfg.split_threshold, cfg.split_min_gap
-        )
+        groups = _complete_linkage_split(self._embeddings, cfg.split_threshold, cfg.split_min_gap)
         if groups is not None and all(len(g) >= cfg.min_split_mass for g in groups):
             # Accepted: group containing the FIRST chunk is S1 (stream order).
             first_group = 0 if 0 in groups[0] else 1
@@ -162,9 +160,7 @@ class OnlineSpeakerClusterer:
                         self._counts[label] = len(confident)
             scored = [self._assign_online_readonly(e) for e in self._embeddings]
 
-            relabels = [
-                Relabel(i, a.label, a.confidence) for i, a in enumerate(scored) if i != idx
-            ]
+            relabels = [Relabel(i, a.label, a.confidence) for i, a in enumerate(scored) if i != idx]
             self._bootstrapped = True
             self._embeddings.clear()
             return scored[idx], relabels

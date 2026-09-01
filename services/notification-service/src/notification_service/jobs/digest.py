@@ -155,9 +155,7 @@ async def run_digest_for_tenant(
             if not is_due(user_settings, now=at):
                 continue
 
-            if not await claim_user_day(
-                conn, tenant_id=tenant_id, user_id=user_id, day=digest_day
-            ):
+            if not await claim_user_day(conn, tenant_id=tenant_id, user_id=user_id, day=digest_day):
                 continue  # another worker owns this user-day
 
             items = await pending_digest_rows(conn, user_id=user_id, since=since)
@@ -176,7 +174,7 @@ async def run_digest_for_tenant(
                 )
                 continue
 
-            # The lines are the ALREADY-RENDERED PHI-free titles, so the
+            # The lines are the ALREADY-RENDERED content-free titles, so the
             # digest cannot surface anything the individual notifications
             # did not.
             lines = [r["title"] for r in items]

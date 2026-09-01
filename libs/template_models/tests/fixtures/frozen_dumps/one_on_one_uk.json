@@ -1,0 +1,55 @@
+{
+  "category": "general",
+  "code": "one_on_one",
+  "language": "uk",
+  "metadata": {
+    "billing_code": null,
+    "notes": ""
+  },
+  "name": "Зустріч 1:1",
+  "schema_version": 1,
+  "sections": [
+    {
+      "asr_prompt": "статус поточних задач і проєктів",
+      "default_content": "",
+      "field_type": "free_text",
+      "id": "updates",
+      "min_chars": 0,
+      "name": "Оновлення",
+      "order": 0,
+      "required": true,
+      "synthesis_prompt": "",
+      "voice_aliases": [
+        "оновлення"
+      ]
+    },
+    {
+      "asr_prompt": "фідбек обох сторін",
+      "default_content": "",
+      "field_type": "free_text",
+      "id": "feedback",
+      "min_chars": 0,
+      "name": "Зворотний зв'язок",
+      "order": 1,
+      "required": false,
+      "synthesis_prompt": "",
+      "voice_aliases": [
+        "зворотний зв'язок"
+      ]
+    },
+    {
+      "asr_prompt": "домовленості та наступні кроки",
+      "default_content": "",
+      "field_type": "free_text",
+      "id": "next_steps",
+      "min_chars": 0,
+      "name": "Наступні кроки",
+      "order": 2,
+      "required": true,
+      "synthesis_prompt": "",
+      "voice_aliases": [
+        "наступні кроки"
+      ]
+    }
+  ]
+}

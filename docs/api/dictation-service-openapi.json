@@ -1,129 +1,667 @@
 {
-  "openapi": "3.1.0",
+  "components": {
+    "schemas": {
+      "DrainStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "active_sessions": {
+            "title": "Active Sessions",
+            "type": "integer"
+          },
+          "draining": {
+            "title": "Draining",
+            "type": "boolean"
+          },
+          "total_weight": {
+            "title": "Total Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draining",
+          "active_sessions",
+          "total_weight"
+        ],
+        "title": "DrainStatus",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "capacity_max": {
+            "title": "Capacity Max",
+            "type": "integer"
+          },
+          "capacity_used": {
+            "title": "Capacity Used",
+            "type": "integer"
+          },
+          "conversation_enabled": {
+            "title": "Conversation Enabled",
+            "type": "boolean"
+          },
+          "conversation_ready": {
+            "title": "Conversation Ready",
+            "type": "boolean"
+          },
+          "conversation_session_weight": {
+            "title": "Conversation Session Weight",
+            "type": "integer"
+          },
+          "conversation_slots_free": {
+            "title": "Conversation Slots Free",
+            "type": "integer"
+          },
+          "db": {
+            "title": "Db",
+            "type": "string"
+          },
+          "diarizer_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diarizer Error"
+          },
+          "diarizer_loaded": {
+            "title": "Diarizer Loaded",
+            "type": "boolean"
+          },
+          "gpu_available": {
+            "title": "Gpu Available",
+            "type": "boolean"
+          },
+          "model_loaded": {
+            "title": "Model Loaded",
+            "type": "boolean"
+          },
+          "redis": {
+            "title": "Redis",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "db",
+          "redis",
+          "model_loaded",
+          "gpu_available",
+          "conversation_enabled",
+          "diarizer_loaded",
+          "conversation_ready",
+          "capacity_used",
+          "capacity_max",
+          "conversation_session_weight",
+          "conversation_slots_free"
+        ],
+        "title": "ReadyResponse",
+        "type": "object"
+      },
+      "SessionDetail": {
+        "properties": {
+          "avg_final_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Final Latency Ms"
+          },
+          "avg_partial_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Partial Latency Ms"
+          },
+          "finalized_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finalized At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "last_active_at": {
+            "format": "date-time",
+            "title": "Last Active At",
+            "type": "string"
+          },
+          "network_drop_count": {
+            "title": "Network Drop Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "total_audio_ms": {
+            "title": "Total Audio Ms",
+            "type": "integer"
+          },
+          "transcript": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Transcript",
+            "type": "array"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "user_id",
+          "status",
+          "language",
+          "target_kind",
+          "transcript",
+          "total_audio_ms",
+          "avg_partial_latency_ms",
+          "avg_final_latency_ms",
+          "network_drop_count",
+          "started_at",
+          "last_active_at",
+          "finalized_at"
+        ],
+        "title": "SessionDetail",
+        "type": "object"
+      },
+      "SessionState": {
+        "enum": [
+          "creating",
+          "active",
+          "paused",
+          "reconnecting",
+          "finalized",
+          "abandoned",
+          "failed"
+        ],
+        "title": "SessionState",
+        "type": "string"
+      },
+      "SessionSummary": {
+        "properties": {
+          "finalized_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finalized At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "last_active_at": {
+            "format": "date-time",
+            "title": "Last Active At",
+            "type": "string"
+          },
+          "network_drop_count": {
+            "default": 0,
+            "title": "Network Drop Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "total_audio_ms": {
+            "default": 0,
+            "title": "Total Audio Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "language",
+          "target_kind",
+          "started_at",
+          "last_active_at"
+        ],
+        "title": "SessionSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
   "info": {
+    "description": "Streaming ASR over WebSockets (dictation.v1).",
     "title": "Dictation Service",
-    "description": "Sprint-04 streaming ASR. HTTP companion endpoints alongside the medical-dictation.v1 WebSocket protocol (docs/api/dictation-ws-v1.md).",
     "version": "0.4.0"
   },
+  "openapi": "3.1.0",
   "paths": {
-    "/healthz": {
+    "/dictate/sessions": {
       "get": {
-        "tags": ["health"],
-        "summary": "Liveness probe",
-        "operationId": "healthz_healthz_get",
-        "responses": {"200": {"description": "OK"}}
-      }
-    },
-    "/readyz": {
-      "get": {
-        "tags": ["health"],
-        "summary": "Readiness probe (DB, Redis, Whisper, GPU)",
-        "operationId": "readyz_readyz_get",
+        "description": "S14 \u2014 also reachable by a tenant_admin holding only `stats.read`,\nfor the business dashboard's minutes-dictated KPI.\n\nNo stripping is needed here: `SessionSummary` carries no transcript \u2014\nonly status, timings and counters. The transcript lives on\n`SessionDetail`, behind `dictation.read`, which an admin does not\nhold.",
+        "operationId": "list_sessions_dictate_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SessionState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
-          "200": {"description": "ready"},
-          "503": {"description": "not ready"}
-        }
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionSummary"
+                  },
+                  "title": "Response List Sessions Dictate Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List recent sessions for the caller (or filtered by status).",
+        "tags": [
+          "dictate"
+        ]
       }
     },
     "/dictate/sessions/{session_id}": {
       "get": {
-        "tags": ["dictate"],
-        "summary": "Fetch a session detail + transcript",
+        "operationId": "get_session_dictate_sessions__session_id__get",
         "parameters": [
-          {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionDetail"}}}
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
           },
-          "404": {"description": "Not found"}
-        }
-      }
-    },
-    "/dictate/sessions": {
-      "get": {
-        "tags": ["dictate"],
-        "summary": "List recent sessions for the caller (or filtered by status).",
-        "parameters": [
-          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
-          {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/SessionStatus"}}
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
         ],
         "responses": {
           "200": {
-            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {"$ref": "#/components/schemas/SessionSummary"}
+                  "$ref": "#/components/schemas/SessionDetail"
                 }
               }
-            }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
-        }
+        },
+        "summary": "Fetch a session detail + transcript",
+        "tags": [
+          "dictate"
+        ]
       }
     },
     "/dictate/sessions/{session_id}/finalize": {
       "post": {
-        "tags": ["dictate"],
-        "summary": "Force-finalize a stuck reconnecting session.",
+        "operationId": "finalize_session_endpoint_dictate_sessions__session_id__finalize_post",
         "parameters": [
-          {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
         ],
         "responses": {
-          "202": {"description": "finalized"},
-          "404": {"description": "Not found / not owned by caller"},
-          "409": {"description": "Session is already terminal"}
-        }
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Finalize Session Endpoint Dictate Sessions  Session Id  Finalize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Force-finalize a stuck reconnecting session.",
+        "tags": [
+          "dictate"
+        ]
       }
-    }
-  },
-  "components": {
-    "schemas": {
-      "SessionStatus": {
-        "type": "string",
-        "enum": ["creating", "active", "paused", "reconnecting", "finalized", "abandoned", "failed"]
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/internal/drain": {
+      "get": {
+        "operationId": "drain_status_internal_drain_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Drain progress",
+        "tags": [
+          "internal"
+        ]
       },
-      "SessionSummary": {
-        "type": "object",
-        "required": ["id", "status", "language", "target_kind", "last_active_at"],
-        "properties": {
-          "id": {"type": "string", "format": "uuid"},
-          "status": {"$ref": "#/components/schemas/SessionStatus"},
-          "language": {"type": "string"},
-          "target_kind": {"type": "string"},
-          "started_at": {"type": "string", "format": "date-time", "nullable": true},
-          "last_active_at": {"type": "string", "format": "date-time"},
-          "finalized_at": {"type": "string", "format": "date-time", "nullable": true},
-          "total_audio_ms": {"type": "integer", "default": 0},
-          "network_drop_count": {"type": "integer", "default": 0}
-        }
-      },
-      "SessionDetail": {
-        "type": "object",
-        "required": [
-          "id", "tenant_id", "user_id", "status", "language",
-          "target_kind", "prompt_id", "transcript", "total_audio_ms",
-          "network_drop_count", "last_active_at"
-        ],
-        "properties": {
-          "id": {"type": "string", "format": "uuid"},
-          "tenant_id": {"type": "string", "format": "uuid"},
-          "user_id": {"type": "string", "format": "uuid"},
-          "status": {"$ref": "#/components/schemas/SessionStatus"},
-          "language": {"type": "string"},
-          "target_kind": {"type": "string"},
-          "prompt_id": {"type": "string", "format": "uuid"},
-          "transcript": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
-          "total_audio_ms": {"type": "integer"},
-          "avg_partial_latency_ms": {"type": "integer", "nullable": true},
-          "avg_final_latency_ms": {"type": "integer", "nullable": true},
-          "network_drop_count": {"type": "integer"},
-          "started_at": {"type": "string", "format": "date-time", "nullable": true},
-          "last_active_at": {"type": "string", "format": "date-time"},
-          "finalized_at": {"type": "string", "format": "date-time", "nullable": true}
-        }
+      "post": {
+        "operationId": "begin_drain_internal_drain_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Begin scale-in drain",
+        "tags": [
+          "internal"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness probe \u2014 DB, Redis, Whisper, GPU",
+        "tags": [
+          "health"
+        ]
       }
     }
   }

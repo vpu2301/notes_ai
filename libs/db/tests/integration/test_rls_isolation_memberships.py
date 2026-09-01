@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 WRITER_DSN = f"postgresql://tenant_writer:tenant_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
@@ -52,13 +52,16 @@ async def _seed(writer_pool: asyncpg.Pool, tenant_id, name: str) -> None:
     async with writer_pool.acquire() as c:
         await c.execute(
             "INSERT INTO tenants (id, name, display_name, slug) VALUES ($1,$2,$3,$2)",
-            tenant_id, name, name.title(),
+            tenant_id,
+            name,
+            name.title(),
         )
     # Membership writes are tenant_writer-only; scope via app.tenant_id.
     async with tenant_connection(writer_pool, tenant_id) as c:
         await c.execute(
             "INSERT INTO tenant_memberships (tenant_id, user_sub, role) VALUES ($1,$2,'owner')",
-            tenant_id, uuid4(),
+            tenant_id,
+            uuid4(),
         )
 
 
@@ -74,9 +77,7 @@ async def test_memberships_isolated_across_tenants(
 
         # Tenant B's app_role connection sees zero of tenant A's memberships.
         async with tenant_connection(app_pool, b) as c:
-            leaked = await c.fetch(
-                "SELECT 1 FROM tenant_memberships WHERE tenant_id = $1", a
-            )
+            leaked = await c.fetch("SELECT 1 FROM tenant_memberships WHERE tenant_id = $1", a)
             assert leaked == [], "tenant B leaked tenant A memberships"
 
         # Tenant A sees exactly its own.
@@ -90,7 +91,8 @@ async def test_memberships_isolated_across_tenants(
                 await c.execute(
                     "INSERT INTO tenant_memberships (tenant_id, user_sub, role) "
                     "VALUES ($1,$2,'admin')",
-                    a, uuid4(),
+                    a,
+                    uuid4(),
                 )
     finally:
         su = await asyncpg.connect(su_dsn)

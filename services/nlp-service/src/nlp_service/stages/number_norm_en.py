@@ -185,8 +185,8 @@ def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
 
     "zero five" → "05", "five" → "5". A summing cardinal parser collapses
     "zero five" to 5 and silently corrupts the decimal (5.05 → 5.5) — a
-    dropped digit in a dose is patient harm — so the fractional part is
-    rendered digit-by-digit, preserving leading zeros.
+    dropped digit silently corrupts a dictated figure — so the fractional
+    part is rendered digit-by-digit, preserving leading zeros.
     """
     digits: list[str] = []
     cursor = i

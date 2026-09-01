@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Produce the PRODUCTION Keycloak realm import from the dev export.
 
-Sprint-16 deployment — the threat-model IOU: every
-`dev-secret-change-in-prod-*` client secret is replaced, every dev user
-and the dev-only `mdx-dev-cli` client removed. The output feeds
-Keycloak's `--import-realm` (or `kc.sh import`).
+Threat model: every `dev-secret-change-in-prod-*` client secret is
+replaced, every dev user and the dev-only `mdx-dev-cli` client removed.
+The output feeds Keycloak's `--import-realm` (or `kc.sh import`).
 
 Client secrets come from Vault (written by gen-prod-secrets.py) so the
 realm and the services can never disagree; --generate mints fresh ones
@@ -62,9 +61,12 @@ def main() -> int:
         material = _vault_secrets()
     else:
         material = {field: secrets.token_urlsafe(32) for field in CLIENT_SECRET_FIELDS.values()}
-        print("generated fresh client secrets — write the SAME values to "
-              "Vault (secret/mdx/keycloak-clients) or the services cannot "
-              "authenticate", file=sys.stderr)
+        print(
+            "generated fresh client secrets — write the SAME values to "
+            "Vault (secret/mdx/keycloak-clients) or the services cannot "
+            "authenticate",
+            file=sys.stderr,
+        )
 
     # 1. Regenerate confidential client secrets; drop dev-only clients.
     clients = []

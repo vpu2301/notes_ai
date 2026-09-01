@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# smoke-test.sh — verify the full local observability stack is reachable.
-# Used in sprint demo: git clone && make dev-up && make smoke-test
+# smoke-test.sh — verify the local stack is reachable.
+# Usage: git clone && make dev-up && make smoke-test
 set -euo pipefail
 
-TEMPLATE_URL="${TEMPLATE_SERVICE_URL:-http://localhost:8080}"
+AUTH_URL="${AUTH_URL:-http://localhost:8000}"
+ASR_URL="${ASR_URL:-http://localhost:8001}"
+DICTATION_URL="${DICTATION_URL:-http://localhost:8002}"
+NOTIFICATION_URL="${NOTIFICATION_URL:-http://localhost:8004}"
+NLP_URL="${NLP_URL:-http://localhost:8005}"
+NOTE_URL="${NOTE_URL:-http://localhost:8006}"
+AUTOCOMPLETE_URL="${AUTOCOMPLETE_URL:-http://localhost:8007}"
+GENERATION_URL="${GENERATION_URL:-http://localhost:8009}"
+
 JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 LOKI_URL="${LOKI_URL:-http://localhost:3100}"
@@ -30,7 +38,7 @@ check() {
 }
 
 echo "==================================================================="
-echo " Smoke Tests — Medical Dictation Backend"
+echo " Smoke Tests — Notes AI Backend"
 echo "==================================================================="
 echo ""
 
@@ -41,9 +49,15 @@ check "Grafana"           "$GRAFANA_URL/api/health"              "ok"
 check "Loki ready"        "$LOKI_URL/ready"                      "ready"
 
 echo ""
-echo "── Template service (start manually: uvicorn template_service.main:app) ──"
-check "Healthz" "$TEMPLATE_URL/healthz" '"status":"ok"'
-check "Readyz"  "$TEMPLATE_URL/readyz"  '"status":"ready"'
+echo "── Application services (asr-worker is a queue consumer — no HTTP) ─"
+check "auth-service         /healthz" "$AUTH_URL/healthz"         '"status":"ok"'
+check "asr-service          /healthz" "$ASR_URL/healthz"          '"status":"ok"'
+check "dictation-service    /healthz" "$DICTATION_URL/healthz"    '"status":"ok"'
+check "notification-service /healthz" "$NOTIFICATION_URL/healthz" '"status":"ok"'
+check "nlp-service          /healthz" "$NLP_URL/healthz"          '"status":"ok"'
+check "note-service         /healthz" "$NOTE_URL/healthz"         '"status":"ok"'
+check "autocomplete-service /healthz" "$AUTOCOMPLETE_URL/healthz" '"status":"ok"'
+check "generation-service   /healthz" "$GENERATION_URL/healthz"   '"status":"ok"'
 
 echo ""
 echo "─────────────────────────────────────────────────────────────────────"

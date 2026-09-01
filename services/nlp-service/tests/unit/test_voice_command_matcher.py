@@ -123,7 +123,7 @@ def test_mid_phrase_period_not_fired_without_pause() -> None:
     """The famous "крапка над і" idiom — never an actual period command."""
     m = VoiceCommandMatcher([_period_spec_uk()], language="uk")
     words = [
-        _w("пацієнт", 0.0, 0.4),
+        _w("клієнт", 0.0, 0.4),
         _w("пройшов", 0.45, 0.7),
         _w("крапка", 0.71, 0.9),  # 10 ms gap
         _w("над", 0.95, 1.1),
@@ -145,12 +145,12 @@ def test_section_command_resolves_against_template() -> None:
     m = VoiceCommandMatcher(
         [spec],
         language="uk",
-        template_sections=(TemplateSection(id=section_id, name="діагноз", aliases=("dx",)),),
+        template_sections=(TemplateSection(id=section_id, name="підсумок", aliases=("summary",)),),
     )
     words = [
         _w("note", 0.0, 0.3),
         _w("розділ", 1.5, 1.8),
-        _w("діагноз", 1.9, 2.2),
+        _w("підсумок", 1.9, 2.2),
     ]
     results = m.detect(words)
     assert len(results) == 1

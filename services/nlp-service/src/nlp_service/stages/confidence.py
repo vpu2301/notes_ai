@@ -2,7 +2,7 @@
 
 Produces :class:`ConfidenceSpan` instances over the post-processed text
 based on per-word Whisper probabilities. The frontend renders spans
-with subtle visual cues so clinicians can spot low-confidence words at
+with subtle visual cues so users can spot low-confidence words at
 a glance.
 
 Span computation:

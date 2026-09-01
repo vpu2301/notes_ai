@@ -28,7 +28,6 @@ def _view(error_kind: str | None) -> TranscriptionJobView:
         tenant_id=uuid4(),
         audio_id=uuid4(),
         requester_sub=uuid4(),
-        prompt_id=uuid4(),
         language="uk",
         model="large-v3",
         status=JobStatus.FAILED if error_kind else JobStatus.QUEUED,
@@ -48,7 +47,7 @@ def test_specs_are_self_consistent(kind: JobErrorKind) -> None:
     assert spec is not None
     assert spec.kind == str(kind)
     assert spec.message and spec.message[0].isupper()
-    # The message is shown to a clinician and must be built from the kind
+    # The message is shown to an end user and must be built from the kind
     # alone — never from the exception detail, which can quote the audio
     # (ADR-0031). Nothing that looks like a Python exception belongs here.
     assert "Error(" not in spec.message
@@ -96,7 +95,7 @@ def test_view_cannot_be_handed_derived_fields_that_contradict_the_kind() -> None
 
 def test_model_copy_cannot_desync_the_derived_fields() -> None:
     # `model_copy(update=...)` skips validators — the list endpoint uses it
-    # to build the PHI-free projection. Computed fields follow the kind
+    # to attach a result URL. Computed fields follow the kind
     # through the copy; stored ones would have been left behind.
     copied = _view(None).model_copy(update={"error_kind": str(JobErrorKind.TIMEOUT)})
     assert copied.error_stage == "inference"

@@ -97,9 +97,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from .delivery.worker import run_forever as delivery_forever
 
             tasks.append(
-                asyncio.create_task(
-                    delivery_forever(state=state), name="notification-delivery"
-                )
+                asyncio.create_task(delivery_forever(state=state), name="notification-delivery")
             )
 
     try:
@@ -116,8 +114,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Notification Service",
         description=(
-            "Sprint-12 notification fan-out: in-app feed, WebSocket push "
-            "(medical-notifications.v1), and email."
+            "Notification fan-out: in-app feed, WebSocket push (notifications.v1), and email."
         ),
         version="0.12.0",
         openapi_version="3.1.0",

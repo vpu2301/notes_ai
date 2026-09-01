@@ -1,4 +1,4 @@
-"""medical-dictation.v2 protocol proofs (sprint 14).
+"""dictation.v2 protocol proofs (sprint 14).
 
 Three contracts from the sprint-04 hand-off:
   1. v1 stays byte-stable — no v1 model changed, no v1 frame gains a key.
@@ -36,13 +36,13 @@ def _partial_v2() -> PartialV2:
     return PartialV2(
         session_id=SID,
         seq=3,
-        text="пацієнт скаржиться",
+        text="перший пункт порядку денного",
         start_ms=0,
         end_ms=1200,
         avg_confidence=0.9,
         speaker="S2",
         speaker_confidence=0.81,
-        speaker_mapping_hint={"S1": "doctor", "S2": "patient"},
+        speaker_mapping_hint={"S1": "Alice", "S2": "Bob"},
     )
 
 
@@ -56,7 +56,14 @@ def test_v1_partial_wire_shape_has_no_speaker_keys() -> None:
     assert '"speaker_confidence"' not in s
     assert '"speaker_mapping_hint"' not in s
     assert set(json.loads(s)) == {
-        "type", "session_id", "seq", "text", "start_ms", "end_ms", "words", "avg_confidence",
+        "type",
+        "session_id",
+        "seq",
+        "text",
+        "start_ms",
+        "end_ms",
+        "words",
+        "avg_confidence",
     }
 
 
@@ -64,8 +71,16 @@ def test_v1_final_wire_shape_unchanged() -> None:
     f = Final(session_id=SID, seq=2, text="b", start_ms=0, end_ms=10, avg_confidence=1.0)
     s = codec.encode_server(f)
     assert set(json.loads(s)) == {
-        "type", "session_id", "seq", "text", "start_ms", "end_ms", "words",
-        "avg_confidence", "is_provisional", "voice_command",
+        "type",
+        "session_id",
+        "seq",
+        "text",
+        "start_ms",
+        "end_ms",
+        "words",
+        "avg_confidence",
+        "is_provisional",
+        "voice_command",
     }
 
 
@@ -92,13 +107,19 @@ def test_v1_client_model_rejects_v2_partial() -> None:
 def test_v1_client_model_rejects_v2_final_and_mapping_update() -> None:
     v1_adapter: TypeAdapter[ServerMessage] = TypeAdapter(ServerMessage)
     f2 = FinalV2(
-        session_id=SID, seq=1, text="x", start_ms=0, end_ms=5,
-        avg_confidence=1.0, speaker="S1", speaker_confidence=0.9,
+        session_id=SID,
+        seq=1,
+        text="x",
+        start_ms=0,
+        end_ms=5,
+        avg_confidence=1.0,
+        speaker="S1",
+        speaker_confidence=0.9,
     )
     with pytest.raises(ValidationError):
         v1_adapter.validate_python(json.loads(codec.encode_server(f2, PROTOCOL_VERSION_V2)))
     smu = SpeakerMappingUpdated(
-        session_id=SID, mapping={"S1": "doctor", "S2": "patient"}, confidence=0.9
+        session_id=SID, mapping={"S1": "Alice", "S2": "Bob"}, confidence=0.9
     )
     with pytest.raises(ValidationError):
         # unknown discriminator value for a v1 client
@@ -109,7 +130,6 @@ def test_v1_server_decode_rejects_v2_start_session_mode() -> None:
     frame = json.dumps(
         {
             "type": "start_session",
-            "prompt_id": str(uuid4()),
             "language": "uk",
             "mode": "conversation",
         }
@@ -120,7 +140,7 @@ def test_v1_server_decode_rejects_v2_start_session_mode() -> None:
 
 
 def test_v1_server_decode_rejects_set_speaker_mapping() -> None:
-    frame = json.dumps({"type": "set_speaker_mapping", "mapping": {"S1": "doctor"}})
+    frame = json.dumps({"type": "set_speaker_mapping", "mapping": {"S1": "Alice"}})
     with pytest.raises(codec.BadMessageError) as exc_info:
         codec.decode_text(frame)
     assert exc_info.value.code is ErrorCode.BAD_MESSAGE
@@ -136,28 +156,25 @@ def test_encode_server_refuses_v2_message_on_v1_session() -> None:
 
 
 def test_negotiation_v1_only_client() -> None:
-    assert codec.negotiate_subprotocol(["medical-dictation.v1"]) == "medical-dictation.v1"
+    assert codec.negotiate_subprotocol(["dictation.v1"]) == "dictation.v1"
 
 
 def test_negotiation_v2_only_client() -> None:
-    assert codec.negotiate_subprotocol(["medical-dictation.v2"]) == "medical-dictation.v2"
+    assert codec.negotiate_subprotocol(["dictation.v2"]) == "dictation.v2"
 
 
 def test_negotiation_prefers_v2_when_both_offered() -> None:
-    assert (
-        codec.negotiate_subprotocol(["medical-dictation.v1", "medical-dictation.v2"])
-        == "medical-dictation.v2"
-    )
+    assert codec.negotiate_subprotocol(["dictation.v1", "dictation.v2"]) == "dictation.v2"
 
 
 def test_negotiation_rejects_unknown() -> None:
     assert codec.negotiate_subprotocol([]) is None
-    assert codec.negotiate_subprotocol(["medical-dictation.v3", "chat"]) is None
+    assert codec.negotiate_subprotocol(["dictation.v3", "chat"]) is None
 
 
 def test_subprotocol_for_version_round_trip() -> None:
-    assert codec.subprotocol_for_version(PROTOCOL_VERSION_V1) == "medical-dictation.v1"
-    assert codec.subprotocol_for_version(PROTOCOL_VERSION_V2) == "medical-dictation.v2"
+    assert codec.subprotocol_for_version(PROTOCOL_VERSION_V1) == "dictation.v1"
+    assert codec.subprotocol_for_version(PROTOCOL_VERSION_V2) == "dictation.v2"
 
 
 # ── v2 session decode/encode behaviour ────────────────────────────────
@@ -168,43 +185,37 @@ def test_v2_decode_start_session_conversation() -> None:
         {
             "type": "start_session",
             "protocol_version": 2,
-            "prompt_id": str(uuid4()),
             "language": "uk",
             "mode": "conversation",
-            "encounter_id": str(uuid4()),
+            "vocabulary_hint": "Klarnote roadmap OKR",
         }
     )
     msg = codec.decode_text(frame, PROTOCOL_VERSION_V2)
     assert isinstance(msg, StartSessionV2)
     assert msg.mode == "conversation"
+    assert msg.vocabulary_hint == "Klarnote roadmap OKR"
 
 
 def test_v2_decode_set_speaker_mapping() -> None:
-    frame = json.dumps(
-        {"type": "set_speaker_mapping", "mapping": {"S1": "patient", "S2": "doctor"}}
-    )
+    frame = json.dumps({"type": "set_speaker_mapping", "mapping": {"S1": "Alice", "S2": "Bob"}})
     msg = codec.decode_text(frame, PROTOCOL_VERSION_V2)
     assert isinstance(msg, SetSpeakerMapping)
-    assert msg.mapping == {"S1": "patient", "S2": "doctor"}
+    assert msg.mapping == {"S1": "Alice", "S2": "Bob"}
 
 
-def test_v2_decode_rejects_bad_mapping_role() -> None:
-    frame = json.dumps({"type": "set_speaker_mapping", "mapping": {"S1": "nurse"}})
+def test_v2_decode_rejects_empty_speaker_name() -> None:
+    frame = json.dumps({"type": "set_speaker_mapping", "mapping": {"S1": ""}})
     with pytest.raises(codec.BadMessageError):
         codec.decode_text(frame, PROTOCOL_VERSION_V2)
 
 
 def test_version_gate_is_session_pinned_both_ways() -> None:
-    v2_start = json.dumps(
-        {"type": "start_session", "protocol_version": 2, "prompt_id": str(uuid4()), "language": "uk"}
-    )
+    v2_start = json.dumps({"type": "start_session", "protocol_version": 2, "language": "uk"})
     with pytest.raises(codec.BadMessageError) as exc_info:
         codec.decode_text(v2_start, PROTOCOL_VERSION_V1)
     assert exc_info.value.code is ErrorCode.UNSUPPORTED_PROTOCOL
 
-    v1_start = json.dumps(
-        {"type": "start_session", "protocol_version": 1, "prompt_id": str(uuid4()), "language": "uk"}
-    )
+    v1_start = json.dumps({"type": "start_session", "protocol_version": 1, "language": "uk"})
     with pytest.raises(codec.BadMessageError) as exc_info:
         codec.decode_text(v1_start, PROTOCOL_VERSION_V2)
     assert exc_info.value.code is ErrorCode.UNSUPPORTED_PROTOCOL
@@ -215,7 +226,7 @@ def test_v2_partial_encodes_speaker_fields_and_null_speaker() -> None:
     doc = json.loads(s)
     assert doc["speaker"] == "S2"
     assert doc["speaker_confidence"] == 0.81
-    assert doc["speaker_mapping_hint"] == {"S1": "doctor", "S2": "patient"}
+    assert doc["speaker_mapping_hint"] == {"S1": "Alice", "S2": "Bob"}
     # labels may trail: null speaker is legal on the v2 wire
     trailing = PartialV2(
         session_id=SID, seq=4, text="…", start_ms=1200, end_ms=1800, avg_confidence=0.8

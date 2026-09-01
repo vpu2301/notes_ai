@@ -5,10 +5,9 @@
 
 ## Context
 
-Sprints 08–09 produce facts users need to hear about: a report is
-finalized, a signing session completes asynchronously via a provider
-callback, the chain reconciler finds an integrity failure. None of it
-surfaces today.
+Sprints 08–09 produce facts users need to hear about: a note is
+finalized, a transcription job completes asynchronously, the chain
+reconciler finds an integrity failure. None of it surfaces today.
 
 The naive wiring is a direct HTTP call from each producer to
 notification-service at each transition.

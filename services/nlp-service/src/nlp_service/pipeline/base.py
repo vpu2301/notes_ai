@@ -6,7 +6,7 @@ records. Every stage takes the previous stage's output and returns a
 new ``StageOutput``; the orchestrator threads them.
 
 Why discriminated-union messages instead of mutating dicts: the
-pipeline runs against PHI-bearing text in production, and silent
+pipeline runs against sensitive note text in production, and silent
 in-place mutation makes idempotence regressions invisible. Frozen
 dataclasses force every stage to be explicit.
 """
@@ -133,9 +133,9 @@ class TemplateSection:
     id: UUID
     name: str
     aliases: tuple[str, ...] = ()
-    # Sprint 13 — the template's section slug (``TemplateSection.id`` in
+    # The template's section slug (``TemplateSection.id`` in
     # template_models). ``id`` here is the template row UUID, which is
-    # NOT what report content keys sections by.
+    # NOT what note content keys sections by.
     section_key: str = ""
     field_type: str = "free_text"
     options: tuple[ChoiceOption, ...] = ()
@@ -147,7 +147,7 @@ class ProcessingContext:
 
     tenant_id: UUID
     language: Literal["uk", "en", "de"]
-    specialty: str | None
+    category: str | None
     reference_date: date
     is_partial: bool
     abbreviation_snapshot: AbbreviationSnapshot
@@ -161,11 +161,11 @@ class ProcessingContext:
     # into ``text`` at the command's position by Stage 1. Streaming
     # keeps False — the FE editor owns op application (sprint 04/06).
     apply_operations_inline: bool = False
-    # Sprint 14: stage names (matching ``Stage.name``) the orchestrator
-    # must skip for this request — conversation-mode transcripts pass
-    # ("voice_commands",) so patient speech can never trigger editing
-    # operations. Callers normalize (dedupe + sort) before constructing;
-    # the value participates in the idempotence cache key.
+    # Stage names (matching ``Stage.name``) the orchestrator must skip
+    # for this request — conversation-mode transcripts pass
+    # ("voice_commands",) so other participants' speech can never trigger
+    # editing operations. Callers normalize (dedupe + sort) before
+    # constructing; the value participates in the idempotence cache key.
     stages_disabled: tuple[str, ...] = ()
 
 

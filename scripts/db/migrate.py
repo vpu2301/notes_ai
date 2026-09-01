@@ -33,7 +33,7 @@ from typing import NamedTuple
 
 import asyncpg
 
-DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/medical_dictation"
+DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "infra" / "postgres" / "migrations"
 
 _VERSION_RE = re.compile(r"^(\d{4})_([\w-]+)\.sql$")

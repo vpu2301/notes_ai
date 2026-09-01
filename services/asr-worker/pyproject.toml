@@ -1,7 +1,7 @@
 [project]
 name = "asr-worker"
 version = "0.3.0"
-description = "Sprint-03 GPU worker. Consumes ASR jobs from Redis Streams, runs Whisper inference, stores encrypted transcripts."
+description = "GPU worker. Consumes ASR jobs from Redis Streams, runs Whisper inference, stores encrypted transcripts."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7.0",

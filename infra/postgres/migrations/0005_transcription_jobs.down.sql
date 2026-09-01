@@ -1,0 +1,2 @@
+DROP FUNCTION IF EXISTS asr_tenants_with_stale_jobs(DOUBLE PRECISION, DOUBLE PRECISION);
+DROP TABLE IF EXISTS transcription_jobs;

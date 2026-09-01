@@ -123,9 +123,7 @@ async def handle_message(
     # redelivery path is what would make a badge tick twice for one fact.
     metrics.events_consumed.add(1, {"category": str(event.category)})
     if result.created:
-        metrics.notifications_created.add(
-            len(result.created), {"category": str(event.category)}
-        )
+        metrics.notifications_created.add(len(result.created), {"category": str(event.category)})
     if result.coalesced:
         metrics.coalesced.add(result.coalesced, {"category": str(event.category)})
     if result.suppressed:

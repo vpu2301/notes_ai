@@ -8,17 +8,17 @@ Lifecycle of a job:
 4. Mark running, audit ``asr.transcription_started``.
 5. Fetch encrypted audio bytes from MinIO via ``EncryptedObjectStore``.
 6. Decode via ffmpeg into mono 16 kHz float32 PCM.
-7. Fetch the medical_prompts row for ``prompt_id``.
-8. Run ``WhisperEngine.transcribe``.
-9. Serialize :class:`TranscriptionOutput` JSON; encrypt + upload.
-10. Mark complete, audit ``asr.transcription_complete``.
-11. ACK the Redis message.
+7. Run ``WhisperEngine.transcribe`` (the payload's optional free-text
+   vocabulary hint feeds Whisper's initial_prompt).
+8. Serialize :class:`TranscriptionOutput` JSON; encrypt + upload.
+9. Mark complete, audit ``asr.transcription_complete``.
+10. ACK the Redis message.
 
 Failure modes are the closed vocabulary in :mod:`asr_models.errors`, and
 the vocabulary decides the retry: a kind whose spec says ``retryable`` goes
 back to ``consumer.fail()`` for redelivery, everything else is recorded on
 the row and acked. Re-delivering a corrupt file three more times only
-delays the failure the clinician is already waiting on.
+delays the failure the user is already waiting on.
 
   - ``AudioDecodeError``      → ``corrupt_audio``        (terminal)
   - decoded PCM has no speech → ``no_speech``            (terminal)
@@ -200,7 +200,7 @@ def _identify(msg: Message) -> tuple[UUID, UUID, UUID] | None:
     return payload.tenant_id, payload.job_id, payload.requester_sub
 
 
-# How often the engine may ask the database whether the clinician has
+# How often the engine may ask the database whether the user has
 # cancelled. Between VAD chunks, so the real granularity is whichever is
 # coarser — one chunk, or one second.
 _CANCEL_POLL_SECONDS = 1.0
@@ -260,9 +260,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 "processor.job_row_missing",
                 extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
             )
-            raise _NonRetryableError(
-                str(JobErrorKind.JOB_ROW_MISSING), "job_id not in DB"
-            )
+            raise _NonRetryableError(str(JobErrorKind.JOB_ROW_MISSING), "job_id not in DB")
         if row["status"] in {"complete", "failed"}:
             logger.info(
                 "processor.idempotent_skip",
@@ -314,7 +312,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         except CryptoError as exc:
             # Wrong AAD, a tenant KEK that will not unwrap, a truncated
             # envelope. Deterministic, and an operator's problem — the
-            # clinician re-uploading the same file changes nothing.
+            # user re-uploading the same file changes nothing.
             raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — S3/MinIO transport
             raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
@@ -335,12 +333,10 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         # audio stream is empty, or a recording that is pure silence. Whisper
         # given no samples answers with a hallucinated phrase, and a
         # hallucination stored as a `complete` transcript is worse than any
-        # failure: it reaches the chart looking like something the clinician
+        # failure: it reaches the note looking like something the speaker
         # said.
         if audio_seconds <= 0:
-            raise await die(
-                JobErrorKind.NO_SPEECH, "decoded audio contains no samples"
-            )
+            raise await die(JobErrorKind.NO_SPEECH, "decoded audio contains no samples")
 
         # Check cancel between fetch and inference.
         if await _is_cancelled(state, tenant_id, job_id):
@@ -351,11 +347,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             # The readiness probe should have caught this; if it did not,
             # say so rather than letting the engine's bare RuntimeError get
             # filed as `unhandled`.
-            raise await die(
-                JobErrorKind.MODEL_UNAVAILABLE, "whisper model is not loaded"
-            )
-
-        prompt_text = await _fetch_prompt(state, payload.prompt_id)
+            raise await die(JobErrorKind.MODEL_UNAVAILABLE, "whisper model is not loaded")
 
         max_infer = max(
             60.0,
@@ -366,8 +358,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 state.engine.transcribe(
                     pcm,
                     language=payload.language,
-                    prompt=prompt_text,
-                    prompt_id=payload.prompt_id,
+                    # Optional free-text vocabulary hint → initial_prompt.
+                    prompt=payload.vocabulary_hint,
                     # Cancel is a request, not a status: DELETE /asr/jobs/{id}
                     # on a RUNNING job only sets `cancel_requested`, and it is
                     # the worker that has to act on it. Before this it never
@@ -382,9 +374,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             await _mark_cancelled(state, tenant_id, job_id)
             return
         except TimeoutError:
-            raise await die(
-                JobErrorKind.TIMEOUT, f"inference exceeded {max_infer:.1f}s"
-            ) from None
+            raise await die(JobErrorKind.TIMEOUT, f"inference exceeded {max_infer:.1f}s") from None
         except _CudaOOMError as exc:
             _oom_counter.add(1)
             err = await die(JobErrorKind.GPU_OOM, str(exc))
@@ -393,7 +383,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
 
         # Inference ran and produced nothing. Same reasoning as the empty-PCM
         # gate above, one stage later: a zero-segment transcript stored as
-        # `complete` reads to the clinician as "we transcribed your recording
+        # `complete` reads to the user as "we transcribed your recording
         # and it was blank", which is indistinguishable from a lost dictation.
         if not output.segments:
             raise await die(
@@ -409,7 +399,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
 
         # Last look before the transcript becomes a fact. A cancel that
         # landed during the final chunk, or while the audio was being
-        # decoded, must not be overwritten by a `complete` — the clinician
+        # decoded, must not be overwritten by a `complete` — the user
         # asked for this job to stop, and a stored transcript is not stopping.
         if await _is_cancelled(state, tenant_id, job_id):
             await _mark_cancelled(state, tenant_id, job_id)
@@ -428,7 +418,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             # Retryable, and the retry redoes the inference. That is the
             # cheaper mistake: the alternative is a job marked complete
             # pointing at an object that was never written, which fails much
-            # later, on read, as a 410 the clinician cannot act on.
+            # later, on read, as a 410 the user cannot act on.
             raise await die(JobErrorKind.RESULT_STORE_FAILED, str(exc)) from exc
 
         try:
@@ -474,7 +464,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         )
 
         # After the status UPDATE and the audit write, outside the
-        # tenant_connection block — the same shape report-service uses.
+        # tenant_connection block — the same shape note-service uses.
         # A job the user submitted and stopped watching is the strongest
         # case in the system for a notification.
         await emit_transcription_completed(
@@ -627,15 +617,6 @@ async def _mark_failed(
         requester_sub=requester_sub,
         error_kind=kind,
     )
-
-
-async def _fetch_prompt(state: WorkerState, prompt_id: UUID) -> str | None:
-    async with state.app_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT prompt_text FROM medical_prompts WHERE id = $1",
-            prompt_id,
-        )
-    return str(row["prompt_text"]) if row is not None else None
 
 
 class _CudaOOMError(RuntimeError):

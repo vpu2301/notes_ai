@@ -1,16 +1,15 @@
 # Roles
 
-The realm defines six roles. The permission matrix lives at
+The realm defines five roles. The permission matrix lives at
 `docs/auth/permissions.csv`; this file is its prose companion.
 
 | Role           | Holds                                                   | Cannot                       |
 | -------------- | ------------------------------------------------------- | ---------------------------- |
-| `tenant_admin` | Onboarding, **user read/list, role management, deactivation/reactivation**, MFA reset, audit read/verify, tenant settings, templates, the patient roster (redacted to name + id since S15), PHI-free usage stats | Cross-tenant operations; **all clinical content** — notes, dictations, ASR jobs, reports (S14, ADR-0033) — and, since S15, a patient's demographics/timeline without a per-patient break-glass grant |
-| `clinician`    | Routine clinical user. Tenant-read. Notes, dictations, ASR, reports (read/write/sign) | User admin (incl. user read); audit |
-| `nurse`        | Limited clinical user. Same clinical reads/writes as clinician, minus `asr.cancel` | Most admin; user read     |
-| `auditor`      | Read-only audit + tenant context + **read-only user roster (`user.read`)** + **one write: `user.remind_mfa`** (S21 — ask a user to enrol a second factor; changes nothing about the account) | Any write that alters an account: invite, roles, (de)activation, MFA reset |
-| `service`      | Machine-to-machine token identity                       | Any user-facing operation today |
-| `knowledge_admin` | Evidence-corpus curation only (EVA-S01): upload/review/approve/expire tenant corpus documents (`evidence.corpus.manage`), web-search domain allowlist (`evidence.domains.manage`) | Everything else — every pre-existing action carries an explicit `false` row; no clinical content, no user admin, no audit |
+| `tenant_admin` | Onboarding, **user read/list, role management, deactivation/reactivation**, MFA reset, audit read/verify, tenant settings, templates, phrase/synonym curation, PII-free usage stats | Cross-tenant operations; **all note content** — notes, dictations, ASR jobs (S14 admin/content separation) |
+| `member`       | Routine workspace user. Tenant-read. Notes (read/write), dictations, ASR, autocomplete | User admin (incl. user read); audit |
+| `viewer`       | Limited workspace user. Same note/dictation reads and writes as member, minus `asr.cancel` | Most admin; user read     |
+| `auditor`      | Read-only audit + tenant context + **read-only user roster (`user.read`)** + **one write: `user.remind_mfa`** (S21 — ask a user to enrol a second factor; changes nothing about the account) | Any write that alters an account: invite, roles, (de)activation, MFA reset; any note content |
+| `service`      | Machine-to-machine token identity: S2S note/dictation/template/dictionary reads, ASR worker writes | Any human-facing admin operation |
 
 The full machine-readable matrix (every role × action × target_kind, with an
 explicit `true|false` for each) lives in `docs/auth/permissions.csv`; the
@@ -20,55 +19,45 @@ drift or any missing (role × action) combination.
 There is **no global / cross-tenant super-admin role**. The DBA superuser
 exists in the database but is never used by service code (ADR-0007).
 
-## Administrators are separated from PHI (S14, ADR-0033)
+## Administrators are separated from note content (S14)
 
-`tenant_admin` holds **no clinical permission**. `asr.*`, `dictation.*`,
-`report.read`/`report.write` and `note.*` are clinician/nurse only. An
-administrator sees the patient **roster** (the surface their job needs)
-but not any patient's notes, dictations or reports.
+`tenant_admin` holds **no content permission**. `asr.*`, `dictation.*` and
+`note.read`/`note.write` are member/viewer only. An administrator manages
+the workspace — its users, templates and dictionaries — but does not read
+anyone's notes, dictations or transcripts.
 
-This is a matrix over **roles, not people.** A practising doctor who also
-runs the clinic holds *both* `tenant_admin` and `clinician`, and a
-permission check passes on any granting role — their clinical access is
+This is a matrix over **roles, not people.** A founder who both runs the
+workspace and takes notes holds *both* `tenant_admin` and `member`, and a
+permission check passes on any granting role — their note access is
 untouched. It is the admin-ONLY account that is restricted, which is why
-the "clinician who also runs the practice → assign both" guidance below
-matters more than it used to: assigning `tenant_admin` alone to a
-practising doctor now takes their charts away.
+the "give a working admin both roles" guidance below matters: assigning
+`tenant_admin` alone takes their notes away.
 
-Two doors are left open, on purpose:
+One door is left open, on purpose:
 
-- **`stats.read`** — PHI-free aggregate reads. Admits an admin to the
-  report-search, ASR-job and dictation-session lists in a stripped
-  projection (no titles, no snippets, no patient references, no
-  transcripts, no result URLs), which is what keeps the business
-  dashboard's counts working.
-- **Break-glass** (`phi_access.request`) — access to **one** report, after
-  a reason from a closed vocabulary and a password re-entry. The grant is
-  time-boxed (60 min default), counted on every use, revocable, audited at
-  `sec` severity, and the report's authors are notified. See ADR-0033 and
-  `docs/runbooks/break-glass.md`.
-
-An `auditor` gets `phi_access.read` — the log of who broke glass and why —
-but never the reports themselves.
+- **`stats.read`** — PII-free aggregate reads. Admits an admin to the
+  note-search, ASR-job and dictation-session lists in a stripped
+  projection (no titles, no snippets, no transcripts, no result URLs),
+  which is what keeps the usage dashboard's counts working.
 
 ## Picking a role at invite time
 
-- A clinician who also runs the practice → assign **both** `tenant_admin`
-  *and* `clinician`. A user can hold multiple realm roles. Since S14 this
-  is **required**, not merely tidy: `tenant_admin` alone carries no
-  clinical access, so a doctor given only that role loses their charts.
+- A person who runs the workspace *and* takes notes → assign **both**
+  `tenant_admin` *and* `member`. A user can hold multiple realm roles.
+  Since S14 this is **required**, not merely tidy: `tenant_admin` alone
+  carries no note access.
 - Compliance officer / external auditor → `auditor`. Doesn't need
   `tenant_admin`; the audit endpoints are independently role-gated.
-- Read-only stakeholder who just needs login → `clinician` for now;
-  finer-grained read-only role is a sprint-17 add.
+- A colleague who mostly consumes shared notes but may still dictate →
+  `viewer`.
 - A machine that calls our API on a partner's behalf → `service`. The
-  scope mechanism (Day 7) is wired for service tokens but sprint 02
-  doesn't yet enforce per-scope checks.
+  scope mechanism (Day 7) is wired for service tokens but per-scope
+  checks are not yet enforced.
 
 ## Changing a user's role
 
 `PUT /admin/users/{sub}/roles` (tenant_admin only, `user.manage_roles`)
-sets a user's realm roles. The body is `{ "roles": ["clinician", …] }`,
+sets a user's realm roles. The body is `{ "roles": ["member", …] }`,
 validated against the known realm-role catalogue (unknown role → 422). The
 endpoint sets the full role set in Keycloak and mirrors the
 highest-privilege role into the local `users.role` column (which holds a
@@ -102,7 +91,7 @@ enrols a second factor:
 - Audited `user.mfa_reminded` at `sec`, and published as the
   `security.mfa_reminder` notification (bell + email) to the subject alone.
 - **Not** behind `requires_mfa()`, unlike every other mutation here: it is how
-  a clinic with no enrolments bootstraps, and it grants nothing.
+  a company with no enrolments bootstraps, and it grants nothing.
 
 `GET /admin/users` and `GET /auth/me` were widened to carry the state these
 surfaces read — `mfa_enrolled_at` + `mfa_reminded_at`/`mfa_reminder_count` on

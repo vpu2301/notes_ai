@@ -88,7 +88,9 @@ class DiarizationEngine:
 
     async def ensure_loaded(self) -> None:
         if not self._enabled:
-            raise DiarizationUnavailableError("conversation mode disabled (MDX_CONVERSATION_ENABLED)")
+            raise DiarizationUnavailableError(
+                "conversation mode disabled (MDX_CONVERSATION_ENABLED)"
+            )
         if self.loaded:
             return
         async with self._lock:
@@ -110,9 +112,7 @@ class DiarizationEngine:
                 # Weight loading + first forward are CPU/GPU-bound; keep
                 # the event loop responsive for live dictation sessions.
                 await asyncio.to_thread(embedder.warm_up)
-                await asyncio.to_thread(
-                    segmenter.speech_regions, np.zeros(1600, dtype=np.float32)
-                )
+                await asyncio.to_thread(segmenter.speech_regions, np.zeros(1600, dtype=np.float32))
             except Exception as exc:  # torch/model errors are varied; fail loud, typed
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 logger.error(

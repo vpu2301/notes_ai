@@ -9,8 +9,9 @@
 ## Context
 
 Sprint-05's Stage 3 transforms spelled-out and hybrid number
-expressions into canonical short form. The clinical-correctness bar is
-high — getting BP, dose, or HR wrong is patient-safety adjacent.
+expressions into canonical short form. The correctness bar is
+high — getting figures, amounts, or dates wrong destroys trust in the
+transcript.
 
 Options:
 
@@ -46,16 +47,16 @@ without a unit/pattern marker.
   long tail of unusual phrasings passes through unchanged rather than
   wrong.
 - **Maintainability**: a new pattern is 10–20 lines of Python + a
-  corpus row. The linguist + clinical content lead update the rules
+  corpus row. The linguist + content lead update the rules
   directly without ML training.
-- **Cost of being wrong**: bounded. Any clinical phrasing that surfaces
+- **Cost of being wrong**: bounded. Any phrasing that surfaces
   in pilot becomes a new corpus row; regression test prevents
   recurrence.
 
 ## What's lost
 
 - Idiomatic phrasings outside the corpus pass through unchanged. A
-  clinician seeing "сто двадцять одна" with no following unit gets
+  user seeing "сто двадцять одна" with no following unit gets
   "сто двадцять одна" — not converted to "121". This is by design
   (untagged = pass through).
 - Cross-language switching mid-text is unsupported.
@@ -75,6 +76,6 @@ without a unit/pattern marker.
 - Corpus coverage plateau: when rule additions stop closing real-pilot
   errors, the rule-based system has hit its ceiling. At that point,
   evaluate seq2seq on a corpus large enough to validate correctness on
-  BP / dose / HR (>5000 examples per language).
-- A pilot clinician reports a clinically wrong normalization that
+  the critical numeric classes (>5000 examples per language).
+- A pilot user reports a materially wrong normalization that
   isn't easily expressible as a rule.

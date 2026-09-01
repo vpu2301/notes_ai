@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[4]
-RULES = REPO / "infra" / "prometheus" / "rules" / "sprint-10-alerts.yml"
+RULES = REPO / "infra" / "prometheus" / "rules" / "autocomplete.yml"
 SRC = REPO / "services" / "autocomplete-service" / "src"
 
 EXPECTED = {
@@ -52,7 +52,9 @@ def test_every_metric_referenced_is_actually_emitted():
     for p in SRC.rglob("*.py"):
         emitted.update(re.findall(r'"(mdx_autocomplete_[a-z0-9_]+)"', p.read_text("utf-8")))
     # histogram instruments export _bucket/_count/_sum
-    for h in [m for m in emitted if "histogram" in m or m.endswith("_seconds") or m.endswith("_bytes")]:
+    for h in [
+        m for m in emitted if "histogram" in m or m.endswith("_seconds") or m.endswith("_bytes")
+    ]:
         emitted.update({f"{h}_bucket", f"{h}_count", f"{h}_sum"})
 
     text = RULES.read_text("utf-8")

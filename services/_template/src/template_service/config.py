@@ -27,11 +27,11 @@ class Settings(BaseSettings):
 
     # ── Auth (libs/auth integration) ─────────────────────────────────────
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")

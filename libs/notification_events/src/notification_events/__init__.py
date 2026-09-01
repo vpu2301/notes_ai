@@ -1,7 +1,7 @@
-"""Sprint-12 notification event contract.
+"""Notification event contract.
 
-Shared by producers (report-service, signing-service, background jobs)
-and the notification-service consumer so there is exactly one definition
+Shared by producers (note-service, auth-service, background jobs) and
+the notification-service consumer so there is exactly one definition
 of the envelope on the wire — the ``libs/asr_models`` pattern from
 sprint 04.
 

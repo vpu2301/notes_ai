@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from auth import Claims
 
@@ -49,7 +49,7 @@ class WordIn(_StrictModel):
 
 
 class ChoiceOptionIn(_StrictModel):
-    """Sprint 13 — mirrors ``template_models.ChoiceOption``."""
+    """Mirrors ``template_models.ChoiceOption``."""
 
     value: str = Field(max_length=64)
     label: str = Field(max_length=128)
@@ -60,9 +60,10 @@ class TemplateSectionIn(_StrictModel):
     id: UUID
     name: str
     aliases: list[str] = Field(default_factory=list)
-    # Sprint-13 additions — optional, so pre-S13 callers are unaffected.
-    # ``section_key`` is the template's section slug and becomes the key
-    # of the extracted-metadata map (report content keys sections by it).
+    # Typed-extraction fields — optional, so navigation-only callers are
+    # unaffected. ``section_key`` is the template's section slug and
+    # becomes the key of the extracted-metadata map (note content keys
+    # sections by it).
     section_key: str = Field(default="", max_length=64)
     field_type: str = Field(default="free_text", max_length=32)
     options: list[ChoiceOptionIn] = Field(default_factory=list)
@@ -72,7 +73,11 @@ class ProcessRequest(_StrictModel):
     text: str
     words: list[WordIn] = Field(default_factory=list)
     language: Literal["uk", "en", "de"]
-    specialty: str | None = None
+    # ``specialty`` is the pre-rename wire key — tolerated so an
+    # un-upgraded caller keeps working.
+    category: str | None = Field(
+        default=None, validation_alias=AliasChoices("category", "specialty")
+    )
     reference_date: date | None = None
     is_partial: bool = False
     template_sections: list[TemplateSectionIn] = Field(default_factory=list)
@@ -80,8 +85,8 @@ class ProcessRequest(_StrictModel):
     decimal_separator: str | None = None
     bp_separator: str | None = None
     date_format: Literal["DD.MM.YYYY", "YYYY-MM-DD", "WORD"] | None = None
-    # Sprint 14 — additive: pipeline stages to skip for this request.
-    # Conversation mode passes ["voice_commands"] so patient speech can
+    # Additive: pipeline stages to skip for this request. Conversation
+    # mode passes ["voice_commands"] so other participants' speech can
     # never trigger editing operations.
     stages_disabled: list[
         Literal[
@@ -165,7 +170,7 @@ async def process(
     ctx = ProcessingContext(
         tenant_id=claims.tid,
         language=body.language,
-        specialty=body.specialty,
+        category=body.category,
         reference_date=ref_date,
         is_partial=body.is_partial,
         abbreviation_snapshot=snapshot,
@@ -237,14 +242,17 @@ class BatchSegmentIn(_StrictModel):
 class BatchProcessRequest(_StrictModel):
     segments: list[BatchSegmentIn]
     language: Literal["uk", "en", "de"]
-    specialty: str | None = None
+    # Legacy wire key ``specialty`` accepted — see ProcessRequest.
+    category: str | None = Field(
+        default=None, validation_alias=AliasChoices("category", "specialty")
+    )
     reference_date: date | None = None
     template_sections: list[TemplateSectionIn] = Field(default_factory=list)
     decimal_separator: str | None = None
     bp_separator: str | None = None
     date_format: Literal["DD.MM.YYYY", "YYYY-MM-DD", "WORD"] | None = None
-    # Sprint 14 — additive, request-level: applies to ALL segments.
-    # Conversation mode passes ["voice_commands"] so patient speech can
+    # Additive, request-level: applies to ALL segments. Conversation
+    # mode passes ["voice_commands"] so other participants' speech can
     # never trigger editing operations.
     stages_disabled: list[
         Literal[
@@ -292,7 +300,7 @@ async def process_batch(
     ctx = ProcessingContext(
         tenant_id=claims.tid,
         language=body.language,
-        specialty=body.specialty,
+        category=body.category,
         reference_date=ref_date,
         is_partial=False,
         abbreviation_snapshot=snapshot,
@@ -365,7 +373,7 @@ async def process_batch(
 
 
 def _section(s: TemplateSectionIn) -> TemplateSection:
-    """Wire → pipeline section, carrying the sprint-13 typed fields."""
+    """Wire → pipeline section, carrying the typed-extraction fields."""
     return TemplateSection(
         id=s.id,
         name=s.name,
@@ -380,7 +388,7 @@ def _section(s: TemplateSectionIn) -> TemplateSection:
 
 
 # German shares Ukrainian's conventions here: decimal comma ("37,2 °C")
-# and DD.MM.YYYY — the forms a German clinician reads back without
+# and DD.MM.YYYY — the forms a German reader reads back without
 # re-parsing. A caller can still override both per request.
 def _default_decimal(language: str) -> str:
     return "," if language in {"uk", "de"} else "."

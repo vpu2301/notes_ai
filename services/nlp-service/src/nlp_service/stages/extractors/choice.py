@@ -1,9 +1,9 @@
-"""choice / multi_choice extraction (sprint 13, step 04).
+"""choice / multi_choice extraction.
 
-**Prime directive: the extractor proposes, the clinician confirms.**
+**Prime directive: the extractor proposes, the user confirms.**
 Below threshold, ambiguous, or negated ⇒ NO selection. An empty field
 with the prose preserved is always correct; a wrong auto-filled
-clinical field is not.
+field is not.
 
 Pure functions — no I/O, no clock, no randomness, injected thresholds.
 Every decision here is replayable byte-for-byte, which is why the
@@ -20,11 +20,11 @@ Matching, per option, per candidate phrase (its label + each alias):
    position when EVERY phrase token is within Levenshtein 1 of the
    aligned text token — and tokens of ≤ 3 characters must match
    EXACTLY (the short-token guard; without it "не" fuzzy-matches "ні"
-   and "на", which would invert the meaning of a Ukrainian clinical
+   and "на", which would invert the meaning of a Ukrainian
    statement).
 3. A negator in the 2 tokens before the match blocks it, unless the
    negator is part of the matched phrase itself (aliases like
-   "не палить" legitimately contain one).
+   "не підписаний" legitimately contain one).
 4. Confidence = token tightness (1 − Σdistance/Σlength), weighted so a
    longer phrase match outranks a single-token one; an exact
    full-phrase match scores 1.0.
@@ -37,7 +37,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Final
 
-from report_models import ChoiceMeta, MultiChoiceMeta
+from note_models import ChoiceMeta, MultiChoiceMeta
 
 from ...pipeline.base import ChoiceOption
 
@@ -74,11 +74,11 @@ NEGATORS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Contrast markers cancel a preceding negator: in "алергій немає, окрім
-# латексу" the negation governs the first clause only, and reading the
-# whole utterance as "no allergies" would DROP a latex allergy. Missing a
-# real allergy is the most dangerous error this extractor can make, so
-# the negation guard stops at these words.
+# Contrast markers cancel a preceding negator: in "каналів немає, окрім
+# телефону" the negation governs the first clause only, and reading the
+# whole utterance as "no channels" would DROP a real entry. Dropping a
+# positively named option is the most dangerous error this extractor can
+# make, so the negation guard stops at these words.
 CONTRAST_MARKERS: Final[frozenset[str]] = frozenset(
     {
         # uk
@@ -156,7 +156,7 @@ def _is_negated(text_tokens: list[str], start: int, phrase_tokens: list[str]) ->
     """True when a negator governs the match.
 
     Three rules, in order:
-    1. A phrase carrying its own negation ("не палить") is never
+    1. A phrase carrying its own negation ("не підписаний") is never
        self-blocked — otherwise negative options would be unfillable.
     2. A contrast marker between the negator and the match cancels the
        negation (see ``CONTRAST_MARKERS``).
@@ -231,14 +231,14 @@ def _better(a: PhraseMatch, b: PhraseMatch) -> bool:
 def _subsume_overlaps(matches: list[PhraseMatch]) -> list[PhraseMatch]:
     """Drop matches whose tokens are already claimed by a longer match.
 
-    "кинув палити" matches ``former`` over two tokens, and its second
-    token alone fuzzy-matches ``current``'s "палить". Those are the SAME
-    words read two ways — not two competing clinical claims — so the
+    "скасував підписку" matches ``former`` over two tokens, and its
+    second token alone fuzzy-matches ``current``'s "підписка". Those are
+    the SAME words read two ways — not two competing claims — so the
     longer reading wins and the shorter is discarded. Without this,
-    every "quit smoking" utterance would look ambiguous and fill
-    nothing.
+    every "cancelled the subscription" utterance would look ambiguous
+    and fill nothing.
 
-    Genuinely disjoint evidence (e.g. "палить ... не палить" at
+    Genuinely disjoint evidence (e.g. "підписаний ... не підписаний" at
     different positions) keeps both matches, so real contradictions
     still surface as ambiguity.
     """
@@ -287,7 +287,7 @@ class ExtractionResult:
     a metric label so step 08's dashboard can tell "nothing was said"
     from "we heard two conflicting things"."""
 
-    meta: object | None  # a report_models *Meta, or None
+    meta: object | None  # a note_models *Meta, or None
     outcome: str  # 'filled' | 'empty' | 'ambiguous'
 
 
@@ -300,7 +300,7 @@ def choose(
     """Single-select extraction with its outcome reason.
 
     Ambiguity rule: if two DIFFERENT options both clear the threshold,
-    nothing is selected. Competing clinical signals are not a coin flip.
+    nothing is selected. Competing signals are not a coin flip.
     """
     above = [m for m in match_options(text, options) if m.confidence >= threshold]
     if not above:
@@ -324,8 +324,8 @@ def choose_multi(
 
     All options clearing the threshold are selected. The exclusive
     "none" convention applies: an explicit ``none_known`` is dropped
-    when any positive finding also matched — the clinician said both,
-    and the positive finding is the safe reading.
+    when any positive entry also matched — the speaker said both,
+    and the positive entry is the safe reading.
     """
     above = [m for m in match_options(text, options) if m.confidence >= threshold]
     if not above:

@@ -107,12 +107,8 @@ def totp_aad(sub: UUID) -> bytes:
     return _TOTP_AAD_PREFIX + str(sub).encode("ascii")
 
 
-async def encrypt_secret(
-    envelope: Envelope, *, secret: str, tenant_id: UUID, sub: UUID
-) -> str:
-    blob = await envelope.encrypt(
-        secret.encode("ascii"), tenant_id=tenant_id, aad=totp_aad(sub)
-    )
+async def encrypt_secret(envelope: Envelope, *, secret: str, tenant_id: UUID, sub: UUID) -> str:
+    blob = await envelope.encrypt(secret.encode("ascii"), tenant_id=tenant_id, aad=totp_aad(sub))
     return json.dumps(
         {
             "v": blob.version,
@@ -129,9 +125,7 @@ async def encrypt_secret(
     )
 
 
-async def decrypt_secret(
-    envelope: Envelope, *, packed: str, tenant_id: UUID, sub: UUID
-) -> str:
+async def decrypt_secret(envelope: Envelope, *, packed: str, tenant_id: UUID, sub: UUID) -> str:
     doc = json.loads(packed)
     blob = EnvelopeBlob(
         ciphertext=_b64d(doc["ct"]),

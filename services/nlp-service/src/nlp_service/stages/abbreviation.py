@@ -11,8 +11,9 @@ Direction:
 - ``either``: pass through.
 
 Tenant override beats global on the same ``(language, expanded, abbreviated)``.
-Domain filter prefers entries whose ``domain`` matches ``ctx.specialty``,
-falling back to ``domain='all'``, then to NULL.
+Domain filter prefers entries whose ``domain`` matches ``ctx.category``
+(the template's business category, e.g. "legal" or "sales"), falling
+back to ``domain='all'``, then to NULL.
 
 Word-boundary matching is mandatory — never substitute "ІМ" inside
 "імпорт".
@@ -43,7 +44,7 @@ class _CompiledRule:
 
 
 class AbbreviationStage:
-    """Sprint-05 Stage 5."""
+    """Stage 5 — abbreviation expansion/compaction."""
 
     name = "abbreviation"
     runs_on_partials: bool = False
@@ -84,7 +85,7 @@ def _compile_rules(ctx: ProcessingContext) -> list[_CompiledRule]:
         ctx.abbreviation_snapshot.entries,
         key=lambda e: (
             0 if e.is_tenant_override else 1,
-            0 if e.domain == ctx.specialty else (1 if e.domain == "all" else 2),
+            0 if e.domain == ctx.category else (1 if e.domain == "all" else 2),
         ),
     )
     for e in sorted_entries:

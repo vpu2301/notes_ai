@@ -1,6 +1,6 @@
 """Email provider abstraction.
 
-Mirrors the sprint-09 ``SigningProvider`` split: one ABC, a real
+One ABC, a real
 implementation, and a mock that REFUSES TO RUN IN PRODUCTION. The
 refusal is the point — a mock that silently accepts mail in production
 looks exactly like a working system while every notification is
@@ -49,9 +49,7 @@ class EmailProvider(ABC):
     async def aclose(self) -> None: ...
 
 
-def _build_mime(
-    message: OutboundEmail, *, from_address: str, from_name: str
-) -> EmailMessage:
+def _build_mime(message: OutboundEmail, *, from_address: str, from_name: str) -> EmailMessage:
     mime = EmailMessage()
     mime["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     mime["To"] = message.to_address
@@ -92,9 +90,7 @@ class SmtpProvider(EmailProvider):
     async def send(self, message: OutboundEmail) -> SendResult:
         import aiosmtplib
 
-        mime = _build_mime(
-            message, from_address=self._from_address, from_name=self._from_name
-        )
+        mime = _build_mime(message, from_address=self._from_address, from_name=self._from_name)
         try:
             await aiosmtplib.send(
                 mime,

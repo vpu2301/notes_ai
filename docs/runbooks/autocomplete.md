@@ -50,8 +50,8 @@ Next request rebuilds.
 Alert: `AutocompleteScrubberRedactionSpike` (> 1/s for 15 min).
 
 - Investigate whether a particular UX flow is leaking PII into
-  prefixes (e.g. FE field that auto-fills with patient identifiers).
-- Clinical content lead reviews tenants with elevated rates.
+  prefixes (e.g. FE field that auto-fills with personal identifiers).
+- The content lead reviews tenants with elevated rates.
 
 ### Phrase-write PII rejection spike
 
@@ -59,7 +59,7 @@ Alert: `AutocompletePhraseWritePiiRejectionSpike` (> 20 / hour).
 
 - Possible misuse pattern. Pull `autocomplete.phrase.write_rejected_pii`
   audit rows; investigate per-user.
-- If legitimate confusion (clinician didn't realise the field is
+- If legitimate confusion (the user didn't realise the field is
   shared), surface a UX improvement to the FE team.
 
 ### Telemetry partition missing / full
@@ -105,7 +105,7 @@ Intra-day ranking is **static by design**: accepts recorded today reach
 the counters only at the nightly roll-up (in-process job; first
 iteration also runs at service startup), which then bumps the tenant
 version_tag so the next request rebuilds the trie. A phrase accepted
-today ranks noticeably higher **tomorrow** — tell the clinician this is
+today ranks noticeably higher **tomorrow** — tell the user this is
 expected, not a bug.
 
 ### Manual roll-up re-runs — the progress-table guard
@@ -154,25 +154,25 @@ of the feature.
 ### Cache / Redis operations
 
 - **Safe trie flush** (forces rebuilds; NEVER FLUSHALL — the Redis is
-  shared with auth/signing rate-limit keys):
+  shared with auth rate-limit keys):
   ```bash
-  docker exec medical-dictation-redis-1 sh -c \
+  docker exec notes-ai-redis-1 sh -c \
     "redis-cli --scan --pattern 'autocomplete:trie:*' | xargs -r redis-cli del"
   ```
 - **vtag inspection** (per-tenant version counter the roll-up bumps):
   ```bash
-  docker exec medical-dictation-redis-1 redis-cli \
+  docker exec notes-ai-redis-1 redis-cli \
     get "autocomplete:tenant_phrase_version:<tenant_uuid>"
   ```
 - TTLs: trie blobs + tags 3600 s (`MDX_TRIE_CACHE_TTL`); build lock
   10 s; lock-lost poll 200 ms. All in `trie/cache.py`.
 
-### Corpus drops (the ~10k authoring pipeline)
+### Corpus drops (system-phrase authoring)
 
-Clinical lead authors CSV/JSON → `scripts/validate-autocomplete-corpus.py`
-(PII + shape gate) → engineering `--emit-sql` → migration PR → clinical
-sign-off. Full contract: `infra/seeds/autocomplete/README.md`. The
-`make check-autocomplete-corpus` CI gate re-validates committed files.
+System phrases ship as reviewed migration rows: the content lead
+authors additions, engineering turns them into a migration PR, and
+review sign-off gates the merge. PII screening happens at review time —
+saved phrases must never contain personal data.
 
 ## Alerts
 
@@ -190,7 +190,7 @@ security signals.
 ### alert-suggest-latency
 
 p95 (cache-hit path) > 150 ms for 10 m. First commands: check the
-cache hit-ratio gauge → `docker logs medical-dictation-redis-1` /
+cache hit-ratio gauge → `docker logs notes-ai-redis-1` /
 `redis-cli ping` → degraded counter by reason
 (`mdx_autocomplete_degraded_total`). Degraded-dominant → Redis;
 hit-dominant latency → check DB and trie build duration.
@@ -213,7 +213,7 @@ docs/security/autocomplete-pii-scrubber.md.
 
 ### alert-pii-rejections
 
-Phrase-write rejections > 0.02/s for 15 m: users pasting patient data
+Phrase-write rejections > 0.02/s for 15 m: users pasting personal data
 into saved phrases. Pull `autocomplete.phrase.write_rejected_pii`
 audit rows (payload has pattern classes + field, never text);
 investigate per-user; likely a UX/training signal.

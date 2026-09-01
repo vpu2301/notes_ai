@@ -34,11 +34,11 @@ from storage import ObjectNotFoundError
 _TENANT = uuid4()
 
 
-def _clinician_claims() -> Claims:
+def _member_claims() -> Claims:
     return Claims(
         sub=uuid4(),
         tid=_TENANT,
-        roles=["clinician"],
+        roles=["member"],
         sid="test-session",
         iss="https://test/issuer",
         aud="mdx",
@@ -53,7 +53,6 @@ def _job_view(status: JobStatus) -> TranscriptionJobView:
         tenant_id=_TENANT,
         audio_id=uuid4(),
         requester_sub=uuid4(),
-        prompt_id=uuid4(),
         language="uk",
         model="large-v3",
         status=status,
@@ -115,9 +114,7 @@ class _FakeNlpClient:
             "segments": [
                 {
                     "text": "Скарги на кашель.",
-                    "confidence_spans": [
-                        {"start_char": 10, "end_char": 16, "level": "moderate"}
-                    ],
+                    "confidence_spans": [{"start_char": 10, "end_char": 16, "level": "moderate"}],
                 },
                 {"text": ".", "confidence_spans": []},
             ],
@@ -164,7 +161,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(jobs, "tenant_connection", _fake_tenant_conn)
 
     app = create_app()
-    app.dependency_overrides[deps.current_user] = _clinician_claims
+    app.dependency_overrides[deps.current_user] = _member_claims
     return SimpleNamespace(client=TestClient(app), store=store, audit=audit, nlp=nlp)
 
 
@@ -212,9 +209,7 @@ def test_result_409_on_a_failed_job_carries_the_failure_vocabulary(
     assert "decoded" in body["error_message"]
 
 
-def test_result_404_when_missing(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_result_404_when_missing(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from asr_service.routers import jobs
 
     async def _get_job(conn, *, job_id):  # noqa: ANN001
@@ -226,9 +221,7 @@ def test_result_404_when_missing(
     assert resp.status_code == 404
 
 
-def test_result_200_nlp_enriched(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_result_200_nlp_enriched(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from asr_service.routers import jobs
 
     view = _job_view(JobStatus.COMPLETE)
@@ -255,9 +248,7 @@ def test_result_200_nlp_enriched(
     assert seg["text"] == "Скарги на кашель."
     assert seg["raw_text"] == "скарги на кашель крапка"
     assert seg["end_ms"] == 3500
-    assert seg["confidence_spans"] == [
-        {"start_char": 10, "end_char": 16, "level": "moderate"}
-    ]
+    assert seg["confidence_spans"] == [{"start_char": 10, "end_char": 16, "level": "moderate"}]
     assert seg["words"][0]["text"] == "скарги"
 
     # The caller's bearer was forwarded verbatim to nlp-service, with
@@ -273,7 +264,7 @@ def test_result_200_nlp_enriched(
     assert store_call["key"] == f"{_TENANT}/{job_id}.json.enc"
     assert store_call["aad"] == job_id.bytes
 
-    # Plaintext PHI reads are audited.
+    # Plaintext transcript reads are audited.
     (event,) = rig.audit.events
     assert event["kind"] == "asr.transcript_accessed"
     assert event["target_id"] == str(job_id)

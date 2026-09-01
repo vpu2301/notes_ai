@@ -10,7 +10,7 @@ from autocomplete_service.suggest import (
 
 def test_slash_prefix_routes_to_snippet():
     assert is_snippet_prefix("/cv")
-    assert is_snippet_prefix("/vitals")
+    assert is_snippet_prefix("/agenda")
 
 
 def test_non_slash_prefix_routes_to_trie():
@@ -20,7 +20,7 @@ def test_non_slash_prefix_routes_to_trie():
 
 def test_trigger_extraction_lowercases_strips_slashes():
     assert extract_snippet_trigger("/CV") == "cv"
-    assert extract_snippet_trigger("//VITALS") == "vitals"
+    assert extract_snippet_trigger("//AGENDA") == "agenda"
     assert extract_snippet_trigger("/  trim  ") == "trim"
 
 

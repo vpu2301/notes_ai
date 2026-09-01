@@ -57,8 +57,8 @@ loop validates the framing logic.
   separately. Rejected: too much surface area for the pilot.
 - OpenAI `whisper` — fp16 instability on long audio (>10 min), and
   ~3× slower than faster-whisper. Rejected.
-- Build per-clinician fine-tuned models — out of scope; revisit
-  post-pilot once we have ≥ 10 hours of clinician audio with consent.
+- Build per-user fine-tuned models — out of scope; revisit
+  post-pilot once we have ≥ 10 hours of user audio with consent.
 
 ## Trigger conditions for revisiting
 

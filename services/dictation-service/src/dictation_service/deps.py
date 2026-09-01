@@ -111,11 +111,10 @@ def requires_any(
 ) -> Callable[..., Awaitable[Claims]]:
     """Admit a caller holding ANY of the given permissions (S14).
 
-    The session list is reachable by a clinician with `dictation.read`
-    and by a tenant_admin holding only `stats.read`, whose rows are
-    already PHI-free (a session summary carries no patient reference and
-    no transcript). Put the primary permission first — a denial is
-    reported against it.
+    The session list is reachable by a member with `dictation.read`
+    and by a tenant_admin holding only `stats.read`, whose rows carry
+    no sensitive content (a session summary has no transcript). Put the
+    primary permission first — a denial is reported against it.
     """
 
     async def dep(claims: Annotated[Claims, Depends(current_user)]) -> Claims:

@@ -63,14 +63,14 @@ disabled feature must not be discoverable.
 ## Bring it up locally
 
 ```bash
-cd medical-dictation-backend
+cd notes-ai-backend
 make dev-up && make migrate-up && make seed
 docker compose up -d auth-service          # or: make run-auth-service
 open http://localhost:8025                 # Mailpit — every dev mail lands here
 ```
 
 Then in the SPA (`~/Desktop/dictat`, `npm run dev`): `#/forgot-password`,
-enter `clinician@tenant-a.example`, and read the mail in Mailpit.
+enter `member@tenant-a.example`, and read the mail in Mailpit.
 
 Both mails render in **en / de / uk**. The reset mail takes its language
 from the SPA's `lang` field; the security notification takes it from

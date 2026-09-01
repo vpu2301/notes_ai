@@ -29,11 +29,11 @@ class Settings(BaseSettings):
 
     # ── Auth ─────────────────────────────────────────────────────────
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -47,11 +47,11 @@ class Settings(BaseSettings):
 
     # ── Database ─────────────────────────────────────────────────────
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@localhost:5432/medical_dictation",
+        default="postgresql://app_role:app_role@localhost:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_pool_min_size: int = Field(default=1, alias="DB_POOL_MIN_SIZE")
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # A misbehaving producer — or a reconciler flagging thousands of rows
     # at once — must not be able to bury every user's feed. Beyond the
     # cap, same-category events inside the window coalesce into one
-    # "N reports finalized" row instead of N rows.
+    # "N notes finalized" row instead of N rows.
     rate_cap_per_category: int = Field(default=20, alias="MDX_NOTIFICATION_RATE_CAP")
     rate_cap_window_s: int = Field(default=300, alias="MDX_NOTIFICATION_RATE_WINDOW_S")
 
@@ -91,8 +91,8 @@ class Settings(BaseSettings):
 
     # ── Email ────────────────────────────────────────────────────────
     email_provider: str = Field(default="mock", alias="MDX_EMAIL_PROVIDER")  # smtp | mock
-    email_from: str = Field(default="noreply@medical-dictation.local", alias="MDX_EMAIL_FROM")
-    email_from_name: str = Field(default="Medical Dictation", alias="MDX_EMAIL_FROM_NAME")
+    email_from: str = Field(default="noreply@notes-ai.local", alias="MDX_EMAIL_FROM")
+    email_from_name: str = Field(default="Klarnote", alias="MDX_EMAIL_FROM_NAME")
     smtp_host: str = Field(default="localhost", alias="MDX_SMTP_HOST")
     smtp_port: int = Field(default=1025, alias="MDX_SMTP_PORT")
     smtp_use_tls: bool = Field(default=False, alias="MDX_SMTP_USE_TLS")
@@ -110,9 +110,7 @@ class Settings(BaseSettings):
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 
 settings = Settings()

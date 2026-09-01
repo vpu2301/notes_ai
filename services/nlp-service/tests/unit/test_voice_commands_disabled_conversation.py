@@ -1,7 +1,8 @@
 """Conversation mode: voice-commands stage disabled end-to-end (sprint 14).
 
-A conversation-mode transcript carries PATIENT speech — «новий абзац»
-said by a patient must stay verbatim prose, never become an editing
+A conversation-mode transcript carries OTHER PARTICIPANTS' speech —
+«новий абзац» said by a meeting participant must stay verbatim prose,
+never become an editing
 operation. The orchestrator is driven with the REAL ``VoiceCommandStage``
 once normally (operation fires) and once with
 ``stages_disabled=("voice_commands",)`` (text verbatim, no operations).
@@ -32,7 +33,7 @@ def _ctx(*, stages_disabled: tuple[str, ...] = ()) -> ProcessingContext:
     return ProcessingContext(
         tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
         language="uk",
-        specialty=None,
+        category=None,
         reference_date=date(2026, 1, 1),
         is_partial=False,
         abbreviation_snapshot=AbbreviationSnapshot(entries=(), fingerprint="x"),
@@ -79,7 +80,7 @@ def test_voice_command_inert_when_stage_disabled() -> None:
             StageInput(text=_TEXT, words=_WORDS),
         )
     )
-    # Patient speech stays verbatim; no editing operations.
+    # Participant speech stays verbatim; no editing operations.
     assert out.text == _TEXT
     assert out.operations == ()
     assert out.voice_commands == ()

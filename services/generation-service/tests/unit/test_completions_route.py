@@ -33,14 +33,21 @@ TENANT = uuid4()
 
 def _claims(tid: UUID | None = None) -> Claims:
     return Claims(
-        sub=uuid4(), tid=tid or TENANT, roles=["clinician"], scope="openid",
-        sid="s", iss="test", aud="mdx-api", exp=2_000_000_000, iat=1,
+        sub=uuid4(),
+        tid=tid or TENANT,
+        roles=["member"],
+        scope="openid",
+        sid="s",
+        iss="test",
+        aud="mdx-api",
+        exp=2_000_000_000,
+        iat=1,
     )
 
 
-def _body(text: str = "Пацієнт скаржиться на біль у") -> InlineCompletionRequest:
+def _body(text: str = "Команда домовилася про наступні") -> InlineCompletionRequest:
     return InlineCompletionRequest(
-        report_id=uuid4(), section_key="anamnesis", text_before_cursor=text, language="uk"
+        note_id=uuid4(), section_key="action_items", text_before_cursor=text, language="uk"
     )
 
 
@@ -56,7 +63,7 @@ class _Metric:
 
 
 class _MockInference:
-    def __init__(self, text: str = "грудній клітці", delay_s: float = 0.0) -> None:
+    def __init__(self, text: str = "кроки щодо релізу", delay_s: float = 0.0) -> None:
         self.text = text
         self.delay_s = delay_s
 
@@ -121,7 +128,7 @@ async def test_served_completion():
     install_state(state)
     result = await inline_completion(_body(), _claims())
     assert isinstance(result, InlineCompletionResponse)
-    assert result.completion == "грудній клітці"
+    assert result.completion == "кроки щодо релізу"
     assert result.model == "gemma3:1b"
     assert result.latency_ms >= 0
     assert state.shown_audit.recorded == [TENANT]
@@ -193,24 +200,27 @@ async def test_empty_completion_is_204():
 
 
 async def test_filtered_completion_is_204_and_audited():
-    """A completion introducing '140/90' absent from context → 204 + warn audit."""
-    state = _FakeState(inference=_MockInference(text="грудях, АТ 140/90 мм рт.ст."))
+    """A completion introducing '$2,500' absent from context → 204 + warn audit."""
+    state = _FakeState(inference=_MockInference(text="кроки, бюджет $2,500 на квартал"))
     install_state(state)
     result = await inline_completion(_body(), _claims())
     assert isinstance(result, Response) and result.status_code == 204
     assert len(state.audit_writer.events) == 1
     event = state.audit_writer.events[0]
     assert event["kind"] == "layer_c.completion.filtered"
-    assert event["payload"]["reason"] == "blood_pressure"
-    assert event["payload"]["matched"] == "140/90"
+    assert event["payload"]["reason"] == "money"
+    assert event["payload"]["matched"] == "$2,500"
     assert state.shown_audit.recorded == []
 
 
 async def test_wire_model_rejects_unknown_fields():
     with pytest.raises(ValidationError):
         InlineCompletionRequest(
-            report_id=uuid4(), section_key="a", text_before_cursor="x",
-            language="uk", extra_field="nope",
+            note_id=uuid4(),
+            section_key="a",
+            text_before_cursor="x",
+            language="uk",
+            extra_field="nope",
         )
 
 
@@ -220,8 +230,8 @@ async def test_wire_model_rejects_oversized_prefix():
 
 
 async def test_leading_ellipsis_stripped():
-    state = _FakeState(inference=_MockInference(text="...грудній клітці, що посилюється"))
+    state = _FakeState(inference=_MockInference(text="...кроки щодо релізу та строків"))
     install_state(state)
     result = await inline_completion(_body(), _claims())
     assert isinstance(result, InlineCompletionResponse)
-    assert result.completion == "грудній клітці, що посилюється"
+    assert result.completion == "кроки щодо релізу та строків"

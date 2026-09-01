@@ -19,14 +19,14 @@ def _snapshot(entries: list[AbbreviationEntry]) -> AbbreviationSnapshot:
 
 
 def _ctx(
-    language: str, snap: AbbreviationSnapshot, specialty: str | None = None
+    language: str, snap: AbbreviationSnapshot, category: str | None = None
 ) -> ProcessingContext:
     from datetime import date
 
     return ProcessingContext(
         tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
         language=language,
-        specialty=specialty,
+        category=category,
         reference_date=date(2026, 1, 1),
         is_partial=False,
         abbreviation_snapshot=snap,

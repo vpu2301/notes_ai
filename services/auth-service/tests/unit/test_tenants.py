@@ -1,11 +1,11 @@
-"""Unit tests for the tenant (clinic) management surface.
+"""Unit tests for the tenant (company) management surface.
 
 The repository SQL is exercised against a real Postgres in the DB-integration
 suite; here we stub ``tenant_connection`` + the repo functions and drive the
 router to assert the authorization / isolation / validation behaviour:
 
 * tenant create + update (happy path, audit, owner bootstrap)
-* role-based access — a clinician token cannot create/update a tenant
+* role-based access — a member token cannot create/update a tenant
 * tenant isolation — you can't read a tenant you are not a member of
 * writes are scoped to the caller's active tenant
 * membership creation, last-owner guard, role validation
@@ -151,10 +151,10 @@ def test_create_tenant_happy_path(make_client, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(tenants.repo, "add_member", _add_member)
 
     client = make_client(_claims(roles=["tenant_admin"]))
-    resp = client.post("/tenants", json={"name": "kyiv-clinic", "display_name": "Kyiv Clinic"})
+    resp = client.post("/tenants", json={"name": "acme-inc", "display_name": "Acme Inc"})
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["name"] == "kyiv-clinic"
+    assert body["name"] == "acme-inc"
     assert body["my_role"] == "owner"
     # Creator was made the founding owner.
     assert created["owner_sub"] == str(ADMIN_SUB) or created["owner_sub"] == ADMIN_SUB
@@ -162,9 +162,9 @@ def test_create_tenant_happy_path(make_client, monkeypatch: pytest.MonkeyPatch) 
     assert "tenant.created" in kinds
 
 
-def test_create_tenant_forbidden_for_clinician(make_client) -> None:
-    client = make_client(_claims(roles=["clinician"]))
-    resp = client.post("/tenants", json={"name": "x-clinic", "display_name": "X"})
+def test_create_tenant_forbidden_for_member(make_client) -> None:
+    client = make_client(_claims(roles=["member"]))
+    resp = client.post("/tenants", json={"name": "x-corp", "display_name": "X"})
     assert resp.status_code == 403
 
 
@@ -227,8 +227,8 @@ def test_update_tenant_denied_for_viewer_membership(make_client, monkeypatch) ->
     assert resp.status_code == 403
 
 
-def test_update_tenant_forbidden_for_nurse_role(make_client) -> None:
-    client = make_client(_claims(roles=["nurse"]))
+def test_update_tenant_forbidden_for_viewer_role(make_client) -> None:
+    client = make_client(_claims(roles=["viewer"]))
     resp = client.patch(f"/tenants/{TENANT_A}", json={"city": "Lviv"})
     assert resp.status_code == 403
 
@@ -261,7 +261,7 @@ def test_get_tenant_member_ok(make_client, monkeypatch) -> None:
     monkeypatch.setattr(tenants.repo, "get_membership", _get_membership)
     monkeypatch.setattr(tenants.repo, "get_tenant", _get_tenant)
 
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     resp = client.get(f"/tenants/{TENANT_A}")
     assert resp.status_code == 200
     assert resp.json()["my_role"] == "admin"
@@ -273,8 +273,11 @@ def test_list_tenants_returns_memberships(make_client, monkeypatch) -> None:
     async def _list_for_user(conn, *, user_sub):  # noqa: ANN001
         return [
             {**_tenant_row(TENANT_A), "membership_role": "owner", "membership_status": "active"},
-            {**_tenant_row(TENANT_B, name="tenant-b", slug="tenant-b"),
-             "membership_role": "admin", "membership_status": "active"},
+            {
+                **_tenant_row(TENANT_B, name="tenant-b", slug="tenant-b"),
+                "membership_role": "admin",
+                "membership_status": "active",
+            },
         ]
 
     monkeypatch.setattr(tenants.repo, "list_tenants_for_user", _list_for_user)
@@ -321,15 +324,17 @@ def test_add_member_happy_path(make_client, monkeypatch) -> None:
 
     client = make_client(_claims(roles=["tenant_admin"]))
     resp = client.post(
-        f"/tenants/{TENANT_A}/members", json={"user_sub": str(new_sub), "role": "nurse"}
+        f"/tenants/{TENANT_A}/members", json={"user_sub": str(new_sub), "role": "viewer"}
     )
     assert resp.status_code == 201, resp.text
     assert "tenant.member_added" in [c["kind"] for c in client.audit_calls]  # type: ignore[attr-defined]
 
 
-def test_add_member_forbidden_for_clinician(make_client) -> None:
-    client = make_client(_claims(roles=["clinician"]))
-    resp = client.post(f"/tenants/{TENANT_A}/members", json={"user_sub": str(uuid4()), "role": "nurse"})
+def test_add_member_forbidden_for_member(make_client) -> None:
+    client = make_client(_claims(roles=["member"]))
+    resp = client.post(
+        f"/tenants/{TENANT_A}/members", json={"user_sub": str(uuid4()), "role": "viewer"}
+    )
     assert resp.status_code == 403
 
 
@@ -382,7 +387,7 @@ def test_switch_requires_membership(make_client, monkeypatch) -> None:
         return None
 
     monkeypatch.setattr(tenants.repo, "get_membership", _get_membership)
-    client = make_client(_claims(roles=["clinician"], tid=TENANT_A))
+    client = make_client(_claims(roles=["member"], tid=TENANT_A))
     resp = client.post(f"/tenants/{TENANT_B}/switch")
     assert resp.status_code == 404
 
@@ -399,7 +404,7 @@ def test_switch_member_ok(make_client, monkeypatch) -> None:
     monkeypatch.setattr(tenants.repo, "get_membership", _get_membership)
     monkeypatch.setattr(tenants.repo, "get_tenant", _get_tenant)
 
-    client = make_client(_claims(roles=["clinician"], tid=TENANT_A))
+    client = make_client(_claims(roles=["member"], tid=TENANT_A))
     resp = client.post(f"/tenants/{TENANT_B}/switch")
     assert resp.status_code == 200
     assert resp.json()["active_tenant"]["my_role"] == "admin"

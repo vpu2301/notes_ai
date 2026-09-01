@@ -16,10 +16,10 @@ def _good() -> dict[str, object]:
     return {
         "sub": "11111111-1111-1111-1111-111111111111",
         "tid": "00000000-0000-0000-0000-00000000000a",
-        "roles": ["clinician"],
+        "roles": ["member"],
         "scope": "openid",
         "sid": "session-1",
-        "iss": "https://issuer.test/realms/medical-dictation",
+        "iss": "https://issuer.test/realms/notes",
         "aud": "mdx-api",
         "exp": now + 900,
         "iat": now,
@@ -30,7 +30,7 @@ def test_valid_payload_parses() -> None:
     c = Claims(**_good())
     assert isinstance(c.sub, UUID)
     assert isinstance(c.tid, UUID)
-    assert c.roles == ["clinician"]
+    assert c.roles == ["member"]
     assert c.mfa is False  # default
     assert c.nbf is None
 
@@ -75,6 +75,6 @@ def test_frozen_model_cannot_be_mutated() -> None:
 
 
 def test_roles_must_be_list_of_strings() -> None:
-    payload = _good() | {"roles": "clinician"}  # bare string, not list
+    payload = _good() | {"roles": "member"}  # bare string, not list
     with pytest.raises(ValidationError):
         Claims(**payload)

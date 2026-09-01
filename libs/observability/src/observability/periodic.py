@@ -1,7 +1,7 @@
 """The sprint-16 scheduler pattern — one runner, hosted per service.
 
 A single scheduler *process* would have to import three services (jobs
-live in report-, autocomplete- and core-service), which the import-linter
+live in note- and autocomplete-service), which the import-linter
 contracts forbid — so the "one pattern" is this shared runner, hosted
 in-process by each service behind its ``MDX_BACKGROUND_JOBS`` flag (the
 autocomplete precedent), with every job also exposed as a

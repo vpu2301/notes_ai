@@ -19,8 +19,8 @@ Output respects ``ctx.date_format``:
 - ``WORD`` (e.g., "1 травня 2026", "5. März 2026")
 
 Ambiguous dates (e.g., "31.04.2026") are NOT corrected; they pass
-through with a ``Warning{code="ambiguous_date"}`` for sprint-8 clinical
-rules.
+through with a ``Warning{code="ambiguous_date"}`` for downstream
+validation rules.
 """
 
 from __future__ import annotations
@@ -229,7 +229,7 @@ _HOURS_DE: dict[str, int] = {
 }
 
 
-# Spelled-out Ukrainian ordinal days in the genitive case, as clinicians
+# Spelled-out Ukrainian ordinal days in the genitive case, as speakers
 # dictate them: "третього травня" (the third of May). Number normalization
 # (Stage 3) only knows cardinals ("три"), so these ordinals reach Stage 4
 # as words and must be mapped here.

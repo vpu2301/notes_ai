@@ -8,7 +8,7 @@ contract (spec: "the §6 tests are the guard, not code review"):
 2. Tenant A never SELECTs tenant B rows (phrases, snippets).
 3. User A cannot INSERT/UPDATE a ``source='user'`` row owned by user B,
    even inside the same tenant.
-4. A clinician-role connection cannot write ``source='tenant'`` rows;
+4. A member-role connection cannot write ``source='tenant'`` rows;
    a tenant_admin connection can, only in its own tenant.
 5. app_role cannot write ``source='system'`` rows; tenant_writer can.
 6. GUCs are transaction-local: a reused pooled connection carries no
@@ -40,12 +40,10 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 
 APP_DSN = f"postgresql://app_role:app_role@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-WRITER_DSN = (
-    f"postgresql://tenant_writer:tenant_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
-)
+WRITER_DSN = f"postgresql://tenant_writer:tenant_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 SU_DSN = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
@@ -76,9 +74,7 @@ async def tenant_a_users():
     """Two real tenant-A user subs — owner_user_id FKs to users(sub)."""
     su = await asyncpg.connect(SU_DSN)
     try:
-        rows = await su.fetch(
-            "SELECT sub FROM users WHERE tenant_id = $1 LIMIT 2", TENANT_A
-        )
+        rows = await su.fetch("SELECT sub FROM users WHERE tenant_id = $1 LIMIT 2", TENANT_A)
     finally:
         await su.close()
     if len(rows) < 2:
@@ -98,12 +94,8 @@ async def _sweep():
     yield
     su = await asyncpg.connect(SU_DSN)
     try:
-        await su.execute(
-            "DELETE FROM autocomplete_phrases WHERE phrase LIKE $1", f"{MARK}%"
-        )
-        await su.execute(
-            "DELETE FROM autocomplete_snippets WHERE expansion LIKE $1", f"{MARK}%"
-        )
+        await su.execute("DELETE FROM autocomplete_phrases WHERE phrase LIKE $1", f"{MARK}%")
+        await su.execute("DELETE FROM autocomplete_snippets WHERE expansion LIKE $1", f"{MARK}%")
         await su.execute(
             "DELETE FROM autocomplete_telemetry WHERE prefix_scrubbed LIKE $1",
             f"{MARK}%",
@@ -118,8 +110,7 @@ async def _sweep():
 async def test_system_rows_visible_to_all_tenants(app_pool, writer_conn):
     text = _phrase("system")
     await writer_conn.execute(
-        "INSERT INTO autocomplete_phrases (phrase, language, source) "
-        "VALUES ($1, 'uk', 'system')",
+        "INSERT INTO autocomplete_phrases (phrase, language, source) VALUES ($1, 'uk', 'system')",
         text,
     )
     for tid in (TENANT_A, TENANT_B):
@@ -144,9 +135,7 @@ async def test_tenant_b_cannot_select_tenant_a_rows(app_pool):
             text,
         )
     async with tenant_connection(app_pool, TENANT_B) as conn:
-        n = await conn.fetchval(
-            "SELECT count(*) FROM autocomplete_phrases WHERE phrase = $1", text
-        )
+        n = await conn.fetchval("SELECT count(*) FROM autocomplete_phrases WHERE phrase = $1", text)
     assert n == 0, "tenant B can read tenant A's phrase rows"
 
     trig = f"zt{uuid4().hex[:6]}"
@@ -173,7 +162,7 @@ async def test_user_b_cannot_write_user_a_rows(app_pool, tenant_a_users):
     user_a, user_b = tenant_a_users
     text = _phrase("user-a")
     async with tenant_connection(app_pool, TENANT_A) as conn:
-        await _set_user(conn, user_a, "clinician")
+        await _set_user(conn, user_a, "member")
         row_id = await conn.fetchval(
             "INSERT INTO autocomplete_phrases "
             "(tenant_id, owner_user_id, phrase, language, source) "
@@ -184,7 +173,7 @@ async def test_user_b_cannot_write_user_a_rows(app_pool, tenant_a_users):
         )
 
     async with tenant_connection(app_pool, TENANT_A) as conn:
-        await _set_user(conn, user_b, "clinician")
+        await _set_user(conn, user_b, "member")
         # UPDATE must match zero rows (RESTRICTIVE USING filters it out).
         tag = await conn.execute(
             "UPDATE autocomplete_phrases SET enabled = FALSE WHERE id = $1", row_id
@@ -204,7 +193,7 @@ async def test_user_b_cannot_write_user_a_rows(app_pool, tenant_a_users):
     # Owner CAN update their own row (proves the zero-match above was RLS,
     # not a wrong id).
     async with tenant_connection(app_pool, TENANT_A) as conn:
-        await _set_user(conn, user_a, "clinician")
+        await _set_user(conn, user_a, "member")
         tag = await conn.execute(
             "UPDATE autocomplete_phrases SET enabled = FALSE WHERE id = $1", row_id
         )
@@ -214,15 +203,15 @@ async def test_user_b_cannot_write_user_a_rows(app_pool, tenant_a_users):
 # ── §6.4 tenant-source rows gated by role ────────────────────────────────
 
 
-async def test_clinician_cannot_write_tenant_rows_admin_can(app_pool):
+async def test_member_cannot_write_tenant_rows_admin_can(app_pool):
     async with tenant_connection(app_pool, TENANT_A) as conn:
-        await _set_user(conn, uuid4(), "clinician")
+        await _set_user(conn, uuid4(), "member")
         with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
             await conn.execute(
                 "INSERT INTO autocomplete_phrases (tenant_id, phrase, language, source) "
                 "VALUES ($1, $2, 'uk', 'tenant')",
                 TENANT_A,
-                _phrase("clinician-tenant"),
+                _phrase("member-tenant"),
             )
 
     async with tenant_connection(app_pool, TENANT_A) as conn:
@@ -257,8 +246,7 @@ async def test_app_role_cannot_write_system_rows(app_pool, writer_conn):
             )
     # tenant_writer can (this is how the seed migration runs).
     await writer_conn.execute(
-        "INSERT INTO autocomplete_phrases (phrase, language, source) "
-        "VALUES ($1, 'uk', 'system')",
+        "INSERT INTO autocomplete_phrases (phrase, language, source) VALUES ($1, 'uk', 'system')",
         _phrase("writer-system"),
     )
 
@@ -267,21 +255,15 @@ async def test_app_role_cannot_write_system_rows(app_pool, writer_conn):
 
 
 async def test_gucs_do_not_leak_across_pooled_connections():
-    pool = await create_pool(
-        APP_DSN, application_name="rls-itest-guc", min_size=1, max_size=1
-    )
+    pool = await create_pool(APP_DSN, application_name="rls-itest-guc", min_size=1, max_size=1)
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await _set_user(conn, uuid4(), "tenant_admin")
-            assert await conn.fetchval(
-                "SELECT current_setting('app.user_id', true)"
-            )
+            assert await conn.fetchval("SELECT current_setting('app.user_id', true)")
         # max_size=1 → same physical connection, new transaction.
         async with pool.acquire() as conn:
             for guc in ("app.tenant_id", "app.user_id", "app.user_role"):
-                val = await conn.fetchval(
-                    "SELECT current_setting($1, true)", guc
-                )
+                val = await conn.fetchval("SELECT current_setting($1, true)", guc)
                 assert val in (None, ""), f"{guc} leaked across transactions: {val!r}"
     finally:
         await pool.close()
@@ -317,8 +299,7 @@ async def test_duplicate_phrase_per_scope_rejected(writer_conn, tenant_a_users):
     """Regression: 0023's per-scope index was a plain btree (not UNIQUE)."""
     text = _phrase("dup")
     await writer_conn.execute(
-        "INSERT INTO autocomplete_phrases (phrase, language, source) "
-        "VALUES ($1, 'uk', 'system')",
+        "INSERT INTO autocomplete_phrases (phrase, language, source) VALUES ($1, 'uk', 'system')",
         text,
     )
     with pytest.raises(asyncpg.exceptions.UniqueViolationError):
@@ -357,8 +338,7 @@ async def test_telemetry_lands_in_current_month_partition(app_pool):
     su = await asyncpg.connect(SU_DSN)
     try:
         part = await su.fetchval(
-            "SELECT tableoid::regclass::text FROM autocomplete_telemetry "
-            "WHERE request_id = $1",
+            "SELECT tableoid::regclass::text FROM autocomplete_telemetry WHERE request_id = $1",
             rid,
         )
     finally:

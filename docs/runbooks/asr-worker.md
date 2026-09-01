@@ -14,7 +14,6 @@ Single-page operations guide for the sprint-03 GPU worker.
 | Transcript bucket     | MinIO `mdx-transcripts`                            |
 | Dashboard             | Grafana → "Sprint 03 — ASR Health"                 |
 | Alerts                | `infra/prometheus/rules/sprint-03-asr.yml`         |
-| WER nightly           | `scripts/eval/run_wer.py`                          |
 
 ## Failure modes
 

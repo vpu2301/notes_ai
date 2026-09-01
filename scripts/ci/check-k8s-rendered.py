@@ -6,9 +6,9 @@ Three checks, run for both staging and prod values:
 1. `helm template` must succeed (chart always renders).
 2. The PROD render must be secret-clean: no `dev-secret-change-in-prod`,
    no `dev-password`, and none of the demo/dev escape hatches
-   (`MD_OBJECT_STORE_DISABLED`, `MDX_DEMO_MODE`, `AUTH_BYPASS_DEV`,
-   `SIGNING_DEV_PASSWORD_ENABLED`) set truthy — the sprint-09/16 config
-   gates applied to what the cluster would actually receive.
+   (`MD_OBJECT_STORE_DISABLED`, `MDX_DEMO_MODE`, `AUTH_BYPASS_DEV`)
+   set truthy — the config gates applied to what the cluster would
+   actually receive.
 3. The chart's vendored ops artefacts must not drift from their source
    of truth (files/jobs/*.py ← scripts/jobs/, files/postgres-init.sql ←
    infra/postgres/init.sql).
@@ -27,31 +27,30 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CHART = ROOT / "infra" / "k8s" / "mdx"
+CHART = ROOT / "infra" / "k8s" / "notes"
 
 FORBIDDEN_LITERALS = ["dev-secret-change-in-prod", "dev-password"]
 TRUTHY_FLAGS = re.compile(
-    r"(MD_OBJECT_STORE_DISABLED|MDX_DEMO_MODE|AUTH_BYPASS_DEV|"
-    r"SIGNING_DEV_PASSWORD_ENABLED)\W+['\"]?(true|1|yes|on)['\"]?",
+    r"(MD_OBJECT_STORE_DISABLED|MDX_DEMO_MODE|AUTH_BYPASS_DEV)"
+    r"\W+['\"]?(true|1|yes|on)['\"]?",
     re.IGNORECASE,
 )
 
 DRIFT_PAIRS = [
-    ("files/jobs/erasure_scheduler.py", "scripts/jobs/erasure_scheduler.py"),
-    ("files/jobs/dsar_package_cleanup.py", "scripts/jobs/dsar_package_cleanup.py"),
     ("files/jobs/nightly_verify.py", "scripts/jobs/nightly_verify.py"),
     ("files/postgres-init.sql", "infra/postgres/init.sql"),
 ]
 
 
 def render(values: Path | None) -> str:
-    cmd = ["helm", "template", "mdx", str(CHART)]
+    cmd = ["helm", "template", "notes", str(CHART)]
     if values is not None:
         cmd += ["-f", str(values)]
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
-        print(f"helm template failed ({values or 'staging defaults'}):\n{out.stderr}",
-              file=sys.stderr)
+        print(
+            f"helm template failed ({values or 'staging defaults'}):\n{out.stderr}", file=sys.stderr
+        )
         sys.exit(1)
     return out.stdout
 
@@ -65,7 +64,7 @@ def main() -> int:
         if chart_file.read_bytes() != src_file.read_bytes():
             failures.append(
                 f"chart file {chart_rel} drifted from {src_rel} — "
-                f"re-copy it (cp {src_rel} infra/k8s/mdx/{chart_rel})"
+                f"re-copy it (cp {src_rel} infra/k8s/notes/{chart_rel})"
             )
 
     if shutil.which("helm") and not os.environ.get("SKIP_HELM"):

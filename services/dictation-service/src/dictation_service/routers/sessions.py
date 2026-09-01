@@ -42,7 +42,7 @@ def _transcript_from_row(raw: Any) -> list[dict[str, Any]]:
     raised ``ValidationError`` → 500 on every read of this endpoint. The
     conversation review swallows that error and falls back to what it
     rendered live, so it stayed invisible until a transcript existed to
-    read back. Same defensive shape report-service uses for its jsonb.
+    read back. Same defensive shape note-service uses for its jsonb.
     """
     if raw is None:
         return []
@@ -71,7 +71,6 @@ class SessionDetail(BaseModel):
     status: str
     language: str
     target_kind: str
-    prompt_id: UUID
     transcript: list[dict[str, Any]]
     total_audio_ms: int
     avg_partial_latency_ms: int | None
@@ -103,7 +102,6 @@ async def get_session(
         status=row["status"],
         language=row["language"],
         target_kind=row["target_kind"],
-        prompt_id=row["prompt_id"],
         transcript=_transcript_from_row(row["transcript_jsonb"]),
         total_audio_ms=int(row["total_audio_ms"]),
         avg_partial_latency_ms=row["avg_partial_latency_ms"],
@@ -123,11 +121,7 @@ async def get_session(
 async def list_sessions(
     claims: Annotated[
         Claims,
-        Depends(
-            requires_any(
-                ("dictation.read", "dictation_session"), ("stats.read", "tenant")
-            )
-        ),
+        Depends(requires_any(("dictation.read", "dictation_session"), ("stats.read", "tenant"))),
     ],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     status_filter: Annotated[SessionState | None, Query(alias="status")] = None,
@@ -135,10 +129,10 @@ async def list_sessions(
     """S14 — also reachable by a tenant_admin holding only `stats.read`,
     for the business dashboard's minutes-dictated KPI.
 
-    No stripping is needed here, unlike the ASR job list: `SessionSummary`
-    carries no patient reference and no transcript — only status, timings
-    and counters. The transcript lives on `SessionDetail`, behind
-    `dictation.read`, which an admin does not hold.
+    No stripping is needed here: `SessionSummary` carries no transcript —
+    only status, timings and counters. The transcript lives on
+    `SessionDetail`, behind `dictation.read`, which an admin does not
+    hold.
     """
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:

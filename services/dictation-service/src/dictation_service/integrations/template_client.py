@@ -1,8 +1,8 @@
-"""HTTP client to report-service for template lookup.
+"""HTTP client to note-service for template lookup.
 
 Sprint-06 lookup happens once at session start (full template loaded
 into session context) and once per section switch (cached on session).
-The dictation hot path doesn't re-fetch; report-service's own
+The dictation hot path doesn't re-fetch; note-service's own
 TTLCache absorbs cross-session repeats.
 """
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class TemplateClientConfig:
-    base_url: str = "http://report-service:8000"
+    base_url: str = "http://note-service:8000"
     timeout_seconds: float = 1.0
 
 
@@ -30,7 +30,6 @@ class TemplateDoc:
     code: str
     name: str
     language: str
-    specialty: str
     schema_version: int
     sections: list[dict[str, Any]]
 
@@ -81,7 +80,6 @@ class TemplateClient:
             code=schema.get("code", doc["code"]),
             name=schema.get("name", doc["name"]),
             language=schema.get("language", doc["language"]),
-            specialty=schema.get("specialty", doc["specialty"]),
             schema_version=int(doc.get("schema_version", 1)),
             sections=list(schema.get("sections", [])),
         )

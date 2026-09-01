@@ -1,0 +1,64 @@
+{
+  "code": "meeting_notes",
+  "name": "Meeting notes",
+  "language": "en",
+  "specialty": "meetings",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "attendees",
+      "name": "Attendees",
+      "voice_aliases": ["attendees", "participants", "who attended"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Meeting attendees and roles. Names, job titles, team names, departments, external guests, organiser, facilitator, note taker.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "List each attendee on its own line as 'Name — role/team'. Keep the organiser first."
+    },
+    {
+      "id": "agenda",
+      "name": "Agenda",
+      "voice_aliases": ["agenda", "topics"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Meeting agenda items. Topics, planned discussion points, time allocations, presenters, priorities, follow-ups from the previous meeting.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Render as a short numbered list of agenda items, one per line."
+    },
+    {
+      "id": "discussion",
+      "name": "Discussion",
+      "voice_aliases": ["discussion", "notes", "key points"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Discussion notes. Key points raised, questions, answers, concerns, proposals, alternatives considered, context, deadlines, budgets, metrics.",
+      "min_chars": 20,
+      "order": 2,
+      "synthesis_prompt": "Summarise the discussion as concise bullet points grouped by topic. Preserve who said what only when it matters for the outcome."
+    },
+    {
+      "id": "decisions",
+      "name": "Decisions",
+      "voice_aliases": ["decisions", "decisions made", "agreed"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Decisions made. Decision made, agreed, approved, rejected, postponed, owner, rationale, effective date.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "One bullet per decision: what was decided, who owns it, and the rationale in a single sentence."
+    },
+    {
+      "id": "action_items",
+      "name": "Action items",
+      "voice_aliases": ["action items", "actions", "next steps"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Action items and next steps. Assignee, task, due date, deadline, follow up with, blocked by, priority.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "One bullet per action item in the form 'Owner: task — due date'. Flag items without an owner or date."
+    }
+  ]
+}

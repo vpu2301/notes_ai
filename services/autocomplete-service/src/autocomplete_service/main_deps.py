@@ -13,7 +13,6 @@ from auth import JwksCache
 from db import create_pool
 
 from .config import settings
-from .integrations.asr_client import AsrClient, AsrClientConfig
 from .rate_limit import PhraseWriteRateLimiter
 from .telemetry_buffer import TelemetryBuffer
 from .trie.cache import TrieCache
@@ -37,10 +36,6 @@ class ServiceState:
     suggest_latency_metric: object
     telemetry_event_metric: object
     telemetry_redaction_metric: object
-    # Eval scoring's transcription path (0091). Built unconditionally — it
-    # opens no connection until a run is pumped, so a deployment that never
-    # scores pays nothing for it.
-    asr_client: AsrClient
 
 
 async def build_state() -> ServiceState:
@@ -97,7 +92,7 @@ async def build_state() -> ServiceState:
     )
     pii_rejections_metric = _meter.create_counter(
         "mdx_autocomplete_phrase_write_pii_rejections_total",
-        description="Corpus writes rejected by the PII scrubber (label=pattern)",
+        description="Phrase/snippet writes rejected by the PII scrubber (label=pattern)",
         unit="1",
     )
     telemetry_buffer = TelemetryBuffer(
@@ -208,18 +203,11 @@ async def build_state() -> ServiceState:
         suggest_latency_metric=suggest_latency_metric,
         telemetry_event_metric=telemetry_event_metric,
         telemetry_redaction_metric=telemetry_redaction_metric,
-        asr_client=AsrClient(
-            config=AsrClientConfig(
-                base_url=settings.asr_service_base_url,
-                timeout_seconds=settings.asr_request_timeout_seconds,
-            )
-        ),
     )
 
 
 async def teardown_state(state: ServiceState) -> None:
     await state.telemetry_buffer.stop()
-    await state.asr_client.aclose()
     await state.jwks_cache.aclose()
     await state.redis.aclose()  # type: ignore[attr-defined]
     await state.app_pool.close()

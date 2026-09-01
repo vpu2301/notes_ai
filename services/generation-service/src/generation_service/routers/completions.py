@@ -2,7 +2,7 @@
 
 Flow: authz → feature gate → rate limit → (slot → inference) under the
 hard end-to-end budget → safety filter → 200 or 204. Silence (204) is a
-valid answer at every gate: a typing clinician must never see an error
+valid answer at every gate: a typing author must never see an error
 because ghost text failed to materialise.
 
 Scope: the sprint spec's ``autocomplete.suggest`` maps to the live
@@ -41,9 +41,9 @@ class InlineCompletionRequest(BaseModel):
 
     # Context pointers only — carried into telemetry correlation, never
     # dereferenced here: the completion depends solely on the typed text,
-    # and a foreign report_id resolves to nothing a caller couldn't already
+    # and a foreign note_id resolves to nothing a caller couldn't already
     # see (RLS), so a DB round-trip would buy latency, not security.
-    report_id: UUID
+    note_id: UUID
     section_key: str = Field(min_length=1, max_length=64)
     text_before_cursor: str = Field(min_length=1, max_length=1000)
     language: Language
@@ -124,8 +124,8 @@ async def inline_completion(
             tenant_id=claims.tid,
             kind=audit_kinds.LAYER_C_COMPLETION_FILTERED,
             actor_sub=claims.sub,
-            target_kind="report",
-            target_id=body.report_id,
+            target_kind="note",
+            target_id=body.note_id,
             payload={
                 "section_key": body.section_key,
                 "reason": verdict.reason,

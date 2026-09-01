@@ -1,7 +1,7 @@
 [project]
 name = "dictation-service"
 version = "0.4.0"
-description = "Sprint-04 streaming ASR. WebSocket protocol medical-dictation.v1 with reconnect, retransmit, voice-command slot."
+description = "Streaming ASR. WebSocket protocol dictation.v1 with reconnect, retransmit, voice-command slot."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",

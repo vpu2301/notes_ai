@@ -25,10 +25,9 @@ OUT_DIR = ROOT / "docs" / "api"
 SERVICES: list[tuple[str, str]] = [
     ("auth_service.main", "auth-service-openapi.json"),
     ("asr_service.main", "asr-service-openapi.json"),
+    ("dictation_service.main", "dictation-service-openapi.json"),
     ("nlp_service.main", "nlp-service-openapi.json"),
-    ("report_service.main", "report-service-openapi.json"),
-    ("signing_service.main", "signing-service-openapi.json"),
-    ("core_service.main", "core-service-openapi.json"),
+    ("note_service.main", "note-service-openapi.json"),
     ("autocomplete_service.main", "autocomplete-service-openapi.json"),
     ("notification_service.main", "notification-service-openapi.json"),
     ("generation_service.main", "generation-service-openapi.json"),

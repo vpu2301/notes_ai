@@ -75,9 +75,7 @@ def build_mime(
     mime["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     mime["To"] = message.to_address
     mime["Subject"] = message.subject
-    mime["Message-ID"] = message_id or make_msgid(
-        domain=from_address.rsplit("@", 1)[-1]
-    )
+    mime["Message-ID"] = message_id or make_msgid(domain=from_address.rsplit("@", 1)[-1])
     mime["Date"] = date or formatdate(localtime=True)
     if message.reply_to:
         mime["Reply-To"] = message.reply_to
@@ -149,9 +147,7 @@ class SmtpProvider(EmailProvider):
     async def send(self, message: OutboundEmail) -> SendResult:
         import aiosmtplib
 
-        mime = build_mime(
-            message, from_address=self._from_address, from_name=self._from_name
-        )
+        mime = build_mime(message, from_address=self._from_address, from_name=self._from_name)
         # Port 465 is implicit TLS (the socket is wrapped before the
         # greeting); everything else negotiates STARTTLS. Passing
         # start_tls=True on 465 makes aiosmtplib try to upgrade an

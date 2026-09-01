@@ -1,0 +1,1 @@
+Note {{ fields.get('note_code', '—') }} was shared with you

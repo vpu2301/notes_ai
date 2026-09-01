@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 from dataclasses import dataclass
 
@@ -26,7 +25,6 @@ from .stages import (
     PunctuationStage,
     VoiceCommandStage,
 )
-from .stages.icd10_repository import search_icd10
 from .stages.voice_command_matcher import CommandSpec
 
 logger = logging.getLogger(__name__)
@@ -77,7 +75,7 @@ async def build_state() -> ServiceState:
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=False)
     cache = RedisCacheAdapter(redis=redis_client, key_prefix=settings.cache_key_prefix)
 
-    # ── Build the 7-stage pipeline (sprint 13) ─────────────────────
+    # ── Build the 7-stage pipeline ─────────────────────────────────
     voice_specs = await repository.load_voice_commands(app_pool)
 
     punctuation = PunctuationStage()
@@ -94,10 +92,6 @@ async def build_state() -> ServiceState:
         AbbreviationStage(),
         FieldExtractionStage(
             confidence_threshold=settings.extraction_confidence_threshold,
-            # Bound to the app pool: icd10_codes is a global reference
-            # table (no RLS), so no tenant scoping is needed. Fail-empty
-            # on timeout — see ADR-0032.
-            icd10_lookup=functools.partial(search_icd10, app_pool),
         ),
         ConfidenceStage(),
     ]

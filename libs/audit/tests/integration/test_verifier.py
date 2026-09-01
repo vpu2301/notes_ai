@@ -31,7 +31,7 @@ pytestmark = pytest.mark.skipif(
 
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-DB_NAME = os.environ.get("POSTGRES_DB", "medical_dictation")
+DB_NAME = os.environ.get("POSTGRES_DB", "notes")
 
 WRITER_DSN = f"postgresql://audit_writer:audit_writer@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
 READER_DSN = f"postgresql://audit_reader:audit_reader@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
@@ -76,7 +76,7 @@ async def _wipe_audit(superuser_conn: asyncpg.Connection):
 async def _seed_chain(writer: AuditWriter, tenant: UUID, n: int) -> None:
     for i in range(n):
         await writer.write_event(
-            tenant_id=tenant, kind="seed", payload={"i": i}, actor_role="clinician"
+            tenant_id=tenant, kind="seed", payload={"i": i}, actor_role="member"
         )
 
 

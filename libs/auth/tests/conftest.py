@@ -18,8 +18,8 @@ from jose import jwt as jose_jwt
 
 from auth.jwks import JwksCache
 
-ISSUER = "https://issuer.test/realms/medical-dictation"
-JWKS_URL = "https://issuer.test/realms/medical-dictation/protocol/openid-connect/certs"
+ISSUER = "https://issuer.test/realms/notes"
+JWKS_URL = "https://issuer.test/realms/notes/protocol/openid-connect/certs"
 AUDIENCE = "mdx-api"
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
 SUB_A = UUID("11111111-1111-1111-1111-111111111111")
@@ -91,7 +91,7 @@ def _valid_payload() -> dict[str, Any]:
     return {
         "sub": str(SUB_A),
         "tid": str(TENANT_A),
-        "roles": ["clinician"],
+        "roles": ["member"],
         "scope": "openid email profile",
         "sid": "session-1",
         "iss": ISSUER,

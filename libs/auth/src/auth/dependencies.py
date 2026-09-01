@@ -43,7 +43,7 @@ from .jwks import JwksCache
 from .revocation import SessionDenylist
 from .verifier import verify_token
 
-_WWW_AUTHENTICATE = 'Bearer realm="medical-dictation"'
+_WWW_AUTHENTICATE = 'Bearer realm="notes"'
 
 
 def _unauthorized(detail: str, *, extra_challenge: str | None = None) -> HTTPException:
@@ -116,9 +116,7 @@ def build_current_user(
             # Catch-all for any future AuthError subclass we add later.
             raise _unauthorized(str(exc)) from exc
 
-        if denylist is not None and await denylist.is_revoked(
-            sid=claims.sid, sub=str(claims.sub)
-        ):
+        if denylist is not None and await denylist.is_revoked(sid=claims.sid, sub=str(claims.sub)):
             raise _unauthorized("Session has been revoked")
 
         set_current_claims(claims)
@@ -141,6 +139,6 @@ def requires_mfa(claims: Claims) -> Claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="MFA required for this endpoint",
-            headers={"WWW-Authenticate": 'MFA realm="medical-dictation"'},
+            headers={"WWW-Authenticate": 'MFA realm="notes"'},
         )
     return claims

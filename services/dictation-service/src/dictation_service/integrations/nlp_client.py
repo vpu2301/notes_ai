@@ -85,9 +85,9 @@ class NlpClient:
         audit row.
 
         Sprint 14: ``stages_disabled=["voice_commands"]`` for
-        conversation-mode finals — a patient saying «новий абзац» must
+        conversation-mode finals — a meeting participant saying «новий абзац» must
         stay verbatim text, never an editing operation. ``bearer``
-        forwards the clinician's token (the repo's cross-service-action
+        forwards the caller's token (the repo's cross-service-action
         pattern); the constructor-level service token is the fallback.
         """
         body: dict[str, Any] = {

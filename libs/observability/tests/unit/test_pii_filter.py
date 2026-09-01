@@ -53,12 +53,6 @@ def test_mask_list_replaces_value(field: str) -> None:
     assert out[field] == "<redacted>"
 
 
-def test_patient_prefix_is_masked() -> None:
-    out = scrub({"patient_id": LIVE_VALUE, "patient_email": LIVE_VALUE})
-    assert out["patient_id"] == "<redacted>"
-    assert out["patient_email"] == "<redacted>"
-
-
 # ──────────────────────────────────────────────────────────────────────
 # Nested structures
 # ──────────────────────────────────────────────────────────────────────
@@ -101,7 +95,7 @@ def test_deeply_nested_at_leaf_5_levels() -> None:
 def test_no_live_value_appears_anywhere() -> None:
     payload = {
         "password": LIVE_VALUE,
-        "patient_name": LIVE_VALUE,
+        "full_name": LIVE_VALUE,
         "headers": {"cookie": LIVE_VALUE, "authorization": LIVE_VALUE},
         "history": [{"transcript": LIVE_VALUE}, {"audio": b"raw-bytes"}],
     }

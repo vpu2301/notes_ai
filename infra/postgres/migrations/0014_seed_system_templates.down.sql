@@ -1,2 +1,0 @@
-DROP FUNCTION IF EXISTS upsert_system_template(TEXT,TEXT,TEXT,TEXT,SMALLINT,JSONB);
-DELETE FROM templates WHERE is_system = TRUE;

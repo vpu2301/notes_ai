@@ -1,7 +1,7 @@
 """Prompt-building for Whisper's ``initial_prompt`` across windows.
 
-First window: use the clinician-specialty prompt (sprint 03
-``medical_prompts``).
+First window: use the session's free-text vocabulary hint (an optional
+start_session param or config default — product terms, names, jargon).
 
 Subsequent windows: append the last N tokens of the FINALIZED transcript
 so Whisper has decoded-context biasing without re-feeding the audio.

@@ -18,7 +18,7 @@ on fan-out. A reminder must not fail to be RECORDED because the
 notification bus is down — the row is the durable half, and the endpoint
 returns 201 either way.
 
-PHI: none is reachable from here. The payload carries the requester's
+Personal data: none is reachable from here. The payload carries the requester's
 ROLE (a closed vocabulary), never their name, and a count. See the
 allow-list in notification-service's `domain/render.py`.
 """

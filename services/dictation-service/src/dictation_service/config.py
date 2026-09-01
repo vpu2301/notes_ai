@@ -38,11 +38,11 @@ class Settings(BaseSettings):
 
     # ── libs/auth (Keycloak) ─────────────────────────────────────────────
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -50,15 +50,15 @@ class Settings(BaseSettings):
 
     # ── Database ────────────────────────────────────────────────────────
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@localhost:5432/medical_dictation",
+        default="postgresql://app_role:app_role@localhost:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_crypto_writer_dsn: str = Field(
-        default="postgresql://crypto_writer:crypto_writer@localhost:5432/medical_dictation",
+        default="postgresql://crypto_writer:crypto_writer@localhost:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
     )
     db_pool_min_size: int = Field(default=1, alias="DB_POOL_MIN_SIZE")
@@ -68,12 +68,10 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
     # ── Sprint-12 notification event bus (ADR-0029) ────────────────────
-    # Same kill switch report-service carries. Publishing is already
+    # Same kill switch note-service carries. Publishing is already
     # fire-and-forget, so this is not about failure handling — it is the
     # source-level cut-off for a notification storm (E1).
-    notifications_enabled: bool = Field(
-        default=True, alias="MDX_NOTIFICATIONS_ENABLED"
-    )
+    notifications_enabled: bool = Field(default=True, alias="MDX_NOTIFICATIONS_ENABLED")
 
     # ── MinIO / S3 (finalized audio uploads) ───────────────────────────
     s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
@@ -87,12 +85,8 @@ class Settings(BaseSettings):
     # When disabled, no finalized audio is ever written to object storage
     # (the HF Space sets this true). Purge-on-finalize additionally zeroes
     # the in-memory PCM buffer at end-of-session as defence in depth.
-    object_store_disabled: bool = Field(
-        default=False, alias="MD_OBJECT_STORE_DISABLED"
-    )
-    demo_audio_purge_on_finalize: bool = Field(
-        default=False, alias="DEMO_AUDIO_PURGE_ON_FINALIZE"
-    )
+    object_store_disabled: bool = Field(default=False, alias="MD_OBJECT_STORE_DISABLED")
+    demo_audio_purge_on_finalize: bool = Field(default=False, alias="DEMO_AUDIO_PURGE_ON_FINALIZE")
 
     # ── Master key (envelope crypto for finalized uploads) ──────────────
     master_key_path: str = Field(default="/etc/mdx/master.key", alias="MDX_MASTER_KEY_PATH")
@@ -104,14 +98,12 @@ class Settings(BaseSettings):
     # fallback for rows not yet re-wrapped (scripts/kms/rewrap-tenant-keks.py).
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
-    vault_token: SecretStrEnv = Field(
-        default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN"
-    )
+    vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
     # ── Streaming protocol ──────────────────────────────────────────────
-    ws_subprotocol: str = Field(default="medical-dictation.v1", alias="MDX_WS_SUBPROTOCOL")
+    ws_subprotocol: str = Field(default="dictation.v1", alias="MDX_WS_SUBPROTOCOL")
     ws_heartbeat_interval_s: float = Field(default=10.0, alias="MDX_WS_HEARTBEAT_INTERVAL_S")
     ws_idle_timeout_s: float = Field(default=35.0, alias="MDX_WS_IDLE_TIMEOUT_S")
     ws_max_binary_frame_bytes: int = Field(default=8 * 1024, alias="MDX_WS_MAX_BINARY_FRAME_BYTES")
@@ -143,16 +135,12 @@ class Settings(BaseSettings):
     # expired, so a legitimately paused session on a live worker is never
     # collected.
     session_reaper_enabled: bool = Field(default=True, alias="MDX_SESSION_REAPER_ENABLED")
-    session_reaper_interval_s: float = Field(
-        default=300.0, alias="MDX_SESSION_REAPER_INTERVAL_S"
-    )
+    session_reaper_interval_s: float = Field(default=300.0, alias="MDX_SESSION_REAPER_INTERVAL_S")
     # Grace after last activity before a session is even considered. Must
     # comfortably exceed worker_heartbeat_ttl_s so a rolling restart isn't
     # mistaken for a crash.
     session_reaper_grace_s: float = Field(default=300.0, alias="MDX_SESSION_REAPER_GRACE_S")
-    session_reaper_batch_limit: int = Field(
-        default=200, alias="MDX_SESSION_REAPER_BATCH_LIMIT"
-    )
+    session_reaper_batch_limit: int = Field(default=200, alias="MDX_SESSION_REAPER_BATCH_LIMIT")
 
     # ── Windowing / inference ───────────────────────────────────────────
     window_seconds: float = Field(default=4.0, alias="MDX_WINDOW_SECONDS")
@@ -172,13 +160,14 @@ class Settings(BaseSettings):
     # can never stall the transcript (sprint-14 fix, ADR-0013 amendment).
     # 4 s = 2× the commit horizon; keeps final latency inside the
     # sprint-04 p95 ≤ 2500 ms target for the normal (silence-gated) path.
-    commit_max_provisional_ms: int = Field(
-        default=4000, alias="MDX_COMMIT_MAX_PROVISIONAL_MS"
-    )
+    commit_max_provisional_ms: int = Field(default=4000, alias="MDX_COMMIT_MAX_PROVISIONAL_MS")
     aligner_boundary_uncertainty_threshold: float = Field(
         default=0.30, alias="MDX_ALIGNER_BOUNDARY_UNCERTAINTY_THRESHOLD"
     )
     prompt_max_tokens: int = Field(default=150, alias="MDX_PROMPT_MAX_TOKENS")
+    # Service-wide fallback for the free-text vocabulary hint fed to
+    # Whisper's initial_prompt when start_session carries none.
+    default_vocabulary_hint: str = Field(default="", alias="MDX_DEFAULT_VOCABULARY_HINT")
 
     # ── Conversation mode / diarization (sprint 14, ADR-0034) ───────────
     conversation_enabled: bool = Field(default=True, alias="MDX_CONVERSATION_ENABLED")
@@ -206,9 +195,7 @@ class Settings(BaseSettings):
     # A conversation session runs two models; weighted capacity below.
     # Weight 2 => 4 dictation OR 2 conversation OR 2+1 mix per worker.
     # CONFIGURED, not yet GPU-measured — see todo.md (S14) + ADR-0034.
-    conversation_session_weight: int = Field(
-        default=2, alias="MDX_CONVERSATION_SESSION_WEIGHT"
-    )
+    conversation_session_weight: int = Field(default=2, alias="MDX_CONVERSATION_SESSION_WEIGHT")
 
     # ── Finalize-time NLP + draft creation (sprint 14) ──────────────────
     # Finalize is not latency-critical; generous timeouts, graceful
@@ -217,12 +204,8 @@ class Settings(BaseSettings):
     finalize_nlp_timeout_seconds: float = Field(
         default=5.0, alias="MDX_FINALIZE_NLP_TIMEOUT_SECONDS"
     )
-    report_base_url: str = Field(
-        default="http://report-service:8000", alias="MDX_REPORT_BASE_URL"
-    )
-    report_draft_timeout_seconds: float = Field(
-        default=5.0, alias="MDX_REPORT_DRAFT_TIMEOUT_SECONDS"
-    )
+    note_base_url: str = Field(default="http://note-service:8000", alias="MDX_NOTE_BASE_URL")
+    note_draft_timeout_seconds: float = Field(default=5.0, alias="MDX_NOTE_DRAFT_TIMEOUT_SECONDS")
 
     # ── Concurrency cap per GPU worker ──────────────────────────────────
     per_worker_max_sessions: int = Field(default=4, alias="MDX_PER_WORKER_MAX_SESSIONS")
@@ -275,9 +258,7 @@ class Settings(BaseSettings):
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 
 settings = Settings()

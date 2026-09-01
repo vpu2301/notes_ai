@@ -47,7 +47,7 @@ async def run_all(
 
     # Size before magic bytes: it is the cheaper check, and it owns the
     # zero-byte case. Sniffing an empty upload first would report it as a
-    # format mismatch, which sends the clinician looking for a codec
+    # format mismatch, which sends the user looking for a codec
     # problem in a file that simply never arrived.
     r = validate_size(len(payload), max_mb=settings.max_upload_mb)
     if not r.ok:

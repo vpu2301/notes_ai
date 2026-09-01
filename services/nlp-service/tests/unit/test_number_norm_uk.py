@@ -1,7 +1,7 @@
 """Ukrainian number normalization corpus.
 
 Each row is a hand-authored (input, expected) pair representing the
-patterns clinicians actually dictate. Sprint-5 target: ≥ 95% pass on
+patterns speakers actually dictate. Target: ≥ 95% pass on
 the full set per language.
 """
 
@@ -32,10 +32,10 @@ CASES_UK: list[tuple[str, str]] = [
     # ── Time ────────────────────────────────────────────────────
     ("о пів на восьму", "07:30"),
     # ── Pass-through (no markers) ──────────────────────────────
-    ("один пацієнт", "один пацієнт"),
+    ("один клієнт", "один клієнт"),
     # ── Frequency ───────────────────────────────────────────────
     ("три рази на добу", "3 разів/добу"),
-    # ── Clinical-safety: no dropped / wrong digits (ADR-0015) ────
+    # ── Figure-safety: no dropped / wrong digits (ADR-0015) ──────
     # Decimal fraction with a leading zero must survive: 2.05, not 2.0.
     ("два цілих нуль п'ять", "2,05"),
     # "на" is a common preposition — only a plausible BP (or a BP cue)

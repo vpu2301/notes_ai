@@ -1,24 +1,24 @@
-# Templates Architecture (Sprint 06)
+# Templates Architecture
 
 ## Where the slice lives
 
-`services/report-service/` ships the templates slice. Sprint-08 will
-extend it with reports. ADR-0016 explains why templates and reports
-co-locate.
+`services/note-service/` ships the templates slice alongside notes.
+ADR-0016 explains why templates and notes co-locate.
 
 ## JSONB schema (the contract)
 
 `libs/template_models.TemplateDefinition` (Pydantic, `extra="forbid"`)
-validates every JSON document on the way in. The five field types:
-`free_text`, `structured_diagnosis`, `date`, `date_with_note`,
-`numeric_with_unit`. Sprint-13 anamnesis adds more.
+validates every JSON document on the way in. Field types:
+`free_text`, `choice`, `date`, `date_with_note`, `numeric_with_unit`.
 
 ## Visibility model
 
 Each `templates` row is either:
 
 - **System** (`tenant_id IS NULL`, `is_system=true`) — managed by DBA
-  migration; readable by every tenant.
+  migration/seed; readable by every tenant. The shipped catalogue is the
+  business set under `infra/seeds/templates/` (meeting notes, 1-on-1,
+  sales call, interview debrief, project update).
 - **Tenant** (`tenant_id IS NOT NULL`) — owned by one tenant; cloned
   from a system row (or another own row) via `POST /templates/clone`.
 
@@ -36,16 +36,16 @@ own-tenant rows. System rows can only be inserted via the
   `schema_version = 1` (section added/removed, `field_type` changed,
   `required` flipped, `min_chars` increased).
 
-Sprint-8 reports persist `template_id` + `template_version` at
-finalization. Templates are **never hard-deleted** — soft-delete only.
+Notes persist `template_id` + `template_version` at finalization.
+Templates are **never hard-deleted** — soft-delete only.
 
 ## Section-aware dictation
 
 ```
-clinician dictates voice command "розділ діагноз"
+author dictates voice command "next section" / "розділ підсумки"
    │
    ▼
-nlp-service (sprint-05) Stage 1 emits Operation:
+nlp-service Stage 1 emits Operation:
    {op: "navigate_section", arg: {section_id: "<id>"}}
    │
    ▼
@@ -68,7 +68,7 @@ swap are in-process (no HTTP round-trip).
 The WS protocol stays at **v1** — `SwitchSection` is additive
 (ADR-0016 amendment).
 
-## In-process cache (report-service)
+## In-process cache (note-service)
 
 `TemplateCache` (cachetools.TTLCache, maxsize=5000, ttl=60s) keyed by
 `(tenant_id, template_id)`. Invalidated on PUT/DELETE for the
@@ -77,18 +77,11 @@ alerts < 80%.
 
 ## Hand-offs
 
-- **Sprint 7 (HF eval):** the 16 system templates are the demo
-  catalogue; per-section WER eval is the precursor to sprint 7's
-  full nightly eval.
-- **Sprint 8 (reports):** `reports.template_id` FK `ON DELETE RESTRICT`;
-  `report_versions.content_jsonb.template_version` records the
+- **Notes:** `notes.template_id` FK `ON DELETE RESTRICT`;
+  `note_versions.content_jsonb.template_version` records the
   schema_version at finalization.
-- **Sprint 11 (patients/encounters):** encounters reference reports;
-  reports reference templates. Template metadata flows into the
-  encounter timeline display.
-- **Sprint 13 (anamnesis):** the extractor consumes
-  `template.sections[i].field_type` to know which fields to populate;
-  sprint-13 adds new field types like `CHOICE`/`MULTI_CHOICE`.
-- **Sprint 17 (admin + FHIR):** `templates.metadata.fhir_template`
-  maps to FHIR Composition.section structure; admin UI surfaces the
-  existing endpoints; re-bind UI for deprecated templates lands here.
+- **Field extraction:** the nlp-service extractor consumes
+  `template.sections[i].field_type` to know which typed fields
+  (choice, date, numeric) to populate from dictated text.
+- **Admin UI:** the admin surface consumes the existing endpoints;
+  re-bind UI for deprecated templates uses `POST /templates/{id}/rebind`.

@@ -26,8 +26,16 @@ OTHER_USER = UUID("0a000000-0000-0000-0000-0000000000bb")
 # RFC 4226 appendix D vectors (secret "12345678901234567890", 6 digits).
 RFC4226_SECRET_B32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 RFC4226_CODES = [
-    "755224", "287082", "359152", "969429", "338314",
-    "254676", "287922", "162583", "399871", "520489",
+    "755224",
+    "287082",
+    "359152",
+    "969429",
+    "338314",
+    "254676",
+    "287922",
+    "162583",
+    "399871",
+    "520489",
 ]
 
 
@@ -117,9 +125,7 @@ async def test_secret_envelope_round_trip(envelope: Envelope) -> None:
     from auth_service import totp
 
     secret = totp.generate_secret()
-    packed = await totp.encrypt_secret(
-        envelope, secret=secret, tenant_id=TENANT, sub=USER
-    )
+    packed = await totp.encrypt_secret(envelope, secret=secret, tenant_id=TENANT, sub=USER)
     assert secret not in packed  # never plaintext at rest
     out = await totp.decrypt_secret(envelope, packed=packed, tenant_id=TENANT, sub=USER)
     assert out == secret
@@ -134,9 +140,7 @@ async def test_secret_envelope_bound_to_sub(envelope: Envelope) -> None:
         envelope, secret=totp.generate_secret(), tenant_id=TENANT, sub=USER
     )
     with pytest.raises((CryptoError, DecryptError)):
-        await totp.decrypt_secret(
-            envelope, packed=packed, tenant_id=TENANT, sub=OTHER_USER
-        )
+        await totp.decrypt_secret(envelope, packed=packed, tenant_id=TENANT, sub=OTHER_USER)
 
 
 # ── Router surface ──────────────────────────────────────────────────────
@@ -217,9 +221,7 @@ def make_client(monkeypatch: pytest.MonkeyPatch, envelope: Envelope):
         async def _transaction():
             yield None
 
-        yield SimpleNamespace(
-            execute=_execute, fetchrow=_fetchrow, transaction=_transaction
-        )
+        yield SimpleNamespace(execute=_execute, fetchrow=_fetchrow, transaction=_transaction)
 
     monkeypatch.setattr(mfa_router, "tenant_connection", _fake_conn)
 
@@ -235,20 +237,18 @@ def make_client(monkeypatch: pytest.MonkeyPatch, envelope: Envelope):
     return _build
 
 
-def test_enrol_disabled_by_default(
-    make_client: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_enrol_disabled_by_default(make_client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from auth_service.config import settings
 
     monkeypatch.setattr(settings, "mfa_enrolment_enabled", False)
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     assert client.post("/auth/mfa/enrol").status_code == 403
 
 
 def test_enrol_verify_flow(make_client: Any) -> None:
     from auth_service import totp
 
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     r = client.post("/auth/mfa/enrol")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -260,14 +260,10 @@ def test_enrol_verify_flow(make_client: Any) -> None:
     # Wrong code → 400, still pending.
     bad = client.post("/auth/mfa/verify", json={"code": "000000"})
     assert bad.status_code == 400
-    assert "totp_secret_enc" not in {
-        k for k in attrs if k != "totp_secret_enc_pending"
-    }
+    assert "totp_secret_enc" not in {k for k in attrs if k != "totp_secret_enc_pending"}
 
     # Right code → enrolled, attribute promoted, audited.
-    good = client.post(
-        "/auth/mfa/verify", json={"code": totp.totp_at(body["secret"])}
-    )
+    good = client.post("/auth/mfa/verify", json={"code": totp.totp_at(body["secret"])})
     assert good.status_code == 200, good.text
     assert attrs["mfa_enrolled"] == ["true"]
     assert "totp_secret_enc" in attrs
@@ -284,7 +280,7 @@ def test_enrolment_closes_a_standing_reminder(make_client: Any) -> None:
     """
     from auth_service import totp
 
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     body = client.post("/auth/mfa/enrol").json()
     client.post("/auth/mfa/verify", json={"code": totp.totp_at(body["secret"])})
 
@@ -297,7 +293,7 @@ def test_enrolment_closes_a_standing_reminder(make_client: Any) -> None:
 def test_enrol_conflict_when_already_enrolled(make_client: Any) -> None:
     from auth_service import totp
 
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     body = client.post("/auth/mfa/enrol").json()
     client.post("/auth/mfa/verify", json={"code": totp.totp_at(body["secret"])})
     assert client.post("/auth/mfa/enrol").status_code == 409
@@ -307,7 +303,7 @@ def test_admin_reset_clears_and_audits_sec(make_client: Any) -> None:
     from audit import Severity
     from auth_service import totp
 
-    client = make_client(_claims(roles=["clinician"]))
+    client = make_client(_claims(roles=["member"]))
     body = client.post("/auth/mfa/enrol").json()
     client.post("/auth/mfa/verify", json={"code": totp.totp_at(body["secret"])})
 
@@ -322,8 +318,8 @@ def test_admin_reset_clears_and_audits_sec(make_client: Any) -> None:
     assert reset_events and reset_events[0]["severity"] == Severity.SEC
 
 
-def test_reset_denied_to_clinician(make_client: Any) -> None:
-    client = make_client(_claims(roles=["clinician"]))
+def test_reset_denied_to_member(make_client: Any) -> None:
+    client = make_client(_claims(roles=["member"]))
     assert client.delete(f"/auth/mfa/{uuid4()}").status_code == 403
 
 
@@ -333,9 +329,9 @@ def test_reset_denied_to_clinician(make_client: Any) -> None:
 @pytest.mark.parametrize(
     ("mfa", "mfa_enrolled", "expected"),
     [
-        (True, True, 200),   # MFA satisfied
+        (True, True, 200),  # MFA satisfied
         (False, False, 403),  # unenrolled → grace: route to enrolment
-        (False, True, 401),   # enrolled, pre-enrolment token → re-login
+        (False, True, 401),  # enrolled, pre-enrolment token → re-login
     ],
 )
 def test_requires_mfa_grace_flow(
@@ -348,9 +344,7 @@ def test_requires_mfa_grace_flow(
     from auth_service.config import settings
 
     monkeypatch.setattr(settings, "require_mfa", True)
-    client = make_client(
-        _claims(roles=["tenant_admin"], mfa=mfa, mfa_enrolled=mfa_enrolled)
-    )
+    client = make_client(_claims(roles=["tenant_admin"], mfa=mfa, mfa_enrolled=mfa_enrolled))
     # Reset is both perm-gated and MFA-gated — a natural gated probe.
     r = client.delete(f"/auth/mfa/{USER}")
     if expected == 200:
@@ -383,7 +377,7 @@ def login_env(monkeypatch: pytest.MonkeyPatch, envelope: Envelope):
     from auth_service.routers import login as login_router
 
     kc = FakeKeycloak()
-    enrolled_claims = {"value": _claims(roles=["clinician"], mfa_enrolled=True)}
+    enrolled_claims = {"value": _claims(roles=["member"], mfa_enrolled=True)}
 
     async def _password_grant(*, username: str, password: str) -> TokenResponse:
         if password != "pw":
@@ -429,27 +423,19 @@ async def _store_secret(env: Any, envelope: Envelope) -> str:
     from auth_service import totp
 
     secret = totp.generate_secret()
-    packed = await totp.encrypt_secret(
-        envelope, secret=secret, tenant_id=TENANT, sub=USER
-    )
+    packed = await totp.encrypt_secret(envelope, secret=secret, tenant_id=TENANT, sub=USER)
     await env.kc.set_user_attributes(USER, {"totp_secret_enc": [packed]})
     return secret
 
 
-async def test_login_enrolled_without_otp_is_refused(
-    login_env: Any, envelope: Envelope
-) -> None:
+async def test_login_enrolled_without_otp_is_refused(login_env: Any, envelope: Envelope) -> None:
     await _store_secret(login_env, envelope)
-    r = login_env.client.post(
-        "/auth/login", json={"email": "a@b.c", "password": "pw"}
-    )
+    r = login_env.client.post("/auth/login", json={"email": "a@b.c", "password": "pw"})
     assert r.status_code == 401
     assert "TOTP" in r.json()["detail"]
 
 
-async def test_login_enrolled_with_wrong_otp_is_refused(
-    login_env: Any, envelope: Envelope
-) -> None:
+async def test_login_enrolled_with_wrong_otp_is_refused(login_env: Any, envelope: Envelope) -> None:
     await _store_secret(login_env, envelope)
     r = login_env.client.post(
         "/auth/login", json={"email": "a@b.c", "password": "pw", "otp": "000000"}
@@ -457,9 +443,7 @@ async def test_login_enrolled_with_wrong_otp_is_refused(
     assert r.status_code == 401
 
 
-async def test_login_enrolled_with_valid_otp_succeeds(
-    login_env: Any, envelope: Envelope
-) -> None:
+async def test_login_enrolled_with_valid_otp_succeeds(login_env: Any, envelope: Envelope) -> None:
     from auth_service import totp
 
     secret = await _store_secret(login_env, envelope)
@@ -472,8 +456,6 @@ async def test_login_enrolled_with_valid_otp_succeeds(
 
 
 async def test_login_unenrolled_needs_no_otp(login_env: Any) -> None:
-    login_env.claims["value"] = _claims(roles=["clinician"], mfa_enrolled=False)
-    r = login_env.client.post(
-        "/auth/login", json={"email": "a@b.c", "password": "pw"}
-    )
+    login_env.claims["value"] = _claims(roles=["member"], mfa_enrolled=False)
+    r = login_env.client.post("/auth/login", json={"email": "a@b.c", "password": "pw"})
     assert r.status_code == 200, r.text

@@ -1,7 +1,7 @@
 [project]
 name = "template_models"
 version = "0.6.0"
-description = "Shared Pydantic models for the templates JSONB schema (sprint 06)."
+description = "Shared Pydantic models for the note templates JSONB schema."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7.0",

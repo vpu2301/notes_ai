@@ -12,7 +12,7 @@
 #   docker compose -f infra/compose/base.yml -f infra/compose/dev.yml \
 #                  -f infra/compose/gpu.yml up -d
 # ──────────────────────────────────────────────────────────────
-name: medical-dictation
+name: notes-ai
 
 services:
   postgres:
@@ -21,7 +21,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-medical_dictation}
+      POSTGRES_DB: ${POSTGRES_DB:-notes}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -78,32 +78,16 @@ services:
         mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
         mc mb --ignore-existing local/mdx-audio
         mc mb --ignore-existing local/mdx-transcripts
-        mc mb --ignore-existing local/mdx-dsar
-        # 0065 — patient record attachments (referrals, lab PDFs, scans).
-        mc mb --ignore-existing local/mdx-patient-docs
-        mc mb --ignore-existing local/mdx-backups
-        # Object lock prevents accidental deletion in dev; in prod the bucket
-        # is created with versioning + retention via Terraform (sprint 16).
+        # Object lock prevents accidental deletion in dev; in prod the
+        # buckets are created with versioning + retention out-of-band.
         mc version enable local/mdx-audio || true
         mc version enable local/mdx-transcripts || true
-        mc version enable local/mdx-patient-docs || true
-        # S11 deployment (ADR-0028): DSAR packages expire at 7 days
-        # (backstop under the app-side TTL cron); DB backups expire at
-        # 35 days — the erasure completion horizon (runbooks/erasure.md).
-        mc ilm rule rm --all --force local/mdx-dsar 2>/dev/null || true
-        mc ilm rule add --expire-days 7 local/mdx-dsar
-        mc ilm rule rm --all --force local/mdx-backups 2>/dev/null || true
-        mc ilm rule add --expire-days 35 local/mdx-backups
-        # S15 (ADR-0037): replay clips are ephemeral derivatives — the real
+        # Replay clips are ephemeral derivatives (ADR-0037) — the real
         # lifetime is the 5-min Redis registry/token TTL; this 1-day ILM is
         # the ciphertext backstop (mc has no sub-day granularity).
         mc mb --ignore-existing local/mdx-audio-clips
         mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
         mc ilm rule add --expire-days 1 local/mdx-audio-clips
-        # S16 — telemetry cold archive (>90-day partitions, encrypted,
-        # written by autocomplete's partition rotation before the drop).
-        # No ILM: cold storage is the point; lifecycle is an ops decision.
-        mc mb --ignore-existing local/mdx-telemetry-archive
         echo "minio-init: buckets ready"
     restart: "no"
 

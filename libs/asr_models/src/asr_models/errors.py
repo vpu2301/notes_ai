@@ -18,13 +18,13 @@ caller actually needs:
     Whether re-running the SAME job could plausibly succeed. Drives the
     worker's ack/DLQ decision — a corrupt file will be just as corrupt on
     the fourth delivery, and re-running it three more times only delays
-    the failure the clinician is waiting for.
+    the failure the user is waiting for.
 ``resubmittable``
     Whether the person who uploaded can do something about it. ``true``
     for "fix the file and send it again"; ``false`` when the fix is an
-    operator's, and telling the clinician to try again would be a lie.
+    operator's, and telling the user to try again would be a lie.
 
-``message`` is a PHI-free English one-liner. It is deliberately built
+``message`` is an English one-liner free of sensitive content. It is deliberately built
 from the kind alone and never from an exception string: the detail column
 is free text assembled from whatever ffmpeg or CUDA said, which can quote
 the audio it choked on (ADR-0031 — the same reason the notification
@@ -238,8 +238,7 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
             retryable=False,
             resubmittable=True,
             message=(
-                "Transcription exceeded the time budget allowed for a "
-                "recording of this length."
+                "Transcription exceeded the time budget allowed for a recording of this length."
             ),
         ),
         _spec(
@@ -247,10 +246,7 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
             ErrorStage.PERSIST,
             retryable=True,
             resubmittable=False,
-            message=(
-                "The transcript was produced but could not be stored; it was "
-                "not kept."
-            ),
+            message=("The transcript was produced but could not be stored; it was not kept."),
         ),
         _spec(
             JobErrorKind.DB_UNAVAILABLE,
@@ -265,8 +261,7 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
             retryable=False,
             resubmittable=True,
             message=(
-                "The job failed on every delivery attempt and was moved to the "
-                "dead-letter queue."
+                "The job failed on every delivery attempt and was moved to the dead-letter queue."
             ),
         ),
         _spec(

@@ -110,7 +110,7 @@ class DiarizationStream:
             for c_start, c_end in _chunks(start, abs_end, cfg.chunk_target_ms, cfg.chunk_min_ms):
                 lo = (c_start - window_start_ms) * SAMPLE_RATE_HZ // 1000
                 hi = (c_end - window_start_ms) * SAMPLE_RATE_HZ // 1000
-                chunk_pcm = pcm[max(0, lo):hi]
+                chunk_pcm = pcm[max(0, lo) : hi]
                 if chunk_pcm.shape[0] < cfg.chunk_min_ms * SAMPLE_RATE_HZ // 1000:
                     continue
                 assignment, relabels = self._clusterer.observe(self._embedder.embed(chunk_pcm))
@@ -137,7 +137,10 @@ class DiarizationStream:
     def attribute(self, start_ms: int, end_ms: int) -> tuple[str | None, float | None]:
         """Speaker for a word timing — see ``attribution.attribute_word``.
         Pending (``None``) until the speaker inventory is trustworthy."""
-        if not self._clusterer.bootstrapped and self.diarized_until_ms < self._config.single_speaker_after_ms:
+        if (
+            not self._clusterer.bootstrapped
+            and self.diarized_until_ms < self._config.single_speaker_after_ms
+        ):
             return None, None
         return attribute_word(
             start_ms,

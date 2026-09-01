@@ -113,9 +113,12 @@ def test_determinism_shuffled_input_identical_output():
 
     rows = [
         PhraseTrieEntry(
-            id=f"p{i}", phrase=f"задишка варіант {chr(0x430 + i)}", source="system",
-            impression_count=0, acceptance_count=0, last_accepted_at=None,
-            specialty=None, section_hint=None,
+            id=f"p{i}",
+            phrase=f"задишка варіант {chr(0x430 + i)}",
+            source="system",
+            impression_count=0,
+            acceptance_count=0,
+            last_accepted_at=None,
         )
         for i in range(8)  # identical counters → identical scores
     ]
@@ -123,9 +126,7 @@ def test_determinism_shuffled_input_identical_output():
     for seed in (1, 7, 42):
         shuffled = rows[:]
         random.Random(seed).shuffle(shuffled)
-        trie = build_trie_from_phrases(
-            tenant_id="t", language="uk", user_id="u", rows=shuffled
-        )
+        trie = build_trie_from_phrases(tenant_id="t", language="uk", user_id="u", rows=shuffled)
         got = suggest_from_trie(trie=trie, prefix="задишка", limit=8)
         orders.append([s.id for s in got])
     assert orders[0] == orders[1] == orders[2], f"non-deterministic: {orders}"
@@ -136,8 +137,12 @@ def test_diversity_distance_4_pair_survives():
 
     def rec(id_, phrase):
         return PhraseRecord(
-            id=id_, phrase=phrase, source="system",
-            impression_count=0, acceptance_count=0, last_accepted_at=None,
+            id=id_,
+            phrase=phrase,
+            source="system",
+            impression_count=0,
+            acceptance_count=0,
+            last_accepted_at=None,
         )
 
     # suffixes "abcd" vs "wxyz1" — Levenshtein 5 > 3 → both survive;

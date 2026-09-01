@@ -19,7 +19,6 @@ def _doc() -> TemplateDoc:
         code="family_medicine_soap_uk",
         name="Сімейний лікар",
         language="uk",
-        specialty="family_medicine",
         schema_version=1,
         sections=[
             {"id": "subjective", "name": "Скарги", "asr_prompt": "скарги та анамнез"},
@@ -43,7 +42,6 @@ def test_section_missing_prompt_defaults_empty() -> None:
         code="c",
         name="C",
         language="uk",
-        specialty="x",
         schema_version=1,
         sections=[{"id": "s1", "name": "S1"}],
     )

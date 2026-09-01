@@ -15,7 +15,7 @@ make ci   # mirrors the CI gates
 - `main` is always shippable.
 - Branch off `main` for any change. Short-lived branches; rebase rather
   than merge into your PR branch.
-- Branch names: `<type>/<short-slug>` — `feat/encounters-search`,
+- Branch names: `<type>/<short-slug>` — `feat/notes-search`,
   `fix/auth-refresh-leak`, `chore/uv-lock-bump`.
 
 ## Commits

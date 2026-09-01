@@ -3,7 +3,7 @@
 Resource attributes follow OpenTelemetry semantic conventions:
 
 * ``service.name``       — per-service
-* ``service.namespace``  — ``medical-dictation`` (the platform)
+* ``service.namespace``  — ``notes-ai`` (the platform)
 * ``service.version``    — read from package metadata when available
 * ``deployment.environment`` — development / staging / production
 
@@ -28,7 +28,7 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 logger = logging.getLogger(__name__)
 
-_PLATFORM_NAMESPACE = "medical-dictation"
+_PLATFORM_NAMESPACE = "notes-ai"
 
 
 def _service_version(package_name: str | None) -> str:

@@ -1,13 +1,13 @@
-"""numeric_with_unit / date binders (sprint 13, step 05).
+"""numeric_with_unit / date binders.
 
 These are **binders, not parsers**. They pick from the artifacts the
-sprint-05 normalizer stages reported about their own output; they
+normalizer stages reported about their own output; they
 contain no numeral vocabulary, no unit table and no date arithmetic of
 their own. That is the single-source rule: if a binder re-derived
 "сто сорок" → 140 or resolved "три дні тому", it would drift from the
 normalizer the first time either changed.
 
-The ambiguity rule from step 04 applies unchanged: several candidates
+The choice-extractor ambiguity rule applies unchanged: several candidates
 and no way to choose ⇒ empty field, prose preserved.
 """
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from report_models import DateMeta, NumericMeta
+from note_models import DateMeta, NumericMeta
 
 from ...pipeline.base import DateArtifact, NumericArtifact, TemplateSection
 from .choice import tokenize
@@ -49,10 +49,10 @@ def _label_tokens(section: TemplateSection) -> set[str]:
 def _label_distance(text: str, artifact: NumericArtifact, labels: set[str]) -> int | None:
     """Token distance from the value to its NEAREST section label.
 
-    A distance rather than a boolean: in "маса 80 кг, температура 37,2"
-    both values sit within a few tokens of "температура", so a boolean
+    A distance rather than a boolean: in "вага 80 кг, висота 37,2"
+    both values sit within a few tokens of "висота", so a boolean
     window would call both labelled and give up. Nearest-wins picks the
-    value the clinician actually attached to the label, and an exact tie
+    value the speaker actually attached to the label, and an exact tie
     still falls through to the ambiguity rule.
     """
     if not labels:
@@ -98,7 +98,7 @@ def bind_numeric(
     Several unlabelled candidates ⇒ empty (ambiguity). A value with no
     unit ⇒ empty: a ``numeric_with_unit`` field without a unit is not
     a measurement, and guessing the unit is exactly the kind of
-    clinical fabrication this sprint refuses.
+    fabrication this stage refuses.
     """
     with_units = [a for a in artifacts if a.unit]
     if not with_units:
@@ -134,14 +134,14 @@ def bind_date(
 ) -> DateMeta | None:
     """Bind one ISO date to a ``date`` / ``date_with_note`` section.
 
-    Exactly one date ⇒ bound. Several ⇒ empty: which one the clinician
+    Exactly one date ⇒ bound. Several ⇒ empty: which one the speaker
     meant is not inferable, and picking the first would silently
-    misdate a clinical record.
+    misdate the note.
 
     ``date_with_note`` needs no note extraction — the dictated prose IS
     the note and already lives in the section's ``text``.
 
-    Relative dates ("три дні тому") appear here only if the sprint-05
+    Relative dates ("три дні тому") appear here only if the
     date normalizer resolved them; this binder never resolves anything.
     """
     if len(artifacts) != 1:

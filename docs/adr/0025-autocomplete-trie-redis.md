@@ -8,8 +8,8 @@
 ## Context
 
 The autocomplete `POST /autocomplete/suggest` endpoint is the highest-
-frequency clinical touchpoint in the product (multiple calls per
-second per active clinician). The latency floor is p95 ≤ 80 ms
+frequency touchpoint in the product (multiple calls per
+second per active user). The latency floor is p95 ≤ 80 ms
 end-to-end — below human perception. A regression here is observable
 in every keystroke session.
 
@@ -64,7 +64,7 @@ Cold-start storm mitigation:
 Positive:
 - Sub-80 ms p95 on cache hit is realistically achievable.
 - No new infra beyond the existing Redis cluster.
-- Same Redis serves rate limit, signing rate limit, autocomplete
+- Same Redis serves rate limit, autocomplete
   cache — operational story is consistent.
 
 Negative / accepted:

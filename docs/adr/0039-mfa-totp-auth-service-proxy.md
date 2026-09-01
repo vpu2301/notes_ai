@@ -52,12 +52,11 @@ EXPLORE findings that shaped the design:
   **403 `mfa_enrolment_required`** for unenrolled users (FE routes to
   enrolment) and **401 + `WWW-Authenticate: MFA`** for enrolled users
   holding a pre-enrolment token. Gated set: role management,
-  user (de/re)activation, MFA reset, tenant CRUD (auth-service);
-  erasure approve/reject + DSAR trigger (core-service). Trust-store
-  admin has no HTTP surface (PR-gated script) — nothing to gate.
+  user (de/re)activation, MFA reset, tenant CRUD (auth-service).
+  (The formerly gated erasure/DSAR routes left with the services that
+  owned them.)
 - **Switches** (dev unchanged, prod flips): `MDX_MFA_ENROLMENT_ENABLED`
-  (surface), `MDX_REQUIRE_MFA` (gating; same env name in auth-service
-  and core-service).
+  (surface), `MDX_REQUIRE_MFA` (gating).
 
 ## Consequences
 

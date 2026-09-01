@@ -11,11 +11,11 @@ Two deliberate constraints:
   into every service that merely wants the type definitions.
 
 * **Never raises.** A notification is strictly less important than the
-  domain action that triggered it. A report finalize must not fail, or
+  domain action that triggered it. A note finalize must not fail, or
   roll back, because the notification bus was unreachable — the whole
   reason this is a stream and not an HTTP call (ADR-0029). Failures are
   logged and swallowed; the event is lost, which is the correct
-  trade-off against losing the report.
+  trade-off against losing the note.
 """
 
 from __future__ import annotations

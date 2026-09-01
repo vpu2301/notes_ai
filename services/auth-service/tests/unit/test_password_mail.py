@@ -29,7 +29,7 @@ def _fields(kind: str, lang: str) -> tuple[dict, dict]:
         return (
             compose.password_reset_fields(
                 lang=lang,
-                email="olena@clinic.example",
+                email="olena@acme.example",
                 display_name="Olena",
                 user_agent=UA,
                 support_url=SUPPORT,
@@ -42,7 +42,7 @@ def _fields(kind: str, lang: str) -> tuple[dict, dict]:
     return (
         compose.password_changed_fields(
             lang=lang,
-            email="olena@clinic.example",
+            email="olena@acme.example",
             display_name="Olena",
             user_agent=UA,
             support_url=SUPPORT,
@@ -60,9 +60,7 @@ def _render(kind: str, lang: str) -> templates.RenderedEmail:
         kind,
         lang,
         subject=copy_mod.subject_for(kind, lang),
-        text_body=copy_mod.text_body(
-            kind, lang, compose.text_values(kind, lang, fields, secrets)
-        ),
+        text_body=copy_mod.text_body(kind, lang, compose.text_values(kind, lang, fields, secrets)),
         context={**fields, **secrets},
     )
 
@@ -107,9 +105,7 @@ def test_missing_variable_raises_rather_than_rendering_a_blank_link() -> None:
     from jinja2 import UndefinedError
 
     with pytest.raises(UndefinedError):
-        templates.render_html(
-            copy_mod.KIND_PASSWORD_RESET, "en", {"greeting": "Hello,"}
-        )
+        templates.render_html(copy_mod.KIND_PASSWORD_RESET, "en", {"greeting": "Hello,"})
 
 
 def test_unknown_kind_and_language_are_refused() -> None:
@@ -123,9 +119,7 @@ def test_attacker_supplied_email_is_html_escaped() -> None:
     """The address is attacker-chosen on the forgot endpoint."""
     fields, secrets = _fields(copy_mod.KIND_PASSWORD_RESET, "en")
     fields["email"] = "<script>alert(1)</script>@x.com"
-    html = templates.render_html(
-        copy_mod.KIND_PASSWORD_RESET, "en", {**fields, **secrets}
-    )
+    html = templates.render_html(copy_mod.KIND_PASSWORD_RESET, "en", {**fields, **secrets})
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
 
@@ -182,9 +176,7 @@ def test_client_line_collapses_when_the_device_is_unknown() -> None:
     data; better to omit the line entirely."""
     fields, secrets = _fields(copy_mod.KIND_PASSWORD_RESET, "en")
     fields["client_label"] = "Unrecognised device"
-    values = compose.text_values(
-        copy_mod.KIND_PASSWORD_RESET, "en", fields, secrets
-    )
+    values = compose.text_values(copy_mod.KIND_PASSWORD_RESET, "en", fields, secrets)
     assert values["client_line"] == ""
 
 
@@ -202,7 +194,7 @@ def test_ip_hash_is_salted_and_truncated() -> None:
 def test_mime_has_both_parts_and_the_headers_deliverability_needs() -> None:
     mime = email_mod.build_mime(
         email_mod.OutboundEmail(
-            to_address="olena@clinic.example",
+            to_address="olena@acme.example",
             subject="Reset your Klarnote password",
             text_body="text",
             html_body="<p>html</p>",
@@ -256,9 +248,7 @@ def test_unknown_provider_is_rejected() -> None:
 async def test_mock_provider_captures_mail() -> None:
     provider = email_mod.MockProvider()
     result = await provider.send(
-        email_mod.OutboundEmail(
-            to_address="a@b.example", subject="s", text_body="t"
-        )
+        email_mod.OutboundEmail(to_address="a@b.example", subject="s", text_body="t")
     )
     assert provider.sent[0].to_address == "a@b.example"
     assert result.provider_message_id

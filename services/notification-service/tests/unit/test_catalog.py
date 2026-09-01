@@ -32,7 +32,7 @@ def test_spec_key_matches_its_category() -> None:
 
 def test_unknown_category_raises() -> None:
     with pytest.raises(KeyError):
-        spec_for("report.telepathy")  # type: ignore[arg-type]
+        spec_for("note.telepathy")  # type: ignore[arg-type]
 
 
 def test_emailing_categories_have_templates() -> None:
@@ -41,7 +41,7 @@ def test_emailing_categories_have_templates() -> None:
 
 
 def test_non_emailing_categories_have_no_template() -> None:
-    """A template that can never render is dead weight the PHI gate must not scan."""
+    """A template that can never render is dead weight the PII gate must not scan."""
     for category, spec in CATALOG.items():
         if spec.default_email_mode is EmailMode.OFF and not spec.email_template:
             assert category not in emailing_categories()
@@ -56,14 +56,12 @@ def test_critical_categories_are_never_digest_eligible() -> None:
 
 def test_failure_categories_bypass_the_digest() -> None:
     assert Category.TRANSCRIPTION_FAILED not in digest_eligible_categories()
-    assert Category.REPORT_SIGNING_FAILED not in digest_eligible_categories()
-    assert Category.REPORT_CHAIN_FAILURE not in digest_eligible_categories()
-    assert Category.REPORT_SIGNED not in digest_eligible_categories()
+    assert Category.NOTE_CHAIN_FAILURE not in digest_eligible_categories()
 
 
-def test_chain_failure_goes_to_admins_not_clinicians() -> None:
-    """An integrity failure is an operational concern (demo step 6)."""
-    assert CATALOG[Category.REPORT_CHAIN_FAILURE].recipient_rule is RecipientRule.TENANT_ADMINS
+def test_chain_failure_goes_to_admins_not_authors() -> None:
+    """An integrity failure is an operational concern, not an authoring one."""
+    assert CATALOG[Category.NOTE_CHAIN_FAILURE].recipient_rule is RecipientRule.TENANT_ADMINS
 
 
 def test_digest_category_does_not_notify_in_app() -> None:
@@ -74,11 +72,11 @@ def test_digest_category_does_not_notify_in_app() -> None:
 def test_self_addressed_categories_do_not_exclude_the_actor() -> None:
     """The regression this file exists to prevent.
 
-    These three categories are addressed to the person who caused them —
+    These categories are addressed to the person who caused them —
     a completion receipt for work they started and stopped watching. With
     the `exclude_actor=True` default, `resolve_recipients` strips the
     only recipient and the event materialises into zero rows: a user
-    finishes a dictation, finalizes their own report, and the feed they
+    finishes a dictation, finalizes their own note, and the feed they
     are staring at stays empty. That failure is silent (a debug-level
     "no recipients" line), which is what made it survive.
     """
@@ -86,8 +84,7 @@ def test_self_addressed_categories_do_not_exclude_the_actor() -> None:
         Category.DICTATION_COMPLETED,
         Category.TRANSCRIPTION_COMPLETED,
         Category.TRANSCRIPTION_FAILED,
-        Category.REPORT_FINALIZED,
-        Category.REPORT_SIGNED,
+        Category.NOTE_FINALIZED,
     ):
         assert CATALOG[category].exclude_actor is False, category
 
@@ -101,7 +98,5 @@ def test_dictation_completion_never_emails() -> None:
 
 
 def test_dictation_completion_is_addressed_by_hint() -> None:
-    """Only the dictating clinician; nobody else cares that a colleague stopped."""
-    assert (
-        CATALOG[Category.DICTATION_COMPLETED].recipient_rule is RecipientRule.EXPLICIT_HINTS
-    )
+    """Only the dictating user; nobody else cares that a colleague stopped."""
+    assert CATALOG[Category.DICTATION_COMPLETED].recipient_rule is RecipientRule.EXPLICIT_HINTS

@@ -29,7 +29,10 @@ class JobEnqueuePayload(BaseModel):
     job_id: UUID
     tenant_id: UUID
     audio_id: UUID
-    prompt_id: UUID
+    # Optional free-text vocabulary hint fed to Whisper's initial_prompt
+    # (product terms, names, jargon). Travels on the queue message only —
+    # it is not persisted on the job row.
+    vocabulary_hint: str | None = None
     language: str = Field(pattern=r"^(uk|en|de)$")
     model: str = "large-v3"
     requester_sub: UUID
@@ -43,7 +46,6 @@ class TranscriptionJobView(BaseModel):
     tenant_id: UUID
     audio_id: UUID
     requester_sub: UUID
-    prompt_id: UUID
     language: str
     model: str
     status: JobStatus
@@ -67,17 +69,6 @@ class TranscriptionJobView(BaseModel):
     # visibly changed.
     cancel_requested: bool = False
 
-    # ── S14: whose dictation this is ─────────────────────────────────
-    # Resolved through audio_files.encounter_id → encounters → patients,
-    # the same join the patient timeline uses. Populated for callers with
-    # clinical read (clinician / nurse); left None in the PHI-free
-    # `stats.read` projection, for a job never linked to an encounter,
-    # and for a patient RLS will not show — so a client must always be
-    # able to render a row without them.
-    patient_id: UUID | None = None
-    patient_name_uk: str | None = None
-    patient_name_en: str | None = None
-
     # ── Derived from `error_kind`; never stored, never settable ──────
     # A client should not have to carry a copy of the failure vocabulary to
     # know whether "try again" is honest advice. These three read straight
@@ -85,10 +76,10 @@ class TranscriptionJobView(BaseModel):
     # follow one source.
     #
     # Computed rather than validated-in: `model_copy(update=...)` skips
-    # validators, and the list endpoint copies these views to build its
-    # PHI-free projection. Stored fields would silently desync there —
-    # a job whose `error_kind` says one thing and whose `error_stage` says
-    # nothing at all.
+    # validators, and callers copy these views (e.g. to attach a result
+    # URL). Stored fields would silently desync there — a job whose
+    # `error_kind` says one thing and whose `error_stage` says nothing
+    # at all.
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -107,7 +98,7 @@ class TranscriptionJobView(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def error_message(self) -> str | None:
-        """PHI-free explanation, safe to show.
+        """Explanation safe to show — carries no sensitive content.
 
         Built from the kind alone. ``error_detail`` is assembled from an
         exception that may quote the audio it choked on, and is not
@@ -115,5 +106,3 @@ class TranscriptionJobView(BaseModel):
         """
         spec = spec_for(self.error_kind)
         return spec.message if spec else None
-
-

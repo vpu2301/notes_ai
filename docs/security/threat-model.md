@@ -2,7 +2,7 @@
 
 **Scope:** the auth-service, libs/auth, libs/audit, the Keycloak realm,
 and the Postgres tables (`tenants`, `users`, `audit.events`). Other
-data planes (Whisper, reports, exports) are out of scope until their
+data planes (Whisper, notes, exports) are out of scope until their
 respective sprints.
 
 **Methodology:** STRIDE per data-flow, then a per-property summary.
@@ -16,7 +16,7 @@ respective sprints.
                   ↓
                   ↓ asyncpg
                   ↓
-            [Postgres /medical_dictation/]
+            [Postgres /notes/]
                  ├── public.tenants (RLS)
                  ├── public.users   (RLS)
                  └── audit.events   (RLS + immutability trigger + audit_writer role)
@@ -81,7 +81,7 @@ trust boundary is the Postgres role + RLS combo, not the network.
 | Attacker TRUNCATEs the table                          | TRUNCATE bypasses triggers BUT requires DBA privilege. Postgres log + monitoring catches it. Sprint 16 streams events to immutable S3 bucket for the after-fact case |
 | Attacker forges a payload_hash that matches their edit | Would also need to rewrite every subsequent row's prev_hash. Verifier walks them all |
 | Service code bypasses AuditWriter                     | `audit_writer` is the only role with INSERT permission. CI gate `check-no-direct-audit-insert.py` scans the codebase for `INSERT INTO audit.events` outside libs/audit |
-| Audit chain itself becomes a privacy leak             | `payload` carries IDs, not PHI. Catalogue at `docs/audit/event-kinds.md` enforces convention |
+| Audit chain itself becomes a privacy leak             | `payload` carries IDs, never note content or personal data. Catalogue at `docs/audit/event-kinds.md` enforces convention |
 
 ---
 
@@ -90,7 +90,7 @@ trust boundary is the Postgres role + RLS combo, not the network.
 - **MFA built in sprint 16 (ADR-0039), still off by default in dev.**
   TOTP enrolment endpoints live on auth-service; `requires_mfa()` (with
   the 403 `mfa_enrolment_required` grace flow) guards role management,
-  user lifecycle, tenant CRUD, erasure approval and DSAR export.
+  user lifecycle and tenant CRUD.
   Production enables `MDX_MFA_ENROLMENT_ENABLED` + `MDX_REQUIRE_MFA`.
   Residual: the dev-only `mdx-dev-cli` client could reach Keycloak's
   token endpoint directly inside the network, bypassing the proxy OTP

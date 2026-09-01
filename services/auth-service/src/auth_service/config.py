@@ -42,11 +42,11 @@ class Settings(BaseSettings):
 
     # ── libs/auth (Keycloak) ─────────────────────────────────────────────
     auth_issuer: str = Field(
-        default="http://localhost:8088/realms/medical-dictation",
+        default="http://localhost:8088/realms/notes",
         alias="AUTH_ISSUER",
     )
     auth_jwks_url: str = Field(
-        default="http://localhost:8088/realms/medical-dictation/protocol/openid-connect/certs",
+        default="http://localhost:8088/realms/notes/protocol/openid-connect/certs",
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
@@ -56,19 +56,19 @@ class Settings(BaseSettings):
     # Each role's pool is constructed at app startup. RLS depends on running
     # as the *right* role — never mix the DSNs.
     db_app_role_dsn: str = Field(
-        default="postgresql://app_role:app_role@localhost:5432/medical_dictation",
+        default="postgresql://app_role:app_role@localhost:5432/notes",
         alias="DB_APP_ROLE_DSN",
     )
     db_tenant_writer_dsn: str = Field(
-        default="postgresql://tenant_writer:tenant_writer@localhost:5432/medical_dictation",
+        default="postgresql://tenant_writer:tenant_writer@localhost:5432/notes",
         alias="DB_TENANT_WRITER_DSN",
     )
     db_audit_writer_dsn: str = Field(
-        default="postgresql://audit_writer:audit_writer@localhost:5432/medical_dictation",
+        default="postgresql://audit_writer:audit_writer@localhost:5432/notes",
         alias="DB_AUDIT_WRITER_DSN",
     )
     db_audit_reader_dsn: str = Field(
-        default="postgresql://audit_reader:audit_reader@localhost:5432/medical_dictation",
+        default="postgresql://audit_reader:audit_reader@localhost:5432/notes",
         alias="DB_AUDIT_READER_DSN",
     )
 
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
 
     # ── Keycloak (server-side login proxy + admin API) ──────────────────
     keycloak_base_url: str = Field(default="http://localhost:8088", alias="KEYCLOAK_BASE_URL")
-    keycloak_realm: str = Field(default="medical-dictation", alias="KEYCLOAK_REALM")
+    keycloak_realm: str = Field(default="notes", alias="KEYCLOAK_REALM")
     keycloak_login_client_id: str = Field(default="mdx-backend", alias="KEYCLOAK_LOGIN_CLIENT_ID")
     keycloak_login_client_secret: str = Field(
         default="dev-secret-change-in-prod-mdx-backend",
@@ -100,12 +100,6 @@ class Settings(BaseSettings):
     # cross-origin; `lax` is sent on those XHR/fetch calls and is the safe SPA
     # default. Cross-SITE prod deployments must set `none` + Secure.
     auth_cookie_samesite: str = Field(default="lax", alias="AUTH_COOKIE_SAMESITE")
-
-    # ── Step-up re-authentication (S14 break-glass) ─────────────────────
-    # How long a minted reauth ticket stays redeemable. Long enough to
-    # finish typing a justification, short enough that a ticket left in a
-    # tab is worthless by the time anyone finds it.
-    reauth_ticket_ttl_seconds: int = Field(default=300, alias="MDX_REAUTH_TICKET_TTL_SECONDS")
 
     # ── CORS (sprint A3 — SPA integration) ──────────────────────────────
     # Comma-separated browser origins allowed to call this service WITH
@@ -133,12 +127,12 @@ class Settings(BaseSettings):
     # default — flipping it on requires the envelope wiring below (the
     # TOTP secret is stored envelope-encrypted in Keycloak attributes).
     mfa_enrolment_enabled: bool = Field(default=False, alias="MDX_MFA_ENROLMENT_ENABLED")
-    mfa_totp_issuer: str = Field(default="Medical Dictation", alias="MDX_MFA_TOTP_ISSUER")
+    mfa_totp_issuer: str = Field(default="Klarnote", alias="MDX_MFA_TOTP_ISSUER")
 
     # Envelope wiring for the TOTP secret store (lazy-built on first MFA
     # call; the service runs fine without the master key until then).
     db_crypto_writer_dsn: str = Field(
-        default="postgresql://crypto_writer:crypto_writer@localhost:5432/medical_dictation",
+        default="postgresql://crypto_writer:crypto_writer@localhost:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
     )
     master_key_path: str = Field(default="/etc/mdx/master.key", alias="MDX_MASTER_KEY_PATH")
@@ -146,9 +140,7 @@ class Settings(BaseSettings):
     # ── Master-key provider (sprint 16, ADR-0011 KMS swap) ───────────────
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
-    vault_token: SecretStrEnv = Field(
-        default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN"
-    )
+    vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
@@ -158,15 +150,11 @@ class Settings(BaseSettings):
     # current_user across the fleet (each service has its own flag; same
     # env name everywhere). Fail-OPEN on Redis outage (ADR-0040) — the
     # degraded mode is exactly the pre-sprint-16 posture. Default off.
-    session_revocation_enabled: bool = Field(
-        default=False, alias="MDX_SESSION_REVOCATION_ENABLED"
-    )
+    session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     # TTL for sub-level denies (deactivation, refresh replay): must cover
     # the access-token lifetime (15 min in the realm) with margin.
-    revoked_sub_ttl_seconds: int = Field(
-        default=1200, alias="MDX_REVOKED_SUB_TTL_SECONDS"
-    )
+    revoked_sub_ttl_seconds: int = Field(default=1200, alias="MDX_REVOKED_SUB_TTL_SECONDS")
 
     # ── Notification bus (S21 — the MFA reminder producer) ─────────────
     # Same kill switch and same env name as every other producer in the
@@ -183,28 +171,22 @@ class Settings(BaseSettings):
     # The forgot/reset surface. Off by default like every other feature
     # switch here: it mints credentials over email, so a deployment that
     # has not configured a mail relay must not advertise the endpoint.
-    password_reset_enabled: bool = Field(
-        default=False, alias="MDX_PASSWORD_RESET_ENABLED"
-    )
+    password_reset_enabled: bool = Field(default=False, alias="MDX_PASSWORD_RESET_ENABLED")
     # 30 minutes. OWASP puts the useful range at 15–60: long enough to
     # survive a slow mail relay and a user who reads mail on their phone
     # and resets on a desktop, short enough that a link sitting in an
     # unattended inbox stops being a key fairly quickly.
-    password_reset_ttl_seconds: int = Field(
-        default=1800, alias="MDX_PASSWORD_RESET_TTL_SECONDS"
-    )
+    password_reset_ttl_seconds: int = Field(default=1800, alias="MDX_PASSWORD_RESET_TTL_SECONDS")
     # The lockdown link lives much longer than the reset link — 7 days.
     # It rides in the "your password was changed" mail, and the whole
     # point of that mail is the case where the change was NOT the account
     # holder: they may be asleep, on shift, or away for the weekend when
     # it lands. A 30-minute panic button that has already expired by the
     # time somebody reads the mail is not a panic button.
-    lockdown_token_ttl_seconds: int = Field(
-        default=604800, alias="MDX_LOCKDOWN_TOKEN_TTL_SECONDS"
-    )
+    lockdown_token_ttl_seconds: int = Field(default=604800, alias="MDX_LOCKDOWN_TOKEN_TTL_SECONDS")
     # Minimum length. NIST SP 800-63B §5.1.1.2: length is the control that
     # matters, composition rules are not, and 8 is the floor for
-    # memorised secrets — 12 is the floor for anything guarding PHI.
+    # memorised secrets — 12 is the floor for anything guarding sensitive data.
     password_min_length: int = Field(default=12, alias="MDX_PASSWORD_MIN_LENGTH")
 
     # Abuse caps for the unauthenticated request endpoint. Two windows:
@@ -212,12 +194,8 @@ class Settings(BaseSettings):
     # being flooded by a stranger. Both fail OPEN on a Redis outage —
     # house pattern, and the alternative is locking everyone out of
     # account recovery because a cache is down.
-    password_reset_ip_per_hour: int = Field(
-        default=20, alias="MDX_PASSWORD_RESET_IP_PER_HOUR"
-    )
-    password_reset_email_per_hour: int = Field(
-        default=5, alias="MDX_PASSWORD_RESET_EMAIL_PER_HOUR"
-    )
+    password_reset_ip_per_hour: int = Field(default=20, alias="MDX_PASSWORD_RESET_IP_PER_HOUR")
+    password_reset_email_per_hour: int = Field(default=5, alias="MDX_PASSWORD_RESET_EMAIL_PER_HOUR")
     # Salt for the stored IP hashes. MUST be set per-deployment: the
     # address space is small enough to brute-force an unsalted hash back
     # to the original IP in seconds.
@@ -241,33 +219,19 @@ class Settings(BaseSettings):
     auth_smtp_password: SecretStrEnv = Field(
         default_factory=lambda: Secret(""), alias="MDX_AUTH_SMTP_PASSWORD"
     )
-    auth_email_from: str = Field(
-        default="sales@klarnote.com", alias="MDX_AUTH_EMAIL_FROM"
-    )
-    auth_email_from_name: str = Field(
-        default="Klarnote", alias="MDX_AUTH_EMAIL_FROM_NAME"
-    )
-    auth_email_reply_to: str = Field(
-        default="sales@klarnote.com", alias="MDX_AUTH_EMAIL_REPLY_TO"
-    )
+    auth_email_from: str = Field(default="sales@klarnote.com", alias="MDX_AUTH_EMAIL_FROM")
+    auth_email_from_name: str = Field(default="Klarnote", alias="MDX_AUTH_EMAIL_FROM_NAME")
+    auth_email_reply_to: str = Field(default="sales@klarnote.com", alias="MDX_AUTH_EMAIL_REPLY_TO")
     # SPA origin the mailed links point at. The reset link is only useful
     # if it lands on the app the user actually runs.
     app_base_url: str = Field(default="http://localhost:5173", alias="MDX_APP_BASE_URL")
-    support_url: str = Field(
-        default="https://klarnote.com/contact", alias="MDX_SUPPORT_URL"
-    )
+    support_url: str = Field(default="https://klarnote.com/contact", alias="MDX_SUPPORT_URL")
 
     # ── Outbox delivery worker ──────────────────────────────────────────
     background_jobs_enabled: bool = Field(default=True, alias="MDX_BACKGROUND_JOBS")
-    mail_delivery_interval_s: float = Field(
-        default=5.0, alias="MDX_AUTH_MAIL_DELIVERY_INTERVAL_S"
-    )
-    mail_delivery_batch_size: int = Field(
-        default=25, alias="MDX_AUTH_MAIL_DELIVERY_BATCH"
-    )
-    mail_delivery_max_attempts: int = Field(
-        default=5, alias="MDX_AUTH_MAIL_DELIVERY_MAX_ATTEMPTS"
-    )
+    mail_delivery_interval_s: float = Field(default=5.0, alias="MDX_AUTH_MAIL_DELIVERY_INTERVAL_S")
+    mail_delivery_batch_size: int = Field(default=25, alias="MDX_AUTH_MAIL_DELIVERY_BATCH")
+    mail_delivery_max_attempts: int = Field(default=5, alias="MDX_AUTH_MAIL_DELIVERY_MAX_ATTEMPTS")
     mail_delivery_backoff_base_s: float = Field(
         default=60.0, alias="MDX_AUTH_MAIL_DELIVERY_BACKOFF_BASE_S"
     )

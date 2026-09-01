@@ -29,7 +29,7 @@ def _ctx(*, inline: bool) -> ProcessingContext:
     return ProcessingContext(
         tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
         language="uk",
-        specialty=None,
+        category=None,
         reference_date=date(2026, 1, 1),
         is_partial=False,
         abbreviation_snapshot=AbbreviationSnapshot(entries=(), fingerprint="x"),

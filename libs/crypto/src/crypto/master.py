@@ -229,9 +229,7 @@ class KmsMasterKeyProvider:
         self._mount = mount.strip("/")
         self._key_name = key_name
         self._owns_client = http_client is None
-        self._client: httpx.AsyncClient = http_client or httpx.AsyncClient(
-            timeout=timeout_seconds
-        )
+        self._client: httpx.AsyncClient = http_client or httpx.AsyncClient(timeout=timeout_seconds)
         self._checked = False
 
     @property
@@ -278,9 +276,7 @@ class KmsMasterKeyProvider:
         import base64
 
         probe = os.urandom(16)
-        data = await self._post(
-            "encrypt", {"plaintext": base64.b64encode(probe).decode("ascii")}
-        )
+        data = await self._post("encrypt", {"plaintext": base64.b64encode(probe).decode("ascii")})
         ct = data.get("ciphertext")
         if not isinstance(ct, str):
             raise MasterKeyError("Vault Transit self-check: encrypt returned no ciphertext")

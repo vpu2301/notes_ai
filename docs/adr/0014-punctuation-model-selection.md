@@ -11,7 +11,7 @@
 Sprint 05's punctuation stage runs after voice commands and before
 number normalization. Inputs are lowercase, no-punctuation Whisper
 output; outputs need correct sentence punctuation + casing in two
-languages (Ukrainian + English) on medical text.
+languages (Ukrainian + English) on domain text.
 
 Options evaluated:
 
@@ -55,8 +55,8 @@ The post-edits ALWAYS run on top of either path:
 ## Alternatives considered
 
 - **Whisper-native punctuation**: Whisper's punctuated mode is poor on
-  Ukrainian medical text and varies by segment length. Rejected.
-- **Rule-based only**: insufficient for clinical-feel; clinicians
+  Ukrainian domain text and varies by segment length. Rejected.
+- **Rule-based only**: insufficient for a professional feel; users
   notice mis-punctuation in 30 seconds.
 - **In-house fine-tune**: triggered only if pilot WER < 85% per
   language; data + DPIA cost rules it out for sprint 5. Backlog.

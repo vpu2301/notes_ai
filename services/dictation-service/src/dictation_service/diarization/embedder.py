@@ -52,14 +52,10 @@ class EcapaEmbedder:
         self._ensure_loaded()
         import torch
 
-        signal = torch.from_numpy(
-            np.ascontiguousarray(pcm, dtype=np.float32)
-        ).unsqueeze(0)
+        signal = torch.from_numpy(np.ascontiguousarray(pcm, dtype=np.float32)).unsqueeze(0)
         with torch.no_grad():
             emb = self._clf.encode_batch(signal).squeeze()
-        vec: np.ndarray = np.asarray(
-            emb.detach().cpu().numpy(), dtype=np.float32
-        ).reshape(-1)
+        vec: np.ndarray = np.asarray(emb.detach().cpu().numpy(), dtype=np.float32).reshape(-1)
         norm = float(np.linalg.norm(vec))
         if norm > 0.0:
             vec = vec / norm

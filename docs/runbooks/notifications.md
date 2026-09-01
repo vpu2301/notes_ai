@@ -20,19 +20,18 @@ anything publishes for X at all. It is not always yes.
 
 | category | published by | file |
 | --- | --- | --- |
-| `report.finalized` | report-service | `routers/reports_lifecycle.py` |
-| `report.signed` / `report.amended` | report-service | `routers/reports_sign.py` |
-| `report.chain_failure` | report-service | `jobs/chain_reconciler.py` |
+| `note.finalized` | note-service | `routers/notes_lifecycle.py` |
+| `note.chain_failure` | note-service | `jobs/chain_reconciler.py` |
 | `dictation.completed` | dictation-service | `ws/handler.py::_finalize_normal` |
 | `transcription.completed` | asr-worker | `processor.py::_process_one` |
 | `transcription.failed` | asr-worker | `processor.py::_mark_failed` |
 | `system.digest` | notification-service | `jobs/digest.py` (not via the bus) |
 
-**No producer exists** for `report.signing_failed` or
-`report.shared_with_you` — they have catalog entries, renderers and
+**No producer exists** for `note.amended` or
+`note.shared_with_you` — they have catalog entries, renderers and
 email templates, but nothing emits them. Nor is anything emitted for a
-cancelled ASR job, or for creating a report from a transcript
-(`POST /v1/reports/from-transcript`) — that one is a synchronous action
+cancelled ASR job, or for creating a note from a transcript
+(`POST /v1/notes/from-transcript`) — that one is a synchronous action
 whose 201 is the user's confirmation.
 
 Every producer is gated by `MDX_NOTIFICATIONS_ENABLED` and needs
@@ -157,7 +156,7 @@ means a producer is flooding the bus.
     WHERE created_at > now() - interval '1 hour'
     GROUP BY 1 ORDER BY 2 DESC;`
 2. The usual culprit is the chain reconciler flagging a large backlog.
-   It emits one event per *report*, not per anomaly — if you see one per
+   It emits one event per *note*, not per anomaly — if you see one per
    anomaly, that regression is back.
 3. Emergency stop at the source: set `MDX_NOTIFICATIONS_ENABLED=false`
    on the offending producer and restart it. In-app history is
@@ -184,10 +183,10 @@ source of truth and clients re-read on reconnect (E5).
 outbox row with `suppressed_reason='preference'`, which is the auditable
 proof if they later say they got one anyway.
 
-**Verify the PHI boundary after a template change**
+**Verify the PII boundary after a template change**
 
 ```bash
-make check-notification-phi-free
+make check-notification-pii-free
 ```
 
 Blocking in `make ci`. Any change to a template or to
@@ -197,7 +196,7 @@ Blocking in `make ci`. Any change to a template or to
 
 ```bash
 redis-cli XADD mdx:notifications:events '*' \
-  value '{"event_id":"…","tenant_id":"…","category":"report.finalized", …}'
+  value '{"event_id":"…","tenant_id":"…","category":"note.finalized", …}'
 ```
 
 Reusing an `event_id` is safe: `dedupe_key` collapses it.
@@ -223,7 +222,7 @@ Events present in the stream with `lag 0` but no matching row means
 `exclude_actor` in `domain/catalog.py` against the event's
 `actor_user_id` and `recipient_hints` — if the only hint IS the actor
 and the category excludes them, nothing is created. That was the
-sprint-12 `report.finalized` defect.
+sprint-12 `note.finalized` defect.
 
 **Adding a category** touches four places that must agree, or the
 consumer DLQs every event of the new kind:
@@ -237,8 +236,7 @@ consumer DLQs every event of the new kind:
    `notification_preferences`.** This is the one with no test in front
    of it: skip it and every event of the new category raises
    `CheckViolationError` inside the consumer and lands in the DLQ. See
-   `0052_notification_dictation_category.sql` and
-   `0053_notification_transcription_categories.sql`.
+   the category CHECKs in `infra/postgres/migrations/0011_notifications.sql`.
 
 Then `make openapi-dump`, and mirror the enum in the SPA's
 `src/notifications/constants.js`.

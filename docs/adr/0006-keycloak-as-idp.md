@@ -25,8 +25,8 @@ concern.
 
 ## Decision
 
-Use **Keycloak 24** as the IdP. One realm (`medical-dictation`) with five
-realm roles (`tenant_admin`, `clinician`, `nurse`, `auditor`, `service`) and
+Use **Keycloak 24** as the IdP. One realm (`notes`) with five
+realm roles (`tenant_admin`, `member`, `viewer`, `auditor`, `service`) and
 five clients:
 
 - `mdx-api` (bearer-only) — the audience marker every access token carries.

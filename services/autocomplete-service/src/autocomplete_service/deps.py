@@ -72,7 +72,7 @@ def requires(
 def role_for_rls(claims: Claims) -> str:
     """The role value for the ``app.user_role`` GUC.
 
-    Tokens carry MULTIPLE roles (e.g. ['clinician', 'tenant_admin']); the
+    Tokens carry MULTIPLE roles (e.g. ['member', 'tenant_admin']); the
     RESTRICTIVE write policies check the GUC against admin roles, so naive
     ``roles[0]`` denied legitimate tenant admins. Pick the highest-privilege
     role the policy distinguishes.
@@ -80,4 +80,4 @@ def role_for_rls(claims: Claims) -> str:
     for role in ("tenant_admin", "admin"):
         if role in claims.roles:
             return role
-    return claims.roles[0] if claims.roles else "clinician"
+    return claims.roles[0] if claims.roles else "member"

@@ -26,7 +26,7 @@ from .deps import install_state
 from .domain.reaper import reaper_loop
 from .main_deps import build_state, teardown_state
 from .middleware import RequestIDMiddleware
-from .routers import health, jobs, prompts
+from .routers import health, jobs
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ASR Service",
-        description="Sprint-03 batch ASR orchestrator (upload, queue, fetch).",
+        description="Batch ASR orchestrator (upload, queue, fetch).",
         version="0.3.0",
         openapi_version="3.1.0",
         lifespan=_lifespan,
@@ -102,7 +102,6 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(jobs.router)
-    app.include_router(prompts.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

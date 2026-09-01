@@ -50,8 +50,6 @@ async def test_first_call_misses_then_subsequent_hit(redis):
             impression_count=0,
             acceptance_count=0,
             last_accepted_at=None,
-            specialty=None,
-            section_hint=None,
         )
     ]
     build_fn, get_count = await _build_once_factory(rows)
@@ -86,8 +84,6 @@ async def test_bump_version_tag_invalidates(redis):
             impression_count=0,
             acceptance_count=0,
             last_accepted_at=None,
-            specialty=None,
-            section_hint=None,
         )
     ]
     build_fn, get_count = await _build_once_factory(rows)
@@ -107,9 +103,12 @@ async def test_bump_version_tag_invalidates(redis):
 
 def _row(id_="a", phrase="hello"):
     return PhraseTrieEntry(
-        id=id_, phrase=phrase, source="system", impression_count=0,
-        acceptance_count=0, last_accepted_at=None, specialty=None,
-        section_hint=None,
+        id=id_,
+        phrase=phrase,
+        source="system",
+        impression_count=0,
+        acceptance_count=0,
+        last_accepted_at=None,
     )
 
 
@@ -131,18 +130,17 @@ async def test_concurrent_cold_requests_build_exactly_once(redis):
         await asyncio.sleep(0.05)  # hold the lock while others arrive
         return await build_fn()
 
-    results = await asyncio.gather(*[
-        cache.get_or_build(tenant_id=tid, language="uk", user_id=uid,
-                           build_fn=slow_build)
-        for _ in range(5)
-    ])
+    results = await asyncio.gather(
+        *[
+            cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=slow_build)
+            for _ in range(5)
+        ]
+    )
     assert all(t is not None for t, _ in results)
     # Exactly one lock-winner build; any lock-losers either read the
     # populated cache (hit=True) or degraded (their own direct build) —
     # but NONE of them wrote the cache, so a follow-up call is a hit.
-    _, st = await cache.get_or_build(
-        tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn
-    )
+    _, st = await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     assert st == "hit"
     winner_builds = sum(1 for _, s_ in results if s_ != "hit")
     assert winner_builds >= 1
@@ -157,6 +155,7 @@ async def test_redis_down_degrades_instead_of_raising():
         def __getattr__(self, name):
             async def _dead(*a, **k):
                 raise ConnectionError("redis down")
+
             return _dead
 
     degraded = []
@@ -195,9 +194,7 @@ async def test_corrupt_blob_treated_as_miss_and_rebuilt(redis):
     assert st == "miss"
     assert get_count() == 1
     # self-healed: the rebuilt blob now serves hits
-    _, st2 = await cache.get_or_build(
-        tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn
-    )
+    _, st2 = await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     assert st2 == "hit"
 
 
@@ -218,13 +215,9 @@ async def test_lazy_invalidation_never_deletes_trie_keys(redis):
 
     await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     await cache.bump_version_tag(tenant_id=tid)  # 3 → 4 (the roll-up's INCR)
-    _, st = await cache.get_or_build(
-        tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn
-    )
+    _, st = await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     assert st == "miss" and get_count() == 2  # rebuild at the new tag
-    _, st2 = await cache.get_or_build(
-        tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn
-    )
+    _, st2 = await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     assert st2 == "hit"  # second read is a hit at tag 4
     # Only lock keys were ever DELeted — never the trie blob or tag keys.
     for k in deleted:

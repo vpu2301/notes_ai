@@ -1,0 +1,69 @@
+{
+  "code": "interview_debrief",
+  "name": "Interview debrief",
+  "language": "en",
+  "specialty": "hiring",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "candidate",
+      "name": "Candidate and role",
+      "voice_aliases": ["candidate", "role", "position"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Candidate and role details. Candidate name, role, seniority, team, interview round, interviewers, interview format.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "One or two lines: candidate, role and round, interviewers present."
+    },
+    {
+      "id": "summary",
+      "name": "Interview summary",
+      "voice_aliases": ["summary", "how it went"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Interview summary. Questions asked, exercises, system design, case study, answers, communication style, experience discussed.",
+      "min_chars": 20,
+      "order": 1,
+      "synthesis_prompt": "Concise summary of what was covered and how the candidate performed, grouped by topic."
+    },
+    {
+      "id": "strengths",
+      "name": "Strengths",
+      "voice_aliases": ["strengths", "positives"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Candidate strengths. Strong signal, deep knowledge, clear communication, ownership, leadership, relevant experience, culture add.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Bullet list of strengths, each backed by a concrete observation from the interview."
+    },
+    {
+      "id": "concerns",
+      "name": "Concerns",
+      "voice_aliases": ["concerns", "weaknesses", "risks"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Concerns and gaps. Weak signal, gap, shallow answer, struggled with, red flag, needs support, seniority mismatch.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Bullet list of concerns, each backed by a concrete observation; distinguish dealbreakers from coachable gaps."
+    },
+    {
+      "id": "recommendation",
+      "name": "Recommendation",
+      "voice_aliases": ["recommendation", "verdict"],
+      "required": true,
+      "field_type": "choice",
+      "asr_prompt": "Hiring recommendation. Strong hire, hire, no hire, strong no hire.",
+      "min_chars": 0,
+      "order": 4,
+      "options": [
+        {"value": "strong_hire", "label": "Strong hire", "voice_aliases": ["strong hire"]},
+        {"value": "hire", "label": "Hire", "voice_aliases": ["hire"]},
+        {"value": "no_hire", "label": "No hire", "voice_aliases": ["no hire"]},
+        {"value": "strong_no_hire", "label": "Strong no hire", "voice_aliases": ["strong no hire"]}
+      ]
+    }
+  ]
+}

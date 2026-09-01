@@ -52,7 +52,7 @@ Symptom: `mdx_nlp_voice_command_undo_rate > 5%` (alert).
    GROUP BY 1 ORDER BY 2 DESC;
    ```
 2. For the noisiest intent, sample 10 sessions: replay their audio,
-   review with the clinical content lead.
+   review with the content lead.
 3. Tune options:
    - Bump `requires_pause_before_ms` for the command (DB seed update).
    - Bump `min_avg_probability` for the command.

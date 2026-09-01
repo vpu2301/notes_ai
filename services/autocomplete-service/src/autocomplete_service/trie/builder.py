@@ -32,8 +32,6 @@ class PhraseTrieEntry:
     impression_count: int
     acceptance_count: int
     last_accepted_at: datetime | None
-    specialty: str | None
-    section_hint: str | None
 
 
 @dataclass(slots=True)

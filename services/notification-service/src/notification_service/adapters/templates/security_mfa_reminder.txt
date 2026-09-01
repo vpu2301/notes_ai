@@ -1,3 +1,3 @@
 {% extends "_base.txt" %}
-{% block heading %}Увімкніть двофакторну автентифікацію{% endblock %}
-{% block body %}Під час перевірки доступів виявлено, що ваш обліковий запис захищено лише паролем. Увімкніть двофакторну автентифікацію (TOTP) — це займає близько хвилини. Нагадування зникне автоматично після налаштування.{% endblock %}
+{% block heading %}Enable two-factor authentication{% endblock %}
+{% block body %}An access review found that your account is protected by a password only. Enable two-factor authentication (TOTP) — it takes about a minute. The reminder disappears automatically once you are set up.{% endblock %}

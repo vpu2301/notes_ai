@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS tenant_keks CASCADE;

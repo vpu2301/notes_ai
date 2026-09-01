@@ -1,11 +1,11 @@
-# Nightly audit-chain verification — Sprint-02 spec § 4.3
+# Nightly audit-chain verification
 #
 # Walks every active tenant's hash-linked audit chain via
 # scripts/jobs/nightly_verify.py (audit.AuditVerifier), emits Prometheus
 # textfile metrics for node-exporter, and writes one `audit.chain_verified`
 # event per tenant. On divergence the script exits non-zero; the
 # `AuditChainBroken` / `AuditChainVerifyStale` alerts in
-# infra/prometheus/rules/sprint-02-auth-audit.yml fire on the gauges.
+# infra/prometheus/rules/auth-audit.yml fire on the gauges.
 #
 # Deployment (host or sidecar cron, NOT a docker-compose service — compose is
 # infra-only per CLAUDE.md; a job container would need an ADR amendment):
@@ -28,4 +28,4 @@ PROM_TEXTFILE=/var/lib/node_exporter/textfile_collector/audit_chain.prom
 
 # 02:00 UTC daily. Ensure the crond runs in UTC (CRON_TZ=UTC) or the host is UTC.
 CRON_TZ=UTC
-0 2 * * *  cd /opt/medical-dictation-backend && /usr/bin/env uv run python scripts/jobs/nightly_verify.py >> /var/log/mdx/nightly-verify.log 2>&1
+0 2 * * *  cd /opt/notes-ai-backend && /usr/bin/env uv run python scripts/jobs/nightly_verify.py >> /var/log/mdx/nightly-verify.log 2>&1

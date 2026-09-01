@@ -25,20 +25,16 @@ pytestmark = pytest.mark.skipif(
     reason="set RUN_DB_INTEGRATION=1 to run; needs dev-up + migrate-up",
 )
 
-DSN = os.environ.get(
-    "DB_APP_ROLE_DSN", "postgresql://app_role:app_role@localhost:5432/medical_dictation"
-)
+DSN = os.environ.get("DB_APP_ROLE_DSN", "postgresql://app_role:app_role@localhost:5432/notes")
 # Cleanup only — see _cleanup().
-ADMIN_DSN = os.environ.get(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/medical_dictation"
-)
+ADMIN_DSN = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/notes")
 
 TENANT_A = UUID("00000000-0000-0000-0000-00000000000a")
 TENANT_B = UUID("00000000-0000-0000-0000-00000000000b")
 ADMIN_A = UUID("0a000000-0000-0000-0000-00000000000a")
-CLINICIAN_A = UUID("0c000000-0000-0000-0000-00000000000a")
-NURSE_A = UUID("0d000000-0000-0000-0000-00000000000a")
-CLINICIAN_B = UUID("0c000000-0000-0000-0000-00000000000b")
+MEMBER_A = UUID("0c000000-0000-0000-0000-00000000000a")
+VIEWER_A = UUID("0d000000-0000-0000-0000-00000000000a")
+MEMBER_B = UUID("0c000000-0000-0000-0000-00000000000b")
 
 
 @pytest.fixture
@@ -54,12 +50,12 @@ def _event(**over: object) -> NotificationEvent:
     base: dict[str, object] = {
         "event_id": uuid4(),
         "tenant_id": TENANT_A,
-        "category": Category.REPORT_FINALIZED,
-        "actor_user_id": CLINICIAN_A,
-        "resource_type": "report",
+        "category": Category.NOTE_FINALIZED,
+        "actor_user_id": MEMBER_A,
+        "resource_type": "note",
         "resource_id": uuid4(),
         "occurred_at": datetime.now(UTC),
-        "payload": {"report_code": "RPT-TEST-1"},
+        "payload": {"note_code": "NOTE-TEST-1"},
     }
     base.update(over)
     return NotificationEvent(**base)  # type: ignore[arg-type]
@@ -93,7 +89,7 @@ async def _cleanup(_pool, tenant_id: UUID, dedupe_prefix: str) -> None:
 
 async def test_materialize_is_idempotent(pool) -> None:
     """The same event twice → exactly one row (the at-least-once contract)."""
-    event = _event(recipient_hints=(NURSE_A,))
+    event = _event(recipient_hints=(VIEWER_A,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             first = await materialize(event, conn=conn, app_base_url="http://x")
@@ -107,7 +103,7 @@ async def test_materialize_is_idempotent(pool) -> None:
         async with tenant_connection(pool, TENANT_A) as conn:
             rows = await conn.fetch(
                 "SELECT id FROM notifications WHERE dedupe_key = $1",
-                event.dedupe_key(NURSE_A),
+                event.dedupe_key(VIEWER_A),
             )
         assert len(rows) == 1
     finally:
@@ -115,19 +111,19 @@ async def test_materialize_is_idempotent(pool) -> None:
 
 
 async def test_actor_is_excluded_from_own_fanout(pool) -> None:
-    event = _event(recipient_hints=(CLINICIAN_A, NURSE_A))
+    event = _event(recipient_hints=(MEMBER_A, VIEWER_A))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             result = await materialize(event, conn=conn, app_base_url="http://x")
         recipients = {c.recipient_user_id for c in result.created}
-        assert recipients == {NURSE_A}, "the actor must not be told about their own action"
+        assert recipients == {VIEWER_A}, "the actor must not be told about their own action"
     finally:
         await _cleanup(pool, TENANT_A, str(event.event_id))
 
 
 async def test_cross_tenant_hint_materialises_nothing(pool) -> None:
     """A producer naming a foreign user must not reach them (§6 isolation)."""
-    event = _event(recipient_hints=(CLINICIAN_B,))
+    event = _event(recipient_hints=(MEMBER_B,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             result = await materialize(event, conn=conn, app_base_url="http://x")
@@ -138,7 +134,7 @@ async def test_cross_tenant_hint_materialises_nothing(pool) -> None:
         async with tenant_connection(pool, TENANT_B) as conn:
             rows = await conn.fetch(
                 "SELECT id FROM notifications WHERE dedupe_key = $1",
-                event.dedupe_key(CLINICIAN_B),
+                event.dedupe_key(MEMBER_B),
             )
         assert rows == []
     finally:
@@ -146,7 +142,7 @@ async def test_cross_tenant_hint_materialises_nothing(pool) -> None:
 
 
 async def test_notification_is_invisible_to_the_other_tenant(pool) -> None:
-    event = _event(recipient_hints=(NURSE_A,))
+    event = _event(recipient_hints=(VIEWER_A,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await materialize(event, conn=conn, app_base_url="http://x")
@@ -154,7 +150,7 @@ async def test_notification_is_invisible_to_the_other_tenant(pool) -> None:
         async with tenant_connection(pool, TENANT_B) as conn:
             leaked = await conn.fetch(
                 "SELECT id FROM notifications WHERE dedupe_key = $1",
-                event.dedupe_key(NURSE_A),
+                event.dedupe_key(VIEWER_A),
             )
         assert leaked == [], "RLS must hide tenant A's notification from tenant B"
     finally:
@@ -162,20 +158,20 @@ async def test_notification_is_invisible_to_the_other_tenant(pool) -> None:
 
 
 async def test_chain_failure_routes_to_admins_only(pool) -> None:
-    """Demo step 6: the admin hears about it, the clinician does not."""
+    """Demo step 6: the admin hears about it, the author does not."""
     event = _event(
-        category=Category.REPORT_CHAIN_FAILURE,
+        category=Category.NOTE_CHAIN_FAILURE,
         actor_user_id=None,
         recipient_hints=(),
-        payload={"report_code": "RPT-TEST-2", "check_name": "chain_reconciler"},
+        payload={"note_code": "NOTE-TEST-2", "check_name": "chain_reconciler"},
     )
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             result = await materialize(event, conn=conn, app_base_url="http://x")
         recipients = {c.recipient_user_id for c in result.created}
         assert ADMIN_A in recipients
-        assert CLINICIAN_A not in recipients
-        assert NURSE_A not in recipients
+        assert MEMBER_A not in recipients
+        assert VIEWER_A not in recipients
     finally:
         await _cleanup(pool, TENANT_A, str(event.event_id))
 
@@ -183,18 +179,18 @@ async def test_chain_failure_routes_to_admins_only(pool) -> None:
 async def test_suppressed_email_is_recorded_not_skipped(pool) -> None:
     """E8: turning email off leaves auditable proof, not silence."""
     event = _event(
-        category=Category.REPORT_SIGNED,
-        recipient_hints=(NURSE_A,),
-        actor_user_id=CLINICIAN_A,
-        payload={"report_code": "RPT-TEST-3"},
+        category=Category.NOTE_SHARED_WITH_YOU,
+        recipient_hints=(VIEWER_A,),
+        actor_user_id=MEMBER_A,
+        payload={"note_code": "NOTE-TEST-3"},
     )
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             await repo.upsert_preference(
                 conn,
                 tenant_id=TENANT_A,
-                user_id=NURSE_A,
-                category=Category.REPORT_SIGNED,
+                user_id=VIEWER_A,
+                category=Category.NOTE_SHARED_WITH_YOU,
                 in_app_enabled=True,
                 email_mode=EmailMode.OFF,
             )
@@ -218,26 +214,26 @@ async def test_suppressed_email_is_recorded_not_skipped(pool) -> None:
         async with tenant_connection(pool, TENANT_A) as conn:
             await conn.execute(
                 "DELETE FROM notification_preferences WHERE user_id=$1 AND category=$2",
-                NURSE_A,
-                str(Category.REPORT_SIGNED),
+                VIEWER_A,
+                str(Category.NOTE_SHARED_WITH_YOU),
             )
         await _cleanup(pool, TENANT_A, str(event.event_id))
 
 
 async def test_feed_and_unread_count_agree(pool) -> None:
-    event = _event(recipient_hints=(NURSE_A,))
+    event = _event(recipient_hints=(VIEWER_A,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
-            before = await repo.unread_count(conn, user_id=NURSE_A)
+            before = await repo.unread_count(conn, user_id=VIEWER_A)
             result = await materialize(event, conn=conn, app_base_url="http://x")
-            after = await repo.unread_count(conn, user_id=NURSE_A)
+            after = await repo.unread_count(conn, user_id=VIEWER_A)
         assert after == before + 1
         new_id = result.created[0].notification_id
 
         async with tenant_connection(pool, TENANT_A) as conn:
             rows = await repo.list_feed(
                 conn,
-                user_id=NURSE_A,
+                user_id=VIEWER_A,
                 limit=10,
                 before_created_at=None,
                 before_id=None,
@@ -251,22 +247,18 @@ async def test_feed_and_unread_count_agree(pool) -> None:
 
 
 async def test_mark_read_is_idempotent(pool) -> None:
-    event = _event(recipient_hints=(NURSE_A,))
+    event = _event(recipient_hints=(VIEWER_A,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             result = await materialize(event, conn=conn, app_base_url="http://x")
             nid = result.created[0].notification_id
 
-            assert await repo.mark_read(conn, user_id=NURSE_A, notification_id=nid)
-            first_row = await conn.fetchrow(
-                "SELECT read_at FROM notifications WHERE id = $1", nid
-            )
+            assert await repo.mark_read(conn, user_id=VIEWER_A, notification_id=nid)
+            first_row = await conn.fetchrow("SELECT read_at FROM notifications WHERE id = $1", nid)
 
             # Second mark must succeed and must NOT move the timestamp.
-            assert await repo.mark_read(conn, user_id=NURSE_A, notification_id=nid)
-            second_row = await conn.fetchrow(
-                "SELECT read_at FROM notifications WHERE id = $1", nid
-            )
+            assert await repo.mark_read(conn, user_id=VIEWER_A, notification_id=nid)
+            second_row = await conn.fetchrow("SELECT read_at FROM notifications WHERE id = $1", nid)
 
         assert first_row["read_at"] == second_row["read_at"]
     finally:
@@ -274,7 +266,7 @@ async def test_mark_read_is_idempotent(pool) -> None:
 
 
 async def test_other_user_cannot_mark_your_notification_read(pool) -> None:
-    event = _event(recipient_hints=(NURSE_A,))
+    event = _event(recipient_hints=(VIEWER_A,))
     try:
         async with tenant_connection(pool, TENANT_A) as conn:
             result = await materialize(event, conn=conn, app_base_url="http://x")
@@ -282,12 +274,8 @@ async def test_other_user_cannot_mark_your_notification_read(pool) -> None:
 
             # Same tenant, wrong recipient — the recipient predicate, not
             # RLS, is what stops this.
-            assert not await repo.mark_read(
-                conn, user_id=CLINICIAN_A, notification_id=nid
-            )
-            row = await conn.fetchrow(
-                "SELECT read_at FROM notifications WHERE id = $1", nid
-            )
+            assert not await repo.mark_read(conn, user_id=MEMBER_A, notification_id=nid)
+            row = await conn.fetchrow("SELECT read_at FROM notifications WHERE id = $1", nid)
         assert row["read_at"] is None
     finally:
         await _cleanup(pool, TENANT_A, str(event.event_id))

@@ -33,9 +33,7 @@ async def resolve_account_by_email(
     Tenant-blind by necessity: the caller has an email address typed
     into a logged-out form and nothing else.
     """
-    return await conn.fetchrow(
-        "SELECT * FROM public.resolve_account_for_password_reset($1)", email
-    )
+    return await conn.fetchrow("SELECT * FROM public.resolve_account_for_password_reset($1)", email)
 
 
 async def peek_token(
@@ -128,7 +126,7 @@ async def sweep_dead_tokens(conn: asyncpg.Connection) -> None:
     """Opportunistic cleanup of this tenant's spent/expired tokens.
 
     Folded into the issuance path so the table needs no cron of its own —
-    the same trick ``reauth`` uses. Rows carry no PHI and, once spent or
+    the same hashed-ticket trick. Rows carry no personal content and, once spent or
     expired, no authority, so there is nothing to retain.
     """
     await conn.execute(
@@ -194,9 +192,7 @@ async def claim_due_mail(conn: asyncpg.Connection) -> asyncpg.Record | None:
     )
 
 
-async def mark_sent(
-    conn: asyncpg.Connection, *, mail_id: UUID, provider_message_id: str
-) -> None:
+async def mark_sent(conn: asyncpg.Connection, *, mail_id: UUID, provider_message_id: str) -> None:
     """Record the send AND destroy the token-bearing variables.
 
     The two happen in one statement on purpose: any path that marks a

@@ -22,7 +22,6 @@ Required env:
   RUN_ASR_CHAOS=1
   ASR_BASE_URL        (default http://localhost:8001)
   ASR_TOKEN           bearer token with asr.write + asr.read (see `make seed`)
-  ASR_PROMPT_ID       a seeded medical prompt UUID
   ASR_SAMPLE_AUDIO    path to a short wav/m4a clip to transcribe
   ASR_WORKER_CMD      (default: "uv run --project services/asr-worker
                        python -m asr_worker.main")
@@ -50,7 +49,6 @@ pytestmark = pytest.mark.skipif(
 
 BASE_URL = os.environ.get("ASR_BASE_URL", "http://localhost:8001")
 TOKEN = os.environ.get("ASR_TOKEN", "")
-PROMPT_ID = os.environ.get("ASR_PROMPT_ID", "")
 SAMPLE_AUDIO = os.environ.get("ASR_SAMPLE_AUDIO", "")
 WORKER_CMD = os.environ.get(
     "ASR_WORKER_CMD",
@@ -90,7 +88,7 @@ def _submit_job(client: httpx.Client) -> str:
     audio = Path(SAMPLE_AUDIO)
     assert audio.is_file(), f"ASR_SAMPLE_AUDIO not found: {SAMPLE_AUDIO}"
     files = {"audio": (audio.name, audio.read_bytes(), "audio/wav")}
-    data = {"prompt_id": PROMPT_ID, "language": "uk"}
+    data = {"language": "uk"}
     resp = client.post("/asr/jobs", headers=_headers(), files=files, data=data)
     assert resp.status_code == 202, f"submit failed: {resp.status_code} {resp.text}"
     return str(resp.json()["job_id"])
@@ -110,13 +108,14 @@ def _wait_for(client: httpx.Client, job_id: str, wanted: set[str], timeout_s: fl
         if last in wanted:
             return last
         time.sleep(0.5)
-    raise AssertionError(f"job {job_id} stuck in {last!r}; wanted one of {wanted} within {timeout_s}s")
+    raise AssertionError(
+        f"job {job_id} stuck in {last!r}; wanted one of {wanted} within {timeout_s}s"
+    )
 
 
 @pytest.fixture
 def http_client() -> httpx.Client:
     assert TOKEN, "set ASR_TOKEN"
-    assert PROMPT_ID, "set ASR_PROMPT_ID"
     with httpx.Client(base_url=BASE_URL, timeout=30.0) as client:
         yield client
 

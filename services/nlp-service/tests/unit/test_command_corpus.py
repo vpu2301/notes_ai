@@ -1,10 +1,10 @@
-"""TP/FP corpus gate — the anamnesis commands must not degrade matching.
+"""TP/FP corpus gate — the typed-field commands must not degrade matching.
 
 Every added spec widens the matcher's surface. The risk is not that a
-command fails to fire; it is that clinical prose gets EATEN as a
+command fails to fire; it is that ordinary prose gets EATEN as a
 command, silently deleting words from a note. So the corpus is measured
-twice — sprint-05 catalogue alone, then with sprint-13's four specs —
-and the two runs are compared.
+twice — base catalogue alone, then with the typed-field specs — and the
+two runs are compared.
 """
 
 from __future__ import annotations
@@ -21,15 +21,15 @@ from tests.fixtures.command_corpus_uk import NEGATIVES, POSITIVES
 
 _SEED_DIR = Path(__file__).resolve().parents[4] / "infra" / "postgres" / "seed"
 
-_S13_INTENTS = {"choice.set", "choice.add", "choice.remove", "diagnosis.capture"}
+_TYPED_FIELD_INTENTS = {"choice.set", "choice.add", "choice.remove"}
 
 
-def _load_specs(language: str = "uk", *, include_s13: bool) -> list[CommandSpec]:
+def _load_specs(language: str = "uk", *, include_typed: bool) -> list[CommandSpec]:
     """The real shipped catalogue, straight from the seed fixtures."""
     raw = json.loads((_SEED_DIR / f"voice_commands_{language}.json").read_text("utf-8"))
     specs: list[CommandSpec] = []
     for cmd in raw:
-        if not include_s13 and cmd["intent"] in _S13_INTENTS:
+        if not include_typed and cmd["intent"] in _TYPED_FIELD_INTENTS:
             continue
         specs.append(
             CommandSpec(
@@ -50,24 +50,30 @@ def _sections() -> tuple[TemplateSection, ...]:
     return (
         TemplateSection(
             id=uuid4(),
-            name="Статус куріння",
-            aliases=("куріння",),
-            section_key="smoking_status",
+            name="Статус підписки",
+            aliases=("підписка",),
+            section_key="subscription_status",
             field_type="choice",
             options=(
-                ChoiceOption(value="never", label="не палить", aliases=("не палить", "не курить")),
-                ChoiceOption(value="current", label="палить", aliases=("палить", "курить")),
+                ChoiceOption(
+                    value="never",
+                    label="не підписаний",
+                    aliases=("не підписаний", "не підписана"),
+                ),
+                ChoiceOption(
+                    value="current", label="підписаний", aliases=("підписаний", "підписана")
+                ),
             ),
         ),
         TemplateSection(
             id=uuid4(),
-            name="Алергії",
-            aliases=("алергії",),
-            section_key="allergies",
+            name="Канали зв'язку",
+            aliases=("канали",),
+            section_key="channels",
             field_type="multi_choice",
             options=(
-                ChoiceOption(value="penicillin", label="пеніцилін", aliases=("пеніцилін",)),
-                ChoiceOption(value="latex", label="латекс", aliases=("латекс",)),
+                ChoiceOption(value="email", label="імейл", aliases=("імейл",)),
+                ChoiceOption(value="phone", label="телефон", aliases=("телефон",)),
             ),
         ),
     )
@@ -89,9 +95,9 @@ def _words(tokens: list[str], *, lead_pause_ms: int = 500, p: float = 0.95) -> l
     return out
 
 
-def _matcher(*, include_s13: bool) -> VoiceCommandMatcher:
+def _matcher(*, include_typed: bool) -> VoiceCommandMatcher:
     return VoiceCommandMatcher(
-        _load_specs(include_s13=include_s13),
+        _load_specs(include_typed=include_typed),
         language="uk",
         template_sections=_sections(),
     )
@@ -104,12 +110,12 @@ def _detect(matcher: VoiceCommandMatcher, tokens: list[str]) -> list[str]:
 # ── the measured gate ───────────────────────────────────────────────
 
 
-def _measure(include_s13: bool) -> dict[str, float | int]:
-    matcher = _matcher(include_s13=include_s13)
+def _measure(include_typed: bool) -> dict[str, float | int]:
+    matcher = _matcher(include_typed=include_typed)
     considered = [
         (tokens, intent)
         for tokens, intent, _ in POSITIVES
-        if include_s13 or intent not in _S13_INTENTS
+        if include_typed or intent not in _TYPED_FIELD_INTENTS
     ]
     tp = sum(1 for tokens, intent in considered if intent in _detect(matcher, tokens))
     fp = sum(1 for tokens, _ in NEGATIVES if _detect(matcher, tokens))
@@ -124,18 +130,18 @@ def _measure(include_s13: bool) -> dict[str, float | int]:
 
 
 def test_corpus_before_and_after_seeding(capsys: pytest.CaptureFixture[str]) -> None:
-    """THE GATE: adding the anamnesis specs must not cost recall or
+    """THE GATE: adding the typed-field specs must not cost recall or
     introduce a single false positive."""
-    before = _measure(include_s13=False)
-    after = _measure(include_s13=True)
+    before = _measure(include_typed=False)
+    after = _measure(include_typed=True)
 
     with capsys.disabled():
-        print("\n  sprint-05 catalogue only :", before)
-        print("  + sprint-13 anamnesis    :", after)
+        print("\n  base catalogue only   :", before)
+        print("  + typed-field commands:", after)
 
     assert before["false_positives"] == 0, before
     assert after["false_positives"] == 0, (
-        f"the new specs EAT clinical prose: {after} — tighten the new patterns, never the FSM"
+        f"the new specs EAT ordinary prose: {after} — tighten the new patterns, never the FSM"
     )
     assert before["recall"] == 1.0, before
     assert after["recall"] == 1.0, after
@@ -145,20 +151,20 @@ def test_corpus_before_and_after_seeding(capsys: pytest.CaptureFixture[str]) -> 
 
 @pytest.mark.parametrize(("tokens", "intent", "why"), POSITIVES)
 def test_positive_cases(tokens: list[str], intent: str, why: str) -> None:
-    assert intent in _detect(_matcher(include_s13=True), tokens), f"{why}: {' '.join(tokens)!r}"
+    assert intent in _detect(_matcher(include_typed=True), tokens), f"{why}: {' '.join(tokens)!r}"
 
 
 @pytest.mark.parametrize(("tokens", "why"), NEGATIVES)
 def test_negative_cases(tokens: list[str], why: str) -> None:
-    """Clinical prose must never be consumed as a command."""
-    detected = _detect(_matcher(include_s13=True), tokens)
+    """Ordinary prose must never be consumed as a command."""
+    detected = _detect(_matcher(include_typed=True), tokens)
     assert detected == [], f"{why}: {' '.join(tokens)!r} matched {detected}"
 
 
-def test_sprint_05_intents_behave_identically_before_and_after() -> None:
+def test_base_intents_behave_identically_before_and_after() -> None:
     """Per-utterance equality, not just aggregate parity."""
-    before, after = _matcher(include_s13=False), _matcher(include_s13=True)
+    before, after = _matcher(include_typed=False), _matcher(include_typed=True)
     for tokens, intent, why in POSITIVES:
-        if intent in _S13_INTENTS:
+        if intent in _TYPED_FIELD_INTENTS:
             continue
         assert _detect(before, tokens) == _detect(after, tokens), why

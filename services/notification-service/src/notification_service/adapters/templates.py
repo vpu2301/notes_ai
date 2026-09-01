@@ -2,15 +2,16 @@
 
 Three properties this module must hold, in priority order:
 
-1. **PHI-free.** A template can only see the variables handed to it, and
-   the only source of those is `domain/render.safe_payload`, which is a
-   per-category allow-list. There is no `**event.payload` splat
-   anywhere, so a producer cannot widen what a template can reach.
-2. **Autoescaped.** Report codes and provider names are attacker-
+1. **Content-free.** A template can only see the variables handed to it,
+   and the only source of those is `domain/render.safe_payload`, which is
+   a per-category allow-list. There is no `**event.payload` splat
+   anywhere, so a producer cannot widen what a template can reach — no
+   note content or personal data can render (ADR-0031).
+2. **Autoescaped.** Note codes and display names are attacker-
    influenced in principle; unescaped they are an HTML-injection vector
    in a mail client (the sprint-09 lesson).
 3. **Deterministic.** The same input renders byte-identical output, so
-   the PHI CI gate and the round-trip test can assert on exact bytes.
+   the PII CI gate and the round-trip test can assert on exact bytes.
    Nothing here reads a clock or a random source.
 """
 
@@ -38,7 +39,7 @@ def build_environment(template_dir: Path | None = None) -> Environment:
     return Environment(
         loader=FileSystemLoader(str(template_dir or TEMPLATE_DIR)),
         # StrictUndefined: a typo'd variable must fail the render, not
-        # quietly produce "Report  has been signed".
+        # quietly produce "Note  was shared with you".
         undefined=StrictUndefined,
         autoescape=select_autoescape(["html", "xml"]),
         # Deterministic output — no trailing-newline drift between runs.
@@ -76,7 +77,7 @@ def render_email(
     `items` is the digest's per-line summary. It is a separate parameter
     rather than a `fields` key so it cannot be populated from an event
     payload — only the digest job, which builds the lines from already-
-    rendered PHI-free titles, can supply it.
+    rendered content-free titles, can supply it.
     """
     environment = env or _env()
     context = {

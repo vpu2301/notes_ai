@@ -1,4 +1,4 @@
-"""Sprint-17 admin list surface — GET /autocomplete/phrases + /snippets.
+"""Admin list surface — GET /autocomplete/phrases + /snippets.
 
 Handlers exercised directly with a fake pool/connection (same style as
 test_phrases_route.py); RLS visibility itself is integration-tested.
@@ -27,8 +27,15 @@ NOW = datetime(2026, 8, 8, 12, 0, 0, tzinfo=UTC)
 
 def _claims(roles=("tenant_admin",)) -> Claims:
     return Claims(
-        sub=uuid4(), tid=uuid4(), roles=list(roles), scope="openid",
-        sid="s", iss="test", aud="mdx-api", exp=2_000_000_000, iat=1,
+        sub=uuid4(),
+        tid=uuid4(),
+        roles=list(roles),
+        scope="openid",
+        sid="s",
+        iss="test",
+        aud="mdx-api",
+        exp=2_000_000_000,
+        iat=1,
     )
 
 
@@ -82,21 +89,14 @@ class _State:
 def _phrase_row(**over) -> dict:
     row = {
         "id": uuid4(),
-        "phrase": "скарги на головний біль",
+        "phrase": "action items from the meeting",
         "language": "uk",
-        "specialty": "neurology",
-        "section_hint": None,
         "source": "tenant",
         "impression_count": 40,
         "acceptance_count": 9,
         "last_accepted_at": NOW,
         "enabled": True,
         "created_at": NOW,
-        # sprint-21 provenance columns (ADR-0043)
-        "review_state": "accepted",
-        "tier": None,
-        "source_kind": "authored",
-        "corpus_release": None,
     }
     row.update(over)
     return row
@@ -105,9 +105,9 @@ def _phrase_row(**over) -> dict:
 async def test_list_phrases_maps_rows_and_scopes_rls():
     conn = _FakeConn([_phrase_row(), _phrase_row(source="system", last_accepted_at=None)])
     install_state(_State(conn))
-    claims = _claims(roles=("clinician", "tenant_admin"))
+    claims = _claims(roles=("member", "tenant_admin"))
 
-    out = await list_phrases(claims, language="uk", specialty=None, source=None, limit=50)
+    out = await list_phrases(claims, language="uk", source=None, limit=50)
 
     assert [type(o) for o in out] == [PhraseListItemDTO, PhraseListItemDTO]
     assert out[0].acceptance_count == 9
@@ -128,24 +128,21 @@ async def test_list_phrases_filters_compose_in_order():
     conn = _FakeConn([])
     install_state(_State(conn))
 
-    out = await list_phrases(
-        _claims(), language="en", specialty="cardiology", source="user", limit=10
-    )
+    out = await list_phrases(_claims(), language="en", source="user", limit=10)
 
     assert out == []
     sql, args = conn.fetches[0]
     assert "AND language = $1" in sql
-    assert "AND specialty = $2" in sql
-    assert "AND source = $3::autocomplete_source" in sql
-    assert args == ("en", "cardiology", "user", 10)
+    assert "AND source = $2::autocomplete_source" in sql
+    assert args == ("en", "user", 10)
     assert "ORDER BY updated_at DESC" in sql
 
 
 async def test_list_snippets_maps_rows():
     row = {
         "id": uuid4(),
-        "trigger": "vitals",
-        "expansion": "АТ ___ мм рт.ст., ЧСС ___",
+        "trigger": "standup",
+        "expansion": "Attendees: ___\nDecisions: ___",
         "cursor_position": 3,
         "language": "uk",
         "source": "tenant",
@@ -158,7 +155,7 @@ async def test_list_snippets_maps_rows():
     out = await list_snippets(_claims(), language=None, source="tenant", limit=25)
 
     assert [type(o) for o in out] == [SnippetListItemDTO]
-    assert out[0].trigger == "vitals"
+    assert out[0].trigger == "standup"
     assert out[0].cursor_position == 3
     sql, args = conn.fetches[0]
     assert "FROM autocomplete_snippets" in sql

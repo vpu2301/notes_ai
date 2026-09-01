@@ -1,6 +1,6 @@
 # Autocomplete architecture (sprint-10)
 
-The high-frequency clinical touchpoint. p95 ≤ 80 ms is the load-bearing
+The highest-frequency typing touchpoint. p95 ≤ 80 ms is the load-bearing
 constraint that shapes every choice here.
 
 ## Topology
@@ -69,7 +69,7 @@ near-duplicates within Levenshtein 3.
 
 1. FE posts `request_id`, `event`, `prefix`, `phrase_id`/`snippet_id`,
    `context`.
-2. PII scrubber: IPN / email / passport / DOB-like patterns redacted.
+2. PII scrubber: email / phone / card-like / ID-like patterns redacted.
 3. In-memory batch buffer; flushes every 5 s OR 100 rows.
 4. Insert into `autocomplete_telemetry` (monthly partition).
 5. Nightly roll-up aggregates yesterday's events into the phrase
@@ -77,19 +77,18 @@ near-duplicates within Levenshtein 3.
 
 ## PII scrubber
 
-Sprint-10 day-6. Conservative regex:
-- 10-digit IPN.
+Conservative regex (generic PII set):
 - Email (RFC-5322-lite).
-- 13-digit medical ID.
-- Passport (2 letters + 6 digits).
-- Date DD.MM.YYYY / DD/MM/YYYY.
-- 7-9 digit phone-like.
+- Card-like digit sequences (13–19 digits, space/dash grouped).
+- National-ID-like patterns (letters + long digit run).
+- Phone numbers (international `+` or separator-broken groups).
+- Long contiguous digit runs (catch-all).
 
 Production code path: telemetry intake redacts prefix + context;
 phrase-write endpoint rejects 422 if the prefix contains a match.
 
-DPO sign-off captured in `docs/security/autocomplete-pii-scrubber.md`;
-regex updates require DPO re-review.
+The pattern set is documented in `docs/security/autocomplete-pii-scrubber.md`;
+regex updates require security review.
 
 ## Data model
 
@@ -108,10 +107,8 @@ regex updates require DPO re-review.
 
 ## Hand-offs
 
-- **Sprint-11 (patients)** — shares PII scrubber regex; sprint-10 may
-  adopt sprint-11 updates.
-- **Sprint-12/13/14** — consume same `/suggest` endpoint; context
+- **Other surfaces** — consume the same `/suggest` endpoint; context
   field hints (`field`, `preceding_text`) tunable per surface.
-- **Sprint-15** — generative completion (Layer C) lives beyond this
+- **Layer C** — generative completion lives beyond this
   service.
 - **Sprint-17** — admin UI consumes existing CRUD endpoints.

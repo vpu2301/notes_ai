@@ -66,10 +66,8 @@ def _ctx() -> SessionContext:
         tenant_id=uuid4(),
         user_id=uuid4(),
         language="uk",
-        prompt_id=uuid4(),
-        prompt_text="",
+        vocabulary_hint="",
         target_kind="note",
-        encounter_id=None,
         template_id=None,
     )
     ctx.buffer = _FakeBuffer()
@@ -94,9 +92,7 @@ def _patch_db(monkeypatch):
         return None
 
     monkeypatch.setattr(finalize_mod, "tenant_connection", _fake_tenant_connection)
-    monkeypatch.setattr(
-        finalize_mod.repository, "write_finalized", _fake_write_finalized
-    )
+    monkeypatch.setattr(finalize_mod.repository, "write_finalized", _fake_write_finalized)
 
 
 async def test_purge_on_finalize_writes_no_audio():

@@ -52,7 +52,7 @@ class TokenResponse:
 
 
 class KeycloakClient:
-    """Async HTTP client for the medical-dictation realm."""
+    """Async HTTP client for the notes realm."""
 
     def __init__(
         self,
@@ -370,9 +370,7 @@ class KeycloakClient:
         rows: list[dict[str, Any]] = resp.json()
         return rows
 
-    async def set_password(
-        self, sub: UUID, *, new_password: str, temporary: bool = False
-    ) -> None:
+    async def set_password(self, sub: UUID, *, new_password: str, temporary: bool = False) -> None:
         """Replace the user's password.
 
         ``temporary=False`` — a reset that lands the user on Keycloak's

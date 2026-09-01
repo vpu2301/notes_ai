@@ -1,0 +1,82 @@
+{
+  "code": "sales_call",
+  "name": "Sales call",
+  "language": "en",
+  "specialty": "sales",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "contact",
+      "name": "Contact and company",
+      "voice_aliases": ["contact", "company", "who we spoke to"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Prospect contact and company details. Company name, industry, company size, contact name, job title, decision maker, champion, procurement.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "One line per person: 'Name — title, company'. Note who the decision maker is."
+    },
+    {
+      "id": "context",
+      "name": "Context and opportunity",
+      "voice_aliases": ["context", "opportunity", "background"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Deal context. Current solution, contract renewal, budget, timeline, evaluation criteria, competitors, trigger event, use case.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Short paragraph: why the prospect is looking, budget and timeline signals, competing options."
+    },
+    {
+      "id": "needs",
+      "name": "Needs and pain points",
+      "voice_aliases": ["needs", "pain points", "requirements"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Customer needs and pain points. Pain point, bottleneck, manual process, integration, compliance requirement, must have, nice to have.",
+      "min_chars": 10,
+      "order": 2,
+      "synthesis_prompt": "Bullet list of needs, each with the underlying pain and its business impact."
+    },
+    {
+      "id": "objections",
+      "name": "Objections",
+      "voice_aliases": ["objections", "concerns raised"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Objections and concerns. Price, security, data residency, migration effort, lock-in, missing feature, approval process.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "One bullet per objection with how it was answered or what follow-up it needs."
+    },
+    {
+      "id": "deal_stage",
+      "name": "Deal stage",
+      "voice_aliases": ["deal stage", "stage"],
+      "required": false,
+      "field_type": "choice",
+      "asr_prompt": "Deal stage. Discovery, qualified, proposal sent, negotiation, closed won, closed lost.",
+      "min_chars": 0,
+      "order": 4,
+      "options": [
+        {"value": "discovery", "label": "Discovery", "voice_aliases": ["discovery"]},
+        {"value": "qualified", "label": "Qualified", "voice_aliases": ["qualified"]},
+        {"value": "proposal", "label": "Proposal sent", "voice_aliases": ["proposal", "proposal sent"]},
+        {"value": "negotiation", "label": "Negotiation", "voice_aliases": ["negotiation"]},
+        {"value": "closed_won", "label": "Closed won", "voice_aliases": ["closed won", "won"]},
+        {"value": "closed_lost", "label": "Closed lost", "voice_aliases": ["closed lost", "lost"]}
+      ]
+    },
+    {
+      "id": "next_steps",
+      "name": "Next steps",
+      "voice_aliases": ["next steps", "follow up"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Agreed next steps. Send proposal, schedule demo, security questionnaire, intro to decision maker, follow up by, trial period.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "One bullet per step: 'Owner: step — date'. Include what the prospect committed to."
+    }
+  ]
+}

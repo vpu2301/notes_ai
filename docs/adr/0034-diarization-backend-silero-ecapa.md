@@ -13,7 +13,7 @@ stride) without degrading the v1 latency targets. The backend must fit
 the platform's non-negotiables: fully offline model loading
 (`HF_HUB_OFFLINE=1`), single-artifact checksum-pinned bakes
 (docs/models/PINS.md, ADR-0021 posture), no gated weights without an
-explicit process, and deterministic/explainable behavior for a medical
+explicit process, and deterministic/explainable behavior for a professional
 product.
 
 ## Candidates
@@ -48,10 +48,10 @@ online 2-speaker cosine clustering** (package
   `0.5·best_sim + 0.5·min(1, (best−second)/0.3)`.
 - Word attribution: majority overlap against `TokenTiming` start/end
   (≥30 % coverage, ≥65 % majority share, else `UNKNOWN`).
-- Doctor/patient mapping is a separate explainable inference
-  (opener 0.35 + clinician-register density 0.65; flips only on strong
-  evidence; frozen by manual `SetSpeakerMapping`) — see
-  `diarization/mapping.py` and docs/api/dictation-ws-v2.md.
+- Speaker labels are neutral (`SPEAKER_1..N`); display names come
+  only from the client's `set_speaker_mapping` message — there is no
+  server-side role inference — see `diarization/mapping.py` and
+  docs/api/dictation-ws-v2.md.
 
 ## Measured numbers (2026-07-26, Apple M5, CPU, `eval/conversations/v1`)
 

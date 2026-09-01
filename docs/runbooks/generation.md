@@ -24,11 +24,11 @@ an error because ghost text failed. That means outages here are
 `LayerCFilterRateHigh`: >10% of completions dropped by the safety filter
 over an hour (audited as `layer_c.completion.filtered`, warn).
 
-The model is routinely inventing clinical values. This is the
+The model is routinely inventing numeric values. This is the
 kill-switch input:
 
 1. Sample the audit events: `payload.reason` says which class fires
-   (blood_pressure / dosage / icd_code / date_like / bare_number) and
+   (money / percent / date_like / bare_number) and
    `payload.matched` the fragment.
 2. Prompt or model regression? Compare `MDX_GEN_MODEL` against the pin
    in docs/models/PINS.md — an unpinned model swap is the usual suspect.
@@ -49,12 +49,11 @@ kill-switch input:
 - `MDX_GEN_TENANT_ALLOWLIST` — empty = all tenants; non-listed tenants
   get silent 204s (`mdx_layer_c_completions_total{outcome="tenant_disabled"}`).
 - Rate limits: burst 10/s + 30/10s per user, fail-open on Redis loss.
-  A second, stricter **per-IP edge limit** (5 r/s + burst 8, nginx
-  `edge_completion` zone) sits in front on `public-edge` — an
-  unauthenticated flood 429s at the edge before spending app CPU;
-  debounced typing (~1–2 r/s) never touches it. See
-  `infra/edge/nginx.conf.template`.
+  A stricter per-IP limit at any fronting reverse proxy is
+  recommended in deployments — an unauthenticated flood should 429
+  at the edge before spending app CPU; debounced typing (~1–2 r/s)
+  never comes close.
 - Acceptance rate (`mdx_layer_c_acceptance_rate`, refreshed by the
   autocomplete nightly roll-up) is the feature's quality metric: a
-  falling rate means clinicians stopped accepting ghosts — review the
+  falling rate means users stopped accepting ghosts — review the
   filter rate and latency before assuming the model got worse.

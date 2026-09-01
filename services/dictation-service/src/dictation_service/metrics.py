@@ -137,7 +137,7 @@ conversation_sessions = _meter.create_counter(
 )
 speaker_mapping_updates = _meter.create_counter(
     "mdx_dictation_speaker_mapping_updates_total",
-    description="Doctor/patient mapping emissions by source (inferred|manual)",
+    description="Speaker-naming mapping emissions by source (manual)",
     unit="1",
 )
 diarization_window_ms = _meter.create_histogram(

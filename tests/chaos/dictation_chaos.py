@@ -30,7 +30,6 @@ not a failure.
 Required env:
 - ``DICTATION_TOKEN``     a valid bearer (issuer must match the service's
                           AUTH_ISSUER — mint it inside the compose network).
-- ``DICTATION_PROMPT_ID`` a seeded ``medical_prompts.id``.
 Optional env:
 - ``DICTATION_WS_URL``    default ws://localhost:8002/ws/dictate
 - ``DICTATION_READY_URL`` default http://localhost:8002/readyz
@@ -59,14 +58,12 @@ pytestmark = pytest.mark.skipif(
 WS_URL = os.environ.get("DICTATION_WS_URL", "ws://localhost:8002/ws/dictate")
 READY_URL = os.environ.get("DICTATION_READY_URL", "http://localhost:8002/readyz")
 ACCESS_TOKEN = os.environ.get("DICTATION_TOKEN", "")
-PROMPT_ID = os.environ.get("DICTATION_PROMPT_ID", "")
 RESTART_CMD = os.environ.get(
     "DICTATION_RESTART_CMD",
-    "docker compose -f infra/compose/base.yml -f infra/compose/dev.yml "
-    "restart dictation-service",
+    "docker compose -f infra/compose/base.yml -f infra/compose/dev.yml restart dictation-service",
 )
 
-SUBPROTOCOL = "medical-dictation.v1"
+SUBPROTOCOL = "dictation.v1"
 
 
 # ── Frame helpers ─────────────────────────────────────────────────────
@@ -165,7 +162,6 @@ async def _start_session(ws, *, resume_session_id: str | None = None) -> dict:  
     """
     msg = {
         "type": "start_session",
-        "prompt_id": PROMPT_ID,
         "language": "uk",
         "target_kind": "generic",
     }

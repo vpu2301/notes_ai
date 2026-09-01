@@ -85,8 +85,7 @@ class VerifyResponse(BaseModel):
 def _enrolment_switched_off() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="MFA enrolment is not enabled on this deployment "
-        "(MDX_MFA_ENROLMENT_ENABLED)",
+        detail="MFA enrolment is not enabled on this deployment (MDX_MFA_ENROLMENT_ENABLED)",
     )
 
 
@@ -140,9 +139,7 @@ async def enrol(claims: Annotated[Claims, Depends(current_user)]) -> EnrolRespon
     )
     account = claims.preferred_username or claims.email or str(claims.sub)
     try:
-        await state.keycloak.set_user_attributes(
-            claims.sub, {ATTR_SECRET_PENDING: [packed]}
-        )
+        await state.keycloak.set_user_attributes(claims.sub, {ATTR_SECRET_PENDING: [packed]})
     except KeycloakError as exc:
         raise HTTPException(status_code=503, detail="identity provider error") from exc
 
@@ -196,9 +193,7 @@ async def verify(
 
     if not totp.verify_code(secret, body.code):
         _mfa_counter.add(1, {"kind": "enrol_verify", "outcome": "invalid_code"})
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid TOTP code"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid TOTP code")
 
     enrolled_at = datetime.now(UTC).isoformat()
     try:
@@ -226,8 +221,7 @@ async def verify(
             conn.transaction(),
         ):
             await conn.execute(
-                "UPDATE users SET mfa_enrolled_at = now(), updated_at = now() "
-                "WHERE sub = $1",
+                "UPDATE users SET mfa_enrolled_at = now(), updated_at = now() WHERE sub = $1",
                 claims.sub,
             )
             await conn.execute(
@@ -296,8 +290,7 @@ async def reset(
     try:
         async with tenant_connection(state.tenant_writer_pool, claims.tid) as conn:
             await conn.execute(
-                "UPDATE users SET mfa_enrolled_at = NULL, updated_at = now() "
-                "WHERE sub = $1",
+                "UPDATE users SET mfa_enrolled_at = NULL, updated_at = now() WHERE sub = $1",
                 sub,
             )
     except Exception as db_exc:  # noqa: BLE001

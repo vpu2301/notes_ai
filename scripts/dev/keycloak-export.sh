@@ -10,7 +10,7 @@
 # rather not churn unless intentional.
 set -euo pipefail
 
-REALM="${REALM:-medical-dictation}"
+REALM="${REALM:-notes}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 OUT="${OUT:-infra/keycloak/realm-export.json}"
 

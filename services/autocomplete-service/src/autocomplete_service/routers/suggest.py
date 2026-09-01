@@ -71,9 +71,7 @@ async def suggest(
     def _observe(path: str) -> None:
         # Interface for the k6 gate + Grafana p95 panel (steps 07/08):
         # path ∈ hit | miss | degraded | snippet.
-        state.suggest_latency_metric.record(
-            (time.perf_counter() - t0) * 1000.0, {"path": path}
-        )
+        state.suggest_latency_metric.record((time.perf_counter() - t0) * 1000.0, {"path": path})
 
     # Snippet path: leading slash → trigger lookup.
     if sug.is_snippet_prefix(body.prefix):

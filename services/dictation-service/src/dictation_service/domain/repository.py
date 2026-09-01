@@ -22,9 +22,7 @@ async def insert_session(
     tenant_id: UUID,
     user_id: UUID,
     language: str,
-    prompt_id: UUID,
     target_kind: str,
-    encounter_id: UUID | None,
     template_id: UUID | None,
     worker_id: str,
     mode: str = "dictation",
@@ -32,17 +30,15 @@ async def insert_session(
     await conn.execute(
         """
         INSERT INTO dictation_sessions
-            (id, tenant_id, user_id, language, prompt_id, target_kind,
-             encounter_id, template_id, worker_id, status, started_at, mode)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',now(),$10)
+            (id, tenant_id, user_id, language, target_kind,
+             template_id, worker_id, status, started_at, mode)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'active',now(),$8)
         """,
         session_id,
         tenant_id,
         user_id,
         language,
-        prompt_id,
         target_kind,
-        encounter_id,
         template_id,
         worker_id,
         mode,
@@ -144,7 +140,7 @@ async def list_stale_sessions(
         await conn.fetch(
             """
             SELECT id, tenant_id, user_id, status, worker_id,
-                   encounter_id, last_active_at
+                   last_active_at
             FROM dictation_sessions
             WHERE status IN ('creating', 'active', 'paused', 'reconnecting')
               AND last_active_at < now() - make_interval(secs => $1::double precision)

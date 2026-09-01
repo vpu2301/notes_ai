@@ -1,0 +1,11 @@
+apiVersion: v2
+name: notes
+description: >-
+  Notes AI backend — production topology. Renders every compose service's
+  cluster counterpart: 9 app services, in-cluster stateful set for staging
+  (external/operator-managed in prod), one-shot migrate/seed jobs, the
+  nightly-verify CronJob, and the KEDA weighted-capacity scaler plus
+  default-deny NetworkPolicies.
+type: application
+version: 0.17.0
+appVersion: "notes-ai"

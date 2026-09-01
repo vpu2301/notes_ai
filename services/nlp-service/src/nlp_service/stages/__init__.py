@@ -2,8 +2,8 @@
 
 Order is the contract (ADR-0028): voice_commands → punctuation →
 number_norm → date_norm → abbreviation → field_extraction →
-confidence. Sprint 7 evals + sprint 8 reports + sprint 13 anamnesis all
-assume this order; changing it is an ADR-level event.
+confidence. Replay determinism and note drafting both assume this
+order; changing it is an ADR-level event.
 """
 
 from .abbreviation import AbbreviationStage

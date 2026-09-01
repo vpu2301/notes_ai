@@ -156,6 +156,17 @@
             ],
             "title": "Bp Separator"
           },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "date_format": {
             "anyOf": [
               {
@@ -210,17 +221,6 @@
             },
             "title": "Segments",
             "type": "array"
-          },
-          "specialty": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Specialty"
           },
           "stages_disabled": {
             "items": {
@@ -352,7 +352,7 @@
       },
       "ChoiceOptionIn": {
         "additionalProperties": false,
-        "description": "Sprint 13 \u2014 mirrors ``template_models.ChoiceOption``.",
+        "description": "Mirrors ``template_models.ChoiceOption``.",
         "properties": {
           "aliases": {
             "items": {
@@ -518,6 +518,17 @@
             ],
             "title": "Bp Separator"
           },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "date_format": {
             "anyOf": [
               {
@@ -570,17 +581,6 @@
               }
             ],
             "title": "Reference Date"
-          },
-          "specialty": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Specialty"
           },
           "stages_disabled": {
             "items": {

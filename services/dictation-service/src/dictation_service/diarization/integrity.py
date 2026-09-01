@@ -3,10 +3,10 @@
 The build-time contract (docs/models/PINS.md) fetches ECAPA at an immutable
 revision and verifies SHA-256 before baking. This module asserts the SAME
 digests again **at process startup**, so a tampered, truncated, or
-wrong-image layer is caught before the first patient consultation rather
+wrong-image layer is caught before the first recorded meeting rather
 than silently producing speaker labels from unknown weights.
 
-Fail-closed: a mismatch raises. For a medical product, refusing to start is
+Fail-closed: a mismatch raises. For a product recording sensitive audio, refusing to start is
 strictly better than diarizing with weights nobody can account for.
 
 Cost is ~0.2 s for the 83 MB artifact — paid once, off the request path.

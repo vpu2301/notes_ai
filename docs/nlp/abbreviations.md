@@ -1,6 +1,6 @@
 # Abbreviation Policy
 
-Sprint-05 Stage 5 applies a per-tenant + global merged dictionary to
+Pipeline Stage 5 applies a per-tenant + global merged dictionary to
 the post-processed text.
 
 ## Schema
@@ -10,7 +10,7 @@ abbreviation_dictionary(
     id, tenant_id NULL=global, language,
     expanded, abbreviated,
     direction (expand | compact | either),
-    domain (cardiology / endocrinology / pulmonology / neurology / all / NULL),
+    domain (free-form category, e.g. 'sales' / 'legal' / 'all' / NULL),
     case_sensitive
 )
 ```
@@ -21,7 +21,7 @@ Tenant rows override global on the same `(language, expanded, abbreviated)`.
 
 - `compact` — REPLACE expanded form with abbreviated. Default.
 - `expand` — REPLACE abbreviated with expanded.
-- `either` — pass through (the clinician's surface form wins).
+- `either` — pass through (the speaker's surface form wins).
 
 ## Snapshot semantics
 
@@ -41,11 +41,14 @@ inside `імпорт` (no boundary on the left). Case sensitivity is per-row.
 
 ## Domain filtering
 
-If `ProcessingContext.specialty` is set (e.g., `cardiology`), rules
-with `domain=specialty` win over `domain='all'` win over `domain=NULL`.
+If `ProcessingContext.category` is set (the note template's business
+category, sent as `category` on `/nlp/process`), rules with
+`domain=category` win over `domain='all'`, which wins over
+`domain=NULL`.
 
-This is what lets `ІМ` mean "infarct" in a cardiology session and
-remain ambiguous otherwise.
+This is what lets the same abbreviation expand differently in, say, a
+legal-review session than in a sales call — a tenant can scope a rule
+to the template categories where it is unambiguous.
 
 ## Admin API
 
@@ -62,11 +65,11 @@ remain ambiguous otherwise.
 
 Reads see own-tenant rows OR global rows. Writes are limited to
 own-tenant rows. Cross-tenant access is impossible at the DB layer
-(sprint-02 RLS-first invariant).
+(RLS-first invariant).
 
-## Global seed
+## Global rows
 
-`infra/postgres/seed/abbreviations_global.sql` ships ~40 cardiology /
-endocrinology / pulmonology / neurology starter entries reviewed by
-the clinical content lead. Tenants can override any of them via
-`PUT /nlp/abbreviations`.
+No global dictionary is seeded out of the box — `tenant_id IS NULL`
+rows are reserved for operator-managed defaults (loaded via the
+`tenant_writer` role). Tenants build their own vocabulary via
+`PUT /nlp/abbreviations` and can override any global row.

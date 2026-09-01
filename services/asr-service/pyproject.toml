@@ -1,7 +1,7 @@
 [project]
 name = "asr-service"
 version = "0.3.0"
-description = "Sprint-03 batch ASR orchestrator. Accepts uploads, validates, enqueues to Redis Streams, returns results."
+description = "Batch ASR orchestrator. Accepts uploads, validates, enqueues to Redis Streams, returns results."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",

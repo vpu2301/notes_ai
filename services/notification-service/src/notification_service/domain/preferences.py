@@ -180,7 +180,7 @@ def _resolve_email(
     if email_mode is EmailMode.DIGEST:
         if not spec.digest_eligible:
             # The user asked to batch this, but the category refuses to be
-            # batched (a signing failure, a chain-integrity alert). Send it
+            # batched (a chain-integrity alert, a failed job). Send it
             # immediately rather than silently dropping it — a preference
             # may not downgrade an alert into nothing.
             return _immediate_or_deferred(settings, now)

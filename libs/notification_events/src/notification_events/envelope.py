@@ -18,9 +18,10 @@ from .enums import Category
 EVENT_SCHEMA_VERSION: Final = "1"
 
 # A payload value must be a scalar. Nested structures are refused because
-# they are the easy path to smuggling a whole report body — and therefore
-# PHI — into an email template. Keeping the payload flat and small keeps
-# the PHI boundary auditable by reading one dict.
+# they are the easy path to smuggling a whole note body — and therefore
+# user content and personal data — into an email template. Keeping the
+# payload flat and small keeps the content boundary auditable by reading
+# one dict.
 _ALLOWED_PAYLOAD_TYPES: Final = (str, int, float, bool, type(None))
 _MAX_PAYLOAD_KEYS: Final = 20
 _MAX_PAYLOAD_VALUE_LEN: Final = 200
@@ -56,15 +57,15 @@ class NotificationEvent(BaseModel):
 
     occurred_at: datetime
 
-    # Recipients the PRODUCER already knows (a report's author and
+    # Recipients the PRODUCER already knows (a note's author and
     # co-authors). Categories whose recipient rule is role-derived —
-    # report.chain_failure fans out to tenant admins — leave this empty
+    # note.chain_failure fans out to tenant admins — leave this empty
     # and let the consumer resolve it; the producer has no business
     # querying the membership table.
     recipient_hints: tuple[UUID, ...] = ()
 
-    # Flat, scalar-only, PHI-free. Carries pointers (a report code, a
-    # provider name), never content.
+    # Flat, scalar-only, free of note content and personal data. Carries
+    # pointers (a note code, an error kind), never content.
     payload: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
     @field_validator("occurred_at")
@@ -87,7 +88,7 @@ class NotificationEvent(BaseModel):
             if not isinstance(value, _ALLOWED_PAYLOAD_TYPES):
                 raise ValueError(
                     f"payload[{key!r}] is {type(value).__name__}; "
-                    "only scalars are allowed (see the PHI boundary, ADR-0031)"
+                    "only scalars are allowed (see the content boundary, ADR-0031)"
                 )
             if isinstance(value, str) and len(value) > _MAX_PAYLOAD_VALUE_LEN:
                 raise ValueError(

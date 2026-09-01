@@ -1,16 +1,16 @@
 """Templates JSONB schema (sprint 06).
 
 Public contract:
-- ``extra="forbid"`` on every model. Sprint-7 evals + sprint-8 reports
-  rely on schema stability; an unknown field is either a typo (catch
-  early) or a real new feature (forces a Pydantic model bump + ADR).
+- ``extra="forbid"`` on every model. Notes rely on schema stability;
+  an unknown field is either a typo (catch early) or a real new
+  feature (forces a Pydantic model bump + ADR).
 - ``ASR_PROMPT_MAX_TOKENS = 224`` matches Whisper's ``initial_prompt``
-  context window. Authoring guidance lives in
-  ``docs/clinical-content/template-authoring.md``.
-- Sprint-06 shipped five ``FieldType`` values; sprint 13 (anamnesis)
-  added ``CHOICE`` and ``MULTI_CHOICE`` as an additive model bump:
-  old templates validate and serialize byte-identically (``options``
-  is omitted from dumps when empty — see ``TemplateSection``).
+  context window.
+- Sprint-06 shipped the first ``FieldType`` values; sprint 13 (typed
+  fields) added ``CHOICE`` and ``MULTI_CHOICE`` as an additive model
+  bump: old templates validate and serialize byte-identically
+  (``options`` is omitted from dumps when empty — see
+  ``TemplateSection``).
 
 ``classify_edit`` is the cosmetic-vs-structural decision rule from
 ADR-0016. Cosmetic edits UPDATE in place + bump ``schema_version``;
@@ -27,6 +27,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -42,20 +43,19 @@ from pydantic import (
 # authorship-time validator (scripts/validate-templates.py) uses
 # tiktoken for the exact count; this constant gates runtime length.
 ASR_PROMPT_MAX_TOKENS: Final = 224
-# Approximate token-to-character ratio for medical text: 4 chars/token
-# is a safe upper bound across UK + EN tokenizers.
+# Approximate token-to-character ratio: 4 chars/token is a safe upper
+# bound across UK + EN tokenizers.
 _APPROX_CHARS_PER_TOKEN: Final = 4
 _ASR_PROMPT_MAX_CHARS_APPROX: Final = ASR_PROMPT_MAX_TOKENS * _APPROX_CHARS_PER_TOKEN
 
 
 class FieldType(StrEnum):
-    """Sprint-06 shipped the first five; sprint-13 adds the two choice
+    """Sprint-06 shipped the first kinds; sprint-13 adds the two choice
     kinds. Adding enum members is additive to the *model*; changing an
     existing section's ``field_type`` remains a STRUCTURAL edit
     (ADR-0016)."""
 
     FREE_TEXT = "free_text"
-    STRUCTURED_DIAGNOSIS = "structured_diagnosis"
     DATE = "date"
     DATE_WITH_NOTE = "date_with_note"
     NUMERIC_WITH_UNIT = "numeric_with_unit"
@@ -80,7 +80,7 @@ class _Strict(BaseModel):
 class ChoiceOption(_Strict):
     """One selectable option of a ``choice``/``multi_choice`` section.
 
-    ``value`` is the stable identity persisted in report content
+    ``value`` is the stable identity persisted in note content
     (``field_specific_metadata``); renaming or removing a value is a
     STRUCTURAL template edit because stored selections would dangle.
     ``voice_aliases`` fuel the sprint-13 extractor and are normalized
@@ -135,8 +135,8 @@ class TemplateSection(_Strict):
     min_chars: int = Field(default=0, ge=0, le=10_000)
     order: int = Field(default=0, ge=0)
     default_content: str = Field(default="", max_length=4_000)
-    # Per-section synthesis guidance read by sprint-12 (Gemma) to turn the
-    # dictated raw text into the section's final prose. Optional: an empty
+    # Per-section synthesis guidance read by the synthesis engine to turn
+    # the dictated raw text into the section's final prose. Optional: an empty
     # value means "no section-specific synthesis guidance". Editing it is a
     # cosmetic change (see ``classify_edit``).
     synthesis_prompt: str = Field(default="", max_length=2_000)
@@ -227,11 +227,9 @@ class TemplateSection(_Strict):
 
 
 class TemplateMetadata(_Strict):
-    """Optional metadata. Sprint-17 FHIR / Composition emission reads these."""
+    """Optional metadata attached to a template definition."""
 
-    moh_order_ref: str | None = Field(default=None, max_length=64)
     billing_code: str | None = Field(default=None, max_length=32)
-    fhir_template: str | None = Field(default=None, max_length=128)
     notes: str = Field(default="", max_length=2_000)
 
 
@@ -239,14 +237,21 @@ class TemplateDefinition(_Strict):
     """Full template definition. Stored as ``templates.schema_jsonb``.
 
     The top-level ``code`` + ``language`` pair is the human-readable
-    identifier; the row's UUID is the system identifier. Sprint 8
-    reports persist the UUID + ``schema_version`` at finalization.
+    identifier; the row's UUID is the system identifier. Notes persist
+    the UUID + ``schema_version`` at finalization.
     """
 
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=256)
     language: str = Field(pattern="^(uk|en)$")
-    specialty: str = Field(min_length=1, max_length=64)
+    # Coarse browse facet ("meetings", "sales", "hr", …). Accepts the
+    # legacy JSON key ``specialty`` on input (pre-rename dumps and the
+    # seed files still carry it); always serialises as ``category``.
+    category: str = Field(
+        min_length=1,
+        max_length=64,
+        validation_alias=AliasChoices("category", "specialty"),
+    )
     schema_version: int = Field(default=1, ge=1)
     sections: tuple[TemplateSection, ...] = Field(min_length=1, max_length=32)
     metadata: TemplateMetadata = Field(default_factory=TemplateMetadata)
@@ -262,9 +267,9 @@ class TemplateDefinition(_Strict):
     def _validate_aliases_unique(self) -> TemplateDefinition:
         """Voice aliases must be unique across the template's sections.
 
-        Two sections claiming alias "діагноз" would make the section
-        command ambiguous; the matcher would pick the first and
-        clinicians would learn it doesn't work.
+        Two sections claiming alias "рішення" would make the section
+        command ambiguous; the matcher would pick the first and users
+        would learn it doesn't work.
         """
         seen: dict[str, str] = {}
         for section in self.sections:
@@ -314,13 +319,13 @@ def classify_edit(old: TemplateDefinition, new: TemplateDefinition) -> EditClass
     - a section's ``required`` flag flipped,
     - a section's ``min_chars`` increased (loosening is cosmetic),
     - a choice section's option ``value`` removed (a rename is
-      remove+add of the stable identity — stored selections in report
+      remove+add of the stable identity — stored selections in note
       ``field_specific_metadata`` would dangle).
 
     Everything else is cosmetic
     (name/aliases/asr_prompt/order/default_content/synthesis_prompt/metadata;
     for options: adding an option, adding/changing voice aliases, and
-    label-only changes — existing reports' selected values stay valid).
+    label-only changes — existing notes' selected values stay valid).
     A no-change edit is classified as :class:`EditKind.NO_CHANGE` so the
     caller can short-circuit.
     """

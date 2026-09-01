@@ -10,8 +10,8 @@ intentional voice commands. Three gates defend against false positives:
 3. **Edit-distance tolerance**: at most one substitution per phrase;
    substituted word's Levenshtein distance from expected ≤ 2.
 
-False positives are the primary clinical-trust risk in sprint 5; the
-defaults err on the side of "didn't fire" rather than "fired wrong."
+False positives are the primary user-trust risk here; the defaults err
+on the side of "didn't fire" rather than "fired wrong."
 
 Section commands (``intent`` starts with ``section.``) additionally
 resolve their argument by matching the words AFTER the command head
@@ -187,12 +187,6 @@ class VoiceCommandMatcher:
                 consumed = consumed + tuple(range(i + n, i + n + section_consumed))
                 after = i + n + section_consumed
                 intent_full = f"section.{section_id}"
-            elif phrase.intent == "diagnosis.capture":
-                # A HINT, not a selection: mark where the dictated
-                # diagnosis text begins so step-05's extractor (and the
-                # FE) know what to read. No ICD-10 is chosen by voice.
-                arg = {"from_word_index": str(after)}
-                intent_full = phrase.intent
             else:
                 intent_full = phrase.intent
 
@@ -291,13 +285,13 @@ class VoiceCommandMatcher:
 
         The FSM layer matches EXACTLY (normalized), never fuzzily:
         fuzziness belongs to the extractor, where a wrong guess only
-        produces a proposal the clinician can reject. A voice command
+        produces a proposal the user can reject. A voice command
         writes directly, so an unresolvable option must become a
         precise no-op — never a guess.
 
         As-built note: ``ProcessingContext`` has no "active section"
-        (verified in sprint 13 step 04 — section-aware streaming was
-        never wired). So the option resolves across ALL choice sections
+        (section-aware streaming was never wired). So the option
+        resolves across ALL choice sections
         in the template snapshot, and an alias claimed by two sections
         is reported ambiguous rather than arbitrarily assigned.
         """
@@ -339,13 +333,13 @@ class VoiceCommandMatcher:
                 return {"section_key": section_key, "value": value}, span
             if len(unique) > 1:
                 # The same words name options in two sections — the
-                # clinician must disambiguate; we never pick.
+                # user must disambiguate; we never pick.
                 return {"reason": "option_ambiguous"}, span
         # Words followed the head but named no option we know. REJECT
         # rather than emitting an "option_not_found" no-op: a no-op would
-        # still CONSUME the head, deleting a word from clinical prose
-        # ("встановити діагноз поки неможливо"). A missing toast is
-        # recoverable; a silently eaten clinical word is not. A reason is
+        # still CONSUME the head, deleting a word from ordinary prose
+        # ("обрати варіант поки неможливо"). A missing toast is
+        # recoverable; a silently eaten word is not. A reason is
         # only reported when an option name was positively recognised
         # (ambiguous, or right name / wrong field type).
         return None, 0

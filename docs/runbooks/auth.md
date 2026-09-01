@@ -31,7 +31,7 @@ cache expires.
 
 **Recovery:**
 1. Restart the Keycloak container (`docker compose restart keycloak`).
-   Confirm `/realms/medical-dictation/.well-known/openid-configuration`
+   Confirm `/realms/notes/.well-known/openid-configuration`
    responds 200.
 2. Watch `mdx_jwks_refresh_attempts_total` climb — services will
    re-prime their caches naturally on the first verify.
@@ -123,7 +123,7 @@ account, role granted in error, or a need-to-know change.
 **Steps:**
 1. As a `tenant_admin`, set the user's full realm-role set:
    ```
-   PUT /admin/users/{sub}/roles      body: {"roles": ["clinician"]}
+   PUT /admin/users/{sub}/roles      body: {"roles": ["member"]}
    ```
    Unknown roles are rejected (422). The endpoint **refuses (409)** to
    strip `tenant_admin` from the *last* active tenant_admin of a tenant,
@@ -166,7 +166,7 @@ account, role granted in error, or a need-to-know change.
    ```
 3. Pull the Keycloak event log for the affected user:
    ```
-   GET /admin/realms/medical-dictation/events?user={sub}
+   GET /admin/realms/notes/events?user={sub}
    ```
    Look for unusual IPs, user agents, or geolocations.
 4. If the user can be reached, ask them to confirm whether they've

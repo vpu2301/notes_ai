@@ -1,6 +1,6 @@
 # Date & Time Normalization
 
-Sprint-05 Stage 4 transforms spelled / relative / colloquial dates
+Pipeline Stage 4 transforms spelled / relative / colloquial dates
 into a canonical form per the tenant's `date_format`.
 
 ## Format options
@@ -41,7 +41,7 @@ to a date.
 - Numeric: `01.05.2026` / `2026-05-01`.
 - Word-form UK: `1 травня 2026` (declined month).
 - Spelled ordinal day UK: `третього травня` → `03.05.2026`, including
-  compounds (`двадцять першого грудня` → `21.12.<year>`). Clinicians
+  compounds (`двадцять першого грудня` → `21.12.<year>`). Speakers
   dictate the day as a genitive ordinal, which Stage 3 (cardinals only)
   leaves untouched, so Stage 4 maps `першого…тридцять першого` directly.
 - Word-form EN: `May 1, 2026` or `May first 2026`.
@@ -55,18 +55,18 @@ Year defaults to `reference_date.year` if omitted.
 
 A date that fails Python's `date()` constructor (e.g., `31.04.2026` —
 April has 30 days) is NOT corrected. It passes through as
-`31.04.2026` and emits `Warning{code="ambiguous_date"}`. Sprint 08's
-clinical-rules layer validates and surfaces to the clinician.
+`31.04.2026` and emits `Warning{code="ambiguous_date"}` for downstream
+validation to surface to the user.
 
 ## Times
 
 - `о пів на <hour>` / `half past <hour>` → `HH:30`.
 - German `um 8 Uhr [30]` → `08:00` / `08:30`. `Uhr` is required — a bare
-  "um 8" is as often a dose interval as a clock time.
+  "um 8" is as often a quantity as a clock time.
 - German `halb acht` → **`07:30`**, not 08:30: `halb` counts down to the
   named hour. `Viertel vor/nach zehn` → `09:45` / `10:15`. `halb eins`
   is `12:30` — a spoken 12-hour clock names the coming hour and midday
-  is the overwhelmingly likely reading in a consultation.
+  is the overwhelmingly likely reading in a working session.
 - Explicit `HH:MM` passes through.
 
 ## Reference-date discipline
@@ -77,4 +77,5 @@ cache key — so cached re-runs are deterministic even when the caller
 didn't pin the date.
 
 A `missing_reference_date` warning fires every time the server falls
-back; pilot week catches callers that aren't pinning their reference.
+back; rollout telemetry catches callers that aren't pinning their
+reference.

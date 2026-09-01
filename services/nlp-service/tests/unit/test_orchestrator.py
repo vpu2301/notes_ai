@@ -78,7 +78,7 @@ def _ctx(
     return ProcessingContext(
         tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
         language="uk",
-        specialty=None,
+        category=None,
         reference_date=date(2026, 1, 1),
         is_partial=is_partial,
         abbreviation_snapshot=AbbreviationSnapshot(entries=(), fingerprint="x"),
@@ -122,9 +122,7 @@ def test_disabled_stage_is_skipped_with_metadata() -> None:
     # Sprint 14: a disabled stage is skipped and leaves a deterministic
     # metadata marker (must survive _strip_nondeterministic).
     orch = Orchestrator(stages=[_Identity(), _Uppercase()])
-    out = asyncio.run(
-        orch.run(_ctx(stages_disabled=("uppercase",)), StageInput(text="hello"))
-    )
+    out = asyncio.run(orch.run(_ctx(stages_disabled=("uppercase",)), StageInput(text="hello")))
     assert out.text == "hello"  # NOT uppercased
     assert out.metadata["uppercase.skipped_disabled"] is True
 
@@ -182,7 +180,7 @@ def test_pipeline_version_change_invalidates_cache() -> None:
     ctx_v2 = ProcessingContext(
         tenant_id=ctx_v1.tenant_id,
         language=ctx_v1.language,
-        specialty=ctx_v1.specialty,
+        category=ctx_v1.category,
         reference_date=ctx_v1.reference_date,
         is_partial=ctx_v1.is_partial,
         abbreviation_snapshot=ctx_v1.abbreviation_snapshot,

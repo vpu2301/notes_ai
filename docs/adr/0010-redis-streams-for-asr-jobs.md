@@ -11,7 +11,7 @@
 Sprint 03's ASR pipeline needs a job queue with these properties:
 
 - At-least-once delivery so worker crashes don't lose jobs.
-- ~tens-of-ms enqueue latency so a clinician's "submit" doesn't feel
+- ~tens-of-ms enqueue latency so a user's "submit" doesn't feel
   laggy.
 - Consumer groups so multiple worker replicas share a single queue
   without coordination.
