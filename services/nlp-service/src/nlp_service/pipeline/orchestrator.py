@@ -1,0 +1,337 @@
+"""Pipeline orchestrator with idempotence cache.
+
+Why a single orchestrator class instead of inlining the loop:
+1. The cache + idempotence key are infrastructure concerns that don't
+   belong in any stage's responsibility.
+2. Sprint 7's eval harness will replay historical inputs through the
+   exact same orchestrator with frozen pipeline_version +
+   abbreviation_snapshot.fingerprint — byte-equal output is the
+   reproducibility contract.
+3. Idempotence violations are detectable HERE (compare cache hit vs
+   fresh run) — the alert lives in ``mdx_nlp_idempotence_violations_total``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import time
+from dataclasses import asdict
+from typing import Any, Protocol
+
+from opentelemetry import metrics
+
+from .base import (
+    PipelineWarning,
+    ProcessingContext,
+    Stage,
+    StageInput,
+    StageOutput,
+)
+
+logger = logging.getLogger(__name__)
+
+_meter = metrics.get_meter("mdx.nlp.orchestrator")
+_cache_hits = _meter.create_counter(
+    "mdx_nlp_cache_hits_total",
+    description="Idempotence-cache hits at orchestrator",
+    unit="1",
+)
+_cache_misses = _meter.create_counter(
+    "mdx_nlp_cache_misses_total",
+    description="Idempotence-cache misses at orchestrator",
+    unit="1",
+)
+_idempotence_violations = _meter.create_counter(
+    "mdx_nlp_idempotence_violations_total",
+    description="Identical inputs produced different outputs — bug.",
+    unit="1",
+)
+_stage_latency_ms = _meter.create_histogram(
+    "mdx_nlp_request_duration_ms",
+    description="Per-stage latency",
+    unit="ms",
+)
+
+
+class CacheProtocol(Protocol):
+    """Tiny duck-typed cache surface; real impl in main_deps backed by Redis."""
+
+    async def get(self, key: str) -> bytes | None: ...  # pragma: no cover
+
+    async def set(self, key: str, value: bytes, ttl_seconds: int) -> None: ...  # pragma: no cover
+
+
+class Orchestrator:
+    """Run the configured stages in order, with cache + telemetry.
+
+    ``cache`` may be None — tests instantiate without one. Production
+    always supplies a Redis-backed instance.
+    """
+
+    def __init__(
+        self,
+        *,
+        stages: list[Stage],
+        cache: CacheProtocol | None = None,
+        cache_ttl_seconds: int = 3600,
+    ) -> None:
+        self._stages = stages
+        self._cache = cache
+        self._cache_ttl = cache_ttl_seconds
+
+    async def run(
+        self,
+        ctx: ProcessingContext,
+        initial: StageInput,
+    ) -> StageOutput:
+        key = idempotence_key(ctx, initial)
+        if self._cache is not None:
+            cached = await self._cache.get(key)
+            if cached is not None:
+                _cache_hits.add(1, {"language": ctx.language})
+                return _decode_cached(cached)
+            _cache_misses.add(1, {"language": ctx.language})
+
+        current = StageOutput(
+            text=initial.text,
+            words=initial.words,
+            confidence_spans=initial.confidence_spans,
+            voice_commands=initial.voice_commands,
+            operations=initial.operations,
+            warnings=initial.warnings,
+            numeric_artifacts=initial.numeric_artifacts,
+            date_artifacts=initial.date_artifacts,
+        )
+
+        for stage in self._stages:
+            if stage.name in ctx.stages_disabled:
+                current = StageOutput(
+                    text=current.text,
+                    words=current.words,
+                    confidence_spans=current.confidence_spans,
+                    voice_commands=current.voice_commands,
+                    operations=current.operations,
+                    warnings=current.warnings,
+                    metadata={**current.metadata, f"{stage.name}.skipped_disabled": True},
+                    numeric_artifacts=current.numeric_artifacts,
+                    date_artifacts=current.date_artifacts,
+                )
+                continue
+            if ctx.is_partial and not stage.runs_on_partials:
+                current = StageOutput(
+                    text=current.text,
+                    words=current.words,
+                    confidence_spans=current.confidence_spans,
+                    voice_commands=current.voice_commands,
+                    operations=current.operations,
+                    warnings=current.warnings,
+                    metadata={**current.metadata, f"{stage.name}.skipped_partial": True},
+                    numeric_artifacts=current.numeric_artifacts,
+                    date_artifacts=current.date_artifacts,
+                )
+                continue
+            t0 = time.monotonic()
+            try:
+                out = await stage.process(ctx, current.as_input())
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "nlp.stage_failed",
+                    extra={"stage": stage.name, "error": str(exc)},
+                )
+                out = StageOutput(
+                    text=current.text,
+                    words=current.words,
+                    confidence_spans=current.confidence_spans,
+                    voice_commands=current.voice_commands,
+                    operations=current.operations,
+                    warnings=current.warnings
+                    + (
+                        PipelineWarning(
+                            code="stage_failed",
+                            detail=f"{type(exc).__name__}: {exc}",
+                            stage=stage.name,
+                        ),
+                    ),
+                    metadata={**current.metadata, f"{stage.name}.error": type(exc).__name__},
+                    numeric_artifacts=current.numeric_artifacts,
+                    date_artifacts=current.date_artifacts,
+                )
+            dt_ms = (time.monotonic() - t0) * 1000.0
+            _stage_latency_ms.record(dt_ms, {"stage": stage.name, "language": ctx.language})
+            current = StageOutput(
+                text=out.text,
+                words=out.words,
+                confidence_spans=out.confidence_spans,
+                voice_commands=out.voice_commands,
+                operations=out.operations,
+                warnings=out.warnings,
+                metadata={**current.metadata, **out.metadata},
+                # Artifacts accumulate: a stage that emits none must not
+                # erase what an earlier stage produced.
+                numeric_artifacts=out.numeric_artifacts or current.numeric_artifacts,
+                date_artifacts=out.date_artifacts or current.date_artifacts,
+            )
+
+        # Strip wall-clock telemetry before the value becomes part of the
+        # deterministic output: per-stage ``*.latency_ms`` keys vary run to
+        # run, which would break the sprint-07 byte-equal replay contract and
+        # poison the idempotence-violation detector. True per-stage latency is
+        # already recorded to the ``mdx_nlp_request_duration_ms`` histogram
+        # above; the response body and cache carry only deterministic metadata.
+        # Artifacts are an INTERNAL stage-to-stage channel. They are
+        # deliberately dropped here: they never reach the response body
+        # or the cache, so adding them cannot change replay bytes.
+        current = StageOutput(
+            text=current.text,
+            words=current.words,
+            confidence_spans=current.confidence_spans,
+            voice_commands=current.voice_commands,
+            operations=current.operations,
+            warnings=current.warnings,
+            metadata=_strip_nondeterministic(current.metadata),
+        )
+
+        if self._cache is not None:
+            await self._cache.set(key, _encode_for_cache(current), self._cache_ttl)
+        return current
+
+
+# ── Idempotence key ─────────────────────────────────────────────────
+
+
+def idempotence_key(ctx: ProcessingContext, initial: StageInput) -> str:
+    """Stable hash over (input, ctx). Pipeline_version + snapshot
+    fingerprint are part of the hash so a bump invalidates the cache."""
+    doc: dict[str, Any] = {
+        "v": "nlp-cache-v4",  # v4: + stages_disabled (sprint 14)
+        "pipeline_version": ctx.pipeline_version,
+        "tenant_id": str(ctx.tenant_id),
+        "language": ctx.language,
+        "specialty": ctx.specialty,
+        "reference_date": ctx.reference_date.isoformat(),
+        "is_partial": ctx.is_partial,
+        # Same text/words produce DIFFERENT output depending on inline op
+        # application — without this field batch and streaming would share
+        # a cache entry.
+        "apply_operations_inline": ctx.apply_operations_inline,
+        # Sprint 14: a request with a stage disabled must never share a
+        # cache entry with one running the full pipeline.
+        "stages_disabled": sorted(ctx.stages_disabled),
+        "snapshot_fingerprint": ctx.abbreviation_snapshot.fingerprint,
+        "decimal_separator": ctx.decimal_separator,
+        "bp_separator": ctx.bp_separator,
+        "date_format": ctx.date_format,
+        # Sprint 13: field_type + options participate in the key — two
+        # requests with identical text but different option sets MUST NOT
+        # share a cache entry, or one section's proposals would be served
+        # for another's.
+        "template_sections": [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "aliases": list(s.aliases),
+                "section_key": s.section_key,
+                "field_type": s.field_type,
+                "options": [
+                    {"value": o.value, "label": o.label, "aliases": list(o.aliases)}
+                    for o in s.options
+                ],
+            }
+            for s in ctx.template_sections
+        ],
+        "text": initial.text,
+        "words": [
+            {
+                "text": w.text,
+                "start_s": w.start_s,
+                "end_s": w.end_s,
+                "probability": w.probability,
+                "is_voice_command_token": w.is_voice_command_token,
+            }
+            for w in initial.words
+        ],
+    }
+    canon = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+# ── Cache (de)serialization ─────────────────────────────────────────
+
+
+def _encode_for_cache(out: StageOutput) -> bytes:
+    return json.dumps(
+        {
+            "text": out.text,
+            "words": [
+                {
+                    "text": w.text,
+                    "start_s": w.start_s,
+                    "end_s": w.end_s,
+                    "probability": w.probability,
+                    "is_voice_command_token": w.is_voice_command_token,
+                }
+                for w in out.words
+            ],
+            "confidence_spans": [asdict(s) for s in out.confidence_spans],
+            "voice_commands": [asdict(c) for c in out.voice_commands],
+            "operations": [asdict(o) for o in out.operations],
+            "warnings": [asdict(w) for w in out.warnings],
+            "metadata": _coerce_jsonable(out.metadata),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _decode_cached(raw: bytes) -> StageOutput:
+    from .base import (
+        CommandSlot,
+        ConfidenceSpan,
+        Operation,
+        PipelineWarning,
+        Word,
+    )
+
+    doc = json.loads(raw.decode("utf-8"))
+    return StageOutput(
+        text=doc["text"],
+        words=tuple(Word(**w) for w in doc.get("words", [])),
+        confidence_spans=tuple(ConfidenceSpan(**s) for s in doc.get("confidence_spans", [])),
+        voice_commands=tuple(CommandSlot(**c) for c in doc.get("voice_commands", [])),
+        operations=tuple(Operation(**o) for o in doc.get("operations", [])),
+        warnings=tuple(PipelineWarning(**w) for w in doc.get("warnings", [])),
+        metadata=dict(doc.get("metadata", {})),
+    )
+
+
+_NONDETERMINISTIC_METADATA_SUFFIXES = (".latency_ms",)
+
+
+def _strip_nondeterministic(d: dict[str, Any]) -> dict[str, Any]:
+    """Drop wall-clock telemetry keys so the output is byte-stable.
+
+    Per-stage ``*.latency_ms`` values vary run to run; they must not reach
+    the cache or the response body, which are governed by the sprint-07
+    byte-equal replay contract. Deterministic flags (``*.path``,
+    ``*.skipped_partial``, ``*.error``, ``*.fallback``) are preserved.
+    """
+    return {
+        k: v
+        for k, v in d.items()
+        if not any(k.endswith(suffix) for suffix in _NONDETERMINISTIC_METADATA_SUFFIXES)
+    }
+
+
+def _coerce_jsonable(d: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort: strip non-JSON values from per-stage metadata."""
+    out: dict[str, Any] = {}
+    for k, v in d.items():
+        try:
+            json.dumps(v)
+            out[k] = v
+        except (TypeError, ValueError):
+            out[k] = str(v)
+    return out

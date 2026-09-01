@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env.local
+# docker compose auto-loads `.env` from this directory — it holds the real
+# sales@klarnote.com App Password (SMTP + IMAP). Never commit it.
+.env
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Secrets — never commit real secrets
+.env.local
+*.pem
+*.key
+secrets/
+
+# uv
+# Note: uv.lock IS committed (deterministic dependency resolution).
+# Only the build-time virtualenv is ignored; that's covered by `.venv/` above.
+infra/edge/certs/
+
+# Sprint 21: terminology source snapshots are fetched, never committed —
+# provenance lives in infra/seeds/corpus/sources.lock (committed).
+infra/seeds/corpus/sources/

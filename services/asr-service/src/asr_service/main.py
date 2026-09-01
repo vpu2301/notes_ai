@@ -1,0 +1,110 @@
+"""asr-service entry point.
+
+Sprint 03 surface:
+- ``/healthz`` / ``/readyz``
+- ``/asr/jobs``   POST upload, GET list, GET id, DELETE id
+
+Use ``create_app()`` for tests; production runs via
+``uvicorn asr_service.main:app --host 0.0.0.0 --port 8000``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from observability import bootstrap, register_exception_handlers
+
+from .config import settings
+from .deps import install_state
+from .domain.reaper import reaper_loop
+from .main_deps import build_state, teardown_state
+from .middleware import RequestIDMiddleware
+from .routers import health, jobs, prompts
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    bootstrap(
+        settings.service_name,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+        log_level=settings.log_level,
+        deployment_environment=settings.environment,
+        package_name="asr-service",
+        disable_otel=settings.testing or settings.otel_sdk_disabled,
+    )
+
+    state = await build_state()
+    app.state.svc = state
+    install_state(state)
+
+    # Out-of-process backstop for jobs stranded by a dead worker — the
+    # worker is the only writer of a job's terminal status, and it cannot
+    # write one for the crash that killed it.
+    reaper_stop = asyncio.Event()
+    reaper_task: asyncio.Task[None] | None = None
+    if settings.job_reaper_enabled:
+        reaper_task = asyncio.create_task(reaper_loop(state, reaper_stop))
+
+    logger.info(
+        "asr-service starting",
+        extra={
+            "service": settings.service_name,
+            "env": settings.environment,
+            "issuer": settings.auth_issuer,
+            "audio_bucket": settings.s3_audio_bucket,
+            "job_reaper": settings.job_reaper_enabled,
+        },
+    )
+    try:
+        yield
+    finally:
+        reaper_stop.set()
+        if reaper_task is not None:
+            reaper_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await reaper_task
+        await teardown_state(state)
+        logger.info("asr-service shutting down")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="ASR Service",
+        description="Sprint-03 batch ASR orchestrator (upload, queue, fetch).",
+        version="0.3.0",
+        openapi_version="3.1.0",
+        lifespan=_lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+    # CORS for the SPA. allow_credentials=True is required so the browser sends
+    # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
+    # origin, so origins are an explicit allow-list (mirror auth-service A3).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        expose_headers=["WWW-Authenticate"],
+        max_age=600,
+    )
+    app.include_router(health.router)
+    app.include_router(jobs.router)
+    app.include_router(prompts.router)
+    FastAPIInstrumentor.instrument_app(app)
+    return app
+
+
+app = create_app()

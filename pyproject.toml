@@ -1,0 +1,411 @@
+[tool.uv.workspace]
+members = ["services/*", "libs/*"]
+
+[dependency-groups]
+# Dev-only. faster-whisper is intentionally excluded from asr-worker's
+# *runtime* deps on macOS (services/asr-worker/pyproject.toml) so dev installs
+# stay light and the CPU path is mocked in tests; prod images pin it via the
+# Dockerfile. Pull it into the shared dev venv on macOS only, so the WER eval
+# harness (scripts/eval/run_wer.py) runs out of the box with a bare
+# `uv run python scripts/eval/run_wer.py --corpus eval/corpus`. macOS-gated:
+# Linux/CI resolution and the production images are unchanged.
+dev = [
+    "faster-whisper>=1.0.0 ; sys_platform == 'darwin'",
+    # Sprint 14 diarization: silero-vad + speechbrain are excluded from
+    # dictation-service's runtime deps on macOS (same rationale as
+    # faster-whisper above) but the DER eval harness
+    # (scripts/eval/run_der.py) must run on a dev laptop. macOS-gated:
+    # Linux/CI resolution and the production images are unchanged.
+    "silero-vad>=6.0.0 ; sys_platform == 'darwin'",
+    "speechbrain>=1.0.0 ; sys_platform == 'darwin'",
+    # scripts/eval/wer_lib.py imports autocomplete_service.eval_normalize
+    # directly rather than keeping a second copy of the rules to drift
+    # against, and those rules are YAML (corpus-v3 Epic A). Declared here so
+    # `make wer-eval-corpus` does not depend on a transitive pyyaml.
+    "pyyaml>=6.0",
+]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency/parameter markers are designed to be evaluated as
+# argument defaults; they are effectively immutable singletons, so B008 does
+# not apply to them.
+extend-immutable-calls = [
+    "fastapi.Query",
+    "fastapi.Depends",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "template_service",
+    "auth_service",
+    "asr_service",
+    "asr_worker",
+    "dictation_service",
+    "nlp_service",
+    "report_service",
+    "core_service",
+    "notification_service",
+    "marketing_service",
+    "observability",
+    "auth",
+    "db",
+    "audit",
+    "messaging",
+    "secret",
+    "crypto",
+    "storage",
+    "asr_models",
+    "template_models",
+    "report_models",
+    "notification_events",
+    "corpus_risk",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = ["dist/", ".venv/"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = ["B101"]
+
+# ── import-linter ────────────────────────────────────────────────────
+# Architectural contracts: enforced in CI. Adding a new contract is fine;
+# relaxing an existing one requires an ADR amendment.
+[tool.importlinter]
+root_packages = [
+    "template_service",
+    "auth_service",
+    "asr_service",
+    "asr_worker",
+    "dictation_service",
+    "nlp_service",
+    "report_service",
+    "core_service",
+    "observability",
+    "secret",
+    "auth",
+    "db",
+    "audit",
+    "messaging",
+    "crypto",
+    "storage",
+    "asr_models",
+    "template_models",
+    "report_models",
+    "notification_service",
+    "notification_events",
+    "generation_service",
+    "clinical_access",
+    "marketing_service",
+    "corpus_forge",
+]
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture in services: routers → domain, never reverse"
+type = "layers"
+layers = [
+    "template_service.routers",
+    "template_service.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "generation-service: routers → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "generation_service.routers",
+    "generation_service.domain",
+    "generation_service.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "asr-service: routers → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "asr_service.routers",
+    "asr_service.domain",
+    "asr_service.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "dictation-service: routers / ws → session / inference / audio → adapters"
+type = "layers"
+layers = [
+    "dictation_service.routers",
+    "dictation_service.ws",
+    "dictation_service.session",
+    "dictation_service.diarization",
+    "dictation_service.inference",
+    "dictation_service.audio",
+    "dictation_service.protocol",
+    "dictation_service.adapters",
+]
+
+# Layering reflects the as-built dependency graph (verified against the
+# import edges, S01 hardening): api/routers sit on top of `domain`, which
+# orchestrates `stages`; every stage and the orchestrator depend on the
+# `pipeline.base` kernel (frozen StageOutput records + the Stage Protocol),
+# which is the lowest layer. The kernel is split out from `pipeline`
+# (`pipeline.base` below `stages`, `pipeline.orchestrator` above it) because
+# the orchestrator threads stages while stages import only the kernel.
+# (Corrects the previously-inverted ordering that placed `domain` below
+# `stages` despite `domain.repository` importing `stages` — an ADR-0001/0014
+# amendment is warranted to record this.)
+[[tool.importlinter.contracts]]
+name = "nlp-service: api/routers → domain → orchestrator → stages → kernel; reverse forbidden"
+type = "layers"
+layers = [
+    "nlp_service.api",
+    "nlp_service.routers",
+    "nlp_service.domain",
+    "nlp_service.pipeline.orchestrator",
+    "nlp_service.stages",
+    "nlp_service.pipeline.base",
+    "nlp_service.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "report-service: routers → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "report_service.routers",
+    "report_service.domain",
+    "report_service.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "core-service: routers → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "core_service.routers",
+    "core_service.domain",
+    "core_service.adapters",
+]
+
+# `ws` sits BELOW the two drivers, not above them. Both the stream
+# consumer (`ingest`) and the outbox worker (`delivery`) publish
+# WebSocket fan-out, so `ws.fanout` is a shared downstream dependency —
+# the first cut of this contract had `ws` on top and import-linter
+# correctly rejected it.
+#
+# `delivery` and `ingest` have no edge between them: dead-lettering,
+# which both need, lives in `domain.dead_letters` rather than in
+# whichever one happened to write it first.
+[[tool.importlinter.contracts]]
+name = "notification-service: routers → delivery → ingest → ws → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "notification_service.routers",
+    "notification_service.delivery",
+    "notification_service.ingest",
+    "notification_service.ws",
+    "notification_service.domain",
+    "notification_service.adapters",
+]
+
+# auth-service: the password-recovery slice introduced domain/ and
+# adapters/ to a service that previously kept everything in routers. The
+# contract is declared now, while there are three modules to keep honest,
+# rather than after the next feature adds a shortcut.
+#
+# Only the new packages are layered. The service's older modules
+# (keycloak_client, tenants_repository, totp) sit at the package root and
+# predate the split; folding them in would be a refactor, not a contract.
+[[tool.importlinter.contracts]]
+name = "auth-service: routers → delivery → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "auth_service.routers",
+    "auth_service.delivery",
+    "auth_service.domain",
+    "auth_service.adapters",
+]
+
+# marketing-service: routers take a request, jobs take an inbound calendar
+# invitation, and both end in the same outbox that `delivery` drains. `jobs`
+# sits above `delivery` because the booking watcher enqueues mail it never
+# sends itself — the loop that sends is downstream of every producer.
+[[tool.importlinter.contracts]]
+name = "marketing-service: routers → jobs → delivery → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "marketing_service.routers",
+    "marketing_service.jobs",
+    "marketing_service.delivery",
+    "marketing_service.domain",
+    "marketing_service.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "corpus-forge: cli → domain → adapters; reverse forbidden"
+type = "layers"
+layers = [
+    "corpus_forge.cli",
+    "corpus_forge.domain",
+    "corpus_forge.adapters",
+]
+
+[[tool.importlinter.contracts]]
+name = "notification_events is a leaf — pure Pydantic types"
+type = "forbidden"
+source_modules = ["notification_events"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging",
+    "crypto", "storage", "asr_models", "template_models", "report_models",
+]
+
+[[tool.importlinter.contracts]]
+name = "template_models is a leaf — pure Pydantic types"
+type = "forbidden"
+source_modules = ["template_models"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging",
+    "crypto", "storage", "asr_models", "report_models",
+]
+
+[[tool.importlinter.contracts]]
+name = "report_models is a leaf — pure Pydantic types"
+type = "forbidden"
+source_modules = ["report_models"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging",
+    "crypto", "storage", "asr_models", "template_models",
+]
+
+# The treatment-relationship predicate is the single source of truth for
+# "is this principal on this patient's care", shared by report-service and
+# core-service. It takes an already-open, RLS-scoped asyncpg connection and
+# nothing else — no pools, no settings, no claims — which is what lets both
+# services depend on it without either one owning it.
+[[tool.importlinter.contracts]]
+name = "clinical_access is a leaf — it takes a connection and answers a question"
+type = "forbidden"
+source_modules = ["clinical_access"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging",
+    "crypto", "storage", "asr_models", "template_models", "report_models",
+    "notification_events",
+    "corpus_risk",
+]
+
+[[tool.importlinter.contracts]]
+name = "Libs may not import services"
+type = "forbidden"
+source_modules = [
+    "observability",
+    "secret",
+    "auth",
+    "db",
+    "audit",
+    "messaging",
+    "crypto",
+    "storage",
+    "asr_models",
+    "template_models",
+    "report_models",
+    "notification_events",
+    "clinical_access",
+]
+forbidden_modules = [
+    "template_service",
+    "asr_service",
+    "asr_worker",
+    "dictation_service",
+    "nlp_service",
+    "report_service",
+    "core_service",
+    "notification_service",
+    "marketing_service",
+]
+
+# Services are mutually independent: shared concerns live in libs/*, never
+# in a sibling service. Cross-service imports couple deploy units and defeat
+# the per-service layering contracts above.
+#
+# One recorded exception: dictation-service reuses asr-worker's `WhisperEngine`
+# directly rather than over the wire (streaming and batch share one CTranslate2
+# model loader). This is known coupling debt — the engine should be hoisted to
+# a `libs/asr_inference` package so both services depend on the lib, not each
+# other. Until that extraction lands it is pinned here as a single explicit
+# ignore so the contract still bans every OTHER service↔service edge.
+[[tool.importlinter.contracts]]
+name = "Services may not import other services"
+type = "independence"
+modules = [
+    "template_service",
+    "asr_service",
+    "asr_worker",
+    "dictation_service",
+    "nlp_service",
+    "report_service",
+    "core_service",
+    "notification_service",
+    "marketing_service",
+    "corpus_forge",
+]
+ignore_imports = [
+    "dictation_service.main_deps -> asr_worker.inference",
+]
+
+[[tool.importlinter.contracts]]
+name = "observability is a leaf — it must not depend on other internal libs"
+type = "forbidden"
+source_modules = ["observability"]
+forbidden_modules = [
+    "secret", "auth", "db", "audit", "messaging", "crypto", "storage", "asr_models",
+]
+
+[[tool.importlinter.contracts]]
+name = "secret is a leaf — it must not depend on other internal libs"
+type = "forbidden"
+source_modules = ["secret"]
+forbidden_modules = [
+    "observability", "auth", "db", "audit", "messaging", "crypto", "storage", "asr_models",
+]
+
+[[tool.importlinter.contracts]]
+name = "asr_models is a leaf — pure Pydantic types"
+type = "forbidden"
+source_modules = ["asr_models"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging", "crypto", "storage",
+]
+
+[[tool.importlinter.contracts]]
+name = "crypto must not depend on storage or messaging"
+type = "forbidden"
+source_modules = ["crypto"]
+forbidden_modules = ["storage", "messaging", "audit", "auth", "db", "observability"]
+
+[[tool.importlinter.contracts]]
+name = "storage layers on crypto only — not auth/audit/db"
+type = "forbidden"
+source_modules = ["storage"]
+forbidden_modules = ["auth", "audit", "db", "messaging", "observability"]
+
+# Config for the workspace-root `tests/` tree (chaos, load) — invoked from the
+# repo root by `make chaos-dictation` / `make load-dictation`. Per-package test
+# config lives in each member's own pyproject; this only covers the cross-cutting
+# root suites, which are async and would otherwise be silently skipped under
+# pytest-asyncio's default strict mode.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

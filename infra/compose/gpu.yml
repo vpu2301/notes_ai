@@ -1,0 +1,71 @@
+# ──────────────────────────────────────────────────────────────
+# GPU overlay — replaces the CPU-only asr-worker with a CUDA variant.
+#
+# Prerequisites on the host:
+#   - NVIDIA driver ≥ 535
+#   - CUDA toolkit 12.x
+#   - NVIDIA Container Toolkit (nvidia-container-runtime) configured as a
+#     Docker runtime.  Run `docker info | grep -i runtime` to verify.
+#
+# Run:
+#   docker compose -f infra/compose/base.yml \
+#                  -f infra/compose/dev.yml  \
+#                  -f infra/compose/gpu.yml  up -d
+# ──────────────────────────────────────────────────────────────
+name: medical-dictation
+
+services:
+  asr-worker:
+    build:
+      context: ../..
+      dockerfile: services/asr-worker/Dockerfile
+    runtime: nvidia
+    environment:
+      MD_ASR_DEVICE: cuda
+      # Load the weights BAKED into the image (ADR-0021). Do NOT set this to a
+      # bare HF id like "large-v3" — that would resolve over the network and
+      # break the offline guarantee below.
+      MD_ASR_MODEL: /opt/models/whisper-large-v3
+      MD_ASR_COMPUTE_TYPE: float16
+      # Cut all runtime egress to Hugging Face.
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  dictation-service:
+    build:
+      context: ../..
+      dockerfile: services/dictation-service/Dockerfile
+    runtime: nvidia
+    environment:
+      MD_ASR_DEVICE: cuda
+      # Load the weights BAKED into the image (ADR-0021). Do NOT set this to a
+      # bare HF id like "large-v3" — that would resolve over the network and
+      # break the offline guarantee below.
+      MD_ASR_MODEL: /opt/models/whisper-large-v3
+      MD_ASR_COMPUTE_TYPE: float16
+      # Sprint 14: ECAPA shares the GPU with Whisper (ADR-0034). Both
+      # models are baked + checksum-pinned in the image; MDX_DIAR_MODEL_DIR
+      # and the digests come from the image ENV, so only the device differs
+      # from the CPU default here.
+      MDX_DIAR_DEVICE: cuda
+      # Cut all runtime egress to Hugging Face.
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
