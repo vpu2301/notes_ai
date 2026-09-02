@@ -26,12 +26,20 @@
 - **Text intelligence** — deterministic NLP post-processing (voice commands,
   punctuation, number/date normalization, abbreviations), phrase autocomplete,
   and inline AI ghost-text completion (local LLM).
+- **Sharing** — notes are private by default; make one visible to the whole
+  workspace, share it with a colleague by e-mail (notification + mail), hand out
+  a public read-only link, download it as PDF or Markdown, or delete it.
 - **Multi-tenant platform** — Keycloak auth (MFA, sessions, password recovery),
   tenant workspaces with roles (`tenant_admin`, `member`, `viewer`), audit trail,
   envelope encryption for all stored audio/transcripts, notifications
   (in-app feed, WebSocket push, email).
 
-Languages: English and Ukrainian first-class (German plumbing present).
+Languages: the recording decides. A capture is submitted with `language=auto`;
+the worker identifies the spoken language and writes the transcript in it, and
+the note is built from a template in that language (English and Ukrainian
+catalogues ship; other languages get their transcript verbatim under the
+English template). English and Ukrainian can also be pinned explicitly;
+German plumbing is present.
 
 ---
 
@@ -182,8 +190,8 @@ root folders:
 - **`macos/`** — "Notes AI Capture", a SwiftUI menu-bar app that turns a Mac
   into an ambient meeting recorder: record → diarized batch transcription →
   meeting note, with a link that opens the note in the web app. `cd macos &&
-  swift build` for dev; XcodeGen spec included for a proper `.app`. See
-  `macos/README.md`.
+  swift run` for dev, `macos/scripts/make-app.sh` for a proper `.app` bundle
+  without Xcode; XcodeGen spec included as well. See `macos/README.md`.
 
 ## API documentation
 
@@ -298,3 +306,4 @@ Key ADRs (full index: [docs/adr/README.md](docs/adr/README.md)):
 - Never commit `.env`, `.env.local`, `*.pem`, or `*.key` files — they are gitignored.
 - All stored audio and transcripts are envelope-encrypted per tenant
   (KEK_master → KEK_tenant → DEK_object); see `libs/crypto`.
+# notes_ai
