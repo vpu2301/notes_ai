@@ -27,21 +27,24 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from .attribution import AttributionPolicy, attribute_word
-from .clustering import ClusteringConfig, OnlineSpeakerClusterer
-from .embedder import EcapaEmbedder
-from .vad import SileroSegmenter
+from diarization.attribution import (
+    AttributionPolicy,
+    SpeakerSegment,
+    attribute_word,
+)
+from diarization.chunking import chunk_spans
+from diarization.clustering import ClusteringConfig, OnlineSpeakerClusterer
+from diarization.embedder import EcapaEmbedder
+from diarization.vad import SileroSegmenter
 
 SAMPLE_RATE_HZ = 16_000
 UNKNOWN = "UNKNOWN"
 
-
-@dataclass(frozen=True)
-class SpeakerSegment:
-    start_ms: int  # session-absolute
-    end_ms: int
-    label: str  # "S1" | "S2" | "UNKNOWN"
-    confidence: float
+__all__ = [
+    "DiarizationConfig",
+    "DiarizationStream",
+    "SpeakerSegment",
+]
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,9 @@ class DiarizationStream:
                     prev = self.segments[-1]
                     self.segments[-1] = replace(prev, end_ms=abs_end)
                 continue
-            for c_start, c_end in _chunks(start, abs_end, cfg.chunk_target_ms, cfg.chunk_min_ms):
+            for c_start, c_end in chunk_spans(
+                start, abs_end, cfg.chunk_target_ms, cfg.chunk_min_ms
+            ):
                 lo = (c_start - window_start_ms) * SAMPLE_RATE_HZ // 1000
                 hi = (c_end - window_start_ms) * SAMPLE_RATE_HZ // 1000
                 chunk_pcm = pcm[max(0, lo) : hi]
@@ -149,21 +154,3 @@ class DiarizationStream:
             diarized_until_ms=self.diarized_until_ms,
             policy=self._config.attribution,
         )
-
-
-def _chunks(start_ms: int, end_ms: int, target_ms: int, min_ms: int) -> list[tuple[int, int]]:
-    """Split [start, end) into near-equal chunks ≤ target, each ≥ min.
-    A short trailing remainder is folded into the previous chunk."""
-    total = end_ms - start_ms
-    if total <= 0:
-        return []
-    if total <= target_ms:
-        return [(start_ms, end_ms)] if total >= min_ms else []
-    n = max(1, round(total / target_ms))
-    size = total / n
-    out: list[tuple[int, int]] = []
-    for i in range(n):
-        lo = start_ms + int(i * size)
-        hi = start_ms + int((i + 1) * size) if i < n - 1 else end_ms
-        out.append((lo, hi))
-    return out

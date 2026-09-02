@@ -87,6 +87,20 @@ class Settings(BaseSettings):
     )
     asr_jobs_before_recycle: int = Field(default=100, alias="MD_ASR_JOBS_BEFORE_RECYCLE")
 
+    # ── Offline diarization (Ambient Capture v1) ────────────────────────
+    # Same knobs and defaults as dictation-service: the ECAPA weights are
+    # baked at /opt/models/ecapa in prod images and digest-verified at
+    # load time (fail-closed, docs/models/PINS.md). Loading is LAZY — a
+    # worker that never sees a diarize=true job never touches torch or
+    # the weights, and a worker without the model still transcribes; a
+    # diarize job then fails `diarization_unavailable` (retryable).
+    diar_model_dir: str = Field(default="/opt/models/ecapa", alias="MDX_DIAR_MODEL_DIR")
+    diar_device: str = Field(default="cpu", alias="MDX_DIAR_DEVICE")
+    diar_model_repo: str = Field(default="", alias="MDX_DIAR_MODEL_REPO")
+    diar_model_revision: str = Field(default="", alias="MDX_DIAR_MODEL_REVISION")
+    diar_model_sha256: str = Field(default="", alias="MDX_DIAR_MODEL_SHA256")
+    diar_meanvar_sha256: str = Field(default="", alias="MDX_DIAR_MEANVAR_SHA256")
+
     # ── Database / queue / storage ──────────────────────────────────────
     db_app_role_dsn: str = Field(
         default="postgresql://app_role:app_role@postgres:5432/notes",

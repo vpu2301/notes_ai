@@ -121,7 +121,49 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
 # ── Content assembly ────────────────────────────────────────────────
 
 
+def _is_diarized(result: dict[str, Any]) -> bool:
+    """A diarized batch result carries top-level ``speakers`` (distinct
+    labels, first-appearance order) and per-segment ``speaker`` labels.
+    Either signal counts — a producer that labels segments but omits the
+    roster still gets dialogue rendering."""
+    if result.get("speakers"):
+        return True
+    return any(seg.get("speaker") for seg in result.get("segments", []))
+
+
+def _dialogue_text(result: dict[str, Any]) -> str:
+    """Render a diarized transcript as speaker-turn dialogue lines.
+
+    Mirrors dictation-service's ``session/draft.py::dialogue_text``: one
+    line per contiguous same-speaker run (``SPEAKER_1: …``), a segment
+    without a label rendered under the honesty label ``UNKNOWN`` rather
+    than silently merged into a neighbouring speaker's turn. Batch labels
+    are already the neutral ``SPEAKER_N`` form (ambient-capture contract),
+    so they pass through verbatim; naming happens in post-hoc note
+    editing, never here.
+    """
+    lines: list[str] = []
+    prev_key: object = object()
+    for seg in result.get("segments", []):
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        speaker = seg.get("speaker")
+        label = str(speaker) if speaker else "UNKNOWN"
+        if speaker == prev_key and lines:
+            lines[-1] = f"{lines[-1]} {text}"
+        else:
+            lines.append(f"{label}: {text}")
+        prev_key = speaker
+    return "\n".join(lines)
+
+
 def _transcript_text(result: dict[str, Any]) -> str:
+    # Diarized results (ambient capture: batch jobs run with diarize=true)
+    # become speaker-turn dialogue, matching what a live conversation
+    # session's finalize draft looks like.
+    if _is_diarized(result):
+        return _dialogue_text(result)
     # Join sentences with a space, not a newline: the note editor
     # serialises its content in a way that drops newlines (turning
     # "...тижнів.\nРегіографія..." into glued "...тижнів.Регіографія..."),

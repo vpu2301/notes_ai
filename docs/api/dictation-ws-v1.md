@@ -64,7 +64,7 @@ fields are rejected (`extra="forbid"`).
 
 | Type              | Fields                                                         | Notes |
 | ----------------- | -------------------------------------------------------------- | ----- |
-| `start_session`   | `language` (`uk`|`en`|`de`), `target_kind` (default `generic`), `vocabulary_hint?` (free text, ≤ 2000 chars — fed to Whisper's `initial_prompt`), `template_id?`, `resume_session_id?` | First message after upgrade. Adding a language WIDENS the pattern — no v1 client breaks |
+| `start_session`   | `language` (`uk`|`en`|`de`), `target_kind` (default `generic`), `vocabulary_hint?` (free text, ≤ 2000 chars — fed to Whisper's `initial_prompt`), `capture_source?` (`browser` default \| `mobile` \| `room_device` — which surface produced the audio), `device_name?` (1–128 chars, stable device/room label; allowed with any source), `template_id?`, `resume_session_id?` | First message after upgrade. Adding a language WIDENS the pattern — no v1 client breaks. `capture_source`/`device_name` are the **Ambient Capture v1** additions (additive, like `vocabulary_hint`): validated, persisted on `dictation_sessions` (migration `0014_ambient_capture`), carried in the `dictation.session.started` audit payload, and echoed on `GET /dictate/sessions` list + detail rows. They describe the ORIGINAL capture — a resume never overwrites them |
 | `refresh_token`   | `token`                                                        | Replaces the bearer; must have same `sub`+`tid` |
 | `end_session`     | —                                                              | Initiates finalize |
 | `pause`           | —                                                              | Audio frames now rejected with `pause_state_mismatch` |

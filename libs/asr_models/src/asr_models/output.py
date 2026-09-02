@@ -26,6 +26,10 @@ class Segment(BaseModel):
     end_ms: NonNegativeInt
     words: list[WordTiming] = Field(default_factory=list)
     avg_confidence: float = Field(ge=0.0, le=1.0)
+    # Ambient Capture v1: neutral diarization label ("SPEAKER_1".."SPEAKER_N").
+    # None when the job was not diarized, or when the diarizer could not
+    # attribute this segment with confidence (never a guess).
+    speaker: str | None = None
 
 
 class TranscriptionMetadata(BaseModel):
@@ -44,6 +48,10 @@ class TranscriptionOutput(BaseModel):
     language: str = Field(pattern=r"^(uk|en|de)$")
     segments: list[Segment]
     metadata: TranscriptionMetadata
+    # Distinct speaker labels in first-appearance order; empty when the
+    # job was not diarized (additive — older stored transcripts decode
+    # with an empty list).
+    speakers: list[str] = Field(default_factory=list)
     schema_version: int = 1
 
 
@@ -76,6 +84,8 @@ class EnrichedSegment(BaseModel):
     words: list[WordTiming] = Field(default_factory=list)
     avg_confidence: float = Field(ge=0.0, le=1.0)
     confidence_spans: list[ConfidenceSpanView] = Field(default_factory=list)
+    # Carried through from the stored transcript for diarized jobs.
+    speaker: str | None = None
 
 
 class TranscriptResultView(BaseModel):
@@ -90,6 +100,8 @@ class TranscriptResultView(BaseModel):
     language: str = Field(pattern=r"^(uk|en|de)$")
     segments: list[EnrichedSegment]
     metadata: TranscriptionMetadata
+    # Distinct speaker labels in first-appearance order (diarized jobs).
+    speakers: list[str] = Field(default_factory=list)
     nlp_applied: bool = False
     nlp_pipeline_version: str | None = None
     schema_version: int = 1

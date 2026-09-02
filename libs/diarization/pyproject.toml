@@ -1,0 +1,39 @@
+[project]
+name = "diarization"
+version = "0.1.0"
+description = "Speaker diarization primitives (Silero VAD + ECAPA embeddings + clustering) shared by streaming dictation and batch ASR."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26.0",
+    # Heavy speech deps follow the repo-wide macOS-exclusion pattern
+    # (see root pyproject [dependency-groups]): dev laptops get them via
+    # the root dev group; prod images pin the model weights via each
+    # service's Dockerfile. Both are imported lazily, so the pure modules
+    # (clustering, attribution, chunking, integrity) work without them.
+    "silero-vad>=6.0.0 ; platform_system != 'Darwin'",
+    "speechbrain>=1.0.0 ; platform_system != 'Darwin'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/diarization"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"

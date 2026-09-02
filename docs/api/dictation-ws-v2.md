@@ -62,11 +62,26 @@ A session is **exactly one version for its whole lifetime**:
   "language": "uk",              // "uk" | "en" | "de"
   "mode": "conversation",        // NEW: "dictation" (default) | "conversation"
   "vocabulary_hint": "Klarnote OKR roadmap",  // optional free text → Whisper initial_prompt
+  "capture_source": "room_device", // "browser" (default) | "mobile" | "room_device"
+  "device_name": "Berlin 4F",      // optional 1–128 char device/room label
   "template_id": "…",            // needed for a draft at finalize
   "target_kind": "generic",
   "resume_session_id": null
 }
 ```
+
+`capture_source` and `device_name` are the **Ambient Capture v1**
+provenance fields, present on *both* v1 and v2 `start_session`
+(additive, like `vocabulary_hint`). `capture_source` says which surface
+produced the audio; `device_name` is a stable free-text label for the
+capturing device/room and is allowed with **any** source. Both are
+validated (unknown source or an out-of-bounds name is `bad_message`),
+persisted on `dictation_sessions` (migration `0014_ambient_capture`),
+carried in the `dictation.session.started` audit payload
+(`device_name` only when set), and echoed on `GET /dictate/sessions`
+list and detail rows. A room device MUST send
+`capture_source: "room_device"` — see
+`docs/runbooks/ambient-device.md`.
 
 `mode: "conversation"` points the microphone at a meeting: the audio is
 diarized and every committed segment carries a speaker proposal. There
@@ -209,10 +224,16 @@ speaker timeline lives on the session context beside the committed
 transcript, so an in-process resume preserves speakers up to the
 committed high-water mark; the version-pinning rule above applies.
 
+`capture_source`/`device_name` describe the **original** capture: a
+resume keeps the session's stored values, and whatever the resume
+`start_session` frame carries (a phone picking up a room-device
+session, say) never overwrites them.
+
 ## Audit kinds
 
 `dictation.session.started` gains `mode` + `protocol_version` in its
-payload. New: `conversation.speaker_mapping.manual_set`,
+payload, plus `capture_source` (and `device_name` when set — Ambient
+Capture v1). New: `conversation.speaker_mapping.manual_set`,
 `conversation.draft.created`, `conversation.draft.create_failed`
 (warn). See `docs/audit/event-kinds.md`.
 

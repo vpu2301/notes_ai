@@ -26,13 +26,16 @@ async def insert_session(
     template_id: UUID | None,
     worker_id: str,
     mode: str = "dictation",
+    capture_source: str = "browser",
+    device_name: str | None = None,
 ) -> None:
     await conn.execute(
         """
         INSERT INTO dictation_sessions
             (id, tenant_id, user_id, language, target_kind,
-             template_id, worker_id, status, started_at, mode)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,'active',now(),$8)
+             template_id, worker_id, status, started_at, mode,
+             capture_source, device_name)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'active',now(),$8,$9,$10)
         """,
         session_id,
         tenant_id,
@@ -42,6 +45,8 @@ async def insert_session(
         template_id,
         worker_id,
         mode,
+        capture_source,
+        device_name,
     )
 
 
@@ -58,7 +63,8 @@ async def list_active_sessions_for_user(
     return list(
         await conn.fetch(
             """
-            SELECT id, status, language, target_kind, started_at, last_active_at
+            SELECT id, status, language, target_kind, capture_source, device_name,
+                   started_at, last_active_at
             FROM dictation_sessions
             WHERE user_id = $1 AND status IN ('active','paused','reconnecting','creating')
             ORDER BY last_active_at DESC
@@ -90,7 +96,7 @@ async def list_sessions(
     return list(
         await conn.fetch(
             f"""
-            SELECT id, status, language, target_kind,
+            SELECT id, status, language, target_kind, capture_source, device_name,
                    started_at, last_active_at, finalized_at,
                    total_audio_ms, network_drop_count
             FROM dictation_sessions

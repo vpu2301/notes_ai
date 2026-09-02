@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-from dictation_service.diarization.clustering import (
+from diarization.clustering import (
     UNKNOWN,
     OnlineSpeakerClusterer,
 )

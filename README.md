@@ -13,7 +13,12 @@
 
 - **Voice notes & dictation** — real-time streaming speech-to-text over WebSocket
   (faster-whisper), plus a batch transcription pipeline for uploaded audio.
-- **Meeting mode** — speaker diarization (who said what) with client-side speaker naming.
+- **Ambient meeting capture** — speaker diarization (who said what) with
+  client-side speaker naming, from a laptop/phone in the room, a dedicated
+  meeting-room device (least-privilege `device` identity), or an uploaded
+  recording (`diarize=true` batch jobs). See
+  [docs/architecture/ambient-capture.md](docs/architecture/ambient-capture.md)
+  and [docs/product/ambient-use-cases.md](docs/product/ambient-use-cases.md).
 - **Notes** — template-based structured notes (meeting notes, 1-on-1s, sales calls,
   interview debriefs, project updates), autosaving drafts, append-only versions with
   diff and tamper-evident hash-chaining, full-text search with synonyms, PDF export

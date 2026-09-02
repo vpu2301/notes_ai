@@ -47,6 +47,13 @@ class SessionContext:
     template_id: UUID | None
     template_text: str | None = None
 
+    # Ambient-capture v1: which surface produced the audio ('browser' |
+    # 'mobile' | 'room_device') and an optional stable device/room label.
+    # They describe the ORIGINAL capture — a resume from a different
+    # surface does not overwrite them.
+    capture_source: str = "browser"
+    device_name: str | None = None
+
     state: SessionState = SessionState.CREATING
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 

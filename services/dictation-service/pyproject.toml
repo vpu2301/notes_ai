@@ -20,14 +20,15 @@ dependencies = [
     # Optional at install time so the unit tests can run on macOS / dev hosts
     # without it installed — codec is imported lazily.
     "opuslib>=3.0.1 ; platform_system != 'Darwin'",
-    # Sprint 14 conversation mode: speaker diarization (Silero VAD
-    # segmentation + speechbrain ECAPA embeddings, ADR-0034). Same
+    # Internal libs
+    # Sprint 14 conversation mode: speaker diarization core (Silero VAD
+    # segmentation + speechbrain ECAPA embeddings, ADR-0034), hoisted to
+    # libs/diarization for Ambient Capture v1 so the batch worker shares
+    # it. The lib carries the silero-vad/speechbrain deps (same
     # macOS-exclusion pattern as opuslib/faster-whisper: dev laptops get
     # them via the root [dependency-groups] dev group instead, prod
-    # images pin the ECAPA weights via the Dockerfile model-fetch stage.
-    "silero-vad>=6.0.0 ; platform_system != 'Darwin'",
-    "speechbrain>=1.0.0 ; platform_system != 'Darwin'",
-    # Internal libs
+    # images pin the ECAPA weights via the Dockerfile model-fetch stage).
+    "diarization",
     "observability",
     "auth",
     "audit",
@@ -43,6 +44,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+diarization = { workspace = true }
 observability = { workspace = true }
 auth = { workspace = true }
 audit = { workspace = true }

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dictation_service.diarization.attribution import UNKNOWN, attribute_word
-from dictation_service.diarization.stream import SpeakerSegment
+from diarization.attribution import UNKNOWN, SpeakerSegment, attribute_word
 
 
 def test_word_fully_inside_one_segment() -> None:

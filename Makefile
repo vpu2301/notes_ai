@@ -78,7 +78,7 @@ typecheck: ## Run mypy --strict over the CI-gated foundation packages (mirrors .
 	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/
 
 typecheck-all: ## Run mypy --strict over ALL packages (non-blocking; tracks feature-service typing debt)
-	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ services/asr-service/src/ services/asr-worker/src/ services/dictation-service/src/ services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/template_models/src/
+	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ services/asr-service/src/ services/asr-worker/src/ services/dictation-service/src/ services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/diarization/src/ libs/template_models/src/
 
 type-check: typecheck ## Legacy alias of `typecheck`
 
@@ -98,6 +98,7 @@ test: ## Run pytest across services and libs
 	uv run --project libs/crypto pytest libs/crypto/tests/unit/ -v
 	uv run --project libs/storage pytest libs/storage/tests/unit/ -v
 	uv run --project libs/asr_models pytest libs/asr_models/tests/unit/ -v
+	uv run --project libs/diarization pytest libs/diarization/tests/unit/ -v
 	uv run --project services/asr-service pytest services/asr-service/tests/unit/ -v
 	uv run --project services/asr-worker pytest services/asr-worker/tests/unit/ -v
 	uv run --project services/dictation-service pytest services/dictation-service/tests/unit/ -v

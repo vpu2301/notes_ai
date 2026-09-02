@@ -263,6 +263,83 @@ def test_assign_passes_through_not_ready_409(rig: SimpleNamespace) -> None:
     assert rig.create_calls == []
 
 
+# ── Diarized (ambient capture) rendering ────────────────────────────
+
+
+def _diarized_result() -> dict:
+    return {
+        "job_id": str(JOB_ID),
+        "language": "uk",
+        "nlp_applied": True,
+        "speakers": ["SPEAKER_1", "SPEAKER_2"],
+        "segments": [
+            {"text": "Почнімо з підсумків спринту.", "speaker": "SPEAKER_1"},
+            {"text": "Реліз готовий.", "speaker": "SPEAKER_1"},
+            {"text": "Коли деплой?", "speaker": "SPEAKER_2"},
+            {"text": "Завтра вранці.", "speaker": "SPEAKER_1"},
+            {"text": "(нерозбірливо)", "speaker": None},
+        ],
+    }
+
+
+def test_transcript_text_renders_dialogue_when_diarized() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    # Contiguous same-speaker segments merge into ONE turn line; an
+    # unattributed segment renders under UNKNOWN, never merged into a
+    # neighbouring speaker (mirrors dictation-service dialogue_text).
+    assert _transcript_text(_diarized_result()) == (
+        "SPEAKER_1: Почнімо з підсумків спринту. Реліз готовий.\n"
+        "SPEAKER_2: Коли деплой?\n"
+        "SPEAKER_1: Завтра вранці.\n"
+        "UNKNOWN: (нерозбірливо)"
+    )
+
+
+def test_transcript_text_flat_when_not_diarized() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    # The pre-ambient shape (no speakers / no speaker keys) is unchanged:
+    # space-joined flat prose.
+    assert _transcript_text(_transcript_result()) == (
+        "Співбесіда з кандидатом на позицію інженера. Висновок: рекомендую наступний етап."
+    )
+
+
+def test_transcript_text_dialogue_without_speaker_roster() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    # Segment-level labels alone are enough to trigger dialogue rendering.
+    result = {
+        "segments": [
+            {"text": "Один.", "speaker": "SPEAKER_1"},
+            {"text": "Два.", "speaker": "SPEAKER_2"},
+        ]
+    }
+    assert _transcript_text(result) == "SPEAKER_1: Один.\nSPEAKER_2: Два."
+
+
+def test_assign_diarized_job_creates_dialogue_note(rig: SimpleNamespace) -> None:
+    async def _fetch_diarized(job_id, *, auth_header):  # noqa: ANN001
+        return _diarized_result()
+
+    rig.monkeypatch.setattr(rig.module, "_fetch_transcript", _fetch_diarized)
+    resp = rig.client.post(
+        "/v1/notes/from-transcript",
+        json={"asr_job_id": str(JOB_ID)},
+    )
+    assert resp.status_code == 201, resp.text
+
+    (call,) = rig.create_calls
+    content = call["content"]
+    text = content.sections[0].text
+    assert text.startswith("SPEAKER_1: Почнімо з підсумків спринту.")
+    assert "SPEAKER_2: Коли деплой?" in text
+    assert "UNKNOWN: (нерозбірливо)" in text
+    # Speaker labels stay neutral — no name inference server-side.
+    assert "SPEAKER_3" not in text
+
+
 def test_by_source_job_bulk_lookup(rig: SimpleNamespace) -> None:
     async def _fetch_links(conn, *, asr_job_ids):  # noqa: ANN001
         assert asr_job_ids == [JOB_ID]

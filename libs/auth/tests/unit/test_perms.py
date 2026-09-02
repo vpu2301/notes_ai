@@ -266,6 +266,54 @@ def test_authors_hold_note_permissions():
     assert can("service", "note.write", "note") is False
 
 
+def test_device_holds_exactly_the_capture_grants():
+    """Ambient capture: the `device` role (room hardware on client
+    credentials) is capture-only. Pin the EXACT grant set — a compromised
+    room device must not be able to read any tenant content."""
+    expected = {
+        ("tenant.read", "tenant"),
+        ("asr.write", "asr_job"),
+        ("asr.read", "asr_job"),
+        ("dictation.start", "dictation_session"),
+        ("dictation.read", "dictation_session"),
+        ("dictation.finalize", "dictation_session"),
+        ("template.read", "template"),
+    }
+    actual = {
+        (action, target)
+        for (role, action, target), allowed in ALLOW.items()
+        if role == "device" and allowed
+    }
+    assert actual == expected
+
+
+def test_device_denied_all_content_and_admin_reads():
+    """Negative space that matters for the threat model: the device can
+    ADD audio/transcripts but read no notes, users, audit, or stats."""
+    for action, target in (
+        ("note.read", "note"),
+        ("note.write", "note"),
+        ("user.read", "user"),
+        ("audit.read", "audit"),
+        ("stats.read", "tenant"),
+        ("asr.cancel", "asr_job"),
+        ("notification.read", "notification"),
+        ("nlp.process", "nlp_text"),
+        ("autocomplete.read", "phrase"),
+        ("synonym.read", "synonym"),
+        ("template.update", "template"),
+    ):
+        assert can("device", action, target) is False, f"{action}/{target}"
+
+
+def test_device_claims_pass_capture_checks():
+    claims = _make_claims(roles=["device"])
+    check(claims, action="dictation.start", target_kind="dictation_session")
+    check(claims, action="asr.write", target_kind="asr_job")
+    with pytest.raises(AuthzDeniedError):
+        check(claims, action="note.read", target_kind="note")
+
+
 def test_dual_role_admin_member_keeps_authoring():
     """The matrix is over ROLES, not people. A member who also administers
     the tenant holds both roles, and `check()` passes on any granting

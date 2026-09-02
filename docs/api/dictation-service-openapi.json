@@ -154,6 +154,22 @@
             ],
             "title": "Avg Partial Latency Ms"
           },
+          "capture_source": {
+            "default": "browser",
+            "title": "Capture Source",
+            "type": "string"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
+          },
           "finalized_at": {
             "anyOf": [
               {
@@ -261,6 +277,22 @@
       },
       "SessionSummary": {
         "properties": {
+          "capture_source": {
+            "default": "browser",
+            "title": "Capture Source",
+            "type": "string"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
+          },
           "finalized_at": {
             "anyOf": [
               {

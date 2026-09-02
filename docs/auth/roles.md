@@ -1,6 +1,6 @@
 # Roles
 
-The realm defines five roles. The permission matrix lives at
+The realm defines six roles. The permission matrix lives at
 `docs/auth/permissions.csv`; this file is its prose companion.
 
 | Role           | Holds                                                   | Cannot                       |
@@ -10,6 +10,7 @@ The realm defines five roles. The permission matrix lives at
 | `viewer`       | Limited workspace user. Same note/dictation reads and writes as member, minus `asr.cancel` | Most admin; user read     |
 | `auditor`      | Read-only audit + tenant context + **read-only user roster (`user.read`)** + **one write: `user.remind_mfa`** (S21 — ask a user to enrol a second factor; changes nothing about the account) | Any write that alters an account: invite, roles, (de)activation, MFA reset; any note content |
 | `service`      | Machine-to-machine token identity: S2S note/dictation/template/dictionary reads, ASR worker writes | Any human-facing admin operation |
+| `device`       | Ambient-capture hardware (meeting-room devices, client-credentials auth): tenant-read, ASR job submit/read, dictation start/read/finalize, template read | **Everything else** — notes, users, audit, stats, notifications, dictionaries. Capture only |
 
 The full machine-readable matrix (every role × action × target_kind, with an
 explicit `true|false` for each) lives in `docs/auth/permissions.csv`; the
@@ -40,6 +41,29 @@ One door is left open, on purpose:
   projection (no titles, no snippets, no transcripts, no result URLs),
   which is what keeps the usage dashboard's counts working.
 
+## Room devices are capture-only (`device`)
+
+`device` is the identity of ambient-capture hardware — a meeting-room
+microphone box that streams or uploads meetings on its own credentials
+(Keycloak client credentials, one confidential client per room; see
+`docs/runbooks/ambient-device.md`). Its grant set is deliberately the
+smallest that lets a meeting be captured:
+
+- `tenant.read`, `template.read` — session context and the template a
+  conversation session loads on start;
+- `dictation.start` / `dictation.read` / `dictation.finalize` — live
+  conversation-mode capture over `dictation.v2`;
+- `asr.write` / `asr.read` — the batch fallback: upload a recording,
+  poll the job to confirm delivery.
+
+Everything else is an explicit deny. The threat model is a compromised
+or stolen box on an office shelf: it must not be able to read **any**
+tenant content — no notes, no other transcripts beyond its own jobs, no
+user roster, no audit trail, no usage stats. It can only *add*
+audio/transcripts. `asr.cancel` is also denied: destructive acts on
+capture go through a human member. Revocation is disabling the room's
+Keycloak client — no user account is involved.
+
 ## Picking a role at invite time
 
 - A person who runs the workspace *and* takes notes → assign **both**
@@ -53,6 +77,9 @@ One door is left open, on purpose:
 - A machine that calls our API on a partner's behalf → `service`. The
   scope mechanism (Day 7) is wired for service tokens but per-scope
   checks are not yet enforced.
+- A meeting-room capture device → **no user account at all**: a per-room
+  confidential client whose service account holds `device`
+  (`docs/runbooks/ambient-device.md`).
 
 ## Changing a user's role
 

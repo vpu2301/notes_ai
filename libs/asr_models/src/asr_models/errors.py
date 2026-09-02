@@ -85,6 +85,8 @@ class JobErrorKind(StrEnum):
     MODEL_UNAVAILABLE = "model_unavailable"
     GPU_OOM = "gpu_oom"
     TIMEOUT = "timeout"
+    DIARIZATION_UNAVAILABLE = "diarization_unavailable"
+    DIARIZATION_FAILED = "diarization_failed"
 
     # ── persist ──────────────────────────────────────────────────────
     RESULT_STORE_FAILED = "result_store_failed"
@@ -239,6 +241,34 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
             resubmittable=True,
             message=(
                 "Transcription exceeded the time budget allowed for a recording of this length."
+            ),
+        ),
+        _spec(
+            JobErrorKind.DIARIZATION_UNAVAILABLE,
+            ErrorStage.INFERENCE,
+            # Mirrors model_unavailable: the recording is fine; the worker
+            # that claimed the job cannot load the speaker model (image
+            # without the baked weights, digest mismatch, cold fleet). A
+            # redelivery may land on a worker that can.
+            retryable=True,
+            resubmittable=False,
+            message=(
+                "Speaker separation was requested but the speaker model is "
+                "not available on the worker."
+            ),
+        ),
+        _spec(
+            JobErrorKind.DIARIZATION_FAILED,
+            ErrorStage.INFERENCE,
+            # Deterministic for a given recording: the model loaded and
+            # choked on these samples. Re-delivering redoes a full Whisper
+            # pass to reach the same crash — not worth the GPU time.
+            retryable=False,
+            resubmittable=True,
+            message=(
+                "The recording was transcribed but speaker separation "
+                "failed. Resubmitting without speaker separation will "
+                "produce a plain transcript."
             ),
         ),
         _spec(

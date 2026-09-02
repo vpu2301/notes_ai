@@ -35,6 +35,11 @@ class JobEnqueuePayload(BaseModel):
     vocabulary_hint: str | None = None
     language: str = Field(pattern=r"^(uk|en|de)$")
     model: str = "large-v3"
+    # Ambient Capture v1: run offline speaker diarization after
+    # transcription. Travels on the queue message only — no DB column;
+    # the diarized output is visible in the stored result's `speaker`/
+    # `speakers` fields.
+    diarize: bool = False
     requester_sub: UUID
     schema_version: int = 1
 
@@ -49,6 +54,11 @@ class TranscriptionJobView(BaseModel):
     language: str
     model: str
     status: JobStatus
+    # Whether offline diarization was requested at submit. Echoed on the
+    # POST /asr/jobs response; `diarize` rides the queue payload only (no
+    # DB column), so views read back later default to False — the stored
+    # result's `speakers` field is the durable record.
+    diarize: bool = False
     # One of `JobErrorKind` — typed as `str` on the wire so a job failed by
     # a newer worker than this reader still deserializes instead of 500ing
     # the list endpoint. `spec_for` maps anything unrecognised to UNKNOWN.

@@ -4,173 +4,208 @@ member,tenant.read,tenant,true,sees own tenant context
 viewer,tenant.read,tenant,true,sees own tenant context
 auditor,tenant.read,tenant,true,sees own tenant context
 service,tenant.read,tenant,false,S2S today has no user-facing perms
+device,tenant.read,tenant,true,ambient (device) — room device sees its own tenant context
 tenant_admin,tenant.update,tenant,true,changes tenant settings
 member,tenant.update,tenant,false,no tenant write capability
 viewer,tenant.update,tenant,false,no tenant write capability
 auditor,tenant.update,tenant,false,read-only
 service,tenant.update,tenant,false,
+device,tenant.update,tenant,false,room-capture hardware: capture only; no admin or aggregate surface
 tenant_admin,tenant.create,tenant,true,onboard a new company/tenant (becomes owner)
 member,tenant.create,tenant,false,no tenant lifecycle authority
 viewer,tenant.create,tenant,false,no tenant lifecycle authority
 auditor,tenant.create,tenant,false,read-only role
 service,tenant.create,tenant,false,S2S has no tenant lifecycle surface
+device,tenant.create,tenant,false,room-capture hardware: capture only; no admin or aggregate surface
 tenant_admin,tenant.manage_members,tenant,true,invite/remove members and set roles
 member,tenant.manage_members,tenant,false,no member-management authority
 viewer,tenant.manage_members,tenant,false,no member-management authority
 auditor,tenant.manage_members,tenant,false,read-only role
 service,tenant.manage_members,tenant,false,S2S has no member-management surface
+device,tenant.manage_members,tenant,false,room-capture hardware: capture only; no admin or aggregate surface
 tenant_admin,user.read,user,true,CRUD — list/read users in own tenant
 member,user.read,user,false,no admin authority
 viewer,user.read,user,false,no admin authority
 auditor,user.read,user,true,read-only visibility of the tenant user roster
 service,user.read,user,false,S2S has no user-facing perms today
+device,user.read,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.invite,user,true,invites users into own tenant
 member,user.invite,user,false,no admin authority
 viewer,user.invite,user,false,no admin authority
 auditor,user.invite,user,false,read-only
 service,user.invite,user,false,
+device,user.invite,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.manage_roles,user,true,CRUD — set a user's realm roles (PUT /admin/users/{sub}/roles)
 member,user.manage_roles,user,false,no admin authority
 viewer,user.manage_roles,user,false,no admin authority
 auditor,user.manage_roles,user,false,read-only role — cannot change roles
 service,user.manage_roles,user,false,
+device,user.manage_roles,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.deactivate,user,true,soft-deactivate users in own tenant
 member,user.deactivate,user,false,no admin authority
 viewer,user.deactivate,user,false,no admin authority
 auditor,user.deactivate,user,false,read-only
 service,user.deactivate,user,false,
+device,user.deactivate,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.reactivate,user,true,CRUD — reactivate a deactivated user (mirror of deactivate)
 member,user.reactivate,user,false,no admin authority
 viewer,user.reactivate,user,false,no admin authority
 auditor,user.reactivate,user,false,read-only
 service,user.reactivate,user,false,
+device,user.reactivate,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.reset_mfa,user,true,clears MFA enrolment (sprint 16+)
 member,user.reset_mfa,user,false,no admin authority
 viewer,user.reset_mfa,user,false,no admin authority
 auditor,user.reset_mfa,user,false,read-only
 service,user.reset_mfa,user,false,
+device,user.reset_mfa,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,user.remind_mfa,user,true,S21 — ask a user to enrol MFA (POST /admin/users/{sub}/mfa-reminder)
 member,user.remind_mfa,user,false,not an oversight role
 viewer,user.remind_mfa,user,false,not an oversight role
 auditor,user.remind_mfa,user,true,S21 — the access review's one action; changes nothing about the account
 service,user.remind_mfa,user,false,
+device,user.remind_mfa,user,false,room-capture hardware: capture only; no user-admin surface
 tenant_admin,audit.read,audit,true,read audit trail
 member,audit.read,audit,false,not an auditor
 viewer,audit.read,audit,false,not an auditor
 auditor,audit.read,audit,true,primary purpose
 service,audit.read,audit,false,
+device,audit.read,audit,false,room-capture hardware: capture only; no audit access
 tenant_admin,audit.verify,audit,true,run chain verification
 member,audit.verify,audit,false,not an auditor
 viewer,audit.verify,audit,false,not an auditor
 auditor,audit.verify,audit,true,primary purpose
 service,audit.verify,audit,false,
+device,audit.verify,audit,false,room-capture hardware: capture only; no audit access
 tenant_admin,asr.write,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
 member,asr.write,asr_job,true,sprint 03 — submit own ASR jobs
 viewer,asr.write,asr_job,true,sprint 03 — viewers submit ASR jobs
 auditor,asr.write,asr_job,false,
 service,asr.write,asr_job,true,"sprint 03 — asr-worker needs S2S writes (status, retry enqueue)"
+device,asr.write,asr_job,true,ambient (device) — uploads room recordings for batch transcription
 tenant_admin,asr.read,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
 member,asr.read,asr_job,true,sprint 03 — read own jobs
 viewer,asr.read,asr_job,true,sprint 03 — viewers read own jobs
 auditor,asr.read,asr_job,false,sprint 03 leaves ASR job reads out of audit role
 service,asr.read,asr_job,true,sprint 03 — asr-worker reads own jobs to process them
+device,asr.read,asr_job,true,ambient (device) — reads back its own jobs to confirm delivery
 tenant_admin,asr.cancel,asr_job,false,admin/content separation (S14): transcription is a content surface; admins get PII-free aggregates via stats.read
 member,asr.cancel,asr_job,true,sprint 03 — cancel own jobs
 viewer,asr.cancel,asr_job,false,cancellations go through member/admin
 auditor,asr.cancel,asr_job,false,
 service,asr.cancel,asr_job,false,
+device,asr.cancel,asr_job,false,capture only; cancellations go through a human member
 tenant_admin,dictation.start,dictation_session,false,admin/content separation (S14): dictation is a content surface
 member,dictation.start,dictation_session,true,sprint 04 — start own session
 viewer,dictation.start,dictation_session,true,sprint 04
 auditor,dictation.start,dictation_session,false,
 service,dictation.start,dictation_session,false,user-only
+device,dictation.start,dictation_session,true,ambient (device) — opens live conversation-mode room capture
 tenant_admin,dictation.read,dictation_session,false,admin/content separation (S14): dictation is a content surface
 member,dictation.read,dictation_session,true,sprint 04 — read own session
 viewer,dictation.read,dictation_session,true,sprint 04
 auditor,dictation.read,dictation_session,false,
 service,dictation.read,dictation_session,true,sprint 05 — NLP S2S reads transcripts
+device,dictation.read,dictation_session,true,ambient (device) — reads its own session state while streaming
 tenant_admin,dictation.finalize,dictation_session,false,admin/content separation (S14): dictation is a content surface
 member,dictation.finalize,dictation_session,true,sprint 04 — finalize own session
 viewer,dictation.finalize,dictation_session,true,sprint 04
 auditor,dictation.finalize,dictation_session,false,
 service,dictation.finalize,dictation_session,false,
+device,dictation.finalize,dictation_session,true,ambient (device) — ends the meeting capture
 tenant_admin,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
 member,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
 viewer,nlp.process,nlp_text,true,sprint 05 — invoke NLP pipeline
 auditor,nlp.process,nlp_text,false,
 service,nlp.process,nlp_text,true,sprint 05 — dictation-service + asr-service S2S
+device,nlp.process,nlp_text,false,capture only — NLP runs S2S after upload; not from the device
 tenant_admin,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
 member,nlp.read.abbreviations,abbreviation,true,sprint 05 — read merged dictionary
 viewer,nlp.read.abbreviations,abbreviation,true,sprint 05
 auditor,nlp.read.abbreviations,abbreviation,true,sprint 05 — auditors see policy
 service,nlp.read.abbreviations,abbreviation,true,sprint 05 — NLP pipeline reads via snapshot
+device,nlp.read.abbreviations,abbreviation,false,room-capture hardware: capture only; no dictionary surface
 tenant_admin,nlp.write.abbreviations,abbreviation,true,sprint 05 — upsert/delete tenant rules
 member,nlp.write.abbreviations,abbreviation,false,tenant_admin only
 viewer,nlp.write.abbreviations,abbreviation,false,tenant_admin only
 auditor,nlp.write.abbreviations,abbreviation,false,
 service,nlp.write.abbreviations,abbreviation,false,user-only
+device,nlp.write.abbreviations,abbreviation,false,room-capture hardware: capture only; no dictionary surface
 tenant_admin,template.read,template,true,sprint 06 — read tenant + system templates
 member,template.read,template,true,sprint 06 — members read for dictation
 viewer,template.read,template,true,sprint 06
 auditor,template.read,template,true,sprint 06 — auditors see catalogue
 service,template.read,template,true,sprint 06 — dictation-service loads on session start
+device,template.read,template,true,ambient (device) — conversation session loads its template on start
 tenant_admin,template.clone,template,true,sprint 06 — clone system into tenant
 member,template.clone,template,false,tenant_admin only
 viewer,template.clone,template,false,
 auditor,template.clone,template,false,
 service,template.clone,template,false,
+device,template.clone,template,false,read-only template access; curation is human administration
 tenant_admin,template.update,template,true,sprint 06 — cosmetic or structural edit
 member,template.update,template,false,tenant_admin only
 viewer,template.update,template,false,
 auditor,template.update,template,false,
 service,template.update,template,false,
+device,template.update,template,false,read-only template access; curation is human administration
 tenant_admin,template.deprecate,template,true,sprint 06 — soft-delete tenant template
 member,template.deprecate,template,false,tenant_admin only
 viewer,template.deprecate,template,false,
 auditor,template.deprecate,template,false,
 service,template.deprecate,template,false,
+device,template.deprecate,template,false,read-only template access; curation is human administration
 tenant_admin,note.write,note,false,admin/content separation (S14): admins do not author or edit notes
 member,note.write,note,true,sprint 08 — authors own notes; sprint 10 — also gates /autocomplete phrase+snippet writes (scope reuse; RLS enforces per-scope authority)
 viewer,note.write,note,true,sprint 08 — authors notes; sprint 10 — also gates /autocomplete phrase+snippet writes
 auditor,note.write,note,false,read-only role — no content writes
 service,note.write,note,false,user-only authoring
+device,note.write,note,false,a compromised room device must not read or write any note content
 tenant_admin,note.read,note,false,"admin/content separation (S14): admins see PII-free aggregates via stats.read, never note content"
 member,note.read,note,true,sprint 08 — reads own notes; sprint 10 — also gates /autocomplete/* (suggest/phrases/telemetry): deliberate reuse of note.read
 viewer,note.read,note,true,sprint 08 — reads notes; sprint 10 — also gates /autocomplete/*
 auditor,note.read,note,false,note content out of audit role (mirrors dictation)
 service,note.read,note,true,S2S note reads (PDF/export pipeline); sprint 10 — also gates /autocomplete/*
+device,note.read,note,false,a compromised room device must not read or write any note content
 tenant_admin,notification.read,notification,true,reads own notification feed and badge
 member,notification.read,notification,true,reads own notification feed and badge
 viewer,notification.read,notification,true,reads own notification feed and badge
 auditor,notification.read,notification,true,own feed only; grants no note-content visibility
 service,notification.read,notification,false,S2S publishes events; it has no feed
+device,notification.read,notification,false,hardware has no notification feed
 tenant_admin,notification.write,notification,true,marks own notifications read; edits own preferences
 member,notification.write,notification,true,marks own notifications read; edits own preferences
 viewer,notification.write,notification,true,marks own notifications read; edits own preferences
 auditor,notification.write,notification,true,marks own notifications read; edits own preferences
 service,notification.write,notification,false,S2S publishes events; it has no preferences
+device,notification.write,notification,false,hardware has no notification feed
 tenant_admin,stats.read,tenant,true,"S14 — PII-free aggregate reads (counts, timings) so the usage dashboard survives the admin/content split"
 member,stats.read,tenant,false,members read the real lists; no stripped mode needed
 viewer,stats.read,tenant,false,viewers read the real lists; no stripped mode needed
 auditor,stats.read,tenant,false,"audit reach is the audit log, not usage aggregates"
 service,stats.read,tenant,false,no S2S dashboard surface
+device,stats.read,tenant,false,room-capture hardware: capture only; no admin or aggregate surface
 tenant_admin,autocomplete.read,phrase,true,S14 — split out of note.read; admins curate the tenant phrase library
 member,autocomplete.read,phrase,true,S14 — suggestions while dictating
 viewer,autocomplete.read,phrase,true,S14 — suggestions while dictating
 auditor,autocomplete.read,phrase,false,no dictation surface
 service,autocomplete.read,phrase,true,S14 — S2S trie warm-up / telemetry roll-up
+device,autocomplete.read,phrase,false,room-capture hardware: capture only; no editor surface
 tenant_admin,autocomplete.write,phrase,true,S14 — split out of note.write; tenant-scope phrase curation is administration
 member,autocomplete.write,phrase,true,S14 — own user-scope phrases
 viewer,autocomplete.write,phrase,true,S14 — own user-scope phrases
 auditor,autocomplete.write,phrase,false,read-only role
 service,autocomplete.write,phrase,false,user-only authoring
+device,autocomplete.write,phrase,false,room-capture hardware: capture only; no editor surface
 tenant_admin,synonym.read,synonym,true,S15 — dictionary curation view
 member,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
 viewer,synonym.read,synonym,true,S15 — synonym dictionary read (search expansion)
 auditor,synonym.read,synonym,false,read-only audit role — no search surface
 service,synonym.read,synonym,true,S15 — S2S dictionary read
+device,synonym.read,synonym,false,room-capture hardware: capture only; no search surface
 tenant_admin,synonym.write,synonym,true,"S15 — tenant synonym curation; dictionary terms, never note content"
 member,synonym.write,synonym,false,curation is administration
 viewer,synonym.write,synonym,false,curation is administration
 auditor,synonym.write,synonym,false,read-only role
 service,synonym.write,synonym,false,human curation only
+device,synonym.write,synonym,false,room-capture hardware: capture only; no search surface

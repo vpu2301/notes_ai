@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from audit import AuditWriter
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
+from diarization import DiarizationEngine
 from messaging import RedisStreamsConsumer, RedisStreamsProducer
 from storage import EncryptedObjectStore, S3Client
 
@@ -31,6 +32,12 @@ class WorkerState:
     transcript_store: EncryptedObjectStore
     envelope: Envelope
     engine: WhisperEngine
+    # Ambient Capture v1: offline speaker diarization for diarize=true
+    # jobs. NEVER warmed at startup — most jobs don't diarize, and a
+    # worker without the ECAPA weights must still transcribe. The first
+    # diarize job pays ensure_loaded(); if that fails the job fails with
+    # `diarization_unavailable` (retryable), the worker stays healthy.
+    diarizer: DiarizationEngine
 
 
 async def build_state() -> WorkerState:
@@ -93,6 +100,17 @@ async def build_state() -> WorkerState:
     engine = WhisperEngine()
     engine.load()
 
+    diarizer = DiarizationEngine(
+        model_dir=settings.diar_model_dir,
+        device=settings.diar_device,
+        pins={
+            "embedding_model.ckpt": settings.diar_model_sha256,
+            "mean_var_norm_emb.ckpt": settings.diar_meanvar_sha256,
+        },
+        model_repo=settings.diar_model_repo,
+        model_revision=settings.diar_model_revision,
+    )
+
     return WorkerState(
         app_pool=app_pool,
         audit_writer_pool=audit_writer_pool,
@@ -106,6 +124,7 @@ async def build_state() -> WorkerState:
         transcript_store=transcript_store,
         envelope=envelope,
         engine=engine,
+        diarizer=diarizer,
     )
 
 

@@ -124,6 +124,7 @@ RUN uv pip install --system --no-cache \
     "torchaudio==2.11.0+cpu" \
     /build/services/dictation-service \
     /build/services/asr-worker \
+    /build/libs/diarization \
     /build/libs/observability \
     /build/libs/auth \
     /build/libs/audit \

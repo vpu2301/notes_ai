@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from dictation_service.diarization.integrity import (
+from diarization.integrity import (
     ModelIntegrityError,
     sha256_file,
     verify_model_dir,

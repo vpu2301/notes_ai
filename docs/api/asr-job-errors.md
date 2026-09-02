@@ -103,6 +103,8 @@ contract. `type` is stable; the concurrency rejection keeps its historical
 | `model_unavailable` | inference | **yes** | no | The Whisper model is not loaded on the worker that claimed the job |
 | `gpu_oom` | inference | no | yes | CUDA out of memory. Not retried — hammering a full GPU costs the whole queue. The CUDA cache is released before the worker moves on |
 | `timeout` | inference | no | yes | Inference exceeded `max(60s, audio_seconds × MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER)` |
+| `diarization_unavailable` | inference | **yes** | no | `diarize=true` was requested but the speaker model is not available on the worker that claimed the job (image without baked ECAPA weights, digest mismatch, cold fleet). Mirrors `model_unavailable` — a redelivery may land on a worker that can |
+| `diarization_failed` | inference | no | yes | The recording was transcribed but speaker separation crashed on these samples. Deterministic — a redelivery redoes a full Whisper pass to reach the same crash. Resubmitting without `diarize` produces a plain transcript |
 | `result_store_failed` | persist | **yes** | no | The transcript was produced but could not be encrypted/uploaded. Retried, which redoes inference — cheaper than a `complete` row pointing at an object that was never written |
 | `db_unavailable` | persist | **yes** | no | The transcript is stored; recording the status failed |
 | `retry_exhausted` | lifecycle | no | yes | A retryable kind failed on every delivery and the message was dead-lettered. The last kind is preserved in `error_detail` |

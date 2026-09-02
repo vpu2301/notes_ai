@@ -240,6 +240,8 @@ async def _new_session(
         language=start.language,
         vocabulary_hint=vocabulary_hint,
         target_kind=start.target_kind,
+        capture_source=start.capture_source,
+        device_name=start.device_name,
         template_id=start.template_id,
         claims=upgrade.claims,
         token_exp_ts=upgrade.claims.exp,
@@ -313,20 +315,26 @@ async def _new_session(
             template_id=ctx.template_id,
             worker_id=settings.worker_id,
             mode=ctx.mode,
+            capture_source=ctx.capture_source,
+            device_name=ctx.device_name,
         )
 
+    started_payload: dict[str, Any] = {
+        "language": ctx.language,
+        "target_kind": ctx.target_kind,
+        "mode": ctx.mode,
+        "protocol_version": ctx.protocol_version,
+        "capture_source": ctx.capture_source,
+    }
+    if ctx.device_name is not None:
+        started_payload["device_name"] = ctx.device_name
     await state.audit_writer.write_event(
         tenant_id=ctx.tenant_id,
         kind=audit_kinds.SESSION_STARTED,
         actor_sub=ctx.user_id,
         target_kind="dictation_session",
         target_id=str(session_id),
-        payload={
-            "language": ctx.language,
-            "target_kind": ctx.target_kind,
-            "mode": ctx.mode,
-            "protocol_version": ctx.protocol_version,
-        },
+        payload=started_payload,
         severity=Severity.INFO,
     )
 
@@ -420,6 +428,10 @@ async def _resume_session(
     ctx.network_drop_count += 1
     ctx.state = SessionState.ACTIVE
     ctx.bearer = upgrade.bearer  # reconnects may carry a fresher token
+    # Ambient-capture v1: capture_source/device_name describe the ORIGINAL
+    # capture. Whatever the resume frame carries (a phone picking up a
+    # room-device session, say) is deliberately ignored — neither the ctx
+    # nor the DB row is rewritten.
     ctx.touch()
     # Sprint 04 declared this instrument but never emitted it, so
     # DictationReconnectRateHigh could not fire (sprint-14 deployment pass).

@@ -62,6 +62,7 @@ known-first-party = [
     "template_models",
     "note_models",
     "notification_events",
+    "diarization",
 ]
 
 [tool.mypy]
@@ -100,6 +101,7 @@ root_packages = [
     "notification_service",
     "notification_events",
     "generation_service",
+    "diarization",
 ]
 
 [[tool.importlinter.contracts]]
@@ -241,6 +243,16 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "diarization is a leaf — it must not depend on other internal libs"
+type = "forbidden"
+source_modules = ["diarization"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging",
+    "crypto", "storage", "asr_models", "template_models", "note_models",
+    "notification_events",
+]
+
+[[tool.importlinter.contracts]]
 name = "Libs may not import services"
 type = "forbidden"
 source_modules = [
@@ -256,6 +268,7 @@ source_modules = [
     "template_models",
     "note_models",
     "notification_events",
+    "diarization",
 ]
 forbidden_modules = [
     "template_service",

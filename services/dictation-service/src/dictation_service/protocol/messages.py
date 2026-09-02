@@ -174,6 +174,14 @@ class StartSession(_StrictModel):
     # Optional free-text vocabulary hint (product terms, names, jargon)
     # fed to Whisper's initial_prompt for this session. Empty = none.
     vocabulary_hint: str = Field(default="", max_length=2000)
+    # Ambient-capture v1 (additive in v1, same as vocabulary_hint): which
+    # surface produced the audio. Persisted on dictation_sessions and
+    # echoed on GET /dictate/sessions; room devices MUST send
+    # "room_device" (docs/runbooks/ambient-device.md).
+    capture_source: Literal["browser", "mobile", "room_device"] = "browser"
+    # Optional stable device/room label (e.g. "Berlin 4F"). Allowed with
+    # ANY capture_source — a browser profile may carry a label too.
+    device_name: str | None = Field(default=None, min_length=1, max_length=128)
     template_id: UUID | None = None
     resume_session_id: UUID | None = None
 

@@ -63,6 +63,7 @@ from asr_models import JobEnqueuePayload, JobErrorKind, TranscriptionOutput, spe
 from audit import Severity
 from crypto import CryptoError
 from db import tenant_connection
+from diarization import DiarizationUnavailableError, OfflineDiarization, diarize_offline
 from messaging import Message, RedisStreamsConsumer
 from storage import ObjectNotFoundError
 
@@ -99,6 +100,11 @@ _gpu_memory_peak = _meter.create_histogram(
 _oom_counter = _meter.create_counter(
     "mdx_asr_oom_total",
     description="Times the worker hit CUDA OOM",
+    unit="1",
+)
+_diarized_jobs = _meter.create_counter(
+    "mdx_asr_diarized_jobs_total",
+    description="Batch jobs that ran offline speaker diarization",
     unit="1",
 )
 _warmup_gauge = _meter.create_gauge(
@@ -397,6 +403,28 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _realtime_factor.record(audio_seconds / max(infer_seconds, 1e-6))
         _gpu_memory_peak.record(output.metadata.peak_gpu_mem_mb)
 
+        if payload.diarize:
+            # Ambient Capture v1: speaker-attribute the finished transcript.
+            # Runs after the transcript exists so a diarizer failure can be
+            # classified precisely (diarization_*) instead of burning the
+            # Whisper pass into an `unhandled`.
+            try:
+                await state.diarizer.ensure_loaded()
+            except DiarizationUnavailableError as exc:
+                raise await die(JobErrorKind.DIARIZATION_UNAVAILABLE, str(exc)) from exc
+            try:
+                diar: OfflineDiarization = await asyncio.to_thread(
+                    diarize_offline,
+                    pcm,
+                    16_000,
+                    embedder=state.diarizer.embedder,
+                    segmenter=state.diarizer.segmenter,
+                )
+            except Exception as exc:  # noqa: BLE001 — model choked on these samples
+                raise await die(JobErrorKind.DIARIZATION_FAILED, str(exc)) from exc
+            output = _apply_diarization(output, diar)
+            _diarized_jobs.add(1)
+
         # Last look before the transcript becomes a fact. A cancel that
         # landed during the final chunk, or while the audio was being
         # decoded, must not be overwritten by a `complete` — the user
@@ -459,6 +487,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 "peak_gpu_mem_mb": output.metadata.peak_gpu_mem_mb,
                 "model": output.metadata.model,
                 "segments": len(output.segments),
+                "diarized": bool(payload.diarize),
+                "speakers": len(output.speakers),
             },
             severity=Severity.INFO,
         )
@@ -488,6 +518,30 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _release_cuda_cache()
             raise err from exc
         raise
+
+
+def _apply_diarization(
+    output: TranscriptionOutput, diar: OfflineDiarization
+) -> TranscriptionOutput:
+    """Speaker-attribute every transcript segment from the diarized timeline.
+
+    A segment the diarizer cannot attribute with confidence keeps
+    ``speaker=None`` — an uncertain label on a meeting transcript is worse
+    than no label. ``speakers`` is the diarizer's first-appearance roster,
+    not the set of attributed segments, so a roster entry can exist even
+    when every one of its segments fell below the attribution floor.
+    """
+    return output.model_copy(
+        update={
+            "segments": [
+                seg.model_copy(
+                    update={"speaker": diar.attribute(int(seg.start_ms), int(seg.end_ms))}
+                )
+                for seg in output.segments
+            ],
+            "speakers": diar.speakers,
+        }
+    )
 
 
 def _dier(

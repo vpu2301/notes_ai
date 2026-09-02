@@ -15,7 +15,6 @@ import numpy as np
 from dictation_service.diarization.stream import (
     SAMPLE_RATE_HZ,
     DiarizationStream,
-    _chunks,
 )
 
 DIM = 7
@@ -96,25 +95,6 @@ def test_frontier_embeds_each_region_once() -> None:
         assert cur.start_ms >= prev.end_ms
     assert stream.segments[0].start_ms == 0
     assert stream.segments[-1].end_ms == 6000
-
-
-def test_chunks_splits_long_region_into_near_target_chunks() -> None:
-    chunks = _chunks(0, 4000, 1200, 250)
-    assert chunks == [(0, 1333), (1333, 2666), (2666, 4000)]
-    assert all(hi - lo >= 250 for lo, hi in chunks)
-    # Contiguous cover of the region.
-    assert chunks[0][0] == 0 and chunks[-1][1] == 4000
-    for (_, prev_hi), (lo, _) in zip(chunks, chunks[1:], strict=False):
-        assert lo == prev_hi
-
-
-def test_chunks_short_region_yields_nothing() -> None:
-    assert _chunks(0, 200, 1200, 250) == []
-    assert _chunks(1000, 1000, 1200, 250) == []
-
-
-def test_chunks_region_between_min_and_target_is_single_chunk() -> None:
-    assert _chunks(500, 1500, 1200, 250) == [(500, 1500)]
 
 
 def test_tiny_post_frontier_tail_extends_previous_segment() -> None:

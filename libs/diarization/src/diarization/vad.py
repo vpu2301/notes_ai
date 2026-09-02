@@ -7,9 +7,9 @@ Silero reports them (250 ms min silence splits a speaker hand-off
 into two segments) and never merge across a potential turn change.
 
 Fail-loud policy: diarization with a stubbed VAD would silently produce
-garbage speaker labels on real consultations, so unlike the asr-worker
+garbage speaker labels on real meetings, so unlike the asr-worker
 wrapper there is NO stub fallback — a missing silero-vad install raises
-at load time and conversation sessions are refused (dictation mode is
+at load time and diarization is refused (non-diarized work is
 unaffected; it never loads this module).
 """
 

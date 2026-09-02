@@ -235,6 +235,76 @@ def test_v2_partial_encodes_speaker_fields_and_null_speaker() -> None:
     assert doc2["speaker"] is None and doc2["speaker_confidence"] is None
 
 
+# ── ambient capture (capture_source / device_name on start_session) ──
+
+
+def test_start_session_capture_defaults() -> None:
+    msg = codec.decode_text(json.dumps({"type": "start_session", "language": "en"}))
+    assert isinstance(msg, StartSession)
+    assert msg.capture_source == "browser"
+    assert msg.device_name is None
+
+
+def test_v1_start_session_accepts_room_device_capture() -> None:
+    frame = json.dumps(
+        {
+            "type": "start_session",
+            "language": "en",
+            "capture_source": "room_device",
+            "device_name": "Berlin 4F",
+        }
+    )
+    msg = codec.decode_text(frame)  # additive in v1, like vocabulary_hint
+    assert isinstance(msg, StartSession)
+    assert msg.capture_source == "room_device"
+    assert msg.device_name == "Berlin 4F"
+
+
+def test_v2_start_session_accepts_capture_fields() -> None:
+    frame = json.dumps(
+        {
+            "type": "start_session",
+            "protocol_version": 2,
+            "language": "en",
+            "mode": "conversation",
+            "capture_source": "mobile",
+            "device_name": "Pixel 9",
+        }
+    )
+    msg = codec.decode_text(frame, PROTOCOL_VERSION_V2)
+    assert isinstance(msg, StartSessionV2)
+    assert msg.capture_source == "mobile"
+    assert msg.device_name == "Pixel 9"
+
+
+def test_start_session_rejects_unknown_capture_source() -> None:
+    for version in (PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V2):
+        frame = json.dumps(
+            {
+                "type": "start_session",
+                "protocol_version": version,
+                "language": "en",
+                "capture_source": "carrier_pigeon",
+            }
+        )
+        with pytest.raises(codec.BadMessageError) as exc_info:
+            codec.decode_text(frame, version)
+        assert exc_info.value.code is ErrorCode.BAD_MESSAGE
+
+
+def test_start_session_rejects_out_of_bounds_device_name() -> None:
+    for bad_name in ("", "x" * 129):
+        frame = json.dumps(
+            {
+                "type": "start_session",
+                "language": "en",
+                "device_name": bad_name,
+            }
+        )
+        with pytest.raises(codec.BadMessageError):
+            codec.decode_text(frame)
+
+
 def test_v2_session_started_carries_mode_and_version() -> None:
     started = SessionStartedV2(
         session_id=SID, server_time_ms=1, model="large-v3", language="uk", mode="conversation"

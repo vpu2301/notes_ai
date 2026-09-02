@@ -125,6 +125,10 @@ async def submit_job(
     audio: Annotated[UploadFile, File(description="Audio file to transcribe.")],
     language: Annotated[str, Form(pattern="^(uk|en)$")],
     vocabulary_hint: Annotated[str | None, Form(max_length=2000)] = None,
+    # Ambient Capture v1: run offline speaker diarization after
+    # transcription. Rides the queue payload only — the stored result's
+    # `speaker`/`speakers` fields are the durable record.
+    diarize: Annotated[bool, Form()] = False,
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> TranscriptionJobView:
     state = get_state()
@@ -234,6 +238,7 @@ async def submit_job(
         tenant_id=claims.tid,
         audio_id=audio_id,
         vocabulary_hint=vocabulary_hint or None,
+        diarize=diarize,
         language=language,
         model="large-v3",
         requester_sub=claims.sub,
@@ -296,6 +301,7 @@ async def submit_job(
         payload={
             "audio_id": str(audio_id),
             "language": language,
+            "diarize": diarize,
         },
         severity=Severity.INFO,
     )
@@ -312,6 +318,7 @@ async def submit_job(
         model="large-v3",
         status=JobStatus.QUEUED,
         queued_at=datetime.fromtimestamp(time.time()),
+        diarize=diarize,
     )
 
 

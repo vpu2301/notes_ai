@@ -9,6 +9,11 @@
             "title": "Audio",
             "type": "string"
           },
+          "diarize": {
+            "default": false,
+            "title": "Diarize",
+            "type": "boolean"
+          },
           "language": {
             "pattern": "^(uk|en)$",
             "title": "Language",
@@ -84,6 +89,17 @@
           "raw_text": {
             "title": "Raw Text",
             "type": "string"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
           },
           "start_ms": {
             "minimum": 0.0,
@@ -220,6 +236,13 @@
             },
             "title": "Segments",
             "type": "array"
+          },
+          "speakers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Speakers",
+            "type": "array"
           }
         },
         "required": [
@@ -247,6 +270,11 @@
           "cancel_requested": {
             "default": false,
             "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "diarize": {
+            "default": false,
+            "title": "Diarize",
             "type": "boolean"
           },
           "error_detail": {

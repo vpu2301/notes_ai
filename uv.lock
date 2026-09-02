@@ -19,6 +19,7 @@ members = [
     "autocomplete-service",
     "crypto",
     "db",
+    "diarization",
     "dictation-service",
     "generation-service",
     "messaging",
@@ -372,6 +373,7 @@ dependencies = [
     { name = "auth" },
     { name = "crypto" },
     { name = "db" },
+    { name = "diarization" },
     { name = "faster-whisper", marker = "sys_platform != 'darwin'" },
     { name = "httpx" },
     { name = "messaging" },
@@ -406,6 +408,7 @@ requires-dist = [
     { name = "auth", editable = "libs/auth" },
     { name = "crypto", editable = "libs/crypto" },
     { name = "db", editable = "libs/db" },
+    { name = "diarization", editable = "libs/diarization" },
     { name = "faster-whisper", marker = "sys_platform != 'darwin'", specifier = ">=1.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "messaging", editable = "libs/messaging" },
@@ -1320,6 +1323,36 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "diarization"
+version = "0.1.0"
+source = { editable = "libs/diarization" }
+dependencies = [
+    { name = "numpy" },
+    { name = "silero-vad", marker = "sys_platform != 'darwin'" },
+    { name = "speechbrain", marker = "sys_platform != 'darwin'" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "silero-vad", marker = "sys_platform != 'darwin'", specifier = ">=6.0.0" },
+    { name = "speechbrain", marker = "sys_platform != 'darwin'", specifier = ">=1.0.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "dictation-service"
 version = "0.4.0"
 source = { editable = "services/dictation-service" }
@@ -1331,6 +1364,7 @@ dependencies = [
     { name = "auth" },
     { name = "crypto" },
     { name = "db" },
+    { name = "diarization" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "messaging" },
@@ -1345,8 +1379,6 @@ dependencies = [
     { name = "python-json-logger" },
     { name = "redis" },
     { name = "secret" },
-    { name = "silero-vad", marker = "sys_platform != 'darwin'" },
-    { name = "speechbrain", marker = "sys_platform != 'darwin'" },
     { name = "storage" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
@@ -1370,6 +1402,7 @@ requires-dist = [
     { name = "auth", editable = "libs/auth" },
     { name = "crypto", editable = "libs/crypto" },
     { name = "db", editable = "libs/db" },
+    { name = "diarization", editable = "libs/diarization" },
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
@@ -1389,8 +1422,6 @@ requires-dist = [
     { name = "redis", specifier = ">=5.0.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "secret", editable = "libs/secret" },
-    { name = "silero-vad", marker = "sys_platform != 'darwin'", specifier = ">=6.0.0" },
-    { name = "speechbrain", marker = "sys_platform != 'darwin'", specifier = ">=1.0.0" },
     { name = "storage", editable = "libs/storage" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
     { name = "websockets", specifier = ">=12.0" },

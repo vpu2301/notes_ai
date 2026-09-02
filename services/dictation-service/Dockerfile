@@ -110,6 +110,7 @@ RUN python3.12 -m uv pip install --system --no-cache \
     --target /deps \
     /build/services/dictation-service \
     /build/services/asr-worker \
+    /build/libs/diarization \
     /build/libs/observability \
     /build/libs/auth \
     /build/libs/audit \

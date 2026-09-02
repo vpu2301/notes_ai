@@ -17,12 +17,12 @@ from .claims import Claims
 # Kept as plain str so we can read them from the CSV without a Literal
 # bridge. The exhaustive test guards against typos.
 
-Role = str  # tenant_admin | member | viewer | auditor | service
+Role = str  # tenant_admin | member | viewer | auditor | service | device
 Action = str  # e.g. 'user.invite', 'audit.read'
 TargetKind = str  # e.g. 'user', 'audit', 'tenant'
 
 KNOWN_ROLES: Final[frozenset[str]] = frozenset(
-    {"tenant_admin", "member", "viewer", "auditor", "service"}
+    {"tenant_admin", "member", "viewer", "auditor", "service", "device"}
 )
 
 KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
@@ -187,6 +187,23 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("service", "synonym.read", "synonym"): True,
     ("tenant_admin", "synonym.read", "synonym"): True,
     ("tenant_admin", "synonym.write", "synonym"): True,
+    # ── Ambient capture devices ────────────────────────────────────────
+    # `device` is room-capture hardware (a meeting-room microphone box)
+    # authenticating via Keycloak client credentials. It CAPTURES only:
+    # it can upload audio and stream/finalize dictation sessions, and
+    # read back its own transcription jobs to confirm delivery — but it
+    # holds no note, user, audit or notification surface. The threat
+    # model is a stolen/compromised box on an office shelf: with this
+    # grant set it cannot read any tenant content, only add new
+    # audio/transcripts. template.read is needed because a conversation
+    # session loads its template on start.
+    ("device", "tenant.read", "tenant"): True,
+    ("device", "asr.write", "asr_job"): True,
+    ("device", "asr.read", "asr_job"): True,
+    ("device", "dictation.start", "dictation_session"): True,
+    ("device", "dictation.read", "dictation_session"): True,
+    ("device", "dictation.finalize", "dictation_session"): True,
+    ("device", "template.read", "template"): True,
 }
 
 

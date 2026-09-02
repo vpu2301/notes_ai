@@ -57,6 +57,10 @@ class SessionSummary(BaseModel):
     status: str
     language: str
     target_kind: str
+    # Ambient-capture v1 provenance: which surface produced the audio
+    # ('browser' | 'mobile' | 'room_device') + optional device/room label.
+    capture_source: str = "browser"
+    device_name: str | None = None
     started_at: datetime | None
     last_active_at: datetime
     finalized_at: datetime | None = None
@@ -71,6 +75,8 @@ class SessionDetail(BaseModel):
     status: str
     language: str
     target_kind: str
+    capture_source: str = "browser"
+    device_name: str | None = None
     transcript: list[dict[str, Any]]
     total_audio_ms: int
     avg_partial_latency_ms: int | None
@@ -102,6 +108,8 @@ async def get_session(
         status=row["status"],
         language=row["language"],
         target_kind=row["target_kind"],
+        capture_source=row["capture_source"],
+        device_name=row["device_name"],
         transcript=_transcript_from_row(row["transcript_jsonb"]),
         total_audio_ms=int(row["total_audio_ms"]),
         avg_partial_latency_ms=row["avg_partial_latency_ms"],
@@ -148,6 +156,8 @@ async def list_sessions(
             status=r["status"],
             language=r["language"],
             target_kind=r["target_kind"],
+            capture_source=r.get("capture_source", "browser"),
+            device_name=r.get("device_name"),
             started_at=r.get("started_at"),
             last_active_at=r["last_active_at"],
             finalized_at=r.get("finalized_at"),

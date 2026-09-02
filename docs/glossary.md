@@ -17,6 +17,8 @@ introduces them.
 | **Dictation session** | A real-time WebSocket dictation flow (Sprint 04). Has a `mode`: `dictation` (single speaker) or `conversation` (meeting). |
 | **Conversation / meeting mode** | Dictation-session mode for multi-speaker audio; adds diarization. Speaker labels are neutral (`SPEAKER_1..N`) with client-supplied naming. |
 | **Diarization**       | Splitting audio by speaker ("who said what") — Silero VAD + ECAPA embeddings + online clustering (ADR-0034). |
+| **Ambient capture**   | Recording a meeting ambiently (room device, laptop/phone, or uploaded audio) and turning it into a speaker-attributed note. See docs/architecture/ambient-capture.md. |
+| **Capture device**    | Meeting-room hardware with its own least-privilege Keycloak identity (`device` role): may capture and transcribe, can never read notes. |
 | **Envelope encryption** | The KEK_master → KEK_tenant → DEK_object layering that protects all stored audio and transcripts (ADR-0011). |
 | **Hash chain**        | Append-only integrity scheme: each record embeds the hash of its predecessor, so tampering breaks the chain. Used by the audit log (ADR-0008) and note versions (ADR-0020). |
 | **Layer C**           | Inline ghost-text completion served by generation-service from a local LLM behind a provider seam (ADR-0036). |

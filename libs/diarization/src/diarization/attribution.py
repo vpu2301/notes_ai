@@ -1,21 +1,29 @@
-"""Word-level speaker attribution by majority overlap (sprint 14).
+"""Speaker attribution by majority overlap (hoisted from dictation-service).
 
-Pure functions: given the diarized speaker timeline and a word's
-``TokenTiming`` start/end, decide which speaker uttered it. UNKNOWN when
-the overlap evidence is ambiguous; ``None`` when the word's audio has not
-been diarized yet (labels may trail text by one window — the FE renders
-text immediately and colours it when the label lands).
+Pure functions: given the diarized speaker timeline and a word's (or
+transcript segment's) start/end, decide which speaker uttered it. UNKNOWN
+when the overlap evidence is ambiguous; ``None`` when the audio has not
+been diarized yet (streaming: labels may trail text by one window — the
+FE renders text immediately and colours it when the label lands; offline
+callers pass a frontier past the end of the recording so this never
+happens).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .stream import SpeakerSegment
 
 UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class SpeakerSegment:
+    """One diarized span on the timeline (absolute milliseconds)."""
+
+    start_ms: int
+    end_ms: int
+    label: str  # "S1" | "S2" | "UNKNOWN"
+    confidence: float
 
 
 @dataclass(frozen=True)

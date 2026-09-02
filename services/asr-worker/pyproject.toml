@@ -20,6 +20,11 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
     "python-json-logger>=2.0.7",
     # Internal libs (resolved via uv workspace)
+    # Offline speaker diarization for diarize=true batch jobs (Ambient
+    # Capture v1). The lib carries the speechbrain/silero-vad deps with
+    # the same macOS-exclusion pattern; models load lazily so workers
+    # without the ECAPA weights still transcribe.
+    "diarization",
     "observability",
     "auth",
     "audit",
@@ -33,6 +38,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+diarization = { workspace = true }
 observability = { workspace = true }
 auth = { workspace = true }
 audit = { workspace = true }

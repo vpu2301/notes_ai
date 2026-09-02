@@ -259,6 +259,81 @@ async def test_empty_hint_falls_back_to_the_config_default(
     assert ctx.vocabulary_hint == "team glossary"
 
 
+# ── b2. ambient-capture provenance (capture_source / device_name) ────
+
+
+async def test_capture_source_defaults_to_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client that never heard of ambient capture stays 'browser'."""
+    state, ws, calls = _wire(monkeypatch)
+
+    ctx = await _new_session(ws, _upgrade(protocol_version=1), state, StartSession(language="en"))
+
+    assert ctx is not None
+    assert ctx.capture_source == "browser"
+    assert ctx.device_name is None
+
+    inserted = calls.inserted[0]
+    assert inserted["capture_source"] == "browser"
+    assert inserted["device_name"] is None
+
+    audit = state.audit_writer.by_kind(audit_kinds.SESSION_STARTED)
+    assert audit["payload"]["capture_source"] == "browser"
+    # No label set → no key at all (the payload never carries a null).
+    assert "device_name" not in audit["payload"]
+
+
+async def test_room_device_capture_is_persisted_and_audited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, ws, calls = _wire(monkeypatch)
+
+    ctx = await _new_session(
+        ws,
+        _upgrade(protocol_version=2),
+        state,
+        StartSessionV2(
+            language="en",
+            mode="conversation",
+            capture_source="room_device",
+            device_name="Berlin 4F",
+        ),
+    )
+
+    assert ctx is not None
+    assert ctx.capture_source == "room_device"
+    assert ctx.device_name == "Berlin 4F"
+
+    inserted = calls.inserted[0]
+    assert inserted["capture_source"] == "room_device"
+    assert inserted["device_name"] == "Berlin 4F"
+
+    audit = state.audit_writer.by_kind(audit_kinds.SESSION_STARTED)
+    assert audit["payload"]["capture_source"] == "room_device"
+    assert audit["payload"]["device_name"] == "Berlin 4F"
+
+
+async def test_device_name_is_allowed_with_any_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """device_name is not gated on room_device — a browser profile may
+    carry a label too."""
+    state, ws, calls = _wire(monkeypatch)
+
+    ctx = await _new_session(
+        ws,
+        _upgrade(protocol_version=1),
+        state,
+        StartSession(language="en", device_name="Volodymyr's laptop"),
+    )
+
+    assert ctx is not None
+    assert ctx.capture_source == "browser"
+    assert ctx.device_name == "Volodymyr's laptop"
+    assert calls.inserted[0]["device_name"] == "Volodymyr's laptop"
+
+
 # ── c. dictation is untouched ────────────────────────────────────────
 
 

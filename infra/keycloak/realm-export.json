@@ -53,6 +53,10 @@
       {
         "name": "service",
         "description": "Service-to-service identity for backend daemons"
+      },
+      {
+        "name": "device",
+        "description": "Ambient-capture hardware (room devices) — capture-only: submit/read ASR jobs, run dictation sessions, read templates; no note or admin access"
       }
     ],
     "client": {}
@@ -442,6 +446,62 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "room-device-demo",
+      "name": "Room Device Demo (ambient capture — DEV ONLY)",
+      "description": "Confidential service-account-only client for ONE meeting-room capture device. Client-credentials grant only — no browser flows, no password grant. Its service account holds the `device` realm role (capture-only) and a tenant_id attribute so tokens carry tid. Production provisions one such client per room; this is the dev example (docs/runbooks/ambient-device.md).",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-room-device-secret",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.signed.response.alg": "RS256",
+        "client_credentials.use_refresh_token": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-mdx-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "mdx-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "roles (flat realm-roles array)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "tid (tenant_id user attribute)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tid",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -684,6 +744,19 @@
           "view-realm"
         ]
       }
+    },
+    {
+      "username": "service-account-room-device-demo",
+      "serviceAccountClientId": "room-device-demo",
+      "enabled": true,
+      "attributes": {
+        "tenant_id": [
+          "00000000-0000-0000-0000-00000000000a"
+        ]
+      },
+      "realmRoles": [
+        "device"
+      ]
     }
   ]
 }
