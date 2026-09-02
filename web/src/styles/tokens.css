@@ -1,0 +1,122 @@
+/* ─── Design tokens ──────────────────────────────────────────────────────
+   Warm neutrals + a single deep indigo accent. 8px grid.
+   System font stack (Inter would be the webfont of choice, but the app
+   must run offline-from-localhost, so no external fetches). */
+
+:root {
+  color-scheme: light dark;
+
+  /* type scale */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif; /* Inter, if self-hosted later */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 0.75rem;   /* 12 */
+  --text-sm: 0.8125rem; /* 13 */
+  --text-md: 0.875rem;  /* 14 */
+  --text-base: 0.9375rem; /* 15 */
+  --text-lg: 1.0625rem; /* 17 */
+  --text-xl: 1.375rem;  /* 22 */
+  --text-2xl: 1.75rem;  /* 28 */
+
+  /* spacing — 8px grid (halves allowed) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* radius */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  /* motion */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --fast: 150ms;
+
+  /* ── light theme (warm neutrals) ── */
+  --bg: #f6f4f1;             /* warm paper */
+  --surface: #fefdfb;        /* card */
+  --surface-2: #f0eeea;      /* inset / hover */
+  --surface-3: #e7e4df;      /* pressed */
+  --ink: #23201c;            /* primary text */
+  --ink-2: #5c5751;          /* secondary text */
+  --ink-3: #8a847c;          /* faint text (still ≥4.5:1 on surface for sm) */
+  --line: #e3dfd9;           /* hairline */
+  --line-strong: #cfcac2;
+
+  --accent: #4f46e5;         /* deep indigo */
+  --accent-hover: #4338ca;
+  --accent-soft: #eef0fd;    /* tinted surface */
+  --accent-soft-line: #d5d8f8;
+  --on-accent: #ffffff;
+
+  --danger: #b3261e;
+  --danger-soft: #fceceb;
+  --danger-soft-line: #f3cdca;
+  --success: #1d7a46;
+  --success-soft: #e7f4ec;
+  --success-soft-line: #c4e3d1;
+  --warn: #92610c;
+  --warn-soft: #fbf1de;
+  --warn-soft-line: #eeddb8;
+  --violet: #6d4fc4;
+  --violet-soft: #f0ebfb;
+  --violet-soft-line: #dcd1f2;
+
+  --rec: #d6362b;            /* recording red */
+
+  --mark-bg: #f3e8b9;        /* search highlight */
+
+  --shadow-1: 0 1px 2px rgba(35, 32, 28, 0.05);
+  --shadow-2: 0 1px 2px rgba(35, 32, 28, 0.04), 0 4px 12px rgba(35, 32, 28, 0.07);
+  --shadow-3: 0 2px 4px rgba(35, 32, 28, 0.06), 0 12px 32px rgba(35, 32, 28, 0.14);
+
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* ── dark theme (warm, not pure black) ── */
+    --bg: #191713;
+    --surface: #211f1b;
+    --surface-2: #2a2723;
+    --surface-3: #33302b;
+    --ink: #ece8e2;
+    --ink-2: #b5afa6;
+    --ink-3: #837d74;
+    --line: #322f2a;
+    --line-strong: #46423c;
+
+    --accent: #8b87f2;
+    --accent-hover: #a19ef5;
+    --accent-soft: #2b2a41;
+    --accent-soft-line: #413f62;
+    --on-accent: #14122e;
+
+    --danger: #f28a84;
+    --danger-soft: #3a2523;
+    --danger-soft-line: #5c3733;
+    --success: #7fd0a1;
+    --success-soft: #20312a;
+    --success-soft-line: #32503f;
+    --warn: #e4b56a;
+    --warn-soft: #38301f;
+    --warn-soft-line: #55482c;
+    --violet: #b9a4f0;
+    --violet-soft: #2f2840;
+    --violet-soft-line: #473c5f;
+
+    --rec: #f26557;
+
+    --mark-bg: #56491c;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+}

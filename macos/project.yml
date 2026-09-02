@@ -1,0 +1,32 @@
+# XcodeGen spec for the proper .app bundle (menu-bar-only, mic permission).
+#
+#   brew install xcodegen
+#   cd macos && xcodegen && open NotesAICapture.xcodeproj
+#
+# The SPM Package.swift alongside this file is the headless dev path
+# (`swift build`); this spec is only needed for a signed .app with its own
+# Info.plist / TCC identity.
+name: NotesAICapture
+options:
+  bundleIdPrefix: ai.notes
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+targets:
+  NotesAICapture:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/NotesAICapture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.notes.capture
+        PRODUCT_NAME: Notes AI Capture
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Support/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Support/NotesAICapture.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"

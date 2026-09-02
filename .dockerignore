@@ -25,3 +25,7 @@ infra/dev/master.key
 .env.local
 *.pem
 *.key
+
+# Client apps — never part of a backend image build context
+web/
+macos/

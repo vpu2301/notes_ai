@@ -39,6 +39,8 @@ Languages: English and Ukrainian first-class (German plumbing present).
 
 ```
 notes_ai/
+├── web/                    # Web UI — React/Vite SPA (login, notes, editor, capture)
+├── macos/                  # macOS app — "Notes AI Capture" SwiftUI menu-bar recorder
 ├── services/               # Independently deployable FastAPI services
 │   ├── _template/          # Baseline template — copy this to create a new service
 │   ├── auth-service/       # Identity, tenants, MFA, sessions, audit read API
@@ -166,6 +168,22 @@ done
 ```
 
 ---
+
+## Client apps
+
+The backend is headless; two first-party clients live in clearly separated
+root folders:
+
+- **`web/`** — the product SPA (Vite + React + TypeScript). `cd web && npm
+  install && npm run dev` → http://localhost:5173 (the origin every service's
+  CORS allow-list expects). Login, note search, template-based editor with
+  autosave/versions/PDF, and a Capture page (record in the browser or upload
+  a recording → diarized transcription → note). See `web/README.md`.
+- **`macos/`** — "Notes AI Capture", a SwiftUI menu-bar app that turns a Mac
+  into an ambient meeting recorder: record → diarized batch transcription →
+  meeting note, with a link that opens the note in the web app. `cd macos &&
+  swift build` for dev; XcodeGen spec included for a proper `.app`. See
+  `macos/README.md`.
 
 ## API documentation
 
