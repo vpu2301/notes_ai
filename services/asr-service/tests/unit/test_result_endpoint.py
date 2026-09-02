@@ -306,3 +306,149 @@ def test_result_410_when_ciphertext_erased(
     assert resp.status_code == 410
     assert "urn:mdx:asr:result:erased" in resp.text
     assert rig.audit.events == []  # nothing served → nothing audited
+
+
+# ── Speaker structure survives enrichment (Ambient Capture) ─────────
+
+
+def _diarized_output() -> TranscriptionOutput:
+    base = _output()
+    return base.model_copy(
+        update={
+            "segments": [
+                base.segments[0].model_copy(update={"speaker": "SPEAKER_1"}),
+                base.segments[1].model_copy(update={"speaker": "SPEAKER_1"}),
+                Segment(
+                    text="так",
+                    start_ms=4000,
+                    end_ms=4400,
+                    words=[WordTiming(text="так", start_ms=4000, end_ms=4400, probability=0.9)],
+                    avg_confidence=0.9,
+                    speaker="SPEAKER_2",
+                ),
+            ],
+            "speakers": ["SPEAKER_1", "SPEAKER_2"],
+        }
+    )
+
+
+def test_result_keeps_speakers_through_nlp_enrichment(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bug this guards: the enriched view used to rebuild every
+    segment without its ``speaker`` and drop the roster, so a diarized
+    job reached every client as one unstructured block of text."""
+    from asr_service.routers import jobs
+
+    rig.store.body = _diarized_output().model_dump_json().encode("utf-8")
+    rig.nlp.response["segments"].append({"text": "Так.", "confidence_spans": []})
+    view = _job_view(JobStatus.COMPLETE).model_copy(
+        update={"speaker_names": {"SPEAKER_2": "Olena"}}
+    )
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+
+    resp = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["nlp_applied"] is True
+    assert [s["speaker"] for s in body["segments"]] == ["SPEAKER_1", "SPEAKER_2"]
+    assert body["speakers"] == ["SPEAKER_1", "SPEAKER_2"]
+    # Display names: the person's name where given, the neutral default elsewhere.
+    assert body["speaker_names"] == {"SPEAKER_1": "Speaker 1", "SPEAKER_2": "Olena"}
+    # And the structure clients render.
+    assert [(t["speaker"], t["name"], t["paragraphs"]) for t in body["turns"]] == [
+        ("SPEAKER_1", "Speaker 1", ["Скарги на кашель."]),
+        ("SPEAKER_2", "Olena", ["Так."]),
+    ]
+    assert body["turns"][0]["segment_indices"] == [0]
+
+
+def test_result_keeps_speakers_when_nlp_is_down(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    rig.store.body = _diarized_output().model_dump_json().encode("utf-8")
+    rig.nlp.response = None
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return _job_view(JobStatus.COMPLETE)
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+
+    body = rig.client.get(f"/asr/jobs/{uuid4()}/result").json()
+    assert body["nlp_applied"] is False
+    assert [s["speaker"] for s in body["segments"]] == ["SPEAKER_1", "SPEAKER_1", "SPEAKER_2"]
+    assert body["speaker_names"] == {"SPEAKER_1": "Speaker 1", "SPEAKER_2": "Speaker 2"}
+    assert [t["speaker"] for t in body["turns"]] == ["SPEAKER_1", "SPEAKER_2"]
+
+
+def test_undiarized_result_is_one_unattributed_turn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return _job_view(JobStatus.COMPLETE)
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+
+    body = rig.client.get(f"/asr/jobs/{uuid4()}/result").json()
+    assert body["speakers"] == []
+    assert body["speaker_names"] == {}
+    assert len(body["turns"]) == 1
+    assert body["turns"][0]["speaker"] is None
+    assert body["turns"][0]["name"] is None
+
+
+# ── PUT /asr/jobs/{id}/speakers ─────────────────────────────────────
+
+
+def test_put_speakers_stores_cleaned_names_and_audits(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    stored: dict[str, object] = {}
+
+    async def _set(conn, *, job_id, names):  # noqa: ANN001
+        stored["job_id"] = job_id
+        stored["names"] = names
+        return names
+
+    monkeypatch.setattr(jobs.repository, "set_speaker_names", _set)
+
+    job_id = uuid4()
+    resp = rig.client.put(
+        f"/asr/jobs/{job_id}/speakers",
+        json={"names": {"SPEAKER_1": "  Mark   Ivanov ", "SPEAKER_2": "   "}},
+    )
+    assert resp.status_code == 200, resp.text
+    # Whitespace collapsed; an empty name clears the label back to default.
+    assert resp.json() == {"job_id": str(job_id), "speaker_names": {"SPEAKER_1": "Mark Ivanov"}}
+    assert stored == {"job_id": job_id, "names": {"SPEAKER_1": "Mark Ivanov"}}
+    (event,) = [e for e in rig.audit.events if e["kind"] == "asr.speakers_named"]
+    assert event["target_id"] == str(job_id)
+    assert event["payload"] == {"labels": ["SPEAKER_1"]}  # labels only, never the names
+
+
+def test_put_speakers_rejects_non_labels(rig: SimpleNamespace) -> None:
+    resp = rig.client.put(f"/asr/jobs/{uuid4()}/speakers", json={"names": {"Mark": "Olena"}})
+    assert resp.status_code == 422
+
+
+def test_put_speakers_404_for_unknown_job(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    async def _set(conn, *, job_id, names):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(jobs.repository, "set_speaker_names", _set)
+    resp = rig.client.put(f"/asr/jobs/{uuid4()}/speakers", json={"names": {"SPEAKER_1": "A"}})
+    assert resp.status_code == 404

@@ -47,9 +47,30 @@ natively, in a window laid out like the Claude / Codex desktop apps
    for titles, one black pill button, a muted moss accent for tints and
    links, and a faint dot print behind the home page and sign-in. Dark mode
    is the same palette turned over. Everything lives in `Views/Theme.swift`.
-4. Everything else — language (Detect / EN / UK), separate speakers, theme,
+4. Everything else — language (Detect / EN / UK / DE), separate speakers, theme,
    sign out, server addresses — lives in **Settings** (⌘,), a sheet behind
-   the account row. Dropdowns (⋯ menus, the account menu, selects) are
+   the account row. Its **Connectors** tab (also *Connectors…* in the
+   account menu and the popover's ⋯ menu) is where the app is wired to the
+   outside:
+   - **Calendar** — connect the Mac's calendars (EventKit) and pick which
+     ones feed the home page's Upcoming list. Google, Outlook and iCloud
+     calendars all arrive through the account added in System Settings ›
+     Internet Accounts (one button away). Changes in Calendar.app refresh
+     the list live.
+   - **MCP connectors** — remote Model Context Protocol servers such as
+     HubSpot, Notion, Linear, Atlassian, or any custom URL
+     (`Connectors/MCPClient.swift`, Streamable HTTP). *Connect* runs the
+     `initialize` handshake and lists the server's tools; a 401 starts the
+     MCP OAuth flow (`Connectors/MCPOAuth.swift`: RFC 9728 resource
+     metadata → RFC 8414 server metadata → RFC 7591 dynamic client
+     registration → PKCE in the browser, callback on the app's
+     `notesai://oauth/callback` scheme). Servers that do not register apps
+     themselves (HubSpot) take a client ID/secret from an app you create on
+     their side, with `http://localhost:52581/callback` as the redirect
+     URL; a pasted access token or an open server work too. Tokens and
+     secrets live in the login Keychain, never in UserDefaults. The
+     connections are per-Mac for now — the backend does not yet consume
+     them when drafting notes. Dropdowns (⋯ menus, the account menu, selects) are
    drawn in the app's own style rather than as native NSMenus
    (`Views/Dropdowns.swift`). The last 10 captures are persisted (job ids;
    statuses are re-fetched). While the window is open the app behaves like
@@ -127,6 +148,7 @@ open NotesAICapture.xcodeproj
 `project.yml` defines an app target that uses `Support/Info.plist`
 (`NSMicrophoneUsageDescription` for the mic prompt,
 `NSCalendarsFullAccessUsageDescription` for the home page's Upcoming list,
+`CFBundleURLTypes` for the `notesai://` OAuth callback of MCP connectors,
 `LSUIElement` so the app is menu-bar-only with no Dock icon) and
 `Support/NotesAICapture.entitlements` (sandbox + network client +
 audio input + calendars). Without the bundle (`swift run`) the calendar
@@ -152,7 +174,11 @@ macos/
     ├── AppState.swift               # auth/settings/recents/selection/template cache
     ├── CaptureViewModel.swift       # record → upload → poll → note pipeline
     ├── NoteViewModel.swift          # one open note: load, autosave, finalize, transcript, PDF
-    ├── CalendarService.swift        # EventKit: upcoming events for the home page
+    ├── CalendarService.swift        # EventKit: upcoming events, calendar picker, live refresh
+    ├── Connectors/
+    │   ├── MCPClient.swift          # MCP over Streamable HTTP: initialize, tools/list
+    │   ├── MCPOAuth.swift           # discovery, dynamic registration, PKCE, loopback/scheme callback
+    │   └── ConnectorStore.swift     # connector list, Keychain tokens, connect/disconnect
     └── Views/
         ├── Theme.swift              # design tokens, button/field/toggle/pill styles
         ├── Dropdowns.swift          # styled ⋯ menus (DSMenu) and select fields (DSSelect)
@@ -164,6 +190,7 @@ macos/
         ├── Sidebar.swift            # search, one button, Home, spaces, account row
         ├── HomeView.swift           # upcoming events, meetings in flight, notes by day
         ├── NoteView.swift           # the note as a document: sections, transcript, ⋯
+        ├── ConnectorsView.swift     # Settings › Connectors: calendar + MCP servers
         └── SettingsView / SignInView
 ```
 

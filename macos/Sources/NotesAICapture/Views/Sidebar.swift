@@ -167,12 +167,26 @@ struct SidebarView: View {
         .help(app.email)
     }
 
+    /// "2 connected" next to the Connectors item; the calendar counts too.
+    private var connectorsHint: String? {
+        var count = app.connectors.connectors.filter {
+            if case .connected = $0.status { return true }
+            return false
+        }.count
+        if app.calendar.access == .granted { count += 1 }
+        return count == 0 ? nil : "\(count) connected"
+    }
+
     private func accountItems() -> [DSMenuItem] {
         [
             .header(app.email.isEmpty ? "Not signed in" : app.email,
                     hint: URL(string: app.settings.authBaseURL)?.host()),
             .separator,
-            .item("Settings…", symbol: "gearshape", hint: "⌘,") { app.settingsPresented = true },
+            .item("Settings…", symbol: "gearshape", hint: "⌘,") {
+                app.settingsTab = .general
+                app.settingsPresented = true
+            },
+            .item("Connectors…", symbol: "puzzlepiece.extension", hint: connectorsHint) { app.showConnectors() },
             .item("Open web app", symbol: "safari") { app.openWebApp() },
             .item("Clear finished meetings", symbol: "checkmark.circle") { app.clearFinishedRecents() },
             .separator,

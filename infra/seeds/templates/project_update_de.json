@@ -1,0 +1,78 @@
+{
+  "code": "project_update_de",
+  "name": "Projekt-Update",
+  "language": "de",
+  "specialty": "projects",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "status_summary",
+      "name": "Statuszusammenfassung",
+      "voice_aliases": ["status", "zusammenfassung", "kurzfassung"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Zusammenfassung des Projektstatus. Projektname, Meilenstein, Sprint, Release, Gesamtzustand, Kernaussage, Fertigstellungsgrad in Prozent.",
+      "min_chars": 10,
+      "order": 0,
+      "synthesis_prompt": "Zwei bis drei Sätze, die ein Stakeholder in zehn Sekunden lesen kann: wo das Projekt steht und das Wichtigste, das man wissen muss."
+    },
+    {
+      "id": "overall_status",
+      "name": "Gesamtstatus",
+      "voice_aliases": ["gesamtstatus", "ampel", "zustand"],
+      "required": true,
+      "field_type": "choice",
+      "asr_prompt": "Gesamtzustand des Projekts. Im Plan, gefährdet, außer Plan.",
+      "min_chars": 0,
+      "order": 1,
+      "options": [
+        {"value": "on_track", "label": "Im Plan", "voice_aliases": ["im plan", "grün"]},
+        {"value": "at_risk", "label": "Gefährdet", "voice_aliases": ["gefährdet", "gelb"]},
+        {"value": "off_track", "label": "Außer Plan", "voice_aliases": ["außer plan", "rot"]}
+      ]
+    },
+    {
+      "id": "progress",
+      "name": "Fortschritt seit dem letzten Update",
+      "voice_aliases": ["fortschritt", "erledigt seit dem letzten mal"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Fortschritt seit dem letzten Update. Abgeschlossen, ausgeliefert, gemergt, deployt, getestet, reviewt, Meilenstein erreicht, dem Plan voraus.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Stichpunktliste der abgeschlossenen Arbeiten, die wichtigste zuerst."
+    },
+    {
+      "id": "risks",
+      "name": "Risiken und Blocker",
+      "voice_aliases": ["risiken", "blocker", "probleme"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Risiken und Blocker. Blockiert durch, Abhängigkeit, Verzug, Scope Creep, Ressourcenlücke, technische Schulden, Lieferantenverzögerung, Gegenmaßnahme.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Ein Stichpunkt pro Risiko: das Risiko, seine Auswirkung und die nötige Gegenmaßnahme oder Entscheidung."
+    },
+    {
+      "id": "next_steps",
+      "name": "Nächste Schritte",
+      "voice_aliases": ["nächste schritte", "plan"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Geplante nächste Schritte. Nächster Sprint, anstehender Meilenstein, Lieferergebnis, Verantwortlicher, Fälligkeitsdatum, zu klärende Abhängigkeit.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Ein Stichpunkt pro Schritt im Format „Verantwortlicher: Schritt — Datum“."
+    },
+    {
+      "id": "target_date",
+      "name": "Zieldatum",
+      "voice_aliases": ["zieldatum", "deadline", "frist"],
+      "required": false,
+      "field_type": "date",
+      "asr_prompt": "Geplantes Fertigstellungsdatum für den aktuellen Meilenstein oder das Release.",
+      "min_chars": 0,
+      "order": 5
+    }
+  ]
+}

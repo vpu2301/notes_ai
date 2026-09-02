@@ -95,6 +95,12 @@ class TranscriptionJobView(BaseModel):
     # visibly changed.
     cancel_requested: bool = False
 
+    # Names people gave the diarized speakers of this job (label →
+    # display name), set via ``PUT /asr/jobs/{id}/speakers``. Empty
+    # until someone names one; the result view merges these into its
+    # ``speaker_names``/``turns``.
+    speaker_names: dict[str, str] = Field(default_factory=dict)
+
     # ── Derived from `error_kind`; never stored, never settable ──────
     # A client should not have to carry a copy of the failure vocabulary to
     # know whether "try again" is honest advice. These three read straight

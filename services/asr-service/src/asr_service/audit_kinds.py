@@ -15,6 +15,8 @@ TRANSCRIPTION_COMPLETE: Final = "asr.transcription_complete"
 TRANSCRIPTION_FAILED: Final = "asr.transcription_failed"
 TRANSCRIPT_ACCESSED: Final = "asr.transcript_accessed"
 JOB_CANCELLED: Final = "asr.job_cancelled"
+# Someone named (or renamed) the diarized speakers of a job.
+SPEAKERS_NAMED: Final = "asr.speakers_named"
 
 # Quota
 QUOTA_EXCEEDED: Final = "asr.quota_exceeded"  # severity=warn

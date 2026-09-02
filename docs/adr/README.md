@@ -56,6 +56,7 @@ medical vertical; the numbers are retired, not reused.
 | 0042  | [HTTP/2 POST streaming fallback — closed with data, not built](0042-http2-post-fallback-closed.md) | Accepted |
 | 0043  | Clinical corpus governance                                                       | Withdrawn — medical vertical removed |
 | 0044  | LLM-assisted corpus review                                                       | Withdrawn — medical vertical removed |
+| 0045  | [Batch diarization: N-speaker agglomerative clustering, word-level attribution, speaker naming](0045-batch-diarization-nspeaker-and-naming.md) | Accepted |
 
 ## Template
 

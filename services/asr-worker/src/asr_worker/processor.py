@@ -59,7 +59,7 @@ from uuid import UUID
 
 from opentelemetry import metrics
 
-from asr_models import JobEnqueuePayload, JobErrorKind, TranscriptionOutput, spec_for
+from asr_models import JobEnqueuePayload, JobErrorKind, Segment, TranscriptionOutput, spec_for
 from audit import Severity
 from crypto import CryptoError
 from db import tenant_connection
@@ -532,25 +532,103 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
 def _apply_diarization(
     output: TranscriptionOutput, diar: OfflineDiarization
 ) -> TranscriptionOutput:
-    """Speaker-attribute every transcript segment from the diarized timeline.
+    """Speaker-attribute the transcript from the diarized timeline.
 
-    A segment the diarizer cannot attribute with confidence keeps
-    ``speaker=None`` — an uncertain label on a meeting transcript is worse
-    than no label. ``speakers`` is the diarizer's first-appearance roster,
-    not the set of attributed segments, so a roster entry can exist even
-    when every one of its segments fell below the attribution floor.
+    Whisper segments follow its own pause heuristics, not speaker turns:
+    a single segment routinely spans "…so that's the plan. — Sounds
+    good." from two people. Attributing whole segments would label the
+    reply with whoever talked longer. So attribution happens per WORD
+    (the worker asks Whisper for word timings), and a segment is split
+    wherever the speaker changes; each piece keeps its own words, timing
+    and mean word probability.
+
+    A word the diarizer cannot attribute inherits its neighbours' label
+    when they agree (mid-sentence dropouts), and a one-word island
+    between two runs of the same speaker is folded back — a diarizer
+    hiccup, not a real interjection. What stays unattributed keeps
+    ``speaker=None``: an uncertain label on a meeting transcript is worse
+    than no label. Segments without word timings fall back to majority
+    attribution of the whole span.
+
+    ``speakers`` is the first-appearance roster of labels that actually
+    ended up on a segment — a client counting "3 speakers" should be able
+    to find all three in the text.
     """
-    return output.model_copy(
-        update={
-            "segments": [
-                seg.model_copy(
-                    update={"speaker": diar.attribute(int(seg.start_ms), int(seg.end_ms))}
-                )
-                for seg in output.segments
-            ],
-            "speakers": diar.speakers,
-        }
-    )
+    segments: list[Segment] = []
+    for seg in output.segments:
+        segments.extend(_split_segment_by_speaker(seg, diar))
+    roster: list[str] = []
+    for seg in segments:
+        if seg.speaker and seg.speaker not in roster:
+            roster.append(seg.speaker)
+    return output.model_copy(update={"segments": segments, "speakers": roster})
+
+
+def _split_segment_by_speaker(seg: Segment, diar: OfflineDiarization) -> list[Segment]:
+    if not seg.words:
+        return [
+            seg.model_copy(update={"speaker": diar.attribute(int(seg.start_ms), int(seg.end_ms))})
+        ]
+
+    labels: list[str | None] = [diar.attribute(int(w.start_ms), int(w.end_ms)) for w in seg.words]
+    labels = _smooth_labels(labels)
+    if all(label == labels[0] for label in labels):
+        return [seg.model_copy(update={"speaker": labels[0]})]
+
+    # The segment text is Whisper's own rendering (punctuation, spacing);
+    # once split, each piece is rebuilt from its words. Whisper's word
+    # texts carry their punctuation, so joining with spaces reproduces
+    # the original for space-delimited languages; languages written
+    # without spaces are joined the way the original text was.
+    joiner = " " if " " in seg.text.strip() else ""
+    pieces: list[Segment] = []
+    start = 0
+    for i in range(1, len(labels) + 1):
+        if i < len(labels) and labels[i] == labels[start]:
+            continue
+        words = seg.words[start:i]
+        probs = [w.probability for w in words]
+        pieces.append(
+            Segment(
+                text=joiner.join(w.text for w in words).strip(),
+                start_ms=words[0].start_ms,
+                end_ms=max(w.end_ms for w in words),
+                words=list(words),
+                avg_confidence=max(0.0, min(1.0, sum(probs) / len(probs))),
+                speaker=labels[start],
+            )
+        )
+        start = i
+    return [p for p in pieces if p.text]
+
+
+def _smooth_labels(labels: list[str | None]) -> list[str | None]:
+    """Fill unattributed words from agreeing neighbours; fold one-word
+    islands between two runs of the same speaker."""
+    out = list(labels)
+    n = len(out)
+    # Pass 1: None runs whose neighbours agree (or with one known
+    # neighbour at either edge of the segment) take that label.
+    i = 0
+    while i < n:
+        if out[i] is not None:
+            i += 1
+            continue
+        j = i
+        while j < n and out[j] is None:
+            j += 1
+        before = out[i - 1] if i > 0 else None
+        after = out[j] if j < n else None
+        fill = before if (after is None or before == after) else (after if before is None else None)
+        if fill is not None:
+            for k in range(i, j):
+                out[k] = fill
+        i = j
+    # Pass 2: a single word labelled X between two words labelled Y is Y.
+    for k in range(1, n - 1):
+        if out[k] != out[k - 1] and out[k - 1] == out[k + 1] and out[k - 1] is not None:
+            out[k] = out[k - 1]
+    return out
 
 
 def _dier(

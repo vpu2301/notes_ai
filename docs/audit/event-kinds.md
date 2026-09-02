@@ -45,6 +45,7 @@ typos at import.
 | `asr.transcription_failed`        | warn     | asr-service reaper               | Same kind, `severity=warn`, `payload.actor="reaper"`: a job stranded by a dead worker (`worker_lost`) or a message that never reached one (`queue_lost`), closed out from outside the worker |
 | `asr.transcript_accessed`         | info     | asr-service GET /asr/jobs/{id}/result | Plaintext transcript served (decrypt-and-return proxy; presigned URLs only ever serve ciphertext). Payload: audio_id, bytes |
 | `asr.job_cancelled`               | info     | asr-service DELETE / worker      | Job cancelled by user or by worker honouring cancel_requested      |
+| `asr.speakers_named`              | info     | asr-service PUT /asr/jobs/{id}/speakers | Someone named the diarized speakers of a job. Payload: the labels touched (`SPEAKER_N`), never the names — who a speaker is, is content (ADR-0031) |
 | `asr.quota_exceeded`              | warn     | asr-service POST /asr/jobs       | Tenant hit the monthly upload cap                                  |
 | `asr.key.master_missing`          | error    | asr-worker startup (fail-closed) | Master key absent/malformed at boot. **System-wide, pre-tenant** — emitted as a CRITICAL structured log, NOT a per-tenant audit-chain row (no tenant context exists). Worker exits non-zero; see runbook § master-key-missing |
 | `dictation.session.started`       | info     | dictation-service WS handler     | New streaming session accepted (after auth + capacity)             |

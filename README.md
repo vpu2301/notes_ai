@@ -13,10 +13,13 @@
 
 - **Voice notes & dictation** — real-time streaming speech-to-text over WebSocket
   (faster-whisper), plus a batch transcription pipeline for uploaded audio.
-- **Ambient meeting capture** — speaker diarization (who said what) with
-  client-side speaker naming, from a laptop/phone in the room, a dedicated
+- **Ambient meeting capture** — speaker diarization (who said what) for any
+  number of speakers, from a laptop/phone in the room, a dedicated
   meeting-room device (least-privilege `device` identity), or an uploaded
-  recording (`diarize=true` batch jobs). See
+  recording (`diarize=true` batch jobs). Transcripts come back as speaker
+  turns with paragraphs; speakers are `Speaker 1..N` until someone names
+  them (`PUT /asr/jobs/{id}/speakers`), and the name follows into every
+  app and the note. See
   [docs/architecture/ambient-capture.md](docs/architecture/ambient-capture.md)
   and [docs/product/ambient-use-cases.md](docs/product/ambient-use-cases.md).
 - **Notes** — template-based structured notes (meeting notes, 1-on-1s, sales calls,
@@ -36,10 +39,10 @@
 
 Languages: the recording decides. A capture is submitted with `language=auto`;
 the worker identifies the spoken language and writes the transcript in it, and
-the note is built from a template in that language (English and Ukrainian
-catalogues ship; other languages get their transcript verbatim under the
-English template). English and Ukrainian can also be pinned explicitly;
-German plumbing is present.
+the note is built from a template in that language (English, Ukrainian and
+German catalogues ship; other languages get their transcript verbatim under
+the English template). English, Ukrainian and German can also be pinned
+explicitly.
 
 ---
 
@@ -293,6 +296,7 @@ Key ADRs (full index: [docs/adr/README.md](docs/adr/README.md)):
 | 0025 | Autocomplete trie + Redis |
 | 0029/0030 | Redis Streams notification bus + pub/sub WS fan-out |
 | 0034 | Speaker diarization (ECAPA) for meeting mode |
+| 0045 | Batch diarization: N-speaker agglomerative clustering, word-level attribution, speaker naming |
 | 0036 | Local LLM (llama.cpp) for inline completion |
 | 0039 | TOTP MFA |
 

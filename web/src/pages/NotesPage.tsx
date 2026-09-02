@@ -4,7 +4,7 @@ import { errorMessage } from "../api/http";
 import { searchNotes } from "../api/notes";
 import type { SearchHit } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
-import { FileTextIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
+import { MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { SkeletonRow } from "../components/Skeleton";
 import { Snippet } from "../components/Snippet";
 import { StatusBadge } from "../components/StatusBadge";
@@ -13,6 +13,19 @@ import { createBlankNote } from "../lib/createBlankNote";
 import { relativeTime } from "../lib/time";
 import { useCaptures, type Capture } from "../lib/useCaptures";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+
+/** The home greeting, by hour — as the Mac app's header. */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return "Good morning";
+  if (h >= 12 && h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** "Wednesday, 2 September" under the greeting. */
+function todayLabel(): string {
+  return new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
 
 /** "Today" / "Yesterday" / … for the list's day groups. */
 function dayGroup(iso: string): string {
@@ -30,12 +43,15 @@ function dayGroup(iso: string): string {
 function CaptureRow({
   capture,
   creating,
+  noteError,
   onCreate,
   onCancel,
   onDismiss,
 }: {
   capture: Capture;
   creating: boolean;
+  /** The automatic note write failed; the row offers a retry. */
+  noteError?: string;
   onCreate: () => void;
   onCancel: () => void;
   onDismiss: () => void;
@@ -45,7 +61,9 @@ function CaptureRow({
   const failed = job.status === "failed";
   const status = failed
     ? job.error_message ?? "Transcription failed"
-    : job.status === "queued"
+    : noteError && !creating
+      ? noteError
+      : job.status === "queued"
       ? "Waiting to start…"
       : job.status === "running"
         ? "Transcribing…"
@@ -55,14 +73,14 @@ function CaptureRow({
 
   return (
     <div className="row capture-row">
-      <span className={`row-ico ${failed ? "rec" : "indigo"} ${pending || (mine && !failed) ? "pulse" : ""}`}>
+      <span className={`row-ico ${failed ? "rec" : "indigo"} ${pending || (mine && !failed && !noteError) ? "pulse" : ""}`}>
         <WaveformIcon size={15} />
       </span>
       <div className="row-body">
         <div className="row-1">
           <span className="row-name">{title || "Untitled meeting"}</span>
         </div>
-        <div className={`row-2 ${failed ? "err" : ""}`}>{status}</div>
+        <div className={`row-2 ${failed || (noteError && !creating) ? "err" : ""}`}>{status}</div>
       </div>
       <div className="row-side">
         {pending && (
@@ -75,9 +93,9 @@ function CaptureRow({
             Dismiss
           </button>
         )}
-        {job.status === "complete" && !mine && (
+        {job.status === "complete" && (!mine || noteError) && (
           <button className="btn primary sm" onClick={onCreate} disabled={creating}>
-            {creating ? "Creating…" : "Create note"}
+            {creating ? "Creating…" : noteError ? "Try again" : "Create note"}
           </button>
         )}
       </div>
@@ -125,7 +143,7 @@ export function NotesPage() {
   }, [debouncedQ, runSearch]);
 
   // A meeting that just finished shows up in the list without a reload.
-  const { captures, creating, createNote, cancel, dismissFailed } = useCaptures({
+  const { captures, creating, noteErrors, createNote, cancel, dismissFailed } = useCaptures({
     onNoteReady: () => void runSearch(debouncedQ),
   });
 
@@ -170,7 +188,10 @@ export function NotesPage() {
   return (
     <div className="home">
       <div className="home-h">
-        <h1>Notes</h1>
+        <div>
+          <h1>{greeting()}</h1>
+          <div className="home-date">{todayLabel()}</div>
+        </div>
         <div className="home-actions">
           <button className="btn ghost" onClick={() => navigate("/meeting/new?mode=upload")} title="Upload a recording">
             <UploadIcon size={14} /> Upload
@@ -204,6 +225,7 @@ export function NotesPage() {
                 key={c.job.id}
                 capture={c}
                 creating={creating.has(c.job.id)}
+                noteError={noteErrors[c.job.id]}
                 onCreate={() =>
                   void createNote(c.job)
                     .then((id) => navigate(`/notes/${id}`))
@@ -263,9 +285,6 @@ export function NotesPage() {
             <div className="panel">
               {g.hits.map((hit) => (
                 <button key={hit.note_id} className="row click" onClick={() => navigate(`/notes/${hit.note_id}`)}>
-                  <span className={`row-ico ${hit.status === "amended" ? "indigo" : ""}`}>
-                    <FileTextIcon size={15} />
-                  </span>
                   <span className="row-body">
                     <span className="row-1">
                       <span className="row-name">{hit.title || "Untitled note"}</span>

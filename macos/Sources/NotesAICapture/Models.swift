@@ -401,40 +401,67 @@ struct TranscriptSegment: Decodable, Sendable {
     }
 }
 
-struct TranscriptResult: Decodable, Sendable {
-    let jobId: String
-    let segments: [TranscriptSegment]
+/// One speaker turn as structured by asr-service: consecutive segments by
+/// one speaker, broken into paragraphs at pauses and sentence ends.
+/// `speaker` is the neutral label ("SPEAKER_2"); `name` is what to show
+/// for it (a person's naming, else "Speaker 2"). Both nil for speech the
+/// diarizer could not attribute.
+struct TranscriptTurn: Decodable, Identifiable, Equatable, Sendable {
+    let speaker: String?
+    let name: String?
+    let startMs: Int
+    let endMs: Int
+    let paragraphs: [String]
+
+    /// Turns are chronological and non-overlapping, so the start is unique.
+    var id: Int { startMs }
 
     enum CodingKeys: String, CodingKey {
-        case jobId = "job_id"
-        case segments
+        case speaker, name, paragraphs
+        case startMs = "start_ms"
+        case endMs = "end_ms"
     }
 }
 
-/// Consecutive segments from one speaker, as shown in the Transcript tab.
-struct TranscriptTurn: Identifiable, Equatable {
-    let id: Int
-    let speaker: String?
-    let startMs: Int
-    var text: String
+struct TranscriptResult: Decodable, Sendable {
+    let jobId: String
+    let segments: [TranscriptSegment]
+    /// Neutral labels in first-appearance order (diarized jobs).
+    let speakers: [String]?
+    /// Label → display name for every roster label.
+    let speakerNames: [String: String]?
+    /// The transcript as speaker turns — what the Transcript tab renders.
+    let turns: [TranscriptTurn]?
 
-    static func turns(from result: TranscriptResult) -> [TranscriptTurn] {
-        var names: [String: String] = [:]
-        var turns: [TranscriptTurn] = []
-        for segment in result.segments {
-            var speaker: String?
-            if let raw = segment.speaker, !raw.isEmpty {
-                if names[raw] == nil { names[raw] = "Speaker \(names.count + 1)" }
-                speaker = names[raw]
-            }
-            if let last = turns.last, last.speaker == speaker {
-                turns[turns.count - 1].text += " " + segment.text
-            } else {
-                turns.append(TranscriptTurn(id: turns.count, speaker: speaker,
-                                            startMs: segment.startMs, text: segment.text))
-            }
-        }
-        return turns
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case segments, speakers, turns
+        case speakerNames = "speaker_names"
+    }
+}
+
+/// `SPEAKER_2` → `Speaker 2`; anything else unchanged.
+func defaultSpeakerName(_ label: String) -> String {
+    guard label.hasPrefix("SPEAKER_") else { return label }
+    let digits = label.dropFirst("SPEAKER_".count)
+    guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return label }
+    return "Speaker \(digits)"
+}
+
+/// What the transcript body shows for speech nobody was matched to.
+let unknownSpeakerName = "Unknown speaker"
+
+struct SpeakerNamesRequest: Encodable, Sendable {
+    let names: [String: String]
+}
+
+struct SpeakerNamesResponse: Decodable, Sendable {
+    let jobId: String
+    let speakerNames: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case speakerNames = "speaker_names"
     }
 }
 

@@ -1,0 +1,82 @@
+{
+  "code": "sales_call_de",
+  "name": "Verkaufsgespräch",
+  "language": "de",
+  "specialty": "sales",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "contact",
+      "name": "Kontakt und Unternehmen",
+      "voice_aliases": ["kontakt", "unternehmen", "firma", "mit wem gesprochen"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Ansprechpartner und Unternehmensdaten des Interessenten. Firmenname, Branche, Unternehmensgröße, Name des Kontakts, Position, Entscheider, Fürsprecher, Einkauf.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Eine Zeile pro Person: „Name — Position, Unternehmen“. Festhalten, wer der Entscheider ist."
+    },
+    {
+      "id": "context",
+      "name": "Kontext und Chance",
+      "voice_aliases": ["kontext", "chance", "hintergrund", "ausgangslage"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Deal-Kontext. Aktuelle Lösung, Vertragsverlängerung, Budget, Zeitplan, Bewertungskriterien, Wettbewerber, Auslöser, Anwendungsfall.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Kurzer Absatz: warum der Interessent sucht, Signale zu Budget und Zeitplan, konkurrierende Optionen."
+    },
+    {
+      "id": "needs",
+      "name": "Bedarf und Schmerzpunkte",
+      "voice_aliases": ["bedarf", "schmerzpunkte", "anforderungen", "probleme"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Kundenbedarf und Schmerzpunkte. Schmerzpunkt, Engpass, manueller Prozess, Integration, Compliance-Anforderung, Muss-Kriterium, Kann-Kriterium.",
+      "min_chars": 10,
+      "order": 2,
+      "synthesis_prompt": "Stichpunktliste der Bedarfe, jeweils mit dem zugrunde liegenden Problem und seiner geschäftlichen Auswirkung."
+    },
+    {
+      "id": "objections",
+      "name": "Einwände",
+      "voice_aliases": ["einwände", "bedenken", "vorbehalte"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Einwände und Bedenken. Preis, Sicherheit, Datenstandort, Migrationsaufwand, Lock-in, fehlende Funktion, Freigabeprozess.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Ein Stichpunkt pro Einwand mit der gegebenen Antwort oder dem nötigen Follow-up."
+    },
+    {
+      "id": "deal_stage",
+      "name": "Deal-Phase",
+      "voice_aliases": ["deal phase", "phase", "stadium"],
+      "required": false,
+      "field_type": "choice",
+      "asr_prompt": "Deal-Phase. Discovery, qualifiziert, Angebot gesendet, Verhandlung, gewonnen, verloren.",
+      "min_chars": 0,
+      "order": 4,
+      "options": [
+        {"value": "discovery", "label": "Discovery", "voice_aliases": ["discovery", "erstgespräch"]},
+        {"value": "qualified", "label": "Qualifiziert", "voice_aliases": ["qualifiziert"]},
+        {"value": "proposal", "label": "Angebot gesendet", "voice_aliases": ["angebot", "angebot gesendet"]},
+        {"value": "negotiation", "label": "Verhandlung", "voice_aliases": ["verhandlung"]},
+        {"value": "closed_won", "label": "Gewonnen", "voice_aliases": ["gewonnen", "abgeschlossen gewonnen"]},
+        {"value": "closed_lost", "label": "Verloren", "voice_aliases": ["verloren", "abgeschlossen verloren"]}
+      ]
+    },
+    {
+      "id": "next_steps",
+      "name": "Nächste Schritte",
+      "voice_aliases": ["nächste schritte", "follow up", "nachfassen"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Vereinbarte nächste Schritte. Angebot senden, Demo planen, Sicherheitsfragebogen, Vorstellung beim Entscheider, nachfassen bis, Testphase.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "Ein Stichpunkt pro Schritt: „Verantwortlicher: Schritt — Datum“. Festhalten, wozu sich der Interessent verpflichtet hat."
+    }
+  ]
+}

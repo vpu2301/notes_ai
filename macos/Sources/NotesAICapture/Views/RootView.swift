@@ -26,9 +26,11 @@ struct RootView: View {
                             NotificationCenter.default.post(name: .openMainWindow, object: nil)
                         },
                         .item("Settings…", symbol: "gearshape", hint: "⌘,") {
+                            app.settingsTab = .general
                             app.settingsPresented = true
                             NotificationCenter.default.post(name: .openMainWindow, object: nil)
                         },
+                        .item("Connectors…", symbol: "puzzlepiece.extension") { app.showConnectors() },
                         .item("Open web app", symbol: "safari") { app.openWebApp() },
                         .separator,
                         .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {

@@ -41,7 +41,12 @@ final class NoteViewModel: ObservableObject {
     /// Set after a successful delete so the view can close itself.
     @Published private(set) var deleted = false
     @Published private(set) var turns: [TranscriptTurn]?
+    /// Label → display name for the transcript's speakers (people's names
+    /// where given, "Speaker N" elsewhere). Kept apart from `turns` so a
+    /// rename repaints every turn of that speaker at once.
+    @Published private(set) var speakerNames: [String: String] = [:]
     @Published private(set) var transcriptError: String?
+    @Published private(set) var renamingSpeaker = false
 
     private let api: APIClient
     private var saveTask: Task<Void, Never>?
@@ -89,10 +94,72 @@ final class NoteViewModel: ObservableObject {
     func loadTranscript() async {
         guard turns == nil, transcriptError == nil, let jobId else { return }
         do {
-            turns = TranscriptTurn.turns(from: try await api.transcript(jobId: jobId))
+            let result = try await api.transcript(jobId: jobId)
+            speakerNames = result.speakerNames ?? [:]
+            turns = result.turns ?? []
         } catch {
             transcriptError = error.localizedDescription
         }
+    }
+
+    // MARK: - Speakers
+
+    /// Whether the recording was diarized (anyone was told apart).
+    var diarized: Bool { (turns ?? []).contains { $0.speaker != nil } }
+
+    var speakerCount: Int { Set((turns ?? []).compactMap(\.speaker)).count }
+
+    func displayName(for turn: TranscriptTurn) -> String {
+        guard let label = turn.speaker else { return unknownSpeakerName }
+        return speakerNames[label] ?? turn.name ?? defaultSpeakerName(label)
+    }
+
+    /// Rename a speaker everywhere: on the job (so the web app agrees), in
+    /// this transcript, and — while the note is still a draft — in the note
+    /// body, whose turn lines start with the name. A finalized note is a
+    /// record; its text stays and only the transcript shows the new name.
+    func renameSpeaker(label: String, to rawName: String) async {
+        let from = speakerNames[label] ?? defaultSpeakerName(label)
+        let trimmed = rawName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let to = trimmed.isEmpty ? defaultSpeakerName(label) : String(trimmed.prefix(80))
+        guard to != from, let jobId else { return }
+
+        // Only the names people gave are stored; defaults are implied.
+        var custom = speakerNames.filter { $0.value != defaultSpeakerName($0.key) }
+        if to == defaultSpeakerName(label) { custom.removeValue(forKey: label) } else { custom[label] = to }
+
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            let stored = try await api.setSpeakerNames(jobId: jobId, names: custom)
+            var merged: [String: String] = [:]
+            for l in speakerNames.keys { merged[l] = stored[l] ?? defaultSpeakerName(l) }
+            speakerNames = merged
+            renameSpeakerInNote(from: from, to: merged[label] ?? to)
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func renameSpeakerInNote(from: String, to: String) {
+        guard editable, var next = content, let sections = next.sections else { return }
+        next.sections = sections.map { section in
+            guard let text = section.text, !text.isEmpty else { return section }
+            var copy = section
+            copy.text = Self.renameSpeaker(in: text, from: from, to: to)
+            return copy
+        }
+        commit(next)
+    }
+
+    /// "Speaker 2: …" → "Olena: …" at the start of lines only — the
+    /// from-transcript note puts the name at the head of each turn.
+    static func renameSpeaker(in text: String, from: String, to: String) -> String {
+        let pattern = "(^|\\n)" + NSRegularExpression.escapedPattern(for: from) + ": "
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let template = "$1" + NSRegularExpression.escapedTemplate(for: to) + ": "
+        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
+                                              withTemplate: template)
     }
 
     // MARK: - Editing (drafts autosave; other states are read-only here)
@@ -291,8 +358,10 @@ final class NoteViewModel: ObservableObject {
     // MARK: - Copy
 
     func transcriptText() -> String {
-        (turns ?? []).map { turn in
-            turn.speaker.map { "\($0): \(turn.text)" } ?? turn.text
+        let diarized = self.diarized
+        return (turns ?? []).map { turn in
+            let body = turn.paragraphs.joined(separator: "\n")
+            return diarized ? "\(displayName(for: turn)): \(body)" : body
         }.joined(separator: "\n\n")
     }
 }

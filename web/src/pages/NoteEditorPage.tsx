@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getResult, listJobs } from "../api/asr";
+import { getResult, listJobs, setSpeakerNames } from "../api/asr";
 import { ApiError, errorMessage } from "../api/http";
 import {
   amendNote,
@@ -25,7 +25,9 @@ import type {
   NoteVersionSummary,
   TemplateSection,
   TranscriptResult,
+  TranscriptTurn,
 } from "../api/types";
+import { defaultSpeakerName } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   AlertIcon,
@@ -250,61 +252,103 @@ function SectionField(props: FieldProps) {
 
 // ── transcript ────────────────────────────────────────────────────────
 
-interface Turn {
-  speaker: string | null;
-  startMs: number;
-  text: string;
+const UNKNOWN_SPEAKER = "Unknown speaker";
+
+/** What a turn's speaker is called right now (people's names win over defaults). */
+function turnName(turn: TranscriptTurn, names: Record<string, string>): string {
+  if (!turn.speaker) return UNKNOWN_SPEAKER;
+  return names[turn.speaker] ?? turn.name ?? defaultSpeakerName(turn.speaker);
 }
 
-/** Consecutive segments from one speaker become one turn. */
-function toTurns(result: TranscriptResult): Turn[] {
-  const names = new Map<string, string>();
-  const label = (raw: string | null | undefined): string | null => {
-    if (!raw) return null;
-    if (!names.has(raw)) names.set(raw, `Speaker ${names.size + 1}`);
-    return names.get(raw)!;
-  };
-  const turns: Turn[] = [];
-  for (const seg of result.segments) {
-    const speaker = label(seg.speaker);
-    const last = turns[turns.length - 1];
-    if (last && last.speaker === speaker) last.text += " " + seg.text;
-    else turns.push({ speaker, startMs: seg.start_ms, text: seg.text });
+/** Only the names people gave — what the job stores; defaults are implied. */
+function customNames(names: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [label, name] of Object.entries(names)) {
+    if (name && name !== defaultSpeakerName(label)) out[label] = name;
   }
-  return turns;
+  return out;
 }
 
-function TranscriptView({ jobId }: { jobId: string }) {
+/**
+ * Rewrite a speaker's name at the start of turns in note text:
+ * "Speaker 2: …" → "Olena: …". The from-transcript note puts the name at
+ * the start of a turn's first line, so only line-leading matches change.
+ */
+export function renameSpeakerInText(text: string, from: string, to: string): string {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`(^|\\n)${escaped}: `, "g"), `$1${to}: `);
+}
+
+interface TranscriptViewProps {
+  jobId: string;
+  /** A speaker was renamed on the job — the note body may want to follow. */
+  onSpeakerRenamed?: (from: string, to: string) => void;
+}
+
+function TranscriptView({ jobId, onSpeakerRenamed }: TranscriptViewProps) {
   const toast = useToast();
   const [result, setResult] = useState<TranscriptResult | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState<{ label: string; value: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     getResult(jobId)
-      .then((r) => !cancelled && setResult(r))
+      .then((r) => {
+        if (cancelled) return;
+        setResult(r);
+        setNames(r.speaker_names ?? {});
+      })
       .catch((err) => !cancelled && setError(errorMessage(err)));
     return () => {
       cancelled = true;
     };
   }, [jobId]);
 
-  const turns = useMemo(() => (result ? toTurns(result) : []), [result]);
-  const speakerCount = useMemo(() => {
-    if (!result) return 0;
-    const named = new Set(result.segments.map((s) => s.speaker).filter(Boolean));
-    return named.size || (result.segments.length > 0 ? 1 : 0);
-  }, [result]);
+  const turns = result?.turns ?? [];
+  const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
+  const diarized = speakerCount > 0;
 
   const copy = async () => {
-    const text = turns.map((t) => (t.speaker ? `${t.speaker}: ${t.text}` : t.text)).join("\n\n");
+    const text = turns
+      .map((t) => {
+        const body = t.paragraphs.join("\n");
+        return diarized ? `${turnName(t, names)}: ${body}` : body;
+      })
+      .join("\n\n");
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
       toast.error("Couldn't copy — your browser blocked clipboard access.");
+    }
+  };
+
+  const commitRename = async () => {
+    if (!editing || saving) return;
+    const { label, value } = editing;
+    const from = names[label] ?? defaultSpeakerName(label);
+    const to = value.trim() || defaultSpeakerName(label);
+    setEditing(null);
+    if (to === from) return;
+    const next = customNames(names);
+    if (to === defaultSpeakerName(label)) delete next[label];
+    else next[label] = to;
+    setSaving(true);
+    try {
+      const res = await setSpeakerNames(jobId, next);
+      const merged: Record<string, string> = {};
+      for (const l of result?.speakers ?? []) merged[l] = res.speaker_names[l] ?? defaultSpeakerName(l);
+      setNames(merged);
+      onSpeakerRenamed?.(from, merged[label] ?? to);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -329,22 +373,61 @@ function TranscriptView({ jobId }: { jobId: string }) {
     <div className="transcript">
       <div className="transcript-bar">
         <span className="help">
-          {turns.length === 0 ? "Nothing was said." : speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`}
+          {turns.length === 0
+            ? "Nothing was said."
+            : !diarized
+              ? "Speakers were not told apart in this recording."
+              : `${speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`} · click a name to rename`}
         </span>
         <span className="grow" />
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      {turns.map((t, i) => (
-        <div key={i} className="turn">
-          <div className="turn-h">
-            {t.speaker && <span className="turn-speaker">{t.speaker}</span>}
-            <span className="turn-time mono">{formatElapsed(t.startMs)}</span>
+      {turns.map((t, i) => {
+        const name = turnName(t, names);
+        const isEditing = editing !== null && t.speaker !== null && editing.label === t.speaker;
+        return (
+          <div key={i} className="turn">
+            <div className="turn-h">
+              {diarized &&
+                (isEditing ? (
+                  <input
+                    className="input speaker-input"
+                    aria-label="Speaker name"
+                    autoFocus
+                    value={editing.value}
+                    maxLength={80}
+                    onChange={(e) => setEditing({ label: editing.label, value: e.target.value })}
+                    onBlur={() => void commitRename()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void commitRename();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                ) : t.speaker ? (
+                  <button
+                    type="button"
+                    className="turn-speaker"
+                    title="Rename this speaker"
+                    disabled={saving}
+                    onClick={() => setEditing({ label: t.speaker!, value: name })}
+                  >
+                    {name}
+                  </button>
+                ) : (
+                  <span className="turn-speaker unknown">{UNKNOWN_SPEAKER}</span>
+                ))}
+              <span className="turn-time mono">{formatElapsed(t.start_ms)}</span>
+            </div>
+            {t.paragraphs.map((p, j) => (
+              <p key={j} className="turn-text">
+                {p}
+              </p>
+            ))}
           </div>
-          <p className="turn-text">{t.text}</p>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -493,6 +576,24 @@ export function NoteEditorPage() {
     setContent(next);
     // Amendments are saved explicitly (one audited version), never autosaved.
     if (isDraft) scheduleSave(next, version);
+  };
+
+  // A speaker renamed in the transcript is renamed in the note too — the
+  // draft's turn lines start with the name. A finalized note is a record;
+  // its text stays, and only the transcript shows the new name.
+  const onSpeakerRenamed = (from: string, to: string) => {
+    if (!content || !isDraft) {
+      toast.success(isDraft ? "Speaker renamed" : "Speaker renamed in the transcript");
+      return;
+    }
+    const next: NoteContent = {
+      ...content,
+      sections: content.sections?.map((s) =>
+        s.text ? { ...s, text: renameSpeakerInText(s.text, from, to) } : s,
+      ),
+    };
+    if (JSON.stringify(next) !== JSON.stringify(content)) onContentChange(next);
+    toast.success("Speaker renamed");
   };
 
   // ── actions ─────────────────────────────────────────────────────────
@@ -806,7 +907,7 @@ export function NoteEditorPage() {
         )}
 
         {tab === "transcript" && sourceJobId ? (
-          <TranscriptView jobId={sourceJobId} />
+          <TranscriptView jobId={sourceJobId} onSpeakerRenamed={onSpeakerRenamed} />
         ) : (
           <div className="doc-body">
             {sections.length === 0 && <div className="section-ro empty-val">This note's template has no sections.</div>}

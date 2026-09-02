@@ -1,0 +1,75 @@
+{
+  "code": "one_on_one_de",
+  "name": "Einzelgespräch",
+  "language": "de",
+  "specialty": "people",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "check_in",
+      "name": "Check-in",
+      "voice_aliases": ["check in", "wie geht es dir", "befinden"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Persönliches Check-in. Stimmung, Energie, Arbeitsbelastung, Work-Life-Balance, Urlaub, allgemeines Wohlbefinden.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Zwei bis drei Sätze dazu, wie es der Person insgesamt geht."
+    },
+    {
+      "id": "wins",
+      "name": "Erfolge seit dem letzten Mal",
+      "voice_aliases": ["erfolge", "highlights", "gut gelaufen"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Aktuelle Erfolge und Highlights. Ausgeliefert, abgeschlossen, gelauncht, Meilenstein erreicht, positives Feedback, Lob.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Kurze Stichpunktliste konkreter Erfolge, der wirkungsvollste zuerst."
+    },
+    {
+      "id": "challenges",
+      "name": "Herausforderungen und Blocker",
+      "voice_aliases": ["herausforderungen", "blocker", "probleme"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Herausforderungen und Blocker. Blockiert durch, wartet auf, Abhängigkeit, unklare Prioritäten, Kapazität, Tooling-Probleme, Reibung zwischen Teams.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Ein Stichpunkt pro Herausforderung: das Problem, seine Auswirkung und welche Unterstützung nötig ist."
+    },
+    {
+      "id": "feedback",
+      "name": "Feedback",
+      "voice_aliases": ["feedback", "rückmeldung", "gegenseitiges feedback"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Feedback in beide Richtungen. Feedback der Führungskraft, Feedback von Kollegen, was beibehalten, was geändert werden soll, Erwartungen.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "„Gegebenes Feedback“ und „Erhaltenes Feedback“ getrennt aufführen, jeweils als kurze Stichpunkte."
+    },
+    {
+      "id": "growth",
+      "name": "Entwicklung und Wachstum",
+      "voice_aliases": ["entwicklung", "wachstum", "karriere", "weiterbildung"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Persönliche und berufliche Entwicklung. Ziele, Fähigkeiten, Schulungen, Mentoring, Beförderung, neue Verantwortung, Stretch-Projekt.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Entwicklungsziele und alle vereinbarten Schritte dorthin zusammenfassen."
+    },
+    {
+      "id": "action_items",
+      "name": "Aufgaben",
+      "voice_aliases": ["aufgaben", "to dos", "nächste schritte"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Aufgaben. Verantwortlicher, Aufgabe, Fälligkeitsdatum, beim nächsten Einzelgespräch nachfassen, wieder aufgreifen.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "Ein Stichpunkt pro Aufgabe im Format „Verantwortlicher: Aufgabe — Fälligkeitsdatum“."
+    }
+  ]
+}

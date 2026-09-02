@@ -1,0 +1,64 @@
+{
+  "code": "meeting_notes_de",
+  "name": "Besprechungsprotokoll",
+  "language": "de",
+  "specialty": "meetings",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "attendees",
+      "name": "Teilnehmer",
+      "voice_aliases": ["teilnehmer", "teilnehmende", "anwesende", "wer war dabei"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Teilnehmer der Besprechung und ihre Rollen. Namen, Positionen, Teamnamen, Abteilungen, externe Gäste, Organisator, Moderator, Protokollführer.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Jeden Teilnehmer in einer eigenen Zeile als „Name — Rolle/Team“ auflisten. Den Organisator zuerst nennen."
+    },
+    {
+      "id": "agenda",
+      "name": "Tagesordnung",
+      "voice_aliases": ["tagesordnung", "agenda", "themen"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Tagesordnungspunkte. Themen, geplante Diskussionspunkte, Zeitplanung, Vortragende, Prioritäten, offene Punkte aus der letzten Besprechung.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Als kurze nummerierte Liste der Tagesordnungspunkte darstellen, ein Punkt pro Zeile."
+    },
+    {
+      "id": "discussion",
+      "name": "Diskussion",
+      "voice_aliases": ["diskussion", "besprechung", "notizen", "kernpunkte"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Diskussionsnotizen. Wichtige Punkte, Fragen, Antworten, Bedenken, Vorschläge, erwogene Alternativen, Kontext, Fristen, Budgets, Kennzahlen.",
+      "min_chars": 20,
+      "order": 2,
+      "synthesis_prompt": "Die Diskussion als knappe Stichpunkte zusammenfassen, nach Themen gruppiert. Wer was gesagt hat nur festhalten, wenn es für das Ergebnis wichtig ist."
+    },
+    {
+      "id": "decisions",
+      "name": "Entscheidungen",
+      "voice_aliases": ["entscheidungen", "beschlüsse", "vereinbart"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Getroffene Entscheidungen. Entschieden, vereinbart, genehmigt, abgelehnt, vertagt, Verantwortlicher, Begründung, gültig ab.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Ein Stichpunkt pro Entscheidung: was entschieden wurde, wer verantwortlich ist und die Begründung in einem Satz."
+    },
+    {
+      "id": "action_items",
+      "name": "Aufgaben",
+      "voice_aliases": ["aufgaben", "to dos", "nächste schritte", "maßnahmen"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Aufgaben und nächste Schritte. Verantwortlicher, Aufgabe, Fälligkeitsdatum, Frist, Rücksprache mit, blockiert durch, Priorität.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Ein Stichpunkt pro Aufgabe im Format „Verantwortlicher: Aufgabe — Fälligkeitsdatum“. Aufgaben ohne Verantwortlichen oder Datum markieren."
+    }
+  ]
+}

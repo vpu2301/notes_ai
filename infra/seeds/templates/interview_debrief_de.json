@@ -1,0 +1,69 @@
+{
+  "code": "interview_debrief_de",
+  "name": "Interview-Nachbesprechung",
+  "language": "de",
+  "specialty": "hiring",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "candidate",
+      "name": "Kandidat und Stelle",
+      "voice_aliases": ["kandidat", "kandidatin", "stelle", "position"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Angaben zu Kandidat und Stelle. Name, Stelle, Seniorität, Team, Interviewrunde, Interviewer, Interviewformat.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Ein bis zwei Zeilen: Kandidat, Stelle und Runde, anwesende Interviewer."
+    },
+    {
+      "id": "summary",
+      "name": "Zusammenfassung des Interviews",
+      "voice_aliases": ["zusammenfassung", "wie es lief", "verlauf"],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Zusammenfassung des Interviews. Gestellte Fragen, Übungen, Systemdesign, Fallstudie, Antworten, Kommunikationsstil, besprochene Erfahrung.",
+      "min_chars": 20,
+      "order": 1,
+      "synthesis_prompt": "Knappe Zusammenfassung, was behandelt wurde und wie der Kandidat abgeschnitten hat, nach Themen gruppiert."
+    },
+    {
+      "id": "strengths",
+      "name": "Stärken",
+      "voice_aliases": ["stärken", "positives", "pluspunkte"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Stärken des Kandidaten. Starkes Signal, tiefes Fachwissen, klare Kommunikation, Eigenverantwortung, Führung, relevante Erfahrung, Bereicherung fürs Team.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Stichpunktliste der Stärken, jede mit einer konkreten Beobachtung aus dem Interview belegt."
+    },
+    {
+      "id": "concerns",
+      "name": "Bedenken",
+      "voice_aliases": ["bedenken", "schwächen", "risiken"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Bedenken und Lücken. Schwaches Signal, Lücke, oberflächliche Antwort, Schwierigkeiten bei, Warnsignal, braucht Unterstützung, Seniorität passt nicht.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Stichpunktliste der Bedenken, jede mit einer konkreten Beobachtung belegt; K.-o.-Kriterien von coachbaren Lücken unterscheiden."
+    },
+    {
+      "id": "recommendation",
+      "name": "Empfehlung",
+      "voice_aliases": ["empfehlung", "urteil", "fazit"],
+      "required": true,
+      "field_type": "choice",
+      "asr_prompt": "Einstellungsempfehlung. Klar einstellen, einstellen, nicht einstellen, klar nicht einstellen.",
+      "min_chars": 0,
+      "order": 4,
+      "options": [
+        {"value": "strong_hire", "label": "Klar einstellen", "voice_aliases": ["klar einstellen", "unbedingt einstellen"]},
+        {"value": "hire", "label": "Einstellen", "voice_aliases": ["einstellen"]},
+        {"value": "no_hire", "label": "Nicht einstellen", "voice_aliases": ["nicht einstellen"]},
+        {"value": "strong_no_hire", "label": "Klar nicht einstellen", "voice_aliases": ["klar nicht einstellen", "auf keinen fall"]}
+      ]
+    }
+  ]
+}

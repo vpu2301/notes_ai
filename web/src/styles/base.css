@@ -5,7 +5,7 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 
 body {
   font-family: var(--sans);
-  font-size: calc(14px * var(--fs));
+  font-size: calc(13.5px * var(--fs));
   line-height: 1.5;
   color: var(--text-1);
   background: var(--bg);
@@ -16,6 +16,8 @@ body {
 }
 
 h1, h2, h3, h4, p { margin: 0; }
+/* Display type: titles, greetings, the wordmark — the Mac's DemiBold cut. */
+h1, h2, .display { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: 0; padding: 0; }
 button:disabled { cursor: not-allowed; }
@@ -24,11 +26,11 @@ input, textarea { outline: none; }
 
 kbd {
   font-family: var(--mono);
-  font-size: calc(11px * var(--fs));
+  font-size: calc(10.5px * var(--fs));
   padding: calc(1px * var(--density)) calc(5px * var(--density));
   border-radius: 4px;
   background: var(--surface-2);
-  border: 1px solid var(--line);
+  border: var(--hairline) solid var(--line);
   color: var(--text-2);
 }
 
@@ -53,8 +55,43 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--line); }
+
+/* The dot print. Paint it on a positioned ancestor with `.dotted`; the
+   ::before covers the box and fades from the top like DSDots. */
+.dotted { position: relative; isolation: isolate; }
+.dotted::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image: var(--dots);
+  background-size: var(--dots-size);
+  background-position: 10px 10px;
+  --dots-light: linear-gradient(var(--dots-light-angle), rgba(0, 0, 0, 0.28) 0%, #000 38%, #000 62%, rgba(0, 0, 0, 0.28) 100%);
+  -webkit-mask-image: var(--dots-fade), var(--dots-light);
+  mask-image: var(--dots-fade), var(--dots-light);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  pointer-events: none;
+  z-index: -1;
+  animation: dots-light var(--dots-light-duration) linear infinite;
+}
+
+/* The light angle is a registered property so the browser can tween it;
+   without registration the angle simply stays put and the print is static. */
+@property --dots-light-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 160deg;
+}
+
+/* The dots stay where they are. Only the light turns: a full revolution per
+   cycle, so the bright band walks around the page and each region of the print
+   surfaces and recedes in turn. */
+@keyframes dots-light {
+  from { --dots-light-angle: 160deg; }
+  to   { --dots-light-angle: 520deg; }
+}
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }

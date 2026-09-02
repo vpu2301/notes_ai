@@ -18,7 +18,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
     // A quiet splash: the silent-refresh either restores the session in a
     // few hundred ms or lands the user on /login — no flash of either UI.
     return (
-      <div className="splash" aria-busy="true">
+      <div className="splash dotted" aria-busy="true">
         <span className="save-status" data-state="saving">
           <span className="dot" /> Signing you in…
         </span>

@@ -15,7 +15,7 @@
             "type": "boolean"
           },
           "language": {
-            "pattern": "^(uk|en)$",
+            "pattern": "^(auto|uk|en)$",
             "title": "Language",
             "type": "string"
           },
@@ -193,6 +193,44 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "SpeakerNamesUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /asr/jobs/{id}/speakers`` body: the complete label \u2192 name\nmapping. A label left out (or given an empty name) goes back to its\nneutral default.",
+        "properties": {
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Names",
+            "type": "object"
+          }
+        },
+        "title": "SpeakerNamesUpdate",
+        "type": "object"
+      },
+      "SpeakerNamesView": {
+        "properties": {
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "speaker_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Names",
+            "type": "object"
+          }
+        },
+        "required": [
+          "job_id",
+          "speaker_names"
+        ],
+        "title": "SpeakerNamesView",
+        "type": "object"
+      },
       "TranscriptResultView": {
         "description": "Plaintext transcript response for a COMPLETE job (proxy-decrypt).\n\nThe stored artifact stays :class:`TranscriptionOutput` (raw ASR);\nNLP enrichment is applied at read time and degrades gracefully \u2014\n``nlp_applied=False`` means the segments are the raw transcript.",
         "properties": {
@@ -202,9 +240,25 @@
             "type": "string"
           },
           "language": {
-            "pattern": "^(uk|en|de)$",
+            "pattern": "^[a-z]{2,3}$",
             "title": "Language",
             "type": "string"
+          },
+          "language_detected": {
+            "default": false,
+            "title": "Language Detected",
+            "type": "boolean"
+          },
+          "language_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Probability"
           },
           "metadata": {
             "$ref": "#/components/schemas/TranscriptionMetadata"
@@ -237,11 +291,25 @@
             "title": "Segments",
             "type": "array"
           },
+          "speaker_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Names",
+            "type": "object"
+          },
           "speakers": {
             "items": {
               "type": "string"
             },
             "title": "Speakers",
+            "type": "array"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurnView"
+            },
+            "title": "Turns",
             "type": "array"
           }
         },
@@ -252,6 +320,64 @@
           "metadata"
         ],
         "title": "TranscriptResultView",
+        "type": "object"
+      },
+      "TranscriptTurnView": {
+        "description": "One speaker turn: the structure a reader actually wants.\n\nBuilt at read time from the (enriched) segments \u2014 consecutive\nsegments by the same speaker, with long stretches broken into\nparagraphs at pauses and sentence ends (``asr_models.structure``).\nA turn whose ``speaker`` is ``None`` is speech the diarizer could\nnot attribute (or an undiarized job, which is one long turn).",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "paragraphs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paragraphs",
+            "type": "array"
+          },
+          "segment_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Segment Indices",
+            "type": "array"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "paragraphs"
+        ],
+        "title": "TranscriptTurnView",
         "type": "object"
       },
       "TranscriptionJobView": {
@@ -271,6 +397,17 @@
             "default": false,
             "title": "Cancel Requested",
             "type": "boolean"
+          },
+          "detected_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Language"
           },
           "diarize": {
             "default": false,
@@ -383,6 +520,13 @@
               }
             ],
             "title": "Result Url"
+          },
+          "speaker_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Names",
+            "type": "object"
           },
           "started_at": {
             "anyOf": [
@@ -876,6 +1020,76 @@
           }
         },
         "summary": "Fetch a completed job's transcript (409 if not ready).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers": {
+      "put": {
+        "description": "Diarization labels are neutral (``SPEAKER_N``); people give them\nnames. The mapping is stored on the job so every surface reading the\ntranscript \u2014 web, desktop, the note built from it \u2014 shows the same\nnames. Works on any job (naming does not care about status); the\nview merges the names on the next read.",
+        "operationId": "set_speaker_names_asr_jobs__job_id__speakers_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerNamesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeakerNamesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Name the diarized speakers of a job (label \u2192 display name).",
         "tags": [
           "asr"
         ]

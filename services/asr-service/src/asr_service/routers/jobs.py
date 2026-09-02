@@ -33,8 +33,10 @@ from fastapi import (
     status,
 )
 from opentelemetry import metrics
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from asr_models import (
+    SPEAKER_LABEL_PATTERN,
     ConfidenceSpanView,
     EnrichedSegment,
     JobEnqueuePayload,
@@ -43,6 +45,8 @@ from asr_models import (
     TranscriptionJobView,
     TranscriptionOutput,
     TranscriptResultView,
+    build_turns,
+    default_speaker_name,
 )
 from audit import Severity
 from auth import Claims
@@ -433,6 +437,7 @@ async def get_job_result(
         job_id=job_id,
         output=output,
         authorization=request.headers.get("authorization"),
+        speaker_names=view.speaker_names,
     )
 
 
@@ -448,8 +453,15 @@ async def _enriched_result_view(
     job_id: UUID,
     output: TranscriptionOutput,
     authorization: str | None,
+    speaker_names: dict[str, str] | None = None,
 ) -> TranscriptResultView:
-    """Run the raw transcript through nlp-service; fall back to raw on failure."""
+    """Run the raw transcript through nlp-service; fall back to raw on failure.
+
+    Whatever happens to the text, the speaker structure survives: every
+    segment keeps its diarization label, the roster rides along, and the
+    view is finished with the display names and the turn structure
+    (``_structured``) — the clients render turns, not segments.
+    """
     raw_segments = [
         EnrichedSegment(
             text=s.text,
@@ -458,6 +470,7 @@ async def _enriched_result_view(
             end_ms=s.end_ms,
             words=s.words,
             avg_confidence=s.avg_confidence,
+            speaker=s.speaker,
         )
         for s in output.segments
     ]
@@ -468,15 +481,16 @@ async def _enriched_result_view(
         language_probability=output.language_probability,
         segments=raw_segments,
         metadata=output.metadata,
+        speakers=list(output.speakers),
     )
     if not settings.nlp_enrich_enabled or not output.segments:
-        return view
+        return _structured(view, speaker_names)
     # The post-processor has per-language rules (dictated punctuation,
     # number words). A language it has no rules for gets the raw Whisper
     # text — which is already punctuated — rather than a 422 from
     # nlp-service that we would then swallow.
     if output.language not in NLP_LANGUAGES:
-        return view
+        return _structured(view, speaker_names)
 
     payload = [
         {
@@ -500,7 +514,7 @@ async def _enriched_result_view(
         authorization=authorization,
     )
     if resp is None or len(resp.get("segments", [])) != len(output.segments):
-        return view  # NLP down/mismatched — serve the raw transcript
+        return _structured(view, speaker_names)  # NLP down/mismatched — raw transcript
 
     enriched: list[EnrichedSegment] = []
     for raw_seg, nlp_seg in zip(output.segments, resp["segments"], strict=True):
@@ -520,7 +534,9 @@ async def _enriched_result_view(
         # A segment that is ONLY punctuation (Whisper split a dictated
         # «Крапка» into its own segment) merges into the previous one.
         # No-op when the previous segment already ends with that mark —
-        # the punctuation stage adds trailing periods on its own.
+        # the punctuation stage adds trailing periods on its own. The
+        # merged segment keeps the previous speaker: a lone period has
+        # no voice of its own.
         if enriched and all(ch in _PUNCT_ONLY for ch in text):
             prev = enriched[-1]
             merged = prev.text.rstrip()
@@ -537,15 +553,104 @@ async def _enriched_result_view(
                 words=raw_seg.words,
                 avg_confidence=raw_seg.avg_confidence,
                 confidence_spans=spans,
+                speaker=raw_seg.speaker,
             )
         )
-    return view.model_copy(
-        update={
-            "segments": enriched,
-            "nlp_applied": True,
-            "nlp_pipeline_version": resp.get("pipeline_version"),
-        }
+    return _structured(
+        view.model_copy(
+            update={
+                "segments": enriched,
+                "nlp_applied": True,
+                "nlp_pipeline_version": resp.get("pipeline_version"),
+            }
+        ),
+        speaker_names,
     )
+
+
+def _structured(view: TranscriptResultView, names: dict[str, str] | None) -> TranscriptResultView:
+    """Finish a result view: roster from what is actually on the segments,
+    display names for every roster label, and the turn structure."""
+    roster = list(view.speakers)
+    for seg in view.segments:
+        if seg.speaker and seg.speaker not in roster:
+            roster.append(seg.speaker)
+    custom = names or {}
+    speaker_names = {label: custom.get(label) or default_speaker_name(label) for label in roster}
+    turns = build_turns(view.segments, speaker_names=speaker_names)
+    return view.model_copy(
+        update={"speakers": roster, "speaker_names": speaker_names, "turns": turns}
+    )
+
+
+# ── Speaker naming ────────────────────────────────────────────────────
+
+
+class SpeakerNamesUpdate(BaseModel):
+    """``PUT /asr/jobs/{id}/speakers`` body: the complete label → name
+    mapping. A label left out (or given an empty name) goes back to its
+    neutral default."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    names: dict[str, str] = Field(default_factory=dict, max_length=64)
+
+    @field_validator("names")
+    @classmethod
+    def _clean(cls, value: dict[str, str]) -> dict[str, str]:
+        import re
+
+        cleaned: dict[str, str] = {}
+        for label, name in value.items():
+            if not re.match(SPEAKER_LABEL_PATTERN, label):
+                raise ValueError(f"{label!r} is not a speaker label (SPEAKER_1..)")
+            name = " ".join(name.split())
+            if not name:
+                continue
+            if len(name) > 80:
+                raise ValueError(f"name for {label} is longer than 80 characters")
+            cleaned[label] = name
+        return cleaned
+
+
+class SpeakerNamesView(BaseModel):
+    job_id: UUID
+    speaker_names: dict[str, str]
+
+
+@router.put(
+    "/jobs/{job_id}/speakers",
+    response_model=SpeakerNamesView,
+    summary="Name the diarized speakers of a job (label → display name).",
+)
+async def set_speaker_names(
+    job_id: UUID,
+    body: SpeakerNamesUpdate,
+    claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
+) -> SpeakerNamesView:
+    """Diarization labels are neutral (``SPEAKER_N``); people give them
+    names. The mapping is stored on the job so every surface reading the
+    transcript — web, desktop, the note built from it — shows the same
+    names. Works on any job (naming does not care about status); the
+    view merges the names on the next read."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        stored = await repository.set_speaker_names(conn, job_id=job_id, names=body.names)
+    if stored is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await state.audit_writer.write_event(
+        tenant_id=claims.tid,
+        kind=audit_kinds.SPEAKERS_NAMED,
+        actor_sub=claims.sub,
+        actor_role=(claims.roles[0] if claims.roles else None),
+        target_kind="asr_job",
+        target_id=str(job_id),
+        # Labels only: who a speaker IS is content, and audit payloads
+        # carry pointers, not content (ADR-0031).
+        payload={"labels": sorted(stored)},
+        severity=Severity.INFO,
+    )
+    return SpeakerNamesView(job_id=job_id, speaker_names=stored)
 
 
 @router.get(

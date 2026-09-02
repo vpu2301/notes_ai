@@ -289,10 +289,10 @@ def test_transcript_text_renders_dialogue_when_diarized() -> None:
     # unattributed segment renders under UNKNOWN, never merged into a
     # neighbouring speaker (mirrors dictation-service dialogue_text).
     assert _transcript_text(_diarized_result()) == (
-        "SPEAKER_1: Почнімо з підсумків спринту. Реліз готовий.\n"
-        "SPEAKER_2: Коли деплой?\n"
-        "SPEAKER_1: Завтра вранці.\n"
-        "UNKNOWN: (нерозбірливо)"
+        "Speaker 1: Почнімо з підсумків спринту. Реліз готовий.\n\n"
+        "Speaker 2: Коли деплой?\n\n"
+        "Speaker 1: Завтра вранці.\n\n"
+        "Unknown speaker: (нерозбірливо)"
     )
 
 
@@ -316,7 +316,7 @@ def test_transcript_text_dialogue_without_speaker_roster() -> None:
             {"text": "Два.", "speaker": "SPEAKER_2"},
         ]
     }
-    assert _transcript_text(result) == "SPEAKER_1: Один.\nSPEAKER_2: Два."
+    assert _transcript_text(result) == "Speaker 1: Один.\n\nSpeaker 2: Два."
 
 
 def test_assign_diarized_job_creates_dialogue_note(rig: SimpleNamespace) -> None:
@@ -333,11 +333,11 @@ def test_assign_diarized_job_creates_dialogue_note(rig: SimpleNamespace) -> None
     (call,) = rig.create_calls
     content = call["content"]
     text = content.sections[0].text
-    assert text.startswith("SPEAKER_1: Почнімо з підсумків спринту.")
-    assert "SPEAKER_2: Коли деплой?" in text
-    assert "UNKNOWN: (нерозбірливо)" in text
+    assert text.startswith("Speaker 1: Почнімо з підсумків спринту.")
+    assert "Speaker 2: Коли деплой?" in text
+    assert "Unknown speaker: (нерозбірливо)" in text
     # Speaker labels stay neutral — no name inference server-side.
-    assert "SPEAKER_3" not in text
+    assert "Speaker 3" not in text
 
 
 def test_by_source_job_bulk_lookup(rig: SimpleNamespace) -> None:
@@ -358,3 +358,84 @@ def test_by_source_job_bulk_lookup(rig: SimpleNamespace) -> None:
     (link,) = resp.json()
     assert link["note_id"] == str(NOTE_ID)
     assert link["asr_job_id"] == str(JOB_ID)
+
+
+# ── Server-side turns (asr-service ``turns`` + ``speaker_names``) ────
+
+
+def _structured_result() -> dict:
+    return {
+        "job_id": str(JOB_ID),
+        "language": "en",
+        "segments": [
+            {"text": "Let's start with the numbers.", "speaker": "SPEAKER_1"},
+            {"text": "Which numbers?", "speaker": "SPEAKER_2"},
+        ],
+        "speakers": ["SPEAKER_1", "SPEAKER_2"],
+        "speaker_names": {"SPEAKER_1": "Mark", "SPEAKER_2": "Speaker 2"},
+        "turns": [
+            {
+                "speaker": "SPEAKER_1",
+                "name": "Mark",
+                "start_ms": 0,
+                "end_ms": 9000,
+                "paragraphs": ["Let's start with the numbers.", "Revenue is up, costs are flat."],
+            },
+            {
+                "speaker": "SPEAKER_2",
+                "name": "Speaker 2",
+                "start_ms": 9000,
+                "end_ms": 10_000,
+                "paragraphs": ["Which numbers?"],
+            },
+            {
+                "speaker": None,
+                "name": None,
+                "start_ms": 10_000,
+                "end_ms": 10_500,
+                "paragraphs": ["(crosstalk)"],
+            },
+        ],
+    }
+
+
+def test_transcript_text_prefers_server_turns_with_names_and_paragraphs() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    assert _transcript_text(_structured_result()) == (
+        "Mark: Let's start with the numbers.\n"
+        "Revenue is up, costs are flat.\n\n"
+        "Speaker 2: Which numbers?\n\n"
+        "Unknown speaker: (crosstalk)"
+    )
+
+
+def test_transcript_text_undiarized_turns_render_as_plain_paragraphs() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    result = {
+        "segments": [{"text": "One."}, {"text": "Two."}],
+        "turns": [
+            {
+                "speaker": None,
+                "name": None,
+                "start_ms": 0,
+                "end_ms": 5000,
+                "paragraphs": ["One.", "Two."],
+            }
+        ],
+    }
+    assert _transcript_text(result) == "One.\nTwo."
+
+
+def test_dialogue_fallback_uses_speaker_names_when_present() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_text
+
+    result = {
+        "segments": [
+            {"text": "Hi.", "speaker": "SPEAKER_1"},
+            {"text": "Hello.", "speaker": "SPEAKER_2"},
+        ],
+        "speaker_names": {"SPEAKER_1": "Mark"},
+    }
+    assert _transcript_text(result) == "Mark: Hi.\n\nSpeaker 2: Hello."

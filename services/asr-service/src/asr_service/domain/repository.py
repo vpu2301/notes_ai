@@ -235,6 +235,26 @@ async def list_stale_jobs(
     ]
 
 
+async def set_speaker_names(
+    conn: asyncpg.Connection, *, job_id: UUID, names: dict[str, str]
+) -> dict[str, str] | None:
+    """Replace the job's speaker naming; return the stored mapping, or
+    ``None`` when the job does not exist (in this tenant)."""
+    row = await conn.fetchrow(
+        """
+        UPDATE transcription_jobs
+        SET speaker_names = $2::jsonb
+        WHERE id = $1
+        RETURNING speaker_names
+        """,
+        job_id,
+        json.dumps(names),
+    )
+    if row is None:
+        return None
+    return _speaker_names(row["speaker_names"])
+
+
 async def count_active_jobs(conn: asyncpg.Connection, *, tenant_id: UUID) -> int:
     """Return the number of queued + running jobs for the tenant.
 
@@ -267,4 +287,21 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
         finished_at=row["finished_at"],
         attempts=int(row["attempts"]),
         cancel_requested=bool(row.get("cancel_requested") or False),
+        speaker_names=_speaker_names(row.get("speaker_names")),
     )
+
+
+def _speaker_names(raw: object) -> dict[str, str]:
+    """``speaker_names`` column → dict. No jsonb codec is registered on
+    the pool, so asyncpg hands the column back as text; rows that predate
+    migration 0018 (or a NULL from a test stub) read as empty."""
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if isinstance(v, str) and v}

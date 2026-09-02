@@ -1,7 +1,8 @@
 """libs/diarization — speaker-diarization primitives shared across services.
 
 Pipeline pieces: Silero VAD segmentation → ECAPA-TDNN speaker embeddings
-→ deterministic 2-speaker cosine clustering → majority-overlap
+→ deterministic cosine clustering (online 2-slot for live sessions,
+agglomerative N-speaker for batch, ADR-0045) → majority-overlap
 attribution. Labels are anonymous S1/S2 proposals with confidence;
 UNKNOWN whenever the evidence is ambiguous — never a guess. Outward
 labels are always neutral SPEAKER_1..N; there is no identity inference.
@@ -24,9 +25,11 @@ from .embedder import EcapaEmbedder
 from .engine import DiarizationEngine, DiarizationUnavailableError
 from .integrity import ModelIntegrityError, sha256_file, verify_model_dir
 from .offline import (
+    OfflineClusteringConfig,
     OfflineDiarization,
     OfflineDiarizationConfig,
     SpeakerTurn,
+    cluster_embeddings,
     diarize_offline,
 )
 from .vad import SileroSegmenter
@@ -39,6 +42,7 @@ __all__ = [
     "DiarizationUnavailableError",
     "EcapaEmbedder",
     "ModelIntegrityError",
+    "OfflineClusteringConfig",
     "OfflineDiarization",
     "OfflineDiarizationConfig",
     "OnlineSpeakerClusterer",
@@ -47,6 +51,7 @@ __all__ = [
     "SpeakerTurn",
     "attribute_word",
     "chunk_spans",
+    "cluster_embeddings",
     "diarize_offline",
     "sha256_file",
     "verify_model_dir",
