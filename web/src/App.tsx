@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ToasterProvider } from "./components/Toaster";
-import { CapturePage } from "./pages/CapturePage";
 import { LoginPage } from "./pages/LoginPage";
+import { MeetingPage } from "./pages/MeetingPage";
 import { NewNotePage } from "./pages/NewNotePage";
 import { NoteEditorPage } from "./pages/NoteEditorPage";
 import { NotesPage } from "./pages/NotesPage";
+import { SharedNotePage } from "./pages/SharedNotePage";
 import { AppShell } from "./shell/AppShell";
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -17,10 +18,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
     // A quiet splash: the silent-refresh either restores the session in a
     // few hundred ms or lands the user on /login — no flash of either UI.
     return (
-      <div className="login-wrap" aria-busy="true">
-        <div className="save-state saving">
-          <span className="sdot" /> Signing you in…
-        </div>
+      <div className="splash" aria-busy="true">
+        <span className="save-status" data-state="saving">
+          <span className="dot" /> Signing you in…
+        </span>
       </div>
     );
   }
@@ -37,6 +38,8 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/* Public link: anyone with the token, no sign-in. */}
+            <Route path="/s/:token" element={<SharedNotePage />} />
             <Route
               element={
                 <RequireAuth>
@@ -45,9 +48,10 @@ export function App() {
               }
             >
               <Route index element={<NotesPage />} />
+              <Route path="/meeting/new" element={<MeetingPage />} />
               <Route path="/new" element={<NewNotePage />} />
               <Route path="/notes/:noteId" element={<NoteEditorPage />} />
-              <Route path="/capture" element={<CapturePage />} />
+              <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

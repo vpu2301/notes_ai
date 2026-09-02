@@ -129,7 +129,7 @@ class RebindResponse(_Strict):
 async def list_templates(
     claims: Annotated[Claims, Depends(requires("template.read", "template"))],
     category: Annotated[str | None, Query(max_length=64)] = None,
-    language: Annotated[str | None, Query(pattern="^(uk|en)$")] = None,
+    language: Annotated[str | None, Query(pattern="^(uk|en|de)$")] = None,
     tenant_only: Annotated[bool, Query()] = False,
     include_deprecated: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,

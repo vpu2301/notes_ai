@@ -28,7 +28,7 @@ class SuggestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prefix: str = Field(min_length=1, max_length=80)
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
     limit: int = Field(default=settings.suggest_default_limit, ge=1, le=settings.suggest_max_limit)
     context: dict | None = Field(
         default=None,

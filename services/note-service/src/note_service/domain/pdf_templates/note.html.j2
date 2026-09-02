@@ -1,5 +1,17 @@
 <!doctype html>
-{% set is_en = (language == "en") %}
+{# Labels per render language; anything unknown renders in English. #}
+{% set L = {
+  "en": {"draft": "Draft", "draft_wm": "DRAFT", "draft_banner": "DRAFT — NOT FINALIZED",
+         "code": "Code:", "org": "Organisation:", "author": "Author:",
+         "coauthors": "Co-authors:", "finalized": "Finalized:"},
+  "uk": {"draft": "Чернетка", "draft_wm": "ЧЕРНЕТКА", "draft_banner": "ЧЕРНЕТКА — НЕ ФІНАЛІЗОВАНО",
+         "code": "Код:", "org": "Організація:", "author": "Автор:",
+         "coauthors": "Спів-автори:", "finalized": "Фіналізовано:"},
+  "de": {"draft": "Entwurf", "draft_wm": "ENTWURF", "draft_banner": "ENTWURF — NICHT FINALISIERT",
+         "code": "Kennung:", "org": "Organisation:", "author": "Autor:",
+         "coauthors": "Mitautoren:", "finalized": "Finalisiert:"}
+} %}
+{% set T = L[language] if language in L else L["en"] %}
 <html lang="{{ language }}">
 <head>
 <meta charset="utf-8" />
@@ -10,7 +22,7 @@
     margin: 18mm 16mm 22mm 18mm;
     {% if is_draft %}
     @top-center {
-      content: "{{ "Draft" if is_en else "Чернетка" }}";
+      content: "{{ T.draft }}";
       color: #b00020;
       font-family: "DejaVu Sans", sans-serif;
       font-size: 9pt;
@@ -65,18 +77,18 @@
 <body>
   {% if is_draft %}
     <div class="draft-watermark">
-      <span>{{ "DRAFT" if is_en else "ЧЕРНЕТКА" }}</span>
+      <span>{{ T.draft_wm }}</span>
     </div>
     <div class="draft-banner">
-      {{ "DRAFT — NOT FINALIZED" if is_en else "ЧЕРНЕТКА — НЕ ФІНАЛІЗОВАНО" }}
+      {{ T.draft_banner }}
     </div>
   {% endif %}
 
   <div class="header-block">
     <h1>{{ title }}</h1>
     <div class="meta">
-      <div><span class="label">{{ "Code:" if is_en else "Код:" }}</span> {{ code }}</div>
-      <div><span class="label">{{ "Organisation:" if is_en else "Організація:" }}</span> {{ issuer }}</div>
+      <div><span class="label">{{ T.code }}</span> {{ code }}</div>
+      <div><span class="label">{{ T.org }}</span> {{ issuer }}</div>
     </div>
   </div>
 
@@ -88,14 +100,14 @@
   {% endfor %}
 
   <div class="author-block">
-    <div class="label">{{ "Author:" if is_en else "Автор:" }}</div>
+    <div class="label">{{ T.author }}</div>
     <div>{{ primary_author }}</div>
     {% if co_authors %}
-      <div class="label" style="margin-top: 6pt;">{{ "Co-authors:" if is_en else "Спів-автори:" }}</div>
+      <div class="label" style="margin-top: 6pt;">{{ T.coauthors }}</div>
       <div>{{ co_authors | join(", ") }}</div>
     {% endif %}
     {% if finalized_at %}
-      <div class="label" style="margin-top: 6pt;">{{ "Finalized:" if is_en else "Фіналізовано:" }}</div>
+      <div class="label" style="margin-top: 6pt;">{{ T.finalized }}</div>
       <div>{{ finalized_at }}</div>
     {% endif %}
   </div>

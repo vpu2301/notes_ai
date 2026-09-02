@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -37,10 +29,13 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((kind: ToastKind, message: string) => {
     const id = nextId.current++;
-    setToasts((prev) => [...prev.slice(-3), { id, kind, message }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, kind === "error" ? 6000 : 3500);
+    setToasts((prev) => [...prev.slice(-2), { id, kind, message }]);
+    window.setTimeout(
+      () => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      },
+      kind === "error" ? 6000 : 3500,
+    );
   }, []);
 
   const apiValue = useMemo<ToastApi>(

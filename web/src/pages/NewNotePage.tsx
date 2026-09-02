@@ -4,7 +4,7 @@ import { errorMessage } from "../api/http";
 import { createNote, getTemplate, listTemplates } from "../api/notes";
 import type { NoteContent, TemplateSummary } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
-import { NotesIcon } from "../components/icons";
+import { LayersIcon } from "../components/icons";
 import { Skeleton } from "../components/Skeleton";
 import { useToast } from "../components/Toaster";
 
@@ -76,10 +76,10 @@ export function NewNotePage() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-h">
         <div>
-          <h1 className="page-title">New note</h1>
-          <p className="page-sub">Pick a template to start from.</p>
+          <h1>New note</h1>
+          <p className="sub">Pick a template to start from. Sections come pre-filled with their defaults.</p>
         </div>
       </div>
 
@@ -87,17 +87,20 @@ export function NewNotePage() {
         <div className="tpl-grid" aria-busy="true">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="card tpl-card" aria-hidden="true">
-              <Skeleton width="60%" height={16} />
-              <Skeleton width="40%" height={13} />
+              <div className="tpl-card-h">
+                <Skeleton width={32} height={32} style={{ borderRadius: 9 }} />
+                <Skeleton width="60%" height={14} />
+              </div>
+              <Skeleton width="40%" height={12} />
             </div>
           ))}
         </div>
       )}
 
       {templates !== null && templates.length === 0 && (
-        <div className="card">
+        <div className="panel">
           <EmptyState
-            icon={<NotesIcon size={26} />}
+            icon={<LayersIcon size={20} />}
             title="No templates available"
             message="Your workspace has no note templates yet. Ask an administrator to add some."
           />
@@ -116,8 +119,11 @@ export function NewNotePage() {
                 disabled={creatingId !== null}
                 aria-busy={creatingId === t.id}
               >
-                <span className="tpl-name">
-                  {creatingId === t.id ? "Creating…" : t.name}
+                <span className="tpl-card-h">
+                  <span className="row-ico">
+                    <LayersIcon size={15} />
+                  </span>
+                  <span className="tpl-name">{creatingId === t.id ? "Creating…" : t.name}</span>
                 </span>
                 <span className="tpl-meta">
                   <span className="lang-tag">{t.language}</span>

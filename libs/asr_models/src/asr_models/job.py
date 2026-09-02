@@ -19,6 +19,13 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+# Languages a caller may pin a job to, plus ``auto`` (detect from the audio).
+LANGUAGE_REQUEST_PATTERN = r"^(auto|uk|en|de)$"
+# Whisper reports ISO 639-1 codes (``yue`` is its one three-letter code).
+LANGUAGE_CODE_PATTERN = r"^[a-z]{2,3}$"
+AUTO_LANGUAGE = "auto"
+
+
 class JobEnqueuePayload(BaseModel):
     """Wire payload the API enqueues onto Redis Streams.
 
@@ -33,7 +40,11 @@ class JobEnqueuePayload(BaseModel):
     # (product terms, names, jargon). Travels on the queue message only —
     # it is not persisted on the job row.
     vocabulary_hint: str | None = None
-    language: str = Field(pattern=r"^(uk|en|de)$")
+    # The language the caller asked for. ``auto`` means "listen and decide":
+    # the worker runs Whisper's language identification on the recording
+    # and transcribes in whatever it hears; the result's ``language`` then
+    # carries the detected code, never the literal ``auto``.
+    language: str = Field(pattern=LANGUAGE_REQUEST_PATTERN)
     model: str = "large-v3"
     # Ambient Capture v1: run offline speaker diarization after
     # transcription. Travels on the queue message only — no DB column;
@@ -51,7 +62,12 @@ class TranscriptionJobView(BaseModel):
     tenant_id: UUID
     audio_id: UUID
     requester_sub: UUID
+    # As requested at submit: ``uk``/``en``/``de`` or ``auto``.
     language: str
+    # What the recording turned out to be in (ISO 639-1). Set by the worker
+    # when the job completes; ``None`` while it is still running. For a
+    # fixed-language job it simply echoes ``language``.
+    detected_language: str | None = None
     model: str
     status: JobStatus
     # Whether offline diarization was requested at submit. Echoed on the

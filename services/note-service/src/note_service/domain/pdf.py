@@ -98,7 +98,7 @@ def render_note_pdf(
     """Render the PDF bytes for a note version.
 
     ``is_draft`` toggles the draft watermark/banner treatment;
-    ``language`` selects the bilingual (uk/en) labels in the template.
+    ``language`` selects the label set (uk/en/de) in the template.
     """
     payload = build_render_input(
         note=note,

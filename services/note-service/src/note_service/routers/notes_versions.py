@@ -21,6 +21,7 @@ from note_models import NoteAmendmentType, NoteContent, ReadPurpose
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import notes_repository as repo
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,8 @@ class NoteVersionDetail(NoteVersionSummary):
 
 def _enforce_read_purpose(note: repo.NoteRow, claims: Claims, purpose: ReadPurpose | None) -> bool:
     """Returns ``is_author``; raises 422 when a non-author omits ``?purpose=``."""
-    is_author = claims.sub == note.primary_author_id or claims.sub in note.co_author_ids
+    # Someone the note was shared with reads as a collaborator (0016).
+    is_author = access.is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
     if not is_author and purpose is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -77,9 +79,8 @@ async def list_versions(
 ) -> list[NoteVersionSummary]:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
         summaries = await repo.list_version_summaries(conn, note_id=note_id)
 
@@ -109,9 +110,8 @@ async def get_version(
 ) -> NoteVersionDetail:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         is_author = _enforce_read_purpose(note, claims, purpose)
         version = await repo.fetch_version_by_number(
             conn, note_id=note_id, version_number=version_number

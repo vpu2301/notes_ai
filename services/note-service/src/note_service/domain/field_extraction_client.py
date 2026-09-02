@@ -56,6 +56,10 @@ def typed_sections_payload(definition: TemplateDefinition) -> list[dict[str, Any
     ]
 
 
+# Languages nlp-service's ``/nlp/process`` accepts (its ``language`` Literal).
+EXTRACTION_LANGUAGES = frozenset({"uk", "en", "de"})
+
+
 async def extract_fields(
     *,
     definition: TemplateDefinition,
@@ -68,6 +72,10 @@ async def extract_fields(
     failure or when the template has no typed sections."""
     sections = typed_sections_payload(definition)
     if not sections or not text.strip():
+        return {}
+    if language not in EXTRACTION_LANGUAGES:
+        # nlp-service has no rules for this language and would answer 422;
+        # fail-open here the same way, without the round trip.
         return {}
 
     body = {

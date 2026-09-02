@@ -9,24 +9,22 @@ export function Skeleton({
   height?: number | string;
   style?: CSSProperties;
 }) {
-  return (
-    <div
-      className="skeleton"
-      aria-hidden="true"
-      style={{ width: width ?? "100%", height, ...style }}
-    />
-  );
+  return <div className="skeleton" aria-hidden="true" style={{ width: width ?? "100%", height, ...style }} />;
 }
 
-export function SkeletonCard() {
+/** A placeholder list row with the same shape as a note row. */
+export function SkeletonRow() {
   return (
-    <div className="card note-card" aria-hidden="true">
-      <div className="row1">
-        <Skeleton width="40%" height={16} />
-        <Skeleton width={70} height={20} style={{ borderRadius: 999 }} />
+    <div className="row" aria-hidden="true">
+      <Skeleton width={32} height={32} style={{ borderRadius: 9 }} />
+      <div className="row-body">
+        <div className="row-1">
+          <Skeleton width="38%" height={14} />
+          <Skeleton width={60} height={18} style={{ borderRadius: 99 }} />
+        </div>
+        <Skeleton width="70%" height={12} style={{ marginTop: 8 }} />
       </div>
-      <Skeleton height={13} style={{ marginTop: 8 }} />
-      <Skeleton width="65%" height={13} style={{ marginTop: 6 }} />
+      <Skeleton width={64} height={12} />
     </div>
   );
 }

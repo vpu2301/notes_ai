@@ -243,7 +243,7 @@ class TemplateDefinition(_Strict):
 
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=256)
-    language: str = Field(pattern="^(uk|en)$")
+    language: str = Field(pattern="^(uk|en|de)$")
     # Coarse browse facet ("meetings", "sales", "hr", …). Accepts the
     # legacy JSON key ``specialty`` on input (pre-rename dumps and the
     # seed files still carry it); always serialises as ``category``.

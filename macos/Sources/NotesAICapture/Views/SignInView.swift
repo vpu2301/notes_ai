@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SignInView: View {
     @EnvironmentObject private var app: AppState
+    var compact = false
 
     @State private var email = ""
     @State private var password = ""
@@ -11,61 +12,68 @@ struct SignInView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Sign in to turn this Mac into a meeting-capture device.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(spacing: 8) {
-                TextField("Email", text: $email)
-                    .textContentType(.username)
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
-                if needsOTP {
-                    TextField("One-time code", text: $otp)
-                        .textContentType(.oneTimeCode)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            if !compact {
+                DSWordmark(size: 18)
             }
-            .textFieldStyle(.roundedBorder)
-            .onSubmit(submit)
-
-            if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(compact ? "Sign in" : "Welcome back")
+                    .font(.dsDisplay(compact ? 17 : 24, .medium))
+                    .foregroundStyle(DS.text1)
+                Text("Sign in to turn this Mac into a meeting-capture device.")
+                    .font(.ds(12.5))
+                    .foregroundStyle(DS.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button(action: submit) {
-                HStack {
-                    Spacer()
-                    if isBusy {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Text("Sign In")
-                            .fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    DSLabel("Email")
+                    DSTextField(placeholder: "you@company.com", text: $email)
+                        .textContentType(.username)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    DSLabel("Password")
+                    DSTextField(placeholder: "••••••••", text: $password, secure: true)
+                        .textContentType(.password)
+                }
+                if needsOTP {
+                    VStack(alignment: .leading, spacing: 6) {
+                        DSLabel("One-time code")
+                        DSTextField(placeholder: "123 456", text: $otp, mono: true)
+                            .textContentType(.oneTimeCode)
                     }
-                    Spacer()
                 }
             }
+            .onSubmit(submit)
+
+            if let errorMessage {
+                DSNotice(tone: needsOTP ? .info : .danger,
+                         symbol: needsOTP ? "key.fill" : "exclamationmark.triangle.fill",
+                         text: errorMessage)
+            }
+
+            Button(action: submit) {
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Sign in")
+                }
+            }
+            .buttonStyle(DSButtonStyle(kind: .primary, height: 34, fill: true))
             .keyboardShortcut(.defaultAction)
-            .controlSize(.large)
             .disabled(isBusy || email.isEmpty || password.isEmpty)
 
             HStack {
                 Text(authHost)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.dsMono(10.5))
+                    .foregroundStyle(DS.muted)
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(.plain)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 11.5, height: 22))
+                    .foregroundStyle(DS.muted)
             }
         }
-        .padding(16)
         .onAppear {
             if email.isEmpty { email = app.email }
         }

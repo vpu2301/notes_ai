@@ -39,6 +39,24 @@ class SearchFilters:
     # bind arg feeds the predicate, ts_headline AND exact_total; unset →
     # the pre-sprint-15 plainto path, byte-identical.
     ts_query: str | None = None
+    # 0016 — the caller. ``viewer_sub`` restricts results to notes that
+    # person may see (workspace-visible, theirs, or shared with them);
+    # ``viewer_sees_all`` (tenant_admin / auditor) lifts that. Deleted
+    # notes are never returned either way.
+    viewer_sub: UUID | None = None
+    viewer_sees_all: bool = False
+
+
+def _access_clauses(filters: SearchFilters, args: list[Any]) -> list[str]:
+    out = ["n.deleted_at IS NULL"]
+    if filters.viewer_sub is not None and not filters.viewer_sees_all:
+        args.append(filters.viewer_sub)
+        i = len(args)
+        out.append(
+            f"(n.visibility = 'workspace' OR n.primary_author_id = ${i} "
+            f"OR ${i} = ANY(n.co_author_ids) OR ${i} = ANY(n.shared_with_ids))"
+        )
+    return out
 
 
 def _fts_clause(filters: SearchFilters, args: list[Any]) -> tuple[str, str] | None:
@@ -105,6 +123,7 @@ async def search_notes(
     if fts is not None:
         predicate, tsquery_expr = fts
         where.append(predicate)
+    where.extend(_access_clauses(filters, args))
 
     if filters.author_id is not None:
         args.append(filters.author_id)
@@ -196,6 +215,7 @@ async def exact_total(conn: asyncpg.Connection, filters: SearchFilters) -> int:
     fts = _fts_clause(filters, args)
     if fts is not None:
         where.append(fts[0])
+    where.extend(_access_clauses(filters, args))
     if filters.statuses:
         args.append(filters.statuses)
         where.append(f"n.status = ANY(${len(args)}::note_status[])")

@@ -31,7 +31,7 @@ router = APIRouter(prefix="/autocomplete", tags=["autocomplete"])
 class CreatePhraseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phrase: str = Field(min_length=1, max_length=80)
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
     source: Literal["user", "tenant"] = "user"
 
 
@@ -64,7 +64,7 @@ class PhraseListItemDTO(BaseModel):
 @router.get("/phrases", response_model=list[PhraseListItemDTO])
 async def list_phrases(
     claims: Annotated[Claims, Depends(requires("autocomplete.read", "phrase"))],
-    language: Annotated[Literal["uk", "en"] | None, Query()] = None,
+    language: Annotated[Literal["uk", "en", "de"] | None, Query()] = None,
     source: Annotated[Literal["system", "tenant", "user"] | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[PhraseListItemDTO]:
@@ -247,7 +247,7 @@ class CreateSnippetRequest(BaseModel):
     )
     expansion: str = Field(min_length=1, max_length=4000)
     cursor_position: int = Field(default=0, ge=0)
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
     source: Literal["user", "tenant"] = "user"
 
     @model_validator(mode="after")
@@ -284,7 +284,7 @@ class SnippetListItemDTO(BaseModel):
 @router.get("/snippets", response_model=list[SnippetListItemDTO])
 async def list_snippets(
     claims: Annotated[Claims, Depends(requires("autocomplete.read", "phrase"))],
-    language: Annotated[Literal["uk", "en"] | None, Query()] = None,
+    language: Annotated[Literal["uk", "en", "de"] | None, Query()] = None,
     source: Annotated[Literal["system", "tenant", "user"] | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[SnippetListItemDTO]:

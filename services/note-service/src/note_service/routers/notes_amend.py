@@ -21,6 +21,7 @@ from note_models import NoteAmendmentType, NoteContent, NoteStatus
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import notes_repository as repo
 from ..domain.diff_engine import compute_diff, section_diff_summary
 from ..domain.note_lifecycle import ConcurrentTransitionError, NoteStateMachine
@@ -71,9 +72,8 @@ async def amend_note(
 ) -> AmendResponse:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        row = await repo.lock_note_for_update(conn, note_id=note_id)
-        if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        row = access.require_view(await repo.lock_note_for_update(conn, note_id=note_id), claims)
         if row.status not in (NoteStatus.FINALIZED, NoteStatus.AMENDED):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,

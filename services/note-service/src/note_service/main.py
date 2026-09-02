@@ -29,9 +29,11 @@ from .routers import (
     notes_lifecycle,
     notes_pdf,
     notes_search,
+    notes_sharing,
     notes_synthesis,
     notes_versions,
     search_tips,
+    shared_public,
     synonyms,
     templates,
 )
@@ -135,7 +137,10 @@ def create_app() -> FastAPI:
     app.include_router(notes_diff.router)
     app.include_router(notes_versions.router)
     app.include_router(notes_pdf.router)
+    app.include_router(notes_sharing.router)
     app.include_router(notes_synthesis.router)
+    # Anonymous, token-addressed reads — no auth dependency at all.
+    app.include_router(shared_public.router)
     # Sprint 15: audio replay (ADR-0037). No ordering hazard: the
     # multi-segment sections path can't be swallowed by /{note_id}.
     app.include_router(notes_audio.router)

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/http";
 import { useAuth } from "../auth/AuthContext";
+import { AlertIcon } from "../components/icons";
 
 export function LoginPage() {
   const { status, login } = useAuth();
@@ -45,83 +46,84 @@ export function LoginPage() {
   };
 
   return (
-    <div className="login-wrap">
-      <form className="card login-card" onSubmit={(e) => void onSubmit(e)}>
-        <div className="wordmark">
-          <span className="mark" aria-hidden="true">
+    <div className="login-shell">
+      <form className="login-card" onSubmit={(e) => void onSubmit(e)}>
+        <div className="login-brand">
+          <span className="sb-brand-mark" aria-hidden="true">
             N
           </span>
-          <span>
-            Notes <span className="ai">AI</span>
-          </span>
+          <div>
+            <div className="login-brand-name">
+              Notes <span className="ai">AI</span>
+            </div>
+            <div className="login-brand-tag">Meetings, written down.</div>
+          </div>
         </div>
-        <p style={{ color: "var(--ink-2)", fontSize: "var(--text-md)" }}>
-          Sign in to your workspace.
-        </p>
 
-        <div className="field">
-          <label className="label" htmlFor="login-email">
-            Email
-          </label>
+        <div>
+          <h1 className="login-title">{otpRequired ? "One more step" : "Sign in"}</h1>
+          <p className="login-sub">
+            {otpRequired ? "Enter the code from your authenticator app." : "Use your workspace account."}
+          </p>
+        </div>
+
+        <label className="login-field">
+          <span>Email</span>
           <input
-            id="login-email"
-            className="input"
             type="email"
             autoComplete="username"
             required
-            autoFocus
+            autoFocus={!otpRequired}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-        </div>
+        </label>
 
-        <div className="field">
-          <label className="label" htmlFor="login-password">
-            Password
-          </label>
+        <label className="login-field">
+          <span>Password</span>
           <input
-            id="login-password"
-            className="input"
             type="password"
             autoComplete="current-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-        </div>
+        </label>
 
         {otpRequired && (
-          <div className="field">
-            <label className="label" htmlFor="login-otp">
-              One-time code
-            </label>
+          <label className="login-field">
+            <span>One-time code</span>
             <input
-              id="login-otp"
-              className="input"
               inputMode="numeric"
               autoComplete="one-time-code"
               placeholder="6-digit code"
               required
               autoFocus
+              className="mono"
               value={otp}
               onChange={(e) => setOtp(e.target.value)}
             />
-            <span className="hint">This account has two-factor authentication enabled.</span>
-          </div>
+            <span className="help" style={{ fontWeight: 400 }}>
+              This account has two-factor authentication enabled.
+            </span>
+          </label>
         )}
 
         {error && (
           <div className="banner banner-danger" role="alert">
-            {error}
+            <AlertIcon size={15} />
+            <span className="grow">{error}</span>
           </div>
         )}
 
-        <button className="btn btn-primary btn-lg" type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+        <button className="btn primary lg block login-submit" type="submit" disabled={busy}>
+          {busy ? "Signing in…" : otpRequired ? "Verify and sign in" : "Sign in"}
         </button>
 
-        <p className="dev-hint">
-          Dev workspace: <code>member@tenant-a.example</code> / <code>dev-password</code>
+        <p className="login-foot">
+          <span>
+            Dev workspace: <code>member@tenant-a.example</code> / <code>dev-password</code>
+          </span>
         </p>
       </form>
     </div>

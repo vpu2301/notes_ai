@@ -9,7 +9,11 @@ import type {
   NoteEnvelope,
   NoteVersionDetail,
   NoteVersionSummary,
+  NoteVisibility,
   SearchResponse,
+  SharedNoteView,
+  SharingView,
+  SourceJobLink,
   TemplateDetail,
   TemplateSummary,
   UpdateDraftResponse,
@@ -119,4 +123,56 @@ export function createFromTranscript(params: {
     method: "POST",
     json: params,
   });
+}
+
+/** Which notes were created from which transcription jobs (≤200 ids). */
+export function notesBySourceJob(jobIds: string[]): Promise<SourceJobLink[]> {
+  if (jobIds.length === 0) return Promise.resolve([]);
+  return api<SourceJobLink[]>("note", "/v1/notes/by-source-job", {
+    query: { ids: jobIds.slice(0, 200).join(",") },
+  });
+}
+
+// ── delete, visibility, sharing (0016) ────────────────────────────────
+
+export function deleteNote(id: string): Promise<{ id: string; deleted_at: string }> {
+  return api("note", `/v1/notes/${id}`, { method: "DELETE" });
+}
+
+export function getSharing(id: string): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/sharing`);
+}
+
+export function setVisibility(id: string, visibility: NoteVisibility): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/visibility`, {
+    method: "PUT",
+    json: { visibility },
+  });
+}
+
+/** Give a workspace member read access; 404 `not_a_member` if the address is unknown. */
+export function shareWithMember(id: string, email: string): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/share`, { method: "POST", json: { email } });
+}
+
+export function unshareMember(id: string, sub: string): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/share/${sub}`, { method: "DELETE" });
+}
+
+/** Idempotent: returns the existing live link if there is one. */
+export function createPublicLink(id: string): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/public-link`, { method: "POST" });
+}
+
+export function revokePublicLink(id: string): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/public-link`, { method: "DELETE" });
+}
+
+/** Anonymous — no bearer, no session. */
+export function getSharedNote(token: string): Promise<SharedNoteView> {
+  return api<SharedNoteView>("note", `/v1/shared/${encodeURIComponent(token)}`, { auth: false });
+}
+
+export function downloadSharedPdf(token: string): Promise<Blob> {
+  return apiBlob("note", `/v1/shared/${encodeURIComponent(token)}/pdf`, { auth: false });
 }

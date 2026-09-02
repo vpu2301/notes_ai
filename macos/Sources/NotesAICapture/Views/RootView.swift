@@ -1,64 +1,50 @@
 import SwiftUI
 
+/// The menu-bar popover: one button, the live card, the last few meetings.
 struct RootView: View {
-    enum Tab: CaseIterable {
-        case capture, recents, settings
-
-        var symbol: String {
-            switch self {
-            case .capture: return "mic"
-            case .recents: return "clock"
-            case .settings: return "gearshape"
-            }
-        }
-
-        var help: String {
-            switch self {
-            case .capture: return "Capture"
-            case .recents: return "Recent captures"
-            case .settings: return "Settings"
-            }
-        }
-    }
-
     @EnvironmentObject private var app: AppState
-    @State private var tab: Tab = .capture
+    @EnvironmentObject private var capture: CaptureViewModel
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            DSDivider()
             content
         }
         .frame(width: 340)
+        .background(DS.bg)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
-            Text("Notes AI Capture")
-                .font(.headline)
+            DSWordmark(size: 14.5)
             Spacer()
             if app.authState == .signedIn {
-                ForEach(Tab.allCases, id: \.self) { item in
-                    Button {
-                        tab = item
-                    } label: {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(width: 24, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(tab == item ? Color.accentColor : Color.secondary)
-                    .help(item.help)
+                DSMenu(width: 224) {
+                    [
+                        .item("Open window", symbol: "macwindow", hint: "⌘⇧N") {
+                            NotificationCenter.default.post(name: .openMainWindow, object: nil)
+                        },
+                        .item("Settings…", symbol: "gearshape", hint: "⌘,") {
+                            app.settingsPresented = true
+                            NotificationCenter.default.post(name: .openMainWindow, object: nil)
+                        },
+                        .item("Open web app", symbol: "safari") { app.openWebApp() },
+                        .separator,
+                        .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
+                            Task { await app.signOut() }
+                        },
+                        .item("Quit Notes AI Capture", symbol: "power", hint: "⌘Q") { NSApp.terminate(nil) },
+                    ]
                 }
+            } else {
+                Button("Quit") { NSApp.terminate(nil) }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                    .foregroundStyle(DS.muted)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
     }
 
     @ViewBuilder
@@ -66,21 +52,42 @@ struct RootView: View {
         switch app.authState {
         case .restoring:
             VStack(spacing: 10) {
-                ProgressView()
+                ProgressView().controlSize(.small)
                 Text("Connecting…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 44)
         case .signedOut:
-            SignInView()
+            SignInView(compact: true)
+                .padding(16)
         case .signedIn:
-            switch tab {
-            case .capture: CaptureView()
-            case .recents: RecentsView()
-            case .settings: SettingsView()
+            VStack(alignment: .leading, spacing: 12) {
+                if case .idle = capture.phase {
+                    NewMeetingButton(fill: true, height: 38)
+                } else {
+                    ActiveCaptureCard(compact: true)
+                        .dsCard(padding: 12)
+                }
+                if app.recents.isEmpty {
+                    MeetingsEmptyState(compact: true)
+                } else {
+                    // No ScrollView: inside a MenuBarExtra window it collapses to
+                    // zero height, and six rows fit without one.
+                    MeetingList(compact: true, limit: 6)
+                    HStack {
+                        Spacer()
+                        OpenMainWindowButton {
+                            Text("All meetings")
+                        }
+                        .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                        .foregroundStyle(DS.accentText)
+                    }
+                }
             }
+            .padding(12)
+            .task { await app.refreshRecents() }
         }
     }
 }

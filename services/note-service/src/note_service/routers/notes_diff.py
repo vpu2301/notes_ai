@@ -13,6 +13,7 @@ from db import tenant_connection
 from note_models import DiffResponse
 
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import notes_repository as repo
 from ..domain.diff_engine import compute_diff
 
@@ -31,9 +32,8 @@ async def get_diff(
     state = get_state()
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
         from_version = await _resolve(conn, note_id=note_id, ref=from_)
         to_version = await _resolve(conn, note_id=note_id, ref=to)

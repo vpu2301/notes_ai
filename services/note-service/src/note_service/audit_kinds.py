@@ -25,6 +25,15 @@ NOTE_SEARCHED: Final = "note.searched"
 NOTE_CHAIN_INTEGRITY_FAILURE: Final = "note.chain_integrity_failure"
 NOTE_PDF_RENDERED: Final = "note.pdf_rendered"  # GET /notes/{id}/pdf (M1·A3)
 
+# 0016: delete, visibility, sharing.
+NOTE_DELETED: Final = "note.deleted"  # soft delete (bin); links revoked
+NOTE_VISIBILITY_CHANGED: Final = "note.visibility_changed"  # private ↔ workspace
+NOTE_SHARED: Final = "note.shared"  # a member was given read access
+NOTE_UNSHARED: Final = "note.unshared"
+NOTE_LINK_CREATED: Final = "note.link_created"  # public "anyone with the link"
+NOTE_LINK_REVOKED: Final = "note.link_revoked"
+NOTE_VIEWED_VIA_LINK: Final = "note.viewed_via_link"  # anonymous read
+
 # Spec item 1: note synthesis (raw dictation → clean prose).
 NOTE_SYNTHESIS_STARTED: Final = "note.synthesis_started"
 NOTE_SYNTHESIS_COMPLETED: Final = "note.synthesis_completed"

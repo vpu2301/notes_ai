@@ -33,7 +33,7 @@ class SearchTip(BaseModel):
 class SearchTipsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
     tips: list[SearchTip]
 
 
@@ -112,6 +112,44 @@ _TIPS: dict[str, list[SearchTip]] = {
             ),
         ),
     ],
+    "de": [
+        SearchTip(
+            key="no_stemming",
+            title="Die Suche findet exakte Wortformen",
+            body=(
+                "Die Suche bildet keine Wortstämme: „Meeting“ findet nicht "
+                "„Meetings“. Suchen Sie selbst nach dem Wortstamm oder "
+                "probieren Sie mehrere Formen."
+            ),
+        ),
+        SearchTip(
+            key="synonyms",
+            title="Synonyme und Abkürzungen werden automatisch erweitert",
+            body=(
+                "Abkürzungen werden zu Langformen erweitert und umgekehrt: "
+                "„QBR“ findet „quarterly business review“. Angewendete "
+                "Erweiterungen erscheinen unter dem Suchfeld; mit der exakten "
+                "Suche (expand=false) abschalten."
+            ),
+        ),
+        SearchTip(
+            key="filters_and",
+            title="Filter werden mit UND verknüpft",
+            body=(
+                "Autor, Status und Datum grenzen das Ergebnis gemeinsam ein: "
+                "jeder weitere Filter verkleinert die Liste."
+            ),
+        ),
+        SearchTip(
+            key="whole_words",
+            title="Ganze Wörter",
+            body=(
+                "Anfragen treffen ganze Wörter, keine Fragmente: „Mark“ findet "
+                "nicht „Marketing“. Verwenden Sie das vollständige Wort oder "
+                "mehrere seiner Formen."
+            ),
+        ),
+    ],
 }
 
 
@@ -121,6 +159,6 @@ async def get_search_tips(
         Claims,
         Depends(requires_any(("note.read", "note"), ("stats.read", "tenant"))),
     ],
-    language: Annotated[Literal["uk", "en"], Query()] = "uk",
+    language: Annotated[Literal["uk", "en", "de"], Query()] = "uk",
 ) -> SearchTipsResponse:
     return SearchTipsResponse(language=language, tips=_TIPS[language])

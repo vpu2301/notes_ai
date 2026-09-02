@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-Language = Literal["uk", "en"]
+Language = Literal["uk", "en", "de"]
 
 _FRAME_UK = (
     "Ти — асистент, який продовжує речення у діловій нотатці (робоча "
@@ -37,12 +37,23 @@ _FRAME_EN = (
     "repetition of what is already written."
 )
 
-_SECTION_LABEL = {"uk": "Розділ нотатки", "en": "Note section"}
-_TEXT_LABEL = {"uk": "Текст до курсора", "en": "Text before cursor"}
+_FRAME_DE = (
+    "Du bist ein Assistent, der einen Satz in einer geschäftlichen Notiz "
+    "oder einem Besprechungsprotokoll fortsetzt. Setze den aktuellen Satz "
+    "knapp und natürlich fort, in der Sprache und im Ton des Autors. Erfinde "
+    "keine neuen Fakten: keine Zahlen, Daten, Namen oder Zusagen, die nicht "
+    "bereits im getippten Text stehen. Vervollständige nur die grammatische "
+    "Struktur des Satzes. Antworte ausschließlich mit der Fortsetzung — ohne "
+    "Erklärungen und ohne Wiederholung des bereits Geschriebenen."
+)
+
+_FRAMES: dict[str, str] = {"uk": _FRAME_UK, "en": _FRAME_EN, "de": _FRAME_DE}
+_SECTION_LABEL = {"uk": "Розділ нотатки", "en": "Note section", "de": "Notizabschnitt"}
+_TEXT_LABEL = {"uk": "Текст до курсора", "en": "Text before cursor", "de": "Text vor dem Cursor"}
 
 
 def build_prompt(*, section_key: str, text_before_cursor: str, language: Language) -> str:
-    frame = _FRAME_UK if language == "uk" else _FRAME_EN
+    frame = _FRAMES[language]
     return (
         f"{frame}\n\n"
         f"{_SECTION_LABEL[language]}: {section_key}\n\n"

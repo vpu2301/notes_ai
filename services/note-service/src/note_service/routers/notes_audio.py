@@ -28,6 +28,7 @@ from db import tenant_connection
 from note_models import ReadPurpose
 
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import audio_clips as clips
 from ..domain import notes_repository as repo
 from .notes_versions import _enforce_read_purpose
@@ -62,9 +63,8 @@ async def list_section_audio_segments(
 ) -> list[AudioSegmentOut]:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
 
         if note.source_session_id is None:

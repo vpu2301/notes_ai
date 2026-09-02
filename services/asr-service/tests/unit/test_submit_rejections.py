@@ -201,3 +201,23 @@ def test_enqueue_failure_fails_the_job_instead_of_reporting_202(
     # a slot in the tenant's concurrency budget.
     assert len(rig.failed) == 1
     assert rig.failed[0]["kind"] == str(JobErrorKind.ENQUEUE_FAILED)
+
+
+def test_auto_language_is_an_accepted_submit(rig: SimpleNamespace) -> None:
+    resp = rig.client.post(
+        "/asr/jobs",
+        files={"audio": ("meeting.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
+        data={"language": "auto"},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["language"] == "auto"
+    assert resp.json()["detected_language"] is None
+
+
+def test_unknown_language_pin_is_rejected(rig: SimpleNamespace) -> None:
+    resp = rig.client.post(
+        "/asr/jobs",
+        files={"audio": ("meeting.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
+        data={"language": "pl"},
+    )
+    assert resp.status_code == 422

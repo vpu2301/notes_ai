@@ -33,7 +33,7 @@ class SynonymGroupOut(BaseModel):
 
     group_id: UUID
     source: Literal["system", "tenant"]
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
     terms: list[str]
 
 
@@ -41,7 +41,7 @@ class SynonymGroupBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     terms: list[str] = Field(min_length=2, max_length=12)
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
 
     @field_validator("terms")
     @classmethod

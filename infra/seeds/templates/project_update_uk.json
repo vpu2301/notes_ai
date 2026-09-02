@@ -1,0 +1,119 @@
+{
+  "code": "project_update_uk",
+  "name": "Статус проєкту",
+  "language": "uk",
+  "specialty": "projects",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "status_summary",
+      "name": "Короткий підсумок",
+      "voice_aliases": [
+        "підсумок",
+        "статус",
+        "коротко"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Короткий підсумок стану проєкту. Загальний стан, головна новина, головний ризик, що потрібно від керівництва.",
+      "min_chars": 10,
+      "order": 0,
+      "synthesis_prompt": "Два–три речення: де проєкт зараз і що найважливіше."
+    },
+    {
+      "id": "overall_status",
+      "name": "Загальний стан",
+      "voice_aliases": [
+        "загальний стан",
+        "стан проєкту"
+      ],
+      "required": true,
+      "field_type": "choice",
+      "asr_prompt": "Загальний стан проєкту. За планом, під загрозою, відстає.",
+      "min_chars": 0,
+      "order": 1,
+      "options": [
+        {
+          "value": "on_track",
+          "label": "За планом",
+          "voice_aliases": [
+            "за планом",
+            "зелений"
+          ]
+        },
+        {
+          "value": "at_risk",
+          "label": "Під загрозою",
+          "voice_aliases": [
+            "під загрозою",
+            "жовтий"
+          ]
+        },
+        {
+          "value": "off_track",
+          "label": "Відстає",
+          "voice_aliases": [
+            "відстає",
+            "червоний"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "progress",
+      "name": "Прогрес з минулого оновлення",
+      "voice_aliases": [
+        "прогрес",
+        "що зроблено"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Прогрес з попереднього оновлення. Завершені етапи, поставки, показники, закриті задачі, демонстрації.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Маркований список зробленого, по одному пункту на рядок."
+    },
+    {
+      "id": "risks",
+      "name": "Ризики та блокери",
+      "voice_aliases": [
+        "ризики",
+        "блокери",
+        "проблеми"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Ризики та блокери. Проблема, вплив, імовірність, план пом'якшення, відповідальний, потрібне рішення.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Один пункт на ризик: суть, вплив і план дій."
+    },
+    {
+      "id": "next_steps",
+      "name": "Наступні кроки",
+      "voice_aliases": [
+        "наступні кроки",
+        "план"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Наступні кроки. Найближчі етапи, задачі, відповідальні, терміни, залежності.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Нумерований список наступних кроків з виконавцем і терміном."
+    },
+    {
+      "id": "target_date",
+      "name": "Цільова дата",
+      "voice_aliases": [
+        "цільова дата",
+        "дедлайн"
+      ],
+      "required": false,
+      "field_type": "date",
+      "asr_prompt": "Цільова дата завершення поточного етапу або релізу.",
+      "min_chars": 0,
+      "order": 5
+    }
+  ]
+}

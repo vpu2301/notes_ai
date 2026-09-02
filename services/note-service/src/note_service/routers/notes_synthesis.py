@@ -28,8 +28,8 @@ from note_models import NoteContent
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
+from ..domain import access, synthesis_jobs
 from ..domain import notes_repository as repo
-from ..domain import synthesis_jobs
 from ..domain.synthesis import Synthesizer, build_synthesizer
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class SynthesizeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sections: list[str] | None = None  # default: all sections in the note
-    language: Literal["uk", "en"]
+    language: Literal["uk", "en", "de"]
 
 
 class SynthesizedSection(BaseModel):
@@ -144,9 +144,8 @@ async def synthesize_note(
     synthesizer = get_synthesizer()
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        row = await repo.fetch_note(conn, note_id=note_id)
-        if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        row = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
         version = await repo.fetch_version(conn, version_id=row.current_version_id)
         if version is None:

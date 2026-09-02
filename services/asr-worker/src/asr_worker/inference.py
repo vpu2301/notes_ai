@@ -22,7 +22,13 @@ from typing import Any
 
 import numpy as np
 
-from asr_models import Segment, TranscriptionMetadata, TranscriptionOutput, WordTiming
+from asr_models import (
+    AUTO_LANGUAGE,
+    Segment,
+    TranscriptionMetadata,
+    TranscriptionOutput,
+    WordTiming,
+)
 
 from .config import settings
 from .vad import SpeechSegment, detect_speech
@@ -38,6 +44,26 @@ class TranscriptionCancelledError(Exception):
 
 
 logger = logging.getLogger(__name__)
+
+# Language identification listens to the first speech in the recording.
+# Whisper decides per 30 s window; three windows of speech is enough to
+# outvote a greeting in another language without listening to the whole
+# meeting first.
+_LANGUAGE_ID_SECONDS = 90
+_LANGUAGE_ID_WINDOWS = 3
+# What the detector falls back to when it cannot decide at all (audio it
+# could not read, or a detector error). English is the model's strongest
+# language, so an undecidable recording is more likely to be usable there
+# than under a guess.
+_LANGUAGE_ID_FALLBACK = "en"
+
+
+@dataclass(slots=True)
+class LanguageGuess:
+    """What language identification heard, and how sure it was."""
+
+    language: str
+    probability: float
 
 
 @dataclass(slots=True)
@@ -168,6 +194,19 @@ class WhisperEngine:
         vad_seconds_speech = sum((s.end_ms - s.start_ms) / 1000.0 for s in speech)
 
         loop = asyncio.get_running_loop()
+
+        # "auto": listen before deciding. The whole recording is decoded in
+        # ONE language — the one the opening minutes are in — so a stray
+        # English word in a Ukrainian meeting never flips the decoder
+        # chunk by chunk.
+        language_detected = False
+        language_probability: float | None = None
+        if language == AUTO_LANGUAGE:
+            sample = _speech_sample(audio_pcm, speech, seconds=_LANGUAGE_ID_SECONDS)
+            guess = await loop.run_in_executor(None, self.detect_language, sample)
+            language, language_probability = guess.language, guess.probability
+            language_detected = True
+
         segments_out: list[Segment] = []
         for s in speech:
             chunk = audio_pcm[
@@ -199,7 +238,45 @@ class WhisperEngine:
             peak_gpu_mem_mb=_peak_gpu_mem_mb(),
             beam_size=settings.asr_beam_size,
         )
-        return TranscriptionOutput(language=language, segments=segments_out, metadata=meta)
+        return TranscriptionOutput(
+            language=language,
+            language_detected=language_detected,
+            language_probability=language_probability,
+            segments=segments_out,
+            metadata=meta,
+        )
+
+    def detect_language(self, pcm: np.ndarray) -> LanguageGuess:
+        """Identify the spoken language of ``pcm`` (mono 16 kHz float32).
+
+        Blocking; call from an executor. Never raises: a detector that
+        cannot decide — no audio, an exception, a code the output schema
+        would reject — answers with the fallback so the job still produces
+        a transcript rather than failing on the step meant to help it.
+        """
+        assert self._model is not None
+        if pcm.size == 0:
+            return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
+        try:
+            code, probability, _all = self._model.detect_language(
+                pcm, language_detection_segments=_LANGUAGE_ID_WINDOWS
+            )
+        except Exception as exc:  # noqa: BLE001 — never let LID kill the job
+            logger.warning(
+                "whisper.language_id_failed",
+                extra={"error": str(exc), "error_class": type(exc).__name__},
+            )
+            return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
+        code = str(code).strip().lower()
+        if not (2 <= len(code) <= 3 and code.isalpha()):
+            logger.warning("whisper.language_id_unusable", extra={"code": code})
+            return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
+        guess = LanguageGuess(language=code, probability=max(0.0, min(1.0, float(probability))))
+        logger.info(
+            "whisper.language_id",
+            extra={"language": guess.language, "probability": round(guess.probability, 3)},
+        )
+        return guess
 
     async def transcribe_window(
         self,
@@ -365,6 +442,28 @@ def _peak_gpu_mem_mb() -> int:
         return int(peak_bytes / (1024 * 1024))
     except Exception:
         return 0
+
+
+def _speech_sample(
+    audio_pcm: np.ndarray, speech: list[SpeechSegment], *, seconds: int
+) -> np.ndarray:
+    """The first ``seconds`` of *speech* (VAD runs concatenated, silence
+    dropped) — what language identification listens to. Silence between
+    turns would otherwise eat the detector's fixed 30 s windows."""
+    budget = seconds * 16_000
+    parts: list[np.ndarray] = []
+    for s in speech:
+        chunk = audio_pcm[int(s.start_ms * 16) : int(s.end_ms * 16)]
+        if chunk.size == 0:
+            continue
+        parts.append(chunk[:budget])
+        budget -= min(budget, chunk.size)
+        if budget <= 0:
+            break
+    if not parts:
+        # VAD found nothing; let the detector hear the raw head instead.
+        return audio_pcm[: seconds * 16_000]
+    return np.concatenate(parts)
 
 
 def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:

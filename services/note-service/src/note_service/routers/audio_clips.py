@@ -34,8 +34,8 @@ from storage import ObjectNotFoundError
 from .. import audit_kinds
 from ..config import settings
 from ..deps import current_user, get_state, requires
+from ..domain import access, audio_slicer
 from ..domain import audio_clips as clips
-from ..domain import audio_slicer
 from ..domain import notes_repository as repo
 from .notes_versions import _enforce_read_purpose
 
@@ -108,9 +108,8 @@ async def create_clip(
 
     started = time.perf_counter()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=body.note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        note = access.require_view(await repo.fetch_note(conn, note_id=body.note_id), claims)
         is_author = _enforce_read_purpose(note, claims, purpose)
         try:
             source = await clips.resolve_audio_source(conn, note_id=body.note_id)

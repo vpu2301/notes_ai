@@ -123,7 +123,10 @@ def _reject(
 )
 async def submit_job(
     audio: Annotated[UploadFile, File(description="Audio file to transcribe.")],
-    language: Annotated[str, Form(pattern="^(uk|en)$")],
+    # ``auto`` (the clients' default) lets the recording decide: the worker
+    # identifies the spoken language and transcribes in it. ``uk``/``en``
+    # pin the decoder for callers that know better.
+    language: Annotated[str, Form(pattern="^(auto|uk|en)$")],
     vocabulary_hint: Annotated[str | None, Form(max_length=2000)] = None,
     # Ambient Capture v1: run offline speaker diarization after
     # transcription. Rides the queue payload only — the stored result's
@@ -433,6 +436,9 @@ async def get_job_result(
     )
 
 
+# Languages nlp-service's batch pipeline accepts (its ``language`` Literal).
+NLP_LANGUAGES = frozenset({"uk", "en", "de"})
+
 _PUNCT_ONLY = frozenset(".,:;!?…—–-()[]{}«»“”‘’'\"/\\*#№%&@+−=_|")
 
 
@@ -458,10 +464,18 @@ async def _enriched_result_view(
     view = TranscriptResultView(
         job_id=job_id,
         language=output.language,
+        language_detected=output.language_detected,
+        language_probability=output.language_probability,
         segments=raw_segments,
         metadata=output.metadata,
     )
     if not settings.nlp_enrich_enabled or not output.segments:
+        return view
+    # The post-processor has per-language rules (dictated punctuation,
+    # number words). A language it has no rules for gets the raw Whisper
+    # text — which is already punctuated — rather than a 422 from
+    # nlp-service that we would then swallow.
+    if output.language not in NLP_LANGUAGES:
         return view
 
     payload = [

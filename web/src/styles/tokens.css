@@ -1,122 +1,142 @@
-/* ─── Design tokens ──────────────────────────────────────────────────────
-   Warm neutrals + a single deep indigo accent. 8px grid.
-   System font stack (Inter would be the webfont of choice, but the app
-   must run offline-from-localhost, so no external fetches). */
+/* ─────────────────────────────────────────────────────────────────────────
+   Notes AI — design tokens
+   Cool neutrals, one teal accent, hairline borders, a soft radial wash on
+   the shell. The accent FAMILY is derived from --accent with color-mix so
+   changing the one hex re-tints hover, tint, text and fill together.
+   ───────────────────────────────────────────────────────────────────────── */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  /* type scale */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif; /* Inter, if self-hosted later */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --text-xs: 0.75rem;   /* 12 */
-  --text-sm: 0.8125rem; /* 13 */
-  --text-md: 0.875rem;  /* 14 */
-  --text-base: 0.9375rem; /* 15 */
-  --text-lg: 1.0625rem; /* 17 */
-  --text-xl: 1.375rem;  /* 22 */
-  --text-2xl: 1.75rem;  /* 28 */
+  /* Type */
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* spacing — 8px grid (halves allowed) */
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 24px;
-  --s-6: 32px;
-  --s-7: 48px;
-  --s-8: 64px;
+  /* Light (default) */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-hover: #f7f8fa;
+  --text-1: #0b1220;
+  --text-2: #2d3640;
+  --text-3: #4a5563;
+  --muted: #6b7480;
+  --muted-aa: color-mix(in srgb, var(--muted) 88%, #000);
+  --line: #e3e7ec;
+  --line-2: #ebeef2;
 
-  /* radius */
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-full: 999px;
+  /* Accent family */
+  --accent: #0a8a7a;
+  --accent-2: color-mix(in srgb, var(--accent) 84%, #000);
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, #fff);
+  --accent-text: color-mix(in srgb, var(--accent) 76%, #000);
+  --accent-fill: color-mix(in srgb, var(--accent) 84%, #000);
+  --accent-ink: #fff;
 
-  /* motion */
-  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --fast: 150ms;
+  /* A second hue for the wash and for "amended" state — indigo. */
+  --indigo: #4338ca;
+  --indigo-soft: #ecebfb;
 
-  /* ── light theme (warm neutrals) ── */
-  --bg: #f6f4f1;             /* warm paper */
-  --surface: #fefdfb;        /* card */
-  --surface-2: #f0eeea;      /* inset / hover */
-  --surface-3: #e7e4df;      /* pressed */
-  --ink: #23201c;            /* primary text */
-  --ink-2: #5c5751;          /* secondary text */
-  --ink-3: #8a847c;          /* faint text (still ≥4.5:1 on surface for sm) */
-  --line: #e3dfd9;           /* hairline */
-  --line-strong: #cfcac2;
+  --warn: #b45309;
+  --warn-soft: #fdf3e2;
+  /* --rec is the RECORDING colour — loud on purpose. */
+  --rec: #dc2626;
+  --rec-soft: #fee2e2;
+  /* --danger is DESTRUCTIVE UI — same family, quieter. */
+  --danger: #b4443e;
+  --danger-2: color-mix(in srgb, var(--danger) 86%, #000);
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, #fff);
+  --danger-text: color-mix(in srgb, var(--danger) 84%, #000);
+  --ok: #047857;
+  --ok-soft: rgba(4, 120, 87, 0.10);
+  --info: #2563eb;
+  --info-soft: #e9effd;
 
-  --accent: #4f46e5;         /* deep indigo */
-  --accent-hover: #4338ca;
-  --accent-soft: #eef0fd;    /* tinted surface */
-  --accent-soft-line: #d5d8f8;
-  --on-accent: #ffffff;
+  --mark-bg: #fdf0c2;
 
-  --danger: #b3261e;
-  --danger-soft: #fceceb;
-  --danger-soft-line: #f3cdca;
-  --success: #1d7a46;
-  --success-soft: #e7f4ec;
-  --success-soft-line: #c4e3d1;
-  --warn: #92610c;
-  --warn-soft: #fbf1de;
-  --warn-soft-line: #eeddb8;
-  --violet: #6d4fc4;
-  --violet-soft: #f0ebfb;
-  --violet-soft-line: #dcd1f2;
+  --shadow-1: 0 1px 2px rgba(11, 18, 32, 0.04), 0 1px 1px rgba(11, 18, 32, 0.02);
+  --shadow-2: 0 4px 14px -4px rgba(11, 18, 32, 0.08), 0 2px 6px rgba(11, 18, 32, 0.04);
+  --shadow-3: 0 12px 28px -8px rgba(11, 18, 32, 0.12);
 
-  --rec: #d6362b;            /* recording red */
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  --mark-bg: #f3e8b9;        /* search highlight */
+  /* Two scale knobs: --density scales SPACE, --fs scales TEXT. Every padding
+     is authored as calc(Npx * var(--density)) and every font-size as
+     calc(Npx * var(--fs)). Both live on <html>. */
+  --density: 1;
+  --fs: 1;
 
-  --shadow-1: 0 1px 2px rgba(35, 32, 28, 0.05);
-  --shadow-2: 0 1px 2px rgba(35, 32, 28, 0.04), 0 4px 12px rgba(35, 32, 28, 0.07);
-  --shadow-3: 0 2px 4px rgba(35, 32, 28, 0.06), 0 12px 32px rgba(35, 32, 28, 0.14);
+  --sidebar-w: 248px;
+  --topbar-h: calc(52px * var(--density));
 
-  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  /* Ambient washes — painted on the shell chrome only, never under text. */
+  --wash-page:
+    radial-gradient(1100px 520px at 32% -12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%),
+    radial-gradient(900px 460px at 100% -6%, color-mix(in srgb, var(--indigo) 15%, transparent), transparent 66%),
+    radial-gradient(900px 500px at 88% 108%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 68%);
+  --wash-panel: linear-gradient(180deg, color-mix(in srgb, var(--text-1) 3%, transparent), transparent);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* ── dark theme (warm, not pure black) ── */
-    --bg: #191713;
-    --surface: #211f1b;
-    --surface-2: #2a2723;
-    --surface-3: #33302b;
-    --ink: #ece8e2;
-    --ink-2: #b5afa6;
-    --ink-3: #837d74;
-    --line: #322f2a;
-    --line-strong: #46423c;
+[data-theme="dark"] {
+  color-scheme: dark;
 
-    --accent: #8b87f2;
-    --accent-hover: #a19ef5;
-    --accent-soft: #2b2a41;
-    --accent-soft-line: #413f62;
-    --on-accent: #14122e;
+  --bg: #0a0e14;
+  --surface: #11161e;
+  --surface-2: #1a2029;
+  --surface-hover: #1d242e;
+  --text-1: #e8ecf1;
+  --text-2: #c9d0d8;
+  --text-3: #a0a8b2;
+  --muted: #7a8493;
+  --muted-aa: color-mix(in srgb, var(--muted) 88%, #fff);
+  --line: #232a35;
+  --line-2: #1d242e;
 
-    --danger: #f28a84;
-    --danger-soft: #3a2523;
-    --danger-soft-line: #5c3733;
-    --success: #7fd0a1;
-    --success-soft: #20312a;
-    --success-soft-line: #32503f;
-    --warn: #e4b56a;
-    --warn-soft: #38301f;
-    --warn-soft-line: #55482c;
-    --violet: #b9a4f0;
-    --violet-soft: #2f2840;
-    --violet-soft-line: #473c5f;
+  --accent: #2dd4bf;
+  --accent-2: color-mix(in srgb, var(--accent) 68%, #fff);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-text: color-mix(in srgb, var(--accent) 66%, #fff);
+  /* Filled control on a dark ground: the bright accent carries dark ink. */
+  --accent-fill: var(--accent);
+  --accent-ink: #0a0e14;
 
-    --rec: #f26557;
+  --indigo: #818cf8;
+  --indigo-soft: rgba(129, 140, 248, 0.10);
 
-    --mark-bg: #56491c;
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.10);
+  --rec: #f87171;
+  --rec-soft: rgba(248, 113, 113, 0.12);
+  --danger: #bb4c45;
+  --danger-2: color-mix(in srgb, var(--danger) 78%, #fff);
+  --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
+  --danger-text: color-mix(in srgb, var(--danger) 60%, #fff);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.12);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.12);
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
-    --shadow-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.5);
-  }
+  --mark-bg: #4a3f16;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-2: 0 4px 14px -4px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 12px 28px -8px rgba(0, 0, 0, 0.55);
+
+  /* Dark: the wash has to LIFT, not tint, so lighten before mixing. */
+  --wash-page:
+    radial-gradient(1100px 520px at 32% -12%,
+      color-mix(in srgb, color-mix(in srgb, var(--accent) 55%, #fff) 14%, transparent), transparent 70%),
+    radial-gradient(900px 460px at 100% -6%,
+      color-mix(in srgb, color-mix(in srgb, var(--indigo) 65%, #fff) 12%, transparent), transparent 66%),
+    radial-gradient(900px 500px at 88% 108%,
+      color-mix(in srgb, color-mix(in srgb, var(--accent) 55%, #fff) 10%, transparent), transparent 68%);
+  --wash-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent);
 }
+
+[data-density="compact"]  { --density: 0.85; }
+[data-density="spacious"] { --density: 1.15; }
+[data-text-size="sm"] { --fs: 0.9; }
+[data-text-size="lg"] { --fs: 1.12; }
+[data-text-size="xl"] { --fs: 1.25; }

@@ -24,6 +24,7 @@ from note_models import NoteStatus, ReadPurpose
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.pdf import render_note_pdf
@@ -51,17 +52,15 @@ async def get_note_pdf(
         ),
     ] = "draft",
     lang: Annotated[
-        Literal["uk", "en"] | None,
+        Literal["uk", "en", "de"] | None,
         Query(description="Render language; falls back to 'en'."),
     ] = None,
 ) -> Response:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
-        is_author = claims.sub == note.primary_author_id or claims.sub in note.co_author_ids
+        is_author = access.is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
         if not is_author and purpose is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,

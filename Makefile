@@ -203,6 +203,9 @@ check-notification-pii-free: ## CI gate (BLOCKING) — no email template may ren
 run-notification-digest: ## Run the daily notification digest once (cron entrypoint)
 	uv run --project services/notification-service python -m notification_service.jobs.digest
 
+smoke-notes: ## Exercise every note operation end to end against the running stack (docker compose up)
+	uv run --project services/note-service python scripts/smoke/notes_e2e.py
+
 validate-templates: ## CI gate — validate every note-template seed JSON
 	PYTHONPATH=libs/template_models/src uv run python scripts/validate-templates.py
 

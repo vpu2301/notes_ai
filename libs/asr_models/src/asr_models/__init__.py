@@ -14,7 +14,14 @@ from .errors import (
     is_retryable,
     spec_for,
 )
-from .job import JobEnqueuePayload, JobStatus, TranscriptionJobView
+from .job import (
+    AUTO_LANGUAGE,
+    LANGUAGE_CODE_PATTERN,
+    LANGUAGE_REQUEST_PATTERN,
+    JobEnqueuePayload,
+    JobStatus,
+    TranscriptionJobView,
+)
 from .output import (
     ConfidenceSpanView,
     EnrichedSegment,
@@ -26,7 +33,10 @@ from .output import (
 )
 
 __all__ = [
+    "AUTO_LANGUAGE",
     "ERROR_SPECS",
+    "LANGUAGE_CODE_PATTERN",
+    "LANGUAGE_REQUEST_PATTERN",
     "UNKNOWN_SPEC",
     "ConfidenceSpanView",
     "EnrichedSegment",

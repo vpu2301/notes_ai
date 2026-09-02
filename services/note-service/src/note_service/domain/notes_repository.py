@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -53,6 +53,11 @@ class NoteRow:
     finalized_at: datetime | None
     cancelled_at: datetime | None
     source_session_id: UUID | None = None
+    # 0016 — who may read it beyond the author team, and whether it is
+    # in the bin. Defaults keep older call sites and fixtures valid.
+    visibility: str = "workspace"
+    shared_with_ids: list[UUID] = field(default_factory=list)
+    deleted_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -74,14 +79,25 @@ class VersionRow:
 # ── Read ────────────────────────────────────────────────────────────
 
 
-async def fetch_note(conn: asyncpg.Connection, *, note_id: UUID) -> NoteRow | None:
+async def fetch_note(
+    conn: asyncpg.Connection, *, note_id: UUID, include_deleted: bool = False
+) -> NoteRow | None:
+    """The note, or ``None`` when it does not exist — or has been deleted.
+
+    Every reader and writer goes through here (directly or via
+    :func:`lock_note_for_update`), so excluding the bin at this one
+    point is what makes a deleted note vanish from every endpoint at
+    once. ``include_deleted`` is for the few callers that need to see
+    it (an admin restore, an audit read).
+    """
     row = await conn.fetchrow(
         """
         SELECT n.id, n.tenant_id, n.code, n.status,
                n.current_version_id, v.version_number AS current_version_number,
                n.primary_author_id, n.co_author_ids,
                n.title, n.created_at, n.updated_at, n.finalized_at,
-               n.cancelled_at, n.source_session_id
+               n.cancelled_at, n.source_session_id,
+               n.visibility, n.shared_with_ids, n.deleted_at
         FROM notes n
         LEFT JOIN note_versions v ON v.id = n.current_version_id
         WHERE n.id = $1
@@ -89,6 +105,8 @@ async def fetch_note(conn: asyncpg.Connection, *, note_id: UUID) -> NoteRow | No
         note_id,
     )
     if row is None:
+        return None
+    if row["deleted_at"] is not None and not include_deleted:
         return None
     return NoteRow(
         id=row["id"],
@@ -105,6 +123,195 @@ async def fetch_note(conn: asyncpg.Connection, *, note_id: UUID) -> NoteRow | No
         finalized_at=row["finalized_at"],
         cancelled_at=row["cancelled_at"],
         source_session_id=row["source_session_id"],
+        visibility=str(row["visibility"]),
+        shared_with_ids=list(row["shared_with_ids"] or []),
+        deleted_at=row["deleted_at"],
+    )
+
+
+# ── 0016: visibility, sharing, delete ────────────────────────────────
+
+
+async def set_visibility(conn: asyncpg.Connection, *, note_id: UUID, visibility: str) -> None:
+    await conn.execute(
+        "UPDATE notes SET visibility = $2::note_visibility, updated_at = now() WHERE id = $1",
+        note_id,
+        visibility,
+    )
+
+
+async def add_shared_with(conn: asyncpg.Connection, *, note_id: UUID, user_sub: UUID) -> None:
+    """Idempotent: sharing twice with the same person is one grant."""
+    await conn.execute(
+        """
+        UPDATE notes
+        SET shared_with_ids = array_append(shared_with_ids, $2), updated_at = now()
+        WHERE id = $1 AND NOT ($2 = ANY(shared_with_ids))
+        """,
+        note_id,
+        user_sub,
+    )
+
+
+async def remove_shared_with(conn: asyncpg.Connection, *, note_id: UUID, user_sub: UUID) -> None:
+    await conn.execute(
+        """
+        UPDATE notes
+        SET shared_with_ids = array_remove(shared_with_ids, $2), updated_at = now()
+        WHERE id = $1
+        """,
+        note_id,
+        user_sub,
+    )
+
+
+async def soft_delete_note(conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID) -> None:
+    """Move the note to the bin and kill its public links in one go."""
+    await conn.execute(
+        """
+        UPDATE notes SET deleted_at = now(), deleted_by = $2, updated_at = now()
+        WHERE id = $1 AND deleted_at IS NULL
+        """,
+        note_id,
+        actor_sub,
+    )
+    await conn.execute(
+        """
+        UPDATE note_share_links SET revoked_at = now(), revoked_by = $2
+        WHERE note_id = $1 AND revoked_at IS NULL
+        """,
+        note_id,
+        actor_sub,
+    )
+
+
+@dataclass(slots=True)
+class MemberRow:
+    sub: UUID
+    email: str
+    display_name: str
+
+
+async def find_member_by_email(conn: asyncpg.Connection, *, email: str) -> MemberRow | None:
+    """A workspace member by e-mail (RLS keeps this to the caller's tenant)."""
+    row = await conn.fetchrow(
+        """
+        SELECT sub, email, display_name FROM users
+        WHERE lower(email) = lower($1) AND status IN ('invited', 'active')
+        """,
+        email.strip(),
+    )
+    if row is None:
+        return None
+    return MemberRow(sub=row["sub"], email=row["email"], display_name=row["display_name"])
+
+
+async def fetch_members(conn: asyncpg.Connection, *, subs: list[UUID]) -> list[MemberRow]:
+    if not subs:
+        return []
+    rows = await conn.fetch(
+        "SELECT sub, email, display_name FROM users WHERE sub = ANY($1::uuid[]) ORDER BY display_name",
+        subs,
+    )
+    return [MemberRow(sub=r["sub"], email=r["email"], display_name=r["display_name"]) for r in rows]
+
+
+@dataclass(slots=True)
+class ShareLinkRow:
+    id: UUID
+    note_id: UUID
+    created_by: UUID
+    created_at: datetime
+    expires_at: datetime | None
+    last_viewed_at: datetime | None
+    view_count: int
+
+
+def _link_row(row: asyncpg.Record) -> ShareLinkRow:
+    return ShareLinkRow(
+        id=row["id"],
+        note_id=row["note_id"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        last_viewed_at=row["last_viewed_at"],
+        view_count=int(row["view_count"]),
+    )
+
+
+async def fetch_live_share_link(conn: asyncpg.Connection, *, note_id: UUID) -> ShareLinkRow | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, note_id, created_by, created_at, expires_at, last_viewed_at, view_count
+        FROM note_share_links
+        WHERE note_id = $1 AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > now())
+        """,
+        note_id,
+    )
+    return _link_row(row) if row is not None else None
+
+
+async def create_share_link(
+    conn: asyncpg.Connection,
+    *,
+    link_id: UUID,
+    tenant_id: UUID,
+    note_id: UUID,
+    token_hash: str,
+    created_by: UUID,
+    expires_at: datetime | None,
+) -> ShareLinkRow:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO note_share_links
+            (id, tenant_id, note_id, token_hash, created_by, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, note_id, created_by, created_at, expires_at, last_viewed_at, view_count
+        """,
+        link_id,
+        tenant_id,
+        note_id,
+        token_hash,
+        created_by,
+        expires_at,
+    )
+    assert row is not None
+    return _link_row(row)
+
+
+async def revoke_share_links(conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID) -> int:
+    result = await conn.execute(
+        """
+        UPDATE note_share_links SET revoked_at = now(), revoked_by = $2
+        WHERE note_id = $1 AND revoked_at IS NULL
+        """,
+        note_id,
+        actor_sub,
+    )
+    # asyncpg returns "UPDATE n".
+    return int(result.split()[-1]) if result else 0
+
+
+async def resolve_share_link(
+    conn: asyncpg.Connection, *, token_hash: str
+) -> tuple[UUID, UUID, UUID] | None:
+    """(tenant_id, note_id, link_id) for a live token, without a tenant
+    context — the SECURITY DEFINER function from migration 0016."""
+    row = await conn.fetchrow("SELECT * FROM public.resolve_note_share_link($1)", token_hash)
+    if row is None:
+        return None
+    return row["tenant_id"], row["note_id"], row["link_id"]
+
+
+async def record_share_link_view(conn: asyncpg.Connection, *, link_id: UUID) -> None:
+    await conn.execute(
+        """
+        UPDATE note_share_links
+        SET view_count = view_count + 1, last_viewed_at = now()
+        WHERE id = $1
+        """,
+        link_id,
     )
 
 

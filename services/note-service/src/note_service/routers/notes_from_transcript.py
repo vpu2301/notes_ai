@@ -209,6 +209,27 @@ def _content_for_template(
     )
 
 
+# Where to look when a transcript's language has no templates of its own
+# (a German or Polish recording under an auto-detected job): the
+# catalogue's lingua franca. The transcript itself is untouched — only
+# the section headings come from the fallback template.
+TEMPLATE_LANGUAGE_FALLBACK = "en"
+
+
+async def _candidates_for_language(
+    conn: asyncpg.Connection, language: str
+) -> tuple[list[template_match.TemplateCandidate], str]:
+    """Active templates in ``language``, else in the fallback language.
+
+    Returns the candidates and the language they are actually in.
+    """
+    candidates = await template_match.load_candidates(conn, language=language)
+    if candidates or language == TEMPLATE_LANGUAGE_FALLBACK:
+        return candidates, language
+    fallback = await template_match.load_candidates(conn, language=TEMPLATE_LANGUAGE_FALLBACK)
+    return fallback, TEMPLATE_LANGUAGE_FALLBACK
+
+
 # ── Routes ──────────────────────────────────────────────────────────
 
 
@@ -232,7 +253,10 @@ async def create_note_from_transcript(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "empty_transcript", "detail": "the job's transcript is empty"},
         )
-    language = str(result.get("language", "uk"))
+    # The language the transcript is IN — for an auto-detected job, what
+    # the worker heard. The note follows it: template (section headings,
+    # prompts) and field extraction are chosen for that language.
+    language = str(result.get("language") or "uk")
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         existing = await conn.fetchrow(
@@ -264,7 +288,7 @@ async def create_note_from_transcript(
             schema_version = int(row["schema_version"])
             selection = "explicit"
         else:
-            candidates = await template_match.load_candidates(conn, language=language)
+            candidates, template_language = await _candidates_for_language(conn, language)
             choice = template_match.select_template(candidates, transcript)
             if choice is None:
                 raise HTTPException(
@@ -273,6 +297,11 @@ async def create_note_from_transcript(
                         "code": "no_templates",
                         "detail": f"no active {language} templates to assign against",
                     },
+                )
+            if template_language != language:
+                logger.info(
+                    "from_transcript.template_language_fallback",
+                    extra={"transcript_language": language, "template_language": template_language},
                 )
             definition = choice.candidate.definition
             template_id, template_name = choice.candidate.id, choice.candidate.name

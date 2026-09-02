@@ -145,6 +145,13 @@ class Settings(BaseSettings):
         alias="MDX_CLIP_TOKEN_HMAC_KEY_HEX",
     )
     clip_token_ttl_seconds: int = Field(default=300, alias="MDX_CLIP_TOKEN_TTL_SECONDS")
+    # HMAC key that turns a share-link row id into the public token
+    # (domain/share_tokens). Hex-encoded; the dev default is NOT a secret.
+    # Rotating it invalidates every public link in the deployment.
+    share_link_hmac_key_hex: str = Field(
+        default="6d64782d6465762d73686172652d6c696e6b2d6b65792d3030303030303030",
+        alias="MDX_SHARE_LINK_HMAC_KEY_HEX",
+    )
     clip_max_span_ms: int = Field(default=60_000, alias="MDX_CLIP_MAX_SPAN_MS")
     clip_pad_ms: int = Field(default=300, alias="MDX_CLIP_PAD_MS")
     clips_per_user_per_hour: int = Field(default=30, alias="MDX_CLIPS_PER_USER_PER_HOUR")

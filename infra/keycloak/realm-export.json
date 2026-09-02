@@ -450,7 +450,7 @@
     {
       "clientId": "room-device-demo",
       "name": "Room Device Demo (ambient capture — DEV ONLY)",
-      "description": "Confidential service-account-only client for ONE meeting-room capture device. Client-credentials grant only — no browser flows, no password grant. Its service account holds the `device` realm role (capture-only) and a tenant_id attribute so tokens carry tid. Production provisions one such client per room; this is the dev example (docs/runbooks/ambient-device.md).",
+      "description": "Service-account-only client for ONE meeting-room capture device (client-credentials grant only). Service account holds the `device` realm role + tenant_id attribute. Dev example; prod provisions one per room. See docs/runbooks/ambient-device.md.",
       "enabled": true,
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",

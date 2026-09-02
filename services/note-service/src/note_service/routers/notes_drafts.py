@@ -16,6 +16,7 @@ from note_models import NoteContent, NoteStatus
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import access
 from ..domain import notes_repository as repo
 from ..domain.conflicts import OptimisticLockMismatchError
 from ..domain.content_metadata import template_field_types
@@ -96,9 +97,8 @@ async def update_draft(
     body_hash = repo.body_hash_for(body.content)
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        row = await repo.lock_note_for_update(conn, note_id=note_id)
-        if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404 (0016).
+        row = access.require_view(await repo.lock_note_for_update(conn, note_id=note_id), claims)
         if row.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,

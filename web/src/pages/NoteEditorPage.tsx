@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { getResult, listJobs } from "../api/asr";
 import { ApiError, errorMessage } from "../api/http";
 import {
   amendNote,
+  deleteNote,
   downloadPdf,
   finalizeNote,
   getNote,
   getTemplate,
   getVersion,
   listVersions,
+  notesBySourceJob,
   revertToDraft,
   updateDraft,
 } from "../api/notes";
@@ -21,13 +24,29 @@ import type {
   NoteVersionDetail,
   NoteVersionSummary,
   TemplateSection,
+  TranscriptResult,
 } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { DownloadIcon, HistoryIcon } from "../components/icons";
+import {
+  AlertIcon,
+  ArrowLeftIcon,
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  FileDownIcon,
+  HistoryIcon,
+  PenIcon,
+  ShareIcon,
+  TrashIcon,
+} from "../components/icons";
+import { Menu, type MenuItem } from "../components/Menu";
+import { ShareDialog } from "../components/ShareDialog";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
-import { formatDateTime, relativeTime } from "../lib/time";
+import { jobForNote, rememberLink } from "../lib/captures";
+import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
+import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
 
 const AUTOSAVE_MS = 900;
 
@@ -83,9 +102,7 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
   }, [text]);
 
   if (readOnly) {
-    return (
-      <div className={`section-ro ${text ? "" : "empty-val"}`}>{text || "Nothing entered."}</div>
-    );
+    return <div className={`section-ro ${text ? "" : "empty-val"}`}>{text || "Nothing entered."}</div>;
   }
   return (
     <textarea
@@ -110,9 +127,7 @@ function ChoiceField({ def, section, readOnly, onChange }: FieldProps) {
   const pick = (value: string) => {
     let nextSel: string[];
     if (multi) {
-      nextSel = selected.includes(value)
-        ? selected.filter((v) => v !== value)
-        : [...selected, value];
+      nextSel = selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value];
     } else {
       nextSel = selected[0] === value ? [] : [value];
     }
@@ -120,14 +135,12 @@ function ChoiceField({ def, section, readOnly, onChange }: FieldProps) {
     onChange({
       ...section,
       text: nextSel.map(label).join(", "),
-      field_specific_metadata: manualMeta(
-        nextSel.length === 0 ? null : { selected: multi ? nextSel : nextSel[0] },
-      ),
+      field_specific_metadata: manualMeta(nextSel.length === 0 ? null : { selected: multi ? nextSel : nextSel[0] }),
     });
   };
 
   return (
-    <div className="seg" role="group" aria-label={def.name}>
+    <div className="seg wrap" role="group" aria-label={def.name}>
       {def.options?.map((opt) => (
         <button
           key={opt.value}
@@ -150,7 +163,7 @@ function DateField({ def, section, readOnly, onChange }: FieldProps) {
   const withNote = def.field_type === "date_with_note";
 
   return (
-    <div className="numeric-row">
+    <div className="inline-row">
       <input
         className="input date-input"
         type="date"
@@ -171,6 +184,7 @@ function DateField({ def, section, readOnly, onChange }: FieldProps) {
           className="input"
           type="text"
           placeholder="Note…"
+          style={{ flex: 1, minWidth: 200 }}
           value={section.text ?? ""}
           disabled={readOnly}
           aria-label={`${def.name} note`}
@@ -196,9 +210,9 @@ function NumericField({ def, section, readOnly, onChange }: FieldProps) {
   };
 
   return (
-    <div className="numeric-row">
+    <div className="inline-row">
       <input
-        className="input num"
+        className="input num mono"
         type="number"
         value={value ?? ""}
         placeholder="Value"
@@ -234,11 +248,115 @@ function SectionField(props: FieldProps) {
   }
 }
 
+// ── transcript ────────────────────────────────────────────────────────
+
+interface Turn {
+  speaker: string | null;
+  startMs: number;
+  text: string;
+}
+
+/** Consecutive segments from one speaker become one turn. */
+function toTurns(result: TranscriptResult): Turn[] {
+  const names = new Map<string, string>();
+  const label = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    if (!names.has(raw)) names.set(raw, `Speaker ${names.size + 1}`);
+    return names.get(raw)!;
+  };
+  const turns: Turn[] = [];
+  for (const seg of result.segments) {
+    const speaker = label(seg.speaker);
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === speaker) last.text += " " + seg.text;
+    else turns.push({ speaker, startMs: seg.start_ms, text: seg.text });
+  }
+  return turns;
+}
+
+function TranscriptView({ jobId }: { jobId: string }) {
+  const toast = useToast();
+  const [result, setResult] = useState<TranscriptResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getResult(jobId)
+      .then((r) => !cancelled && setResult(r))
+      .catch((err) => !cancelled && setError(errorMessage(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  const turns = useMemo(() => (result ? toTurns(result) : []), [result]);
+  const speakerCount = useMemo(() => {
+    if (!result) return 0;
+    const named = new Set(result.segments.map((s) => s.speaker).filter(Boolean));
+    return named.size || (result.segments.length > 0 ? 1 : 0);
+  }, [result]);
+
+  const copy = async () => {
+    const text = turns.map((t) => (t.speaker ? `${t.speaker}: ${t.text}` : t.text)).join("\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy — your browser blocked clipboard access.");
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="banner banner-danger" role="alert">
+        <AlertIcon size={15} />
+        <span className="grow">{error}</span>
+      </div>
+    );
+  }
+  if (!result) {
+    return (
+      <div aria-busy="true" aria-label="Loading transcript" className="transcript">
+        <Skeleton style={{ height: 56 }} />
+        <Skeleton style={{ height: 56 }} />
+        <Skeleton style={{ height: 56 }} />
+      </div>
+    );
+  }
+  return (
+    <div className="transcript">
+      <div className="transcript-bar">
+        <span className="help">
+          {turns.length === 0 ? "Nothing was said." : speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`}
+        </span>
+        <span className="grow" />
+        <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
+          {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      {turns.map((t, i) => (
+        <div key={i} className="turn">
+          <div className="turn-h">
+            {t.speaker && <span className="turn-speaker">{t.speaker}</span>}
+            <span className="turn-time mono">{formatElapsed(t.startMs)}</span>
+          </div>
+          <p className="turn-text">{t.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── the page ──────────────────────────────────────────────────────────
+
+type Tab = "notes" | "transcript";
 
 export function NoteEditorPage() {
   const { noteId = "" } = useParams();
   const toast = useToast();
+  const navigate = useNavigate();
 
   const [note, setNote] = useState<NoteEnvelope | null>(null);
   const [sections, setSections] = useState<TemplateSection[] | null>(null);
@@ -248,11 +366,16 @@ export function NoteEditorPage() {
   const [conflict, setConflict] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [tab, setTab] = useState<Tab>("notes");
+  const [sourceJobId, setSourceJobId] = useState<string | null>(() => jobForNote(noteId));
+
   const [versions, setVersions] = useState<NoteVersionSummary[] | null>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [viewing, setViewing] = useState<NoteVersionDetail | null>(null);
 
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -278,9 +401,7 @@ export function NoteEditorPage() {
       if (env.content?.template_id) {
         try {
           const tpl = await getTemplate(env.content.template_id);
-          setSections(
-            [...tpl.schema_jsonb.sections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-          );
+          setSections([...tpl.schema_jsonb.sections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
         } catch {
           // Template unavailable (deprecated/permissions): fall back to the
           // envelope's section labels as plain free-text sections.
@@ -302,6 +423,29 @@ export function NoteEditorPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Which transcription (if any) this note came from — for the Transcript
+  // tab. The envelope doesn't say, so ask the note service about the
+  // recent jobs; the answer is cached per browser.
+  useEffect(() => {
+    if (sourceJobId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const jobs = await listJobs();
+        const ids = jobs.filter((j) => j.status === "complete").map((j) => j.id);
+        const links = await notesBySourceJob(ids);
+        for (const l of links) rememberLink(l.asr_job_id, l.note_id);
+        const mine = links.find((l) => l.note_id === noteId);
+        if (mine && !cancelled) setSourceJobId(mine.asr_job_id);
+      } catch {
+        /* no transcript tab, then */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [noteId, sourceJobId]);
 
   // ── autosave (drafts and live amendments share the debounce) ────────
 
@@ -403,17 +547,41 @@ export function NoteEditorPage() {
     }
   };
 
+  const fileBase = () => safeFilename(shownContent?.title ?? "", note?.code ?? "note");
+
   const onPdf = async () => {
     try {
-      const blob = await downloadPdf(noteId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${note?.code ?? "note"}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      saveBlob(await downloadPdf(noteId), `${fileBase()}.pdf`);
     } catch (err) {
       toast.error(errorMessage(err));
+    }
+  };
+
+  const onMarkdown = () => {
+    if (!shownContent || !sections) return;
+    const md = noteToMarkdown({
+      title: shownContent.title ?? "",
+      code: note?.code ?? "",
+      updatedAt: note?.updated_at,
+      sections: sections.map((def) => ({
+        name: def.name,
+        text: sectionOf(shownContent, def.id).text ?? "",
+      })),
+    });
+    saveBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${fileBase()}.md`);
+  };
+
+  const onDelete = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await deleteNote(noteId);
+      toast.success("Note deleted");
+      navigate("/", { replace: true });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -448,25 +616,26 @@ export function NoteEditorPage() {
       case "saving":
         return "Saving…";
       case "dirty":
-        return "Unsaved changes";
+        return "Unsaved";
       case "error":
         return conflict ? "Out of date" : "Save failed";
       default:
-        return `Saved · v${version}`;
+        return "Saved";
     }
-  }, [saveState, conflict, version]);
+  }, [saveState, conflict]);
 
   if (loadError) {
     return (
-      <div className="card" style={{ padding: "var(--s-6)" }}>
+      <div className="doc">
         <div className="banner banner-danger" role="alert">
-          {loadError}
+          <AlertIcon size={15} />
+          <span className="grow">{loadError}</span>
         </div>
-        <div className="center-row" style={{ marginTop: "var(--s-4)" }}>
+        <div className="center-row">
           <button className="btn" onClick={() => void load()}>
             Try again
           </button>
-          <Link to="/" className="btn btn-ghost" style={{ textDecoration: "none" }}>
+          <Link to="/" className="btn ghost">
             Back to notes
           </Link>
         </div>
@@ -476,23 +645,84 @@ export function NoteEditorPage() {
 
   if (!note || !shownContent || sections === null) {
     return (
-      <div aria-busy="true" aria-label="Loading note">
-        <Skeleton style={{ height: 40, width: "50%", marginBottom: "var(--s-5)" }} />
-        <div className="editor-main">
-          <div className="card section-block">
-            <Skeleton style={{ height: 90 }} />
-          </div>
-          <div className="card section-block">
-            <Skeleton style={{ height: 90 }} />
-          </div>
-        </div>
+      <div className="doc" aria-busy="true" aria-label="Loading note">
+        <Skeleton style={{ height: 32, width: "45%", marginBottom: 10 }} />
+        <Skeleton style={{ height: 16, width: "30%", marginBottom: 28 }} />
+        <Skeleton style={{ height: 80, marginBottom: 16 }} />
+        <Skeleton style={{ height: 80 }} />
       </div>
     );
   }
 
+  const menu: MenuItem[] = [
+    { label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare(true) },
+    { label: "Download PDF", icon: <DownloadIcon size={14} />, sep: true, onClick: () => void onPdf() },
+    { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
+    { label: showVersions ? "Hide history" : "History", icon: <HistoryIcon size={14} />, onClick: () => void toggleVersions() },
+  ];
+  if (!viewing && isDraft) {
+    menu.push({
+      label: "Finalize note",
+      icon: <CheckIcon size={14} />,
+      sep: true,
+      onClick: () => {
+        setActionError(null);
+        setConfirmFinalize(true);
+      },
+    });
+  }
+  if (!viewing && (note.status === "finalized" || note.status === "amended") && !amending) {
+    menu.push({
+      label: note.status === "amended" ? "Amend again" : "Amend",
+      icon: <PenIcon size={14} />,
+      sep: true,
+      onClick: () => setAmending(true),
+    });
+    if (note.status === "finalized") {
+      menu.push({ label: "Revert to draft", onClick: () => void onRevert(), disabled: busy });
+    }
+  }
+  if (!viewing) {
+    menu.push({
+      label: "Delete note",
+      icon: <TrashIcon size={14} />,
+      sep: true,
+      danger: true,
+      disabled: busy,
+      onClick: () => {
+        setActionError(null);
+        setConfirmDelete(true);
+      },
+    });
+  }
+
   return (
-    <>
-      <div className="editor-head">
+    <div className="doc-wrap">
+      <div className="doc">
+        <div className="doc-bar">
+          <Link to="/" className="tb-back" title="Back to notes" aria-label="Back to notes">
+            <ArrowLeftIcon size={15} />
+          </Link>
+          {viewing ? (
+            <>
+              <StatusBadge status={`v${viewing.version_number}`} />
+              <button className="btn sm" onClick={() => setViewing(null)}>
+                Back to current
+              </button>
+            </>
+          ) : (
+            note.status !== "draft" && <StatusBadge status={note.status} />
+          )}
+          <span className="grow" />
+          {isDraft && !viewing && (
+            <span className="save-status" data-state={saveState} role="status">
+              <span className="dot" aria-hidden="true" />
+              {saveLabel}
+            </span>
+          )}
+          <Menu items={menu} />
+        </div>
+
         <input
           className="title-input"
           value={shownContent.title ?? ""}
@@ -501,70 +731,30 @@ export function NoteEditorPage() {
           disabled={!editable}
           onChange={(e) => onContentChange({ ...shownContent, title: e.target.value })}
         />
-        <div className="row">
-          <StatusBadge status={viewing ? `v${viewing.version_number}` : note.status} />
-          <span className="code-tag">{note.code}</span>
-          {isDraft && !viewing && (
-            <span className={`save-state ${saveState}`} role="status">
-              <span className="sdot" aria-hidden="true" />
-              {saveLabel}
-            </span>
-          )}
-          <span style={{ flex: 1 }} />
-          {viewing && (
-            <button className="btn btn-sm" onClick={() => setViewing(null)}>
-              Back to current
-            </button>
-          )}
-          {!viewing && isDraft && (
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => {
-                setActionError(null);
-                setConfirmFinalize(true);
-              }}
-            >
-              Finalize
-            </button>
-          )}
-          {!viewing && note.status === "finalized" && !amending && (
-            <>
-              <button className="btn btn-sm" onClick={() => setAmending(true)}>
-                Amend
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => void onRevert()} disabled={busy}>
-                Revert to draft
-              </button>
-            </>
-          )}
-          {!viewing && note.status === "amended" && !amending && (
-            <button className="btn btn-sm" onClick={() => setAmending(true)}>
-              Amend again
-            </button>
-          )}
-          <button className="btn btn-ghost btn-sm" onClick={() => void onPdf()}>
-            <DownloadIcon /> PDF
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            aria-pressed={showVersions}
-            onClick={() => void toggleVersions()}
-          >
-            <HistoryIcon /> History
-          </button>
+        <div className="doc-meta">
+          <span>{formatDateTime(note.created_at)}</span>
+          <span className="sep">·</span>
+          <span>Updated {relativeTime(note.updated_at)}</span>
+          <span className="sep">·</span>
+          <span className="mono">{note.code}</span>
         </div>
+
         {conflict && (
           <div className="banner banner-warn" role="alert">
-            Someone else saved a newer version of this note.{" "}
-            <button className="btn btn-sm" onClick={() => void load()} style={{ marginLeft: 8 }}>
+            <AlertIcon size={15} />
+            <span className="grow">Someone else saved a newer version of this note.</span>
+            <button className="btn sm" onClick={() => void load()}>
               Reload latest
             </button>
           </div>
         )}
+
         {amending && (
-          <div className="card amend-bar">
-            <h3>Recording an amendment</h3>
-            <div className="row">
+          <div className="amend-bar">
+            <h3>
+              <PenIcon size={14} /> Recording an amendment
+            </h3>
+            <div className="row-actions">
               <select
                 className="select"
                 value={amendType}
@@ -582,11 +772,11 @@ export function NoteEditorPage() {
                 value={amendReason}
                 onChange={(e) => setAmendReason(e.target.value)}
               />
-              <button className="btn btn-primary btn-sm" onClick={() => void onSaveAmendment()} disabled={busy}>
+              <button className="btn primary sm" onClick={() => void onSaveAmendment()} disabled={busy}>
                 {busy ? "Saving…" : "Save amendment"}
               </button>
               <button
-                className="btn btn-ghost btn-sm"
+                className="btn ghost sm"
                 disabled={busy}
                 onClick={() => {
                   setAmending(false);
@@ -598,75 +788,111 @@ export function NoteEditorPage() {
             </div>
           </div>
         )}
-      </div>
 
-      <div className="editor-layout">
-        <div className="editor-main">
-          {sections.length === 0 && (
-            <div className="card section-block">
-              <div className="section-ro empty-val">This note's template has no sections.</div>
-            </div>
-          )}
-          {sections.map((def) => (
-            <section key={def.id} className="card section-block">
-              <div className="field">
-                <span className="section-name">
-                  {def.name}
-                  {def.required ? " *" : ""}
-                </span>
-                <SectionField
-                  def={def}
-                  section={sectionOf(shownContent, def.id)}
-                  readOnly={!editable}
-                  onChange={(next) => onContentChange(withSection(shownContent, next))}
-                />
-              </div>
-            </section>
-          ))}
-        </div>
+        {sourceJobId && (
+          <div className="tabs doc-tabs" role="tablist">
+            <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
+              Notes
+            </button>
+            <button
+              className={`tab ${tab === "transcript" ? "on" : ""}`}
+              role="tab"
+              aria-selected={tab === "transcript"}
+              onClick={() => setTab("transcript")}
+            >
+              Transcript
+            </button>
+          </div>
+        )}
 
-        {showVersions && (
-          <aside className="card versions-panel" aria-label="Version history">
-            <h3>History</h3>
-            {versions === null && <Skeleton style={{ height: 60 }} />}
-            {versions?.map((v) => (
-              <button
-                key={v.id}
-                className="ver-item"
-                aria-current={
-                  viewing ? viewing.version_number === v.version_number : v.version_number === version
-                }
-                onClick={() => void openVersion(v)}
-              >
-                <span className="v-num">
-                  v{v.version_number}
-                  {v.is_amendment ? ` · ${v.amendment_type ?? "amendment"}` : ""}
-                </span>
-                <span className="v-meta">{formatDateTime(v.created_at)}</span>
-                {v.amendment_reason && <span className="v-meta">“{v.amendment_reason}”</span>}
-              </button>
+        {tab === "transcript" && sourceJobId ? (
+          <TranscriptView jobId={sourceJobId} />
+        ) : (
+          <div className="doc-body">
+            {sections.length === 0 && <div className="section-ro empty-val">This note's template has no sections.</div>}
+            {sections.map((def) => (
+              <section key={def.id} className="doc-section">
+                <div className="field">
+                  <span className="section-name">
+                    {def.name}
+                    {def.required && <span className="req-tag">required</span>}
+                  </span>
+                  <SectionField
+                    def={def}
+                    section={sectionOf(shownContent, def.id)}
+                    readOnly={!editable}
+                    onChange={(next) => onContentChange(withSection(shownContent, next))}
+                  />
+                </div>
+              </section>
             ))}
-          </aside>
+          </div>
         )}
       </div>
 
-      <p className="page-sub" style={{ marginTop: "var(--s-5)" }}>
-        Last updated {relativeTime(note.updated_at)}
-      </p>
+      {showVersions && (
+        <aside className="panel versions-panel" aria-label="Version history">
+          <div className="panel-h">
+            <h3>History</h3>
+            <span className="grow" />
+            {versions && <span className="count">{versions.length}</span>}
+          </div>
+          {versions === null && (
+            <div className="panel-b">
+              <Skeleton style={{ height: 48 }} />
+            </div>
+          )}
+          {versions?.map((v) => (
+            <button
+              key={v.id}
+              className="ver-item"
+              aria-current={viewing ? viewing.version_number === v.version_number : v.version_number === version}
+              onClick={() => void openVersion(v)}
+            >
+              <span className="ver-num">
+                <span className="mono">v{v.version_number}</span>
+                {v.is_amendment && <span className="chip amended">{v.amendment_type ?? "amendment"}</span>}
+              </span>
+              <span className="ver-meta">{formatDateTime(v.created_at)}</span>
+              {v.amendment_reason && <span className="ver-meta">“{v.amendment_reason}”</span>}
+            </button>
+          ))}
+        </aside>
+      )}
 
       {confirmFinalize && (
         <ConfirmDialog
           title="Finalize this note?"
+          subtitle="Finalizing freezes the current version."
           confirmLabel="Finalize"
           busy={busy}
           error={actionError}
           onConfirm={() => void onFinalize()}
           onCancel={() => setConfirmFinalize(false)}
         >
-          Finalizing freezes the current version. You can still amend it later — every
-          amendment is recorded in the note's history.
+          You can still amend it later — every amendment is recorded in the note's history with a typed
+          reason.
         </ConfirmDialog>
       )}
-    </>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this note?"
+          subtitle="It disappears from everyone's list and any public link stops working."
+          confirmLabel="Delete"
+          confirmDanger
+          busy={busy}
+          error={actionError}
+          onConfirm={() => void onDelete()}
+          onCancel={() => setConfirmDelete(false)}
+        >
+          The note is kept for the workspace's records but is no longer shown anywhere.
+        </ConfirmDialog>
+      )}
+
+      {showShare && (
+        <ShareDialog noteId={noteId} noteTitle={shownContent.title ?? ""} onClose={() => setShowShare(false)} />
+      )}
+    </div>
   );
 }

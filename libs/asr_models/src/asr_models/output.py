@@ -42,10 +42,16 @@ class TranscriptionMetadata(BaseModel):
 
 
 class TranscriptionOutput(BaseModel):
-    # The union of what any ASR surface supports. `de` arrived with
-    # streaming dictation; the batch edge (asr-service) keeps its own,
-    # narrower `^(uk|en)$` form gate until German batch is piloted.
-    language: str = Field(pattern=r"^(uk|en|de)$")
+    # The language the transcript is written in, as an ISO 639-1 code.
+    # A job submitted with ``language=auto`` stores whatever Whisper's
+    # language identification heard (any Whisper language, not just the
+    # ones the NLP post-processor knows); a pinned job echoes the pin.
+    # Never the literal ``auto``.
+    language: str = Field(pattern=r"^[a-z]{2,3}$")
+    # True when ``language`` came from language identification rather than
+    # the caller; ``language_probability`` is the detector's confidence.
+    language_detected: bool = False
+    language_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     segments: list[Segment]
     metadata: TranscriptionMetadata
     # Distinct speaker labels in first-appearance order; empty when the
@@ -97,7 +103,9 @@ class TranscriptResultView(BaseModel):
     """
 
     job_id: UUID
-    language: str = Field(pattern=r"^(uk|en|de)$")
+    language: str = Field(pattern=r"^[a-z]{2,3}$")
+    language_detected: bool = False
+    language_probability: float | None = None
     segments: list[EnrichedSegment]
     metadata: TranscriptionMetadata
     # Distinct speaker labels in first-appearance order (diarized jobs).

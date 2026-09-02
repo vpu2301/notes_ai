@@ -12,6 +12,8 @@ final class CaptureViewModel: ObservableObject {
         case creatingNote
         case done(noteId: String)
         case failed(String)
+        /// The microphone is off for this app in System Settings.
+        case microphoneDenied
 
         var isBusy: Bool {
             switch self {
@@ -21,10 +23,21 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
+    /// Lets the recording decide its own language (the default).
+    static let autoLanguage = "auto"
+
     @Published var title = ""
-    @Published var language = "en"
-    @Published var diarize = true
+    /// "auto", or an ISO 639-1 code to pin the transcriber to.
+    @Published var language: String {
+        didSet { UserDefaults.standard.set(language, forKey: "captureLanguage") }
+    }
+    @Published var diarize: Bool {
+        didSet { UserDefaults.standard.set(diarize, forKey: "captureDiarize") }
+    }
     @Published private(set) var phase: Phase = .idle
+    /// The ASR job of the capture being processed (or just finished), so the
+    /// window can show the live card for that meeting and nothing else.
+    @Published private(set) var activeJobId: String?
 
     let recorder = AudioRecorder()
     private unowned let app: AppState
@@ -33,6 +46,9 @@ final class CaptureViewModel: ObservableObject {
 
     init(app: AppState) {
         self.app = app
+        let defaults = UserDefaults.standard
+        self.language = defaults.string(forKey: "captureLanguage") ?? Self.autoLanguage
+        self.diarize = defaults.object(forKey: "captureDiarize") as? Bool ?? true
         // Re-publish the recorder's changes (level, elapsed) through this
         // object so views and the menu-bar label stay in sync.
         recorderSubscription = recorder.objectWillChange.sink { [weak self] _ in
@@ -54,6 +70,16 @@ final class CaptureViewModel: ObservableObject {
         pipelineTask?.cancel()
         pipelineTask = nil
         phase = .idle
+        activeJobId = nil
+    }
+
+    /// The one-click path: clear any finished state and start recording now.
+    /// A title (say, from a calendar event) can be handed in.
+    func startNew(title: String = "") {
+        guard !recorder.isRecording, !phase.isBusy else { return }
+        reset()
+        self.title = title
+        Task { await beginRecording() }
     }
 
     // MARK: - Pipeline
@@ -63,6 +89,8 @@ final class CaptureViewModel: ObservableObject {
         do {
             try await recorder.start()
             phase = .recording
+        } catch RecorderError.permissionDenied {
+            phase = .microphoneDenied
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -75,6 +103,8 @@ final class CaptureViewModel: ObservableObject {
         }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let meetingTitle = trimmed.isEmpty ? Self.defaultTitle() : trimmed
+        // The card and the list should agree on the name while it processes.
+        title = meetingTitle
         pipelineTask = Task { await process(fileURL: fileURL, meetingTitle: meetingTitle) }
     }
 
@@ -83,9 +113,13 @@ final class CaptureViewModel: ObservableObject {
         var jobId: String?
         do {
             phase = .uploading
-            let job = try await app.api.submitJob(fileURL: fileURL, language: language, diarize: diarize)
+            let job = try await app.api.submitJob(fileURL: fileURL,
+                                                  contentType: recorder.format.contentType,
+                                                  language: language, diarize: diarize)
             jobId = job.id
+            activeJobId = job.id
             app.addRecent(jobId: job.id, title: meetingTitle)
+            if app.selection == nil { app.selection = .capture(jobId: job.id) }
 
             phase = .transcribing
             var current = job
@@ -102,12 +136,20 @@ final class CaptureViewModel: ObservableObject {
             }
 
             phase = .creatingNote
-            let templateId = await app.meetingTemplateID(language: language)
+            // The note follows the language the recording was actually in.
+            let templateId = await app.meetingTemplateID(
+                language: current.detectedLanguage ?? language)
             let note = try await app.api.createNoteFromTranscript(
                 asrJobId: job.id, templateId: templateId, title: meetingTitle)
             app.updateRecent(jobId: job.id, status: .complete, noteId: note.id)
             phase = .done(noteId: note.id)
             title = ""
+            // Show the fresh note in the window unless the user is reading
+            // another one there.
+            if app.selection == nil || app.selection == .capture(jobId: job.id) {
+                app.selection = .capture(jobId: job.id)
+            }
+            await app.refreshNotes()
         } catch is CancellationError {
             // reset() was called; nothing to do.
         } catch {

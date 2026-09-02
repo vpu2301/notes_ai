@@ -130,8 +130,50 @@ export interface NoteEnvelope {
   updated_at: string;
   finalized_at: string | null;
   cancelled_at: string | null;
+  /** Who may read it beyond the author team. */
+  visibility?: NoteVisibility;
+  shared_with_ids?: string[];
   content?: NoteContent | null;
   section_labels?: SectionLabel[] | null;
+}
+
+// ── note-service: sharing (0016) ────────────────────────────────────────
+
+export type NoteVisibility = "private" | "workspace";
+
+export interface SharedMember {
+  sub: string;
+  email: string;
+  display_name: string;
+}
+
+export interface PublicLink {
+  token: string;
+  /** SPA path; prefix with the current origin to get a full URL. */
+  path: string;
+  created_at: string;
+  expires_at: string | null;
+  view_count: number;
+  last_viewed_at: string | null;
+}
+
+export interface SharingView {
+  note_id: string;
+  visibility: NoteVisibility;
+  can_manage: boolean;
+  can_delete: boolean;
+  shared_with: SharedMember[];
+  public_link: PublicLink | null;
+}
+
+/** What an anonymous reader gets from a public link. */
+export interface SharedNoteView {
+  code: string;
+  title: string;
+  status: string;
+  updated_at: string;
+  sections: { section_key: string; name: string; text: string }[];
+  issuer_name: string;
 }
 
 export interface NoteCreatedResponse {
@@ -219,12 +261,28 @@ export interface FromTranscriptResponse {
 
 export type AsrJobStatus = "queued" | "running" | "complete" | "failed" | "cancelled";
 
+/** What a job may be submitted as: detect from the audio, or a pinned language. */
+export type AsrLanguage = "auto" | "en" | "uk";
+
+/** Human name for an ISO 639-1 code, in the viewer's locale; the code itself if unknown. */
+export function languageName(code: string | null | undefined): string {
+  if (!code || code === "auto") return "";
+  try {
+    return new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 export interface AsrJob {
   id: string;
   tenant_id: string;
   audio_id: string;
   requester_sub: string;
+  /** As requested: "auto", "en", "uk". */
   language: string;
+  /** What the recording turned out to be in (ISO 639-1); set once complete. */
+  detected_language?: string | null;
   model: string;
   status: AsrJobStatus;
   diarize?: boolean;
@@ -269,4 +327,35 @@ export interface UnreadCount {
 export interface ReadResult {
   updated: number;
   unread_count: number;
+}
+
+// ── asr-service: transcript result ─────────────────────────────────────
+
+export interface TranscriptSegment {
+  text: string;
+  raw_text: string;
+  start_ms: number;
+  end_ms: number;
+  avg_confidence: number;
+  speaker?: string | null;
+}
+
+export interface TranscriptResult {
+  job_id: string;
+  /** The language the transcript is in (never "auto"). */
+  language: string;
+  language_detected?: boolean;
+  language_probability?: number | null;
+  segments: TranscriptSegment[];
+  speakers?: string[];
+  nlp_applied?: boolean;
+}
+
+// ── note-service: transcript ↔ note links ──────────────────────────────
+
+export interface SourceJobLink {
+  asr_job_id: string;
+  note_id: string;
+  code: string;
+  status: string;
 }

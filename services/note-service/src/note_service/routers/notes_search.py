@@ -30,7 +30,7 @@ from db import tenant_connection
 
 from .. import audit_kinds
 from ..deps import get_state, requires_any
-from ..domain import query_expansion
+from ..domain import access, query_expansion
 from ..domain import search as searchmod
 from ..domain.pii_redactor import is_author_team, redact_snippet
 
@@ -120,6 +120,8 @@ async def search_notes(
         statuses=status_filter,
         created_from=created_from,
         created_to=created_to,
+        viewer_sub=claims.sub,
+        viewer_sees_all=access.sees_whole_tenant(claims),
     )
 
     expanded_terms: list[str] = []

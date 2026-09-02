@@ -1,141 +1,162 @@
 import SwiftUI
 
-struct CaptureView: View {
+/// The single live card: title, timer and Stop while recording; the three
+/// pipeline steps while working; "Note ready" when done. Nothing to fill in
+/// before pressing record — the title can be typed while the meeting runs.
+struct ActiveCaptureCard: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
+    var compact = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Meeting title", text: $capture.title)
-                .textFieldStyle(.roundedBorder)
-                .disabled(capture.phase.isBusy)
-
-            HStack(spacing: 10) {
-                Picker("Language", selection: $capture.language) {
-                    Text("English").tag("en")
-                    Text("Українська").tag("uk")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(capture.isRecording || capture.phase.isBusy)
+            switch capture.phase {
+            case .idle:
+                EmptyView()
+            case .recording:
+                recording
+            case .uploading, .transcribing, .creatingNote:
+                working
+            case .done(let noteId):
+                done(noteId)
+            case .failed(let message):
+                failed(message)
+            case .microphoneDenied:
+                microphoneDenied
             }
-
-            Toggle("Separate speakers", isOn: $capture.diarize)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(capture.isRecording || capture.phase.isBusy)
-
-            recordCard
-
-            statusArea
         }
-        .padding(16)
-        .animation(.default, value: capture.phase)
+        .animation(.easeOut(duration: 0.2), value: capture.phase)
     }
 
-    // MARK: - Record card
+    // MARK: - Recording
 
-    private var recordCard: some View {
-        VStack(spacing: 12) {
+    private var recording: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                if capture.isRecording {
-                    PulsingDot()
-                    Text("REC")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.red)
-                }
-                Spacer()
+                PulsingDot()
                 Text(formatElapsed(capture.recorder.elapsed))
-                    .font(.title2.weight(.medium).monospacedDigit())
-                    .foregroundStyle(capture.isRecording ? .primary : .secondary)
-                Spacer()
-                // Mirror spacer keeps the timer centered.
-                if capture.isRecording {
-                    Text("REC").font(.caption.weight(.bold)).hidden()
-                    PulsingDot().hidden()
+                    .font(.dsMono(compact ? 15 : 17, .medium))
+                    .foregroundStyle(DS.text1)
+                    .monospacedDigit()
+                LevelMeter(level: capture.recorder.level, active: true,
+                           segments: compact ? 14 : 20, height: 10)
+                Spacer(minLength: 8)
+                Button {
+                    capture.toggleRecording()
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
                 }
+                .buttonStyle(DSButtonStyle(kind: .rec, height: 28))
+                .keyboardShortcut(".", modifiers: .command)
+                .help("Stop and create the note (⌘.)")
             }
-
-            LevelMeter(level: capture.recorder.level, active: capture.isRecording)
-
-            Button(action: capture.toggleRecording) {
-                ZStack {
-                    Circle()
-                        .fill(capture.isRecording
-                              ? Color.red.opacity(0.16)
-                              : Color.accentColor.opacity(0.14))
-                        .frame(width: 64, height: 64)
-                    Image(systemName: capture.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(capture.isRecording ? Color.red : Color.accentColor)
-                }
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(capture.phase.isBusy)
-            .help(capture.isRecording ? "Stop and transcribe" : "Start recording")
+            TextField("Untitled meeting", text: $capture.title)
+                .textFieldStyle(.plain)
+                .font(.dsDisplay(compact ? 17 : 20, .medium))
+                .foregroundStyle(DS.text1)
+            Text("Recording this Mac's microphone. Stop when the meeting ends — the note is drafted for you.")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
     }
 
-    // MARK: - Pipeline status
+    // MARK: - Working
 
-    @ViewBuilder
-    private var statusArea: some View {
-        switch capture.phase {
-        case .idle:
-            Label("Ready to capture", systemImage: "checkmark.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .recording:
-            Label("Recording — press stop when the meeting ends", systemImage: "waveform")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .uploading:
-            progressRow("Uploading audio…")
-        case .transcribing:
-            progressRow("Transcribing… you can close this popover")
-        case .creatingNote:
-            progressRow("Drafting your meeting note…")
-        case .done(let noteId):
+    private var working: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                Text("Note ready")
-                    .font(.callout.weight(.medium))
-                Spacer()
-                Button("Open note") {
-                    app.openNote(noteId)
-                }
-                .controlSize(.small)
-                Button("New") { capture.reset() }
-                    .controlSize(.small)
-                    .buttonStyle(.borderless)
+                ProgressView().controlSize(.small)
+                Text(capture.title.isEmpty ? "Untitled meeting" : capture.title)
+                    .font(.ds(14, .semibold))
+                    .foregroundStyle(DS.text1)
+                    .lineLimit(1)
             }
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 6) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+            PipelineSteps(phase: capture.phase)
+            if compact {
+                Text("You can close this — the note appears in the list when it is ready.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Dismiss") { capture.reset() }
-                    .controlSize(.small)
             }
         }
     }
 
-    private func progressRow(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    // MARK: - Done / failed
+
+    private func done(_ noteId: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.ds(16))
+                .foregroundStyle(DS.ok)
+            Text("Note ready")
+                .font(.dsDisplay(16, .medium))
+                .foregroundStyle(DS.text1)
+            Spacer(minLength: 8)
+            Button("Dismiss") { capture.reset() }
+                .buttonStyle(DSButtonStyle(kind: .ghost, height: 28))
+            Button {
+                app.openNote(noteId)
+            } label: {
+                Label("Open note", systemImage: "arrow.up.right")
+            }
+            .buttonStyle(DSButtonStyle(kind: .primary, height: 28))
         }
+    }
+
+    private var microphoneDenied: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DSNotice(tone: .warn, symbol: "mic.slash.fill",
+                     text: RecorderError.permissionDenied.localizedDescription)
+            HStack {
+                Spacer()
+                Button("Dismiss") { capture.reset() }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, height: 28))
+                Button {
+                    NSWorkspace.shared.open(RecorderError.privacySettingsURL)
+                } label: {
+                    Label("Open System Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(DSButtonStyle(kind: .primary, height: 28))
+            }
+        }
+    }
+
+    private func failed(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: message)
+            HStack {
+                Spacer()
+                Button("Dismiss") { capture.reset() }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
+            }
+        }
+    }
+}
+
+/// The one button. Dark, like the web's create button.
+struct NewMeetingButton: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var fill = false
+    var height: CGFloat = 32
+
+    var body: some View {
+        Button {
+            capture.startNew()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("New meeting")
+                if !fill {
+                    Text("⌘N")
+                        .font(.dsMono(10.5))
+                        .opacity(0.55)
+                }
+            }
+        }
+        .buttonStyle(DSButtonStyle(kind: .dark, height: height, fill: fill))
+        .disabled(capture.isRecording || capture.phase.isBusy)
+        .help("Start recording now (⌘N)")
     }
 }

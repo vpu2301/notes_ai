@@ -457,12 +457,18 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                     SET status='complete',
                         result_storage_uri=$2,
                         finished_at=now(),
-                        metadata=$3::jsonb
+                        metadata=$3::jsonb,
+                        detected_language=$4
                     WHERE id = $1
                     """,
                     job_id,
                     f"minio://{state.transcript_store.bucket}/{result_key}",
                     json.dumps(output.metadata.model_dump(mode="json")),
+                    # For an `auto` job this is what language identification
+                    # heard; for a pinned job it echoes the pin. Clients pick
+                    # the note template from it, so it lives on the row, not
+                    # only inside the encrypted result.
+                    output.language,
                 )
                 await conn.execute(
                     "UPDATE audio_files SET status='transcribed' WHERE id = $1",
@@ -489,6 +495,9 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 "segments": len(output.segments),
                 "diarized": bool(payload.diarize),
                 "speakers": len(output.speakers),
+                "language": output.language,
+                "language_detected": output.language_detected,
+                "language_probability": output.language_probability,
             },
             severity=Severity.INFO,
         )
@@ -504,7 +513,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             requester_sub=payload.requester_sub,
             duration_ms=int(audio_seconds * 1000),
             segments=len(output.segments),
-            language=payload.language,
+            language=output.language,
             model=output.metadata.model,
         )
     except _JobError:

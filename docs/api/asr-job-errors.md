@@ -29,9 +29,12 @@ step 9.
 |---|---|---|---|---|
 | 1 | Bearer + `asr.write` on `asr_job` | `scope_missing` | 401 / 403 | Token absent, expired, or a role without dictation upload |
 
-The multipart form takes the audio file, `language`, and an optional
-free-text `vocabulary_hint` (≤ 2000 chars) that feeds Whisper's
-`initial_prompt` — product terms, names, jargon.
+The multipart form takes the audio file, `language` (`auto` to let the
+worker identify the spoken language — the clients' default — or `uk`/`en`
+to pin it), and an optional free-text `vocabulary_hint` (≤ 2000 chars)
+that feeds Whisper's `initial_prompt` — product terms, names, jargon.
+For an `auto` job the language actually heard lands on the job view's
+`detected_language` once it completes, and on the result's `language`.
 | 2 | Declared MIME in the allow-list | `mime_not_allowed` | 400 | A container we cannot transcribe (video, zip, `application/octet-stream` from a client that did not set the type) |
 | 3 | Not empty | `empty_upload` | 400 | The browser lost the recording before submit; a MediaRecorder stopped before its first flush |
 | 4 | Size ≤ `MD_ASR_MAX_UPLOAD_MB` | `size_exceeded` | 400 | An hour of uncompressed WAV; an accidental whole-session upload |
@@ -46,7 +49,7 @@ free-text `vocabulary_hint` (≤ 2000 chars) that feeds Whisper's
 | 10 | Tenant under the monthly quota | `quota_exceeded` | 429 | `MD_ASR_MONTHLY_QUOTA_BYTES` for the calendar month. A soft billing guard, not a security boundary — parallel uploads can overshoot by the in-flight bytes |
 | 11 | Queue accepted the job | `enqueue_failed` | 503 | Redis unreachable at publish. The row is marked `failed` before the response — a `queued` job nobody will ever transcribe is worse than an error |
 
-`language` outside `uk|en` and a malformed UUID are rejected by FastAPI's
+`language` outside `auto|uk|en` and a malformed UUID are rejected by FastAPI's
 own form validation as **422** with the framework's field-level body, not
 a `code` from this table.
 

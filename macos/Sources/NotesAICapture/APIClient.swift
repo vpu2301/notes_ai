@@ -84,9 +84,103 @@ actor APIClient {
         return try decode(FromTranscriptResponse.self, from: data)
     }
 
+    // MARK: - Notes (note-service): open, edit, finalize, export
+
+    func fetchNote(id: String) async throws -> NoteEnvelope {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)", method: "GET",
+                                  query: [("include_content", "true")], authorized: true)
+        return try decode(NoteEnvelope.self, from: data)
+    }
+
+    func fetchTemplate(id: String) async throws -> TemplateDetail {
+        let data = try await send(base: \.noteBaseURL, path: "/templates/\(id)", method: "GET",
+                                  authorized: true)
+        return try decode(TemplateDetail.self, from: data)
+    }
+
+    func updateDraft(id: String, content: NoteContent, expectedVersion: Int) async throws -> UpdateDraftResponse {
+        let request = UpdateDraftRequest(content: content, expectedVersion: expectedVersion)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/draft", method: "PUT",
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+        return try decode(UpdateDraftResponse.self, from: data)
+    }
+
+    func finalizeNote(id: String, expectedVersion: Int) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["expected_version": expectedVersion])
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/finalize", method: "POST",
+                           jsonBody: body, authorized: true)
+    }
+
+    func revertToDraft(id: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/revert-to-draft", method: "POST",
+                           authorized: true)
+    }
+
+    /// The tenant's notes, newest first; `q` runs the server's full-text
+    /// search (with synonym expansion).
+    func searchNotes(query: String?, limit: Int = 100) async throws -> SearchResponse {
+        var params: [(String, String)] = [("limit", String(limit))]
+        if let query, !query.isEmpty { params.append(("q", query)) }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/search", method: "GET",
+                                  query: params, authorized: true)
+        return try decode(SearchResponse.self, from: data)
+    }
+
+    func notePDF(id: String) async throws -> Data {
+        try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/pdf", method: "GET",
+                       accept: "application/pdf", authorized: true)
+    }
+
+    // MARK: - Delete, visibility, sharing (0016)
+
+    func deleteNote(id: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)", method: "DELETE", authorized: true)
+    }
+
+    func sharing(id: String) async throws -> SharingView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/sharing", method: "GET",
+                                  authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    func setVisibility(id: String, visibility: String) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: ["visibility": visibility])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/visibility", method: "PUT",
+                                  jsonBody: body, authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    /// Idempotent: returns the note's live link, minting one if needed.
+    func createPublicLink(id: String) async throws -> SharingView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/public-link", method: "POST",
+                                  authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    func revokePublicLink(id: String) async throws -> SharingView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/public-link", method: "DELETE",
+                                  authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    /// 404 `not_a_member` when nobody in the workspace has that address.
+    func shareWithMember(id: String, email: String) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: ["email": email])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/share", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
     // MARK: - Transcription jobs (asr-service)
 
-    func submitJob(fileURL: URL, language: String, diarize: Bool) async throws -> TranscriptionJob {
+    /// Plaintext transcript of a COMPLETE job (409 while it is still running).
+    func transcript(jobId: String) async throws -> TranscriptResult {
+        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/result", method: "GET",
+                                  authorized: true)
+        return try decode(TranscriptResult.self, from: data)
+    }
+
+    func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool) async throws -> TranscriptionJob {
         let audioData = try Data(contentsOf: fileURL)
         let boundary = "NotesAICapture-\(UUID().uuidString)"
         let body = Self.multipartBody(
@@ -94,7 +188,7 @@ actor APIClient {
             fields: [("language", language), ("diarize", diarize ? "true" : "false")],
             fileField: "audio",
             fileName: fileURL.lastPathComponent,
-            contentType: "audio/mp4",
+            contentType: contentType,
             fileData: audioData
         )
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs", method: "POST",
@@ -116,9 +210,11 @@ actor APIClient {
         base: KeyPath<BackendSettings, String>,
         path: String,
         method: String,
+        query: [(String, String)] = [],
         jsonBody: Data? = nil,
         body: Data? = nil,
         contentType: String? = nil,
+        accept: String = "application/json",
         authorized: Bool,
         allowRefresh: Bool = true
     ) async throws -> Data {
@@ -131,9 +227,13 @@ actor APIClient {
             try? await refresh()
         }
 
-        var request = URLRequest(url: root.appending(path: path))
+        var url = root.appending(path: path)
+        if !query.isEmpty {
+            url.append(queryItems: query.map { URLQueryItem(name: $0.0, value: $0.1) })
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         if let jsonBody {
             request.httpBody = jsonBody
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -154,9 +254,9 @@ actor APIClient {
 
         if http.statusCode == 401, authorized, allowRefresh {
             try await refresh()
-            return try await send(base: base, path: path, method: method,
+            return try await send(base: base, path: path, method: method, query: query,
                                   jsonBody: jsonBody, body: body, contentType: contentType,
-                                  authorized: authorized, allowRefresh: false)
+                                  accept: accept, authorized: authorized, allowRefresh: false)
         }
 
         guard (200..<300).contains(http.statusCode) else {
@@ -166,9 +266,25 @@ actor APIClient {
         return data
     }
 
+    /// Server timestamps are ISO 8601, with or without fractional seconds.
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let date = fractional.date(from: raw) ?? plain.date(from: raw) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Unrecognised date: \(raw)"))
+        }
+        return decoder
+    }()
+
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do {
-            return try JSONDecoder().decode(type, from: data)
+            return try Self.decoder.decode(type, from: data)
         } catch {
             throw APIError.http(status: 0, problem: Problem(
                 title: "Unexpected response",

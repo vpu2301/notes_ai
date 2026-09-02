@@ -5,20 +5,22 @@ export function EmptyState({
   title,
   message,
   action,
+  compact = false,
 }: {
   icon: ReactNode;
   title: string;
   message: string;
   action?: ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <div className="empty">
+    <div className={`empty ${compact ? "compact" : ""}`}>
       <div className="empty-art" aria-hidden="true">
         {icon}
       </div>
       <h3>{title}</h3>
       <p>{message}</p>
-      {action}
+      {action && <div className="empty-actions">{action}</div>}
     </div>
   );
 }

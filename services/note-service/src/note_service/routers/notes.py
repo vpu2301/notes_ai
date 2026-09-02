@@ -16,7 +16,7 @@ from note_models import NoteContent, ReadPurpose
 
 from .. import audit_kinds
 from ..deps import get_state, requires
-from ..domain import code_sequence
+from ..domain import access, code_sequence
 from ..domain import notes_repository as repo
 from ._content_guard import ensure_valid_field_metadata
 
@@ -85,6 +85,9 @@ class NoteEnvelope(BaseModel):
     updated_at: str
     finalized_at: str | None
     cancelled_at: str | None
+    # 0016 — who may read it beyond the author team.
+    visibility: str = "workspace"
+    shared_with_ids: list[UUID] = Field(default_factory=list)
     content: NoteContent | None = None
     section_labels: list[SectionLabel] | None = None
 
@@ -111,6 +114,8 @@ def _envelope(
         updated_at=row.updated_at.isoformat(),
         finalized_at=row.finalized_at.isoformat() if row.finalized_at else None,
         cancelled_at=row.cancelled_at.isoformat() if row.cancelled_at else None,
+        visibility=row.visibility,
+        shared_with_ids=row.shared_with_ids,
         content=content,
         section_labels=section_labels,
     )
@@ -231,12 +236,12 @@ async def get_note(
 ) -> NoteEnvelope:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        row = await repo.fetch_note(conn, note_id=note_id)
-        if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
+        # A private note the caller was not given is a 404, not a 403.
+        row = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
         # Read-purpose enforcement: required if requester is not author/co-author.
-        is_author = claims.sub == row.primary_author_id or claims.sub in row.co_author_ids
+        # Someone the note was shared with reads as a collaborator.
+        is_author = access.is_author_team(row, claims.sub) or claims.sub in row.shared_with_ids
         if not is_author and purpose is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,

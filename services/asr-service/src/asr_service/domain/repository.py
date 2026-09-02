@@ -257,6 +257,7 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
         audio_id=row["audio_id"],
         requester_sub=row["requester_sub"],
         language=row["language"],
+        detected_language=row.get("detected_language"),
         model=row["model"],
         status=JobStatus(row["status"]),
         error_kind=row["error_kind"],

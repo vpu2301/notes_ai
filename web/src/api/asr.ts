@@ -1,10 +1,11 @@
 import { api } from "./http";
-import type { AsrJob } from "./types";
+import type { AsrJob, AsrLanguage, TranscriptResult } from "./types";
 
 export function submitJob(params: {
   audio: Blob;
   filename: string;
-  language: "en" | "uk";
+  /** "auto" (default) lets the recording decide; "en"/"uk" pin the decoder. */
+  language: AsrLanguage;
   diarize: boolean;
   vocabularyHint?: string;
 }): Promise<AsrJob> {
@@ -28,4 +29,9 @@ export function getJob(id: string): Promise<AsrJob> {
 
 export function cancelJob(id: string): Promise<void> {
   return api<void>("asr", `/asr/jobs/${id}`, { method: "DELETE" });
+}
+
+/** Plaintext transcript of a COMPLETE job (409 while it is still running). */
+export function getResult(id: string): Promise<TranscriptResult> {
+  return api<TranscriptResult>("asr", `/asr/jobs/${id}/result`);
 }

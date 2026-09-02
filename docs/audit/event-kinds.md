@@ -84,6 +84,13 @@ typos at import.
 | `note.searched`                   | info     | note-service GET /v1/notes/search | Sprint 08 — search executed. Payload: q, has_q, result_count, filters. Results are never enumerated. |
 | `note.chain_integrity_failure`    | sec      | note-service chain reconciler / property test | Sprint 08 — an append-only version chain anomaly was detected. Investigate immediately. |
 | `note.pdf_rendered`               | info     | note-service GET /v1/notes/{id}/pdf | M1 — PDF rendered. Payload: version_number, size_bytes, purpose |
+| `note.deleted`                    | info     | note-service DELETE /v1/notes/{id} | 0016 — soft delete by the author or a tenant_admin; the row stays, every public link is revoked. Payload: code, status |
+| `note.visibility_changed`         | info     | note-service PUT /v1/notes/{id}/visibility | 0016 — `private` ↔ `workspace`. Payload: from, to |
+| `note.shared`                     | info     | note-service POST /v1/notes/{id}/share | 0016 — a workspace member was given read access (they get a `note.shared_with_you` notification). Payload: with (sub), via |
+| `note.unshared`                   | info     | note-service DELETE /v1/notes/{id}/share/{sub} | 0016 — access taken back. Payload: with (sub) |
+| `note.link_created`               | info     | note-service POST /v1/notes/{id}/public-link | 0016 — an "anyone with the link" token was minted. Payload: link_id, expires_at. Never the token. |
+| `note.link_revoked`               | info     | note-service DELETE /v1/notes/{id}/public-link | 0016 — public link(s) revoked. Payload: revoked (count) |
+| `note.viewed_via_link`            | info     | note-service GET /v1/shared/{token}[/pdf] | 0016 — anonymous read through a public link; no actor. Payload: link_id, format |
 | `note.synthesis_started`          | info     | note-service POST /v1/notes/{id}/synthesize | Spec item 1 — synthesis run begun (raw dictation → clean prose). Payload: section_count, language, provider |
 | `note.synthesis_completed`        | info     | note-service POST /v1/notes/{id}/synthesize | Spec item 1 — synthesis run finished (paired with `note.synthesis_started`). Payload: job_id, section_count, language, provider |
 | `note.field.extracted`            | info     | note-service POST /v1/notes/{id}/finalize | Sprint 13 — ONE aggregated row per finalized note: how many typed fields still carried machine-extracted values at finalize. Deliberately not per-utterance (chain pollution). Payload: field_types (list), section_count. **No values, no prose.** |
