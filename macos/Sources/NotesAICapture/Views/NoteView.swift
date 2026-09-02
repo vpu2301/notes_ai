@@ -13,6 +13,9 @@ struct NoteView: View {
     @State private var sharePrompt = false
     @State private var shareEmail = ""
     @State private var shareNotMember: String?
+    /// Which speaker label is being renamed inline, and the text so far.
+    @State private var editingSpeaker: String?
+    @State private var speakerDraft = ""
 
     /// The capture this note came from, when it is one of this Mac's.
     private let capture: RecentCapture?
@@ -344,7 +347,7 @@ struct NoteView: View {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             } else if let turns = model.turns {
                 HStack {
-                    Text(turns.isEmpty ? "Nothing was said." : speakerSummary(turns))
+                    Text(turns.isEmpty ? "Nothing was said." : speakerSummary)
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                     Spacer()
@@ -359,21 +362,22 @@ struct NoteView: View {
                 ForEach(turns) { turn in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            if let speaker = turn.speaker {
-                                Text(speaker)
-                                    .font(.dsDisplay(13.5, .medium))
-                                    .foregroundStyle(DS.accentText)
+                            if model.diarized {
+                                SpeakerName(turn: turn, model: model,
+                                            editingLabel: $editingSpeaker, draft: $speakerDraft)
                             }
                             Text(formatElapsed(ms: turn.startMs))
                                 .font(.dsMono(11))
                                 .foregroundStyle(DS.muted)
                         }
-                        Text(turn.text)
-                            .font(.dsBody)
-                            .foregroundStyle(DS.text1)
-                            .lineSpacing(3)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(turn.paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.dsBody)
+                                .foregroundStyle(DS.text1)
+                                .lineSpacing(3)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             } else {
@@ -385,9 +389,10 @@ struct NoteView: View {
         .task { await model.loadTranscript() }
     }
 
-    private func speakerSummary(_ turns: [TranscriptTurn]) -> String {
-        let count = Set(turns.compactMap(\.speaker)).count
-        return count <= 1 ? "1 speaker" : "\(count) speakers"
+    private var speakerSummary: String {
+        guard model.diarized else { return "Speakers were not told apart in this recording." }
+        let count = model.speakerCount
+        return (count <= 1 ? "1 speaker" : "\(count) speakers") + " · click a name to rename"
     }
 
     // MARK: - States
@@ -485,5 +490,71 @@ private struct SectionEditor: View {
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: focused)
         .animation(.easeOut(duration: 0.12), value: hover)
+    }
+}
+
+
+/// A turn's speaker name: a click turns it into a text field; Return (or
+/// clicking away) saves the name to the job, Escape cancels.
+private struct SpeakerName: View {
+    let turn: TranscriptTurn
+    @ObservedObject var model: NoteViewModel
+    @Binding var editingLabel: String?
+    @Binding var draft: String
+
+    @FocusState private var focused: Bool
+    @State private var hover = false
+
+    var body: some View {
+        if let label = turn.speaker {
+            if editingLabel == label {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.dsDisplay(13.5, .medium))
+                    .foregroundStyle(DS.text1)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .frame(width: 200)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(DS.text3.opacity(0.6), lineWidth: 1)
+                    )
+                    .focused($focused)
+                    .onAppear { focused = true }
+                    .onSubmit { commit(label) }
+                    .onExitCommand { editingLabel = nil }
+                    .onChange(of: focused) { _, isFocused in
+                        if !isFocused, editingLabel == label { commit(label) }
+                    }
+            } else {
+                Button {
+                    draft = model.displayName(for: turn)
+                    editingLabel = label
+                } label: {
+                    Text(model.displayName(for: turn))
+                        .font(.dsDisplay(13.5, .medium))
+                        .foregroundStyle(DS.accentText)
+                        .underline(hover, pattern: .dot, color: DS.accentText)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.renamingSpeaker)
+                .help("Rename this speaker")
+                .onHover { hover = $0 }
+            }
+        } else {
+            Text(unknownSpeakerName)
+                .font(.dsDisplay(13.5, .medium))
+                .italic()
+                .foregroundStyle(DS.muted)
+        }
+    }
+
+    private func commit(_ label: String) {
+        let name = draft
+        editingLabel = nil
+        Task { await model.renameSpeaker(label: label, to: name) }
     }
 }

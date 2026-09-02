@@ -11,10 +11,16 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 14) {
                 Text("Settings")
                     .font(.dsDisplay(18, .medium))
                     .foregroundStyle(DS.text1)
+                DSSegmentedPill(
+                    options: [
+                        .init(AppState.SettingsTab.general, label: "General"),
+                        .init(AppState.SettingsTab.connectors, label: "Connectors"),
+                    ],
+                    selection: $app.settingsTab)
                 Spacer()
                 if let onClose {
                     Button("Done", action: onClose)
@@ -27,6 +33,18 @@ struct SettingsView: View {
             DSDivider()
 
             ScrollView {
+                if app.settingsTab == .connectors {
+                    ConnectorsView(calendar: app.calendar, store: app.connectors)
+                        .padding(20)
+                } else {
+                    general
+                }
+            }
+        }
+        .background(DS.bg)
+    }
+
+    private var general: some View {
                 VStack(alignment: .leading, spacing: 20) {
                     group("Meetings") {
                         row("Language") {
@@ -36,6 +54,7 @@ struct SettingsView: View {
                                           help: "Detect from the recording"),
                                     .init("en", label: "EN", help: "English"),
                                     .init("uk", label: "UK", help: "Українська"),
+                                    .init("de", label: "DE", help: "Deutsch"),
                                 ],
                                 selection: $capture.language)
                         }
@@ -117,9 +136,6 @@ struct SettingsView: View {
                     }
                 }
                 .padding(20)
-            }
-        }
-        .background(DS.bg)
     }
 
     private var authHost: String {

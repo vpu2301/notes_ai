@@ -16,6 +16,7 @@ const LANGUAGES: ReadonlyArray<readonly [AsrLanguage, string]> = [
   ["auto", "Detect"],
   ["en", "English"],
   ["uk", "Українська"],
+  ["de", "Deutsch"],
 ];
 
 /**
@@ -40,7 +41,7 @@ export function MeetingPage() {
   const [drag, setDrag] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const { captures, cancel, refresh } = useCaptures({
+  const { captures, noteErrors, createNote, cancel, refresh } = useCaptures({
     onNoteReady: (jid, noteId) => {
       if (jid === jobId) navigate(`/notes/${noteId}`, { replace: true });
     },
@@ -102,10 +103,30 @@ export function MeetingPage() {
     const detected = languageName(job?.detected_language);
     const failed = job?.status === "failed";
     const cancelled = job?.status === "cancelled";
+    const noteError = job && job.status === "complete" ? noteErrors[job.id] : undefined;
     return (
       <div className="meeting">
         <div className="meeting-stage">
-          {failed || cancelled ? (
+          {job && noteError ? (
+            <>
+              <span className="stage-ico rec">
+                <AlertIcon size={20} />
+              </span>
+              <h2>Couldn't write the note</h2>
+              <p className="help">{noteError}</p>
+              <div className="stage-actions">
+                <button
+                  className="btn primary"
+                  onClick={() => void createNote(job).catch((err) => toast.error(errorMessage(err)))}
+                >
+                  Try again
+                </button>
+                <Link to="/" className="btn ghost">
+                  Back to notes
+                </Link>
+              </div>
+            </>
+          ) : failed || cancelled ? (
             <>
               <span className="stage-ico rec">
                 <AlertIcon size={20} />

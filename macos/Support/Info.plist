@@ -28,6 +28,17 @@
 	<string>Notes AI Capture records meeting audio so it can be transcribed into a note.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Notes AI shows your upcoming calendar events so you can start a meeting note from them.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ai.notes.capture.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>notesai</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 </dict>

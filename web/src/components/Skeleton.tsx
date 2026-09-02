@@ -16,7 +16,6 @@ export function Skeleton({
 export function SkeletonRow() {
   return (
     <div className="row" aria-hidden="true">
-      <Skeleton width={32} height={32} style={{ borderRadius: 9 }} />
       <div className="row-body">
         <div className="row-1">
           <Skeleton width="38%" height={14} />

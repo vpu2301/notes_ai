@@ -262,7 +262,7 @@ export interface FromTranscriptResponse {
 export type AsrJobStatus = "queued" | "running" | "complete" | "failed" | "cancelled";
 
 /** What a job may be submitted as: detect from the audio, or a pinned language. */
-export type AsrLanguage = "auto" | "en" | "uk";
+export type AsrLanguage = "auto" | "en" | "uk" | "de";
 
 /** Human name for an ISO 639-1 code, in the viewer's locale; the code itself if unknown. */
 export function languageName(code: string | null | undefined): string {
@@ -279,7 +279,7 @@ export interface AsrJob {
   tenant_id: string;
   audio_id: string;
   requester_sub: string;
-  /** As requested: "auto", "en", "uk". */
+  /** As requested: "auto", "en", "uk", "de". */
   language: string;
   /** What the recording turned out to be in (ISO 639-1); set once complete. */
   detected_language?: string | null;
@@ -291,6 +291,8 @@ export interface AsrJob {
   finished_at?: string | null;
   attempts?: number;
   cancel_requested?: boolean;
+  /** Names people gave the diarized speakers (label → name). */
+  speaker_names?: Record<string, string>;
   result_url?: string | null;
   error_kind?: string | null;
   /** Safe-to-show explanation built from the kind alone (ADR-0031). */
@@ -340,6 +342,21 @@ export interface TranscriptSegment {
   speaker?: string | null;
 }
 
+/**
+ * One speaker turn, as structured by asr-service: consecutive segments by
+ * one speaker, broken into paragraphs at pauses and sentence ends.
+ * `speaker` is the neutral label ("SPEAKER_2"), `name` what to show for it
+ * (a person's naming, else "Speaker 2"); both null for unattributed speech.
+ */
+export interface TranscriptTurn {
+  speaker: string | null;
+  name: string | null;
+  start_ms: number;
+  end_ms: number;
+  paragraphs: string[];
+  segment_indices?: number[];
+}
+
 export interface TranscriptResult {
   job_id: string;
   /** The language the transcript is in (never "auto"). */
@@ -347,8 +364,18 @@ export interface TranscriptResult {
   language_detected?: boolean;
   language_probability?: number | null;
   segments: TranscriptSegment[];
+  /** Neutral labels in first-appearance order (diarized jobs). */
   speakers?: string[];
+  /** Label → display name for every roster label. */
+  speaker_names?: Record<string, string>;
+  /** The transcript as speaker turns — what the UI renders. */
+  turns?: TranscriptTurn[];
   nlp_applied?: boolean;
+}
+
+/** `SPEAKER_2` → `Speaker 2`; anything else unchanged. */
+export function defaultSpeakerName(label: string): string {
+  return /^SPEAKER_\d+$/.test(label) ? `Speaker ${label.slice(8)}` : label;
 }
 
 // ── note-service: transcript ↔ note links ──────────────────────────────

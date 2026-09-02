@@ -46,24 +46,21 @@ export function LoginPage() {
   };
 
   return (
-    <div className="login-shell">
+    <div className="login-shell dotted">
       <form className="login-card" onSubmit={(e) => void onSubmit(e)}>
         <div className="login-brand">
           <span className="sb-brand-mark" aria-hidden="true">
             N
           </span>
-          <div>
-            <div className="login-brand-name">
-              Notes <span className="ai">AI</span>
-            </div>
-            <div className="login-brand-tag">Meetings, written down.</div>
+          <div className="login-brand-name">
+            Notes <span className="ai">AI</span>
           </div>
         </div>
 
         <div>
-          <h1 className="login-title">{otpRequired ? "One more step" : "Sign in"}</h1>
+          <h1 className="login-title">{otpRequired ? "One more step" : "Welcome back"}</h1>
           <p className="login-sub">
-            {otpRequired ? "Enter the code from your authenticator app." : "Use your workspace account."}
+            {otpRequired ? "Enter the code from your authenticator app." : "Sign in to your workspace to see your meeting notes."}
           </p>
         </div>
 

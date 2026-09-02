@@ -41,6 +41,7 @@ struct NotesAICaptureApp: App {
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
+                    app.settingsTab = .general
                     app.settingsPresented = true
                     NotificationCenter.default.post(name: .openMainWindow, object: nil)
                 }

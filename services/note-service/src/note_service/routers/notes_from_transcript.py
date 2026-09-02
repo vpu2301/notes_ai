@@ -128,20 +128,72 @@ def _is_diarized(result: dict[str, Any]) -> bool:
     roster still gets dialogue rendering."""
     if result.get("speakers"):
         return True
+    if any(t.get("speaker") for t in result.get("turns", [])):
+        return True
     return any(seg.get("speaker") for seg in result.get("segments", []))
 
 
+# What an unattributed turn is labelled in a diarized note. Honest, not
+# a guess: the diarizer heard someone it could not place.
+UNKNOWN_SPEAKER = "Unknown speaker"
+
+
+def _turns_text(result: dict[str, Any]) -> str:
+    """Render asr-service's ``turns`` as the note body.
+
+    asr-service already decided the structure (``asr_models.structure``:
+    consecutive same-speaker segments are one turn, long turns break into
+    paragraphs at pauses and sentence ends) and the display names (what a
+    person named the speaker, else "Speaker N"). Here that becomes text:
+
+        Mark: First paragraph of Mark's turn.
+        Second paragraph of the same turn.
+
+        Olena: Her reply.
+
+    Turns are separated by a blank line so they read as paragraphs in
+    the editor; the name sits at the start of the turn's first line, the
+    form both apps rewrite when a speaker is renamed later. An undiarized
+    transcript is one unattributed turn and renders as plain paragraphs.
+    """
+    blocks: list[str] = []
+    diarized = _is_diarized(result)
+    for turn in result.get("turns", []):
+        paragraphs = [str(p).strip() for p in turn.get("paragraphs", []) if str(p).strip()]
+        if not paragraphs:
+            continue
+        if diarized:
+            label = turn.get("name") or (
+                default_speaker_name(str(turn["speaker"]))
+                if turn.get("speaker")
+                else UNKNOWN_SPEAKER
+            )
+            paragraphs[0] = f"{label}: {paragraphs[0]}"
+        blocks.append("\n".join(paragraphs))
+    return "\n\n".join(blocks)
+
+
+def default_speaker_name(label: str) -> str:
+    """``SPEAKER_2`` → ``Speaker 2`` (mirrors ``asr_models.default_speaker_name``;
+    note-service reads the transcript as JSON and does not depend on that lib)."""
+    if label.startswith("SPEAKER_") and label[8:].isdigit():
+        return f"Speaker {label[8:]}"
+    return label
+
+
 def _dialogue_text(result: dict[str, Any]) -> str:
-    """Render a diarized transcript as speaker-turn dialogue lines.
+    """Render a diarized transcript WITHOUT server-side turns as
+    speaker-turn dialogue lines (a producer older than the ``turns``
+    field, or a test fixture).
 
     Mirrors dictation-service's ``session/draft.py::dialogue_text``: one
-    line per contiguous same-speaker run (``SPEAKER_1: …``), a segment
-    without a label rendered under the honesty label ``UNKNOWN`` rather
-    than silently merged into a neighbouring speaker's turn. Batch labels
-    are already the neutral ``SPEAKER_N`` form (ambient-capture contract),
-    so they pass through verbatim; naming happens in post-hoc note
-    editing, never here.
+    block per contiguous same-speaker run, a segment without a label
+    rendered under the honesty label rather than silently merged into a
+    neighbouring speaker's turn. Batch labels are the neutral
+    ``SPEAKER_N`` form (ambient-capture contract); a ``speaker_names``
+    map on the result names them, else the default "Speaker N".
     """
+    names = result.get("speaker_names") or {}
     lines: list[str] = []
     prev_key: object = object()
     for seg in result.get("segments", []):
@@ -149,25 +201,31 @@ def _dialogue_text(result: dict[str, Any]) -> str:
         if not text:
             continue
         speaker = seg.get("speaker")
-        label = str(speaker) if speaker else "UNKNOWN"
+        label = (
+            (names.get(speaker) or default_speaker_name(str(speaker)))
+            if speaker
+            else UNKNOWN_SPEAKER
+        )
         if speaker == prev_key and lines:
             lines[-1] = f"{lines[-1]} {text}"
         else:
             lines.append(f"{label}: {text}")
         prev_key = speaker
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 def _transcript_text(result: dict[str, Any]) -> str:
+    # asr-service ships the transcript pre-structured (speaker turns,
+    # paragraphs, display names); render that when it is there.
+    if result.get("turns"):
+        return _turns_text(result)
     # Diarized results (ambient capture: batch jobs run with diarize=true)
     # become speaker-turn dialogue, matching what a live conversation
     # session's finalize draft looks like.
     if _is_diarized(result):
         return _dialogue_text(result)
-    # Join sentences with a space, not a newline: the note editor
-    # serialises its content in a way that drops newlines (turning
-    # "...тижнів.\nРегіографія..." into glued "...тижнів.Регіографія..."),
-    # so a space is the separator that survives a round-trip.
+    # No structure at all (an older producer): flat prose, joined with
+    # spaces so a round-trip through the editor keeps it intact.
     parts = [str(seg.get("text", "")).strip() for seg in result.get("segments", [])]
     return " ".join(p for p in parts if p)
 

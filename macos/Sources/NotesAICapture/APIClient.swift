@@ -7,11 +7,28 @@ import Foundation
 /// - The short-lived access token is kept in memory only, and refreshed
 ///   once (via `POST /auth/refresh`) whenever a request answers 401 or the
 ///   token is about to expire.
+/// - Refreshes are SINGLE-FLIGHT. The server rotates the refresh cookie on
+///   every call and treats a re-used cookie as a replay attack (it revokes
+///   the user's sessions and clears the cookie), so two concurrent 401s —
+///   the capture pipeline polling a job while the popover polls recents —
+///   must share one refresh rather than each sending the same cookie.
+/// - A KEEPALIVE refresh runs a minute before the access token expires, for
+///   as long as the app is signed in. The refresh cookie only lives as long
+///   as Keycloak's idle timeout (30 min) and is rotated by each refresh, so
+///   a long recording — during which nothing else calls the backend — would
+///   otherwise let it lapse and the upload would answer "no refresh cookie".
 actor APIClient {
     private var settings: BackendSettings
     private var accessToken: String?
     private var tokenExpiry: Date?
     private let session: URLSession
+    /// The refresh currently in flight, if any; joiners await it.
+    private var refreshInFlight: Task<Void, Error>?
+    /// Called once when the server says the session is gone (refresh answered
+    /// 401): the cookie expired or was revoked, so the app must sign out.
+    private var sessionLostHandler: (@Sendable () -> Void)?
+    /// Refreshes shortly before the access token expires while signed in.
+    private var keepAlive: Task<Void, Never>?
 
     init(settings: BackendSettings) {
         self.settings = settings
@@ -24,6 +41,10 @@ actor APIClient {
 
     func update(settings: BackendSettings) {
         self.settings = settings
+    }
+
+    func onSessionLost(_ handler: @escaping @Sendable () -> Void) {
+        sessionLostHandler = handler
     }
 
     // MARK: - Auth
@@ -55,18 +76,77 @@ actor APIClient {
                             authorized: true, allowRefresh: false)
         accessToken = nil
         tokenExpiry = nil
+        keepAlive?.cancel()
+        keepAlive = nil
     }
 
+    /// Rotate the refresh cookie and mint a new access token. Concurrent
+    /// callers join the refresh already in flight instead of racing it.
     private func refresh() async throws {
-        let data = try await send(base: \.authBaseURL, path: "/auth/refresh", method: "POST",
-                                  authorized: false)
-        try store(loginResponse: data)
+        if let inFlight = refreshInFlight {
+            return try await inFlight.value
+        }
+        let task = Task<Void, Error> {
+            do {
+                let data = try await send(base: \.authBaseURL, path: "/auth/refresh", method: "POST",
+                                          authorized: false)
+                try store(loginResponse: data)
+            } catch let APIError.http(status, _) where status == 401 {
+                // No cookie, or a stale/revoked one: the session is over.
+                accessToken = nil
+                tokenExpiry = nil
+                throw APIError.notAuthenticated
+            }
+        }
+        refreshInFlight = task
+        defer { refreshInFlight = nil }
+        try await task.value
+    }
+
+    /// A request answered 401 and refreshing did not help: sign the app out
+    /// instead of surfacing the server's wording in a capture banner.
+    private func sessionLost() {
+        accessToken = nil
+        tokenExpiry = nil
+        keepAlive?.cancel()
+        keepAlive = nil
+        sessionLostHandler?()
     }
 
     private func store(loginResponse data: Data) throws {
         let response = try decode(LoginResponse.self, from: data)
         accessToken = response.accessToken
         tokenExpiry = Date().addingTimeInterval(TimeInterval(response.expiresIn))
+        scheduleKeepAlive(expiresIn: response.expiresIn)
+    }
+
+    /// Refresh a minute before the access token expires (the web app does
+    /// the same). Each refresh rotates the cookie, which keeps the server-side
+    /// session from idling out while the user is only recording.
+    private func scheduleKeepAlive(expiresIn: Int) {
+        keepAlive?.cancel()
+        let delay = max(10, expiresIn - 60)
+        keepAlive = Task { [weak self] in
+            // The continuous clock keeps counting through system sleep, so a
+            // Mac that wakes late refreshes at once rather than an hour on.
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            await self.keepAliveTick()
+        }
+    }
+
+    private func keepAliveTick() async {
+        do {
+            try await refresh()
+        } catch APIError.notAuthenticated {
+            // The cookie is gone (a >30-minute sleep, or a revoke): sign out
+            // now, rather than on the user's next click.
+            sessionLost()
+        } catch {
+            // Transient (offline, 503): try again shortly; the 401 path of the
+            // next real request refreshes too, so nothing is lost meanwhile.
+            scheduleKeepAlive(expiresIn: 90)
+        }
     }
 
     // MARK: - Templates & notes (note-service)
@@ -180,6 +260,16 @@ actor APIClient {
         return try decode(TranscriptResult.self, from: data)
     }
 
+    /// Name the diarized speakers of a job (the complete label → name map;
+    /// a label left out goes back to its "Speaker N" default). Stored on the
+    /// job, so the web app and the note built from it show the same names.
+    func setSpeakerNames(jobId: String, names: [String: String]) async throws -> [String: String] {
+        let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names))
+        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers", method: "PUT",
+                                  jsonBody: body, authorized: true)
+        return try decode(SpeakerNamesResponse.self, from: data).speakerNames
+    }
+
     func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool) async throws -> TranscriptionJob {
         let audioData = try Data(contentsOf: fileURL)
         let boundary = "NotesAICapture-\(UUID().uuidString)"
@@ -243,8 +333,9 @@ actor APIClient {
                 request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             }
         }
-        if authorized, let token = accessToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let tokenUsed = authorized ? accessToken : nil
+        if let tokenUsed {
+            request.setValue("Bearer \(tokenUsed)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, response) = try await session.data(for: request)
@@ -253,10 +344,25 @@ actor APIClient {
         }
 
         if http.statusCode == 401, authorized, allowRefresh {
-            try await refresh()
+            // Only refresh if nobody rotated the token while this request was
+            // out; otherwise the retry below already carries the new one.
+            if accessToken == tokenUsed {
+                do {
+                    try await refresh()
+                } catch APIError.notAuthenticated {
+                    sessionLost()
+                    throw APIError.notAuthenticated
+                }
+            }
             return try await send(base: base, path: path, method: method, query: query,
                                   jsonBody: jsonBody, body: body, contentType: contentType,
                                   accept: accept, authorized: authorized, allowRefresh: false)
+        }
+        if http.statusCode == 401, authorized {
+            // Still unauthorised with a freshly minted token: the server has
+            // revoked the user (denylist), so the session is gone too.
+            sessionLost()
+            throw APIError.notAuthenticated
         }
 
         guard (200..<300).contains(http.statusCode) else {

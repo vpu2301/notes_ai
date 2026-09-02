@@ -12,6 +12,22 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt
 
+# Neutral diarization label: ``SPEAKER_1``.. — the only speaker identity
+# the platform ever produces on its own (no name inference, ADR-0034).
+SPEAKER_LABEL_PATTERN = r"^SPEAKER_[1-9][0-9]{0,2}$"
+
+
+def default_speaker_name(label: str) -> str:
+    """Human default for a neutral label: ``SPEAKER_2`` → ``Speaker 2``.
+
+    Used wherever a label has not been named by a person yet (the
+    transcript view, the note body). Anything that is not a neutral
+    label passes through unchanged.
+    """
+    if label.startswith("SPEAKER_") and label[8:].isdigit():
+        return f"Speaker {label[8:]}"
+    return label
+
 
 class WordTiming(BaseModel):
     text: str
@@ -94,6 +110,29 @@ class EnrichedSegment(BaseModel):
     speaker: str | None = None
 
 
+class TranscriptTurnView(BaseModel):
+    """One speaker turn: the structure a reader actually wants.
+
+    Built at read time from the (enriched) segments — consecutive
+    segments by the same speaker, with long stretches broken into
+    paragraphs at pauses and sentence ends (``asr_models.structure``).
+    A turn whose ``speaker`` is ``None`` is speech the diarizer could
+    not attribute (or an undiarized job, which is one long turn).
+    """
+
+    speaker: str | None = None
+    # What to show for the speaker: the name a person gave this label
+    # on the job, else the neutral default ("Speaker 2"); None when
+    # the turn is unattributed.
+    name: str | None = None
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    paragraphs: list[str]
+    # Indices into ``segments`` — lets a client jump from a turn back to
+    # the timed words behind it.
+    segment_indices: list[int] = Field(default_factory=list)
+
+
 class TranscriptResultView(BaseModel):
     """Plaintext transcript response for a COMPLETE job (proxy-decrypt).
 
@@ -110,6 +149,13 @@ class TranscriptResultView(BaseModel):
     metadata: TranscriptionMetadata
     # Distinct speaker labels in first-appearance order (diarized jobs).
     speakers: list[str] = Field(default_factory=list)
+    # Label → display name for every roster label: the name a person
+    # assigned via ``PUT /asr/jobs/{id}/speakers``, else the neutral
+    # default ("Speaker 1"). Empty for undiarized jobs.
+    speaker_names: dict[str, str] = Field(default_factory=dict)
+    # The transcript as speaker turns with paragraphs — derived from
+    # ``segments``; clients render this, not the raw segment list.
+    turns: list[TranscriptTurnView] = Field(default_factory=list)
     nlp_applied: bool = False
     nlp_pipeline_version: str | None = None
     schema_version: int = 1

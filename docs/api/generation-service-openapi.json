@@ -20,7 +20,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"

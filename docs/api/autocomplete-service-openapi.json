@@ -7,7 +7,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -53,7 +54,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -302,7 +304,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -538,7 +541,8 @@
                 {
                   "enum": [
                     "uk",
-                    "en"
+                    "en",
+                    "de"
                   ],
                   "type": "string"
                 },
@@ -753,7 +757,8 @@
                 {
                   "enum": [
                     "uk",
-                    "en"
+                    "en",
+                    "de"
                   ],
                   "type": "string"
                 },

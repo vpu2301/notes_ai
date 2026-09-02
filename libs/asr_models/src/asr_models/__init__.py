@@ -23,20 +23,25 @@ from .job import (
     TranscriptionJobView,
 )
 from .output import (
+    SPEAKER_LABEL_PATTERN,
     ConfidenceSpanView,
     EnrichedSegment,
     Segment,
     TranscriptionMetadata,
     TranscriptionOutput,
     TranscriptResultView,
+    TranscriptTurnView,
     WordTiming,
+    default_speaker_name,
 )
+from .structure import build_turns
 
 __all__ = [
     "AUTO_LANGUAGE",
     "ERROR_SPECS",
     "LANGUAGE_CODE_PATTERN",
     "LANGUAGE_REQUEST_PATTERN",
+    "SPEAKER_LABEL_PATTERN",
     "UNKNOWN_SPEC",
     "ConfidenceSpanView",
     "EnrichedSegment",
@@ -50,7 +55,10 @@ __all__ = [
     "TranscriptionMetadata",
     "TranscriptionOutput",
     "TranscriptResultView",
+    "TranscriptTurnView",
     "WordTiming",
+    "build_turns",
+    "default_speaker_name",
     "is_retryable",
     "spec_for",
 ]

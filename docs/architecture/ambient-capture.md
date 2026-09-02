@@ -42,11 +42,24 @@ finalization, and search.
 - Diarization (silero VAD + ECAPA embeddings + clustering, ADR-0034)
   produces neutral labels `SPEAKER_1..N`. The platform never guesses who
   a speaker *is*.
-- Live sessions: the client can assign display names during or after the
-  meeting (`SetSpeakerMapping`); the finalized transcript and the draft
-  note use those names.
-- Batch jobs: labels stay `SPEAKER_N`; participants are named while
-  editing the note.
+- Live sessions: the online clusterer separates two speakers; the client
+  can assign display names during or after the meeting
+  (`SetSpeakerMapping`); the finalized transcript and the draft note use
+  those names.
+- Batch jobs (ADR-0045): the whole recording is clustered at once
+  (average-linkage agglomerative, up to 8 speakers), and speakers are
+  attributed per *word*, so a Whisper segment that spans two people is
+  split at the change. `GET /asr/jobs/{id}/result` returns the
+  transcript pre-structured as `turns` (one per speaker change, long
+  turns broken into paragraphs at pauses and sentence ends) plus a
+  `speaker_names` map; the web and macOS transcript tabs render those
+  turns, and `POST /v1/notes/from-transcript` writes them as
+  `Name: paragraph` blocks.
+- Naming: a person renames `Speaker 2` → `Olena` in either app;
+  `PUT /asr/jobs/{id}/speakers` stores the label → name map on the job,
+  so both apps and every later read agree. While the note is a draft the
+  app also rewrites the turn prefixes in the note body; a finalized note
+  keeps its text.
 
 ## Room devices
 

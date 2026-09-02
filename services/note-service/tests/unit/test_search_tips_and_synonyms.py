@@ -9,12 +9,13 @@ from note_service.routers.search_tips import _TIPS
 from note_service.routers.synonyms import SynonymGroupBody
 
 
-def test_tips_exist_in_both_languages_with_same_keys():
-    assert set(_TIPS) == {"uk", "en"}
+def test_tips_exist_in_every_language_with_same_keys():
+    assert set(_TIPS) == {"uk", "en", "de"}
     uk_keys = [t.key for t in _TIPS["uk"]]
-    en_keys = [t.key for t in _TIPS["en"]]
-    assert uk_keys == en_keys
+    for language in ("en", "de"):
+        assert [t.key for t in _TIPS[language]] == uk_keys
     assert {"no_stemming", "synonyms", "filters_and"} <= set(uk_keys)
+    assert "expand=false" in " ".join(t.body for t in _TIPS["de"])
     # The honesty contract: tips must state the no-stemming limitation and
     # the expand=false escape hatch.
     uk_all = " ".join(t.body for t in _TIPS["uk"])

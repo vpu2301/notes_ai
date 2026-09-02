@@ -404,6 +404,26 @@
         "title": "CreateResponse",
         "type": "object"
       },
+      "DeletedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted_at": {
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "deleted_at"
+        ],
+        "title": "DeletedResponse",
+        "type": "object"
+      },
       "DiffResponse": {
         "additionalProperties": false,
         "properties": {
@@ -702,6 +722,31 @@
         "title": "LocalizedText",
         "type": "object"
       },
+      "Member": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "sub": {
+            "format": "uuid",
+            "title": "Sub",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub",
+          "email",
+          "display_name"
+        ],
+        "title": "Member",
+        "type": "object"
+      },
       "MetadataDiff": {
         "additionalProperties": false,
         "properties": {
@@ -899,6 +944,14 @@
             ],
             "title": "Section Labels"
           },
+          "shared_with_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Shared With Ids",
+            "type": "array"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -909,6 +962,11 @@
           },
           "updated_at": {
             "title": "Updated At",
+            "type": "string"
+          },
+          "visibility": {
+            "default": "workspace",
+            "title": "Visibility",
             "type": "string"
           }
         },
@@ -1114,6 +1172,79 @@
           "amendment_reason"
         ],
         "title": "NoteVersionSummary",
+        "type": "object"
+      },
+      "PublicLink": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "last_viewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Viewed At"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "view_count": {
+            "title": "View Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "token",
+          "path",
+          "created_at",
+          "expires_at",
+          "view_count",
+          "last_viewed_at"
+        ],
+        "title": "PublicLink",
+        "type": "object"
+      },
+      "PublicLinkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days"
+          }
+        },
+        "title": "PublicLinkRequest",
         "type": "object"
       },
       "ReadPurpose": {
@@ -1344,7 +1475,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -1407,6 +1539,142 @@
         "title": "SectionPromptResponse",
         "type": "object"
       },
+      "ShareRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ShareRequest",
+        "type": "object"
+      },
+      "SharedNoteView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "issuer_name": {
+            "title": "Issuer Name",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SharedSection"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "status",
+          "updated_at",
+          "sections",
+          "issuer_name"
+        ],
+        "title": "SharedNoteView",
+        "type": "object"
+      },
+      "SharedSection": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "section_key": {
+            "title": "Section Key",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_key",
+          "name",
+          "text"
+        ],
+        "title": "SharedSection",
+        "type": "object"
+      },
+      "SharingView": {
+        "additionalProperties": false,
+        "properties": {
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "can_manage": {
+            "title": "Can Manage",
+            "type": "boolean"
+          },
+          "note_id": {
+            "format": "uuid",
+            "title": "Note Id",
+            "type": "string"
+          },
+          "public_link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shared_with": {
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            },
+            "title": "Shared With",
+            "type": "array"
+          },
+          "visibility": {
+            "enum": [
+              "private",
+              "workspace"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "visibility",
+          "can_manage",
+          "can_delete",
+          "shared_with",
+          "public_link"
+        ],
+        "title": "SharingView",
+        "type": "object"
+      },
       "SourceJobLink": {
         "additionalProperties": false,
         "properties": {
@@ -1444,7 +1712,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -1477,7 +1746,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -1535,7 +1805,8 @@
           "language": {
             "enum": [
               "uk",
-              "en"
+              "en",
+              "de"
             ],
             "title": "Language",
             "type": "string"
@@ -1630,7 +1901,7 @@
             "type": "string"
           },
           "language": {
-            "pattern": "^(uk|en)$",
+            "pattern": "^(uk|en|de)$",
             "title": "Language",
             "type": "string"
           },
@@ -2087,6 +2358,24 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "VisibilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "visibility": {
+            "enum": [
+              "private",
+              "workspace"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "visibility"
+        ],
+        "title": "VisibilityRequest",
+        "type": "object"
       }
     }
   },
@@ -2167,7 +2456,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "pattern": "^(uk|en)$",
+                  "pattern": "^(uk|en|de)$",
                   "type": "string"
                 },
                 {
@@ -3289,6 +3578,64 @@
       }
     },
     "/v1/notes/{note_id}": {
+      "delete": {
+        "description": "Soft delete. The note leaves every list and read path and its\npublic links stop working; the row and its versions are kept.",
+        "operationId": "delete_note_v1_notes__note_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Note",
+        "tags": [
+          "notes"
+        ]
+      },
       "get": {
         "operationId": "get_note_v1_notes__note_id__get",
         "parameters": [
@@ -3783,7 +4130,8 @@
                 {
                   "enum": [
                     "uk",
-                    "en"
+                    "en",
+                    "de"
                   ],
                   "type": "string"
                 },
@@ -3834,6 +4182,140 @@
           }
         },
         "summary": "Render the current version as a PDF (draft watermark for draft notes; 409 only for cancelled).",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/public-link": {
+      "delete": {
+        "operationId": "revoke_public_link_v1_notes__note_id__public_link_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Public Link",
+        "tags": [
+          "notes"
+        ]
+      },
+      "post": {
+        "description": "Idempotent: a note has at most one live link, and asking again\nreturns it rather than minting a second.",
+        "operationId": "create_public_link_v1_notes__note_id__public_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PublicLinkRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Public Link",
         "tags": [
           "notes"
         ]
@@ -3983,6 +4465,203 @@
           }
         },
         "summary": "List Section Audio Segments",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/share": {
+      "post": {
+        "operationId": "share_with_member_v1_notes__note_id__share_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Share With Member",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/share/{user_sub}": {
+      "delete": {
+        "operationId": "unshare_member_v1_notes__note_id__share__user_sub__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_sub",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Sub",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unshare Member",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/sharing": {
+      "get": {
+        "operationId": "get_sharing_v1_notes__note_id__sharing_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sharing",
         "tags": [
           "notes"
         ]
@@ -4293,6 +4972,75 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/visibility": {
+      "put": {
+        "operationId": "set_visibility_v1_notes__note_id__visibility_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Visibility",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/search/tips": {
       "get": {
         "operationId": "get_search_tips_v1_search_tips_get",
@@ -4305,7 +5053,8 @@
               "default": "uk",
               "enum": [
                 "uk",
-                "en"
+                "en",
+                "de"
               ],
               "title": "Language",
               "type": "string"
@@ -4353,6 +5102,89 @@
         "summary": "Get Search Tips",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/v1/shared/{token}": {
+      "get": {
+        "operationId": "read_shared_note_v1_shared__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedNoteView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Shared Note",
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    "/v1/shared/{token}/pdf": {
+      "get": {
+        "operationId": "read_shared_note_pdf_v1_shared__token__pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/pdf": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Shared Note Pdf",
+        "tags": [
+          "shared"
         ]
       }
     },

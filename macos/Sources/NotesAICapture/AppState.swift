@@ -32,6 +32,17 @@ final class AppState: ObservableObject {
     @Published private(set) var recents: [RecentCapture] = []
     /// The Settings sheet in the main window; the popover's menu sets it too.
     @Published var settingsPresented = false
+    /// Which tab the Settings sheet opens on.
+    @Published var settingsTab: SettingsTab = .general
+
+    enum SettingsTab: Hashable { case general, connectors }
+
+    /// Open Settings on the Connectors tab (menus, the home page's prompt).
+    func showConnectors() {
+        settingsTab = .connectors
+        settingsPresented = true
+        NotificationCenter.default.post(name: .openMainWindow, object: nil)
+    }
     /// What the main window's detail pane shows; nil is the home page.
     @Published var selection: Selection?
 
@@ -51,6 +62,8 @@ final class AppState: ObservableObject {
     /// nil = every note; otherwise only the notes filed in that space.
     @Published var selectedSpaceId: String?
     let calendar = CalendarService()
+    /// Remote MCP servers (HubSpot, Notion, …) connected on this Mac.
+    let connectors = ConnectorStore()
     private var searchTask: Task<Void, Never>?
     /// Light / dark / follow-system, persisted; applied app-wide as `NSApp.appearance`.
     @Published var themePref: ThemePref {
@@ -75,6 +88,12 @@ final class AppState: ObservableObject {
         self.themePref = ThemePref(rawValue: UserDefaults.standard.string(forKey: Keys.theme) ?? "") ?? .system
         Self.applyAppearance(themePref)
         Task { await restoreSession() }
+        Task { await connectors.recheck() }
+        Task { [weak self] in
+            await self?.api.onSessionLost {
+                Task { @MainActor in self?.sessionExpired() }
+            }
+        }
     }
 
     /// Set the appearance app-wide (the menu-bar panel included — SwiftUI's
@@ -104,6 +123,16 @@ final class AppState: ObservableObject {
 
     func signOut() async {
         await api.logout()
+        templateCache = nil
+        notes = []
+        selection = nil
+        authState = .signedOut
+    }
+
+    /// The refresh cookie expired or was revoked server-side: drop to the
+    /// sign-in form (the popover and the window both key off `authState`).
+    private func sessionExpired() {
+        guard authState == .signedIn else { return }
         templateCache = nil
         notes = []
         selection = nil

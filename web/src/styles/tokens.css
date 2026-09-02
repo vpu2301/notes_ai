@@ -1,66 +1,93 @@
 /* ─────────────────────────────────────────────────────────────────────────
    Notes AI — design tokens
-   Cool neutrals, one teal accent, hairline borders, a soft radial wash on
-   the shell. The accent FAMILY is derived from --accent with color-mix so
-   changing the one hex re-tints hover, tint, text and fill together.
+
+   The macOS capture app's look (macos/…/Views/Theme.swift), brought to the
+   web: paper and ink, hairline frames instead of shadows, generous radii, a
+   display face over a quiet sans. The ground is pure WHITE (not warm
+   off-white). Frames are QUIET at rest — a warm neutral hairline with only
+   a whisper of the accent in it — and turn ORANGE only when a frame is
+   live: hovered, focused, selected. The accent FAMILY derives from
+   --accent with color-mix, so one hex re-tints frames, tints, text and
+   focus rings together.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
   color-scheme: light;
 
-  /* Type */
+  /* Type. The Mac app sets Avenir Next; on a Mac the web matches it for
+     display text, elsewhere Geist (self-hosted) carries both roles. */
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Avenir Next", "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Light (default) */
-  --bg: #f6f7f9;
+  /* Ground & surfaces — white, with warm greys for the second surface. */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f1f3f6;
-  --surface-hover: #f7f8fa;
-  --text-1: #0b1220;
-  --text-2: #2d3640;
-  --text-3: #4a5563;
-  --muted: #6b7480;
-  --muted-aa: color-mix(in srgb, var(--muted) 88%, #000);
-  --line: #e3e7ec;
-  --line-2: #ebeef2;
+  --surface-2: #f6f4f0;
+  --surface-hover: #faf8f5;
+  --sidebar: #ffffff;
 
-  /* Accent family */
-  --accent: #0a8a7a;
+  /* Ink scale — warm, never pure black (as on the Mac). */
+  --text-1: #1a1816;
+  --text-2: #3d3936;
+  --text-3: #5f5a55;
+  --muted: #8a847c;
+  --muted-aa: color-mix(in srgb, var(--muted) 88%, #000);
+
+  /* Ink fill — the one filled button (Granola's black pill) and the toggle. */
+  --ink: #1a1816;
+  --ink-text: #ffffff;
+
+  /* Accent family — a soft, earthy orange (apricot/terracotta), not neon. */
+  --accent: #d97b45;
   --accent-2: color-mix(in srgb, var(--accent) 84%, #000);
-  --accent-soft: color-mix(in srgb, var(--accent) 11%, #fff);
-  --accent-text: color-mix(in srgb, var(--accent) 76%, #000);
-  --accent-fill: color-mix(in srgb, var(--accent) 84%, #000);
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, #fff);
+  --accent-text: color-mix(in srgb, var(--accent) 78%, #000);
+  --accent-fill: var(--accent);
   --accent-ink: #fff;
 
-  /* A second hue for the wash and for "amended" state — indigo. */
-  --indigo: #4338ca;
-  --indigo-soft: #ecebfb;
+  /* Frames. --line is every resting hairline: card borders, the sidebar
+     edge, the topbar rule, input outlines — a warm neutral with a hint of
+     the accent. --line-2 is the quieter divider between rows inside a
+     card. --line-hover and --line-active are the ONLY places the frame
+     goes orange: a hovered card, a selected tab, the current sidebar row. */
+  --line: color-mix(in srgb, var(--accent) 12%, #e3ddd5);
+  --line-2: color-mix(in srgb, var(--accent) 7%, #eeeae4);
+  --line-hover: color-mix(in srgb, var(--accent) 45%, #fff);
+  --line-active: color-mix(in srgb, var(--accent) 62%, #fff);
+  --hairline: 1px;
 
-  --warn: #b45309;
-  --warn-soft: #fdf3e2;
+  /* Second hue ("amended") — a dusty plum, as on the Mac. */
+  --indigo: #6b5b95;
+  --indigo-soft: color-mix(in srgb, var(--indigo) 10%, #fff);
+
+  --warn: #a8651a;
+  --warn-soft: color-mix(in srgb, var(--warn) 10%, #fff);
   /* --rec is the RECORDING colour — loud on purpose. */
-  --rec: #dc2626;
-  --rec-soft: #fee2e2;
+  --rec: #d9483b;
+  --rec-soft: color-mix(in srgb, var(--rec) 10%, #fff);
   /* --danger is DESTRUCTIVE UI — same family, quieter. */
-  --danger: #b4443e;
+  --danger: #b4483e;
   --danger-2: color-mix(in srgb, var(--danger) 86%, #000);
-  --danger-soft: color-mix(in srgb, var(--danger) 10%, #fff);
-  --danger-text: color-mix(in srgb, var(--danger) 84%, #000);
-  --ok: #047857;
-  --ok-soft: rgba(4, 120, 87, 0.10);
-  --info: #2563eb;
-  --info-soft: #e9effd;
+  --danger-soft: color-mix(in srgb, var(--danger) 9%, #fff);
+  --danger-text: #9a3a31;
+  --ok: #3f7d55;
+  --ok-soft: color-mix(in srgb, var(--ok) 11%, #fff);
+  --info: #4b6f9e;
+  --info-soft: color-mix(in srgb, var(--info) 10%, #fff);
 
-  --mark-bg: #fdf0c2;
+  --mark-bg: #fdefc8;
 
-  --shadow-1: 0 1px 2px rgba(11, 18, 32, 0.04), 0 1px 1px rgba(11, 18, 32, 0.02);
-  --shadow-2: 0 4px 14px -4px rgba(11, 18, 32, 0.08), 0 2px 6px rgba(11, 18, 32, 0.04);
-  --shadow-3: 0 12px 28px -8px rgba(11, 18, 32, 0.12);
+  /* Shadows are for floating things only (menus, modals, toasts). Cards
+     and panels are framed by a hairline, never lifted. */
+  --shadow-1: none;
+  --shadow-2: 0 6px 20px -6px rgba(26, 24, 22, 0.14), 0 1px 3px rgba(26, 24, 22, 0.06);
+  --shadow-3: 0 16px 40px -12px rgba(26, 24, 22, 0.22);
 
-  --radius: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* Radii — the Mac's, rounder than before. */
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
 
   /* Two scale knobs: --density scales SPACE, --fs scales TEXT. Every padding
      is authored as calc(Npx * var(--density)) and every font-size as
@@ -68,71 +95,75 @@
   --density: 1;
   --fs: 1;
 
-  --sidebar-w: 248px;
+  --sidebar-w: 256px;
   --topbar-h: calc(52px * var(--density));
 
-  /* Ambient washes — painted on the shell chrome only, never under text. */
-  --wash-page:
-    radial-gradient(1100px 520px at 32% -12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%),
-    radial-gradient(900px 460px at 100% -6%, color-mix(in srgb, var(--indigo) 15%, transparent), transparent 66%),
-    radial-gradient(900px 500px at 88% 108%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 68%);
-  --wash-panel: linear-gradient(180deg, color-mix(in srgb, var(--text-1) 3%, transparent), transparent);
+  /* The dot print behind the home page, sign-in and empty states: small
+     ink dots on a 20px grid, fading out from the top (DSDots on the Mac). */
+  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 16%, transparent) 1.1px, transparent 1.4px);
+  --dots-size: 20px 20px;
+  --dots-fade: radial-gradient(900px 900px at 50% 0, #000, rgba(0, 0, 0, 0.35) 55%, transparent 100%);
+  /* A soft light sweeps around the print: the angle turns, and the dots under
+     the bright band show while the ones off-axis recede. The dots never move.
+     The gradient itself lives on the dot pseudo-elements (base.css, shell.css)
+     because the angle is animated there and var() resolves where declared. */
+  --dots-light-duration: 26s;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0a0e14;
-  --surface: #11161e;
-  --surface-2: #1a2029;
-  --surface-hover: #1d242e;
-  --text-1: #e8ecf1;
-  --text-2: #c9d0d8;
-  --text-3: #a0a8b2;
-  --muted: #7a8493;
+  /* The same warm palette turned over. */
+  --bg: #171512;
+  --surface: #1e1b18;
+  --surface-2: #27231f;
+  --surface-hover: #231f1c;
+  --sidebar: #131110;
+
+  --text-1: #ece8e1;
+  --text-2: #cfc9c0;
+  --text-3: #a49d94;
+  --muted: #7d766e;
   --muted-aa: color-mix(in srgb, var(--muted) 88%, #fff);
-  --line: #232a35;
-  --line-2: #1d242e;
 
-  --accent: #2dd4bf;
-  --accent-2: color-mix(in srgb, var(--accent) 68%, #fff);
+  --ink: #ece8e1;
+  --ink-text: #171512;
+
+  --accent: #e39a68;
+  --accent-2: color-mix(in srgb, var(--accent) 70%, #fff);
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-text: color-mix(in srgb, var(--accent) 66%, #fff);
-  /* Filled control on a dark ground: the bright accent carries dark ink. */
+  --accent-text: color-mix(in srgb, var(--accent) 80%, #fff);
   --accent-fill: var(--accent);
-  --accent-ink: #0a0e14;
+  --accent-ink: #171512;
 
-  --indigo: #818cf8;
-  --indigo-soft: rgba(129, 140, 248, 0.10);
+  --line: color-mix(in srgb, var(--accent) 10%, #302b26);
+  --line-2: color-mix(in srgb, var(--accent) 6%, #272320);
+  --line-hover: color-mix(in srgb, var(--accent) 40%, var(--surface));
+  --line-active: color-mix(in srgb, var(--accent) 58%, var(--surface));
 
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.10);
-  --rec: #f87171;
-  --rec-soft: rgba(248, 113, 113, 0.12);
-  --danger: #bb4c45;
+  --indigo: #b3a4d6;
+  --indigo-soft: color-mix(in srgb, var(--indigo) 12%, transparent);
+
+  --warn: #e2a24d;
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+  --rec: #f0796d;
+  --rec-soft: color-mix(in srgb, var(--rec) 14%, transparent);
+  --danger: #c7574c;
   --danger-2: color-mix(in srgb, var(--danger) 78%, #fff);
   --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
-  --danger-text: color-mix(in srgb, var(--danger) 60%, #fff);
-  --ok: #34d399;
-  --ok-soft: rgba(52, 211, 153, 0.12);
-  --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.12);
+  --danger-text: #e29a92;
+  --ok: #7fc394;
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --info: #8fb0dd;
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
 
   --mark-bg: #4a3f16;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-2: 0 4px 14px -4px rgba(0, 0, 0, 0.45);
-  --shadow-3: 0 12px 28px -8px rgba(0, 0, 0, 0.55);
+  --shadow-1: none;
+  --shadow-2: 0 6px 20px -6px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
 
-  /* Dark: the wash has to LIFT, not tint, so lighten before mixing. */
-  --wash-page:
-    radial-gradient(1100px 520px at 32% -12%,
-      color-mix(in srgb, color-mix(in srgb, var(--accent) 55%, #fff) 14%, transparent), transparent 70%),
-    radial-gradient(900px 460px at 100% -6%,
-      color-mix(in srgb, color-mix(in srgb, var(--indigo) 65%, #fff) 12%, transparent), transparent 66%),
-    radial-gradient(900px 500px at 88% 108%,
-      color-mix(in srgb, color-mix(in srgb, var(--accent) 55%, #fff) 10%, transparent), transparent 68%);
-  --wash-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent);
+  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 14%, transparent) 1.1px, transparent 1.4px);
 }
 
 [data-density="compact"]  { --density: 0.85; }
