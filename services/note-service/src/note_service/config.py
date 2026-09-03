@@ -168,6 +168,39 @@ class Settings(BaseSettings):
     # Draft-idleness threshold (spec §4.4 / docs/runbooks/notes.md: 30d).
     idle_draft_days: int = Field(default=30, alias="MDX_IDLE_DRAFT_DAYS")
 
+    # ── Calendar connections (0019) ──────────────────────────────────────
+    # Google OAuth client for the read-only calendar connection behind the
+    # home page's "Coming up" list. Empty client id = feature off: reads
+    # answer ``available: false`` and connect answers 503. Create the
+    # client in Google Cloud Console (OAuth 2.0 Client ID, "Web
+    # application") with the redirect URI below as an authorised redirect.
+    google_calendar_client_id: str = Field(default="", alias="GOOGLE_CALENDAR_CLIENT_ID")
+    google_calendar_client_secret: SecretStrEnv = Field(
+        default_factory=lambda: Secret(""), alias="GOOGLE_CALENDAR_CLIENT_SECRET"
+    )
+    # Must be THIS service's public callback URL, exactly as registered
+    # at Google (scheme, host, port and path all count).
+    google_calendar_redirect_uri: str = Field(
+        default="http://localhost:8006/v1/calendar/google/callback",
+        alias="GOOGLE_CALENDAR_REDIRECT_URI",
+    )
+    # HMAC key that signs the OAuth ``state`` (domain/calendar_state).
+    # Hex-encoded; the dev default is NOT a secret. Rotating it only
+    # invalidates sign-ins that are mid-flight (15 minutes).
+    calendar_state_hmac_key_hex: str = Field(
+        default="6d64782d6465762d63616c656e6461722d73746174652d6b65792d30303030",
+        alias="MDX_CALENDAR_STATE_HMAC_KEY_HEX",
+    )
+    # Where the callback may send the browser afterwards, on top of the
+    # CORS origins (the web app) and the Mac app's ``notesai://`` scheme.
+    # Comma-separated URL prefixes.
+    calendar_return_to_extra: str = Field(default="", alias="MDX_CALENDAR_RETURN_TO_EXTRA")
+
+    @property
+    def calendar_return_to_prefixes(self) -> list[str]:
+        extra = [p.strip() for p in self.calendar_return_to_extra.split(",") if p.strip()]
+        return [*self.cors_origins_list, "notesai://", *extra]
+
     # ── Session revocation check (sprint 16) ────────────────────────────
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN

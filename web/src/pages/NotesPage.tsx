@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { errorMessage } from "../api/http";
 import { searchNotes } from "../api/notes";
 import type { SearchHit } from "../api/types";
+import { ComingUp } from "../components/ComingUp";
 import { EmptyState } from "../components/EmptyState";
 import { MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { SkeletonRow } from "../components/Skeleton";
@@ -215,6 +216,8 @@ export function NotesPage() {
           onChange={(e) => setQ(e.target.value)}
         />
       </label>
+
+      {!searching && <ComingUp />}
 
       {captures && captures.length > 0 && (
         <section className="home-group" aria-label="In progress">

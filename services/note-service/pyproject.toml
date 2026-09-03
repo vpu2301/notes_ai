@@ -30,6 +30,8 @@ dependencies = [
     "weasyprint>=62.0",
     "Jinja2>=3.1",
     "pypdf>=4.2",
+    # Calendar links (0020): RRULE expansion of iCal feeds
+    "python-dateutil>=2.9",
 ]
 
 [tool.uv.sources]

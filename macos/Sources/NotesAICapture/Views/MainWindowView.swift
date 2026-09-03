@@ -39,7 +39,7 @@ struct MainWindowView: View {
         .frame(minWidth: 860, minHeight: 540)
         .sheet(isPresented: $app.settingsPresented) {
             SettingsView(onClose: { app.settingsPresented = false })
-                .frame(width: 460, height: 560)
+                .frame(width: 760, height: 620)
         }
         .onAppear {
             NSApp.setActivationPolicy(.regular)
@@ -65,13 +65,13 @@ struct MainWindowView: View {
                     MeetingStatusPane(row: recent)
                 }
             } else {
-                HomeView(calendar: app.calendar)
+                HomeView(calendar: app.calendar, google: app.googleCalendar)
             }
         case .note(let noteId):
             NoteView(capture: app.recents.first { $0.noteId == noteId }, noteId: noteId, api: app.api)
                 .id(noteId)
         case nil:
-            HomeView(calendar: app.calendar)
+            HomeView(calendar: app.calendar, google: app.googleCalendar)
         }
     }
 }

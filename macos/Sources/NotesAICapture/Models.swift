@@ -524,3 +524,127 @@ enum Selection: Equatable {
     /// Any note from the tenant, by note id.
     case note(noteId: String)
 }
+
+// MARK: - Calendar connections (note-service, 0019)
+
+/// One calendar connected on the server — a Google account (`google`) or
+/// a calendar link (`ics`, a private iCal address; 0020). Shared by every
+/// client: connect once in the web app or here, the events show up in both.
+struct CalendarConnection: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let provider: String
+    let accountEmail: String
+    let connectedAt: Date
+    let hiddenCalendarIds: [String]
+    let needsReauth: Bool
+    let lastSyncedAt: Date?
+    let lastError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, provider
+        case accountEmail = "account_email"
+        case connectedAt = "connected_at"
+        case hiddenCalendarIds = "hidden_calendar_ids"
+        case needsReauth = "needs_reauth"
+        case lastSyncedAt = "last_synced_at"
+        case lastError = "last_error"
+    }
+
+    /// A calendar link rather than an OAuth account: `accountEmail` is its label.
+    var isLink: Bool { provider == "ics" }
+}
+
+struct CalendarConnectionsResponse: Decodable, Sendable {
+    /// False when the server has no Google client configured.
+    let available: Bool
+    /// True when the server takes calendar links (0020); nil on older servers.
+    let linkAvailable: Bool?
+    let connections: [CalendarConnection]
+
+    enum CodingKeys: String, CodingKey {
+        case available, connections
+        case linkAvailable = "link_available"
+    }
+}
+
+struct CalendarConnectResponse: Decodable, Sendable {
+    let authorizeUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case authorizeUrl = "authorize_url"
+    }
+}
+
+/// One calendar of a connected account, with whether it feeds the list.
+struct RemoteCalendar: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let color: String?
+    let primary: Bool
+    let shown: Bool
+}
+
+struct RemoteCalendarsResponse: Decodable, Sendable {
+    let connectionId: String
+    let calendars: [RemoteCalendar]
+
+    enum CodingKeys: String, CodingKey {
+        case connectionId = "connection_id"
+        case calendars
+    }
+}
+
+struct UpcomingEvent: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let connectionId: String
+    let accountEmail: String
+    let calendarId: String
+    let calendarName: String
+    let color: String?
+    let title: String
+    let start: Date
+    let end: Date
+    let allDay: Bool
+    let location: String?
+    let meetingUrl: String?
+    let htmlLink: String?
+    let attendeeCount: Int
+    let attendees: [String]
+    let organizer: String?
+    let responseStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, color, title, start, end, location, attendees, organizer
+        case connectionId = "connection_id"
+        case accountEmail = "account_email"
+        case calendarId = "calendar_id"
+        case calendarName = "calendar_name"
+        case allDay = "all_day"
+        case meetingUrl = "meeting_url"
+        case htmlLink = "html_link"
+        case attendeeCount = "attendee_count"
+        case responseStatus = "response_status"
+    }
+}
+
+struct CalendarProblem: Decodable, Equatable, Sendable {
+    let connectionId: String
+    let accountEmail: String
+    let code: String
+    let message: String
+    let needsReauth: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case code, message
+        case connectionId = "connection_id"
+        case accountEmail = "account_email"
+        case needsReauth = "needs_reauth"
+    }
+}
+
+struct UpcomingEventsResponse: Decodable, Sendable {
+    let available: Bool
+    let connected: Bool
+    let events: [UpcomingEvent]
+    let problems: [CalendarProblem]
+}

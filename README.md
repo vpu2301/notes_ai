@@ -52,6 +52,7 @@ explicitly.
 notes_ai/
 ├── web/                    # Web UI — React/Vite SPA (login, notes, editor, capture)
 ├── macos/                  # macOS app — "Notes AI Capture" SwiftUI menu-bar recorder
+├── ios/                    # iOS app — "Notes AI" SwiftUI iPhone recorder + note reader
 ├── services/               # Independently deployable FastAPI services
 │   ├── _template/          # Baseline template — copy this to create a new service
 │   ├── auth-service/       # Identity, tenants, MFA, sessions, audit read API
@@ -195,6 +196,11 @@ root folders:
   meeting note, with a link that opens the note in the web app. `cd macos &&
   swift run` for dev, `macos/scripts/make-app.sh` for a proper `.app` bundle
   without Xcode; XcodeGen spec included as well. See `macos/README.md`.
+- **`ios/`** — "Notes AI", the iPhone counterpart: the same capture
+  pipeline, home page, native note editor and connectors, laid out for a
+  phone. A committed Xcode project (`open ios/NotesAICapture.xcodeproj`),
+  iOS 17+; `ios/scripts/check.sh` compiles it without a simulator. See
+  `ios/README.md`.
 
 ## API documentation
 

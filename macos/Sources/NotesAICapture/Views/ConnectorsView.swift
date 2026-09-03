@@ -7,14 +7,36 @@ import SwiftUI
 struct ConnectorsView: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
+    @ObservedObject var google: GoogleCalendarService
     @ObservedObject var store: ConnectorStore
     @State private var editing: Connector?
     @State private var pendingRemoval: Connector?
+    @State private var pendingDisconnect: CalendarConnection?
+    @State private var addingLink = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            googleCard
             calendarCard
             connectorsCard
+        }
+        .alert(Text(pendingDisconnect?.isLink == true ? "Remove this calendar link?" : "Disconnect this Google account?"),
+               isPresented: Binding(
+            get: { pendingDisconnect != nil }, set: { if !$0 { pendingDisconnect = nil } }
+        )) {
+            Button(pendingDisconnect?.isLink == true ? "Remove" : "Disconnect", role: .destructive) {
+                if let connection = pendingDisconnect { Task { await google.disconnect(connection.id) } }
+                pendingDisconnect = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDisconnect = nil }
+        } message: {
+            Text(pendingDisconnect?.isLink == true
+                 ? "Its events leave the Coming up list here and in the web app. The calendar itself is untouched."
+                 : "Its events leave the Coming up list here and in the web app. Nothing changes in Google Calendar.")
+        }
+        .sheet(isPresented: $addingLink) {
+            CalendarLinkSheet(google: google) { addingLink = false }
+                .frame(width: 420)
         }
         .sheet(item: $editing) { connector in
             ConnectorEditor(connector: connector, store: store) { editing = nil }
@@ -32,16 +54,167 @@ struct ConnectorsView: View {
             Text("Its sign-in is forgotten on this Mac. Nothing changes on the other side.")
         }
         .onAppear { calendar.recheckAccess() }
+        .task { await google.refresh() }
     }
 
-    // MARK: - Calendar
+    // MARK: - Google Calendar & calendar links (server-side connections)
+
+    private var googleCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ConnectorGlyph(symbol: "calendar.badge.clock")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(google.linkAvailable ? "Google Calendar & calendar links" : "Google Calendar")
+                        .font(.ds(13, .medium))
+                        .foregroundStyle(DS.text1)
+                    Text(googleSubtitle)
+                        .font(.dsMeta)
+                        .foregroundStyle(google.error == nil ? DS.muted : DS.dangerText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                googleChip
+                if google.linkAvailable {
+                    // The no-client-id way in: primary when it is the only one.
+                    Button("Add link") { addingLink = true }
+                        .buttonStyle(DSButtonStyle(kind: google.available == false && !google.isConnected ? .primary : .secondary,
+                                                   size: 12, height: 28))
+                }
+                if google.available != false {
+                    Button(google.isConnected ? "Add account" : "Connect") { Task { await google.connect() } }
+                        .buttonStyle(DSButtonStyle(kind: google.isConnected ? .secondary : .primary, size: 12, height: 28))
+                        .disabled(google.connecting)
+                }
+            }
+            ForEach(google.connections) { connection in
+                DSDivider()
+                googleAccount(connection)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+    }
+
+    private var googleSubtitle: String {
+        if let error = google.error { return error }
+        switch google.available {
+        case nil: return "Checking the server…"
+        case .some(false) where !google.isConnected:
+            return google.linkAvailable
+                ? "Google sign-in is not set up on this server — add a calendar by its private iCal address instead."
+                : "Not set up on this server (GOOGLE_CALENDAR_CLIENT_ID)."
+        default:
+            if google.isConnected { return "Next 7 days on the home page, here and in the web app." }
+            return google.linkAvailable
+                ? "Connect an account or add a calendar link: the next meetings show on the home page, here and in the web app."
+                : "Connect an account: its next meetings show on the home page, here and in the web app."
+        }
+    }
+
+    @ViewBuilder
+    private var googleChip: some View {
+        if google.connecting {
+            DSChip(text: "Connecting", tint: DS.info, soft: DS.infoSoft, dot: true)
+        } else if google.connections.contains(where: \.needsReauth) {
+            DSChip(text: "Sign in", tint: DS.warn, soft: DS.warnSoft)
+        } else if google.isConnected {
+            DSChip(text: google.connections.count == 1 ? "Connected" : "\(google.connections.count) connected",
+                   tint: DS.ok, soft: DS.okSoft)
+        } else if google.available == false, !google.linkAvailable {
+            DSChip(text: "Not set up", tint: DS.muted, soft: DS.surface2)
+        } else {
+            DSChip(text: "Not connected", tint: DS.muted, soft: DS.surface2)
+        }
+    }
+
+    /// One connected account or link: its address, a Sign-in-again nudge
+    /// when Google dropped the token, and the calendars to include.
+    private func googleAccount(_ connection: CalendarConnection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if connection.isLink {
+                    Image(systemName: "link")
+                        .font(.ds(11, .medium))
+                        .foregroundStyle(DS.muted)
+                }
+                Text(connection.accountEmail)
+                    .font(.ds(12.5, .medium))
+                    .foregroundStyle(DS.text1)
+                    .lineLimit(1)
+                if let error = connection.lastError, connection.isLink {
+                    Text(error == "feed_gone" ? "Link no longer works" : "Couldn't fetch")
+                        .font(.ds(10.5, .medium))
+                        .foregroundStyle(DS.warn)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(DS.warnSoft))
+                }
+                Spacer(minLength: 6)
+                if connection.needsReauth {
+                    Button("Sign in again") { Task { await google.connect(loginHint: connection.accountEmail) } }
+                        .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 24))
+                        .disabled(google.connecting)
+                }
+                Button(connection.isLink ? "Remove" : "Disconnect") { pendingDisconnect = connection }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                    .foregroundStyle(DS.muted)
+            }
+            if let list = google.calendars[connection.id] {
+                ForEach(list) { item in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color(hexString: item.color) ?? DS.accent)
+                            .frame(width: 8, height: 8)
+                        Toggle(item.name, isOn: Binding(
+                            get: { item.shown },
+                            set: { google.setCalendarAsync(connectionId: connection.id, calendarId: item.id, shown: $0) }
+                        ))
+                        .toggleStyle(DSToggleStyle())
+                        if item.primary {
+                            Text("Primary")
+                                .font(.ds(10.5, .medium))
+                                .foregroundStyle(DS.text3)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(DS.surface2))
+                        }
+                    }
+                    .frame(height: 26)
+                }
+            } else if google.calendarsLoading.contains(connection.id) {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Loading calendars…")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                .frame(height: 26)
+            } else if connection.needsReauth {
+                Text("Calendars appear after the sign-in.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+            } else {
+                Button("Choose calendars…") { Task { await google.loadCalendars(for: connection.id) } }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                    .foregroundStyle(DS.accentText)
+            }
+        }
+        .task(id: connection.id) {
+            if google.calendars[connection.id] == nil, !connection.needsReauth {
+                await google.loadCalendars(for: connection.id)
+            }
+        }
+    }
+
+    // MARK: - This Mac's calendars (EventKit)
 
     private var calendarCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 ConnectorGlyph(symbol: "calendar")
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Calendar")
+                    Text("This Mac's calendars")
                         .font(.ds(13, .medium))
                         .foregroundStyle(DS.text1)
                     Text(calendarSubtitle)
@@ -68,7 +241,7 @@ struct ConnectorsView: View {
             return shown == calendar.calendars.count
                 ? "\(calendar.calendars.count) calendars · next 7 days on the home page"
                 : "\(shown) of \(calendar.calendars.count) calendars · next 7 days on the home page"
-        case .notAsked: return "See your next meetings and start a note from one."
+        case .notAsked: return "Calendars from System Settings › Internet Accounts, on this Mac only."
         case .denied: return "Access is off for Notes AI in System Settings."
         case .unavailable: return "Needs the .app bundle (scripts/make-app.sh)."
         }
@@ -327,6 +500,93 @@ private struct ConnectorGlyph: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(DS.accentSoft)
             )
+    }
+}
+
+// MARK: - Calendar link sheet (0020)
+
+/// Paste a calendar's private iCal address. The server fetches it before
+/// answering, so a wrong link fails right here with a readable message.
+/// Shared by the Connectors tab and the home page's Coming up card.
+struct CalendarLinkSheet: View {
+    @ObservedObject var google: GoogleCalendarService
+    let onClose: () -> Void
+
+    @State private var url = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Add a calendar link")
+                    .font(.dsDisplay(16, .medium))
+                    .foregroundStyle(DS.text1)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            DSDivider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Paste the calendar's private iCal address. No Google sign-in needed; the events show here and in the web app.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Calendar address")
+                        .font(.ds(12, .medium))
+                        .foregroundStyle(DS.text3)
+                    DSTextField(placeholder: "https://calendar.google.com/calendar/ical/…/basic.ics", text: $url, mono: true)
+                }
+                Text("Google Calendar: Settings → your calendar → Integrate calendar → “Secret address in iCal format”. Published Outlook and iCloud calendar links work too.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let error {
+                    Text(error)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.dangerText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(20)
+
+            DSDivider()
+            HStack {
+                Spacer()
+                Button("Cancel") { onClose() }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(busy)
+                Button(busy ? "Checking…" : "Add calendar") { add() }
+                    .buttonStyle(DSButtonStyle(kind: .primary, height: 28))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isValid || busy)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+        .background(DS.bg)
+    }
+
+    private var isValid: Bool {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.hasPrefix("https://") || trimmed.hasPrefix("webcal://") || trimmed.hasPrefix("http://")
+    }
+
+    private func add() {
+        guard isValid, !busy else { return }
+        busy = true
+        error = nil
+        Task {
+            if let message = await google.addLink(url: url) {
+                error = message
+            } else {
+                onClose()
+            }
+            busy = false
+        }
     }
 }
 

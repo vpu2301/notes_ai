@@ -35,7 +35,7 @@ final class AppState: ObservableObject {
     /// Which tab the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable { case general, connectors }
+    enum SettingsTab: Hashable, CaseIterable { case general, connectors, account, advanced }
 
     /// Open Settings on the Connectors tab (menus, the home page's prompt).
     func showConnectors() {
@@ -62,6 +62,8 @@ final class AppState: ObservableObject {
     /// nil = every note; otherwise only the notes filed in that space.
     @Published var selectedSpaceId: String?
     let calendar = CalendarService()
+    /// Google Calendar connected on the server (shared with the web app).
+    private(set) lazy var googleCalendar = GoogleCalendarService(api: api)
     /// Remote MCP servers (HubSpot, Notion, …) connected on this Mac.
     let connectors = ConnectorStore()
     private var searchTask: Task<Void, Never>?
@@ -110,7 +112,10 @@ final class AppState: ObservableObject {
 
     func restoreSession() async {
         authState = await api.restoreSession() ? .signedIn : .signedOut
-        if authState == .signedIn { await refreshNotes() }
+        if authState == .signedIn {
+            await refreshNotes()
+            await googleCalendar.refresh(force: true)
+        }
     }
 
     func signIn(email: String, password: String, otp: String?) async throws {
@@ -119,10 +124,12 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(email, forKey: Keys.email)
         authState = .signedIn
         await refreshNotes()
+        await googleCalendar.refresh(force: true)
     }
 
     func signOut() async {
         await api.logout()
+        googleCalendar.reset()
         templateCache = nil
         notes = []
         selection = nil
@@ -133,6 +140,7 @@ final class AppState: ObservableObject {
     /// sign-in form (the popover and the window both key off `authState`).
     private func sessionExpired() {
         guard authState == .signedIn else { return }
+        googleCalendar.reset()
         templateCache = nil
         notes = []
         selection = nil

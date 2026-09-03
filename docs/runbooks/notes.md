@@ -110,6 +110,101 @@ this as `note.draft.updated` with payload `{manual_reopen: true}`.
 (Autosave min-interval 5 s and diff-cache 1024 entries are in-code
 defaults — `domain/autosave_rate_limit.py`, `domain/diff_cache.py`.)
 
+## Calendar connections (0019)
+
+The home page's **Coming up** list reads the user's calendar through
+note-service. Two ways in, both stored in the same table and read by the
+same clients:
+
+- **Google account (OAuth)** — needs a Google OAuth client on the
+  deployment (below). Lists every calendar of the account; the user picks.
+- **Calendar link (0020)** — needs nothing on the deployment. The user
+  pastes the calendar's private iCal address; see *Calendar links* below.
+
+### Google account
+
+Nothing on the Google path works until the deployment has an OAuth client:
+
+1. Google Cloud Console → *APIs & Services* → enable **Google Calendar API**.
+2. *Credentials* → **OAuth 2.0 Client ID**, type *Web application*. Add
+   `GOOGLE_CALENDAR_REDIRECT_URI` (default
+   `http://localhost:8006/v1/calendar/google/callback`) as an authorised
+   redirect URI — scheme, host, port and path must match exactly.
+3. Set `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET` on
+   note-service (compose reads them from the shell / `.env`). Leave them
+   empty and both clients hide the connect button (`available: false`).
+4. Consent screen: scopes `openid`, `email`,
+   `https://www.googleapis.com/auth/calendar.readonly` — read-only; the
+   service never writes to a calendar. While the app is in *Testing* status
+   only listed test users can connect, and Google expires their refresh
+   tokens after 7 days.
+
+Storage: `calendar_connections`, one row per (user, account). Tokens are
+envelope-encrypted with the tenant KEK (`token_blob`); a dump is useless
+without the master key. Rows are personal — every read filters on the
+caller's `sub` on top of tenant RLS.
+
+### Calendar links (0020)
+
+`POST /v1/calendar/ics/connect {url}` adds a calendar by its private
+subscription address — no Google client, no OAuth, and it works for
+Outlook and iCloud feeds too. Where users find the address:
+
+- Google Calendar → Settings → the calendar → *Integrate calendar* →
+  **Secret address in iCal format**.
+- Outlook.com → Settings → Calendar → *Shared calendars* → **Publish a
+  calendar** (ICS link).
+- iCloud Calendar → share icon → **Public calendar** (the `webcal://` link).
+
+How it works: the service fetches the feed once at add time (a wrong link
+fails right there), then again on every `GET /v1/calendar/events` (no
+cache — Google itself only refreshes a secret address every few hours, so
+the feed is the bottleneck, not us). The ICS is parsed in
+`domain/ics_calendar.py` (RRULE/EXDATE/RECURRENCE-ID expansion via
+`python-dateutil`), and events come out shaped like the Google ones.
+
+Storage: the same `calendar_connections` row with `provider = 'ics'`. The
+URL **is** the credential (anyone holding it reads the calendar), so it
+is sealed in `token_blob` like a token; `account_email` carries the feed's
+display label (its `X-WR-CALNAME`, or the host); `feed_fingerprint` is
+sha256(url) so the same link added twice updates the row.
+
+Fetching a user-supplied URL is SSRF surface. Policy (`normalize_feed_url`,
+`assert_public_host`): https only (`webcal://` rewritten), no credentials
+in the URL, host must resolve to public addresses only — checked before
+the request and after every redirect, at most 5 hops — body capped at
+5 MB, and the response must contain `BEGIN:VCALENDAR`. There is no
+allow-list of hosts on purpose: any calendar product qualifies.
+
+Link symptoms:
+
+- **"The link no longer works"** (`last_error = feed_gone`, HTTP 401/403/
+  404/410 from the feed) — the user reset the secret address in Google
+  Calendar, or the published calendar was unpublished. They add the new
+  link; the old row is disconnected from the ⋯ menu.
+- **Times off by hours** — the feed uses a `TZID` zoneinfo does not know
+  (Windows names from some Outlook exports). The parser falls back to the
+  feed's `X-WR-TIMEZONE`, then UTC, and logs `calendar.ics.unknown_tzid`.
+- **Connect answers 400 "private network"** — the address resolves to a
+  loopback / RFC 1918 / link-local host. Expected; there is no override.
+- **Event missing that Google shows** — the secret address lags the UI by
+  up to a few hours on Google's side; nothing to do server-side.
+
+Google symptoms:
+
+- **"Google asked to sign in again"** — the refresh token died
+  (`needs_reauth = true`, `last_error = needs_reauth`). Password change,
+  revoked at myaccount.google.com, or the 7-day testing-mode expiry. The
+  user reconnects; nothing to do server-side.
+- **`?calendar=error&reason=no_refresh_token`** — Google skipped the
+  consent screen. The connect URL always sends `prompt=consent`; check that
+  a proxy is not rewriting the query.
+- **`reason=redirect_uri_mismatch`** — the registered redirect URI differs
+  from `GOOGLE_CALENDAR_REDIRECT_URI`. Compare character by character.
+- **Connect answers 400 `return_to`** — the client's origin is not in
+  `CORS_ALLOWED_ORIGINS` (or `MDX_CALENDAR_RETURN_TO_EXTRA`). The Mac app's
+  `notesai://` scheme is always allowed.
+
 ## Secrets
 
 None specific to the notes surface beyond the shared master-key mount

@@ -22,6 +22,8 @@ from .domain.cache import TemplateCache
 from .domain.clip_rate_limit import ClipRateLimiter
 from .domain.diff_cache import DiffCache
 from .domain.draft_audit_buffer import DraftAuditBuffer
+from .domain.google_calendar import GoogleCalendarClient
+from .domain.ics_calendar import IcsFeedClient
 from .domain.search_audit_buffer import SearchAuditBuffer
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,14 @@ class ServiceState:
     clip_rate_limiter: ClipRateLimiter
     # Sprint 15: aggregated search.expanded audit (ADR-0038).
     search_audit_buffer: SearchAuditBuffer
+    # 0019: calendar connections. The envelope seals OAuth tokens at
+    # rest; the Google client is unconfigured (and says so) when the
+    # deployment has no client id.
+    envelope: Envelope
+    google_calendar: GoogleCalendarClient
+    # 0020: calendar links (iCal feeds) — fetched with the SSRF policy in
+    # domain/ics_calendar; needs no configuration.
+    ics_feeds: IcsFeedClient
     # Metric handles (kept on state so routers don't recreate them).
     diff_cache_hit_metric: object
     autosave_conflicts_metric: object
@@ -186,6 +196,12 @@ async def build_state() -> ServiceState:
 
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
 
+    google_calendar = GoogleCalendarClient(
+        client_id=settings.google_calendar_client_id,
+        client_secret=settings.google_calendar_client_secret.value(),
+        redirect_uri=settings.google_calendar_redirect_uri,
+    )
+
     return ServiceState(
         jwks_cache=jwks_cache,
         app_pool=app_pool,
@@ -202,6 +218,9 @@ async def build_state() -> ServiceState:
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
         search_audit_buffer=search_audit_buffer,
+        envelope=envelope,
+        google_calendar=google_calendar,
+        ics_feeds=IcsFeedClient(),
         diff_cache_hit_metric=diff_cache_hit_metric,
         autosave_conflicts_metric=autosave_conflicts_metric,
         clips_created_metric=clips_created_metric,
@@ -213,6 +232,8 @@ async def teardown_state(state: ServiceState) -> None:
     await state.draft_audit_buffer.stop()
     await state.search_audit_buffer.stop()
     await state.redis.aclose()
+    await state.google_calendar.aclose()
+    await state.ics_feeds.aclose()
     await state.jwks_cache.aclose()
     await state.app_pool.close()
     await state.audit_writer_pool.close()

@@ -305,3 +305,50 @@ export function FileDownIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+export function CalendarIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="3" y="4.5" width="14" height="12.5" rx="2.5" />
+      <path d="M3 8.5h14M7 2.5v3.5M13 2.5v3.5" />
+    </svg>
+  );
+}
+
+export function CalendarClockIcon({ size = 24 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M3 8.5h9M6.5 2.5v3.5M11.5 2.5v3.5" />
+      <path d="M9.5 16.5H5.5A2.5 2.5 0 0 1 3 14V6.5A2.5 2.5 0 0 1 5.5 4h7A2.5 2.5 0 0 1 15 6.5V9" />
+      <circle cx="14.5" cy="14.5" r="3.6" />
+      <path d="M14.5 12.7v1.9l1.3 1" />
+    </svg>
+  );
+}
+
+export function VideoIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="2.5" y="5.5" width="11" height="9" rx="2" />
+      <path d="M13.5 9l4-2.5v7l-4-2.5" />
+    </svg>
+  );
+}
+
+export function RefreshIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6" />
+      <path d="M16.5 3.5v4h-4" />
+    </svg>
+  );
+}
+
+export function LinkOffIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M8 12l4-4M7.5 5.5l1-1a3 3 0 0 1 4.3 4.3l-1 1M12.5 14.5l-1 1a3 3 0 0 1-4.3-4.3l1-1" />
+      <path d="M3.5 3.5l13 13" />
+    </svg>
+  );
+}

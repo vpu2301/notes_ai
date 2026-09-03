@@ -196,7 +196,7 @@ services:
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${PUBLISH_HOST:-127.0.0.1}:8000:8000"
     healthcheck: *svc-healthcheck
     depends_on:
       postgres:
@@ -230,7 +230,7 @@ services:
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
-      - "127.0.0.1:8001:8000"
+      - "${PUBLISH_HOST:-127.0.0.1}:8001:8000"
     healthcheck: *svc-healthcheck
     depends_on:
       postgres:
@@ -417,10 +417,18 @@ services:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
+      # Google Calendar (0019). Calendar links (0020, iCal addresses)
+      # need none of this. Leave the client id empty and the
+      # "Coming up" list simply hides its connect button. When set, the
+      # redirect URI must be registered on the OAuth client at Google and
+      # point at THIS service as the browser reaches it.
+      GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
+      GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
+      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:8006/v1/calendar/google/callback}
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
-      - "127.0.0.1:8006:8000"
+      - "${PUBLISH_HOST:-127.0.0.1}:8006:8000"
     healthcheck: *svc-healthcheck
     depends_on:
       postgres:

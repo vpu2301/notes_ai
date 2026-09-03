@@ -68,6 +68,12 @@ SYNONYM_GROUP_CREATED: Final = "synonym.group.created"
 SYNONYM_GROUP_UPDATED: Final = "synonym.group.updated"
 SYNONYM_GROUP_DELETED: Final = "synonym.group.deleted"
 
+# ── 0019: calendar connections ──────────────────────────────────────
+# Payload: provider and the connection id — never the account's
+# e-mail, and never an event title.
+CALENDAR_CONNECTED: Final = "calendar.connected"
+CALENDAR_DISCONNECTED: Final = "calendar.disconnected"
+
 # ── Sprint 16 — scheduler runs ──────────────────────────────────────────
 SCHEDULER_JOB_COMPLETED: Final = "scheduler.job.completed"
 SCHEDULER_JOB_FAILED: Final = "scheduler.job.failed"

@@ -317,3 +317,72 @@ section:first-of-type > .tpl-cat { margin-top: 0; }
 .shared-text { white-space: pre-wrap; margin: 6px 0 0; line-height: 1.65; }
 .shared-doc h2.section-name { margin: 0; }
 .shared-foot { padding: calc(14px * var(--density)) calc(20px * var(--density)); color: var(--muted); font-size: calc(12px * var(--fs)); text-align: center; }
+
+/* ─── Coming up (calendar) ──────────────────────────────────────────────── */
+/* ComingUp: one framed card — today's date on the left in display type,
+   the next days' events on the right. Empty states sit in a dashed frame
+   inside the card, as Granola does. */
+.cu-head { display: flex; align-items: center; gap: 8px; }
+.cu-head .home-group-h { flex: 1; }
+.cu-card {
+  display: flex; gap: calc(20px * var(--density));
+  padding: calc(16px * var(--density));
+  background: var(--surface);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-xl, 20px);
+}
+.cu-date {
+  flex: none; width: 128px;
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px;
+  align-content: start; padding-top: 2px;
+}
+.cu-date-day {
+  grid-row: 1 / span 2;
+  font-family: var(--display); font-size: calc(34px * var(--fs)); font-weight: 500; line-height: 1;
+  color: var(--text-1); font-variant-numeric: tabular-nums;
+}
+.cu-date-month { font-size: calc(13.5px * var(--fs)); font-weight: 600; color: var(--text-1); display: inline-flex; align-items: center; gap: 5px; align-self: end; }
+.cu-date-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.cu-date-wd { font-size: calc(12.5px * var(--fs)); color: var(--muted); }
+.cu-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
+.cu-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-height: 150px; padding: calc(20px * var(--density));
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius-lg);
+  color: var(--muted); text-align: center;
+}
+.cu-empty svg { color: var(--muted); opacity: .8; }
+.cu-empty-text { font-size: calc(13.5px * var(--fs)); max-width: 320px; }
+.cu-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.cu-list { border-radius: var(--radius-lg); }
+.cu-row { align-items: center; }
+.cu-row.live .cu-time { color: var(--accent-text); font-weight: 600; }
+.cu-when {
+  flex: none; width: 96px; display: flex; flex-direction: column; gap: 1px;
+  font-size: calc(12px * var(--fs)); color: var(--text-3); font-variant-numeric: tabular-nums; line-height: 1.3;
+}
+.cu-day { font-size: calc(10.5px * var(--fs)); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.cu-bar { flex: none; width: 3px; height: 28px; border-radius: 2px; }
+.cu-actions { display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .12s; }
+.cu-row:hover .cu-actions, .cu-row:focus-within .cu-actions { opacity: 1; }
+.cu-actions .btn.ghost { color: var(--text-2); }
+.cu-problem {
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(8px * var(--density)) calc(12px * var(--density));
+  background: var(--warn-soft); color: var(--text-1);
+  border-radius: var(--radius); font-size: calc(12.5px * var(--fs));
+}
+.cu-problem .grow { flex: 1; min-width: 0; }
+.cu-picker { display: flex; flex-direction: column; gap: calc(14px * var(--density)); }
+.cu-picker-account h3 { margin: 0 0 6px; font-size: calc(11px * var(--fs)); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.cu-picker-row { display: flex; width: 100%; padding: 5px 0; }
+.cu-picker-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-picker-note { margin: 0; color: var(--muted); font-size: calc(12.5px * var(--fs)); }
+.cu-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+@media (max-width: 640px) {
+  .cu-card { flex-direction: column; gap: 12px; }
+  .cu-date { width: auto; }
+  .cu-when { width: 72px; }
+  .cu-actions { opacity: 1; }
+}

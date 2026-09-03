@@ -174,6 +174,7 @@ struct SidebarView: View {
             return false
         }.count
         if app.calendar.access == .granted { count += 1 }
+        count += app.googleCalendar.connections.count
         return count == 0 ? nil : "\(count) connected"
     }
 

@@ -386,3 +386,74 @@ export interface SourceJobLink {
   code: string;
   status: string;
 }
+
+// ── note-service: calendar connections (0019) ──────────────────────────
+
+export interface CalendarConnection {
+  id: string;
+  /** "google": an OAuth account; "ics": a calendar link (private iCal address, 0020). */
+  provider: "google" | "ics";
+  account_email: string;
+  connected_at: string;
+  hidden_calendar_ids: string[];
+  needs_reauth: boolean;
+  last_synced_at: string | null;
+  last_error: string | null;
+}
+
+export interface CalendarConnectionsResponse {
+  /** False when the server has no Google client configured. */
+  available: boolean;
+  /** True when the server accepts calendar links (0020); absent on older servers. */
+  link_available?: boolean;
+  connections: CalendarConnection[];
+}
+
+export interface CalendarEntry {
+  id: string;
+  name: string;
+  color: string | null;
+  primary: boolean;
+  shown: boolean;
+}
+
+export interface CalendarListResponse {
+  connection_id: string;
+  calendars: CalendarEntry[];
+}
+
+export interface UpcomingEvent {
+  id: string;
+  connection_id: string;
+  account_email: string;
+  calendar_id: string;
+  calendar_name: string;
+  color: string | null;
+  title: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  location: string | null;
+  meeting_url: string | null;
+  html_link: string | null;
+  attendee_count: number;
+  attendees: string[];
+  organizer: string | null;
+  response_status: string | null;
+}
+
+export interface CalendarProblem {
+  connection_id: string;
+  account_email: string;
+  code: string;
+  message: string;
+  needs_reauth: boolean;
+}
+
+export interface UpcomingEventsResponse {
+  available: boolean;
+  connected: boolean;
+  events: UpcomingEvent[];
+  problems: CalendarProblem[];
+  fetched_at: string;
+}

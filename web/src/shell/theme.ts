@@ -4,6 +4,13 @@ export type ThemePref = "system" | "light" | "dark";
 
 const KEY = "notesai.theme";
 
+/**
+ * The web is white by default — the paper-and-ink look of the Mac app on a
+ * pure white ground — whatever the OS appearance says. Dark and "follow the
+ * system" stay one click away in the sidebar and are remembered once chosen.
+ */
+const DEFAULT_PREF: ThemePref = "light";
+
 function readPref(): ThemePref {
   try {
     const v = localStorage.getItem(KEY);
@@ -11,7 +18,7 @@ function readPref(): ThemePref {
   } catch {
     /* storage unavailable */
   }
-  return "system";
+  return DEFAULT_PREF;
 }
 
 function systemDark(): boolean {

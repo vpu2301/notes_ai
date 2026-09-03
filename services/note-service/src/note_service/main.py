@@ -19,6 +19,7 @@ from .main_deps import build_state, teardown_state
 from .middleware import RequestIDMiddleware
 from .routers import (
     audio_clips,
+    calendar,
     health,
     notes,
     notes_amend,
@@ -148,6 +149,8 @@ def create_app() -> FastAPI:
     # Sprint 15: query expansion surfaces (ADR-0038).
     app.include_router(search_tips.router)
     app.include_router(synonyms.router)
+    # 0019: calendar connections + the "Coming up" events read.
+    app.include_router(calendar.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

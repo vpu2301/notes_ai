@@ -9,11 +9,13 @@ struct HomeView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
     @ObservedObject private var calendar: CalendarService
+    @ObservedObject private var google: GoogleCalendarService
     @State private var pendingTrash: NoteSummary?
     @State private var trashError: String?
 
-    init(calendar: CalendarService) {
+    init(calendar: CalendarService, google: GoogleCalendarService) {
         self.calendar = calendar
+        self.google = google
     }
 
     var body: some View {
@@ -25,8 +27,8 @@ struct HomeView: View {
                     ActiveCaptureCard()
                         .dsCard(padding: 16, radius: DS.radiusXl)
                 }
-                if app.selectedSpaceId == nil, searchQuery.isEmpty, calendar.access != .unavailable {
-                    upcoming
+                if app.selectedSpaceId == nil, searchQuery.isEmpty, showComingUp {
+                    ComingUpCard(calendar: calendar, google: google)
                 }
                 if app.selectedSpaceId == nil, !pendingCaptures.isEmpty {
                     section("Meetings") {
@@ -41,7 +43,7 @@ struct HomeView: View {
             .padding(.bottom, 60)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
-        .task { await app.refreshNotes(); calendar.refresh() }
+        .task { await app.refreshNotes(); calendar.refresh(); await google.refresh() }
         .alert("Move this note to the trash?", isPresented: Binding(
             get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }
         )) {
@@ -102,54 +104,13 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Upcoming (calendar)
+    // MARK: - Coming up (calendar)
 
-    @ViewBuilder
-    private var upcoming: some View {
-        switch calendar.access {
-        case .granted:
-            if !calendar.events.isEmpty {
-                section("Upcoming") {
-                    rows(calendar.events.map { AnyView(EventRow(event: $0)) })
-                }
-            }
-        case .notAsked:
-            section("Upcoming") {
-                promptRow("See your next meetings here and start a note from one.",
-                          button: "Connect calendar") {
-                    Task { await calendar.requestAccess() }
-                }
-            }
-        case .denied:
-            section("Upcoming") {
-                promptRow("Calendar access is off for Notes AI in System Settings.",
-                          button: "Open System Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-            }
-        case .unavailable:
-            EmptyView()
-        }
-    }
-
-    private func promptRow(_ text: String, button: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar")
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(DS.accentText)
-            Text(text)
-                .font(.dsBody)
-                .foregroundStyle(DS.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button(button, action: action)
-                .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 28))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .dsCard(padding: 0, radius: DS.radiusLg)
+    /// Hidden only when there is nothing to offer: the server has no
+    /// Google client, nothing is connected, and this is a dev binary
+    /// without calendar access.
+    private var showComingUp: Bool {
+        google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
     }
 
     // MARK: - Meetings in flight
@@ -406,36 +367,280 @@ private struct CaptureRow: View {
     }
 }
 
-/// A calendar event; hover shows a Start button that begins a meeting
-/// with the event's title.
-private struct EventRow: View {
+/// "Coming up": today's date on the left, the next days' events on the
+/// right — from the Google accounts and calendar links connected on the
+/// server and from this Mac's own calendars, merged. One button connects
+/// Google (or adds a link when the server has no Google client); the ⋯
+/// menu holds the rest (choose calendars, another account, disconnect).
+private struct ComingUpCard: View {
+    @EnvironmentObject private var app: AppState
+    @ObservedObject var calendar: CalendarService
+    @ObservedObject var google: GoogleCalendarService
+    @State private var pendingDisconnect: CalendarConnection?
+    @State private var addingLink = false
+
+    private var items: [ComingUpItem] {
+        ComingUpItem.merge(google: google.events, mac: calendar.access == .granted ? calendar.events : [])
+    }
+
+    private var anySource: Bool { google.isConnected || calendar.access == .granted }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                DSLabel("Coming up").padding(.leading, 4)
+                Spacer()
+                if google.loading, google.isConnected {
+                    ProgressView().controlSize(.mini)
+                }
+                DSMenu(width: 260, dim: true, items: menuItems)
+            }
+            HStack(alignment: .top, spacing: 20) {
+                dateBlock
+                    .frame(width: 118, alignment: .leading)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(google.problems, id: \.connectionId) { problem in
+                        problemRow(problem)
+                    }
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(16)
+            .dsCard(padding: 0, radius: DS.radiusXl)
+        }
+        .alert(Text(pendingDisconnect?.isLink == true ? "Remove this calendar link?" : "Disconnect this Google account?"),
+               isPresented: Binding(
+            get: { pendingDisconnect != nil }, set: { if !$0 { pendingDisconnect = nil } }
+        )) {
+            Button(pendingDisconnect?.isLink == true ? "Remove" : "Disconnect", role: .destructive) {
+                if let connection = pendingDisconnect { Task { await google.disconnect(connection.id) } }
+                pendingDisconnect = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDisconnect = nil }
+        } message: {
+            Text(pendingDisconnect?.isLink == true
+                 ? "Its events leave the list here and in the web app. The calendar itself is untouched."
+                 : "Its events leave the list here and in the web app. Nothing changes in Google Calendar.")
+        }
+        .sheet(isPresented: $addingLink) {
+            CalendarLinkSheet(google: google) { addingLink = false }
+                .frame(width: 420)
+        }
+    }
+
+    private var dateBlock: some View {
+        let now = Date()
+        return HStack(alignment: .top, spacing: 10) {
+            Text(now.formatted(.dateTime.day()))
+                .font(.dsDisplay(34, .medium))
+                .foregroundStyle(DS.text1)
+                .monospacedDigit()
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(now.formatted(.dateTime.month(.wide)))
+                        .font(.ds(13.5, .semibold))
+                        .foregroundStyle(DS.text1)
+                    Circle().fill(DS.accent).frame(width: 6, height: 6)
+                }
+                Text(now.formatted(.dateTime.weekday(.abbreviated)))
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if !anySource {
+            dashed {
+                VStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 26, weight: .light))
+                        .foregroundStyle(DS.muted)
+                    Text("See your next meetings here and start a note from one.")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                    HStack(spacing: 8) {
+                        if google.available != false {
+                            Button(google.connecting ? "Opening Google…" : "Connect Google Calendar") {
+                                Task { await google.connect() }
+                            }
+                            .buttonStyle(DSButtonStyle(kind: .primary, size: 12.5, height: 30))
+                            .disabled(google.connecting)
+                        }
+                        if google.linkAvailable {
+                            Button("Add calendar link") { addingLink = true }
+                                .buttonStyle(DSButtonStyle(kind: google.available == false ? .primary : .secondary,
+                                                           size: 12.5, height: 30))
+                        }
+                        if calendar.access == .notAsked {
+                            Button("Use this Mac's calendars") { Task { await calendar.requestAccess() } }
+                                .buttonStyle(DSButtonStyle(kind: .secondary, size: 12.5, height: 30))
+                        }
+                    }
+                    if let error = google.error {
+                        Text(error)
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.dangerText)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+        } else if items.isEmpty {
+            dashed {
+                VStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 26, weight: .light))
+                        .foregroundStyle(DS.muted)
+                    Text(google.loading && google.events.isEmpty ? "Loading…" : "No upcoming events")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                }
+            }
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    ComingUpRow(item: item)
+                    if index < items.count - 1 {
+                        DSDivider().padding(.leading, 16)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous))
+            .dsCard(padding: 0, radius: DS.radiusLg)
+        }
+    }
+
+    private func dashed(@ViewBuilder _ inner: () -> some View) -> some View {
+        inner()
+            .frame(maxWidth: .infinity, minHeight: 150)
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    .foregroundStyle(DS.line)
+            )
+    }
+
+    private func problemRow(_ problem: CalendarProblem) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.ds(11, .semibold))
+                .foregroundStyle(DS.warn)
+            Text(problem.needsReauth
+                 ? "Google asked to sign in again for \(problem.accountEmail)."
+                 : "\(problem.accountEmail): \(problem.message)")
+                .font(.ds(12.5))
+                .foregroundStyle(DS.text1)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            if problem.needsReauth {
+                Button("Sign in again") { Task { await google.connect(loginHint: problem.accountEmail) } }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
+                    .disabled(google.connecting)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: DS.radius, style: .continuous).fill(DS.warnSoft))
+    }
+
+    private func menuItems() -> [DSMenuItem] {
+        var items: [DSMenuItem] = []
+        if google.isConnected || calendar.access == .granted {
+            items.append(.item("Choose calendars…", symbol: "calendar") { app.showConnectors() })
+            items.append(.item("Refresh", symbol: "arrow.clockwise") {
+                calendar.refresh()
+                Task { await google.refresh(force: true) }
+            })
+        }
+        if google.available != false {
+            if !items.isEmpty { items.append(.separator) }
+            items.append(.item(google.isConnected ? "Connect another Google account" : "Connect Google Calendar",
+                               symbol: "plus") { Task { await google.connect() } })
+        }
+        if google.linkAvailable {
+            if google.available == false, !items.isEmpty { items.append(.separator) }
+            items.append(.item("Add calendar link…", symbol: "link") { addingLink = true })
+        }
+        if calendar.access == .notAsked {
+            items.append(.item("Use this Mac's calendars", symbol: "desktopcomputer") {
+                Task { await calendar.requestAccess() }
+            })
+        }
+        if !google.connections.isEmpty {
+            items.append(.separator)
+            for connection in google.connections {
+                items.append(.item(connection.isLink ? "Remove \(connection.accountEmail)" : "Disconnect \(connection.accountEmail)",
+                                   symbol: "xmark.circle", danger: true) {
+                    pendingDisconnect = connection
+                })
+            }
+        }
+        return items
+    }
+}
+
+/// One upcoming event; hover shows Join (when it has a video link) and a
+/// Start button that begins a meeting note with the event's title.
+private struct ComingUpRow: View {
     @EnvironmentObject private var capture: CaptureViewModel
-    let event: CalendarService.Event
+    let item: ComingUpItem
     @State private var hover = false
 
     var body: some View {
         HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                if !Calendar.current.isDateInToday(item.start) {
+                    Text(dayLabel.uppercased())
+                        .font(.dsLabel)
+                        .tracking(0.5)
+                        .foregroundStyle(DS.muted)
+                }
+                Text(item.isLive ? "Now" : when)
+                    .font(.ds(12, item.isLive ? .semibold : .regular))
+                    .foregroundStyle(item.isLive ? DS.accentText : DS.text3)
+                    .monospacedDigit()
+            }
+            .frame(width: 96, alignment: .leading)
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(event.calendarColor.map { Color(cgColor: $0) } ?? DS.accent)
+                .fill(item.color ?? DS.accent)
                 .frame(width: 3, height: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title)
+                Text(item.title)
                     .font(.ds(13.5, .semibold))
                     .foregroundStyle(DS.text1)
                     .lineLimit(1)
-                Text(when)
-                    .font(.dsMeta)
-                    .foregroundStyle(DS.muted)
+                if let detail = item.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 8)
-            if hover, !capture.isRecording, !capture.phase.isBusy {
-                Button {
-                    capture.startNew(title: event.title)
-                } label: {
-                    Label("Start", systemImage: "mic.fill")
+            if hover {
+                if let url = item.meetingURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Join", systemImage: "video")
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
+                    .help("Open the video call")
                 }
-                .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 26))
-                .help("Start a meeting note for this event")
+                if !capture.isRecording, !capture.phase.isBusy {
+                    Button {
+                        capture.startNew(title: item.title)
+                    } label: {
+                        Label("Start", systemImage: "mic.fill")
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 26))
+                    .help("Start a meeting note for this event")
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -445,11 +650,16 @@ private struct EventRow: View {
         .onHover { hover = $0 }
     }
 
+    private var dayLabel: String {
+        let calendar = Calendar.current
+        if calendar.isDateInTomorrow(item.start) { return "Tomorrow" }
+        return item.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
     private var when: String {
-        let day = MeetingGroups.dayTitle(event.start)
-        if event.isAllDay { return "\(day) · all day" }
-        let start = event.start.formatted(date: .omitted, time: .shortened)
-        let end = event.end.formatted(date: .omitted, time: .shortened)
-        return "\(day) · \(start) – \(end)"
+        if item.isAllDay { return "All day" }
+        let start = item.start.formatted(date: .omitted, time: .shortened)
+        let end = item.end.formatted(date: .omitted, time: .shortened)
+        return "\(start) – \(end)"
     }
 }

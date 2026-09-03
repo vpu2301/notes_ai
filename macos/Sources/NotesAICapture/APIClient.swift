@@ -149,6 +149,60 @@ actor APIClient {
         }
     }
 
+    // MARK: - Calendar connections (note-service, 0019)
+
+    func calendarConnections() async throws -> CalendarConnectionsResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/connections", method: "GET",
+                                  authorized: true)
+        return try decode(CalendarConnectionsResponse.self, from: data)
+    }
+
+    /// Google's consent page for a new connection. After the sign-in Google
+    /// sends the browser to `returnTo` (the app's own URL scheme here).
+    func startGoogleCalendarConnect(returnTo: String, loginHint: String?) async throws -> URL {
+        var body: [String: Any] = ["return_to": returnTo]
+        if let loginHint, !loginHint.isEmpty { body["login_hint"] = loginHint }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/google/connect", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: body), authorized: true)
+        let response = try decode(CalendarConnectResponse.self, from: data)
+        guard let url = URL(string: response.authorizeUrl) else { throw APIError.badURL }
+        return url
+    }
+
+    /// 0020: add a calendar by its private iCal address. No Google client
+    /// involved; the server fetches the feed once before answering.
+    func connectCalendarLink(url: String, label: String?) async throws -> CalendarConnection {
+        var body: [String: Any] = ["url": url]
+        if let label, !label.isEmpty { body["label"] = label }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/ics/connect", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: body), authorized: true)
+        return try decode(CalendarConnection.self, from: data)
+    }
+
+    func disconnectCalendar(id: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/calendar/connections/\(id)", method: "DELETE",
+                           authorized: true)
+    }
+
+    func remoteCalendars(connectionId: String) async throws -> RemoteCalendarsResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/connections/\(connectionId)/calendars",
+                                  method: "GET", authorized: true)
+        return try decode(RemoteCalendarsResponse.self, from: data)
+    }
+
+    func setHiddenCalendars(connectionId: String, hidden: [String]) async throws -> CalendarConnection {
+        let body = try JSONSerialization.data(withJSONObject: ["hidden_calendar_ids": hidden])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/connections/\(connectionId)/calendars",
+                                  method: "PUT", jsonBody: body, authorized: true)
+        return try decode(CalendarConnection.self, from: data)
+    }
+
+    func upcomingEvents(days: Int = 7) async throws -> UpcomingEventsResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/calendar/events", method: "GET",
+                                  query: [("days", String(days))], authorized: true)
+        return try decode(UpcomingEventsResponse.self, from: data)
+    }
+
     // MARK: - Templates & notes (note-service)
 
     func fetchTemplates() async throws -> [TemplateSummary] {

@@ -298,8 +298,10 @@ private extension CharacterSet {
 }
 
 /// One ASWebAuthenticationSession at a time, anchored to the main window.
+/// Shared by the MCP sign-in and the Google Calendar connect flow — both
+/// come back on the `notesai://` scheme.
 @MainActor
-private final class BrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
+final class BrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = BrowserSession()
     private var current: ASWebAuthenticationSession?
 

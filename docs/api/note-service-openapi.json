@@ -170,6 +170,88 @@
         "title": "BoundNote",
         "type": "object"
       },
+      "CalendarView": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "boolean"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color",
+          "primary",
+          "shown"
+        ],
+        "title": "CalendarView",
+        "type": "object"
+      },
+      "CalendarsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hidden_calendar_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Hidden Calendar Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hidden_calendar_ids"
+        ],
+        "title": "CalendarsRequest",
+        "type": "object"
+      },
+      "CalendarsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "calendars": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarView"
+            },
+            "title": "Calendars",
+            "type": "array"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "calendars"
+        ],
+        "title": "CalendarsResponse",
+        "type": "object"
+      },
       "CancelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -271,6 +353,142 @@
           "id"
         ],
         "title": "CloneResponse",
+        "type": "object"
+      },
+      "ConnectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "login_hint": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login Hint"
+          },
+          "return_to": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Return To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "return_to"
+        ],
+        "title": "ConnectRequest",
+        "type": "object"
+      },
+      "ConnectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authorize_url": {
+            "title": "Authorize Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url"
+        ],
+        "title": "ConnectResponse",
+        "type": "object"
+      },
+      "ConnectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "account_email": {
+            "title": "Account Email",
+            "type": "string"
+          },
+          "connected_at": {
+            "title": "Connected At",
+            "type": "string"
+          },
+          "hidden_calendar_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hidden Calendar Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "needs_reauth": {
+            "title": "Needs Reauth",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "account_email",
+          "connected_at",
+          "hidden_calendar_ids",
+          "needs_reauth",
+          "last_synced_at",
+          "last_error"
+        ],
+        "title": "ConnectionView",
+        "type": "object"
+      },
+      "ConnectionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionView"
+            },
+            "title": "Connections",
+            "type": "array"
+          },
+          "link_available": {
+            "default": true,
+            "title": "Link Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "connections"
+        ],
+        "title": "ConnectionsResponse",
         "type": "object"
       },
       "CreateClipRequest": {
@@ -545,6 +763,186 @@
         "title": "DiffSegment",
         "type": "object"
       },
+      "EventView": {
+        "additionalProperties": false,
+        "properties": {
+          "account_email": {
+            "title": "Account Email",
+            "type": "string"
+          },
+          "all_day": {
+            "title": "All Day",
+            "type": "boolean"
+          },
+          "attendee_count": {
+            "title": "Attendee Count",
+            "type": "integer"
+          },
+          "attendees": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attendees",
+            "type": "array"
+          },
+          "calendar_id": {
+            "title": "Calendar Id",
+            "type": "string"
+          },
+          "calendar_name": {
+            "title": "Calendar Name",
+            "type": "string"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "html_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Html Link"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "meeting_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Url"
+          },
+          "organizer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organizer"
+          },
+          "response_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Status"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connection_id",
+          "account_email",
+          "calendar_id",
+          "calendar_name",
+          "color",
+          "title",
+          "start",
+          "end",
+          "all_day",
+          "location",
+          "meeting_url",
+          "html_link",
+          "attendee_count",
+          "attendees",
+          "organizer",
+          "response_status"
+        ],
+        "title": "EventView",
+        "type": "object"
+      },
+      "EventsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventView"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "fetched_at": {
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemView"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "connected",
+          "events",
+          "problems",
+          "fetched_at"
+        ],
+        "title": "EventsResponse",
+        "type": "object"
+      },
       "FieldType": {
         "description": "Sprint-06 shipped the first kinds; sprint-13 adds the two choice\nkinds. Adding enum members is additive to the *model*; changing an\nexisting section's ``field_type`` remains a STRUCTURAL edit\n(ADR-0016).",
         "enum": [
@@ -701,6 +1099,34 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "LinkConnectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LinkConnectRequest",
         "type": "object"
       },
       "LocalizedText": {
@@ -1172,6 +1598,41 @@
           "amendment_reason"
         ],
         "title": "NoteVersionSummary",
+        "type": "object"
+      },
+      "ProblemView": {
+        "additionalProperties": false,
+        "properties": {
+          "account_email": {
+            "title": "Account Email",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "needs_reauth": {
+            "title": "Needs Reauth",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connection_id",
+          "account_email",
+          "code",
+          "message",
+          "needs_reauth"
+        ],
+        "title": "ProblemView",
         "type": "object"
       },
       "PublicLink": {
@@ -3205,6 +3666,489 @@
         "summary": "Stream Clip",
         "tags": [
           "audio-clips"
+        ]
+      }
+    },
+    "/v1/calendar/connections": {
+      "get": {
+        "operationId": "list_connections_v1_calendar_connections_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Connections",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/connections/{connection_id}": {
+      "delete": {
+        "operationId": "disconnect_v1_calendar_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/connections/{connection_id}/calendars": {
+      "get": {
+        "operationId": "list_calendars_v1_calendar_connections__connection_id__calendars_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Calendars",
+        "tags": [
+          "calendar"
+        ]
+      },
+      "put": {
+        "operationId": "set_calendars_v1_calendar_connections__connection_id__calendars_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Calendars",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/events": {
+      "get": {
+        "operationId": "upcoming_events_v1_calendar_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 31,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upcoming Events",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/google/callback": {
+      "get": {
+        "operationId": "google_callback_v1_calendar_google_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Google Callback",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/google/connect": {
+      "post": {
+        "operationId": "google_connect_v1_calendar_google_connect_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Google Connect",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/ics/connect": {
+      "post": {
+        "description": "Add a calendar by its private iCal address \u2014 no Google client, no\nOAuth. The feed is fetched once now so a wrong link fails here, not\nsilently on the home page.",
+        "operationId": "ics_connect_v1_calendar_ics_connect_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ics Connect",
+        "tags": [
+          "calendar"
         ]
       }
     },

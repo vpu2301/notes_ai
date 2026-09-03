@@ -29,7 +29,9 @@ export function MeetingPage() {
   const toast = useToast();
   const [params] = useSearchParams();
 
-  const [title, setTitle] = useState("");
+  // A calendar event's title arrives as ?title= from the home page's
+  // "Start" button; otherwise the field starts empty.
+  const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
   // Auto by default: the transcript and the note come out in whatever
   // language the meeting was held in. Pinning is an option, not a step.
   const [language, setLanguage] = useState<AsrLanguage>("auto");
