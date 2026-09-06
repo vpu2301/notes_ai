@@ -352,3 +352,20 @@ export function LinkOffIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+export function FolderIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M2.75 5.5A1.25 1.25 0 0 1 4 4.25h3.3l1.6 1.9H16A1.25 1.25 0 0 1 17.25 7.4v7.35A1.25 1.25 0 0 1 16 16H4a1.25 1.25 0 0 1-1.25-1.25z" />
+    </svg>
+  );
+}
+
+export function FolderPlusIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M2.75 5.5A1.25 1.25 0 0 1 4 4.25h3.3l1.6 1.9H16A1.25 1.25 0 0 1 17.25 7.4v7.35A1.25 1.25 0 0 1 16 16H4a1.25 1.25 0 0 1-1.25-1.25z" />
+      <path d="M10 8.75v4.5M7.75 11h4.5" />
+    </svg>
+  );
+}

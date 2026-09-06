@@ -88,8 +88,30 @@ async def http_exception_handler(
     # members — e.g. a machine-readable `code` the SPA can branch on. Set it on
     # the exception instance before raising:
     #     e = HTTPException(401, detail="…"); e.problem_extras = {"code": "…"}; raise e
-    extras = getattr(exc, "problem_extras", None) or {}
-    p = _problem(status=exc.status_code, detail=str(exc.detail), **extras)
+    extras = dict(getattr(exc, "problem_extras", None) or {})
+    detail = exc.detail
+    type_uri: str | None = None
+    title: str | None = None
+    if isinstance(detail, dict):
+        # A raiser that built a problem document inline —
+        # ``HTTPException(422, detail={"type": …, "title": …, "detail": …,
+        # "allowed": […]})`` — means its members, not a Python repr of the
+        # dict. Lift the RFC 9457 members to the top level and keep every
+        # other key as an extension member, so clients branch on ``type``
+        # and show ``detail`` exactly as they do for a plain string.
+        body = dict(detail)
+        type_uri = body.pop("type", None) if isinstance(body.get("type"), str) else None
+        title = body.pop("title", None) if isinstance(body.get("title"), str) else None
+        raw_detail = body.pop("detail", None)
+        detail = raw_detail if isinstance(raw_detail, str) else None
+        body.pop("status", None)
+        body.pop("instance", None)
+        extras = {**body, **extras}
+    elif detail is not None and not isinstance(detail, str):
+        detail = str(detail)
+    p = _problem(status=exc.status_code, detail=detail, type_uri=type_uri, **extras)
+    if title:
+        p.title = title
     logger.info(
         "http_exception",
         extra={

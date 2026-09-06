@@ -151,7 +151,7 @@ def test_pdf_200_for_draft_with_watermark(
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language):  # noqa: ANN001
+    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
         captured["is_draft"] = is_draft
         captured["language"] = language
         # The native weasyprint stack is not installed in unit envs, so the
@@ -193,7 +193,7 @@ def test_pdf_clean_variant_ignored_for_draft(
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language):  # noqa: ANN001
+    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
         captured["is_draft"] = is_draft
         return b"%PDF-1.7 x"
 
@@ -220,7 +220,7 @@ def test_pdf_clean_variant_honoured_for_finalized(
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language):  # noqa: ANN001
+    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
         captured["is_draft"] = is_draft
         return b"%PDF-1.7 clean"
 
@@ -234,17 +234,13 @@ def test_pdf_clean_variant_honoured_for_finalized(
     assert f"note-{NOTE_ID}.pdf" in resp.headers["content-disposition"]
 
 
-def test_pdf_template_gates_draft_elements_bilingual() -> None:
-    """The ``is_draft`` template var gates a bilingual watermark + banner."""
-    from jinja2 import Environment, FileSystemLoader, select_autoescape
+def _render_template(**overrides) -> str:
+    """Render note.html.j2 directly (the native weasyprint stack is not
+    installed in unit envs, so the HTML is what we can assert on).
 
+    Uses the production environment factory, so an escaping change there
+    is caught here."""
     import note_service.domain.pdf as pdfmod
-
-    env = Environment(
-        loader=FileSystemLoader(str(pdfmod._TEMPLATE_DIR)),
-        autoescape=select_autoescape(["html", "xml"]),
-    )
-    tpl = env.get_template("note.html.j2")
 
     base = {
         "title": "t",
@@ -254,19 +250,68 @@ def test_pdf_template_gates_draft_elements_bilingual() -> None:
         "co_authors": [],
         "sections": [],
         "finalized_at": "",
+        "date_label": "",
+        "language": "en",
+        "is_draft": False,
     }
+    tpl = pdfmod.template_env().get_template(pdfmod._TEMPLATE_NAME)
+    return tpl.render(**{**base, **overrides})
 
-    draft_uk = tpl.render(**base, language="uk", is_draft=True)
+
+def test_pdf_template_gates_draft_elements_bilingual() -> None:
+    """The ``is_draft`` template var gates a bilingual watermark + banner."""
+    draft_uk = _render_template(language="uk", is_draft=True)
     assert "ЧЕРНЕТКА" in draft_uk
     assert "НЕ ФІНАЛІЗОВАНО" in draft_uk
 
-    draft_en = tpl.render(**base, language="en", is_draft=True)
+    draft_en = _render_template(language="en", is_draft=True)
     assert "DRAFT" in draft_en
     assert "NOT FINALIZED" in draft_en
 
-    clean = tpl.render(**base, language="uk", is_draft=False)
+    clean = _render_template(language="uk", is_draft=False)
     assert "ЧЕРНЕТКА" not in clean
     assert "draft-watermark" not in clean
+
+
+def test_pdf_template_embeds_brand_font_and_mark() -> None:
+    """The document carries the product's own face and mark, not the
+    renderer's default sans."""
+    import note_service.domain.pdf as pdfmod
+
+    html = _render_template()
+    assert 'font-family: "Geist"' in html
+    assert 'url("fonts/geist-latin.woff2")' in html
+    # …and the files are actually shipped next to the template.
+    assert (pdfmod._TEMPLATE_DIR / "fonts" / "geist-latin.woff2").is_file()
+    # The superellipse mark, the same path the web BrandMark draws.
+    assert "<svg" in html and "#4f7a5e" in html
+
+
+def test_pdf_template_publishes_running_footer_before_first_page() -> None:
+    """`string(footline)` is only set from where the element sits, so the
+    hidden publisher must precede the masthead — otherwise page 1's
+    footer renders empty."""
+    html = _render_template(issuer="Northwind", code="N-9")
+    assert html.index('class="footline"') < html.index('class="masthead"')
+    assert "Northwind · N-9" in html
+
+
+def test_pdf_template_escapes_note_text() -> None:
+    """Autoescape still covers every field the note owns."""
+    html = _render_template(title="<script>x</script>", issuer='" onload="x')
+    assert "<script>x</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_pdf_sections_render_as_markup() -> None:
+    """Section bodies arrive as markup and are placed unescaped."""
+    from markupsafe import Markup
+
+    html = _render_template(
+        sections=[{"name": "Action items", "html": Markup("<ul><li>do it</li></ul>")}]
+    )
+    assert "<ul><li>do it</li></ul>" in html
+    assert "Action items" in html
 
 
 def test_pdf_200_for_finalized(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,7 +323,7 @@ def test_pdf_200_for_finalized(client: TestClient, monkeypatch: pytest.MonkeyPat
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language):  # noqa: ANN001
+    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
         return b"%PDF-1.7 fake-bytes"
 
     monkeypatch.setattr(notes_pdf.repo, "fetch_note", _fetch_note)

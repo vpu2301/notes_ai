@@ -65,7 +65,7 @@ def _payload() -> JobEnqueuePayload:
         job_id=uuid4(),
         tenant_id=uuid4(),
         audio_id=uuid4(),
-        vocabulary_hint="Klarnote roadmap",
+        vocabulary_hint="Notes AI roadmap",
         language="uk",
         requester_sub=uuid4(),
     )

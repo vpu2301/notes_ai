@@ -23,6 +23,7 @@ from .routers import (
     health,
     notes,
     notes_amend,
+    notes_ask,
     notes_audio,
     notes_diff,
     notes_drafts,
@@ -35,6 +36,7 @@ from .routers import (
     notes_versions,
     search_tips,
     shared_public,
+    spaces,
     synonyms,
     templates,
 )
@@ -140,6 +142,8 @@ def create_app() -> FastAPI:
     app.include_router(notes_pdf.router)
     app.include_router(notes_sharing.router)
     app.include_router(notes_synthesis.router)
+    # "Ask this note" — a question over the note and its transcript.
+    app.include_router(notes_ask.router)
     # Anonymous, token-addressed reads — no auth dependency at all.
     app.include_router(shared_public.router)
     # Sprint 15: audio replay (ADR-0037). No ordering hazard: the
@@ -151,6 +155,8 @@ def create_app() -> FastAPI:
     app.include_router(synonyms.router)
     # 0019: calendar connections + the "Coming up" events read.
     app.include_router(calendar.router)
+    # 0021: spaces — personal note folders shared across devices.
+    app.include_router(spaces.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

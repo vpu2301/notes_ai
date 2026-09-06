@@ -6,5 +6,5 @@ Open: {{ deep_link }}
 {% endif %}
 
 --
-This is an automated message from Klarnote.
+This is an automated message from Notes AI.
 It deliberately contains no note content or personal data.

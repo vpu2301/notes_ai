@@ -61,7 +61,7 @@ A session is **exactly one version for its whole lifetime**:
   "protocol_version": 2,
   "language": "uk",              // "uk" | "en" | "de"
   "mode": "conversation",        // NEW: "dictation" (default) | "conversation"
-  "vocabulary_hint": "Klarnote OKR roadmap",  // optional free text → Whisper initial_prompt
+  "vocabulary_hint": "Notes AI OKR roadmap",  // optional free text → Whisper initial_prompt
   "capture_source": "room_device", // "browser" (default) | "mobile" | "room_device"
   "device_name": "Berlin 4F",      // optional 1–128 char device/room label
   "template_id": "…",            // needed for a draft at finalize

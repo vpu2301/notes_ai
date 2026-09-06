@@ -8,6 +8,9 @@ struct SettingsView: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var onClose: (() -> Void)? = nil
     @State private var isSigningOut = false
+    @State private var nameDraft = ""
+    @State private var savingName = false
+    @State private var removingIdentity: String?
 
     private static let sidebarWidth: CGFloat = 200
 
@@ -53,6 +56,17 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.bg)
+        }
+        .alert("Remove local data?",
+               isPresented: Binding(get: { removingIdentity != nil },
+                                    set: { if !$0 { removingIdentity = nil } })) {
+            Button("Remove", role: .destructive) {
+                if let removingIdentity { app.removeLocalData(identityId: removingIdentity) }
+                removingIdentity = nil
+            }
+            Button("Cancel", role: .cancel) { removingIdentity = nil }
+        } message: {
+            Text("This deletes that account's meetings list and any recordings kept for it on this Mac. Recordings that were never uploaded cannot be recovered.")
         }
     }
 
@@ -154,19 +168,24 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             group("Signed in as") {
                 HStack(spacing: 10) {
-                    DSAvatar(name: app.email.isEmpty ? "?" : app.email, size: 30)
+                    DSAvatar(name: displayName, size: 30)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(app.email.isEmpty ? "Not signed in" : app.email)
+                        Text(displayName)
                             .font(.ds(13, .medium))
                             .foregroundStyle(DS.text1)
                             .lineLimit(1)
-                        Text(authHost)
+                        Text(app.identity == nil ? authHost : "\(app.email) · \(authHost)")
                             .font(.dsMeta)
                             .foregroundStyle(DS.muted)
                             .lineLimit(1)
                     }
                     Spacer()
                     Button {
+                        guard app.pendingCount == 0 else {
+                            onClose?()
+                            app.requestSignOut()
+                            return
+                        }
                         isSigningOut = true
                         Task {
                             await app.signOut()
@@ -183,12 +202,130 @@ struct SettingsView: View {
                     .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
                     .disabled(isSigningOut)
                 }
+                Text("The sign-in for this Mac is kept in its login Keychain and never leaves it. Signing out removes it.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            group("Your name") {
+                HStack(spacing: 10) {
+                    DSTextField(placeholder: "Your name", text: $nameDraft)
+                    Button(savingName ? "Saving…" : "Save") {
+                        savingName = true
+                        Task {
+                            await app.setDisplayName(nameDraft)
+                            savingName = false
+                        }
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
+                    .disabled(savingName || nameDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                              || nameDraft == app.identity?.displayName)
+                }
+            }
+            .onAppear { if nameDraft.isEmpty { nameDraft = app.identity?.displayName ?? "" } }
+
+            workspacesGroup
+            securityGroup
+
+            if pendingCount > 0 {
+                group("Recordings waiting") {
+                    HStack(spacing: 10) {
+                        Image(systemName: "waveform.badge.exclamationmark")
+                            .foregroundStyle(DS.warn)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(pendingCount) recording\(pendingCount == 1 ? "" : "s") kept on this Mac")
+                                .font(.ds(13, .medium))
+                                .foregroundStyle(DS.text1)
+                            Text("These could not be uploaded — the session had ended, or the server was unreachable. They are kept until they can be sent.")
+                                .font(.dsMeta)
+                                .foregroundStyle(DS.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting(
+                                PendingCaptures.all().map(\.audioURL))
+                        }
+                        .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
+                    }
+                }
             }
         }
     }
 
+    // ── Workspaces, sessions and local data (IDX-M2) ─────────────────
+
+    private var workspacesGroup: some View {
+        group("Workspaces") {
+            VStack(alignment: .leading, spacing: 8) {
+                WorkspaceList(onSwitch: { onClose?() })
+                Text("Notes, spaces and meetings belong to a workspace. Switching changes what this Mac shows and what new meetings are filed under.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var securityGroup: some View {
+        group("Security") {
+            VStack(alignment: .leading, spacing: 10) {
+                SessionsList()
+                DSDivider()
+                HStack {
+                    Text("Password, two-factor and email changes")
+                        .font(.ds(12.5))
+                        .foregroundStyle(DS.text2)
+                    Spacer()
+                    Button("Manage on the web") { app.openSecuritySettings() }
+                        .buttonStyle(DSButtonStyle(kind: .secondary, height: 26))
+                }
+            }
+        }
+    }
+
+    private var localDataGroup: some View {
+        let others = app.otherLocalIdentities
+        return Group {
+            if !others.isEmpty {
+                group("Other accounts on this Mac") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(others, id: \.id) { other in
+                            HStack(spacing: 10) {
+                                DSAvatar(name: other.email.isEmpty ? "?" : other.email, size: 24)
+                                Text(other.email.isEmpty ? other.id : other.email)
+                                    .font(.ds(13))
+                                    .foregroundStyle(DS.text1)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("Remove local data") { removingIdentity = other.id }
+                                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 24))
+                            }
+                        }
+                        Text("Their meetings list and any recordings kept for them stay on this Mac until removed here. Nothing on the server is touched.")
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var displayName: String {
+        let name = app.identity?.displayName ?? ""
+        if !name.isEmpty { return name }
+        return app.email.isEmpty ? "Not signed in" : app.email
+    }
+
+    /// Read once per appearance of the sheet: this is a directory listing,
+    /// not something to poll.
+    private var pendingCount: Int { PendingCaptures.count() }
+
     private var advanced: some View {
         VStack(alignment: .leading, spacing: 20) {
+            localDataGroup
             group("Server addresses") {
                 labeledField("Auth", text: $app.settings.authBaseURL)
                 labeledField("ASR", text: $app.settings.asrBaseURL)

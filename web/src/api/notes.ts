@@ -1,4 +1,4 @@
-import { api, apiBlob } from "./http";
+import { api, apiBlob, ApiError } from "./http";
 import type {
   AmendResponse,
   FinalizeResponse,
@@ -10,6 +10,7 @@ import type {
   NoteVersionDetail,
   NoteVersionSummary,
   NoteVisibility,
+  ReadPurpose,
   SearchResponse,
   SharedNoteView,
   SharingView,
@@ -38,9 +39,20 @@ export function createNote(content: NoteContent): Promise<NoteCreatedResponse> {
   });
 }
 
-export function getNote(id: string): Promise<NoteEnvelope> {
+/**
+ * The problem `type` the server answers a non-author read that came without
+ * `?purpose=`. The page retries once with a purpose and says whose note it
+ * is showing; see `ReadPurpose`.
+ */
+export const READ_PURPOSE_REQUIRED = "https://errors.notes-ai/missing-read-purpose";
+
+export function needsReadPurpose(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 422 && err.type === READ_PURPOSE_REQUIRED;
+}
+
+export function getNote(id: string, purpose?: ReadPurpose): Promise<NoteEnvelope> {
   return api<NoteEnvelope>("note", `/v1/notes/${id}`, {
-    query: { include_content: true },
+    query: { include_content: true, purpose },
   });
 }
 
@@ -102,16 +114,22 @@ export function searchNotes(params: {
   });
 }
 
-export function listVersions(id: string): Promise<NoteVersionSummary[]> {
-  return api<NoteVersionSummary[]>("note", `/v1/notes/${id}/versions`);
+export function listVersions(id: string, purpose?: ReadPurpose): Promise<NoteVersionSummary[]> {
+  return api<NoteVersionSummary[]>("note", `/v1/notes/${id}/versions`, { query: { purpose } });
 }
 
-export function getVersion(id: string, versionNumber: number): Promise<NoteVersionDetail> {
-  return api<NoteVersionDetail>("note", `/v1/notes/${id}/versions/${versionNumber}`);
+export function getVersion(
+  id: string,
+  versionNumber: number,
+  purpose?: ReadPurpose,
+): Promise<NoteVersionDetail> {
+  return api<NoteVersionDetail>("note", `/v1/notes/${id}/versions/${versionNumber}`, {
+    query: { purpose },
+  });
 }
 
-export function downloadPdf(id: string): Promise<Blob> {
-  return apiBlob("note", `/v1/notes/${id}/pdf`);
+export function downloadPdf(id: string, purpose?: ReadPurpose): Promise<Blob> {
+  return apiBlob("note", `/v1/notes/${id}/pdf`, { query: { purpose } });
 }
 
 export function createFromTranscript(params: {

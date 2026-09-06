@@ -198,6 +198,59 @@ async def _seed_autocomplete(conn: asyncpg.Connection) -> None:
     print(f"-- autocomplete snippets: {inserted} inserted ({len(STARTER_SNIPPETS)} in set)")
 
 
+# ── IDX-B1b: the dev room device ─────────────────────────────────────
+#
+# Seeded here rather than in seed.sql because the row stores a HASH, and a
+# hard-coded hash in SQL is a value nobody can check and everybody has to
+# trust. Computing it from the known dev secret keeps the SQL honest and
+# means changing the dev secret is a one-line edit.
+#
+# The secret is the same string the Keycloak realm uses for
+# `room-device-demo`, so a dev device config keeps working across the
+# cut-over without being touched.
+#
+# NOTE what is deliberately NOT seeded: service credentials. The B1b
+# inspect step found that `mdx-backend`, `mdx-asr-worker` and
+# `mdx-dictation` have `serviceAccountsEnabled` in the realm but no
+# service-account user, no roles, and no runtime consumer anywhere in
+# `services/` — a captured token for them carries Keycloak's default
+# roles and no `tid`. They are declared-but-unused and are deleted in
+# IDX-B2; giving them credentials here would carry dead clients forward.
+DEV_DEVICE_TENANT = "00000000-0000-0000-0000-00000000000a"
+DEV_DEVICE_ID = "0000000d-0000-0000-0000-00000000d0e1"
+DEV_DEVICE_SECRET = "dev-room-device-secret"  # noqa: S105 — dev realm parity
+
+
+async def _seed_dev_device(conn: asyncpg.Connection) -> None:
+    import hashlib
+
+    exists = await conn.fetchval(
+        "SELECT 1 FROM service_credentials WHERE id = $1", DEV_DEVICE_ID
+    )
+    if exists:
+        print("-- dev room device: already present")
+        return
+    await conn.execute(
+        """
+        INSERT INTO service_credentials (id, kind, tenant_id, name, roles)
+        VALUES ($1, 'device', $2, 'Demo meeting room', ARRAY['device'])
+        ON CONFLICT (id) DO NOTHING
+        """,
+        DEV_DEVICE_ID,
+        DEV_DEVICE_TENANT,
+    )
+    await conn.execute(
+        """
+        INSERT INTO service_credential_secrets (credential_id, secret_hash, secret_prefix)
+        VALUES ($1, $2, 'devdemo0')
+        ON CONFLICT (secret_hash) DO NOTHING
+        """,
+        DEV_DEVICE_ID,
+        hashlib.sha256(DEV_DEVICE_SECRET.encode()).hexdigest(),
+    )
+    print(f"-- dev room device: {DEV_DEVICE_ID} (tenant A, secret in the runbook)")
+
+
 async def main() -> int:
     print(f"Seeding {DB_NAME} on {DB_HOST}:{DB_PORT}…")
     conn = await asyncpg.connect(DSN)
@@ -206,6 +259,7 @@ async def main() -> int:
         await _seed_templates(conn)
         await _seed_voice_commands(conn)
         await _seed_autocomplete(conn)
+        await _seed_dev_device(conn)
     finally:
         await conn.close()
     print("Seed complete.")

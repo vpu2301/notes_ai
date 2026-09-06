@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -44,6 +46,12 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
+    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
+    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
+    # token's own `iss` selects which entry verifies it. Unset (the
+    # default) means the three values above build a one-element list, so
+    # a deployment that has not been migrated behaves exactly as before.
+    auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     # ── CORS (SPA integration) ──────────────────────────────────────────
@@ -82,7 +90,7 @@ class Settings(BaseSettings):
     template_cache_ttl_seconds: int = Field(default=60, alias="MDX_TEMPLATE_CACHE_TTL_SECONDS")
 
     # Issuing organisation printed on the exported PDF (M1·A3).
-    pdf_issuer_name: str = Field(default="Klarnote", alias="MDX_PDF_ISSUER_NAME")
+    pdf_issuer_name: str = Field(default="Notes AI", alias="MDX_PDF_ISSUER_NAME")
 
     # Sprint 13: typed-field extraction at draft assembly (ADR-0028).
     # Fail-open — an unreachable nlp-service costs proposals, not drafts.
@@ -93,6 +101,37 @@ class Settings(BaseSettings):
     # asr-service base URL — create-from-transcript fetches the
     # completed job's transcript from there, forwarding the caller's JWT.
     asr_service_base_url: str = Field(default="http://localhost:8001", alias="ASR_SERVICE_BASE_URL")
+
+    # ── "Ask this note" (libs/models chat provider, ADR-0046) ──────────
+    # The registry in config/models.yaml decides which backend answers
+    # (dev: the Mac's Ollama; staging/prod: the EU endpoint). Resolved
+    # on first use, so a Mac without a model server still serves notes.
+    models_config: str = Field(default="config/models.yaml", alias="MODELS_CONFIG")
+    # Registry env name: dev | test | staging | prod. Derived from
+    # ENVIRONMENT when unset (development→dev, production→prod).
+    models_env: str = Field(default="", alias="ENV")
+    ask_max_tokens: int = Field(default=700, alias="MDX_ASK_MAX_TOKENS")
+    # How much of the note + transcript goes into the prompt (characters).
+    ask_context_chars: int = Field(default=60_000, alias="MDX_ASK_CONTEXT_CHARS")
+
+    @staticmethod
+    def registry_environ() -> Mapping[str, str]:
+        """The mapping ``${VAR}`` placeholders in config/models.yaml resolve
+        from — here because config.py is the one module allowed to read the
+        process environment (check-no-os-environ gate)."""
+        return os.environ
+
+    def registry_env(self) -> str:
+        if self.models_env:
+            return self.models_env
+        if self.testing:
+            return "test"
+        return {
+            "development": "dev",
+            "production": "prod",
+            "test": "test",
+            "staging": "staging",
+        }.get(self.environment, self.environment)
 
     # ── Note synthesis (spec item 1) ──────────────────────────────────
     # "mock" (default) is the deterministic offline engine — no external

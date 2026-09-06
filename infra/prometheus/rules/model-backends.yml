@@ -1,0 +1,63 @@
+# Model-backend alerts (DEP-S1 §S). Instruments: libs/jobs/src/jobs/metrics.py.
+groups:
+  - name: model-backends
+    interval: 30s
+    rules:
+      - alert: ModelBackendWarmingTooLong
+        # A job parked on a warming backend for longer than 2 × the longest
+        # declared cold start (300 s for hf_eu) means the endpoint is not
+        # coming up — scaling failed, quota, or a deleted endpoint.
+        expr: |
+          max by (backend) (mdx_model_waiting_oldest_seconds) > 600
+        for: 2m
+        labels:
+          severity: warn
+          team: platform
+        annotations:
+          summary: "Model backend {{ $labels.backend }} has jobs waiting on warm-up for > 10 min"
+          description: |
+            Jobs are parked in waiting_on_model for {{ $labels.backend }} longer than 2× its cold start. Check the endpoint state (make hf-endpoints ARGS="status --env staging"), quota and the last apply.
+            Runbook: docs/runbooks/model-backends.md#warming-too-long
+
+      - alert: ModelBackendAuth
+        # A revoked/rotated token fails every call immediately (kind=auth,
+        # never retried). One is enough: the ledger and the notes stop.
+        expr: |
+          (sum by (backend) (increase(mdx_model_calls_total{outcome="auth"}[5m])) or vector(0)) > 0
+        for: 0m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "Model backend {{ $labels.backend }} rejects our token (auth errors in the last 5 min)"
+          description: |
+            Calls to {{ $labels.backend }} fail with kind=auth. Jobs fail immediately (no retry storm). Rotate/restore HF_TOKEN from the secret manager and restart the workers.
+            Runbook: docs/runbooks/model-backends.md#auth
+
+      - alert: ModelBackendUnavailable
+        expr: |
+          (sum by (backend) (increase(mdx_model_calls_total{outcome="unavailable"}[10m])) or vector(0)) > 5
+          and
+          (sum by (backend) (increase(mdx_model_calls_total{outcome="ok"}[10m])) or vector(0)) == 0
+        for: 10m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "Model backend {{ $labels.backend }} unavailable for 10 min (no successful call)"
+          description: |
+            Every call to {{ $labels.backend }} in the last 10 minutes failed with kind=unavailable. Endpoint failed/deleted or the HF region is down; jobs are retrying with backoff. Notes ship with transcript only (BE-S2 degrade).
+            Runbook: docs/runbooks/model-backends.md#unavailable
+
+      - alert: ModelJobsDead
+        expr: |
+          (sum by (kind) (increase(mdx_jobs_finished_total{outcome="dead"}[30m])) or vector(0)) > 0
+        for: 0m
+        labels:
+          severity: warn
+          team: platform
+        annotations:
+          summary: "{{ $labels.kind }} jobs exhausted their attempts (dead) in the last 30 min"
+          description: |
+            A job reached max_attempts or lost its worker repeatedly. Inspect jobs WHERE status='dead' for the kind and re-queue after the cause is fixed.
+            Runbook: docs/runbooks/model-backends.md#dead-jobs

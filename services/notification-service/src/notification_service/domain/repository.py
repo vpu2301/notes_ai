@@ -34,23 +34,49 @@ async def filter_to_tenant_members(
     """
     if not user_ids:
         return []
+    # IDX-B2: `profile_of_subs` replaces the per-tenant `users` table and
+    # keeps the same boundary — it returns a row only for a sub with an
+    # active membership in the connection's tenant, so a producer naming
+    # somebody else's user still matches nothing.
     rows = await conn.fetch(
-        "SELECT sub FROM users WHERE sub = ANY($1::uuid[]) AND status = 'active'",
+        "SELECT sub FROM profile_of_subs($1::uuid[]) WHERE status = 'active'",
         list(user_ids),
     )
     return [r["sub"] for r in rows]
 
 
 async def tenant_admin_ids(conn: asyncpg.Connection) -> list[UUID]:
-    """Active tenant admins — the audience for operational alerts."""
+    """Active tenant admins — the audience for operational alerts.
+
+    Reads the membership roster rather than `users.role` (IDX-B2). A role
+    describes a person's standing IN A WORKSPACE, and `users.role` could
+    only ever hold the one for their home tenant — so an admin of this
+    workspace whose home was elsewhere never received these alerts.
+    `tenant_memberships` is tenant-scoped by RLS and already readable by
+    `app_role`, so no helper is needed.
+    """
     rows = await conn.fetch(
-        "SELECT sub FROM users WHERE role = 'tenant_admin' AND status = 'active'"
+        """
+        SELECT user_sub AS sub FROM tenant_memberships
+        WHERE status = 'active' AND role IN ('owner', 'admin')
+        """
     )
     return [r["sub"] for r in rows]
 
 
 async def user_email(conn: asyncpg.Connection, user_id: UUID) -> str | None:
-    row = await conn.fetchrow("SELECT email FROM users WHERE sub = $1", user_id)
+    """The address to actually send to.
+
+    This is the caller the pack's "the helper returns no emails" rule did
+    not account for: a digest with no address is not a privacy win, it is
+    an undelivered digest. `profile_of_subs` carries the column, and its
+    membership predicate is a tighter bound than the `users` RLS this
+    replaces — a sub outside the connection's tenant now returns nothing
+    at all rather than relying on the row simply not existing.
+    """
+    row = await conn.fetchrow(
+        "SELECT email FROM profile_of_subs(ARRAY[$1]::uuid[])", user_id
+    )
     if row is None:
         return None
     email: str = row["email"]

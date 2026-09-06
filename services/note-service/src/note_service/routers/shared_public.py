@@ -29,7 +29,7 @@ from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.pdf import render_note_pdf
 from ..domain.share_tokens import hash_token, looks_like_token
-from .notes import _resolve_section_labels
+from .notes import _resolve_section_labels, _resolve_section_names
 
 logger = logging.getLogger(__name__)
 
@@ -140,13 +140,19 @@ async def read_shared_note_pdf(token: str) -> Response:
         version = await repo.fetch_version(conn, version_id=note.current_version_id)
         if version is None:
             raise _not_found()
+        section_names = await _resolve_section_names(conn, content=version.content)
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
         await repo.record_share_link_view(conn, link_id=link_id)
 
     issuer = branding.issuer_name if branding.issuer_name != "—" else settings.pdf_issuer_name
     is_draft = note.status not in (NoteStatus.FINALIZED, NoteStatus.AMENDED)
     pdf_bytes = render_note_pdf(
-        note=note, version=version, issuer_name=issuer, is_draft=is_draft, language="en"
+        note=note,
+        version=version,
+        issuer_name=issuer,
+        is_draft=is_draft,
+        language="en",
+        section_names=section_names,
     )
     await _audit_view(tenant_id, note_id, link_id, fmt="pdf")
     return Response(

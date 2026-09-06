@@ -1,0 +1,22 @@
+# Cost rates per backend for the model_usage ledger (DEP-S1-06).
+# cost_cents_est = input_tokens/1000 * input_cents_per_1k
+#                + output_tokens/1000 * output_cents_per_1k
+#                + audio_seconds/60 * audio_cents_per_minute
+# HF rates = instance hourly price ÷ measured throughput. The numbers below
+# are FIRST ESTIMATES from list prices (Sep 2026) and DEP-S0 dev-Mac
+# throughput; DEP-S6 replaces them with measured figures. `dev_mac` is
+# free (founder's electricity); `hosted_eu` is filled by the DEP-S6 cost model.
+version: 1
+currency: EUR
+backends:
+  dev_mac:        { input_cents_per_1k: 0, output_cents_per_1k: 0 }
+  dev_mac_asr:    { audio_cents_per_minute: 0 }
+  inproc_cpu_asr: { audio_cents_per_minute: 0 }
+  recorded:       { input_cents_per_1k: 0, output_cents_per_1k: 0 }
+  # nvidia-l4 x1 ≈ €0.75/h; assume 25 tok/s generation + prompt processing amortised
+  # → ~90k output tokens/h → 0.83 c per 1k output; prompt tokens ~10× cheaper.
+  hf_eu:          { input_cents_per_1k: 0.08, output_cents_per_1k: 0.83, cold_start_cents: 6 }
+  # nvidia-t4 x1 ≈ €0.50/h; whisper-large-v3-turbo ≈ 0.05× realtime on T4 → 1200 audio-min/h
+  hf_eu_asr:      { audio_cents_per_minute: 0.04, cold_start_cents: 4 }
+  hosted_eu:      { input_cents_per_1k: null, output_cents_per_1k: null }   # DEP-S6
+  anthropic:      { input_cents_per_1k: null, output_cents_per_1k: null }   # BE-S3

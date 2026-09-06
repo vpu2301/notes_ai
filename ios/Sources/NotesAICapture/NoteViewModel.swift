@@ -36,6 +36,10 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
     @Published private(set) var conflict = false
+    /// Set when this is not our note and nobody shared it with us — a
+    /// workspace admin opening a colleague's note. Every read is then sent
+    /// with this purpose (the server records it) and the screen says so.
+    @Published private(set) var readPurpose: ReadPurpose?
     @Published private(set) var loadError: String?
     @Published private(set) var isLoading = true
     @Published private(set) var busy = false
@@ -57,7 +61,10 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var renamingSpeaker = false
 
     private let api: APIClient
+    /// The autosave timer (cancelled and restarted on every edit).
     private var saveTask: Task<Void, Never>?
+    /// The write on the wire, if one is running.
+    private var saveInFlight: Task<Void, Never>?
     private var pending: (content: NoteContent, version: Int)?
     private static let autosaveDelay: Duration = .milliseconds(900)
 
@@ -68,6 +75,13 @@ final class NoteViewModel: ObservableObject {
     }
 
     var isDraft: Bool { note?.status == .draft }
+
+    /// "Ada's note" — who this note belongs to, when it is not ours.
+    var oversightLabel: String? {
+        guard readPurpose != nil else { return nil }
+        let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? "A colleague's note" : "\(name)'s note"
+    }
     var editable: Bool { isDraft }
 
     // MARK: - Load
@@ -76,7 +90,15 @@ final class NoteViewModel: ObservableObject {
         loadError = nil
         isLoading = note == nil
         do {
-            let envelope = try await api.fetchNote(id: noteId)
+            let envelope: NoteEnvelope
+            do {
+                envelope = try await api.fetchNote(id: noteId)
+                readPurpose = nil
+            } catch let error as APIError where error.needsReadPurpose {
+                // Not our note: read it as a reviewer, on the record.
+                envelope = try await api.fetchNote(id: noteId, purpose: .review)
+                readPurpose = .review
+            }
             note = envelope
             content = envelope.content
             version = envelope.currentVersionNumber
@@ -202,10 +224,26 @@ final class NoteViewModel: ObservableObject {
     /// Write the pending content now (also called before finalize and when
     /// the page goes away).
     func flush() async {
+        // Stop the timer. When flush() runs *inside* the timer task this
+        // cancels the current task too, and a cancelled task makes
+        // URLSession fail with "cancelled" before anything is sent — so the
+        // write below runs in its own task, out of reach of that cancellation.
         saveTask?.cancel()
+        saveTask = nil
+        if let inFlight = saveInFlight { await inFlight.value }
         guard let snapshot = pending else { return }
         pending = nil
         saveState = .saving
+        let write = Task { [weak self] in
+            guard let self else { return }
+            await self.write(snapshot)
+        }
+        saveInFlight = write
+        await write.value
+        if saveInFlight == write { saveInFlight = nil }
+    }
+
+    private func write(_ snapshot: (content: NoteContent, version: Int)) async {
         do {
             let result = try await api.updateDraft(id: noteId, content: snapshot.content,
                                                    expectedVersion: snapshot.version)
@@ -254,7 +292,7 @@ final class NoteViewModel: ObservableObject {
         actionError = nil
         defer { busy = false }
         do {
-            let data = try await api.notePDF(id: noteId)
+            let data = try await api.notePDF(id: noteId, purpose: readPurpose == nil ? nil : .export)
             shareItem = ShareItem(url: try Self.exportFile(named: "\(note?.code ?? "note").pdf", data: data))
         } catch {
             actionError = error.localizedDescription

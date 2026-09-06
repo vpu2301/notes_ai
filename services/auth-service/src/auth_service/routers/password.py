@@ -20,7 +20,7 @@ Four public-facing acts, three of which run with no session at all.
 same 202 and the same body for a real address, an unknown one, a
 deactivated one, and one that tripped the rate limiter. Anything else
 turns the endpoint into a membership oracle for a business system,
-where "is this doctor a Klarnote user" is itself worth knowing. The
+where "is this doctor a Notes AI user" is itself worth knowing. The
 uniform response costs nothing; the timing difference between a real
 and unknown address is not eliminated, and is noted as accepted
 residual risk (evening it out would mean an artificial delay on every

@@ -20,7 +20,7 @@ from .codec import validate_codec
 from .duration import probe_audio, validate_duration
 from .hash import compute_hash
 from .magic_bytes import validate_magic_bytes
-from .mime import validate_mime
+from .mime import normalize_mime, validate_mime
 from .result import UploadFacts, ValidationResult, ok
 from .size import validate_size
 
@@ -35,13 +35,20 @@ async def run_all(
     Returns the validation result plus the facts collected up to that
     point. On failure, the facts struct is partially filled.
     """
+    r = validate_mime(mime_type)
+
+    # Everything downstream keys off the bare type/subtype: the
+    # magic-byte table, the tempfile suffix, and the row we persist. A
+    # browser recording arrives as ``audio/webm;codecs=opus``; storing
+    # the parameter would mean two spellings of one media type in the
+    # database.
+    mime_type = normalize_mime(mime_type)
     facts = UploadFacts(
         mime_type=mime_type,
         size_bytes=len(payload),
         bytes_buffer=payload,
     )
 
-    r = validate_mime(mime_type)
     if not r.ok:
         return r, facts
 

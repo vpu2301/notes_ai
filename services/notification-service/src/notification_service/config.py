@@ -37,6 +37,12 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
+    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
+    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
+    # token's own `iss` selects which entry verifies it. Unset (the
+    # default) means the three values above build a one-element list, so
+    # a deployment that has not been migrated behaves exactly as before.
+    auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     cors_allowed_origins: str = Field(default="", alias="CORS_ALLOWED_ORIGINS")
@@ -92,7 +98,7 @@ class Settings(BaseSettings):
     # ── Email ────────────────────────────────────────────────────────
     email_provider: str = Field(default="mock", alias="MDX_EMAIL_PROVIDER")  # smtp | mock
     email_from: str = Field(default="noreply@notes-ai.local", alias="MDX_EMAIL_FROM")
-    email_from_name: str = Field(default="Klarnote", alias="MDX_EMAIL_FROM_NAME")
+    email_from_name: str = Field(default="Notes AI", alias="MDX_EMAIL_FROM_NAME")
     smtp_host: str = Field(default="localhost", alias="MDX_SMTP_HOST")
     smtp_port: int = Field(default=1025, alias="MDX_SMTP_PORT")
     smtp_use_tls: bool = Field(default=False, alias="MDX_SMTP_USE_TLS")

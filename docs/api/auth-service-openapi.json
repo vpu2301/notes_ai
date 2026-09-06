@@ -2272,7 +2272,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Return verified claims + DB user state",
+        "summary": "Return verified claims, the identity, and its memberships",
         "tags": [
           "auth"
         ]

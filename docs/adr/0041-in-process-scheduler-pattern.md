@@ -26,8 +26,9 @@ each other). The repo already holds two working precedents:
 
 - `observability.run_periodic(job_name, interval_seconds, fn)` owns the
   loop mechanics and the metric contract:
-  `mdx_scheduler_job_runs_total{job, outcome}`,
-  `mdx_scheduler_job_duration_seconds{job}`. (It lives in the leaf
+  `mdx_scheduler_job_runs_total{job_name, outcome}`,
+  `mdx_scheduler_job_duration_seconds{job_name}` (the label is `job_name`
+  because the collector's Prometheus exporter owns `job`). (It lives in the leaf
   observability lib, so it cannot write audit rows itself.)
 - Each job writes its own per-run audit row
   (`scheduler.job.completed/failed`) under the **reserved global tenant**

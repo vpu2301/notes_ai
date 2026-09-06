@@ -238,11 +238,11 @@ async def test_vocabulary_hint_lands_on_the_context(
         ws,
         _upgrade(protocol_version=2),
         state,
-        _start_v2(mode="dictation", vocabulary_hint="Klarnote OKR roadmap"),
+        _start_v2(mode="dictation", vocabulary_hint="Notes AI OKR roadmap"),
     )
 
     assert ctx is not None
-    assert ctx.vocabulary_hint == "Klarnote OKR roadmap"
+    assert ctx.vocabulary_hint == "Notes AI OKR roadmap"
 
 
 async def test_empty_hint_falls_back_to_the_config_default(

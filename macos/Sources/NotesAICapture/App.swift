@@ -39,6 +39,15 @@ struct NotesAICaptureApp: App {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(app.selectedNoteId == nil)
             }
+            CommandGroup(after: .sidebar) {
+                Button(app.sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar") {
+                    app.toggleSidebar()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Invite People…") { app.showInvite() }
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
                     app.settingsTab = .general
@@ -60,6 +69,15 @@ enum MainWindow {
 /// the window closes.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `notesai://` links clicked outside the app (IDX-M2). SwiftUI's
+        // `onOpenURL` needs a scene that is on screen, and this app spends
+        // most of its life with none; the Apple Event is delivered
+        // whatever is showing.
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReply:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL))
         // `swift run` has no Info.plist (no LSUIElement), so enforce it here
         // too — this also keeps the Window scene from opening at launch.
         NSApp.setActivationPolicy(.accessory)
@@ -70,6 +88,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NotificationCenter.default.post(name: .openMainWindow, object: nil)
             }
         }
+    }
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor,
+                                      withReply reply: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: string)
+        else { return }
+        NotificationCenter.default.post(name: .openAppURL, object: url)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -85,6 +111,8 @@ extension Notification.Name {
     /// Ask the (always-alive) menu-bar label to open the main window; used
     /// where no SwiftUI `openWindow` environment is available.
     static let openMainWindow = Notification.Name("NotesAICapture.openMainWindow")
+    /// A `notesai://` URL arrived from outside the app; the object is the URL.
+    static let openAppURL = Notification.Name("NotesAICapture.openAppURL")
 }
 
 /// Opens (or focuses) the main window and brings the app forward.

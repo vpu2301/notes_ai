@@ -430,6 +430,7 @@ are in the root `README.md` service-URL table.
 ```bash
 $ make dev-down      # stop + remove containers (volumes kept)
 $ make reset-db      # wipe & recreate the Postgres volume (also re-imports Keycloak realm)
+$ make dev-nuke      # DESTRUCTIVE: containers + every volume (Postgres, MinIO, Kafka)
 ```
 
 > Don't drop the Postgres volume by hand — Keycloak shares that server, and an

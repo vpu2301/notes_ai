@@ -19,7 +19,7 @@ export function SkeletonRow() {
       <div className="row-body">
         <div className="row-1">
           <Skeleton width="38%" height={14} />
-          <Skeleton width={60} height={18} style={{ borderRadius: 99 }} />
+          <Skeleton width={60} height={18} style={{ borderRadius: "var(--radius-pill)" }} />
         </div>
         <Skeleton width="70%" height={12} style={{ marginTop: 8 }} />
       </div>

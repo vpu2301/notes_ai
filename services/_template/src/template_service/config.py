@@ -35,6 +35,12 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
+    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
+    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
+    # token's own `iss` selects which entry verifies it. Unset (the
+    # default) means the three values above build a one-element list, so
+    # a deployment that has not been migrated behaves exactly as before.
+    auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     @property

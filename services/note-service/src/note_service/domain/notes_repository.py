@@ -193,24 +193,48 @@ class MemberRow:
 
 
 async def find_member_by_email(conn: asyncpg.Connection, *, email: str) -> MemberRow | None:
-    """A workspace member by e-mail (RLS keeps this to the caller's tenant)."""
-    row = await conn.fetchrow(
+    """A workspace member by e-mail, scoped to the caller's tenant.
+
+    Reads `identities` through `profile_of_subs` (IDX-B2) rather than the
+    per-tenant `users` table. The difference that matters: `users` has one
+    row per principal in its HOME tenant, so a colleague invited into this
+    workspace from another one was simply not found here — sharing a note
+    with them failed with "no such member". The helper resolves anyone
+    with an active membership in this tenant, wherever they came from.
+
+    The candidate subs come from `tenant_memberships`, which `app_role`
+    can already read within its own tenant, so the address comparison
+    happens over this workspace's members and nobody else's.
+    """
+    rows = await conn.fetch(
         """
-        SELECT sub, email, display_name FROM users
-        WHERE lower(email) = lower($1) AND status IN ('invited', 'active')
+        SELECT p.sub, p.display_name, p.email
+        FROM profile_of_subs(
+                 ARRAY(SELECT user_sub FROM tenant_memberships WHERE status = 'active')
+             ) p
+        WHERE lower(p.email) = lower($1) AND p.status = 'active'
+        LIMIT 1
         """,
         email.strip(),
     )
-    if row is None:
+    if not rows:
         return None
+    row = rows[0]
     return MemberRow(sub=row["sub"], email=row["email"], display_name=row["display_name"])
 
 
 async def fetch_members(conn: asyncpg.Connection, *, subs: list[UUID]) -> list[MemberRow]:
+    """Profiles for a page of subs — one query, no N+1 (IDX-B2 F2).
+
+    Same change as `find_member_by_email`: a co-author who lives in
+    another workspace used to render blank here, because the LEFT JOIN
+    onto per-tenant `users` found nothing for them.
+    """
     if not subs:
         return []
     rows = await conn.fetch(
-        "SELECT sub, email, display_name FROM users WHERE sub = ANY($1::uuid[]) ORDER BY display_name",
+        "SELECT sub, display_name, email FROM profile_of_subs($1::uuid[])"
+        " ORDER BY display_name",
         subs,
     )
     return [MemberRow(sub=r["sub"], email=r["email"], display_name=r["display_name"]) for r in rows]

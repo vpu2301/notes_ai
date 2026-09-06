@@ -17,14 +17,79 @@ from auth_service.adapters import templates
 from auth_service.domain import compose
 from auth_service.domain import copy as copy_mod
 
-APP = "https://app.klarnote.com"
-SUPPORT = "https://klarnote.com/contact"
+APP = "https://app.notes-ai.local"
+SUPPORT = "https://notes-ai.local/contact"
 WHEN = datetime(2026, 8, 9, 14, 30, tzinfo=UTC)
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0 Safari/537.36"
 TOKEN = "tok-ABCDEF0123456789"
 
 
 def _fields(kind: str, lang: str) -> tuple[dict, dict]:
+    # IDX-A5 notices. Each is listed explicitly rather than defaulted, so
+    # adding a kind without teaching this helper fails the render gate
+    # instead of quietly rendering somebody else's variables.
+    if kind == copy_mod.KIND_MFA_ENABLED:
+        return compose.mfa_enabled_fields(lang=lang, changed_at=WHEN), {}
+    if kind == copy_mod.KIND_MFA_DISABLED:
+        return (
+            compose.mfa_disabled_fields(lang=lang, changed_at=WHEN, by_admin=True),
+            {},
+        )
+    if kind == copy_mod.KIND_RECOVERY_CODE_USED:
+        return (
+            compose.recovery_code_used_fields(lang=lang, remaining=4, used_at=WHEN),
+            {},
+        )
+    if kind == copy_mod.KIND_EMAIL_CHANGED:
+        return (
+            compose.email_changed_fields(
+                lang=lang,
+                new_email="new-address@acme.example",
+                revert_url=f"{APP}/auth/email/revert/{TOKEN}",
+                revert_ttl_seconds=86400,
+                changed_at=WHEN,
+            ),
+            {},
+        )
+    if kind == copy_mod.KIND_ACCOUNT_DELETION:
+        return (
+            compose.account_deletion_fields(lang=lang, purge_on=WHEN, requested_at=WHEN),
+            {},
+        )
+    if kind == copy_mod.KIND_AUTH_CODE:
+        return (
+            compose.auth_code_fields(
+                lang=lang, code="482913", ttl_seconds=600, user_agent=UA, requested_at=WHEN
+            ),
+            {},
+        )
+    if kind == copy_mod.KIND_AUTH_LOCKED:
+        return compose.auth_locked_fields(lang=lang, locked_until=WHEN), {}
+    if kind == copy_mod.KIND_SIGNUP_VERIFY:
+        return (
+            compose.signup_verify_fields(
+                lang=lang, code="482913", ttl_seconds=600, user_agent=UA, requested_at=WHEN
+            ),
+            {},
+        )
+    if kind == copy_mod.KIND_CONCIERGE_WELCOME:
+        return (
+            compose.concierge_welcome_fields(
+                lang=lang,
+                display_name="Olena",
+                temporary_password=TOKEN,
+                app_base_url=APP,
+                created_at=WHEN,
+            ),
+            {},
+        )
+    if kind == copy_mod.KIND_SIGNUP_EXISTS:
+        return (
+            compose.signup_exists_fields(
+                lang=lang, app_base_url=APP, user_agent=UA, requested_at=WHEN
+            ),
+            {},
+        )
     if kind == copy_mod.KIND_PASSWORD_RESET:
         return (
             compose.password_reset_fields(
@@ -79,13 +144,96 @@ def test_every_kind_and_language_renders(kind: str, lang: str) -> None:
     assert "{" not in rendered.text_body
 
 
-@pytest.mark.parametrize("kind", copy_mod.KINDS)
+def _expected_link(kind: str) -> str:
+    """What THIS kind's link must contain.
+
+    Most link mails carry a one-shot token, and the token is the thing
+    the mail exists to deliver. `signup_exists` is the exception: its
+    link is the plain sign-in page, because there is nothing to confirm —
+    the account already exists, and handing an unauthenticated caller a
+    token for somebody else's account is precisely what that mail must
+    not do.
+    """
+    if kind == copy_mod.KIND_SIGNUP_EXISTS:
+        return f"{APP}/login"
+    if kind == copy_mod.KIND_CONCIERGE_WELCOME:
+        # The link is what this mail is for: the first thing to do with a
+        # mailed password is replace it.
+        return f"{APP}/settings/password"
+    return TOKEN
+
+
+@pytest.mark.parametrize("kind", copy_mod.LINK_KINDS)
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
 def test_action_link_is_present_in_both_parts(kind: str, lang: str) -> None:
     """The one thing the mail exists to deliver must be in both parts."""
     rendered = _render(kind, lang)
-    assert TOKEN in rendered.html_body
-    assert TOKEN in rendered.text_body
+    expected = _expected_link(kind)
+    assert expected in rendered.html_body
+    assert expected in rendered.text_body
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_the_signup_confirmation_mail_carries_no_link(lang: str) -> None:
+    """BE-0: a code, never a link.
+
+    Corporate mail filters and some mobile clients open every URL in an
+    inbound message. A confirmation link would be spent by a machine that
+    merely read the mail, and the person would arrive to find their
+    confirmation already used. A six-digit code cannot be consumed by a
+    scanner.
+    """
+    rendered = _render(copy_mod.KIND_SIGNUP_VERIFY, lang)
+    assert "http" not in rendered.text_body
+    assert "482 913" in rendered.text_body
+    assert "<a " not in rendered.html_body
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_neither_signup_mail_says_whether_the_address_was_registered(lang: str) -> None:
+    """The uniform 202 is only honest if the mails keep the secret too.
+
+    `/auth/signup` answers identically for a new address and a known one,
+    so the sole place the difference exists is a mailbox. Neither body may
+    quote the address back, which is what would turn a forwarded screenshot
+    into a disclosure.
+    """
+    for kind in (copy_mod.KIND_SIGNUP_VERIFY, copy_mod.KIND_SIGNUP_EXISTS):
+        rendered = _render(kind, lang)
+        assert "olena@acme.example" not in rendered.text_body
+        assert "olena@acme.example" not in rendered.html_body
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_email_change_notice_masks_the_new_address(lang: str) -> None:
+    """It goes to the address that just lost the account.
+
+    The reader is not necessarily the person who made the change, so the
+    full destination is withheld — enough is shown to recognise your own
+    other address, not enough to hand a stranger's mailbox to an attacker.
+    """
+    rendered = _render(copy_mod.KIND_EMAIL_CHANGED, lang)
+    assert "new-address@acme.example" not in rendered.html_body
+    assert "new-address@acme.example" not in rendered.text_body
+    assert "n***s@acme.example" in rendered.text_body
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_a5_notices_carry_no_link_except_the_revert(lang: str) -> None:
+    """A security notice that trains people to click is a lure.
+
+    Only the email-change notice has anything to undo, and that is the
+    one place a link earns its place.
+    """
+    for kind in (
+        copy_mod.KIND_MFA_ENABLED,
+        copy_mod.KIND_MFA_DISABLED,
+        copy_mod.KIND_RECOVERY_CODE_USED,
+        copy_mod.KIND_ACCOUNT_DELETION,
+    ):
+        rendered = _render(kind, lang)
+        assert "href=" not in rendered.html_body, kind
+        assert "http" not in rendered.text_body, kind
 
 
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
@@ -195,18 +343,18 @@ def test_mime_has_both_parts_and_the_headers_deliverability_needs() -> None:
     mime = email_mod.build_mime(
         email_mod.OutboundEmail(
             to_address="olena@acme.example",
-            subject="Reset your Klarnote password",
+            subject="Reset your Notes AI password",
             text_body="text",
             html_body="<p>html</p>",
-            reply_to="sales@klarnote.com",
+            reply_to="sales@notes-ai.local",
         ),
-        from_address="sales@klarnote.com",
-        from_name="Klarnote",
+        from_address="sales@notes-ai.local",
+        from_name="Notes AI",
     )
     assert mime.get_content_type() == "multipart/alternative"
     assert mime["Message-ID"]
     assert mime["Date"]
-    assert mime["Reply-To"] == "sales@klarnote.com"
+    assert mime["Reply-To"] == "sales@notes-ai.local"
     # Security mail IS auto-generated: suppress out-of-office replies.
     assert mime["Auto-Submitted"] == "auto-generated"
 
@@ -219,8 +367,8 @@ def test_security_mail_is_not_unsubscribable() -> None:
         email_mod.OutboundEmail(
             to_address="a@b.example", subject="s", text_body="t", html_body="<p>h</p>"
         ),
-        from_address="sales@klarnote.com",
-        from_name="Klarnote",
+        from_address="sales@notes-ai.local",
+        from_name="Notes AI",
     )
     assert mime["List-Unsubscribe"] is None
     assert mime["List-Unsubscribe-Post"] is None
@@ -229,7 +377,7 @@ def test_security_mail_is_not_unsubscribable() -> None:
 def test_ehlo_hostname_never_resolves_the_local_fqdn() -> None:
     """socket.getfqdn() blocks for 30s on a network with no PTR record,
     inside the send, inside the transaction holding the outbox row."""
-    assert email_mod.ehlo_hostname("sales@klarnote.com") == "klarnote.com"
+    assert email_mod.ehlo_hostname("sales@notes-ai.local") == "notes-ai.local"
     assert email_mod.ehlo_hostname("") == "localhost"
 
 
@@ -252,3 +400,20 @@ async def test_mock_provider_captures_mail() -> None:
     )
     assert provider.sent[0].to_address == "a@b.example"
     assert result.provider_message_id
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_auth_code_mail_carries_the_grouped_code_and_no_links(lang: str) -> None:
+    rendered = _render(copy_mod.KIND_AUTH_CODE, lang)
+    assert "482 913" in rendered.html_body and "482 913" in rendered.text_body
+    assert "482913" not in rendered.subject  # never in a notification preview
+    assert "href=" not in rendered.html_body
+    assert "http" not in rendered.text_body
+    assert "olena@" not in rendered.html_body  # the address stays in the envelope
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_locked_mail_has_no_links_and_names_the_unlock_time(lang: str) -> None:
+    rendered = _render(copy_mod.KIND_AUTH_LOCKED, lang)
+    assert "href=" not in rendered.html_body
+    assert "2026" in rendered.text_body

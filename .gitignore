@@ -6,7 +6,7 @@ __pycache__/
 venv/
 .env.local
 # docker compose auto-loads `.env` from this directory — it holds the real
-# sales@klarnote.com App Password (SMTP + IMAP). Never commit it.
+# sales@notes-ai.local App Password (SMTP + IMAP). Never commit it.
 .env
 *.egg-info/
 dist/

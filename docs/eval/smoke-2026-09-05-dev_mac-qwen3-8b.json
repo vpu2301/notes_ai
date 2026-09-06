@@ -1,0 +1,104 @@
+{
+  "kind": "smoke",
+  "backend": "dev_mac",
+  "date": "2026-09-05",
+  "generated_at": "2026-09-05T09:51:37+00:00",
+  "git": "7f1294e",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "summary": {
+    "meetings": 5,
+    "failed": 0,
+    "hallucination_rate": 0.0,
+    "latency_ms_p50": 33609,
+    "latency_ms_max": 54570,
+    "model_id": "qwen3:8b",
+    "structured_mode": "json_schema",
+    "processor": {
+      "name": "Developer machine",
+      "region": "local"
+    }
+  },
+  "results": [
+    {
+      "meeting": "m01_en_product_sync",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 22771,
+      "input_tokens": 319,
+      "output_tokens": 202,
+      "action_items": 2,
+      "decisions": 1,
+      "evidence_quotes": 3,
+      "hallucinated_quotes": 0,
+      "model_id": "qwen3:8b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m02_de_kundenprojekt",
+      "language": "de",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 38860,
+      "input_tokens": 307,
+      "output_tokens": 348,
+      "action_items": 2,
+      "decisions": 2,
+      "evidence_quotes": 4,
+      "hallucinated_quotes": 0,
+      "model_id": "qwen3:8b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m03_uk_planning",
+      "language": "uk",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 54570,
+      "input_tokens": 397,
+      "output_tokens": 482,
+      "action_items": 3,
+      "decisions": 2,
+      "evidence_quotes": 5,
+      "hallucinated_quotes": 0,
+      "model_id": "qwen3:8b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m04_en_hiring",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 33609,
+      "input_tokens": 292,
+      "output_tokens": 297,
+      "action_items": 3,
+      "decisions": 1,
+      "evidence_quotes": 4,
+      "hallucinated_quotes": 0,
+      "model_id": "qwen3:8b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m05_en_incident_review",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 26713,
+      "input_tokens": 299,
+      "output_tokens": 245,
+      "action_items": 2,
+      "decisions": 1,
+      "evidence_quotes": 3,
+      "hallucinated_quotes": 0,
+      "model_id": "qwen3:8b",
+      "structured_mode": "json_schema"
+    }
+  ],
+  "max_tokens": 1500
+}

@@ -35,6 +35,11 @@ struct HomeView: View {
                         rows(pendingCaptures.map { AnyView(CaptureRow(capture: $0)) })
                     }
                 }
+                // Recordings the server never got. Above the notes on
+                // purpose: unfinished work outranks finished work.
+                if app.selectedSpaceId == nil, !app.pending.isEmpty {
+                    PendingUploadsSection(pending: app.pending)
+                }
                 notesSection
             }
             .frame(maxWidth: 760, alignment: .leading)
@@ -43,7 +48,7 @@ struct HomeView: View {
             .padding(.bottom, 60)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
-        .task { await app.refreshNotes(); calendar.refresh(); await google.refresh() }
+        .task { await app.refreshNotes(); await app.refreshSpaces(); calendar.refresh(); await google.refresh() }
         .alert("Move this note to the trash?", isPresented: Binding(
             get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }
         )) {

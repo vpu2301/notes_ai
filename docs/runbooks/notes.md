@@ -236,3 +236,14 @@ answers (`no_audio_source` / `audio_not_retained` / `audio_erased` /
 4. MinIO lifecycle: clips live 5 min (Redis registry) with a 1-day
    bucket ILM backstop on `mdx-audio-clips`; a full bucket is never the
    explanation — check the ILM rule survived a `minio-init` re-run.
+
+## Spaces (0021)
+
+A **space** is a personal folder for notes: `GET/POST /v1/spaces`,
+`PUT/DELETE /v1/spaces/{id}`, and `PUT /v1/notes/{id}/space` with
+`{"space_id": …}` (`null` unfiles). Spaces are scoped to the caller's
+`sub` on top of tenant RLS — colleagues see the same notes but file them
+their own way — and need only `note.read`. A note is in at most one space
+per user. Deleting a space stamps `deleted_at` and unfiles its notes
+(`note_spaces`, `note_space_items`; no hard deletes). The Mac and iOS apps
+read the same list; the web app does not use spaces yet.

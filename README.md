@@ -243,7 +243,8 @@ make security      # bandit + pip-audit + semgrep
 make migrate-up    # apply SQL migrations
 make seed          # seed dev tenants, users, templates, starter content
 make openapi-dump  # refresh docs/api/*-openapi.json
-make dev-down      # stop & remove containers
+make dev-down      # stop & remove containers (volumes kept)
+make dev-nuke      # DESTRUCTIVE: also delete all volumes (asks to confirm)
 make doctor        # environment health check
 make help          # full target list
 ```

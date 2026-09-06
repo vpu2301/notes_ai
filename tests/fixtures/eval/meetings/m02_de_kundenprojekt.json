@@ -1,0 +1,8 @@
+{"id":"m02_de_kundenprojekt","language":"de","transcript":[
+{"speaker":"SPEAKER_1","t_start_ms":0,"t_end_ms":8000,"text":"Guten Morgen zusammen. Heute geht es um das Kundenprojekt Nordwind und den Liefertermin."},
+{"speaker":"SPEAKER_2","t_start_ms":8000,"t_end_ms":21000,"text":"Der Prototyp ist fertig, aber die Schnittstelle zum Lagersystem fehlt noch. Ohne die Schnittstelle können wir am fünfzehnten nicht liefern."},
+{"speaker":"SPEAKER_1","t_start_ms":21000,"t_end_ms":30000,"text":"Dann verschieben wir die Lieferung auf den zweiundzwanzigsten. Ich informiere den Kunden heute noch."},
+{"speaker":"SPEAKER_3","t_start_ms":30000,"t_end_ms":40000,"text":"Ich übernehme die Schnittstelle zum Lagersystem und melde mich am Montag mit einem Stand."},
+{"speaker":"SPEAKER_2","t_start_ms":40000,"t_end_ms":48000,"text":"Gut. Offen bleibt noch die Frage, ob wir den Wartungsvertrag mit anbieten. Das klären wir nächste Woche."},
+{"speaker":"SPEAKER_1","t_start_ms":48000,"t_end_ms":52000,"text":"Einverstanden. Danke euch."}],
+"expect":{"min_action_items":2,"must_mention":["zweiundzwanzigsten","Lagersystem"]}}

@@ -16,6 +16,8 @@ struct NoteView: View {
     /// Which speaker label is being renamed inline, and the text so far.
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
+    /// What is typed in the ask bar at the bottom.
+    @State private var askDraft = ""
 
     /// The capture this note came from, when it is one of this Mac's.
     private let capture: RecentCapture?
@@ -103,6 +105,10 @@ struct NoteView: View {
             }
             if model.conflict {
                 DSChip(text: "Out of date", tint: DS.warn, soft: DS.warnSoft)
+            }
+            if let label = model.oversightLabel {
+                DSChip(text: label, tint: DS.info, soft: DS.infoSoft)
+                    .help("You can see this note because you run this workspace. This view is recorded.")
             }
             Spacer()
             if model.isDraft {
@@ -221,6 +227,12 @@ struct NoteView: View {
                 })
             }
         }
+        if !model.chat.isEmpty {
+            items.append(.separator)
+            items.append(.item("Clear chat", symbol: "bubble.left.and.text.bubble.right") {
+                model.clearChat()
+            })
+        }
         items.append(.separator)
         if let capture {
             items.append(.item("Copy job ID", symbol: "number") { copy(capture.jobId) })
@@ -236,62 +248,189 @@ struct NoteView: View {
     // MARK: - Document
 
     private var document: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                TextField("Untitled note", text: Binding(
-                    get: { model.content?.title ?? "" },
-                    set: { model.setTitle($0) }
-                ))
-                .textFieldStyle(.plain)
-                .font(.dsDoc)
-                .foregroundStyle(DS.text1)
-                .disabled(!model.editable)
-                .padding(.bottom, 8)
-
-                if let note = model.note {
-                    HStack(spacing: 6) {
-                        Text(formatDateTime(note.createdAt))
-                        Text("·")
-                        Text("Updated \(relativeTime(note.updatedAt))")
-                        Text("·")
-                        Text(note.code).font(.dsMono(11.5))
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        documentBody
+                        if !model.chat.isEmpty || model.asking || model.askError != nil {
+                            askThread
+                                .padding(.top, 36)
+                        }
+                        Color.clear.frame(height: 1).id("ask-end")
                     }
-                    .font(.dsMeta)
-                    .foregroundStyle(DS.muted)
-                    .padding(.bottom, 18)
+                    .frame(maxWidth: 680, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 28)
+                    .padding(.bottom, 24)
                 }
-
-                if model.conflict {
-                    HStack(spacing: 10) {
-                        DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
-                                 text: "Someone else saved a newer version of this note.")
-                        Button("Reload latest") { Task { await model.load() } }
-                            .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
-                    }
-                    .padding(.bottom, 16)
+                .onChange(of: model.chat.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) }
                 }
-
-                if capture?.status == .complete {
-                    DSSegmentedPill(
-                        options: [
-                            .init(NoteViewModel.Tab.notes, label: "Notes"),
-                            .init(NoteViewModel.Tab.transcript, label: "Transcript"),
-                        ],
-                        selection: $model.tab, height: 28)
-                    .padding(.bottom, 20)
-                }
-
-                switch model.tab {
-                case .notes: sections
-                case .transcript: transcript
+                .onChange(of: model.asking) { _, asking in
+                    if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
                 }
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            askBar
+        }
+    }
+
+    /// Title, meta line, tabs and the section editors — the note itself.
+    @ViewBuilder
+    private var documentBody: some View {
+        TextField("Untitled note", text: Binding(
+            get: { model.content?.title ?? "" },
+            set: { model.setTitle($0) }
+        ))
+        .textFieldStyle(.plain)
+        .font(.dsDoc)
+        .foregroundStyle(DS.text1)
+        .disabled(!model.editable)
+        .padding(.bottom, 8)
+
+        if let note = model.note {
+            HStack(spacing: 6) {
+                Text(formatDateTime(note.createdAt))
+                Text("·")
+                Text("Updated \(relativeTime(note.updatedAt))")
+                Text("·")
+                Text(note.code).font(.dsMono(11.5))
+            }
+            .font(.dsMeta)
+            .foregroundStyle(DS.muted)
+            .padding(.bottom, 18)
+        }
+
+        if model.conflict {
+            HStack(spacing: 10) {
+                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
+                         text: "Someone else saved a newer version of this note.")
+                Button("Reload latest") { Task { await model.load() } }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
+            }
+            .padding(.bottom, 16)
+        }
+
+        if capture?.status == .complete {
+            DSSegmentedPill(
+                options: [
+                    .init(NoteViewModel.Tab.notes, label: "Notes"),
+                    .init(NoteViewModel.Tab.transcript, label: "Transcript"),
+                ],
+                selection: $model.tab, height: 28)
+            .padding(.bottom, 20)
+        }
+
+        switch model.tab {
+        case .notes: sections
+        case .transcript: transcript
+        }
+    }
+
+    // MARK: - Ask this note
+
+    /// The thread: questions on the right in a quiet bubble, answers as
+    /// plain text under a spark — one conversation about this note.
+    private var askThread: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(model.chat) { message in
+                switch message.role {
+                case .user:
+                    HStack {
+                        Spacer(minLength: 80)
+                        Text(message.text)
+                            .font(.dsBody)
+                            .foregroundStyle(DS.text1)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                                    .fill(DS.surface2)
+                            )
+                    }
+                case .assistant:
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(DS.accentText)
+                            .frame(width: 20, height: 20)
+                        Text(message.text)
+                            .font(.dsBody)
+                            .foregroundStyle(DS.text1)
+                            .lineSpacing(3)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            if model.asking {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.accentText)
+                        .frame(width: 20, height: 20)
+                    Text("Thinking…")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if let error = model.askError {
+                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
+            }
+        }
+    }
+
+    /// The bar pinned under the document: one field, Return sends.
+    private var askBar: some View {
+        VStack(spacing: 0) {
+            DSDivider()
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DS.accentText)
+                TextField("Ask about this note…", text: $askDraft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.ds(13.5))
+                    .foregroundStyle(DS.text1)
+                    .lineLimit(1...4)
+                    .onSubmit { sendQuestion() }
+                Button { sendQuestion() } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 8)
+                }
+                .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 26))
+                .disabled(model.asking || askDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Send (Return)")
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .fill(DS.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .strokeBorder(DS.line, lineWidth: DS.hairline)
+            )
+            .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 40)
-            .padding(.top, 28)
-            .padding(.bottom, 60)
+            .padding(.vertical, 12)
         }
+        .background(DS.bg)
+    }
+
+    private func sendQuestion() {
+        let question = askDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty, !model.asking else { return }
+        askDraft = ""
+        Task { await model.ask(question) }
     }
 
     private var sections: some View {

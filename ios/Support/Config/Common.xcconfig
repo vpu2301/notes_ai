@@ -1,0 +1,10 @@
+// Settings shared by both configurations.
+//
+// The Info.plist is run through the C preprocessor so that one file can
+// carry two App Transport Security policies (IDX-I1 F). `-traditional` is
+// not optional: without it the preprocessor reads the `//` in the DOCTYPE
+// URL as a comment and eats the rest of the line, and the plist no longer
+// parses. `-Wno-invalid-pp-token` keeps apostrophes in usage strings from
+// being read as the start of a character literal.
+INFOPLIST_PREPROCESS = YES
+INFOPLIST_OTHER_PREPROCESSOR_FLAGS = -traditional -Wno-invalid-pp-token

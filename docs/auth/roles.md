@@ -41,6 +41,39 @@ One door is left open, on purpose:
   projection (no titles, no snippets, no transcripts, no result URLs),
   which is what keeps the usage dashboard's counts working.
 
+## Membership roles → the `roles` claim (IDX)
+
+The table above is the **permission** vocabulary. A self-serve workspace
+has a second one: `tenant_memberships.role`, which says who may manage
+the workspace. One membership carries one management role (the table is
+`UNIQUE (tenant_id, user_sub)`), and `platform_roles_for`
+(`auth_service.domain.identity_repository`) is the only place the two
+vocabularies meet — a native session's `roles` claim is exactly what it
+returns.
+
+| Membership role | `roles` claim              | Who holds it |
+| --------------- | -------------------------- | ------------ |
+| `owner`         | `tenant_admin` + `member`  | The person who created the workspace — their own account, or the team/company they opened |
+| `admin`         | `tenant_admin` + `member`  | Someone the owner appointed to run the workspace alongside them |
+| `member`        | `member`                   | Works in the workspace |
+| `assistant`     | `member`                   | Works in the workspace on someone else's behalf |
+| `viewer`        | `viewer`                   | Reads, and dictates, but cannot cancel an ASR job |
+| *(unknown)*     | `viewer`                   | A membership role we do not recognise must never become an admin |
+
+**Managing a workspace never removes the ability to work in it.** S14
+still holds where it was aimed — `tenant_admin` as a *permission* carries
+no `note.*`, `asr.*` or `dictation.*`, so an admin-only account is still
+expressible and still sees no content. What changed is the default a
+person LANDS in: mapping `owner` to `tenant_admin` alone did not restrict
+an administrator, it locked out the only account a new workspace has.
+Every self-serve signup is the owner of the workspace it just created, so
+the first thing that account did — write a note, start a recording — was
+`403 deny: roles=['tenant_admin'] cannot 'asr.write'`.
+
+An admin-only account is now made on purpose rather than by default:
+assign the realm roles directly (`PUT /admin/users/{sub}/roles`) instead
+of relying on a membership role to withhold `member`.
+
 ## Room devices are capture-only (`device`)
 
 `device` is the identity of ambient-capture hardware — a meeting-room
@@ -64,6 +97,39 @@ audio/transcripts. `asr.cancel` is also denied: destructive acts on
 capture go through a human member. Revocation is disabling the room's
 Keycloak client — no user account is involved.
 
+## Membership roles → the `roles` claim (native sessions)
+
+A native session's `roles` claim is derived from the person's **membership**
+in the workspace it is scoped to (`tenant_memberships.role`), by
+`platform_roles_for` in `services/auth-service/.../identity_repository.py`:
+
+| Membership role     | `roles` claim              |
+| ------------------- | -------------------------- |
+| `owner`, `admin`    | `tenant_admin` **+** `member` |
+| `member`, `assistant` | `member`                 |
+| `viewer`            | `viewer`                   |
+| anything unknown    | `viewer` (never an admin)  |
+
+**Running a workspace never removes the ability to work in it.** Mapping
+`owner` to `tenant_admin` alone is not the S14 separation, it is a lockout:
+the person who creates a workspace is its owner, so the first token every
+self-serve account is ever issued would be one that cannot open a note,
+create a space or start a recording — `403 deny: roles=['tenant_admin']
+cannot 'asr.write'` on the first thing they try. The rule above is the
+"a founder holds both" guidance applied by default rather than left as a
+manual step nobody performs.
+
+An **admin-only** account — administration with no content access — is
+still expressible, and is still what `tenant_admin` alone means. It is now
+a deliberate realm-role assignment (`PUT /admin/users/{sub}/roles`), not
+something a person falls into by owning the workspace they created.
+
+The claim is re-read from the membership every time a token is minted,
+including on every refresh, so a role change takes effect on the next
+rotation rather than at next sign-in. Clients lean on that: web, macOS and
+iOS all refresh once and retry when a request comes back with a role
+denial, so a token that predates a grant does not strand the app.
+
 ## Picking a role at invite time
 
 - A person who runs the workspace *and* takes notes → assign **both**
@@ -78,8 +144,11 @@ Keycloak client — no user account is involved.
   scope mechanism (Day 7) is wired for service tokens but per-scope
   checks are not yet enforced.
 - A meeting-room capture device → **no user account at all**: a per-room
-  confidential client whose service account holds `device`
-  (`docs/runbooks/ambient-device.md`).
+  credential in `service_credentials` holding `device`, which exchanges a
+  client secret for a token at `POST /auth/oauth/token`
+  (`docs/runbooks/ambient-device.md`). Before IDX-B1b this was a Keycloak
+  client; that form of token is rejected by `libs/auth.Claims`, so any room
+  still provisioned that way cannot call the API.
 
 ## Changing a user's role
 

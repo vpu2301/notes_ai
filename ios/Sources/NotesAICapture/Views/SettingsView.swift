@@ -7,10 +7,8 @@ struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
     @State private var path: [AppState.SettingsTab] = []
-    @State private var isSigningOut = false
     @State private var host = ""
     @State private var hostApplied = false
-    @State private var savedPassword = CredentialStore.hasSaved
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -43,6 +41,8 @@ struct SettingsView: View {
                 switch tab {
                 case .connectors:
                     ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
+                case .account:
+                    AccountView()
                 case .general:
                     EmptyView()
                 }
@@ -51,6 +51,8 @@ struct SettingsView: View {
         .tint(DS.accentText)
         .onAppear {
             if app.settingsTab == .connectors { path = [.connectors] }
+            if app.settingsTab == .account { path = [.account] }
+            app.refreshPending()
         }
         .onDisappear { app.settingsTab = .general }
     }
@@ -120,68 +122,51 @@ struct SettingsView: View {
         .dsCard(padding: 14)
     }
 
+    /// Account, workspaces and sessions are a page of their own: there is
+    /// too much there to read past on the way to the capture settings.
     private var account: some View {
-        group("Signed in as") {
-            HStack(spacing: 10) {
-                DSAvatar(name: app.email.isEmpty ? "?" : app.email, size: 34)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(app.email.isEmpty ? "Not signed in" : app.email)
+        NavigationLink(value: AppState.SettingsTab.account) {
+            HStack(spacing: 12) {
+                DSAvatar(name: displayName, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
                         .font(.ds(15, .medium))
                         .foregroundStyle(DS.text1)
                         .lineLimit(1)
-                    Text(authHost)
+                    Text(subtitle)
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                         .lineLimit(1)
                 }
                 Spacer()
-                Button {
-                    isSigningOut = true
-                    Task {
-                        await app.signOut()
-                        isSigningOut = false
-                    }
-                } label: {
-                    if isSigningOut {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Sign out")
-                    }
-                }
-                .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 34))
-                .disabled(isSigningOut)
-            }
-            if let biometry = CredentialStore.biometryName {
-                DSDivider()
-                HStack(spacing: 10) {
-                    Image(systemName: CredentialStore.biometrySymbol)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(DS.accentText)
-                        .frame(width: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(savedPassword ? "Sign in with \(biometry)" : "\(biometry) sign-in is off")
-                            .font(.ds(15, .medium))
-                            .foregroundStyle(DS.text1)
-                        Text(savedPassword
-                             ? "The password is kept in this phone's Keychain, behind \(biometry)."
-                             : "Turn on “Save password for \(biometry)” the next time you sign in.")
-                            .font(.dsMeta)
-                            .foregroundStyle(DS.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    if savedPassword {
-                        Button("Forget") {
-                            CredentialStore.delete()
-                            savedPassword = false
-                        }
-                        .buttonStyle(DSButtonStyle(kind: .ghost, size: 14, height: 34))
-                        .foregroundStyle(DS.dangerText)
-                    }
+                if app.pending.isEmpty {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.muted)
+                } else {
+                    DSChip(text: "\(app.pending.count) waiting", tint: DS.warn, soft: DS.warnSoft)
                 }
             }
+            .contentShape(Rectangle())
         }
-        .onAppear { savedPassword = CredentialStore.hasSaved }
+        .buttonStyle(.plain)
+        .dsCard(padding: 14)
+    }
+
+    private var displayName: String {
+        let name = app.identity?.displayName ?? ""
+        if !name.isEmpty { return name }
+        return app.email.isEmpty ? "Not signed in" : app.email
+    }
+
+    /// The workspace comes first: it is the thing that changes what the
+    /// app shows, and the address is only ever confirmation.
+    private var subtitle: String {
+        var parts: [String] = []
+        if let workspace = app.activeWorkspace { parts.append(workspace.title) }
+        if !app.email.isEmpty, app.identity?.displayName.isEmpty == false { parts.append(app.email) }
+        if parts.isEmpty { parts.append(authHost) }
+        return parts.joined(separator: " · ")
     }
 
     private var advanced: some View {

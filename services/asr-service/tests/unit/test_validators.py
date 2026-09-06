@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from asr_service.validators.codec import validate_codec
-from asr_service.validators.duration import ProbeOutput, validate_duration
+from asr_service.validators.duration import ProbeOutput, probe_audio, validate_duration
 from asr_service.validators.hash import compute_hash
 from asr_service.validators.magic_bytes import validate_magic_bytes
-from asr_service.validators.mime import validate_mime
+from asr_service.validators.mime import normalize_mime, validate_mime
 from asr_service.validators.size import validate_size
 
 
@@ -20,6 +25,30 @@ def test_mime_allow_list_rejects_application_zip() -> None:
     r = validate_mime("application/zip")
     assert not r.ok
     assert r.code == "mime_not_allowed"
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        "audio/webm;codecs=opus",
+        "audio/webm; codecs=opus",
+        "AUDIO/WEBM; codecs=opus",
+        "  audio/webm  ",
+    ],
+)
+def test_mime_allow_list_ignores_parameters(declared: str) -> None:
+    """A browser recording declares its codec; that is still audio/webm.
+
+    ``MediaRecorder`` sets the blob type to what it actually picked, so
+    the multipart part arrives as ``audio/webm;codecs=opus``. Matching
+    the raw header against the allow-list rejected every web capture.
+    """
+    assert validate_mime(declared).ok
+    assert normalize_mime(declared) == "audio/webm"
+
+
+def test_mime_parameters_do_not_smuggle_a_banned_type() -> None:
+    assert not validate_mime("application/zip; codecs=opus").ok
 
 
 def test_magic_bytes_wav_happy_path() -> None:
@@ -144,3 +173,51 @@ def test_hash_is_deterministic_and_correct_length() -> None:
     h2 = compute_hash(b"abc")
     assert h1 == h2
     assert len(h1) == 32
+
+
+# ── Duration of a header-less container ──────────────────────────────
+
+
+def _ffmpeg_missing() -> bool:
+    return shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None
+
+
+@pytest.mark.skipif(_ffmpeg_missing(), reason="ffmpeg/ffprobe not installed")
+def test_probe_recovers_duration_of_live_muxed_webm(tmp_path: Path) -> None:
+    """A WebM with no duration in its header is still probeable.
+
+    Piping the muxer's output (``-f webm -``) reproduces exactly what a
+    browser's ``MediaRecorder`` writes: the muxer cannot seek back to
+    fill in the Segment duration, so ffprobe reports none for either the
+    format or the stream. Every web recording has this shape, and
+    without the packet-scan fallback all of them were rejected as
+    ``unprobeable``.
+    """
+    path = tmp_path / "live.webm"
+    with path.open("wb") as out:
+        subprocess.run(  # noqa: S603
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-c:a",
+                "libopus",
+                "-f",
+                "webm",
+                "-",
+            ],
+            stdout=out,
+            check=True,
+        )
+
+    probe = asyncio.run(probe_audio(str(path)))
+
+    assert probe is not None
+    assert probe.codec == "opus"
+    assert 2900 <= probe.duration_ms <= 3100
+    assert validate_duration(probe, max_seconds=1800, min_ms=400).ok

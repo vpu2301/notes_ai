@@ -192,6 +192,69 @@ header is additionally validated against the allow-list in prod.
 
 ---
 
+## IDX addendum — the native identity platform
+
+What changed when identity moved out of Keycloak (sprints A2, A3, A5,
+B1b, B2, B3). Only the deltas; the sprint-02 tables above still hold.
+
+### Trust boundary changes
+
+| Before | After | Consequence |
+| --- | --- | --- |
+| Keycloak minted tokens; auth-service proxied | auth-service signs RS256 itself | The signing key is now **our** highest-value secret. Compromise mints any identity in any workspace. Rotation: `docs/runbooks/idx-secrets.md` |
+| Keycloak stored credentials | `identities`, `identity_totp`, `service_credential_secrets` | Credential material is in our database. `app_role` — what every product service connects as — is granted nothing on any of it, enforced by `check-identity-grants.py` |
+| Keycloak's brute-force detector | DB-backed lockout on `identities` | Survives a Redis restart, which the cache-based alternative would not |
+| Room devices were Keycloak clients | `service_credentials`, `POST /auth/oauth/token` | The old form never worked: a Keycloak device token is rejected by `libs/auth.Claims`. See IDX-B1b |
+
+### New assets
+
+| Asset | Store | Protection |
+| --- | --- | --- |
+| Signing keys | secrets manager | Never on disk in prod; overlap rotation; JWKS publishes public halves only, asserted by test |
+| TOTP secrets | `identity_totp.secret_enc` | `libs/crypto` envelope, AAD bound to the identity — a blob moved to another row fails to decrypt |
+| Recovery codes | `identity_recovery_codes` | sha256 only, single-use, claimed by conditional UPDATE |
+| Device secrets | `service_credential_secrets` | sha256 of a 256-bit random; **no KDF** — full-entropy input has no dictionary to stretch against |
+| One-time codes | `auth_challenges.code_hash` | `sha256("<code>:<challenge_id>")`, so a leaked hash fits one challenge |
+| Sessions | `auth_sessions` | Refresh token stored as sha256; revocation is DB row **plus** denylist |
+
+### New threats, and what answers them
+
+| Threat | Answer |
+| --- | --- |
+| **S** — forge a token | RS256 pinned before decode; `alg=none` and HS256-with-public-key both rejected (8.1/8.2 in the pen-test checklist) |
+| **S** — enumerate accounts via the sign-in endpoint | Uniform 202: same work, same body, for known and unknown addresses. Two accepted residuals, both documented |
+| **S** — brute-force a 6-digit code | 5 attempts per challenge, one live code per address, per-email and per-IP caps, then a DB-backed lockout |
+| **S** — replay a TOTP code inside its drift window | Time step claimed with a strictly-greater-than guard; the same code cannot authenticate twice |
+| **S** — guess a device secret | 256-bit random, 60/min per client, locked for 15 min after 10 failures — **fail-closed**, the one control where availability yields |
+| **T** — alter the audit trail | Unchanged: hash-chained, verified nightly |
+| **R** — deny an action | Every credential change, revocation and lockout writes a `sec` audit row. A *successful* device token grant deliberately does not (96/day/room would bury the trail) |
+| **I** — read another workspace's people | `profile_of_subs` returns rows only for subs sharing an active membership with the caller's tenant; unscoped connections get nothing |
+| **I** — a leaked service token reads customer data | Service credentials mint against the platform tenant, which owns none |
+| **D** — lock everyone out via the lockout | Lockout is per identity; the sign-in caps are per address and per IP |
+| **E** — admin escalates to owner | An admin cannot reset an **owner's** second factor; only another owner can |
+| **E** — a room device acts as a user | `device` is capture-only, fixed per kind by a CHECK constraint; `tid` comes from the row, never the request |
+
+### Accepted residual risks
+
+1. **Timing on a locked, already-notified account.** It answers faster
+   because it sends no mail. Reaching that state costs ten failures
+   against an account you must already know exists.
+2. **`email_in_use` on email change is explicit.** The caller is
+   authenticated, so it is not an oracle; hiding it would fail later with
+   nothing the user could act on.
+3. **The denylist is fail-open** (ADR-0040). A Redis outage shortens
+   revocation from "immediate" to "within the access-token lifetime".
+   Alerted as critical (`DenylistPushFailed`).
+4. **No single-instance lock on maintenance** (ADR-0041). Jobs are
+   idempotent; concurrent runs are redundant, not harmful.
+
+### Still open — do not treat as covered
+
+Password login and its hashing parameters (IDX-A4), refresh rotation and
+replay detection (IDX-A2's remaining half), invitations (IDX-B1), and the
+removal of Keycloak itself (IDX-B2). Until those land, Keycloak is still
+in the request path and its own threat surface still applies.
+
 ## Excluded by scope
 
 - Network-layer attacks (DDoS, BGP hijack) — handled by the cloud

@@ -3,6 +3,10 @@ import SwiftUI
 
 /// The left column: the wordmark under the traffic lights, search, the one
 /// button, Home, and the user's spaces. Lists live on the home page.
+///
+/// It collapses to an icon rail (the toggle beside the wordmark, ⌃⌘S). The
+/// rail is wide enough to keep the window's traffic lights inside it, so
+/// nothing ever floats over the detail pane.
 struct SidebarView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -10,13 +14,32 @@ struct SidebarView: View {
     @State private var addingSpace = false
     @FocusState private var newSpaceFocused: Bool
 
+    /// Wide enough for the traffic lights (they end around x = 61).
+    static let railWidth: CGFloat = 64
+
     var body: some View {
+        Group {
+            if app.sidebarCollapsed { rail } else { full }
+        }
+        .frame(width: app.sidebarCollapsed ? Self.railWidth : DS.sidebarWidth)
+        .background(DS.sidebar)
+        .onChange(of: newSpaceFocused) { _, focused in
+            if !focused, addingSpace { commitSpace() }
+        }
+    }
+
+    // MARK: - Full column
+
+    private var full: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Color.clear.frame(width: 62)
                 DSWordmark(size: 14)
-                Spacer()
+                Spacer(minLength: 4)
+                inviteButton
+                collapseButton
             }
+            .padding(.trailing, 8)
             .frame(height: DS.titlebarInset + 8)
             .padding(.top, 2)
 
@@ -95,17 +118,104 @@ struct SidebarView: View {
             DSDivider()
             accountRow
         }
-        .frame(width: DS.sidebarWidth)
-        .background(DS.sidebar)
-        .onChange(of: newSpaceFocused) { _, focused in
-            if !focused, addingSpace { commitSpace() }
+    }
+
+    // MARK: - Collapsed rail
+
+    private var rail: some View {
+        VStack(spacing: 6) {
+            // The traffic lights sit here; the rail is wide enough for them.
+            Color.clear.frame(height: DS.titlebarInset + 8)
+
+            collapseButton
+            railButton("Search notes", symbol: "magnifyingglass") {
+                app.toggleSidebar()
+            }
+            railButton("Start recording now (⌘N)", symbol: "mic.fill", accent: true) {
+                capture.startNew()
+            }
+            .disabled(capture.isRecording || capture.phase.isBusy)
+            railButton("Home", symbol: "house", on: app.selection == nil && app.selectedSpaceId == nil) {
+                app.selection = nil
+                app.selectedSpaceId = nil
+            }
+
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(app.spaces) { space in
+                        railButton(space.name,
+                                   symbol: app.selectedSpaceId == space.id ? "folder.fill" : "folder",
+                                   on: app.selectedSpaceId == space.id) {
+                            app.selectedSpaceId = space.id
+                            app.selection = nil
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.hidden)
+
+            inviteButton
+            DSDivider()
+            DSMenu(width: 236, edge: .top, items: accountItems) {
+                DSAvatar(name: app.email.isEmpty ? "?" : app.email, size: 28)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .help(app.email.isEmpty ? "Account" : app.email)
         }
     }
 
-    private func commitSpace() {
-        if app.addSpace(named: newSpaceName) != nil || newSpaceName.trimmingCharacters(in: .whitespaces).isEmpty {
-            cancelSpace()
+    private func railButton(_ help: String, symbol: String, on: Bool = false,
+                            accent: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(accent ? DS.inkText : (on ? DS.text1 : DS.text3))
+                .frame(width: 32, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                        .fill(accent ? DS.ink : (on ? DS.sidebarOn : .clear))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                        .strokeBorder(DS.line, lineWidth: on && !accent ? DS.hairline : 0)
+                )
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    // MARK: - The two chrome icons
+
+    private var collapseButton: some View {
+        Button {
+            app.toggleSidebar()
+        } label: {
+            Image(systemName: app.sidebarCollapsed ? "sidebar.left" : "sidebar.leading")
+        }
+        .buttonStyle(DSIconButtonStyle(size: 24))
+        .help(app.sidebarCollapsed ? "Expand sidebar (⌃⌘S)" : "Collapse sidebar (⌃⌘S)")
+    }
+
+    private var inviteButton: some View {
+        Button {
+            app.invitePresented = true
+        } label: {
+            Image(systemName: "person.badge.plus")
+        }
+        .buttonStyle(DSIconButtonStyle(size: 24))
+        .help("Invite people to this workspace")
+    }
+
+    // MARK: - Spaces editing
+
+    private func commitSpace() {
+        let name = newSpaceName
+        cancelSpace()
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        Task { await app.addSpace(named: name) }
     }
 
     private func cancelSpace() {
@@ -148,8 +258,11 @@ struct SidebarView: View {
                         .font(.ds(12.5, .medium))
                         .foregroundStyle(DS.text1)
                         .lineLimit(1)
-                    Text(URL(string: app.settings.authBaseURL)?.host() ?? app.settings.authBaseURL)
-                        .font(.dsMono(10))
+                    // The workspace, not the host: which company's notes
+                    // these are is the thing you can be wrong about
+                    // (IDX-M2). The server address moved into the menu.
+                    Text(workspaceLine)
+                        .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                         .lineLimit(1)
                 }
@@ -167,6 +280,12 @@ struct SidebarView: View {
         .help(app.email)
     }
 
+    private var workspaceLine: String {
+        let name = app.activeWorkspaceName
+        if !name.isEmpty { return name }
+        return URL(string: app.settings.authBaseURL)?.host() ?? app.settings.authBaseURL
+    }
+
     /// "2 connected" next to the Connectors item; the calendar counts too.
     private var connectorsHint: String? {
         var count = app.connectors.connectors.filter {
@@ -179,10 +298,37 @@ struct SidebarView: View {
     }
 
     private func accountItems() -> [DSMenuItem] {
-        [
+        var items: [DSMenuItem] = [
             .header(app.email.isEmpty ? "Not signed in" : app.email,
                     hint: URL(string: app.settings.authBaseURL)?.host()),
+        ]
+        // The workspace switcher, inline: switching is a thing people do
+        // several times a day, and a settings sheet is the wrong distance
+        // away from it (IDX-M2).
+        if app.workspaces.count > 1 {
+            items.append(.separator)
+            items.append(.header("Workspace"))
+            for workspace in app.workspaces.prefix(6) {
+                items.append(.item(
+                    workspace.title,
+                    symbol: workspace.id == app.tenantId ? "checkmark.circle.fill" : "building.2",
+                    hint: workspace.myRole?.capitalized,
+                    disabled: app.switchingTo != nil,
+                    checked: false
+                ) {
+                    Task { await app.switchWorkspace(to: workspace.id) }
+                })
+            }
+            if app.workspaces.count > 6 {
+                items.append(.item("All workspaces…", symbol: "ellipsis") {
+                    app.settingsTab = .account
+                    app.settingsPresented = true
+                })
+            }
+        }
+        items += [
             .separator,
+            .item("Invite people…", symbol: "person.badge.plus") { app.invitePresented = true },
             .item("Settings…", symbol: "gearshape", hint: "⌘,") {
                 app.settingsTab = .general
                 app.settingsPresented = true
@@ -192,10 +338,11 @@ struct SidebarView: View {
             .item("Clear finished meetings", symbol: "checkmark.circle") { app.clearFinishedRecents() },
             .separator,
             .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
-                Task { await app.signOut() }
+                app.requestSignOut()
             },
             .item("Quit Notes AI Capture", symbol: "power", hint: "⌘Q") { NSApp.terminate(nil) },
         ]
+        return items
     }
 }
 

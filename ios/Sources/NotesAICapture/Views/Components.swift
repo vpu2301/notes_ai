@@ -264,3 +264,70 @@ enum MeetingGroups {
         return date.formatted(.dateTime.weekday(.wide).day().month(.wide))
     }
 }
+
+// MARK: - One-time code
+
+/// Six boxes over one real field.
+///
+/// A mailed code arrives from Mail or Messages by paste — or, more often
+/// on a phone, from the keyboard's own "From Messages" suggestion — far
+/// more often than it is typed, and six separate fields turn one paste
+/// into six keystrokes in the wrong boxes. `textContentType(.oneTimeCode)`
+/// only works on a single field, which settles it. Typing still works (the
+/// boxes fill left to right) and the field auto-submits on the sixth
+/// digit, because asking someone to tap Continue after entering a code
+/// they were just told to enter is a step with no content.
+struct DSCodeField: View {
+    @Binding var code: String
+    var length = 6
+    var onComplete: (String) -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack {
+            TextField("", text: $code)
+                .textFieldStyle(.plain)
+                .textContentType(.oneTimeCode)
+                .keyboardType(.numberPad)
+                .focused($focused)
+                .opacity(0.02)
+                .onChange(of: code) { _, new in
+                    let digits = String(new.filter(\.isNumber).prefix(length))
+                    if digits != new { code = digits }
+                    if digits.count == length { onComplete(digits) }
+                }
+            HStack(spacing: 8) {
+                ForEach(0..<length, id: \.self) { index in
+                    box(at: index)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
+        .onAppear { focused = true }
+        .accessibilityLabel("One-time code")
+    }
+
+    private func box(at index: Int) -> some View {
+        let characters = Array(code)
+        let filled = index < characters.count
+        let isNext = index == characters.count && focused
+        return Text(filled ? String(characters[index]) : " ")
+            .font(.dsMono(22))
+            .foregroundStyle(DS.text1)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                    .fill(DS.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                    .strokeBorder(isNext ? DS.text3 : DS.line,
+                                  lineWidth: isNext ? 1.5 : DS.hairline)
+            )
+            .animation(.easeOut(duration: 0.12), value: isNext)
+    }
+}

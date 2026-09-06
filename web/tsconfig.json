@@ -17,7 +17,13 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+
+    /* The Vitest suite reads docs/api/error-codes.md and walks src/ from disk. */
+    "types": ["vitest/globals", "node"]
   },
-  "include": ["src", "vite.config.ts"]
+  /* `e2e/` is type-checked here rather than left to Playwright's own
+     transpile: a spec that does not compile is a spec that cannot run, and
+     CI should say so in the fast job rather than after a stack comes up. */
+  "include": ["src", "tests", "e2e", "vite.config.ts", "playwright.config.ts"]
 }

@@ -16,7 +16,15 @@ from redis.asyncio import Redis
 from starlette.requests import Request
 
 from audit import AuditWriter
-from auth import Claims, JwksCache, build_current_user, build_session_denylist
+from auth import (
+    Claims,
+    IssuerConfig,
+    JwksCache,
+    build_current_user,
+    build_session_denylist,
+    issuer_url_map,
+    issuers_from_env,
+)
 from db import create_pool
 
 from .adapters.email import EmailProvider, build_provider
@@ -28,6 +36,23 @@ logger = logging.getLogger(__name__)
 
 # What `auth.build_current_user` hands back: (request, authorization) -> Claims.
 CurrentUserDep = Callable[[Request, str | None], Awaitable[Claims]]
+
+
+def auth_issuers() -> list[IssuerConfig]:
+    """The issuers this service trusts (FND-1 / ADR-0047).
+
+    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
+    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
+    Both the JWKS cache and ``build_current_user`` are built from THIS
+    list, so the keys a token can be verified with and the issuers a
+    token may claim can never drift apart.
+    """
+    return issuers_from_env(
+        settings.auth_issuers_json,
+        issuer=settings.auth_issuer,
+        jwks_url=settings.auth_jwks_url,
+        audience=settings.auth_audience,
+    )
 
 
 @dataclass(slots=True)
@@ -64,7 +89,10 @@ async def build_state() -> ServiceState:
         max_size=4,
     )
     redis: Redis = Redis.from_url(settings.redis_url, decode_responses=False)
-    jwks_cache = JwksCache(issuer_to_url={settings.auth_issuer: settings.auth_jwks_url})
+    issuers = auth_issuers()
+    # FND-1: log what this process will actually accept — see above.
+    logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
+    jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
 
     return ServiceState(
         app_pool=app_pool,
@@ -87,8 +115,9 @@ async def build_state() -> ServiceState:
         ),
         current_user_dep=build_current_user(
             jwks_cache=jwks_cache,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
+            # FND-1: the list, not a single string. The token's `iss`
+            # picks the entry it is verified against.
+            issuers=issuers,
             clock_skew_seconds=settings.auth_clock_skew_seconds,
             denylist=build_session_denylist(
                 enabled=settings.session_revocation_enabled,

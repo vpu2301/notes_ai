@@ -1,6 +1,7 @@
 /* ─── Buttons ───────────────────────────────────────────────────────────── */
-/* DSButtonStyle: 32px tall, radius 10, hairline frame on the secondary,
-   the ink pill for primary. The accent is for live frames, tints and text. */
+/* DSButtonStyle: 32px tall, a continuous radius, a warm-neutral hairline on
+   the secondary, the ink pill for primary. Hover deepens the neutral — the
+   accent never touches a frame. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: calc(7px * var(--density));
   height: 32px;
@@ -11,14 +12,25 @@
   color: var(--text-1);
   font-weight: 500; font-size: calc(13px * var(--fs));
   white-space: nowrap;
-  transition: background .12s, border-color .12s, color .12s, opacity .12s;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease),
+              transform var(--t-fast) var(--ease);
 }
 .btn:hover { background: var(--surface-2); border-color: var(--line-hover); }
+.btn:active:not([disabled]) { transform: scale(.985); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .btn svg { flex: none; }
 
-.btn.primary, .btn.accent { background: var(--ink); color: var(--ink-text); border-color: var(--ink); }
-.btn.primary:hover:not([disabled]), .btn.accent:hover:not([disabled]) { opacity: .85; background: var(--ink); border-color: var(--ink); color: var(--ink-text); }
+.btn.primary, .btn.accent {
+  background: var(--ink); color: var(--ink-text); border-color: var(--ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink-text) 14%, transparent),
+              0 1px 2px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.btn.primary:hover:not([disabled]), .btn.accent:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--ink) 88%, var(--surface));
+  border-color: color-mix(in srgb, var(--ink) 88%, var(--surface));
+  color: var(--ink-text);
+}
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-1); }
 .btn.ghost:hover:not([disabled]) { background: var(--surface-2); border-color: transparent; color: var(--text-1); }
 .btn.ghost[aria-pressed="true"] { background: var(--surface-2); color: var(--text-1); }
@@ -28,13 +40,14 @@
 /* The one loud red: the recording control. */
 .btn.rec { background: var(--rec); color: #fff; border-color: var(--rec); }
 .btn.rec:hover:not([disabled]) { background: color-mix(in srgb, var(--rec) 88%, #000); border-color: color-mix(in srgb, var(--rec) 88%, #000); color: #fff; }
-.btn.sm { height: 26px; padding: 0 calc(9px * var(--density)); font-size: calc(12px * var(--fs)); gap: calc(5px * var(--density)); border-radius: 8px; }
-.btn.lg { height: 38px; padding: 0 calc(16px * var(--density)); font-size: calc(14px * var(--fs)); }
+.btn.sm { height: 26px; padding: 0 calc(10px * var(--density)); font-size: calc(12px * var(--fs)); gap: calc(5px * var(--density)); border-radius: var(--radius-sm); }
+.btn.lg { height: 38px; padding: 0 calc(18px * var(--density)); font-size: calc(14px * var(--fs)); border-radius: var(--radius-lg); }
 .btn.block { width: 100%; }
 .btn kbd { background: transparent; border: 0; color: inherit; opacity: .55; padding: 0; }
 
 /* ─── Forms ─────────────────────────────────────────────────────────────── */
-/* DSTextField: surface, quiet hairline, the orange frame only on focus. */
+/* DSTextField: surface, quiet hairline; focus is the only place a field
+   takes colour, and it takes it as a moss ring, not as a frame tint. */
 .input, .select, .textarea {
   width: 100%;
   background: var(--surface);
@@ -42,10 +55,11 @@
   border-radius: var(--radius);
   padding: calc(7px * var(--density)) calc(10px * var(--density));
   font-size: calc(13px * var(--fs)); color: var(--text-1);
-  transition: border-color .12s, box-shadow .12s;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
+.input:hover:not(:disabled):not(:focus), .select:hover:not(:disabled), .textarea:hover:not(:disabled):not(:focus) { border-color: var(--line-hover); }
 .input:focus, .select:focus, .textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--line-active);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .input:disabled, .select:disabled, .textarea:disabled { background: var(--surface-2); color: var(--text-3); }
@@ -54,7 +68,7 @@
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a847c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right calc(10px * var(--density)) center;
+  background-position: right calc(11px * var(--density)) center;
   background-size: 14px;
   padding-right: calc(30px * var(--density));
 }
@@ -69,7 +83,7 @@
 }
 .label .req { color: var(--danger); margin-left: 2px; }
 .help { font-size: calc(11.5px * var(--fs)); color: var(--muted); }
-.help code { font-family: var(--mono); font-size: calc(11px * var(--fs)); background: var(--surface-2); border: var(--hairline) solid var(--line); border-radius: 4px; padding: 0 4px; }
+.help code { font-family: var(--mono); font-size: calc(11px * var(--fs)); background: var(--surface-2); border: var(--hairline) solid var(--line); border-radius: var(--radius-xs); padding: 0 4px; }
 .field-error { color: var(--rec); font-size: calc(12px * var(--fs)); display: block; }
 
 /* Platform checkbox */
@@ -77,14 +91,14 @@
   appearance: none; -webkit-appearance: none;
   flex: none;
   width: 15px; height: 15px; margin: 0;
-  border: 1.5px solid var(--line);
-  border-radius: 4px;
+  border: 1.5px solid var(--line-hover);
+  border-radius: 5px;
   background: var(--surface);
   cursor: pointer;
   display: inline-block;
-  transition: background-color .12s ease, border-color .12s ease;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
-.chk:hover:not(:disabled) { border-color: var(--line-hover); }
+.chk:hover:not(:disabled) { border-color: var(--line-active); }
 .chk:checked {
   background-color: var(--ink);
   border-color: var(--ink);
@@ -94,7 +108,7 @@
 [data-theme="dark"] .chk:checked {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23171512' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6'/%3E%3C/svg%3E");
 }
-.chk:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chk:focus-visible { outline: none; border-color: var(--line-active); box-shadow: 0 0 0 3px var(--accent-soft); }
 .chk:disabled { cursor: not-allowed; opacity: .5; }
 .chk-row {
   display: inline-flex; align-items: center; gap: calc(8px * var(--density));
@@ -102,31 +116,37 @@
   cursor: pointer; user-select: none;
 }
 
-/* Segmented control (DSSegmentedPill): grey track, white raised segment in
-   a hairline. */
+/* Segmented control (DSSegmentedPill): a warm track with a white raised
+   segment. The raised one is told apart by its surface and a soft lift, not
+   by a coloured frame. */
 .seg {
   display: inline-flex;
   background: var(--surface-2);
-  border-radius: 10px; padding: 3px;
+  border-radius: var(--radius); padding: 3px;
   gap: 2px;
 }
 .seg-opt {
-  height: 22px;
-  padding: 0 calc(10px * var(--density));
-  border-radius: 7px;
+  height: 24px;
+  padding: 0 calc(11px * var(--density));
+  border-radius: var(--radius-sm);
   border: var(--hairline) solid transparent;
   font-size: calc(12px * var(--fs)); font-weight: 500;
   color: var(--muted);
   display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s, color .12s, border-color .12s;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease),
+              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .seg-opt:hover:not([disabled]) { color: var(--text-1); }
-.seg-opt[aria-pressed="true"], .seg-opt[aria-checked="true"] { background: var(--surface); color: var(--text-1); border-color: var(--line-active); }
+.seg-opt[aria-pressed="true"], .seg-opt[aria-checked="true"] {
+  background: var(--surface); color: var(--text-1);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(26, 24, 22, .05);
+}
 .seg-opt[disabled] { cursor: default; }
 .seg.wrap { flex-wrap: wrap; }
 
 /* ─── Cards / panels ────────────────────────────────────────────────────── */
-/* DSCard: a surface in an orange hairline, never a shadow. */
+/* DSCard: a surface in a warm hairline, never a shadow. */
 .card {
   background: var(--surface);
   border: var(--hairline) solid var(--line);
@@ -134,7 +154,7 @@
 }
 .card.pad { padding: calc(16px * var(--density)); }
 .card-hover {
-  transition: border-color .12s ease, background .12s ease;
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease);
   cursor: pointer;
 }
 .card-hover:hover { border-color: var(--line-hover); background: var(--surface-hover); }
@@ -193,18 +213,19 @@
 }
 .chip.version { font-family: var(--mono); text-transform: none; }
 
-/* Filter chip (toggle): a framed capsule; pressed = accent tint. */
+/* Filter chip (toggle): a framed capsule; pressed fills with the moss tint
+   and drops its frame altogether rather than colouring it. */
 .filter-chip {
   display: inline-flex; align-items: center; gap: calc(6px * var(--density));
-  padding: calc(4px * var(--density)) calc(10px * var(--density)); border-radius: 99px;
+  padding: calc(4px * var(--density)) calc(11px * var(--density)); border-radius: var(--radius-pill);
   font-size: calc(12px * var(--fs)); font-weight: 500;
   background: var(--surface); color: var(--text-3);
   border: var(--hairline) solid var(--line);
   text-transform: capitalize;
-  transition: background .12s, color .12s, border-color .12s;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 .filter-chip:hover { background: var(--surface-2); color: var(--text-1); border-color: var(--line-hover); }
-.filter-chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); border-color: var(--line-active); }
+.filter-chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
 .filter-chip[aria-pressed="true"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 .code-tag {
@@ -212,7 +233,7 @@
   font-size: calc(11px * var(--fs));
   color: var(--text-3);
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
   white-space: nowrap;
 }
@@ -224,24 +245,104 @@
   letter-spacing: .04em;
   color: var(--accent-text);
   background: var(--accent-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 5px;
 }
 
 /* ─── Toolbar / search ──────────────────────────────────────────────────── */
 .toolbar { display: flex; gap: calc(8px * var(--density)); align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-/* DSSearchField: magnifier, orange hairline, 30px tall. */
-.search-input {
-  display: flex; align-items: center; gap: calc(7px * var(--density));
-  background: var(--surface); border: var(--hairline) solid var(--line);
-  border-radius: var(--radius); height: 32px; padding: 0 calc(10px * var(--density));
-  flex: 1; max-width: 380px; min-width: 220px;
-  transition: border-color .12s, box-shadow .12s;
+
+/* DSSearchField, expandable (components/SearchField.tsx).
+
+   At rest it is one magnifier in a capsule the size of a button. A click,
+   a `/` or ⌘K grows the capsule to the width of its row — only the capsule
+   moves; the magnifier keeps its box at the left, so the icon stays exactly
+   where it was and the field appears to open FROM it. Every other part —
+   the caret, the hint, the tail — fades in behind the growing edge.
+
+   The frame stays a warm neutral throughout (resting, hovered, focused);
+   focus is a moss ring around it and moss in the magnifier, never in the
+   hairline itself. */
+.sf {
+  --sf-h: calc(44px * var(--density));
+  --sf-w: 780px;
+  position: relative;
+  display: flex; align-items: center;
+  height: var(--sf-h);
+  width: 100%;
+  max-width: var(--sf-h);
+  background: var(--surface);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
+  cursor: text;
+  overflow: hidden;
+  transition: max-width var(--t-slow) var(--ease), border-color var(--t) var(--ease),
+              box-shadow var(--t) var(--ease), background var(--t) var(--ease);
 }
-.search-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.search-input svg { color: var(--muted); flex: none; }
-.search-input input { flex: 1; border: 0; background: transparent; font-size: calc(12.5px * var(--fs)); min-width: 0; }
-.search-input input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.sf.on { max-width: var(--sf-w); cursor: auto; }
+.sf:hover:not(.on) { background: var(--surface-hover); border-color: var(--line-hover); }
+.sf:focus-within { border-color: var(--line-active); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* The magnifier's box is the collapsed capsule, so it is centred while shut
+   and optically inset by the same amount once open. */
+.sf-ico {
+  flex: none;
+  width: calc(var(--sf-h) - 2px); height: 100%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  transition: color var(--t) var(--ease), transform var(--t) var(--ease);
+}
+.sf:hover:not(.on) .sf-ico { color: var(--text-2); transform: scale(1.06); }
+.sf:focus-within .sf-ico { color: var(--accent-text); }
+
+.sf-input {
+  flex: 1; min-width: 0;
+  height: 100%;
+  appearance: none; -webkit-appearance: none;
+  border: 0; background: transparent;
+  font-size: calc(14px * var(--fs));
+  letter-spacing: -0.005em;
+  color: var(--text-1);
+  opacity: 0;
+  transition: opacity var(--t) var(--ease);
+}
+.sf.on .sf-input { opacity: 1; }
+.sf-input::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+/* Result count, spinner, clear — the quiet right end. */
+.sf-tail {
+  flex: none;
+  display: flex; align-items: center; gap: calc(7px * var(--density));
+  padding-right: calc(7px * var(--density));
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--t) var(--ease);
+}
+.sf.on .sf-tail { opacity: 1; pointer-events: auto; }
+.sf-status { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The hint shows only while the caret is in an empty field — a full field
+   carries the clear button in its place. */
+.sf-kbd {
+  background: transparent; border-color: transparent;
+  color: var(--muted); opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.sf:focus-within .sf-kbd { opacity: .8; }
+.sf-clear {
+  width: 26px; height: 26px; flex: none;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sf-clear:hover { background: var(--surface-2); color: var(--text-1); }
+.sf-spin {
+  width: 13px; height: 13px; flex: none;
+  border-radius: 50%;
+  border: 1.6px solid var(--line-hover);
+  border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .toolbar-chips { display: flex; gap: calc(6px * var(--density)); flex-wrap: wrap; }
 .toolbar .grow { flex: 1; }
 
@@ -262,12 +363,16 @@
   content: ""; position: absolute; top: 0; left: 16px; right: 0;
   height: var(--hairline); background: var(--line-2);
 }
-.row.click { cursor: pointer; }
+.row.click { cursor: pointer; transition: background var(--t-fast) var(--ease); }
 .row.click:hover { background: var(--surface-hover); }
+.row.click:hover .row-time { color: var(--text-3); }
+.row-time, .row-name { transition: color var(--t-fast) var(--ease); }
+.row:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.row:last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
 .row-ico {
   width: 30px; height: 30px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 9px; background: var(--accent-soft); color: var(--accent-text);
+  border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text);
 }
 .row-ico.indigo { background: var(--indigo-soft); color: var(--indigo); }
 .row-ico.warn { background: var(--warn-soft); color: var(--warn); }
@@ -287,7 +392,7 @@
   font-size: calc(10.5px * var(--fs));
   color: var(--rec);
   background: var(--rec-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
 }
 
@@ -298,7 +403,7 @@
   background: var(--surface); border: var(--hairline) solid var(--line); border-radius: var(--radius-lg);
   padding: calc(12px * var(--density)) calc(14px * var(--density));
   text-align: left; width: 100%;
-  transition: border-color .12s ease, background .12s ease;
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease);
 }
 button.stat-card { cursor: pointer; }
 button.stat-card:hover { border-color: var(--line-hover); background: var(--surface-hover); }
@@ -315,26 +420,32 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   padding: 3px;
   margin-bottom: 14px;
   background: var(--surface-2);
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 .tab {
   display: inline-flex; align-items: center; gap: calc(6px * var(--density));
-  height: 24px;
-  padding: 0 calc(11px * var(--density));
-  border-radius: 7px;
+  height: 26px;
+  padding: 0 calc(12px * var(--density));
+  border-radius: var(--radius-sm);
   border: var(--hairline) solid transparent;
   font-size: calc(12px * var(--fs)); font-weight: 500;
   color: var(--muted);
-  transition: background .12s, color .12s, border-color .12s;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease),
+              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .tab:hover { color: var(--text-1); }
-.tab.on { background: var(--surface); color: var(--text-1); border-color: var(--line-active); }
+.tab.on {
+  background: var(--surface); color: var(--text-1);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(26, 24, 22, .05);
+}
 
 /* ─── Modal ─────────────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(26, 24, 22, 0.45);
-  backdrop-filter: blur(2px);
+  background: color-mix(in srgb, #1a1816 42%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
   padding: calc(24px * var(--density));
   animation: fade-in .15s ease;
@@ -346,11 +457,11 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   width: 100%; max-width: 480px;
   max-height: 88vh;
   box-shadow: var(--shadow-3);
-  animation: modal-in .18s ease;
+  animation: modal-in var(--t) var(--ease);
   overflow: hidden;
   display: flex; flex-direction: column;
 }
-@keyframes modal-in { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes modal-in { from { transform: scale(.97) translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
 .modal-h { padding: calc(18px * var(--density)) calc(20px * var(--density)) 0; }
 .modal-h h2 { margin: 0; font-size: calc(17px * var(--fs)); }
 .modal-h p { margin: 4px 0 0; color: var(--muted); font-size: calc(13px * var(--fs)); }
@@ -373,11 +484,11 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 }
 .toast {
   background: var(--ink); color: var(--ink-text);
-  padding: calc(10px * var(--density)) calc(16px * var(--density)); border-radius: var(--radius);
+  padding: calc(10px * var(--density)) calc(16px * var(--density)); border-radius: var(--radius-pill);
   font-size: calc(13px * var(--fs));
   display: flex; align-items: center; gap: calc(10px * var(--density));
   box-shadow: var(--shadow-3);
-  animation: toast-in .2s ease;
+  animation: toast-in var(--t) var(--ease);
   pointer-events: auto;
 }
 .toast-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--accent); }
@@ -385,7 +496,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .toast-error .toast-dot { background: #f0796d; }
 [data-theme="dark"] .toast-success .toast-dot { background: #3f7d55; }
 [data-theme="dark"] .toast-error .toast-dot { background: #d9483b; }
-@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toast-in { from { transform: translateY(10px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ─── Banners (DSNotice) ────────────────────────────────────────────────── */
 .banner {
@@ -417,9 +528,9 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   border-radius: var(--radius-lg);
 }
 .empty-art {
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   margin: 0 auto 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--accent-soft);
   color: var(--accent-text);
   display: flex; align-items: center; justify-content: center;
@@ -428,7 +539,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .empty p { margin: 0 auto; font-size: calc(13.5px * var(--fs)); max-width: 360px; }
 .empty-actions { display: inline-flex; gap: calc(8px * var(--density)); margin-top: 16px; flex-wrap: wrap; justify-content: center; }
 .empty.compact { padding: calc(24px * var(--density)) calc(20px * var(--density)); }
-.empty.compact .empty-art { width: 34px; height: 34px; margin-bottom: 8px; }
+.empty.compact .empty-art { width: 36px; height: 36px; border-radius: var(--radius); margin-bottom: 8px; }
 .empty.compact h3 { font-size: calc(14px * var(--fs)); }
 
 /* ─── Save status ───────────────────────────────────────────────────────── */
@@ -446,9 +557,16 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .skeleton {
   position: relative; overflow: hidden;
   background: var(--surface-2);
-  border-radius: 6px;
-  animation: pulse 1.8s ease-in-out infinite;
+  border-radius: var(--radius-sm);
 }
+.skeleton::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface) 70%, transparent), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 1.5s var(--ease) infinite;
+}
+@keyframes shimmer { to { transform: translateX(100%); } }
 
 /* ─── Misc ──────────────────────────────────────────────────────────────── */
 .center-row { display: flex; justify-content: center; gap: calc(8px * var(--density)); padding: calc(14px * var(--density)); }
@@ -489,3 +607,28 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .share-people li { display: flex; align-items: center; gap: 10px; padding: calc(8px * var(--density)) calc(12px * var(--density)); }
 .share-people li + li { border-top: var(--hairline) solid var(--line-2); }
 .share-person { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
+/* The space a note is filed in, on its row in the notes list. */
+.chip.space-chip {
+  text-transform: none;
+  background: var(--surface-2); color: var(--text-3);
+  padding-left: calc(6px * var(--density));
+}
+.chip.space-chip svg { color: var(--muted); }
+
+
+/* ─── Link-styled button (IDX-W1) ───────────────────────────────────────── */
+/* A button that reads as a link: used for "Use a password instead", "Send a
+   new code", and every other secondary action on the signed-out screens.
+   It stays a <button> because it acts rather than navigates. */
+.link-btn {
+  border: 0; background: transparent; padding: 0;
+  color: var(--accent-text); font: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.link-btn:hover:not(:disabled) { color: var(--text); }
+.link-btn:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+.link-btn:focus-visible {
+  outline: none; border-radius: var(--radius-xs);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}

@@ -63,6 +63,9 @@ known-first-party = [
     "note_models",
     "notification_events",
     "diarization",
+    "models",
+    "jobs",
+    "ratelimit",
 ]
 
 [tool.mypy]
@@ -102,6 +105,9 @@ root_packages = [
     "notification_events",
     "generation_service",
     "diarization",
+    "models",
+    "jobs",
+    "ratelimit",
 ]
 
 [[tool.importlinter.contracts]]
@@ -269,6 +275,9 @@ source_modules = [
     "note_models",
     "notification_events",
     "diarization",
+    "models",
+    "jobs",
+    "ratelimit",
 ]
 forbidden_modules = [
     "template_service",
@@ -304,6 +313,28 @@ modules = [
 ]
 ignore_imports = [
     "dictation_service.main_deps -> asr_worker.inference",
+]
+
+# libs/models is the ONLY package allowed to know a model vendor (decision
+# 11). It layers on asr_models (transcript types) and nothing else internal.
+[[tool.importlinter.contracts]]
+name = "models depends on asr_models only — never on auth/db/storage/services"
+type = "forbidden"
+source_modules = ["models"]
+forbidden_modules = [
+    "observability", "secret", "auth", "db", "audit", "messaging", "crypto", "storage",
+    "template_models", "note_models", "notification_events", "diarization",
+]
+
+# libs/jobs layers on db + models + observability; never on tenancy/auth,
+# storage, crypto or messaging (a transport is never the source of truth).
+[[tool.importlinter.contracts]]
+name = "jobs depends on db, models, observability only"
+type = "forbidden"
+source_modules = ["jobs"]
+forbidden_modules = [
+    "secret", "auth", "audit", "messaging", "crypto", "storage",
+    "template_models", "note_models", "notification_events", "diarization",
 ]
 
 [[tool.importlinter.contracts]]

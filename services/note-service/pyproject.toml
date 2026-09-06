@@ -32,6 +32,8 @@ dependencies = [
     "pypdf>=4.2",
     # Calendar links (0020): RRULE expansion of iCal feeds
     "python-dateutil>=2.9",
+    # "Ask this note" (ADR-0046): the model-provider seam
+    "models",
 ]
 
 [tool.uv.sources]
@@ -45,6 +47,7 @@ notification_events = { workspace = true }
 secret = { workspace = true }
 crypto = { workspace = true }
 storage = { workspace = true }
+models = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

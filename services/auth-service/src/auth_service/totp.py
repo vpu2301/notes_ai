@@ -76,16 +76,34 @@ def totp_at(secret: str, *, at_unix: float | None = None) -> str:
 
 def verify_code(secret: str, code: str, *, at_unix: float | None = None) -> bool:
     """Constant-time TOTP check with ±``TOTP_DRIFT_STEPS`` drift window."""
+    return matching_step(secret, code, at_unix=at_unix) is not None
+
+
+def matching_step(secret: str, code: str, *, at_unix: float | None = None) -> int | None:
+    """The time step this code is valid for, or None (IDX-A5 F3).
+
+    ``verify_code`` answers "is this code good"; the native login flow also
+    needs "good *for when*". The drift window means one code stays valid
+    for up to 90 seconds, so without recording the step, the same six
+    digits work three times — long enough for somebody reading over a
+    shoulder, or replaying a code from a phished page. The caller stores
+    the returned step and refuses anything not strictly greater.
+
+    Steps are scanned oldest-first so a code that matches more than one
+    step (only possible on a secret with a degenerate period) is charged
+    at the earliest, never letting a later step be re-spent.
+    """
     code = code.strip().replace(" ", "")
     if len(code) != TOTP_DIGITS or not code.isdigit():
-        return False
+        return None
     key = base64.b32decode(secret + "=" * (-len(secret) % 8), casefold=True)
     now = time.time() if at_unix is None else at_unix
     counter = int(now // TOTP_PERIOD_SECONDS)
-    for step in range(-TOTP_DRIFT_STEPS, TOTP_DRIFT_STEPS + 1):
-        if hmac.compare_digest(_hotp(key, counter + step), code):
-            return True
-    return False
+    for offset in range(-TOTP_DRIFT_STEPS, TOTP_DRIFT_STEPS + 1):
+        step = counter + offset
+        if hmac.compare_digest(_hotp(key, step), code):
+            return step
+    return None
 
 
 # ── Envelope <-> Keycloak attribute packing ─────────────────────────────

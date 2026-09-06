@@ -20,7 +20,7 @@ behind `MDX_PASSWORD_RESET_ENABLED`.
                                           ├─ mint token (sha256 stored)
                                           └─ enqueue mail ──▶ outbox worker ──▶ SMTP
                                                                    │
- inbox ◀── "Reset your Klarnote password" ◀─────────────────────────┘
+ inbox ◀── "Reset your Notes AI password" ◀─────────────────────────┘
    │
    └─▶ SPA #/reset-password?token=… ──▶ POST /auth/password/reset
                                               ├─ Keycloak reset-password
@@ -28,7 +28,7 @@ behind `MDX_PASSWORD_RESET_ENABLED`.
                                               ├─ spend all other tokens
                                               └─ enqueue security notification
                                                         │
- inbox ◀── "Your Klarnote password was changed" ◀────────┘
+ inbox ◀── "Your Notes AI password was changed" ◀────────┘
    │
    └─▶ [This wasn't me] ──▶ SPA #/account-recovery?token=…
                                   └─▶ POST /auth/security/lockdown

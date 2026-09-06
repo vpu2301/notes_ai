@@ -53,20 +53,12 @@ class NoteVersionDetail(NoteVersionSummary):
 
 
 def _enforce_read_purpose(note: repo.NoteRow, claims: Claims, purpose: ReadPurpose | None) -> bool:
-    """Returns ``is_author``; raises 422 when a non-author omits ``?purpose=``."""
-    # Someone the note was shared with reads as a collaborator (0016).
-    is_author = access.is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
-    if not is_author and purpose is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "https://errors.notes-ai/missing-read-purpose",
-                "title": "Read purpose required",
-                "detail": "Non-author reads must include ?purpose=<value>",
-                "allowed": [p.value for p in ReadPurpose],
-            },
-        )
-    return is_author
+    """Returns ``is_author``; raises 422 when a non-author omits ``?purpose=``.
+
+    The rule lives in :mod:`note_service.domain.access` with the rest of the
+    who-may-read rules; this is the name the audio routers import.
+    """
+    return access.require_read_purpose(note, claims, purpose)
 
 
 @router.get("/{note_id}/versions", response_model=list[NoteVersionSummary])

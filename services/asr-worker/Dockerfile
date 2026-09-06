@@ -159,6 +159,13 @@ ENV PYTHONPATH=/deps \
     MDX_DIAR_MODEL_SHA256="${MDX_DIAR_MODEL_SHA256}" \
     MDX_DIAR_MEANVAR_SHA256="${MDX_DIAR_MEANVAR_SHA256}"
 
+# Model-provider registry (DEP-S0). The worker resolves ASR_BACKEND against
+# this file at startup; the default `inproc_cpu_asr` keeps the baked whisper
+# path. Env vars referenced by other backends are only required when that
+# backend is enabled in the running ENV.
+COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
+ENV MODELS_CONFIG=/app/config/models.yaml
+
 USER nonroot
 WORKDIR /app
 CMD ["python3.12", "-m", "asr_worker.main"]

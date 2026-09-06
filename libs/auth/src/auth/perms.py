@@ -39,6 +39,9 @@ KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
         "notification",
         "phrase",
         "synonym",
+        # IDX-B1b: credentials for non-human principals (room devices,
+        # service accounts).
+        "credential",
     }
 )
 
@@ -65,6 +68,15 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("tenant_admin", "user.remind_mfa", "user"): True,
     ("tenant_admin", "audit.read", "audit"): True,
     ("tenant_admin", "audit.verify", "audit"): True,
+    # IDX-B1b: register and revoke this workspace's meeting-room devices.
+    # `tenant_admin` is the JWT role an owner/admin MEMBERSHIP maps to
+    # (see auth_service.domain.identity_repository._PLATFORM_ROLES) — the
+    # membership roles themselves are not part of this matrix, which is
+    # keyed on what a token carries. The route additionally checks the
+    # caller's membership in the workspace it is acting on, because a
+    # `tenant_admin` token proves administration of ITS tenant, not of an
+    # arbitrary one named in the path.
+    ("tenant_admin", "device.manage", "credential"): True,
     # member: routine authoring user (creates and edits notes)
     ("member", "tenant.read", "tenant"): True,
     # viewer: like member but with less admin capability

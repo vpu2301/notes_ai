@@ -1,0 +1,9 @@
+{"id":"m01_en_product_sync","language":"en","transcript":[
+{"speaker":"SPEAKER_1","t_start_ms":0,"t_end_ms":9000,"text":"Okay, let's start the product sync. Two things today: the onboarding redesign and the pricing page test."},
+{"speaker":"SPEAKER_2","t_start_ms":9000,"t_end_ms":22000,"text":"On onboarding, the new flow cut drop-off on step two from thirty-one percent to nineteen. I want to ship it to everyone by Friday."},
+{"speaker":"SPEAKER_1","t_start_ms":22000,"t_end_ms":31000,"text":"Agreed. Priya, can you write the release note and send it to support before the rollout?"},
+{"speaker":"SPEAKER_3","t_start_ms":31000,"t_end_ms":38000,"text":"Yes, I'll have the release note to support by Thursday noon."},
+{"speaker":"SPEAKER_2","t_start_ms":38000,"t_end_ms":55000,"text":"On pricing, the annual-plan test is inconclusive after two weeks. I propose we extend it two more weeks rather than decide on noise."},
+{"speaker":"SPEAKER_1","t_start_ms":55000,"t_end_ms":63000,"text":"Fine, extend the pricing test two weeks. Decision made. Tom owns re-reading the numbers on the twentieth."},
+{"speaker":"SPEAKER_2","t_start_ms":63000,"t_end_ms":68000,"text":"Got it, I'll re-read the numbers on the twentieth."}],
+"expect":{"min_action_items":2,"must_mention":["release note","twentieth"]}}

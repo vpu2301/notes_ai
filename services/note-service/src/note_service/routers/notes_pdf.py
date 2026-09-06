@@ -28,6 +28,7 @@ from ..domain import access
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.pdf import render_note_pdf
+from .notes import _resolve_section_names
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +61,7 @@ async def get_note_pdf(
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
-        is_author = access.is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
-        if not is_author and purpose is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "type": "https://errors.notes-ai/missing-read-purpose",
-                    "title": "Read purpose required",
-                    "detail": "Non-author reads must include ?purpose=<value>",
-                    "allowed": [p.value for p in ReadPurpose],
-                },
-            )
+        access.require_read_purpose(note, claims, purpose)
 
         # A cancelled note must never be exported.
         if note.status == NoteStatus.CANCELLED:
@@ -88,6 +79,10 @@ async def get_note_pdf(
         version = await repo.fetch_version(conn, version_id=note.current_version_id)
         if version is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+
+        # Human section headings (and their template order) for the
+        # document — the raw section keys are storage identifiers.
+        section_names = await _resolve_section_names(conn, content=version.content)
 
         # Tenant branding for the document header (issuer name). Read under the
         # same RLS-scoped connection; falls back to the configured default when
@@ -110,6 +105,7 @@ async def get_note_pdf(
         issuer_name=issuer_name,
         is_draft=is_draft,
         language=language,
+        section_names=section_names,
     )
 
     await state.audit_writer.write_event(

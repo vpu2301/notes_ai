@@ -45,7 +45,7 @@
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   flex-shrink: 0;
-  transition: width .22s ease, min-width .22s ease;
+  transition: width var(--t) var(--ease), min-width var(--t) var(--ease);
 }
 .sb.collapsed {
   width: 56px;
@@ -67,22 +67,21 @@
   letter-spacing: -0.02em;
   color: var(--text-1);
   padding: calc(4px * var(--density));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
 }
 .sb-brand-inner:hover { background: var(--surface-2); }
-/* The brand mark: a white tile in a soft orange frame with the ink initial. */
+/* The brand mark. The shape itself is an inline superellipse
+   (components/BrandMark.tsx) rather than a CSS radius, so it is the same
+   squircle in every browser and the same one the app icons use; this rule
+   only holds it and gives it the small lift on hover. No frame — a filled
+   mark needs none. */
 .sb-brand-mark {
-  width: 26px; height: 26px; flex: none;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1.5px solid var(--line-active);
+  flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--text-1);
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: calc(14px * var(--fs));
-  line-height: 1;
+  transition: transform var(--t) var(--ease);
 }
+.sb-brand-inner:hover .sb-brand-mark { transform: scale(1.06) rotate(-1.5deg); }
 .sb-wordmark { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-wordmark .ai { color: var(--accent-text); }
 .sb-toggle {
@@ -103,9 +102,10 @@
   padding: 0 calc(12px * var(--density)); margin: 0;
   border-radius: var(--radius);
   font-size: calc(13px * var(--fs)); font-weight: 500;
-  transition: opacity .12s;
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 .sb-cta:hover { opacity: .88; }
+.sb-cta:active { transform: scale(.985); }
 .sb-cta-icon {
   width: 18px; height: 18px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
@@ -119,12 +119,16 @@
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: inherit;
 }
-.sb-cta-split { position: relative; display: flex; margin: calc(6px * var(--density)) 0 0; gap: 1px; }
+/* One pill, split. The seam between the label and the caret is a
+   translucent rule drawn INSIDE the ink, not a gap letting the sidebar
+   through — a slit would break the shape in two. */
+.sb-cta-split { position: relative; display: flex; margin: calc(6px * var(--density)) 0 0; }
 .sb-cta-split > .sb-cta:first-child { flex: 1; min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
 .sb-cta-caret {
-  flex: 0 0 auto; width: 32px; padding: 0;
+  flex: 0 0 auto; width: 34px; padding: 0;
   justify-content: center;
   border-radius: 0 var(--radius) var(--radius) 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--ink-text) 16%, transparent);
 }
 .sb-cta-caret.open { opacity: .88; }
 .sb-cta-split.collapsed { margin: calc(6px * var(--density)) 0 0; justify-content: center; }
@@ -140,16 +144,16 @@
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-2);
-  padding: calc(4px * var(--density));
+  padding: calc(5px * var(--density));
   display: flex; flex-direction: column;
   z-index: 60;
-  animation: menu-in .14s ease;
+  animation: menu-in var(--t-fast) var(--ease);
 }
-@keyframes menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
 .anchored-menu-item {
   display: flex; align-items: center; gap: calc(10px * var(--density));
   padding: calc(7px * var(--density)) calc(10px * var(--density));
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   font-size: calc(13px * var(--fs));
   color: var(--text-1);
   text-align: left;
@@ -171,12 +175,12 @@
   width: 100%;
   margin: 1px 0;
   padding: calc(7px * var(--density)) calc(10px * var(--density));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   font-size: calc(11px * var(--fs)); font-weight: 600;
   letter-spacing: .04em;
   text-transform: uppercase;
-  transition: background .12s, color .12s;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .sb-group-h:hover { background: var(--surface-2); color: var(--text-1); }
 .sb-group-h svg:first-child { color: var(--muted); flex-shrink: 0; }
@@ -199,21 +203,29 @@
   padding: calc(10px * var(--density)) calc(10px * var(--density)) calc(4px * var(--density));
 }
 
-/* Nav row: 30px tall; the active one is a white card in an orange frame. */
+/* Nav row: 32px tall. The active one lifts off the sidebar as a white card
+   on a warm hairline — the same trick the segmented pill uses — and only its
+   icon takes the moss. Frames stay neutral. */
 .sb-link {
-  display: flex; align-items: center; gap: calc(8px * var(--density));
-  height: 30px;
+  display: flex; align-items: center; gap: calc(9px * var(--density));
+  height: 32px;
   padding: 0 calc(10px * var(--density)); margin: 1px 0;
   border-radius: var(--radius);
   border: var(--hairline) solid transparent;
   color: var(--text-3); cursor: pointer;
   font-size: calc(13px * var(--fs)); font-weight: 500;
   position: relative;
-  transition: background .12s, color .12s, border-color .12s;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease),
+              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .sb-link svg { color: currentColor; flex-shrink: 0; }
-.sb-link:hover { background: var(--surface-2); color: var(--text-1); }
-.sb-link.on { background: var(--surface); border-color: var(--line-active); color: var(--text-1); }
+.sb-link:hover { background: var(--surface-hover); color: var(--text-1); }
+.sb-link.on {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text-1);
+  box-shadow: 0 1px 2px rgba(26, 24, 22, .05);
+}
 .sb-link.on svg { color: var(--accent-text); }
 .sb-link-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-link .badge {
@@ -226,6 +238,64 @@
 
 .sb-nav { display: flex; flex-direction: column; margin-top: calc(8px * var(--density)); }
 .sb-spacer { flex: 1; min-height: 12px; }
+
+/* ─── Spaces: the user's own folders, under the main nav ─────────────── */
+.sb-spaces { display: flex; flex-direction: column; margin-top: calc(10px * var(--density)); }
+.sb-section-h {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 calc(10px * var(--density)) calc(4px * var(--density));
+  font-size: calc(10.5px * var(--fs)); font-weight: 700;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+}
+.sb-section-h span { flex: 1; }
+.sb-section-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; flex: none;
+  border: 0; background: transparent; border-radius: var(--radius-sm);
+  color: var(--muted); cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sb-section-add:hover { background: var(--surface-hover); color: var(--text-1); }
+
+/* Row = link + a ⋯ that only shows on hover / focus / when open. */
+.sb-space { display: flex; align-items: center; position: relative; }
+.sb-space .sb-link { flex: 1; min-width: 0; padding-right: calc(28px * var(--density)); }
+.sb-space-more {
+  position: absolute; right: calc(4px * var(--density));
+  opacity: 0; transition: opacity var(--t-fast) var(--ease);
+}
+.sb-space:hover .sb-space-more,
+.sb-space-more:focus-within { opacity: 1; }
+.sb-space-more .icon-btn { width: 24px; height: 24px; border-radius: var(--radius-sm); }
+.sb-space:hover .sb-count { opacity: 0; }
+.sb-count {
+  font-size: calc(10.5px * var(--fs)); font-weight: 600; color: var(--muted);
+  font-variant-numeric: tabular-nums; flex: none;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.sb-link.on .sb-count { color: var(--accent-text); }
+.sb.collapsed .sb-count { display: none; }
+
+/* Inline "new space" / rename field, sized like a nav row. */
+.sb-space-edit {
+  display: flex; align-items: center; gap: calc(9px * var(--density));
+  height: 32px; margin: 1px 0;
+  padding: 0 calc(10px * var(--density));
+  border-radius: var(--radius);
+  border: var(--hairline) solid var(--line-active);
+  background: var(--surface);
+  color: var(--text-3);
+}
+.sb-space-input {
+  flex: 1; min-width: 0;
+  border: 0; background: transparent; outline: none; padding: 0;
+  color: var(--text-1); font: inherit;
+  font-size: calc(13px * var(--fs)); font-weight: 500;
+}
+.sb-hint {
+  margin: calc(4px * var(--density)) calc(10px * var(--density));
+  font-size: calc(11.5px * var(--fs)); line-height: 1.45; color: var(--muted);
+}
 
 /* Footer: controls + account, above a hairline. */
 .sb-foot {
@@ -241,39 +311,45 @@
 .sb.collapsed .sb-foot { margin: 8px calc(-4px * var(--density)) 0; padding: calc(8px * var(--density)) 0 0; }
 .sb.collapsed .sb-controls { justify-content: center; padding: 0; gap: 0; flex-direction: column; }
 
-/* Segmented pill (DSSegmentedPill): grey track, white raised segment in a
-   hairline. */
+/* Segmented pill (DSSegmentedPill): warm track, white raised segment on a
+   neutral hairline. */
 .seg-pill {
   display: inline-flex;
   background: var(--surface-2);
-  border-radius: 10px; padding: 3px;
+  border-radius: var(--radius); padding: 3px;
   font-size: calc(11px * var(--fs));
   gap: 2px;
 }
 .seg-pill button {
-  height: 20px;
-  padding: 0 calc(7px * var(--density)); border-radius: 7px;
+  height: 22px;
+  padding: 0 calc(8px * var(--density)); border-radius: var(--radius-sm);
   color: var(--muted); font-weight: 500;
   border: var(--hairline) solid transparent;
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease),
+              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .seg-pill button:hover { color: var(--text-1); }
-.seg-pill button.on { background: var(--surface); color: var(--text-1); border-color: var(--line-active); }
+.seg-pill button.on {
+  background: var(--surface); color: var(--text-1);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(26, 24, 22, .05);
+}
 
 .icon-btn {
   width: 28px; height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--text-3);
   position: relative;
-  transition: background .12s, color .12s;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
 .icon-btn.danger { color: var(--danger); }
 .icon-btn .count {
   position: absolute; top: -3px; right: -3px;
   min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: var(--accent-fill); color: var(--accent-ink);
   font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
   font-family: var(--mono);
@@ -291,12 +367,13 @@
 }
 .sb-user:hover, .sb-user.open { background: var(--surface-2); }
 .sb-user > svg { color: var(--muted); }
-/* Initials avatar (DSAvatar): an accent-tinted circle in an accent hairline. */
+/* Initials avatar (DSAvatar): a moss-tinted circle with the faintest moss
+   ring — a circle has no frame to speak of, so this one stays. */
 .avatar {
-  width: 26px; height: 26px; flex-shrink: 0;
+  width: 28px; height: 28px; flex-shrink: 0;
   border-radius: 50%;
   background: var(--accent-soft);
-  border: var(--hairline) solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border: var(--hairline) solid color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--accent-text);
   font-family: var(--display);
   font-weight: 500; font-size: calc(11px * var(--fs));
@@ -316,10 +393,10 @@
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-2);
-  padding: calc(4px * var(--density));
+  padding: calc(5px * var(--density));
   display: flex; flex-direction: column;
   z-index: 50;
-  animation: menu-in .14s ease;
+  animation: menu-in var(--t-fast) var(--ease);
 }
 .sb-user-menu.collapsed { left: calc(100% + 6px); right: auto; bottom: 0; min-width: 220px; }
 .sb-user-menu-head {
@@ -331,7 +408,7 @@
 .sb-user-menu-item {
   display: flex; align-items: center; gap: calc(10px * var(--density));
   padding: calc(7px * var(--density)) calc(10px * var(--density));
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   font-size: calc(13px * var(--fs));
   color: var(--text-1);
   text-align: left;
@@ -347,7 +424,7 @@
 
 /* ─── Topbar ────────────────────────────────────────────────────────────── */
 /* Part of the page, not a strip laid over it — transparent until the page
-   scrolls under it, then the ground colour and an orange hairline. */
+   scrolls under it, then the ground colour and a warm hairline. */
 .tb {
   display: flex; align-items: center; gap: calc(14px * var(--density));
   height: var(--topbar-h);
@@ -356,12 +433,12 @@
   background: transparent;
   border-bottom: var(--hairline) solid transparent;
   position: sticky; top: 0; z-index: 10;
-  transition: background-color .18s ease, border-color .18s ease;
+  transition: background-color var(--t) var(--ease), border-color var(--t) var(--ease);
 }
 .tb.is-stuck {
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: saturate(1.4) blur(12px);
-  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: saturate(1.6) blur(16px);
+  -webkit-backdrop-filter: saturate(1.6) blur(16px);
   border-bottom-color: var(--line);
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -369,7 +446,7 @@
 }
 .tb-back {
   width: 30px; height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--muted);
 }
@@ -377,26 +454,13 @@
 .tb-title { font-size: calc(13px * var(--fs)); font-weight: 500; color: var(--text-3); }
 .tb-sub { font-size: calc(12.5px * var(--fs)); color: var(--muted); }
 .tb-crumbs { display: flex; align-items: center; gap: calc(6px * var(--density)); font-size: calc(13px * var(--fs)); color: var(--muted); min-width: 0; }
-.tb-crumbs a { padding: calc(3px * var(--density)) calc(6px * var(--density)); border-radius: 5px; }
+.tb-crumbs a { padding: calc(3px * var(--density)) calc(6px * var(--density)); border-radius: var(--radius-xs); }
 .tb-crumbs a:hover { background: var(--surface-2); color: var(--text-1); }
 .tb-crumbs .sep { display: inline-flex; align-items: center; color: var(--text-3); opacity: .55; }
 .tb-crumbs .cur { color: var(--text-1); font-weight: 500; padding: calc(3px * var(--density)) calc(6px * var(--density)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-spacer { flex: 1; }
-.tb-search {
-  display: flex; align-items: center; gap: calc(8px * var(--density));
-  background: var(--surface);
-  border: var(--hairline) solid var(--line);
-  padding: calc(5px * var(--density)) calc(10px * var(--density)); border-radius: var(--radius);
-  width: 300px;
-  color: var(--muted);
-  font-size: calc(13px * var(--fs));
-  text-align: left;
-}
-.tb-search:hover { border-color: var(--line-hover); }
-.tb-search-ph { flex: 1; }
-.tb-search kbd { color: var(--muted); }
 .tb-actions { display: flex; align-items: center; gap: calc(6px * var(--density)); }
-.tb .icon-btn { width: 32px; height: 32px; border-radius: 8px; }
+.tb .icon-btn { width: 32px; height: 32px; border-radius: var(--radius-sm); }
 
 /* Dropdown anchored under the topbar bell */
 .dropdown-host { position: relative; }
@@ -409,9 +473,9 @@
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-2);
-  padding: calc(4px * var(--density));
+  padding: calc(5px * var(--density));
   z-index: 50;
-  animation: menu-in .14s ease;
+  animation: menu-in var(--t-fast) var(--ease);
 }
 .dropdown-wide { width: 360px; max-height: 460px; overflow-y: auto; }
 .menu-head {
@@ -429,8 +493,8 @@
   display: flex; gap: calc(10px * var(--density));
   width: 100%; text-align: left;
   padding: calc(9px * var(--density)) calc(10px * var(--density));
-  border-radius: 7px;
-  transition: background .12s;
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
 }
 .notif:hover { background: var(--surface-2); }
 .notif .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; }
@@ -471,3 +535,6 @@
   color: var(--muted);
   font-size: calc(12px * var(--fs));
 }
+
+/* A "Try again" inside a hint line — see the global .link-btn in
+   components.css, which IDX-W1 promoted this rule into. */

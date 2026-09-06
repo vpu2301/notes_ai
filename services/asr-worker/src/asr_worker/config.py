@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import Field
@@ -86,6 +88,40 @@ class Settings(BaseSettings):
         default=5.0, alias="MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER"
     )
     asr_jobs_before_recycle: int = Field(default=100, alias="MD_ASR_JOBS_BEFORE_RECYCLE")
+
+    # ── Model-provider seam (DEP-S0, libs/models) ───────────────────────
+    # `ASR_BACKEND` names a backend in config/models.yaml. `inproc_cpu_asr`
+    # keeps today's in-process faster-whisper path (byte-identical output);
+    # `dev_mac_asr` / `hf_eu_asr` route through an OpenAI-compatible
+    # `/v1/audio/transcriptions` server. The registry validates the choice at
+    # startup (env guard, missing secrets) — a bad value never fails a job.
+    asr_backend: str = Field(default="inproc_cpu_asr", alias="ASR_BACKEND")
+    models_config: str = Field(default="config/models.yaml", alias="MODELS_CONFIG")
+    # Env name for the registry: dev | test | staging | prod. Derived from
+    # ENVIRONMENT when unset (development→dev, production→prod).
+    models_env: str = Field(default="", alias="ENV")
+
+    @staticmethod
+    def registry_environ() -> Mapping[str, str]:
+        """The mapping ``${VAR}`` placeholders in config/models.yaml resolve from.
+
+        Lives here because ``config.py`` is the only module allowed to touch
+        the process environment (check-no-os-environ gate); libs/models never
+        reads it directly.
+        """
+        return os.environ
+
+    def registry_env(self) -> str:
+        if self.models_env:
+            return self.models_env
+        if self.testing:
+            return "test"
+        return {
+            "development": "dev",
+            "production": "prod",
+            "test": "test",
+            "staging": "staging",
+        }.get(self.environment, self.environment)
 
     # ── Offline diarization (Ambient Capture v1) ────────────────────────
     # Same knobs and defaults as dictation-service: the ECAPA weights are

@@ -1,0 +1,12 @@
+# Dev-Mac chat model for libs/models `dev_mac` backend (DEP-S0).
+#
+# Why a Modelfile: Ollama's OpenAI-compatible endpoint ignores per-request
+# `num_ctx`, and the default context (4k) silently truncates a 60-minute
+# transcript window. Baking num_ctx into a named model is the only way the
+# /v1 route honours the `context_window` promised in config/models.yaml.
+#
+# `make dev-model` runs: ollama create notes-chat -f infra/models/dev-mac/Modelfile
+# Override the base with DEV_MAC_BASE_MODEL (the script substitutes FROM).
+FROM gemma3:4b
+PARAMETER num_ctx 32768
+PARAMETER temperature 0

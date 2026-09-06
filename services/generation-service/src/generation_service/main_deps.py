@@ -11,7 +11,7 @@ import asyncpg
 from opentelemetry import metrics
 
 from audit import AuditWriter, Severity
-from auth import JwksCache
+from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from db import create_pool
 
 from . import audit_kinds
@@ -24,6 +24,22 @@ from .domain.slots import SlotPool
 logger = logging.getLogger(__name__)
 _meter = metrics.get_meter("mdx.generation")
 
+
+def auth_issuers() -> list[IssuerConfig]:
+    """The issuers this service trusts (FND-1 / ADR-0047).
+
+    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
+    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
+    Both the JWKS cache and ``build_current_user`` are built from THIS
+    list, so the keys a token can be verified with and the issuers a
+    token may claim can never drift apart.
+    """
+    return issuers_from_env(
+        settings.auth_issuers_json,
+        issuer=settings.auth_issuer,
+        jwks_url=settings.auth_jwks_url,
+        audience=settings.auth_audience,
+    )
 
 @dataclass
 class ServiceState:
@@ -46,7 +62,13 @@ class ServiceState:
 
 
 async def build_state() -> ServiceState:
-    jwks_cache = JwksCache(issuer_to_url={settings.auth_issuer: settings.auth_jwks_url})
+    issuers = auth_issuers()
+    # FND-1: log what this process will actually accept. During the
+    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
+    # issuer?" has to be answerable from one log line, not from a token
+    # that mysteriously 401s an hour later.
+    logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
+    jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,
         application_name=f"{settings.service_name}/audit_writer",

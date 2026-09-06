@@ -1,0 +1,28 @@
+# hf_eu — chat/extraction backend for the `standard` tier (beta default).
+# Applied by scripts/models/hf_endpoints.py; diffed in CI (hf-endpoints-plan).
+name: notes-chat-{env}
+task: text-generation
+type: protected            # token-authenticated, no public URL (decision 12)
+model:
+  repository: google/gemma-3-4b-it   # gated (manual): the HF namespace must accept Google's Gemma terms once before apply
+  revision: 093f9f388b31de276ce2de164bdc2081324b9767   # docs/models/PINS.md (fetched 2026-09-05)
+  framework: pytorch
+  # Text Generation Inference (HF's server) speaks the OpenAI-compatible
+  # /v1/chat/completions route the libs/models provider uses; json_schema
+  # structured output is probed at startup (`structured_output: probe`).
+  image:
+    tgi:
+      max_input_tokens: 24576
+      max_total_tokens: 32768
+      max_batch_prefill_tokens: 32768
+provider:
+  vendor: aws
+  region: eu-west-1        # EU only
+compute:
+  accelerator: gpu
+  instance_type: nvidia-a10g  # 24 GB — fits a 4B/8B bf16 model with 32k context
+  instance_size: x1
+  scaling:
+    min_replica: 0          # scale-to-zero: the queue treats wake-up as `warming`
+    max_replica: 2
+    scale_to_zero_timeout: 15   # minutes idle

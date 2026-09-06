@@ -1,5 +1,18 @@
 <!doctype html>
-{# Labels per render language; anything unknown renders in English. #}
+{# ────────────────────────────────────────────────────────────────────
+   The exported note.
+
+   Same design language as the apps (web/src/styles/tokens.css): warm
+   paper instead of white, warm ink instead of black, ONE moss accent,
+   hairlines instead of boxes, Geist embedded from ./fonts, and the
+   superellipse brand mark (the same path web/src/components/BrandMark
+   draws) as the only ornament.
+
+   Everything a page's running header/footer needs is published with
+   `string-set` on flow elements, so no user byte is ever interpolated
+   into a <style> block. The strings that DO appear in CSS `content`
+   below are the template's own translated labels, never note data.
+   ──────────────────────────────────────────────────────────────────── #}
 {% set L = {
   "en": {"draft": "Draft", "draft_wm": "DRAFT", "draft_banner": "DRAFT — NOT FINALIZED",
          "code": "Code:", "org": "Organisation:", "author": "Author:",
@@ -17,99 +30,357 @@
 <meta charset="utf-8" />
 <title>{{ title }}</title>
 <style>
+  /* ── Geist, the face the web and native apps use.
+     One file per subset, and each subset gets its OWN family name: the
+     renderer honours `unicode-range` for the @font-face *cascade* but
+     not for glyph selection, so a single "Geist" family across all four
+     files hands Cyrillic text to the Latin subset and prints mojibake.
+     Distinct families make it an ordinary per-glyph font fallback,
+     which is exactly what the font-family stack below is for. ─────── */
+  @font-face { font-family: "Geist"; font-weight: 300 700; font-style: normal;
+    src: url("fonts/geist-latin.woff2") format("woff2"); }
+  @font-face { font-family: "Geist LatinExt"; font-weight: 300 700; font-style: normal;
+    src: url("fonts/geist-latin-ext.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Cyrillic"; font-weight: 300 700; font-style: normal;
+    src: url("fonts/geist-cyrillic.woff2") format("woff2"); }
+  @font-face { font-family: "Geist CyrillicExt"; font-weight: 300 700; font-style: normal;
+    src: url("fonts/geist-cyrillic-ext.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Mono"; font-weight: 400 500; font-style: normal;
+    src: url("fonts/geist-mono-latin.woff2") format("woff2"); }
+
+  :root {
+    --paper: #fbfaf7;
+    --paper-2: #f3f1ec;
+    --ink: #1a1816;
+    --ink-2: #3d3936;
+    --ink-3: #5f5a55;
+    --muted: #8a847c;
+    --moss: #4f7a5e;
+    --moss-2: #3f6650;
+    --line: #e6e2db;
+    --line-2: #efece6;
+    --warn: #8a5518;
+    --warn-soft: #f6f0e6;
+  }
+
+  /* ── The page. Wide side margins keep the measure near 80 characters;
+     the running head carries the note title from page 2 on, and the
+     foot carries workspace · code · folio on every page. ──────────── */
   @page {
     size: A4;
-    margin: 18mm 16mm 22mm 18mm;
-    {% if is_draft %}
-    @top-center {
-      content: "{{ T.draft }}";
-      color: #b00020;
-      font-family: "DejaVu Sans", sans-serif;
-      font-size: 9pt;
-      font-weight: bold;
+    margin: 21mm 26mm 18mm 26mm;
+    background: #fbfaf7;
+
+    @top-left {
+      content: string(doctitle);
+      font-family: "Geist", "Geist LatinExt", "Geist Cyrillic",
+        "Geist CyrillicExt", "DejaVu Sans", sans-serif;
+      font-size: 7.6pt;
+      color: #8a847c;
+      margin-bottom: 6mm;
     }
-    {% endif %}
+    @bottom-left {
+      content: string(footline);
+      font-family: "Geist", "Geist LatinExt", "Geist Cyrillic",
+        "Geist CyrillicExt", "DejaVu Sans", sans-serif;
+      font-size: 7.4pt;
+      color: #8a847c;
+      margin-top: 7mm;
+    }
+    @bottom-right {
+      content: counter(page) " / " counter(pages);
+      font-family: "Geist Mono", "DejaVu Sans Mono", monospace;
+      font-size: 7.4pt;
+      color: #8a847c;
+      margin-top: 7mm;
+    }
   }
-  body { font-family: "DejaVu Sans", sans-serif; font-size: 11pt; line-height: 1.4; }
-  h1   { font-size: 18pt; margin: 0 0 4pt; }
-  h2   { font-size: 13pt; margin: 16pt 0 4pt; border-bottom: 1px solid #888; padding-bottom: 2pt; }
-  .meta { color: #555; font-size: 10pt; margin-bottom: 8pt; }
-  .header-block { margin-bottom: 12pt; }
-  .section-text { white-space: pre-wrap; }
-  .author-block { margin-top: 24pt; padding-top: 10pt; border-top: 1px dashed #888; }
-  .label { color: #555; font-size: 9pt; }
+  /* The masthead already names the document on page one. */
+  @page :first { @top-left { content: none; } }
+
   {% if is_draft %}
-  .draft-banner {
-    border: 1.5pt solid #b00020;
-    color: #b00020;
-    background: #fdecec;
-    font-weight: bold;
-    text-align: center;
-    padding: 6pt;
-    margin-bottom: 12pt;
-    letter-spacing: 1pt;
+  /* A literal from the label set above — never note data. */
+  @page { @top-right {
+    content: "{{ T.draft }}";
+    font-family: "Geist", "Geist LatinExt", "Geist Cyrillic",
+        "Geist CyrillicExt", "DejaVu Sans", sans-serif;
+    font-size: 7.6pt;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: #8a5518;
+    margin-bottom: 6mm;
+  } }
+  {% endif %}
+
+  html { color: #1a1816; }
+  body {
+    font-family: "Geist", "Geist LatinExt", "Geist Cyrillic",
+        "Geist CyrillicExt", "DejaVu Sans", sans-serif;
+    font-size: 10.4pt;
+    line-height: 1.62;
+    font-weight: 400;
+    margin: 0;
+    orphans: 2;
+    widows: 2;
   }
+
+  /* ── Masthead ─────────────────────────────────────────────────────
+     Mark + workspace on the left, note code on the right, one hairline
+     under. Nothing is boxed. */
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 4.5mm;
+    border-bottom: 0.5pt solid var(--line);
+  }
+  .brand { display: flex; align-items: center; }
+  .brand svg { width: 7.2mm; height: 7.2mm; }
+  .issuer {
+    margin-left: 2.6mm;
+    font-size: 8.2pt;
+    font-weight: 500;
+    letter-spacing: 0.085em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .doccode {
+    font-family: "Geist Mono", "DejaVu Sans Mono", monospace;
+    font-size: 8pt;
+    color: var(--muted);
+  }
+
+  /* ── Title block ──────────────────────────────────────────────────
+     The one large thing on the page. Tight leading, slight negative
+     tracking, and a quiet meta line under it. */
+  .title-block { margin: 9mm 0 8mm; }
+  h1 {
+    string-set: doctitle content();
+    font-size: 21pt;
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.014em;
+    color: var(--ink);
+    margin: 0;
+    max-width: 145mm;
+  }
+  .meta {
+    margin-top: 3.2mm;
+    font-size: 8.6pt;
+    color: var(--ink-3);
+  }
+  .meta .dot { color: var(--line); margin: 0 1.8mm; }
+  .chip {
+    display: inline-block;
+    padding: 0.5mm 2.4mm 0.8mm;
+    border-radius: 3mm;                /* pill — the app's capsule */
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 7.4pt;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  /* ── Sections ─────────────────────────────────────────────────────
+     A hairline opens each one and the heading sits in moss above the
+     body: the accent lives in the text, the rule stays neutral. */
+  .section { margin-top: 8mm; }
+  .section + .section { padding-top: 7.5mm; border-top: 0.5pt solid var(--line-2); }
+  .section h2 {
+    font-size: 8.4pt;
+    font-weight: 600;
+    letter-spacing: 0.105em;
+    text-transform: uppercase;
+    color: var(--moss-2);
+    margin: 0 0 3.4mm;
+    break-after: avoid;
+  }
+
+  /* ── Body ─────────────────────────────────────────────────────── */
+  p { margin: 0 0 2.8mm; }
+  p:last-child { margin-bottom: 0; }
+  strong { font-weight: 600; color: var(--ink); }
+  em { font-style: italic; }
+  code {
+    font-family: "Geist Mono", "DejaVu Sans Mono", monospace;
+    font-size: 0.9em;
+    background: var(--paper-2);
+    border-radius: 1.2mm;
+    padding: 0.3mm 1mm;
+  }
+  h3, h4 {
+    font-size: 10.4pt;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 5mm 0 2mm;
+    break-after: avoid;
+  }
+  h4 { font-size: 9.6pt; color: var(--ink-2); }
+
+  ol { margin: 0 0 3mm; padding-left: 5.6mm; list-style: decimal; }
+  ul { margin: 0 0 3mm; padding-left: 4.6mm; list-style: none; }
+  ul:last-child, ol:last-child { margin-bottom: 0; }
+  li { margin-bottom: 1.6mm; padding-left: 0.8mm; break-inside: avoid; }
+  li:last-child { margin-bottom: 0; }
+  ul > li { position: relative; }
+  /* A small moss dot instead of the font's bullet glyph — the same mark
+     at every size, and it never inherits the text's weight. */
+  ul > li::before {
+    content: "";
+    position: absolute;
+    left: -3.4mm;
+    top: 2.3mm;
+    width: 1.15mm;
+    height: 1.15mm;
+    border-radius: 50%;
+    background: var(--moss);
+  }
+  ol > li::marker { color: var(--moss-2); font-weight: 600; }
+
+  /* Action items. The box is drawn, not typed, so it matches the app's
+     soft corners and survives any font fallback. */
+  ul.checklist { padding-left: 6mm; }
+  ul.checklist > li::before { content: none; }
+  .box {
+    position: absolute;
+    left: -6mm;
+    top: 1.5mm;
+    width: 2.9mm;
+    height: 2.9mm;
+    border: 0.5pt solid #c8c1b5;
+    border-radius: 0.9mm;
+    background: #ffffff;
+  }
+  .box.done { background: var(--moss); border-color: var(--moss); }
+
+  blockquote {
+    margin: 0 0 3mm;
+    padding-left: 4mm;
+    border-left: 0.5pt solid var(--line);
+    color: var(--ink-2);
+  }
+  hr.rule { border: 0; border-top: 0.5pt solid var(--line-2); margin: 4mm 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 3mm;
+    font-size: 9.4pt;
+  }
+  th {
+    text-align: left;
+    font-size: 7.8pt;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 3mm 1.6mm 0;
+    border-bottom: 0.5pt solid var(--line);
+  }
+  td {
+    padding: 1.8mm 3mm 1.8mm 0;
+    border-bottom: 0.5pt solid var(--line-2);
+    vertical-align: top;
+  }
+
+  /* ── Colophon ─────────────────────────────────────────────────── */
+  .colophon {
+    margin-top: 10mm;
+    padding-top: 4mm;
+    border-top: 0.5pt solid var(--line);
+    font-size: 8.4pt;
+    color: var(--ink-3);
+    break-inside: avoid;
+  }
+  .colophon .label {
+    font-size: 7.4pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .colophon .row + .row { margin-top: 2.4mm; }
+  /* Publishes the foot line to every page's @bottom-left. */
+  .footline { position: absolute; left: -9999pt; string-set: footline content(); }
+
+  {% if is_draft %}
+  /* The draft mark: present enough to be unmistakable, quiet enough to
+     read through. Warm ink at 5%, never the loud red of a stamp. */
   .draft-watermark {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     z-index: -1;
     overflow: hidden;
   }
   .draft-watermark span {
     position: absolute;
-    top: 45%;
-    left: -10%;
-    width: 120%;
+    top: 42%; left: -12%;
+    width: 124%;
     text-align: center;
-    transform: rotate(-35deg);
-    font-size: 90pt;
-    font-weight: bold;
-    color: #b00020;
-    opacity: 0.08;
-    letter-spacing: 12pt;
+    transform: rotate(-28deg);
+    font-size: 54pt;
+    font-weight: 500;
+    color: #1a1816;
+    opacity: 0.05;
+    /* The trailing letter-space would push the word off-centre; the
+       matching indent puts it back. */
+    letter-spacing: 0.24em;
+    text-indent: 0.24em;
   }
   {% endif %}
 </style>
 </head>
 <body>
+  {# Published to every page's @bottom-left; must come before the first
+     page's content is laid out, so it lives here rather than at the end. #}
+  <div class="footline">{{ issuer }} · {{ code }}</div>
+
   {% if is_draft %}
-    <div class="draft-watermark">
-      <span>{{ T.draft_wm }}</span>
-    </div>
-    <div class="draft-banner">
-      {{ T.draft_banner }}
-    </div>
+    <div class="draft-watermark"><span>{{ T.draft_wm }}</span></div>
   {% endif %}
 
-  <div class="header-block">
+  <div class="masthead">
+    <div class="brand">
+      {# The product mark: a true superellipse, |x/a|^4.6 + |y/a|^4.6 = 1,
+         the same path web/src/components/BrandMark.tsx draws. #}
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#4f7a5e" d="M31 16 30.97 21.46 30.87 23.37 30.72 24.76 30.49 25.88 30.2 26.82 29.84 27.62 29.41 28.31 28.9 28.9 28.31 29.41 27.62 29.84 26.82 30.2 25.88 30.49 24.76 30.72 23.37 30.87 21.46 30.97 16 31 10.54 30.97 8.63 30.87 7.24 30.72 6.12 30.49 5.18 30.2 4.38 29.84 3.69 29.41 3.1 28.9 2.59 28.31 2.16 27.62 1.8 26.82 1.51 25.88 1.28 24.76 1.13 23.37 1.03 21.46 1 16 1.03 10.54 1.13 8.63 1.28 7.24 1.51 6.12 1.8 5.18 2.16 4.38 2.59 3.69 3.1 3.1 3.69 2.59 4.38 2.16 5.18 1.8 6.12 1.51 7.24 1.28 8.63 1.13 10.54 1.03 16 1 21.46 1.03 23.37 1.13 24.76 1.28 25.88 1.51 26.82 1.8 27.62 2.16 28.31 2.59 28.9 3.1 29.41 3.69 29.84 4.38 30.2 5.18 30.49 6.12 30.72 7.24 30.87 8.63 30.97 10.54z"/>
+        <path fill="#fbfaf7" d="M10 23V9h3l7 9.5V9h3v14h-3l-7-9.5V23z"/>
+      </svg>
+      <div class="issuer">{{ issuer }}</div>
+    </div>
+    <div class="doccode">{{ code }}</div>
+  </div>
+
+  <div class="title-block">
     <h1>{{ title }}</h1>
     <div class="meta">
-      <div><span class="label">{{ T.code }}</span> {{ code }}</div>
-      <div><span class="label">{{ T.org }}</span> {{ issuer }}</div>
+      {% if date_label %}<span>{{ date_label }}</span>{% endif %}
+      {% if is_draft %}
+        {% if date_label %}<span class="dot">•</span>{% endif %}
+        <span class="chip">{{ T.draft_banner }}</span>
+      {% endif %}
     </div>
   </div>
 
   {% for s in sections %}
-    {% if s.text %}
-      <h2>{{ s.key }}</h2>
-      <div class="section-text">{{ s.text }}</div>
-    {% endif %}
+    <div class="section">
+      {% if s.name %}<h2>{{ s.name }}</h2>{% endif %}
+      {{ s.html }}
+    </div>
   {% endfor %}
 
-  <div class="author-block">
-    <div class="label">{{ T.author }}</div>
-    <div>{{ primary_author }}</div>
-    {% if co_authors %}
-      <div class="label" style="margin-top: 6pt;">{{ T.coauthors }}</div>
-      <div>{{ co_authors | join(", ") }}</div>
+  {% if primary_author or co_authors %}
+  <div class="colophon">
+    {% if primary_author %}
+      <div class="row"><span class="label">{{ T.author }}</span> {{ primary_author }}</div>
     {% endif %}
-    {% if finalized_at %}
-      <div class="label" style="margin-top: 6pt;">{{ T.finalized }}</div>
-      <div>{{ finalized_at }}</div>
+    {% if co_authors %}
+      <div class="row"><span class="label">{{ T.coauthors }}</span> {{ co_authors | join(", ") }}</div>
     {% endif %}
   </div>
+  {% endif %}
 </body>
 </html>

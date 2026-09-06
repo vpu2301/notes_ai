@@ -76,6 +76,7 @@ groups:
           severity: warning
           team: platform
         annotations:
+          runbook: "docs/runbooks/auth.md#jwks-cache-hit-ratio"
           summary: "JWKS cache hit ratio < 95% for 5 minutes"
           description: |
             libs/auth's JwksCache hit ratio has dropped below 95% for the
@@ -115,6 +116,7 @@ groups:
           severity: warning
           team: platform
         annotations:
+          runbook: "docs/runbooks/auth.md#chain-verify-stale"
           summary: "Audit chain verifier hasn't reported in 8h"
           description: |
             The nightly verify job is supposed to run at 02:00 UTC.
@@ -133,9 +135,170 @@ groups:
           severity: warning
           team: platform
         annotations:
+          runbook: "docs/runbooks/auth.md#audit-write-slow"
           summary: "AuditWriter p95 > 100ms for 5 minutes"
           description: |
             Either DB latency spiked, advisory-lock contention is climbing
             (a per-tenant hot key), or JCS canonicalisation is slow on a
             pathological payload. Check pg_stat_activity for blocked
             audit-writer transactions.
+
+  # A group of its own: these are auth rules, and the `audit` group above
+  # is about the hash chain. Sharing a group would also share its
+  # evaluation interval, which is not a property anyone should inherit by
+  # accident.
+  - name: auth-idx
+    interval: 30s
+    rules:
+      # ══════════════════════════════════════════════════════════════
+      # IDX-B3 — the native identity platform.
+      #
+      # Every metric named below is emitted by auth-service code today;
+      # `tests/unit/test_alert_rules.py` asserts it, because a rule
+      # naming a metric nothing exports fails silently (it never fires,
+      # which on a dashboard is indistinguishable from "no problem") and
+      # was the root cause in sprints 08 and 10.
+      # ══════════════════════════════════════════════════════════════
+
+      # A high share of sign-in codes being rejected is either an attack
+      # or a broken client. Both need a human the same day.
+      - alert: OtpVerifyFailureRatioHigh
+        expr: |
+          sum(rate(mdx_auth_otp_verify_total{result!~"ok|new_identity"}[10m]))
+            /
+          clamp_min(sum(rate(mdx_auth_otp_verify_total[10m])), 0.001)
+            > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "More than 30% of sign-in codes are being rejected"
+          runbook: "docs/runbooks/auth.md#otp-verify-failures"
+          description: |
+            Over the last 10 minutes, more than 30% of /auth/email/verify
+            attempts failed. A code is five guesses and ten minutes, so a
+            sustained ratio this high is not users mistyping.
+
+      - alert: OtpStartRateLimitedBurst
+        expr: sum(rate(mdx_auth_otp_start_total{result="rate_limited"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Sign-in code requests are being rate limited at over 1/s"
+          runbook: "docs/runbooks/auth.md#otp-start-rate-limited"
+          description: |
+            Someone is sweeping /auth/email/start. The caps are doing their
+            job; this is the signal that they are being exercised.
+
+      - alert: AccountLockoutBurst
+        expr: sum(increase(mdx_auth_otp_verify_total{result="exhausted"}[10m])) > 20
+        for: 0m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "More than 20 sign-in challenges exhausted in 10 minutes"
+          runbook: "docs/runbooks/auth.md#account-lockout-burst"
+          description: |
+            Each exhaustion is five wrong codes against one challenge and
+            counts toward that identity's lockout. A burst is a campaign,
+            not a bad week.
+
+      # IDX-B1b. A room device holds one secret and retries with backoff;
+      # a burst of failures is a wrong config or somebody guessing.
+      - alert: ClientCredentialsFailureBurst
+        expr: sum(increase(mdx_auth_client_credentials_total{result="invalid"}[5m])) > 20
+        for: 0m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "More than 20 client_credentials failures in 5 minutes"
+          runbook: "docs/runbooks/ambient-device.md#when-something-is-wrong"
+          description: |
+            Check which client_id in the platform tenant's
+            auth.client_credentials_failed audit rows. A single room that
+            was rotated away from is the common cause.
+
+      # Critical: the DB row stops the next refresh, but a failed denylist
+      # push means the token already in someone's hands stays live for its
+      # full lifetime. That is the window revocation exists to close.
+      - alert: DenylistPushFailed
+        expr: sum(increase(mdx_auth_sessions_revoked_total[5m])) > 0
+          and on() sum(increase(mdx_auth_denylist_push_failed_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "A session revocation failed to reach the denylist"
+          runbook: "docs/runbooks/auth.md#denylist-push-failed"
+          description: |
+            Revocation is only immediate when both halves land. Check Redis;
+            until it is healthy, treat revocations as taking up to
+            AUTH_ACCESS_TTL_SECONDS to bite.
+
+      # Freshness, not failure: a job erroring every run keeps its
+      # last-success gauge frozen, which is exactly what this catches.
+      # The gauge is set ONLY on success for that reason.
+      - alert: AuthMaintenanceStale
+        expr: |
+          time() - max by (job_name) (mdx_auth_maint_last_success_timestamp) > 10800
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Maintenance job {{ $labels.job_name }} has not succeeded in 3 hours"
+          runbook: "docs/runbooks/auth.md#maintenance-stale"
+          description: |
+            The longest scheduled interval is hourly, so three hours is
+            three missed runs. Either MDX_BACKGROUND_JOBS is off, the
+            replica hosting it is gone, or the job is failing — check
+            mdx_scheduler_job_runs_total{outcome="error"}.
+
+      - alert: EmailSendFailures
+        expr: sum(increase(mdx_auth_email_send_failed_total[5m])) > 5
+        for: 0m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "More than 5 account emails failed to send in 5 minutes"
+          runbook: "docs/runbooks/auth.md#email-send-failures"
+          description: |
+            Sign-in codes are sent inline, so a failing relay is a failing
+            sign-in: /auth/email/start answers 503 and deletes the
+            challenge. Check the relay before the support queue does.
+
+      - alert: MfaVerifyFailureBurst
+        expr: sum(increase(mdx_auth_mfa_verify_total{result!="ok"}[10m])) > 20
+        for: 0m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "More than 20 second-factor failures in 10 minutes"
+          runbook: "docs/runbooks/auth.md#mfa-verify-failures"
+          description: |
+            Includes replayed TOTP codes (result="invalid" after a step was
+            already spent), which is the signature of a code being reused
+            from a phished page.
+
+      - alert: RecoveryCodeUsageSpike
+        expr: sum(increase(mdx_auth_recovery_code_used_total[1h])) > 5
+        for: 0m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "More than 5 recovery codes used in an hour"
+          runbook: "docs/runbooks/auth.md#recovery-code-spike"
+          description: |
+            A recovery code is the credential people keep on paper. Several
+            in an hour across the estate is either a device-loss event or a
+            stolen printout being worked through.
+

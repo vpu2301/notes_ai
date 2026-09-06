@@ -18,6 +18,9 @@ Public surface:
 - :class:`CompositeMasterKeyProvider` — mixed-master reads during re-wrap.
 - :func:`build_master_key_provider` — the sanctioned composition helper.
 - :class:`TenantKekRepository` — fetches plaintext tenant KEKs from `tenant_keks`.
+- :mod:`crypto.passwords` — the sanctioned password verifier (scrypt). Not
+  envelope material: a verifier must never be decryptable, so it shares none
+  of the key hierarchy above.
 - Exception classes for every failure mode.
 """
 
@@ -44,6 +47,9 @@ from .master import (
     MasterKeyProvider,
     build_master_key_provider,
 )
+from .passwords import hash_password, hash_password_async, needs_rehash
+from .passwords import verify as verify_password
+from .passwords import verify_async as verify_password_async
 from .stream import encryptor_at_offset, fresh_stream_key, fresh_stream_nonce
 from .tenant_kek import TenantKekRepository
 from .vault_kv import fetch_kv_secrets
@@ -69,4 +75,9 @@ __all__ = [
     "fetch_kv_secrets",
     "fresh_stream_key",
     "fresh_stream_nonce",
+    "hash_password",
+    "hash_password_async",
+    "needs_rehash",
+    "verify_password",
+    "verify_password_async",
 ]

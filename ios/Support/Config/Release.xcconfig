@@ -1,0 +1,6 @@
+#include "Common.xcconfig"
+
+// A shipped build talks TLS only. A session token — which since IDX-I1 is
+// what this app carries — over plain http is not acceptable, and neither
+// is a local-networking exception that a release build has no use for.
+INFOPLIST_PREPROCESSOR_DEFINITIONS = $(inherited) DEV_HTTP=0

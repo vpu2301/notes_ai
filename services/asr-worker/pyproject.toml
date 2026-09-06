@@ -35,6 +35,7 @@ dependencies = [
     "asr_models",
     "secret",
     "notification_events",
+    "models",
 ]
 
 [tool.uv.sources]
@@ -49,6 +50,7 @@ storage = { workspace = true }
 asr_models = { workspace = true }
 secret = { workspace = true }
 notification_events = { workspace = true }
+models = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

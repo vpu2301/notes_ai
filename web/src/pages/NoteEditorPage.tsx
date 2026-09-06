@@ -11,6 +11,7 @@ import {
   getTemplate,
   getVersion,
   listVersions,
+  needsReadPurpose,
   notesBySourceJob,
   revertToDraft,
   updateDraft,
@@ -23,6 +24,7 @@ import type {
   NoteSection,
   NoteVersionDetail,
   NoteVersionSummary,
+  ReadPurpose,
   TemplateSection,
   TranscriptResult,
   TranscriptTurn,
@@ -36,10 +38,12 @@ import {
   CopyIcon,
   DownloadIcon,
   FileDownIcon,
+  FolderIcon,
   HistoryIcon,
   PenIcon,
   ShareIcon,
   TrashIcon,
+  UserIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { ShareDialog } from "../components/ShareDialog";
@@ -49,6 +53,7 @@ import { useToast } from "../components/Toaster";
 import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
+import { useSpaces } from "../spaces/SpacesContext";
 
 const AUTOSAVE_MS = 900;
 
@@ -440,6 +445,8 @@ export function NoteEditorPage() {
   const { noteId = "" } = useParams();
   const toast = useToast();
   const navigate = useNavigate();
+  const { spaces, spaceOf, file: fileInSpace, forgetNote } = useSpaces();
+  const noteSpace = spaces.find((s) => s.id === spaceOf[noteId]);
 
   const [note, setNote] = useState<NoteEnvelope | null>(null);
   const [sections, setSections] = useState<TemplateSection[] | null>(null);
@@ -448,6 +455,12 @@ export function NoteEditorPage() {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /**
+   * Set when this is not our note and nobody shared it with us — a
+   * workspace admin opening a colleague's note. Every read is then sent
+   * with this purpose (the server records it) and the page says so.
+   */
+  const [readPurpose, setReadPurpose] = useState<ReadPurpose | null>(null);
 
   const [tab, setTab] = useState<Tab>("notes");
   const [sourceJobId, setSourceJobId] = useState<string | null>(() => jobForNote(noteId));
@@ -474,7 +487,16 @@ export function NoteEditorPage() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const env = await getNote(noteId);
+      let env: NoteEnvelope;
+      try {
+        env = await getNote(noteId);
+        setReadPurpose(null);
+      } catch (err) {
+        if (!needsReadPurpose(err)) throw err;
+        // Not our note: read it as a reviewer, on the record.
+        env = await getNote(noteId, "review");
+        setReadPurpose("review");
+      }
       setNote(env);
       setContent(env.content ?? null);
       setVersion(env.current_version_number);
@@ -652,7 +674,7 @@ export function NoteEditorPage() {
 
   const onPdf = async () => {
     try {
-      saveBlob(await downloadPdf(noteId), `${fileBase()}.pdf`);
+      saveBlob(await downloadPdf(noteId, readPurpose ? "export" : undefined), `${fileBase()}.pdf`);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -677,6 +699,7 @@ export function NoteEditorPage() {
     setActionError(null);
     try {
       await deleteNote(noteId);
+      forgetNote(noteId);
       toast.success("Note deleted");
       navigate("/", { replace: true });
     } catch (err) {
@@ -692,7 +715,7 @@ export function NoteEditorPage() {
     setViewing(null);
     if (opening && versions === null) {
       try {
-        setVersions(await listVersions(noteId));
+        setVersions(await listVersions(noteId, readPurpose ?? undefined));
       } catch (err) {
         toast.error(errorMessage(err));
         setVersions([]);
@@ -703,7 +726,7 @@ export function NoteEditorPage() {
   const openVersion = async (v: NoteVersionSummary) => {
     if (v.version_number === version && !viewing) return;
     try {
-      setViewing(await getVersion(noteId, v.version_number));
+      setViewing(await getVersion(noteId, v.version_number, readPurpose ?? undefined));
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -783,6 +806,17 @@ export function NoteEditorPage() {
       menu.push({ label: "Revert to draft", onClick: () => void onRevert(), disabled: busy });
     }
   }
+  if (!viewing && spaces.length > 0) {
+    const current = spaceOf[noteId];
+    spaces.forEach((sp, i) => {
+      menu.push({
+        label: current === sp.id ? `Remove from ${sp.name}` : `Move to ${sp.name}`,
+        icon: <FolderIcon size={14} />,
+        sep: i === 0,
+        onClick: () => void fileInSpace(noteId, current === sp.id ? null : sp.id),
+      });
+    });
+  }
   if (!viewing) {
     menu.push({
       label: "Delete note",
@@ -797,9 +831,20 @@ export function NoteEditorPage() {
     });
   }
 
+  const authorName = note.primary_author_name?.trim() || "a colleague";
+
   return (
     <div className="doc-wrap">
       <div className="doc">
+        {readPurpose && (
+          <div className="banner banner-info" role="status">
+            <UserIcon size={15} />
+            <span className="grow">
+              This is {authorName}&rsquo;s note. You can see it because you run this workspace,
+              and this view is recorded.
+            </span>
+          </div>
+        )}
         <div className="doc-bar">
           <Link to="/" className="tb-back" title="Back to notes" aria-label="Back to notes">
             <ArrowLeftIcon size={15} />
@@ -838,6 +883,14 @@ export function NoteEditorPage() {
           <span>Updated {relativeTime(note.updated_at)}</span>
           <span className="sep">·</span>
           <span className="mono">{note.code}</span>
+          {noteSpace && (
+            <>
+              <span className="sep">·</span>
+              <Link to={`/spaces/${noteSpace.id}`} className="doc-space">
+                <FolderIcon size={12} /> {noteSpace.name}
+              </Link>
+            </>
+          )}
         </div>
 
         {conflict && (

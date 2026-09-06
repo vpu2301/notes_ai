@@ -135,7 +135,7 @@ INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 VALUES ('0000c111-0000-0000-0000-000000000001', '0a000000-0000-0000-0000-00000000000a', 'owner', 'active')
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
--- ── Klarnote's own account — the vendor, not a customer ────────────────────
+-- ── Notes AI's own account — the vendor, not a customer ────────────────────
 -- Backs the platform-owner console at #/company (src/company/ in the SPA),
 -- whose access gate is an email allowlist because there is no platform role
 -- in KNOWN_ROLES yet. In Keycloak it carries tenant_admin + auditor:
@@ -151,14 +151,14 @@ INSERT INTO users (sub, tenant_id, email, display_name, role, status)
 VALUES (
     '0f000000-0000-0000-0000-00000000000f',   -- used only on a fresh realm import
     '00000000-0000-0000-0000-00000000000a',
-    'vpu2301@gmail.com', 'Klarnote Owner', 'tenant_admin', 'active'
+    'vpu2301@gmail.com', 'Notes AI Owner', 'tenant_admin', 'active'
 )
 ON CONFLICT (tenant_id, email) DO UPDATE
     SET display_name = EXCLUDED.display_name,
         role         = EXCLUDED.role,
         status       = EXCLUDED.status;
 
--- ── Klarnote owner: member of every tenant ─────────────────────────────────
+-- ── Notes AI owner: member of every tenant ─────────────────────────────────
 -- The platform-owner console reads its portfolio from GET /tenants, which
 -- returns exactly the tenants the caller is a MEMBER of. The cross join is
 -- deliberate: every tenant seeded here and any added later gets a
@@ -171,5 +171,48 @@ FROM tenants t
 CROSS JOIN users u
 WHERE u.email = 'vpu2301@gmail.com'
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
+
+-- ── Identities for every seeded user ──────────────────────────────────────
+-- Migration 0028 repointed notes.primary_author_id, note_versions.created_by
+-- and autocomplete_*.owner_user_id from users(sub) to identities(id). The
+-- 0027 backfill only sees the users that existed WHEN IT RAN, and on a fresh
+-- stack that is none — migrations run against an empty database and the seed
+-- lands afterwards. So a seeded account signed in fine and then 500'd on
+-- every POST /v1/notes with notes_primary_author_id_fkey: "Key is not present
+-- in table identities".
+--
+-- Same shape as 0027's backfill, keyed off users so it stays correct when
+-- Keycloak issued a sub of its own (see the users INSERT above). legacy_idp
+-- is true: these accounts authenticate through Keycloak, their password and
+-- MFA live there, and ADR-0047's dual mode has to know that.
+INSERT INTO identities (id, email, email_verified_at, display_name,
+                        status, locale, timezone, legacy_idp)
+SELECT u.sub, lower(u.email), u.created_at, u.display_name,
+       'active', 'en', 'UTC', true
+FROM users u
+WHERE NOT EXISTS (SELECT 1 FROM identities i WHERE i.id = u.sub)
+  AND NOT EXISTS (SELECT 1 FROM identities x WHERE x.email = lower(u.email))
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE identities i
+SET last_tenant_id = u.tenant_id
+FROM users u
+WHERE u.sub = i.id AND i.last_tenant_id IS NULL;
+
+-- Keep the profile in step on re-seed. The INSERT above only fires for an
+-- identity that does not exist yet, so without this a display name edited
+-- in the users INSERT lands on `users` and never reaches `identities` —
+-- the seed then reports one name and every native token carries the other.
+--
+-- Scoped to legacy_idp: for a Keycloak-backed identity the profile is
+-- owned upstream and `users` is the local mirror of it, so copying down is
+-- correct. A native identity (IDX-BE-3) owns its own name and must never
+-- have it overwritten by a seed run.
+UPDATE identities i
+SET display_name = u.display_name
+FROM users u
+WHERE u.sub = i.id
+  AND i.legacy_idp
+  AND i.display_name IS DISTINCT FROM u.display_name;
 
 COMMIT;

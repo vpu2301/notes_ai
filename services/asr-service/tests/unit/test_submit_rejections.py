@@ -162,7 +162,7 @@ def _post(rig: SimpleNamespace) -> Any:
     return rig.client.post(
         "/asr/jobs",
         files={"audio": ("dictation.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
-        data={"language": "uk", "vocabulary_hint": "Klarnote roadmap"},
+        data={"language": "uk", "vocabulary_hint": "Notes AI roadmap"},
     )
 
 

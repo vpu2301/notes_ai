@@ -221,3 +221,69 @@ func relativeTime(_ date: Date) -> String {
     return formatter.localizedString(for: date, relativeTo: Date())
 }
 
+
+// MARK: - One-time code
+
+/// Six boxes for a six-digit code.
+///
+/// Drawn over a single hidden field rather than as six real ones: the
+/// code arrives from the mail app by paste far more often than it is
+/// typed, and six separate fields turn one ⌘V into six keystrokes in the
+/// wrong boxes. Typing still works — the boxes fill left to right — and
+/// the field auto-submits on the sixth digit, because asking someone to
+/// press Return after entering a code they were just told to enter is a
+/// step with no content.
+struct DSCodeField: View {
+    @Binding var code: String
+    var length = 6
+    var onComplete: (String) -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack {
+            // The real field: invisible, but it holds the caret, the paste
+            // and the keyboard.
+            TextField("", text: $code)
+                .textFieldStyle(.plain)
+                .textContentType(.oneTimeCode)
+                .focused($focused)
+                .opacity(0.02)
+                .onChange(of: code) { _, new in
+                    let digits = String(new.filter(\.isNumber).prefix(length))
+                    if digits != new { code = digits }
+                    if digits.count == length { onComplete(digits) }
+                }
+            HStack(spacing: 8) {
+                ForEach(0..<length, id: \.self) { index in
+                    box(at: index)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
+        .onAppear { focused = true }
+        .accessibilityLabel("One-time code")
+    }
+
+    private func box(at index: Int) -> some View {
+        let characters = Array(code)
+        let filled = index < characters.count
+        let isNext = index == characters.count && focused
+        return Text(filled ? String(characters[index]) : " ")
+            .font(.dsMono(17))
+            .foregroundStyle(DS.text1)
+            .frame(width: 38, height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                    .fill(DS.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                    .strokeBorder(isNext ? DS.text3 : DS.line,
+                                  lineWidth: isNext ? 1 : DS.hairline)
+            )
+            .animation(.easeOut(duration: 0.12), value: isNext)
+    }
+}

@@ -1,0 +1,1 @@
+{"id":"chatcmpl-361","object":"chat.completion","created":1788598532,"model":"gemma3:4b","system_fingerprint":"fp_ollama","choices":[{"index":0,"message":{"role":"assistant","content":"{\"title\": \"Project Phoenix Kickoff\", \"n\": 1}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":29,"completion_tokens":16,"total_tokens":45}}

@@ -140,6 +140,9 @@ struct NoteView: View {
             }
             if model.conflict {
                 DSChip(text: "Out of date", tint: DS.warn, soft: DS.warnSoft)
+            } else if let label = model.oversightLabel {
+                DSChip(text: label, tint: DS.info, soft: DS.infoSoft)
+                    .accessibilityHint("You can see this note because you run this workspace. This view is recorded.")
             } else if model.isDraft {
                 saveStatus
             }

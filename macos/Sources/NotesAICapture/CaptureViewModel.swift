@@ -109,13 +109,26 @@ final class CaptureViewModel: ObservableObject {
     }
 
     private func process(fileURL: URL, meetingTitle: String) async {
-        defer { try? FileManager.default.removeItem(at: fileURL) }
+        // The recording is deleted only once the server has it. Every other
+        // exit from this function — a failed upload, a lost session, the
+        // app being quit mid-pipeline — moves it to `pending/` with a
+        // sidecar instead. A meeting cannot be recorded twice (IDX-M1 F).
+        var uploaded = false
+        let recordedAt = Date()
+        defer {
+            if uploaded {
+                try? FileManager.default.removeItem(at: fileURL)
+            } else {
+                keep(fileURL, title: meetingTitle, recordedAt: recordedAt)
+            }
+        }
         var jobId: String?
         do {
             phase = .uploading
             let job = try await app.api.submitJob(fileURL: fileURL,
                                                   contentType: recorder.format.contentType,
                                                   language: language, diarize: diarize)
+            uploaded = true
             jobId = job.id
             activeJobId = job.id
             app.addRecent(jobId: job.id, title: meetingTitle)
@@ -158,6 +171,24 @@ final class CaptureViewModel: ObservableObject {
                 app.updateRecent(jobId: jobId, errorMessage: message)
             }
             phase = .failed(message)
+        }
+    }
+
+    /// Put the recording somewhere it will still be tomorrow, and say in
+    /// the banner where it went — a file the person is not told about is
+    /// only technically not lost.
+    private func keep(_ fileURL: URL, title: String, recordedAt: Date) {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let kept = PendingCaptures.keep(fileURL, info: PendingCapture.Info(
+            title: title,
+            language: language,
+            diarize: diarize,
+            recordedAt: recordedAt,
+            identityId: app.identityId,
+            tenantId: app.tenantId))
+        guard kept != nil else { return }
+        if case .failed(let message) = phase {
+            phase = .failed(message + " The recording was kept on this Mac.")
         }
     }
 

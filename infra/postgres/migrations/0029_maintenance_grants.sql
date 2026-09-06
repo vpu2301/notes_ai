@@ -1,0 +1,19 @@
+-- 0029 — IDX-B3: the one grant scheduled maintenance needs.
+--
+-- Migration 0024 gave `tenant_writer` SELECT/INSERT/UPDATE on
+-- `auth_sessions` and no DELETE, which was right at the time: nothing
+-- deleted a session, it revoked one. The A5 purge and every revocation
+-- path still only UPDATE.
+--
+-- IDX-B3's `expire-sessions` job introduces the first real delete: a row
+-- revoked more than ninety days ago is audit context nobody reads, and
+-- keeping every session a busy workspace ever opened makes
+-- `GET /auth/sessions` slower forever for no benefit.
+--
+-- Adding it here rather than widening 0024 keeps the reasoning attached
+-- to the change, and keeps `check-identity-grants.py` honest — that gate
+-- exists precisely so a grant on these tables is a decision somebody
+-- made, not one that arrived with a `GRANT ... ON ALL TABLES`.
+--
+-- `app_role` gains nothing. It still holds no privilege on this table.
+GRANT DELETE ON auth_sessions TO tenant_writer;

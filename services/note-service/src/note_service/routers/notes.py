@@ -6,7 +6,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from audit import Severity
@@ -88,6 +88,10 @@ class NoteEnvelope(BaseModel):
     # 0016 — who may read it beyond the author team.
     visibility: str = "workspace"
     shared_with_ids: list[UUID] = Field(default_factory=list)
+    # Only filled for an oversight read (the caller is not on the author
+    # team and was not shared the note), so the client can name whose note
+    # it is showing. None on the author's own reads and on list envelopes.
+    primary_author_name: str | None = None
     content: NoteContent | None = None
     section_labels: list[SectionLabel] | None = None
 
@@ -100,6 +104,7 @@ def _envelope(
     *,
     content: NoteContent | None = None,
     section_labels: list[SectionLabel] | None = None,
+    primary_author_name: str | None = None,
 ) -> NoteEnvelope:
     return NoteEnvelope(
         id=row.id,
@@ -116,6 +121,7 @@ def _envelope(
         cancelled_at=row.cancelled_at.isoformat() if row.cancelled_at else None,
         visibility=row.visibility,
         shared_with_ids=row.shared_with_ids,
+        primary_author_name=primary_author_name,
         content=content,
         section_labels=section_labels,
     )
@@ -165,6 +171,17 @@ async def _resolve_section_labels(
         SectionLabel(section_key=section.id, name=LocalizedText(uk=section.name, en=section.name))
         for section in sorted(definition.sections, key=lambda s: s.order)
     ]
+
+
+async def _resolve_section_names(conn: object, *, content: NoteContent) -> dict[str, str]:
+    """``{section_key: heading}`` in template order, for the PDF renderer.
+
+    Empty when the template no longer resolves — the renderer then
+    humanizes the raw keys rather than printing ``action_items``."""
+    labels = await _resolve_section_labels(conn, content=content) or []
+    return {
+        label.section_key: name for label in labels if (name := (label.name.en or label.name.uk))
+    }
 
 
 # ── Routes ──────────────────────────────────────────────────────────
@@ -239,19 +256,18 @@ async def get_note(
         # A private note the caller was not given is a 404, not a 403.
         row = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
-        # Read-purpose enforcement: required if requester is not author/co-author.
-        # Someone the note was shared with reads as a collaborator.
-        is_author = access.is_author_team(row, claims.sub) or claims.sub in row.shared_with_ids
-        if not is_author and purpose is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "type": "https://errors.notes-ai/missing-read-purpose",
-                    "title": "Read purpose required",
-                    "detail": "Non-author reads must include ?purpose=<value>",
-                    "allowed": [p.value for p in ReadPurpose],
-                },
-            )
+        # Read-purpose enforcement: an oversight reader (a workspace member
+        # on a workspace-visible note, a tenant_admin or auditor on anything)
+        # must say why they are reading; the author team and people the
+        # note was shared with never do.
+        is_author = access.require_read_purpose(row, claims, purpose)
+
+        # An oversight reader is told whose note it is, so a client can say
+        # "Ada's note" rather than "someone else's". Authors already know.
+        primary_author_name: str | None = None
+        if not is_author:
+            members = await repo.fetch_members(conn, subs=[row.primary_author_id])
+            primary_author_name = members[0].display_name if members else None
 
         content_obj: NoteContent | None = None
         section_labels: list[SectionLabel] | None = None
@@ -275,4 +291,9 @@ async def get_note(
         severity=Severity.INFO,
     )
 
-    return _envelope(row, content=content_obj, section_labels=section_labels)
+    return _envelope(
+        row,
+        content=content_obj,
+        section_labels=section_labels,
+        primary_author_name=primary_author_name,
+    )

@@ -74,6 +74,17 @@ SYNONYM_GROUP_DELETED: Final = "synonym.group.deleted"
 CALENDAR_CONNECTED: Final = "calendar.connected"
 CALENDAR_DISCONNECTED: Final = "calendar.disconnected"
 
+# ── 0021: spaces (personal note folders) ────────────────────────────
+# Payload: the space id only — never its name, never a note title.
+# Filing a note is not audited (frequent, and it changes nothing about
+# the note itself).
+SPACE_CREATED: Final = "space.created"
+SPACE_RENAMED: Final = "space.renamed"
+SPACE_DELETED: Final = "space.deleted"
+
 # ── Sprint 16 — scheduler runs ──────────────────────────────────────────
 SCHEDULER_JOB_COMPLETED: Final = "scheduler.job.completed"
 SCHEDULER_JOB_FAILED: Final = "scheduler.job.failed"
+
+# "Ask this note": a question answered by the model over the note + transcript.
+NOTE_ASKED: Final = "note.asked"  # payload: backend, model_id, question_chars — never the text

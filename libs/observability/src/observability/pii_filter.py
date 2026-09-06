@@ -117,8 +117,34 @@ _JSON_PATTERN: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
+# ──────────────────────────────────────────────────────────────────────
+# Value patterns — redacted wherever they appear, whatever the field is
+# called (IDX-B1b I).
+#
+# The key-based lists above cannot help when a secret is interpolated
+# into a message ("configured client %s"), pasted into a free-text field,
+# or logged under a name nobody predicted. A client credential is a
+# machine-generated string with a deliberate, unmistakable tag, so it can
+# be recognised by shape — which is exactly why the tag exists.
+#
+# Reserved for values that cannot occur legitimately in a log line. A
+# pattern for something people also type (an email, a name) would redact
+# real content, which is why this list is one entry long.
+# ──────────────────────────────────────────────────────────────────────
+_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # mdx_sk_<8 hex>_<43 url-safe chars> — see auth_service.domain.credentials
+    re.compile(r"mdx_sk_[A-Za-z0-9]{4,16}_[A-Za-z0-9_\-]{20,}"),
+)
+
 _MASK_VALUE = "<redacted>"
 _MAX_DEPTH = 10
+
+
+def redact_values(text: str) -> str:
+    """Mask any known secret shape inside a string."""
+    for pattern in _VALUE_PATTERNS:
+        text = pattern.sub(_MASK_VALUE, text)
+    return text
 
 
 def _classify(name: str) -> str:
@@ -157,6 +183,8 @@ def scrub(value: Any, depth: int = 0) -> Any:
         return [scrub(v, depth + 1) for v in value]
     if isinstance(value, tuple):
         return tuple(scrub(v, depth + 1) for v in value)
+    if isinstance(value, str):
+        return redact_values(value)
     return value
 
 

@@ -1,0 +1,34 @@
+# Secret scan (DEP-S1-05). Runs in CI (secret-scan job) and via `make secret-scan`.
+# Default gitleaks rules cover HF tokens (hf_…), AWS, GitHub, Slack, generic
+# high-entropy keys; the rules below add what this repo specifically handles.
+title = "notes-ai"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "huggingface-endpoint-token"
+description = "Hugging Face token (fine-grained or classic)"
+regex = '''\b(hf_[A-Za-z0-9]{30,})\b'''
+keywords = ["hf_"]
+
+[[rules]]
+id = "hosted-model-token-env"
+description = "Model host bearer token committed with a value"
+regex = '''(?i)\b(HOSTED_MODEL_TOKEN|HF_TOKEN|ANTHROPIC_API_KEY)\s*[=:]\s*['"]?([A-Za-z0-9_\-]{16,})'''
+keywords = ["HOSTED_MODEL_TOKEN", "HF_TOKEN", "ANTHROPIC_API_KEY"]
+
+[allowlist]
+description = "Fixtures and docs that mention token *shapes* without values"
+paths = [
+  '''\.env\.example$''',
+  '''libs/models/tests/.*''',        # fake tokens in unit tests (hf_secret_token, hf_supersecret_token_value_1234)
+  '''docs/.*\.md$''',
+  '''uv\.lock$''',
+  '''infra/dev/auth-signing-dev\.json$''',   # dev-only issuer key (IDX-A2); scripts/ci/check-dev-keys.py keeps its kid out of non-dev configs
+]
+regexes = [
+  '''hf_secret_token''',
+  '''hf_supersecret_token_value_1234''',
+  '''PIN_ME''',
+]

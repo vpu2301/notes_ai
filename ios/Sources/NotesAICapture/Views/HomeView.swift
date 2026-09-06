@@ -26,10 +26,21 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                if let notice = app.linkNotice {
+                    DSNotice(tone: .info, symbol: "link", text: notice)
+                        .onTapGesture { app.linkNotice = nil }
+                }
+                if app.workspaceLost { WorkspaceLostBanner() }
                 SpacesBar(add: { addingSpace = true }, rename: { space in
                     renameDraft = space.name
                     renamingSpace = space
                 })
+                // Recordings that never reached the server come before
+                // anything else on the page: they are the only thing here
+                // that exists nowhere but this phone.
+                if app.selectedSpaceId == nil, searchQuery.isEmpty, !app.pending.isEmpty {
+                    PendingUploadsSection(captures: app.pending)
+                }
                 if app.selectedSpaceId == nil, searchQuery.isEmpty, showComingUp {
                     ComingUpCard(calendar: calendar, google: google)
                 }
@@ -61,11 +72,12 @@ struct HomeView: View {
                     prompt: "Search notes")
         .refreshable {
             await app.refreshNotes()
+            await app.refreshSpaces()
             await app.refreshRecents()
             calendar.refresh()
             await google.refresh(force: true)
         }
-        .task { await app.refreshNotes(); calendar.refresh(); await google.refresh() }
+        .task { await app.refreshNotes(); await app.refreshSpaces(); calendar.refresh(); await google.refresh() }
         .onChange(of: app.path.isEmpty) { _, home in
             // Back from a note: its title or snippet may have changed.
             if home { Task { await app.refreshNotes() } }
@@ -90,8 +102,11 @@ struct HomeView: View {
         .alert("New space", isPresented: $addingSpace) {
             TextField("Space name", text: $newSpaceName)
             Button("Add") {
-                if let space = app.addSpace(named: newSpaceName) { app.selectedSpaceId = space.id }
+                let name = newSpaceName
                 newSpaceName = ""
+                Task {
+                    if let space = await app.addSpace(named: name) { app.selectedSpaceId = space.id }
+                }
             }
             Button("Cancel", role: .cancel) { newSpaceName = "" }
         } message: {
@@ -116,7 +131,8 @@ struct HomeView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
+            WorkspaceChip()
             Text(space?.name ?? greeting)
                 .font(.dsDisplay(30))
                 .foregroundStyle(DS.text1)
@@ -166,6 +182,10 @@ struct HomeView: View {
             },
             .item("Connectors…", symbol: "puzzlepiece.extension", hint: connectorsHint) { app.showConnectors() },
             .item("Open web app", symbol: "safari") { app.openWebApp() },
+            .item("Account & workspaces…", symbol: "person.crop.circle") {
+                app.settingsTab = .account
+                app.settingsPresented = true
+            },
             .item("Clear finished meetings", symbol: "checkmark.circle") { app.clearFinishedRecents() },
             .separator,
             .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
