@@ -38,7 +38,10 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
+    # NOTE: MinIO withdrew its community images from Docker Hub (2025) —
+    # `docker pull minio/minio` now returns "pull access denied". quay.io is
+    # the upstream-published mirror; same digests, same RELEASE tags.
+    image: quay.io/minio/minio:RELEASE.2024-04-18T19-09-19Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:

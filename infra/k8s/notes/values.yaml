@@ -30,8 +30,8 @@ stateful:
     image: redis:7.2-alpine
     host: redis
   minio:
-    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
-    mcImage: minio/mc:RELEASE.2024-04-18T16-45-29Z
+    image: quay.io/minio/minio:RELEASE.2024-04-18T19-09-19Z
+    mcImage: quay.io/minio/mc:RELEASE.2024-04-18T16-45-29Z
     storage: 20Gi
     host: minio
   keycloak:
