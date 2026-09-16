@@ -12,6 +12,7 @@ from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
 from diarization import DiarizationEngine
 from messaging import RedisStreamsConsumer, RedisStreamsProducer
+from models import ASRProvider, Registry, build_asr_provider
 from storage import EncryptedObjectStore, S3Client
 
 from .config import settings
@@ -31,13 +32,34 @@ class WorkerState:
     audio_store: EncryptedObjectStore
     transcript_store: EncryptedObjectStore
     envelope: Envelope
-    engine: WhisperEngine
+    # The ASR seam (libs/models). `inproc_cpu_asr` wraps WhisperEngine so the
+    # default path is unchanged; other backends are HTTP. The processor only
+    # ever sees the ASRProvider protocol.
+    engine: ASRProvider
     # Ambient Capture v1: offline speaker diarization for diarize=true
     # jobs. NEVER warmed at startup — most jobs don't diarize, and a
     # worker without the ECAPA weights must still transcribe. The first
     # diarize job pays ensure_loaded(); if that fails the job fails with
     # `diarization_unavailable` (retryable), the worker stays healthy.
     diarizer: DiarizationEngine
+
+
+def build_asr(backend_name: str) -> ASRProvider:
+    """Resolve ``ASR_BACKEND`` through the registry (startup-time validation).
+
+    ``inproc_cpu_asr`` needs no config file beyond the committed one; a
+    missing/invalid ``config/models.yaml`` or a backend not allowed in this
+    env raises ``ConfigError`` here, before any job is claimed.
+    """
+    registry = Registry.load(
+        settings.models_config,
+        env=settings.registry_env(),
+        environ=settings.registry_environ(),
+        validate=False,  # only the ASR route matters to this worker
+    )
+    resolved = registry.backend(backend_name, expect_kind="asr")
+    engine = WhisperEngine() if resolved.kind == "asr_inproc" else None
+    return build_asr_provider(resolved, inproc_engine=engine)
 
 
 async def build_state() -> WorkerState:
@@ -97,8 +119,8 @@ async def build_state() -> WorkerState:
         s3=s3, bucket=settings.s3_transcripts_bucket, envelope=envelope
     )
 
-    engine = WhisperEngine()
-    engine.load()
+    engine = build_asr(settings.asr_backend)
+    await engine.warm_up()
 
     diarizer = DiarizationEngine(
         model_dir=settings.diar_model_dir,

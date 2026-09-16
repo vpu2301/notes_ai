@@ -32,6 +32,9 @@ NOTE_SHARED: Final = "note.shared"  # a member was given read access
 NOTE_UNSHARED: Final = "note.unshared"
 NOTE_LINK_CREATED: Final = "note.link_created"  # public "anyone with the link"
 NOTE_LINK_REVOKED: Final = "note.link_revoked"
+# The note was mailed to somebody, from the server. Counts only — the
+# addresses stay out of the audit log on purpose.
+NOTE_LINK_EMAILED: Final = "note.link_emailed"
 NOTE_VIEWED_VIA_LINK: Final = "note.viewed_via_link"  # anonymous read
 
 # Spec item 1: note synthesis (raw dictation → clean prose).
@@ -74,6 +77,17 @@ SYNONYM_GROUP_DELETED: Final = "synonym.group.deleted"
 CALENDAR_CONNECTED: Final = "calendar.connected"
 CALENDAR_DISCONNECTED: Final = "calendar.disconnected"
 
+# ── 0021: spaces (personal note folders) ────────────────────────────
+# Payload: the space id only — never its name, never a note title.
+# Filing a note is not audited (frequent, and it changes nothing about
+# the note itself).
+SPACE_CREATED: Final = "space.created"
+SPACE_RENAMED: Final = "space.renamed"
+SPACE_DELETED: Final = "space.deleted"
+
 # ── Sprint 16 — scheduler runs ──────────────────────────────────────────
 SCHEDULER_JOB_COMPLETED: Final = "scheduler.job.completed"
 SCHEDULER_JOB_FAILED: Final = "scheduler.job.failed"
+
+# "Ask this note": a question answered by the model over the note + transcript.
+NOTE_ASKED: Final = "note.asked"  # payload: backend, model_id, question_chars — never the text

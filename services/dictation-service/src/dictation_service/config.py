@@ -46,6 +46,12 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
+    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
+    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
+    # token's own `iss` selects which entry verifies it. Unset (the
+    # default) means the three values above build a one-element list, so
+    # a deployment that has not been migrated behaves exactly as before.
+    auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     # ── Database ────────────────────────────────────────────────────────
@@ -73,7 +79,7 @@ class Settings(BaseSettings):
     # source-level cut-off for a notification storm (E1).
     notifications_enabled: bool = Field(default=True, alias="MDX_NOTIFICATIONS_ENABLED")
 
-    # ── MinIO / S3 (finalized audio uploads) ───────────────────────────
+    # ── S3 object storage (finalized audio uploads) ────────────────────
     s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
     s3_region: str = Field(default="us-east-1", alias="S3_REGION")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")

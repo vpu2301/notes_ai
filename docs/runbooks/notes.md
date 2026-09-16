@@ -106,6 +106,13 @@ this as `note.draft.updated` with payload `{manual_reopen: true}`.
 | `MDX_TEMPLATE_CACHE_MAXSIZE`      | 5000    | in-process template cache entries             |
 | `MDX_TEMPLATE_CACHE_TTL_SECONDS`  | 60      | template cache TTL                            |
 | `MDX_FFMPEG_PATH`                 | ffmpeg  | audio-clip pipeline binary (ADR-0037)         |
+| `MDX_EMAIL_PROVIDER`              | mock    | `smtp` to actually send share mail            |
+| `MDX_NOTE_SMTP_HOST` / `_PORT`    | localhost / 1025 | relay for share mail (Mailpit in dev) |
+| `MDX_NOTE_EMAIL_FROM` / `_FROM_NAME` | notes@notes-ai.local / Notes AI | envelope sender; must match the SMTP username on Gmail |
+| `MDX_NOTE_EMAIL_REPLY_TO`         | notes@notes-ai.local | fallback reply path when the sharer has no address on file |
+| `MDX_APP_BASE_URL`                | http://localhost:5173 | origin the mailed links point at |
+| `MDX_SHARE_EMAILS_PER_USER_PER_HOUR` | 60   | per-sender cap, counted in recipients         |
+| `MDX_SHARE_EMAIL_MAX_RECIPIENTS`  | 10      | recipients per send                           |
 
 (Autosave min-interval 5 s and diff-cache 1024 entries are in-code
 defaults — `domain/autosave_rate_limit.py`, `domain/diff_cache.py`.)
@@ -233,6 +240,62 @@ answers (`no_audio_source` / `audio_not_retained` / `audio_erased` /
 3. Corrupt source WAV (`unexpected WAV layout` in logs): the session was
    written by a pre-S04 build or the object was truncated — check
    `audio_files.sha256` against the object.
-4. MinIO lifecycle: clips live 5 min (Redis registry) with a 1-day
+4. Object-store lifecycle: clips live 5 min (Redis registry) with a 1-day
    bucket ILM backstop on `mdx-audio-clips`; a full bucket is never the
-   explanation — check the ILM rule survived a `minio-init` re-run.
+   explanation — check the bucket's 1-day expiry lifecycle rule is set.
+
+## Spaces (0021)
+
+A **space** is a personal folder for notes: `GET/POST /v1/spaces`,
+`PUT/DELETE /v1/spaces/{id}`, and `PUT /v1/notes/{id}/space` with
+`{"space_id": …}` (`null` unfiles). Spaces are scoped to the caller's
+`sub` on top of tenant RLS — colleagues see the same notes but file them
+their own way — and need only `note.read`. A note is in at most one space
+per user. Deleting a space stamps `deleted_at` and unfiles its notes
+(`note_spaces`, `note_space_items`; no hard deletes). The Mac and iOS apps
+read the same list; the web app does not use spaces yet.
+
+## Sharing a note by e-mail
+
+`POST /v1/notes/{id}/share/email` takes `{recipients, message, lang}` and
+sends a branded HTML mail per recipient, inline. Recipients split two
+ways: a workspace member is granted read access and mailed a link to the
+note in the app (plus the usual content-free `note.shared_with_you`
+notification); anybody else is mailed the note's public link, minted by
+this call if the note has none. The reply reports `sent` / `rejected` /
+`failed` per address, so one dead mailbox never loses the rest of the
+batch, and the audit event `note.link_emailed` records counts only —
+never the addresses.
+
+**"Nothing arrives."** In order:
+
+1. **Is note-service pointed at a real relay?** The most common cause,
+   and the one with no error anywhere: `MDX_NOTE_SMTP_*` is SEPARATE from
+   the `MDX_AUTH_SMTP_*` block that carries sign-in codes. Set only the
+   auth one and codes reach real inboxes while every share is delivered
+   to Mailpit — a clean 250, `sent` for every recipient, "Sent to ..." in
+   the UI, and nothing in the recipient's mailbox. `docker compose exec
+   note-service env | grep MDX_NOTE_SMTP` is the check; if it says
+   `mailpit`, the mail is at http://localhost:8025 and never left the box.
+2. Is `MDX_EMAIL_PROVIDER=smtp`? The `mock` provider accepts every
+   message and drops it (and refuses to start in production/staging, so
+   this only bites in dev).
+3. Check the service log for `note.share_mail.send_failed` —
+   `error_class` distinguishes a timeout from a refusal.
+4. Delivered but not in the inbox? Look in spam. Every share mail carries
+   `Date` and `Message-ID` (`adapters/email.py`); a relay that strips or
+   a build that omits either gets the message filed as suspicious.
+
+**"The link in the mail 404s."** `MDX_APP_BASE_URL` is not the origin the
+SPA is served from. The server builds `<base>/notes/<id>` and
+`<base>/s/<token>`; nothing else in the pipeline knows the browser's URL.
+
+**"Every recipient comes back `rejected`."** A 5xx from the relay,
+usually authentication: on Google Workspace `MDX_NOTE_SMTP_PASSWORD` must
+be a 16-character App Password, and the From address must match the SMTP
+username.
+
+**"A sender is stuck on 429."** The hourly cap is counted in recipients,
+not calls — `MDX_SHARE_EMAILS_PER_USER_PER_HOUR`. The counter is a Redis
+key per sender per hour (`note:share-mail-rl:<sub>:<bucket>`) and fails
+OPEN if Redis is down, so a 429 means the cap was genuinely reached.

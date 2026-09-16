@@ -65,7 +65,7 @@ def _payload() -> JobEnqueuePayload:
         job_id=uuid4(),
         tenant_id=uuid4(),
         audio_id=uuid4(),
-        vocabulary_hint="Klarnote roadmap",
+        vocabulary_hint="Notes AI roadmap",
         language="uk",
         requester_sub=uuid4(),
     )
@@ -101,7 +101,7 @@ async def test_retry_leaves_the_row_alone(marked: list[dict[str, Any]]) -> None:
     # Still retrying is not a failure of the job — it is a failure of one
     # attempt. The row stays `running` and the message comes back.
     consumer = _Consumer(dead_letters=False)
-    err = _RetryableError(str(JobErrorKind.STORAGE_UNAVAILABLE), "minio down")
+    err = _RetryableError(str(JobErrorKind.STORAGE_UNAVAILABLE), "object store down")
 
     await _fail_or_retry(object(), consumer, _message(_payload()), err)  # type: ignore[arg-type]
 
@@ -112,7 +112,7 @@ async def test_retry_leaves_the_row_alone(marked: list[dict[str, Any]]) -> None:
 async def test_dead_letter_closes_the_job_out(marked: list[dict[str, Any]]) -> None:
     payload = _payload()
     consumer = _Consumer(dead_letters=True)
-    err = _RetryableError(str(JobErrorKind.STORAGE_UNAVAILABLE), "minio down")
+    err = _RetryableError(str(JobErrorKind.STORAGE_UNAVAILABLE), "object store down")
 
     await _fail_or_retry(object(), consumer, _message(payload), err)  # type: ignore[arg-type]
 

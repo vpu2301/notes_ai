@@ -41,9 +41,9 @@ SECRET_LAYOUT: dict[str, dict[str, str]] = {
     },
     "infra": {
         "password": "token",  # postgres superuser
-        "user": "literal:mdx",  # minio root user
-        # minio password + keycloak admin share the postgres row shape;
-        # split into per-store paths if the hosting choice separates them.
+        "user": "literal:mdx",
+        # keycloak admin shares the postgres row shape; split into
+        # per-store paths if the hosting choice separates them.
     },
 }
 

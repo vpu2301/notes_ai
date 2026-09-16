@@ -272,8 +272,15 @@ function CalendarLinkDialog({
  * events from the user's connected calendars — a Google account or a
  * calendar link — or a one-button invitation to connect one. Start a
  * meeting note from any event.
+ *
+ * `invite` is that invitation, and a workspace with no notes in it turns
+ * it off (WEB-1b). Somebody who has never recorded anything has no idea
+ * yet what a connected calendar would be *for*; offering an OAuth consent
+ * screen as the first thing they see puts a decision about Google in front
+ * of the one-line reason they came. The card comes back, prompt and all,
+ * the moment there is a first note.
  */
-export function ComingUp() {
+export function ComingUp({ invite = true }: { invite?: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
@@ -415,6 +422,11 @@ export function ComingUp() {
 
   // No way to connect anything and nothing connected: nothing to show.
   if (available === false && !linkAvailable && connections.length === 0) return null;
+  // Nothing connected and this is not the moment to ask: the card would be
+  // a date and an empty box. Note the ordering — a workspace that HAS a
+  // connected calendar still shows it on day one, because those events are
+  // real content rather than a request.
+  if (!invite && connections.length === 0) return null;
 
   const now = new Date();
   const connected = connections.length > 0;

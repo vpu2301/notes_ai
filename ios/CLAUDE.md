@@ -10,3 +10,12 @@
 - `scripts/check.sh` type-checks and compiles the module against the iOS SDK
   with `swiftc` alone; it works even when Xcode has no iOS platform
   downloaded. Run it after every change.
+- The unit tests (`Tests/NotesAICaptureTests`, added by IDX-I1) are an
+  app-hosted XCTest bundle, so running them **boots a simulator** — which
+  the rule above forbids. Verify them with
+  `xcodebuild … build-for-testing` (compiles and links the bundle, boots
+  nothing) and leave `scripts/test.sh` to the user and to CI.
+- `scripts/build-sim.sh Release && scripts/check-ats.sh` is the only way to
+  see the Release App Transport Security policy: it is produced by the
+  Info.plist preprocessor from `Support/Config/*.xcconfig`, so it is not
+  written literally in any file.

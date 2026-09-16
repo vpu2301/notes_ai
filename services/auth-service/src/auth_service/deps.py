@@ -64,11 +64,15 @@ async def current_user(
         from auth import build_current_user
 
         from .config import settings
+        from .main_deps import auth_issuers
 
         state._current_user_dep = build_current_user(  # type: ignore[attr-defined]
             jwks_cache=state.jwks_cache,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
+            # FND-1: a list, chosen by mode. In `native` it is this
+            # service's own issuer alone — a Keycloak-signed token must
+            # not open a native endpoint after cut-over. In `dual` it is
+            # both, which is the point of the period (ADR-0047).
+            issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
             denylist=state.denylist,
         )

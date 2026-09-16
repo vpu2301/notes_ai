@@ -34,7 +34,7 @@ struct RootView: View {
                         .item("Open web app", symbol: "safari") { app.openWebApp() },
                         .separator,
                         .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
-                            Task { await app.signOut() }
+                            app.requestSignOut()
                         },
                         .item("Quit Notes AI Capture", symbol: "power", hint: "⌘Q") { NSApp.terminate(nil) },
                     ]
@@ -66,6 +66,11 @@ struct RootView: View {
                 .padding(16)
         case .signedIn:
             VStack(alignment: .leading, spacing: 12) {
+                if app.reconnecting {
+                    ReconnectingBanner()
+                        .padding(.horizontal, -12)
+                        .padding(.top, -12)
+                }
                 if case .idle = capture.phase {
                     NewMeetingButton(fill: true, height: 38)
                 } else {
@@ -89,7 +94,10 @@ struct RootView: View {
                 }
             }
             .padding(12)
-            .task { await app.refreshRecents() }
+            .task {
+                await app.refreshRecents()
+                await app.refreshWorkspaces()
+            }
         }
     }
 }

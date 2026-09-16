@@ -44,6 +44,7 @@ from ..diarization.engine import DiarizationUnavailableError
 from ..diarization.mapping import SpeakerNaming
 from ..domain import repository
 from ..inference import StreamingWindower
+from ..main_deps import auth_issuers
 from ..notifications import emit_dictation_completed
 from ..protocol import (
     PROTOCOL_VERSION_V1,
@@ -687,8 +688,10 @@ async def _on_text(
             new_claims = await verify_token(
                 msg.token,
                 jwks_cache=state.jwks_cache,
-                expected_audience=settings.auth_audience,
-                expected_issuer=settings.auth_issuer,
+                # FND-1: the same list the HTTP dependency uses. A socket
+                # that trusted a different set of issuers than the REST surface
+                # would be an outage confined to one endpoint.
+                issuers=auth_issuers(),
                 clock_skew_seconds=settings.auth_clock_skew_seconds,
             )
         except Exception as exc:  # noqa: BLE001

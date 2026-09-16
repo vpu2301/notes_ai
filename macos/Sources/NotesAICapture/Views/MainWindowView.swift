@@ -21,18 +21,41 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ZStack { DSWash(); DSDots() })
             case .signedOut:
-                SignInView()
-                    .dsCard(padding: 24, radius: DS.radiusXl)
-                    .frame(width: 380)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(ZStack { DSWash(); DSDots() })
+                ScrollView {
+                    VStack(spacing: 16) {
+                        SignInView()
+                            .dsCard(padding: 24, radius: DS.radiusXl)
+                        // A session that ended does not take the meetings
+                        // waiting on this Mac with it. They cannot be sent
+                        // until somebody signs in, but they can be seen,
+                        // saved and — deliberately — deleted.
+                        if !app.pending.isEmpty {
+                            PendingUploadsSection(pending: app.pending, canSend: false)
+                        }
+                    }
+                    .frame(width: 420)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ZStack { DSWash(); DSDots() })
             case .signedIn:
-                HStack(spacing: 0) {
-                    SidebarView()
-                    Rectangle().fill(DS.line).frame(width: DS.hairline).frame(maxHeight: .infinity)
-                    detail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(DS.bg)
+                VStack(spacing: 0) {
+                    if app.reconnecting {
+                        ReconnectingBanner()
+                        DSDivider()
+                    }
+                    if let notice = app.workspaceNotice {
+                        WorkspaceNoticeBanner(text: notice)
+                        DSDivider()
+                    }
+                    HStack(spacing: 0) {
+                        SidebarView()
+                        Rectangle().fill(DS.line).frame(width: DS.hairline).frame(maxHeight: .infinity)
+                        detail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(DS.bg)
+                    }
                 }
             }
         }
@@ -41,9 +64,29 @@ struct MainWindowView: View {
             SettingsView(onClose: { app.settingsPresented = false })
                 .frame(width: 760, height: 620)
         }
+        .sheet(isPresented: $app.invitePresented) {
+            InviteView(onClose: { app.invitePresented = false })
+                .frame(width: 540, height: 560)
+        }
+        .sheet(item: $app.reauth) { prompt in
+            ReauthSheet(prompt: prompt)
+        }
+        .alert("Recordings are still waiting", isPresented: $app.signOutPrompt) {
+            Button("Keep for next sign-in") { Task { await app.signOut() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(app.pendingCount) recording\(app.pendingCount == 1 ? " has" : "s have") not been uploaded. They stay on this Mac and will be sent the next time you sign in as \(app.email).")
+        }
         .onAppear {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
+            // Invitations accepted elsewhere, a role changed by an admin, a
+            // membership removed: picked up when the window comes forward,
+            // and throttled to once every five minutes inside.
+            Task {
+                await app.refreshWorkspaces()
+                await app.retryPendingUploads()
+            }
         }
         .onDisappear {
             // Back to a menu-bar-only app once the window is gone.

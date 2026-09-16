@@ -1,0 +1,38 @@
+[project]
+name = "jobs"
+version = "0.1.0"
+description = "Postgres-backed job queue (jobs table, FOR UPDATE SKIP LOCKED, lease + heartbeat, stale-lock reaper) with the model-backend warming state, keep-warm probe and the model_usage ledger (DEP-S1)."
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.29.0",
+    "pydantic>=2.7.0",
+    "pyyaml>=6.0",
+    "opentelemetry-api>=1.24.0",
+    "db",
+    "models",
+    "observability",
+]
+
+[tool.uv.sources]
+db = { workspace = true }
+models = { workspace = true }
+observability = { workspace = true }
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0", "ruff>=0.4.0", "mypy>=1.10.0", "types-PyYAML>=6.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jobs"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"

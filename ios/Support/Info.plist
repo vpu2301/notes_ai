@@ -35,7 +35,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Notes AI records meeting audio so it can be transcribed into a note.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Notes AI uses Face ID to sign you in with your saved password.</string>
+	<string>Notes AI uses Face ID to unlock the password saved on this phone, so you do not have to type it again.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Notes AI talks to your Notes AI server, which may run on a computer on your Wi‑Fi.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
@@ -53,12 +53,15 @@
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Development backends are plain http (localhost on the simulator, the
-		     Mac's LAN address on a phone). Tighten this for a production build. -->
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
+#if DEV_HTTP
+	<key>NSAllowsArbitraryLoads</key>
+	<true/>
+	<key>NSAllowsLocalNetworking</key>
+	<true/>
+#else
+	<key>NSAllowsArbitraryLoads</key>
+	<false/>
+#endif
 	</dict>
 </dict>
 </plist>

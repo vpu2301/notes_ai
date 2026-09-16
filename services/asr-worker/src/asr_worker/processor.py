@@ -6,7 +6,7 @@ Lifecycle of a job:
 2. Parse :class:`JobEnqueuePayload` from the message value.
 3. Idempotency check: SELECT status from transcription_jobs.
 4. Mark running, audit ``asr.transcription_started``.
-5. Fetch encrypted audio bytes from MinIO via ``EncryptedObjectStore``.
+5. Fetch encrypted audio bytes from S3 via ``EncryptedObjectStore``.
 6. Decode via ffmpeg into mono 16 kHz float32 PCM.
 7. Run ``WhisperEngine.transcribe`` (the payload's optional free-text
    vocabulary hint feeds Whisper's initial_prompt).
@@ -65,12 +65,12 @@ from crypto import CryptoError
 from db import tenant_connection
 from diarization import DiarizationUnavailableError, OfflineDiarization, diarize_offline
 from messaging import Message, RedisStreamsConsumer
+from models import ProviderError, TranscriptionCancelledError
 from storage import ObjectNotFoundError
 
 from . import audit_kinds
 from .audio_io import AudioDecodeError, decode_to_pcm
 from .config import settings
-from .inference import TranscriptionCancelledError
 from .main_deps import WorkerState
 from .notifications import emit_transcription_completed, emit_transcription_failed
 
@@ -320,7 +320,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             # envelope. Deterministic, and an operator's problem — the
             # user re-uploading the same file changes nothing.
             raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 — S3/MinIO transport
+        except Exception as exc:  # noqa: BLE001 — S3 transport
             raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
 
         try:
@@ -381,6 +381,19 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             return
         except TimeoutError:
             raise await die(JobErrorKind.TIMEOUT, f"inference exceeded {max_infer:.1f}s") from None
+        except ProviderError as exc:
+            # HTTP ASR backend (dev_mac_asr / hf_eu_asr) failed. Retryable
+            # kinds (warming, unavailable, timeout, rate_limited) become
+            # MODEL_UNAVAILABLE so the job is re-queued; anything else is
+            # a hard failure with the kind in the message (no content).
+            if exc.retryable:
+                raise await die(
+                    JobErrorKind.MODEL_UNAVAILABLE, f"asr backend {exc.backend}: {exc.kind}"
+                ) from exc
+            raise await die(
+                JobErrorKind.UNHANDLED,
+                f"asr backend {exc.backend}: {exc.kind}: {exc.message[:120]}",
+            ) from exc
         except _CudaOOMError as exc:
             _oom_counter.add(1)
             err = await die(JobErrorKind.GPU_OOM, str(exc))

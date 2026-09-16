@@ -40,6 +40,7 @@ from auth.exceptions import (
 from .. import metrics
 from ..audit_kinds import UPGRADE_FAILED
 from ..config import settings
+from ..main_deps import auth_issuers
 from ..protocol.codec import (
     SUBPROTOCOL,
     SUBPROTOCOL_PREFERENCE,
@@ -182,8 +183,10 @@ async def authorize_upgrade(
         claims = await verify_token(
             bearer,
             jwks_cache=jwks_cache,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
+            # FND-1: the same list the HTTP dependency uses. A socket
+            # that trusted a different set of issuers than the REST surface
+            # would be an outage confined to one endpoint.
+            issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
         )
     except ExpiredTokenError as exc:

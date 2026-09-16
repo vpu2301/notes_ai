@@ -104,7 +104,7 @@ _COMMON_PASSWORDS: Final[frozenset[str]] = frozenset(
         "toor",
         "test",
         "test123",
-        "klarnote",
+        "notes-ai",
         "notesai",
         "dictation",
         "notes",

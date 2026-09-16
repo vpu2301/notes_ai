@@ -218,6 +218,130 @@ class KeycloakClient:
         await self._assign_realm_role(sub, realm_role)
         return sub
 
+    async def create_user_with_password(
+        self,
+        *,
+        email: str,
+        display_name: str,
+        tenant_id: UUID,
+        password: str,
+        realm_roles: list[str],
+        enabled: bool = False,
+    ) -> UUID:
+        """Create a user who can sign in with a password, once enabled (BE-0).
+
+        Three things differ from :meth:`create_user`, and each of them is
+        the reason this is a separate method rather than a flag:
+
+        * **A non-empty ``lastName``.** The realm's declarative user
+          profile marks ``firstName`` and ``lastName`` required. A user
+          whose profile is incomplete gets ``VERIFY_PROFILE`` added at
+          *authentication* time — not at creation — and the password grant
+          then refuses with "Account is not fully set up", the same
+          message a pending required action produces. The user record
+          shows ``requiredActions: []`` the whole time, which is what
+          makes this one expensive to find. See :func:`split_display_name`.
+        * **No ``requiredActions``.** ``create_user`` sets
+          ``["UPDATE_PASSWORD"]`` because it is an admin invite: the person
+          has no password yet and Keycloak's own page gives them one. A
+          pending required action makes the password grant refuse with
+          "Account is not fully set up", so a self-serve user who just
+          chose a password would be unable to use it. This is the single
+          most load-bearing line in the method.
+        * **A credential in the create payload.** One round trip, and the
+          password never sits in a user record that has no password —
+          there is no window in which the account exists and is
+          unauthenticatable.
+        * **``enabled=False`` by default.** Verification enables it. An
+          account that is disabled in Keycloak cannot obtain a token by
+          ANY grant — not our proxy, not a direct ROPC call, not the dev
+          CLI. That is a stronger guarantee than a status column in our
+          own database, which only binds the paths that check it.
+
+        ``realm_roles`` is a list because a self-serve signup needs both
+        ``tenant_admin`` (it is their workspace) and ``member`` (S14 gives
+        ``tenant_admin`` no content permission at all, so without
+        ``member`` the account cannot write a note — see
+        ``docs/auth/roles.md`` and ``platform_roles_for``).
+        """
+        first_name, last_name = split_display_name(display_name)
+        payload: dict[str, Any] = {
+            "username": email,
+            "email": email,
+            "firstName": first_name,
+            "lastName": last_name,
+            "enabled": enabled,
+            "emailVerified": False,
+            "attributes": {
+                "tenant_id": [str(tenant_id)],
+                "mfa_enrolled_at": [],
+            },
+            # Explicitly empty, not omitted: an empty list is a statement
+            # that this account has nothing pending, and a future edit
+            # that adds one here breaks password login silently.
+            "requiredActions": [],
+            "credentials": [{"type": "password", "value": password, "temporary": False}],
+        }
+
+        resp = await self._client.post(
+            self._admin_users_url(),
+            json=payload,
+            headers=await self._admin_headers(),
+        )
+        if resp.status_code == 409:
+            raise KeycloakError(
+                status=409,
+                body=_body(resp),
+                message=f"user with email {email!r} already exists",
+            )
+        if resp.status_code != 201:
+            raise KeycloakError(status=resp.status_code, body=_body(resp))
+
+        location = resp.headers.get("Location") or ""
+        sub_str = location.rsplit("/", 1)[-1] if location else ""
+        if not sub_str:
+            raise KeycloakError(
+                status=201,
+                body=_body(resp),
+                message="Keycloak create_user did not return a Location header",
+            )
+        sub = UUID(sub_str)
+
+        for role in realm_roles:
+            await self._assign_realm_role(sub, role)
+        return sub
+
+    async def set_email_verified(self, sub: UUID, *, verified: bool = True) -> None:
+        """Mark the address confirmed, and enable the account in one call.
+
+        The two go together on purpose. They are the same fact stated
+        twice — "this person proved they read mail at this address" — and
+        a code path that could set one without the other would eventually
+        produce a verified account nobody can sign in to, or an enabled
+        account that never proved anything.
+        """
+        resp = await self._client.put(
+            self._admin_users_url(str(sub)),
+            json={"emailVerified": verified, "enabled": verified},
+            headers=await self._admin_headers(),
+        )
+        if resp.status_code not in (200, 204):
+            raise KeycloakError(status=resp.status_code, body=_body(resp))
+
+    async def delete_user(self, sub: UUID) -> None:
+        """Remove a user. The compensation half of the signup transaction.
+
+        404 is success: the thing we are undoing is already undone, and a
+        compensation that raises when its target is missing turns a
+        recovered failure into an unrecovered one.
+        """
+        resp = await self._client.delete(
+            self._admin_users_url(str(sub)),
+            headers=await self._admin_headers(),
+        )
+        if resp.status_code not in (200, 204, 404):
+            raise KeycloakError(status=resp.status_code, body=_body(resp))
+
     async def _get_role_rep(self, role_name: str) -> dict[str, Any]:
         """Fetch a realm role representation by name (id, name, …)."""
         role_url = f"{self._base}/admin/realms/{self._realm}/roles/{role_name}"
@@ -393,6 +517,29 @@ class KeycloakClient:
         )
         if resp.status_code not in (200, 204):
             raise KeycloakError(status=resp.status_code, body=_body(resp))
+
+
+def split_display_name(display_name: str) -> tuple[str, str]:
+    """One name field → the two Keycloak's user profile requires.
+
+    Signup asks for one name because that is what a person has; Keycloak's
+    realm profile requires ``firstName`` AND ``lastName``, and an empty
+    one is not "absent", it is "incomplete" — which Keycloak resolves by
+    demanding VERIFY_PROFILE at the next sign-in, refusing the password
+    grant with a message that says nothing about names.
+
+    So a single-word name is written to both fields rather than leaving
+    one blank. "Ada" becomes ("Ada", "Ada"); "Ada Lovelace" becomes
+    ("Ada", "Lovelace"); "Ada Byron King" becomes ("Ada", "Byron King").
+    The duplication is visible only in Keycloak's admin console, and the
+    alternative is an account nobody can sign in to.
+    """
+    parts = (display_name or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], parts[0]
+    return parts[0], " ".join(parts[1:])
 
 
 def _body(resp: httpx.Response) -> Any:

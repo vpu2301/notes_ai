@@ -10,8 +10,8 @@ Single-page operations guide for the sprint-03 GPU worker.
 | Master key (dev)      | `/etc/mdx/master.key` (mounted from `infra/dev/`)  |
 | Queue                 | Redis stream `asr:jobs`, group `asr-workers`       |
 | DLQ                   | Redis stream `asr:jobs:dlq`                        |
-| Audio bucket          | MinIO `mdx-audio`                                  |
-| Transcript bucket     | MinIO `mdx-transcripts`                            |
+| Audio bucket          | S3 `mdx-audio`                                     |
+| Transcript bucket     | S3 `mdx-transcripts`                               |
 | Dashboard             | Grafana → "Sprint 03 — ASR Health"                 |
 | Alerts                | `infra/prometheus/rules/sprint-03-asr.yml`         |
 
@@ -64,13 +64,13 @@ Symptoms: `mdx_asr_queue_depth > 100` for > 5 m.
 2. If the upstream rate is sustained, the capacity model is wrong;
    open a follow-up to revise the sprint-16 sizing ADR.
 
-### § minio-outage
+### § object-store-outage
 
 Symptoms: jobs queue but don't progress; worker log says
 `storage.s3.head_bucket_failed`.
 
-1. Confirm MinIO health: `mc admin info local`.
-2. Recover MinIO; jobs resume automatically because they remain in the
+1. Confirm the object store is reachable from the worker (S3_ENDPOINT).
+2. Recover it; jobs resume automatically because they remain in the
    pending-entries list until reclaimed.
 
 ### § nvidia-driver-mismatch

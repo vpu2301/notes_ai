@@ -27,6 +27,10 @@ enum DS {
     // Hairlines
     static let line         = Color.ds("e6e2db", "2c2824")
     static let line2        = Color.ds("efece6", "241f1c")
+    /// The same warm neutral walked a step darker, so a live frame is
+    /// felt rather than coloured (`--line-hover` / `--line-active`).
+    static let lineHover    = Color.ds("d9d3c9", "3b352f")
+    static let lineActive   = Color.ds("c8c1b5", "4a433b")
     /// Border weight for every hairline: half a point on Retina.
     static let hairline: CGFloat = 0.5
 
@@ -128,6 +132,14 @@ extension Color {
 }
 
 extension UIColor {
+    /// A light/dark pair as one dynamic colour — the `Color.ds` twin, for
+    /// the UIKit appearance proxies that cannot take a SwiftUI `Color`.
+    static func ds(_ light: String, _ dark: String) -> UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
+        }
+    }
+
     convenience init(hex: String, alpha: CGFloat = 1) {
         var value: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&value)
@@ -319,6 +331,28 @@ struct DSIconButtonStyle: ButtonStyle {
                     .fill(on ? DS.accentSoft : (configuration.isPressed ? DS.surface2 : .clear))
             )
             .contentShape(Rectangle())
+    }
+}
+
+// MARK: - UIKit appearance
+
+/// The one surface SwiftUI's tokens cannot reach.
+///
+/// `.searchable` is a UIKit `UISearchBar`, and the fill of its field is
+/// translucent grey by default. Over an opaque list that is invisible;
+/// here the ground is dotted paper and the notes scroll *behind* the
+/// navigation bar, so the moment the field goes active the dots and the
+/// rows sliding under it read straight through the box being typed into.
+/// An opaque fill is the fix — `HomeView` supplies the other half, an
+/// opaque bar behind the field while the search is active.
+enum DSAppearance {
+    /// Called once, from the app's `init`.
+    static func apply() {
+        let field = UISearchTextField.appearance(whenContainedInInstancesOf: [UISearchBar.self])
+        // `DS.surface2`, not `surface`: the field stays a well pressed
+        // into the paper rather than a card floating on it — the grey the
+        // resting bar already had, only opaque.
+        field.backgroundColor = .ds("f3f1ec", "27231f")
     }
 }
 
@@ -591,5 +625,36 @@ extension JobStatus {
         case .failed: return DS.recSoft
         case .cancelled: return DS.warnSoft
         }
+    }
+}
+
+/// A pill on the note's meta line (`.doc-pill` on the web): an icon and a
+/// short fact — when the note was taken, what wrote it, where it is
+/// filed. Sized for a fingertip; the ones that are also controls are
+/// wrapped in a Button by the caller.
+struct DSMetaPill: View {
+    var symbol: String?
+    let text: String
+    var tone: Tone = .neutral
+    var mono = false
+
+    enum Tone { case neutral, accent }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(tone == .accent ? DS.accentText : DS.muted)
+            }
+            Text(text)
+                .font(mono ? .dsMono(11.5) : .ds(12.5, .medium))
+        }
+        .foregroundStyle(tone == .accent ? DS.accentText : DS.text3)
+        .padding(.horizontal, 11)
+        .frame(height: 30)
+        .background(Capsule().fill(tone == .accent ? DS.accentSoft : .clear))
+        .overlay(Capsule().strokeBorder(tone == .accent ? .clear : DS.line, lineWidth: DS.hairline))
+        .contentShape(Capsule())
     }
 }

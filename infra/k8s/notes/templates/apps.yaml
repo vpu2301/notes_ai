@@ -24,6 +24,9 @@ spec:
       labels:
         app: {{ $name }}
         mdx-tier: app
+        {{- range $k, $v := $app.podLabels }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
     spec:
       {{- if $app.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ $app.terminationGracePeriodSeconds }}

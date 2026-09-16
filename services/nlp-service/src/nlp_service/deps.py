@@ -14,7 +14,7 @@ from audit import Severity
 from auth import Action, AuthzDeniedError, Claims, TargetKind, check
 
 from .config import settings
-from .main_deps import ServiceState
+from .main_deps import ServiceState, auth_issuers
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,9 @@ async def current_user(
 
         state._current_user_dep = build_current_user(  # type: ignore[attr-defined]
             jwks_cache=state.jwks_cache,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
+            # FND-1: the list, not a single string. The token's `iss`
+            # picks the entry it is verified against.
+            issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
             # Sprint 16: session-revocation denylist (None when the flag is
             # off — pre-sprint-16 behaviour, no Redis dependency at runtime).

@@ -100,7 +100,7 @@ contract. `type` is stable; the concurrency rejection keeps its historical
 | `job_row_missing` | queue | no | yes | The message names a job id that is not in the database |
 | `audio_missing` | decode | no | yes | The audio object is gone: retention TTL, an erasure request, or an upload whose row was written but whose object never landed |
 | `decrypt_failed` | decode | no | **no** | Envelope failure — wrong AAD, a tenant KEK that will not unwrap, a truncated object. An operator's problem; re-uploading changes nothing |
-| `storage_unavailable` | decode | **yes** | no | MinIO/S3 unreachable while fetching |
+| `storage_unavailable` | decode | **yes** | no | S3 object store unreachable while fetching |
 | `corrupt_audio` | decode | no | yes | ffmpeg refused the file that ffprobe accepted — truncated payload, a container whose declared codec the stream does not carry |
 | `no_speech` | decode | no | yes | Decoded cleanly, contains no speech: silence, or a microphone that captured nothing. **Deliberately a failure, not an empty `complete`** — Whisper given silence produces a hallucinated phrase, and a hallucination stored as a transcript reaches the note looking like dictation |
 | `model_unavailable` | inference | **yes** | no | The Whisper model is not loaded on the worker that claimed the job |

@@ -52,6 +52,29 @@ x-postgres-dsns: &postgres-dsns
 x-auth-env: &auth-env
   AUTH_ISSUER: http://keycloak:8080/realms/notes
   AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+  # FND-1 / ADR-0047: the fleet trusts a LIST of issuers. Both are named
+  # here from day one — Keycloak, which mints today, and auth-service,
+  # which mints from BE-2 (`MDX_IDP_MODE=dual`). Until then its JWKS is an
+  # empty-but-valid document, which every service tolerates: an issuer
+  # with no keys rejects tokens, it does not break the ones beside it.
+  #
+  # Naming the second issuer BEFORE it can sign is the whole point of the
+  # rollout order. The alternative — flip auth-service first, then chase
+  # eight services with a config change — is the mass-logout window
+  # ADR-0047 exists to avoid.
+  # `issuer` is the browser-facing origin, because that is what lands in
+  # the token's `iss`. `jwks_url` is NOT: every consumer fetches it from
+  # inside the compose network, where `localhost:8000` is the consuming
+  # container itself (note-service fetching its own 404 page, not a key
+  # set). They are two different addresses for the same issuer and must
+  # be configured as such — AUTH_ISSUER_JWKS_URL is the in-cluster one.
+  AUTH_ISSUERS_JSON: >-
+    [{"issuer":"http://keycloak:8080/realms/notes",
+      "jwks_url":"http://keycloak:8080/realms/notes/protocol/openid-connect/certs",
+      "audience":"mdx-api"},
+     {"issuer":"${AUTH_ISSUER_URL:-http://localhost:8000}",
+      "jwks_url":"${AUTH_ISSUER_JWKS_URL:-http://auth-service:8000/.well-known/jwks.json}",
+      "audience":"mdx-api"}]
 
 # Browser origins allowed to call the SPA-facing services WITH credentials
 # (the HttpOnly mdx_rt cookie). Single source of truth — every HTTP service that
@@ -64,6 +87,15 @@ x-common-env: &common-env
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
 
+# Object storage (S3-compatible). The local MinIO container was removed —
+# there is no object store in the dev stack by default. Point these at a
+# real S3-compatible endpoint in `.env` to re-enable audio at rest; left
+# empty the services start fine and only the audio paths fail.
+x-s3-env: &s3-env
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+
 x-svc-healthcheck: &svc-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else sys.exit(1)"]
   interval: 15s
@@ -72,31 +104,6 @@ x-svc-healthcheck: &svc-healthcheck
   start_period: 30s
 
 services:
-  # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
-  minio-init:
-    # NOTE: see the MinIO server note — `minio/mc` was withdrawn from Docker
-    # Hub too; quay.io is the upstream registry.
-    image: quay.io/minio/mc:RELEASE.2024-04-18T16-45-29Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
-        mc mb --ignore-existing local/mdx-audio
-        mc mb --ignore-existing local/mdx-transcripts
-        mc version enable local/mdx-audio || true
-        mc version enable local/mdx-transcripts || true
-        # Replay clips — 5-min token/registry TTL is the real lifetime;
-        # 1-day ILM is the ciphertext backstop (ADR-0037).
-        mc mb --ignore-existing local/mdx-audio-clips
-        mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
-        mc ilm rule add --expire-days 1 local/mdx-audio-clips
-        echo "minio-init: buckets ready"
-    restart: "no"
-
   # ── DB schema migrations (one-shot, runs as the postgres superuser
   #    because migrations CREATE ROLE / extensions) ──────────────────
   migrate:
@@ -151,6 +158,19 @@ services:
       DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/notes
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: notes
+      # IDX-A2 native issuer. Off by default; flip MDX_IDP_MODE=native to
+      # mint tokens locally with the dev-only key mounted below.
+      MDX_IDP_MODE: "${MDX_IDP_MODE:-keycloak}"
+      AUTH_ISSUER_URL: "${AUTH_ISSUER_URL:-http://localhost:8000}"
+      AUTH_ACCESS_TTL_SECONDS: "${AUTH_ACCESS_TTL_SECONDS:-900}"
+      # IDX-M1 rotation: the idle window slides on every refresh, the
+      # absolute cap does not move, and the grace window is how long the
+      # token a rotation retired still answers (a dropped response, not a
+      # replay).
+      AUTH_REFRESH_TTL_SECONDS: "${AUTH_REFRESH_TTL_SECONDS:-2592000}"
+      AUTH_SESSION_ABSOLUTE_TTL_SECONDS: "${AUTH_SESSION_ABSOLUTE_TTL_SECONDS:-7776000}"
+      AUTH_REFRESH_GRACE_SECONDS: "${AUTH_REFRESH_GRACE_SECONDS:-30}"
+      AUTH_SIGNING_KEYS_FILE: /etc/mdx/auth-signing.json
       # ── Password recovery ────────────────────────────────────────
       # ON in the dev stack so the flow is exercised locally, with mail
       # captured by Mailpit (http://localhost:8025) rather than sent.
@@ -158,18 +178,23 @@ services:
       # `.env` present nothing can escape to a real mailbox.
       MDX_PASSWORD_RESET_ENABLED: "${MDX_PASSWORD_RESET_ENABLED:-true}"
       MDX_EMAIL_PROVIDER: "${MDX_EMAIL_PROVIDER:-smtp}"
+      # BE-0 self-serve signup. On in the dev stack so the flow is
+      # exercised locally, with mail captured by Mailpit
+      # (http://localhost:8025) rather than sent. Off by default
+      # everywhere else — see .env.example.
+      MDX_SIGNUP_ENABLED: "${MDX_SIGNUP_ENABLED:-true}"
       MDX_AUTH_SMTP_HOST: "${MDX_AUTH_SMTP_HOST:-mailpit}"
       MDX_AUTH_SMTP_PORT: "${MDX_AUTH_SMTP_PORT:-1025}"
       MDX_AUTH_SMTP_USE_TLS: "${MDX_AUTH_SMTP_USE_TLS:-false}"
       MDX_AUTH_SMTP_USERNAME: "${MDX_AUTH_SMTP_USERNAME:-}"
       MDX_AUTH_SMTP_PASSWORD: "${MDX_AUTH_SMTP_PASSWORD:-}"
-      MDX_AUTH_EMAIL_FROM: "${MDX_AUTH_EMAIL_FROM:-sales@klarnote.com}"
-      MDX_AUTH_EMAIL_FROM_NAME: "${MDX_AUTH_EMAIL_FROM_NAME:-Klarnote}"
-      MDX_AUTH_EMAIL_REPLY_TO: "${MDX_AUTH_EMAIL_REPLY_TO:-sales@klarnote.com}"
+      MDX_AUTH_EMAIL_FROM: "${MDX_AUTH_EMAIL_FROM:-sales@notes-ai.local}"
+      MDX_AUTH_EMAIL_FROM_NAME: "${MDX_AUTH_EMAIL_FROM_NAME:-Notes AI}"
+      MDX_AUTH_EMAIL_REPLY_TO: "${MDX_AUTH_EMAIL_REPLY_TO:-sales@notes-ai.local}"
       # Where the mailed links point. Must be the origin the SPA is
       # actually served from, or every reset link 404s.
       MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
-      MDX_SUPPORT_URL: "${MDX_SUPPORT_URL:-https://klarnote.com/contact}"
+      MDX_SUPPORT_URL: "${MDX_SUPPORT_URL:-https://notes-ai.local/contact}"
       # Per-deployment salt for the stored IP hashes. The dev default is
       # a known string on purpose — it is not a secret here, and it MUST
       # be overridden in staging/prod.
@@ -188,7 +213,7 @@ services:
       # regardless (login.py enforces on enrolment, not on the flag).
       MDX_MFA_ENROLMENT_ENABLED: "${MDX_MFA_ENROLMENT_ENABLED:-true}"
       MDX_REQUIRE_MFA: "${MDX_REQUIRE_MFA:-false}"
-      MDX_MFA_TOTP_ISSUER: "${MDX_MFA_TOTP_ISSUER:-Klarnote (dev)}"
+      MDX_MFA_TOTP_ISSUER: "${MDX_MFA_TOTP_ISSUER:-Notes AI (dev)}"
       # Enrolment stores the TOTP secret envelope-encrypted (AAD =
       # tenant‖sub‖purpose), so auth-service needs the master key and
       # the crypto_writer pool — lazily built on the first MFA call,
@@ -197,6 +222,7 @@ services:
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
+      - ./infra/dev/auth-signing-dev.json:/etc/mdx/auth-signing.json:ro
     ports:
       - "${PUBLISH_HOST:-127.0.0.1}:8000:8000"
     healthcheck: *svc-healthcheck
@@ -223,10 +249,9 @@ services:
       dockerfile: services/asr-service/Dockerfile
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_NLP_BASE_URL: http://nlp-service:8000
     volumes:
@@ -239,12 +264,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       keycloak:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -262,7 +283,7 @@ services:
       dockerfile: services/asr-worker/Dockerfile.cpu
     restart: unless-stopped
     environment:
-      <<: [*common-env, *postgres-dsns]
+      <<: [*common-env, *postgres-dsns, *s3-env]
       MD_ASR_DEVICE: cpu
       MD_ASR_MODEL: /opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_COMPUTE_TYPE: int8
@@ -270,9 +291,18 @@ services:
       MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
       MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "40.0"
+      # Model-provider registry (libs/models, DEP-S0/S1). ENV=dev routes
+      # ASR_BACKEND=dev_mac_asr to whisper-server on this Mac (make dev-model);
+      # the default keeps the baked CPU whisper. HF_* only matter with ENV=staging.
+      ENV: ${ENV:-dev}
+      MODELS_CONFIG: /app/config/models.yaml
+      ASR_BACKEND: ${ASR_BACKEND:-inproc_cpu_asr}
+      DEV_MAC_ASR_URL: ${DEV_MAC_ASR_URL:-http://host.docker.internal:8080}
+      HF_ASR_ENDPOINT_URL: ${HF_ASR_ENDPOINT_URL:-}
+      HF_ASR_MODEL_PIN: ${HF_ASR_MODEL_PIN:-}
+      HF_TOKEN: ${HF_TOKEN:-}
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
@@ -282,10 +312,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -302,7 +328,7 @@ services:
       dockerfile: services/dictation-service/Dockerfile.cpu
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       MD_ASR_DEVICE: cpu
       MD_ASR_MODEL: /opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_COMPUTE_TYPE: int8
@@ -337,7 +363,6 @@ services:
       MDX_WORKER_ID: dictation-dev-1
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MDX_TMPFS_ROOT: /run/dictation
       # Keep in sync with x-cors-env above — the SPA opens the WS from the
@@ -367,12 +392,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       keycloak:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -406,7 +427,7 @@ services:
       dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
       # Notification producer — lifecycle transitions publish onto the
@@ -417,7 +438,6 @@ services:
       # Audio replay (ADR-0037): decrypt-slice-encode needs the same
       # S3 + envelope-crypto wiring dictation-service has.
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       # Google Calendar (0019). Calendar links (0020, iCal addresses)
       # need none of this. Leave the client id empty and the
@@ -427,6 +447,26 @@ services:
       GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
       GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:8006/v1/calendar/google/callback}
+      # ── Sharing a note by e-mail ─────────────────────────────────
+      # "Send" in the share sheet delivers a branded HTML mail from
+      # here. Captured by Mailpit (http://localhost:8025) in the dev
+      # stack: every value is `${VAR:-<mailpit default>}`, so with no
+      # `.env` present nothing can escape to a real mailbox.
+      MDX_EMAIL_PROVIDER: "${MDX_EMAIL_PROVIDER:-smtp}"
+      MDX_NOTE_SMTP_HOST: "${MDX_NOTE_SMTP_HOST:-mailpit}"
+      MDX_NOTE_SMTP_PORT: "${MDX_NOTE_SMTP_PORT:-1025}"
+      MDX_NOTE_SMTP_USE_TLS: "${MDX_NOTE_SMTP_USE_TLS:-false}"
+      MDX_NOTE_SMTP_USERNAME: "${MDX_NOTE_SMTP_USERNAME:-}"
+      MDX_NOTE_SMTP_PASSWORD: "${MDX_NOTE_SMTP_PASSWORD:-}"
+      MDX_NOTE_EMAIL_FROM: "${MDX_NOTE_EMAIL_FROM:-notes@notes-ai.local}"
+      MDX_NOTE_EMAIL_FROM_NAME: "${MDX_NOTE_EMAIL_FROM_NAME:-Notes AI}"
+      # Replies normally go to the colleague who pressed Send; this is
+      # the fallback for a sharer with no address on file.
+      MDX_NOTE_EMAIL_REPLY_TO: "${MDX_NOTE_EMAIL_REPLY_TO:-notes@notes-ai.local}"
+      MDX_SHARE_EMAIL_TIMEOUT_S: "${MDX_SHARE_EMAIL_TIMEOUT_S:-15}"
+      # Where the mailed links point. Must be the origin the SPA is
+      # actually served from, or every shared note 404s.
+      MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
@@ -441,8 +481,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
 
   # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:

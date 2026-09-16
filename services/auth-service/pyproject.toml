@@ -31,9 +31,12 @@ dependencies = [
     # S21 MFA reminders: auth-service is the only service that knows a user
     # has no second factor, so it is the producer for security.mfa_reminder.
     "notification_events",
+    # IDX-A3: OTP abuse caps
+    "ratelimit",
 ]
 
 [tool.uv.sources]
+ratelimit = { workspace = true }
 observability = { workspace = true }
 auth = { workspace = true }
 audit = { workspace = true }

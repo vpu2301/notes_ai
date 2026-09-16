@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa chaos-dictation chaos-asr load-dictation nightly-verify test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service
+.PHONY: smoke-ios test-egress check-no-vendor-import eval-smoke measure-turnaround dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa chaos-dictation chaos-asr load-dictation nightly-verify test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -9,13 +9,12 @@ PROMTOOL_IMAGE = prom/prometheus:v2.54.1
 
 ##@ Local Development
 
-dev-up: ## Start the full local stack (PostgreSQL, Redis, MinIO, Kafka, Keycloak, observability)
+dev-up: ## Start the full local stack (PostgreSQL, Redis, Kafka, Keycloak, observability)
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d --wait
 	@echo ""
 	@echo "Stack is up. Service URLs:"
 	@echo "  PostgreSQL   : localhost:5432"
 	@echo "  Redis        : localhost:6379"
-	@echo "  MinIO        : http://localhost:9000 (console: http://localhost:9001)"
 	@echo "  Kafka        : localhost:9092"
 	@echo "  Keycloak     : http://localhost:8088"
 	@echo "  Jaeger UI    : http://localhost:16686"
@@ -23,10 +22,19 @@ dev-up: ## Start the full local stack (PostgreSQL, Redis, MinIO, Kafka, Keycloak
 	@echo "  Grafana      : http://localhost:3000  (admin/admin)"
 	@echo "  Loki         : http://localhost:3100"
 
-dev-down: ## Stop and remove all containers
+# No `-v` on purpose: the Postgres volume holds every note, space and
+# recording, plus the Keycloak realm. `dev-restart` runs this target, so a
+# restart must never destroy data. Use `dev-nuke` for a clean slate, or
+# `reset-db` to wipe just Postgres.
+dev-down: ## Stop and remove all containers (named volumes are KEPT)
+	$(COMPOSE) -f $(COMPOSE_FILE) down
+
+dev-nuke: ## DESTRUCTIVE — stop containers AND delete all volumes (Postgres, Kafka, …)
+	@echo "This deletes every local note, space, recording and the Keycloak realm."
+	@printf 'Type "nuke" to confirm: ' && read ans && [ "$$ans" = "nuke" ] || { echo "aborted"; exit 1; }
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 
-dev-restart: dev-down dev-up ## Full restart of the local stack
+dev-restart: dev-down dev-up ## Full restart of the local stack (data preserved)
 
 dev-logs: ## Tail logs from all containers
 	$(COMPOSE) -f $(COMPOSE_FILE) logs -f
@@ -66,6 +74,27 @@ run-notification-service: ## Run notification-service on :8004 (needs dev-up + m
 doctor: ## Diagnose local environment issues
 	@bash scripts/doctor.sh
 
+##@ Models (DEP-S0 — libs/models, config/models.yaml)
+
+dev-model: ## Start/verify the model servers on this Mac: `make dev-model` (start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
+	@bash scripts/dev/dev-model.sh $(ARGS)
+
+eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
+	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
+
+test-egress: ## Prove the worker egress allowlist: example.com blocked, model endpoints reachable (needs staging/compose up)
+	RUN_EGRESS_TEST=1 uv run pytest tests/integration/test_worker_egress.py -v
+
+hf-endpoints: ## HF Inference Endpoints from deploy/hf/endpoints/*.yaml: `make hf-endpoints ARGS="plan --env staging"` (validate|plan|apply|status|pause|resume|delete)
+	uv run python scripts/models/hf_endpoints.py $(if $(ARGS),$(ARGS),validate)
+
+secret-scan: ## Scan the repo history for committed secrets (gitleaks; CI runs the same config)
+	@command -v gitleaks >/dev/null || { echo "gitleaks not installed: brew install gitleaks"; exit 1; }
+	gitleaks git --config .gitleaks.toml --redact --no-banner .
+
+measure-turnaround: ## ASR turnaround on a fixture: `make measure-turnaround FIXTURE=10min_de BACKEND=dev_mac_asr` → docs/eval/turnaround-<date>-<backend>-<fixture>.json
+	uv run --project libs/models python scripts/eval/measure_turnaround.py --fixture $(FIXTURE) --backend $(BACKEND)
+
 ##@ Code Quality
 
 lint: ## Run ruff linter across all packages
@@ -78,7 +107,7 @@ typecheck: ## Run mypy --strict over the CI-gated foundation packages (mirrors .
 	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/
 
 typecheck-all: ## Run mypy --strict over ALL packages (non-blocking; tracks feature-service typing debt)
-	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ services/asr-service/src/ services/asr-worker/src/ services/dictation-service/src/ services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/diarization/src/ libs/template_models/src/
+	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/models/src/ libs/jobs/src/ services/asr-service/src/ services/asr-worker/src/ services/dictation-service/src/ services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/diarization/src/ libs/template_models/src/
 
 type-check: typecheck ## Legacy alias of `typecheck`
 
@@ -99,6 +128,11 @@ test: ## Run pytest across services and libs
 	uv run --project libs/storage pytest libs/storage/tests/unit/ -v
 	uv run --project libs/asr_models pytest libs/asr_models/tests/unit/ -v
 	uv run --project libs/diarization pytest libs/diarization/tests/unit/ -v
+	uv run --project libs/models pytest libs/models/tests/unit/ -v
+	uv run --project libs/jobs pytest libs/jobs/tests/unit/ -v
+	uv run --project libs/ratelimit pytest libs/ratelimit/tests/unit/ -v
+	uv run pytest tests/unit/ -v
+	uv run pytest tests/contract/ -v
 	uv run --project services/asr-service pytest services/asr-service/tests/unit/ -v
 	uv run --project services/asr-worker pytest services/asr-worker/tests/unit/ -v
 	uv run --project services/dictation-service pytest services/dictation-service/tests/unit/ -v
@@ -177,6 +211,9 @@ openapi-check: ## CI gate — fail if any committed OpenAPI snapshot drifts
 check-rls: ## CI gate — every user-schema table has RLS+FORCE enabled
 	uv run python scripts/ci/check-rls-policies.py
 
+check-identity-bridge: ## CI gate (needs DB) — every active identity has its bridge `users` row (BE-1)
+	uv run python scripts/ci/check-identity-bridge.py
+
 check-audit-insert: ## CI gate — no direct audit.events writes outside libs/audit
 	uv run python scripts/ci/check-no-direct-audit-insert.py
 
@@ -186,8 +223,20 @@ check-no-object-storage: ## CI gate — no direct boto3/aioboto3/minio outside l
 check-no-crypto: ## CI gate — no direct cryptography.hazmat outside libs/crypto
 	uv run python scripts/ci/check-no-direct-crypto.py
 
+check-identity-grants: ## CI gate — app_role must not reach identity/credential secrets
+	uv run python scripts/ci/check-identity-grants.py
+
+check-auth-issuer-config: ## CI gate — services verify against AUTH_ISSUERS_JSON, never a literal issuer (FND-1)
+	uv run python scripts/ci/check-auth-issuer-config.py
+
 check-no-demo-envvars-in-prod: ## CI gate — demo/dev escape hatches never enabled in prod configs
 	uv run python scripts/ci/check-no-demo-envvars-in-prod.py
+
+check-dev-keys: ## CI gate — the dev-only auth signing key (infra/dev) never appears in a non-dev config (IDX-A2)
+	uv run python scripts/ci/check-dev-keys.py
+
+check-no-vendor-import: ## CI gate — no model-vendor SDK (anthropic/openai/huggingface_hub/…) outside libs/models (DEP-S0)
+	uv run python scripts/ci/check-no-vendor-import.py
 
 check-k8s-rendered: ## CI gate — chart renders; prod render secret-clean; vendored ops files drift-checked
 	uv run python scripts/ci/check-k8s-rendered.py
@@ -205,6 +254,38 @@ run-notification-digest: ## Run the daily notification digest once (cron entrypo
 
 smoke-notes: ## Exercise every note operation end to end against the running stack (docker compose up)
 	uv run --project services/note-service python scripts/smoke/notes_e2e.py
+
+smoke-ios: ## IOS-0 — web-created account → sign in as the phone does → 1s capture → note (needs the stack up)
+	@# Not run by CI, for the same reason `web-e2e` is not: it needs the
+	@# whole stack including an asr-worker that bakes whisper-large-v3
+	@# (2.7 GiB), and the iOS job runs on a macOS runner with no Docker.
+	@# Point it at a stack that is already up — `make dev-up`, or
+	@# `make web-e2e-stack` if you also want the Mailpit half.
+	uv run --project services/note-service python scripts/smoke/ios_signup_e2e.py $(ARGS)
+
+web-e2e-stack: ## Bring the stack up in the shape the browser tests need (native identity + Mailpit)
+	@# `MDX_IDP_MODE=native` is the whole point: `/auth/email/*` is mounted
+	@# only in that mode, so under the default `keycloak` every one of these
+	@# tests would 404 at the first step. The SMTP override is the other
+	@# half — a developer with a real relay in their `.env` must not have a
+	@# test suite mailing sign-in codes to the internet.
+	MDX_IDP_MODE=native \
+	MDX_EMAIL_PROVIDER=smtp \
+	MDX_AUTH_SMTP_HOST=mailpit \
+	MDX_AUTH_SMTP_PORT=1025 \
+	MDX_AUTH_SMTP_USE_TLS=false \
+	MDX_AUTH_EMAIL_FROM=sales@notes-ai.local \
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up -d --wait \
+	    postgres redis mailpit auth-service note-service asr-service asr-worker
+	@echo ""
+	@echo "auth-service is in native mode. Mailpit inbox: http://localhost:8025"
+	@echo "Put it back with: make dev-up"
+
+web-e2e: ## Run the Playwright first-use suite (needs `make web-e2e-stack`)
+	@# Not depending on web-e2e-stack: recreating four containers on every
+	@# run turns a 40-second suite into a four-minute one, and the stack is
+	@# the slow half. Bring it up once, iterate on the tests.
+	cd web && npm ci && npx playwright install --with-deps chromium && npm run test:e2e
 
 validate-templates: ## CI gate — validate every note-template seed JSON
 	PYTHONPATH=libs/template_models/src uv run python scripts/validate-templates.py
@@ -247,10 +328,11 @@ test-integration-db: ## All integration tests against the live dev DB (needs mig
 	RUN_DB_INTEGRATION=1 uv run --project libs/db pytest libs/db/tests/integration/ -v
 	RUN_DB_INTEGRATION=1 uv run --project libs/audit pytest libs/audit/tests/integration/ -v
 	RUN_DB_INTEGRATION=1 RUN_KEYCLOAK_INTEGRATION=1 uv run --project services/auth-service pytest services/auth-service/tests/integration/ -v
+	RUN_DB_INTEGRATION=1 uv run --project libs/jobs pytest libs/jobs/tests/integration/ -v
 
-ci: lint typecheck test security lint-imports check-no-os-environ check-no-direct-asyncpg check-audit-insert check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered check-notification-pii-free validate-templates check-alert-rules check-metric-names ## Mirror CI gates locally
+ci: lint typecheck test security lint-imports check-no-os-environ check-no-direct-asyncpg check-audit-insert check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-no-vendor-import check-k8s-rendered check-notification-pii-free validate-templates check-alert-rules check-metric-names ## Mirror CI gates locally
 
-ci-with-db: ci check-rls openapi-check ## Full CI mirror — needs `make dev-up && make migrate-up`
+ci-with-db: ci check-rls check-identity-bridge openapi-check ## Full CI mirror — needs `make dev-up && make migrate-up`
 
 pre-commit-install: ## Install the pre-commit hook into git
 	@command -v pre-commit >/dev/null || (echo "Install pre-commit: pip install pre-commit"; exit 1)

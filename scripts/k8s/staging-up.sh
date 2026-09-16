@@ -58,9 +58,6 @@ k3d image import -c "$CLUSTER" "${IMAGES[@]}"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mdx-postgres \
   --from-literal=password=postgres --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$NS" create secret generic mdx-minio \
-  --from-literal=user=minioadmin --from-literal=password=minioadmin \
-  --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mdx-keycloak-admin \
   --from-literal=user=admin --from-literal=password=admin \
   --dry-run=client -o yaml | kubectl apply -f -
@@ -71,6 +68,21 @@ kubectl -n "$NS" create secret generic mdx-keycloak-clients \
 kubectl -n "$NS" create secret generic mdx-master-key \
   --from-file=master.key=infra/dev/master.key \
   --dry-run=client -o yaml | kubectl apply -f -
+# Hugging Face Inference Endpoints (DEP-S1). Values come from the shell
+# environment (secret manager / .env.local), never from a file in the repo.
+# With HF_ASR_ENDPOINT_URL set, asr-worker is routed to hf_eu_asr; without
+# it the worker keeps the baked CPU whisper (inproc_cpu_asr) so staging
+# still comes up on a laptop with no HF account.
+kubectl -n "$NS" create secret generic mdx-hf-endpoints \
+  --from-literal=HF_CHAT_ENDPOINT_URL="${HF_CHAT_ENDPOINT_URL:-}" \
+  --from-literal=HF_ASR_ENDPOINT_URL="${HF_ASR_ENDPOINT_URL:-}" \
+  --from-literal=HF_TOKEN="${HF_TOKEN:-}" \
+  --from-literal=HF_CHAT_MODEL_PIN="${HF_CHAT_MODEL_PIN:-google/gemma-3-4b-it}" \
+  --from-literal=HF_ASR_MODEL_PIN="${HF_ASR_MODEL_PIN:-deepdml/faster-whisper-large-v3-turbo-ct2}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+ASR_BACKEND_VALUE=inproc_cpu_asr
+if [ -n "${HF_ASR_ENDPOINT_URL:-}" ] && [ -n "${HF_TOKEN:-}" ]; then ASR_BACKEND_VALUE=hf_eu_asr; fi
+echo "asr-worker ASR_BACKEND=$ASR_BACKEND_VALUE"
 
 # Realm import (staging: the dev realm export; production: the realm is
 # produced by scripts/k8s/gen-prod-realm.py).
@@ -79,8 +91,9 @@ kubectl -n "$NS" create configmap mdx-keycloak-realm \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 4. Deploy. The post-install hooks run migrate (with the idempotent
-#    init.sql initContainer) → minio-init → seed.
-helm upgrade --install notes infra/k8s/notes -n "$NS" --timeout 15m "$@"
+#    init.sql initContainer) → seed.
+helm upgrade --install notes infra/k8s/notes -n "$NS" --timeout 15m \
+  --set "apps.asr-worker.env.ASR_BACKEND=$ASR_BACKEND_VALUE" "$@"
 
 echo "staging-up: deployed. kubectl -n $NS get pods"
 echo "KEDA (optional): helm install keda kedacore/keda -n keda --create-namespace"

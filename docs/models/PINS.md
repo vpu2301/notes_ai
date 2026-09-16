@@ -15,6 +15,10 @@ Pins resolved from the Hugging Face API on **2026-06-10**.
 | nlp-service | `oliverguhr/fullstop-punctuation-multilang-large` | `345e80adc07e761d3a35feafd20f2f44a151f453` | `model.safetensors` | `270f27d7398a5fdad43bdf9953ea532fbe62c5f5227ed5f5316e9bd64a9255e1` | `/opt/models/punctuation` |
 | dictation-service (conversation mode, sprint 14, ADR-0034) | `speechbrain/spkrec-ecapa-voxceleb` | `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` | `embedding_model.ckpt` | `0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2` | `/opt/models/ecapa` |
 | generation-service (Layer C inline completion, sprint 15, ADR-0036) | `ollama.com/library/gemma3:1b` (Gemma 3 1B instruct, Q4_K_M GGUF) | tag digest `8648f39daa8f` | GGUF blob | `7cd4618c1faf8b7233c6c906dac1694b6a47684b37b8895d470ac688520b9c01` | dev: `~/.ollama/models/blobs/` (served by `llama-server`); prod bake pending GPU rig |
+| libs/models `dev_mac_asr` (DEP-S0, ADR-0046; dev Mac only) | `ggerganov/whisper.cpp` → `ggml-large-v3-turbo.bin` | main (content-addressed by digest) | GGML | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69` | `~/.cache/whisper-cpp/` (served by `whisper-server`, fetched by `make dev-model`) |
+| libs/models `dev_mac` (DEP-S0, ADR-0046; dev Mac only) | `ollama.com/library/gemma3:4b` (Gemma 3 4B instruct, Q4_K_M GGUF) | tag digest `a2af6cc3eb7f` | GGUF blob | `a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a` (Ollama digest) | `~/.ollama/models/blobs/`; served as `notes-chat` via `infra/models/dev-mac/Modelfile` (num_ctx 32768) |
+| libs/models `hf_eu` (DEP-S1; staging/beta, HF Inference Endpoint eu-west-1) | `google/gemma-3-4b-it` (gated: accept Gemma terms in the HF namespace) | `093f9f388b31de276ce2de164bdc2081324b9767` | served by TGI (weights fetched by HF at that revision) | n/a — HF verifies the revision | `deploy/hf/endpoints/chat.yaml` |
+| libs/models `hf_eu_asr` (DEP-S1; staging/beta) | `openai/whisper-large-v3-turbo` (endpoint model) served as `deepdml/faster-whisper-large-v3-turbo-ct2` (CT2) | `41f01f3fe87f28c78e2fbf8b568835947dd65ed9` / `4df90f75321148c3a29a9e2351b7ddf8f5b115a8` | Speaches image (`ghcr.io/speaches-ai/speaches:0.8.2-cuda`) | n/a — HF verifies the revision | `deploy/hf/endpoints/asr.yaml` |
 
 Assembly for the ECAPA row is scripted — `scripts/models/prepare_ecapa.py`
 (also verifies `mean_var_norm_emb.ckpt`
@@ -32,6 +36,23 @@ by `llama-server` pointed at the blob path (ADR-0036 records why: a constant
 The production image bake (fetch at pin → `sha256sum -c` → bake, same flow as
 the rows above) is deferred with the GPU rig; the digest above is the pin it
 must verify against.
+
+### Runtime model *backends* (DEP-S0, ADR-0046) — an explicit exemption
+
+The two `libs/models` rows above are **dev-Mac only** and are the first
+models this table lists that are *served over HTTP at runtime* rather than
+baked into an image. They keep the doctrine's intent — a named, digest-pinned
+artifact that is verified before use — but the enforcement is different:
+`make dev-model` fetches whisper.cpp weights by digest and Ollama stores
+blobs content-addressed; nothing is baked. The staging/beta backend
+(`hf_eu`, Hugging Face Inference Endpoints in an EU region) is a
+*processor*, not a pin in this table: its model id is the `HF_CHAT_MODEL_PIN`
+/ `HF_ASR_MODEL_PIN` environment value, recorded on every run as
+`(backend, model_id)` (decision 11) and disclosed on the workspace Data
+page (decision 12). "Hugging Face is never a runtime dependency" therefore
+now reads: *never for the baked models in this table*; the Inference
+Endpoints path is a deliberate, disclosed runtime processor for beta,
+replaced by `hosted_eu` at gate H0. DEP-S1 adds the pin-upgrade runbook.
 
 ## How the pin is enforced
 

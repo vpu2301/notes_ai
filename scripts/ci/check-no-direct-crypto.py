@@ -35,6 +35,16 @@ ALLOWED_PREFIXES = (
     "libs/storage/tests/",  # tampering tests
     "libs/crypto/tests/",  # adversarial tests
     "libs/auth/tests/",  # JWT signing-key fixtures (RS256 test keys)
+    # IDX-A2's native issuer. An RS256 signer has to parse a PKCS#8 private
+    # key, serialise the public half into a JWK, and derive a `kid` from the
+    # SPKI — none of which is envelope encryption, and none of which
+    # libs/crypto has an API for. The rule this gate enforces is "no
+    # hand-rolled data-at-rest crypto"; asymmetric token signing is a
+    # different job with a different library surface.
+    "services/auth-service/src/auth_service/domain/signing_keys.py",
+    "services/auth-service/tests/unit/test_issuer.py",
+    "libs/auth/src/auth/testing.py",  # in-memory issuer for contract tests
+    "scripts/ops/gen-signing-key.py",  # generates the key list operators paste
     "scripts/ci/check-no-direct-crypto.py",
 )
 

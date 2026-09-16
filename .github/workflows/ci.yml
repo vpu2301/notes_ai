@@ -90,8 +90,12 @@ jobs:
           make check-audit-insert
           make check-no-object-storage
           make check-no-crypto
+          make check-identity-grants
+          make check-auth-issuer-config
           make validate-templates
           make check-no-demo-envvars-in-prod
+          make check-no-vendor-import
+          make check-dev-keys
 
   # ──────────────────────────────────────────────────────────────
   # S16 deployment: the Helm chart must render (staging + prod), the
@@ -152,6 +156,189 @@ jobs:
           flags: template-service
 
   # ──────────────────────────────────────────────────────────────
+  # Web (IDX-W1): nothing ran `web/` in CI before, so its type errors and
+  # its auth-flow tests only failed on somebody's laptop. The error-copy
+  # test reads docs/api/error-codes.md from the repo, so this job needs the
+  # whole checkout, not just web/.
+  #
+  # The type-check covers `web/e2e/` as well, so a browser spec that does
+  # not compile fails here rather than after a stack comes up. Running
+  # those specs is NOT part of this job and is not an oversight: the
+  # first-use test waits on a real transcription, and the asr-worker image
+  # bakes whisper-large-v3 (2.7 GiB) — not something to build on every
+  # push. `make web-e2e` runs them against the dev stack; see web/README.md.
+  # ──────────────────────────────────────────────────────────────
+  web:
+    name: Web — type-check, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  # ──────────────────────────────────────────────────────────────
+  # macOS capture app (IDX-M1). The Swift half of the estate had never
+  # been built by CI: its type errors only ever failed on somebody's
+  # laptop, and the session tests added in M1 are exactly the kind that
+  # must not rot. A macOS runner is the only way to compile SwiftUI, so
+  # the job is scoped to changes under `macos/` and runs nothing else.
+  # ──────────────────────────────────────────────────────────────
+  macos-app:
+    name: macOS app — build & tests
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Tests
+        run: swift test
+
+  # ──────────────────────────────────────────────────────────────
+  # MAC-0 item 2 — the signup smoke: an account created through the API,
+  # signed in with the app's own client, one second of audio uploaded, and
+  # the note asserted in Recents. The only test in the macOS target that
+  # answers a real server rather than a stub.
+  #
+  # It cannot bring its own stack: GitHub's macOS runners have no Docker,
+  # and the app under test only builds on macOS. So it points at a running
+  # deployment supplied as secrets. With no `MAC_SMOKE_AUTH_URL` secret the
+  # job is skipped outright — a repository without a staging stack must not
+  # go red for the absence of one.
+  #
+  # `if:` also lists the paths BE-0 touches, so a change to the signup
+  # endpoints re-runs this without waiting for someone to remember.
+  # ──────────────────────────────────────────────────────────────
+  macos-signup-smoke:
+    name: macOS app — signup smoke (live stack)
+    runs-on: macos-15
+    needs: macos-app
+    if: vars.MAC_SMOKE_ENABLED == 'true'
+    defaults:
+      run:
+        working-directory: macos
+    env:
+      MAC_SMOKE_AUTH_URL: ${{ secrets.MAC_SMOKE_AUTH_URL }}
+      MAC_SMOKE_ASR_URL: ${{ secrets.MAC_SMOKE_ASR_URL }}
+      MAC_SMOKE_NOTE_URL: ${{ secrets.MAC_SMOKE_NOTE_URL }}
+      MAC_SMOKE_FIXTURE: ${{ secrets.MAC_SMOKE_FIXTURE }}
+    steps:
+      - uses: actions/checkout@v4
+      # A missing secret would otherwise show up as a silent `XCTSkip`
+      # inside a green job, which is the one outcome worse than red.
+      - name: Stack is configured
+        run: |
+          for name in MAC_SMOKE_AUTH_URL MAC_SMOKE_ASR_URL MAC_SMOKE_NOTE_URL MAC_SMOKE_FIXTURE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set; unset MAC_SMOKE_ENABLED or add the secret"
+              exit 1
+            fi
+          done
+      - name: Signup smoke
+        run: swift test --filter SignupSmokeTests
+
+  ios-app:
+    name: iOS app — build, tests & ATS
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      # Compiles every source against the iOS SDK without an Xcode build;
+      # the fastest way to fail on a syntax or type error.
+      - name: Type-check
+        run: scripts/check.sh
+      - name: Tests
+        run: scripts/test.sh "iPhone 16"
+      # IDX-I1 L: a shipped build must not allow arbitrary loads. Asserted
+      # on the built product, because the ATS policy is produced by the
+      # Info.plist preprocessor and not written literally anywhere.
+      - name: Release build
+        run: scripts/build-sim.sh Release
+      - name: App Transport Security
+        run: scripts/check-ats.sh
+      # IOS-0's smoke — sign in as a web-created account, capture a second,
+      # see the note in Recents. It needs a whole stack (auth, note, asr and
+      # an asr-worker that bakes whisper-large-v3, 2.7 GiB) and this runner
+      # is macOS with no Docker, so the job cannot bring one up: the same
+      # decision, for the same reason, as the web job's Playwright suite.
+      # Set the repository variable NOTES_STACK_HOST to a reachable stack
+      # and both halves run; leave it unset and this is a visible skip
+      # rather than a green tick that means nothing.
+      #
+      # `scripts/test.sh` above already compiles and links `LiveStackTests`
+      # on every push, so the smoke cannot rot silently while it waits for
+      # a stack — which is the failure mode a disabled test usually has.
+      - name: End-to-end smoke (needs a stack)
+        if: vars.NOTES_STACK_HOST != ''
+        env:
+          NOTES_STACK_HOST: ${{ vars.NOTES_STACK_HOST }}
+        run: |
+          scripts/test.sh "iPhone 16"
+          cd .. && make smoke-ios ARGS="--auth http://$NOTES_STACK_HOST:8000 \
+            --asr http://$NOTES_STACK_HOST:8001 --note http://$NOTES_STACK_HOST:8006"
+
+  # ──────────────────────────────────────────────────────────────
+  # Secret scan (DEP-S1-05): a token in any commit fails the push. Same
+  # config as `make secret-scan`; full history so a squashed leak is found.
+  # ──────────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ──────────────────────────────────────────────────────────────
+  # HF endpoint drift (DEP-S1-01): specs are schema-checked on every PR;
+  # when the staging token is available the live endpoints are diffed and
+  # drift fails the job. `apply` is never run from CI on a PR — see
+  # .github/workflows/hf-endpoints-apply.yml (manual, environment-protected).
+  # ──────────────────────────────────────────────────────────────
+  hf-endpoints-plan:
+    name: HF endpoints — validate + plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --all-packages
+      - name: Validate specs (offline)
+        run: uv run python scripts/models/hf_endpoints.py validate
+      - name: Plan against staging (drift fails)
+        if: ${{ secrets.HF_TOKEN_STAGING != '' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN_STAGING }}
+          HF_NAMESPACE: ${{ vars.HF_NAMESPACE }}
+        run: uv run python scripts/models/hf_endpoints.py plan --env staging
+
+  # ──────────────────────────────────────────────────────────────
   security:
     name: Security scans (bandit + semgrep)
     runs-on: ubuntu-latest
@@ -198,6 +385,9 @@ jobs:
           docker build \
             -t template-service:ci \
             services/_template/
+
+      - name: Image carries no token (DEP-S1-05)
+        run: bash scripts/ci/check-image-no-secrets.sh template-service:ci
 
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master

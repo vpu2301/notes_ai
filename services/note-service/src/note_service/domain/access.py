@@ -21,6 +21,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from auth import Claims
+from note_models import ReadPurpose
 
 from .notes_repository import NoteRow
 
@@ -42,8 +43,40 @@ def is_author_team(note: NoteRow, user_sub: UUID) -> bool:
     return user_sub == note.primary_author_id or user_sub in note.co_author_ids
 
 
+def reads_as_collaborator(note: NoteRow, claims: Claims) -> bool:
+    """The author team, plus anyone the note was shared with (0016).
+
+    These readers never declare a purpose: the note is theirs to read.
+    Everyone else — a workspace member reading a ``workspace``-visible
+    note, a tenant_admin or auditor reading across the tenant — is an
+    oversight read and must say why (sprint-08 ``?purpose=``).
+    """
+    return is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
+
+
+def require_read_purpose(note: NoteRow, claims: Claims, purpose: ReadPurpose | None) -> bool:
+    """Returns whether the caller reads as a collaborator.
+
+    Raises 422 ``missing-read-purpose`` when an oversight reader omits
+    ``?purpose=``. Called after :func:`require_view`, so a note the caller
+    may not see at all is already a 404 by the time this runs.
+    """
+    collaborator = reads_as_collaborator(note, claims)
+    if not collaborator and purpose is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "https://errors.notes-ai/missing-read-purpose",
+                "title": "Read purpose required",
+                "detail": "Non-author reads must include ?purpose=<value>",
+                "allowed": [p.value for p in ReadPurpose],
+            },
+        )
+    return collaborator
+
+
 def can_view(note: NoteRow, claims: Claims) -> bool:
-    if is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids:
+    if reads_as_collaborator(note, claims):
         return True
     if note.visibility == VISIBILITY_WORKSPACE:
         return True

@@ -3,6 +3,7 @@
     GET    /v1/notes/{id}/sharing        who can see it, and the public link
     PUT    /v1/notes/{id}/visibility     private | workspace
     POST   /v1/notes/{id}/share          give a workspace member access (+ notify)
+    POST   /v1/notes/{id}/share/email    mail the note to people, from the server
     DELETE /v1/notes/{id}/share/{sub}    take it back
     POST   /v1/notes/{id}/public-link    "anyone with the link" (idempotent)
     DELETE /v1/notes/{id}/public-link    revoke it
@@ -13,17 +14,26 @@ Sharing with a member goes out as a ``note.shared_with_you`` notification
 sharer's name — never the title or content (ADR-0031). Someone who is not
 a member cannot be granted access; the client offers the public link
 instead.
+
+``/share/email`` is the one place a note's title and the sharer's own
+words leave the system in an e-mail, and it is deliberate: a person
+typed the addresses and the message and pressed Send. It replaces the
+``mailto:`` hand-off the clients used to do, which produced an unstyled
+draft the sender still had to send — and, on macOS, surfaced whatever
+Mail.app already had open. Members are granted access and get an app
+link; everyone else gets the public link, minted if the note has none.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from audit import Severity
 from auth import Claims
@@ -31,9 +41,10 @@ from db import tenant_connection
 from notification_events import Category
 
 from .. import audit_kinds
+from ..adapters import share_mail_copy
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import access
+from ..domain import access, share_email
 from ..domain import notes_repository as repo
 from ..domain.share_tokens import hash_token, token_for
 from ..notifications import emit_note_event
@@ -97,6 +108,65 @@ class ShareRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+# Same loose shape check as ShareRequest — the real test is whether a
+# relay accepts it, and this only has to keep obvious nonsense (and a
+# header-injection newline) out of an SMTP envelope.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class ShareEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipients: list[str] = Field(min_length=1)
+    # The sharer's own words. Optional: "here is the note" is a complete
+    # thought, and forcing a message would get "fyi" typed into every one.
+    message: str = Field(default="")
+    # The UI language of whoever pressed Send. The recipient's own
+    # language is unknowable — half of them have no account here — so the
+    # sender's is the best available guess, and it is usually right
+    # because people share within a team.
+    lang: str = Field(default=share_mail_copy.DEFAULT_LANG, max_length=16)
+
+    @field_validator("recipients")
+    @classmethod
+    def _valid_addresses(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for raw in value:
+            address = raw.strip()
+            if not _EMAIL_RE.match(address) or len(address) > 254:
+                raise ValueError(f"{raw!r} is not an e-mail address")
+            # Case-insensitive dedupe: mailing the same person twice
+            # because they typed one address two ways is a bug they see.
+            key = address.lower()
+            if key not in seen:
+                seen.add(key)
+                cleaned.append(address)
+        return cleaned
+
+
+class ShareEmailOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    # ``member`` — granted access, mailed an app link; ``link`` — mailed
+    # the public link, no account needed.
+    access: Literal["member", "link"]
+    # ``rejected`` is a relay saying the mailbox does not exist; the
+    # sender can fix a typo. ``failed`` is worth trying again.
+    status: Literal["sent", "rejected", "failed"]
+
+
+class ShareEmailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sharing: SharingView
+    results: list[ShareEmailOutcome]
+    # True when this call minted the public link, so the client can say
+    # so rather than leaving the author to discover it in the sheet.
+    public_link_created: bool
+
+
 class PublicLinkRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,6 +222,68 @@ async def _audit(claims: Claims, kind: str, note_id: UUID, payload: dict[str, ob
         payload=payload,
         severity=Severity.INFO,
     )
+
+
+async def _grant_member(
+    conn: object, note: repo.NoteRow, member_sub: UUID
+) -> tuple[repo.NoteRow, bool]:
+    """Give one member read access. Returns (note, newly_granted).
+
+    Idempotent, and silent about it: re-sharing with somebody who
+    already has the note is a no-op, not an error, because from the
+    sharer's side it is the same intention either way.
+    """
+    if member_sub in note.shared_with_ids or access.is_author_team(note, member_sub):
+        return note, False
+    await repo.add_shared_with(conn, note_id=note.id, user_sub=member_sub)  # type: ignore[arg-type]
+    refreshed = await repo.fetch_note(conn, note_id=note.id)  # type: ignore[arg-type]
+    return (refreshed or note), True
+
+
+async def _notify_shared(
+    claims: Claims, note: repo.NoteRow, member_sub: UUID, sharer_display: str
+) -> None:
+    """The in-app + e-mail ping. Content-free by contract (ADR-0031)."""
+    state = get_state()
+    await _audit(
+        claims, audit_kinds.NOTE_SHARED, note.id, {"with": str(member_sub), "via": "member"}
+    )
+    await emit_note_event(
+        state.redis,
+        category=Category.NOTE_SHARED_WITH_YOU,
+        tenant_id=claims.tid,
+        note_id=note.id,
+        note_code=note.code,
+        actor_user_id=claims.sub,
+        # The recipient hint IS the sharee — nobody else is told.
+        primary_author_id=member_sub,
+        extra_payload={"shared_by_display": sharer_display},
+    )
+
+
+async def _ensure_public_link(
+    conn: object, claims: Claims, note_id: UUID
+) -> tuple[repo.ShareLinkRow, bool]:
+    """The live link for a note, minting one if there is none.
+
+    Returns (link, created). A note has at most one live link, so this
+    is idempotent — asking again hands back the same token rather than
+    minting a second one nobody can revoke from the sheet.
+    """
+    link = await repo.fetch_live_share_link(conn, note_id=note_id)  # type: ignore[arg-type]
+    if link is not None:
+        return link, False
+    link_id = uuid4()
+    link = await repo.create_share_link(
+        conn,  # type: ignore[arg-type]
+        link_id=link_id,
+        tenant_id=claims.tid,
+        note_id=note_id,
+        token_hash=hash_token(token_for(link_id, key_hex=settings.share_link_hmac_key_hex)),
+        created_by=claims.sub,
+        expires_at=None,
+    )
+    return link, True
 
 
 # ── Routes ──────────────────────────────────────────────────────────
@@ -210,30 +342,148 @@ async def share_with_member(
                     "detail": "nobody in your workspace has that e-mail address",
                 },
             )
-        already = member.sub in note.shared_with_ids or access.is_author_team(note, member.sub)
-        if not already:
-            await repo.add_shared_with(conn, note_id=note_id, user_sub=member.sub)
-            note = await repo.fetch_note(conn, note_id=note_id) or note
+        note, granted = await _grant_member(conn, note, member.sub)
         # The sharer's name for the notification — a person, not a sub.
         (me,) = await repo.fetch_members(conn, subs=[claims.sub]) or [None]
         view = await _sharing_view(conn, note, claims)
 
-    if not already:
-        await _audit(
-            claims, audit_kinds.NOTE_SHARED, note_id, {"with": str(member.sub), "via": "member"}
-        )
-        await emit_note_event(
-            state.redis,
-            category=Category.NOTE_SHARED_WITH_YOU,
-            tenant_id=claims.tid,
-            note_id=note_id,
-            note_code=note.code,
-            actor_user_id=claims.sub,
-            # The recipient hint IS the sharee — nobody else is told.
-            primary_author_id=member.sub,
-            extra_payload={"shared_by_display": me.display_name if me else "A colleague"},
-        )
+    if granted:
+        await _notify_shared(claims, note, member.sub, me.display_name if me else "A colleague")
     return view
+
+
+@router.post("/{note_id}/share/email", response_model=ShareEmailResponse)
+async def share_by_email(
+    note_id: UUID,
+    body: ShareEmailRequest,
+    claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+) -> ShareEmailResponse:
+    """Mail the note to the people the sharer named, from the server.
+
+    Two kinds of recipient, one button. A workspace member is granted
+    access and mailed a link to the note in the app; anybody else is
+    mailed the public link, which is minted here if the note has none —
+    that is the only way to hand a note to somebody with no account, and
+    the mail says plainly that anyone holding the link can read it.
+
+    Sending is per-recipient and never raises: one dead address must not
+    swallow the four mails that would have arrived. The response says
+    what happened to each one so the sender can fix a typo rather than
+    wonder.
+    """
+    state = get_state()
+    max_recipients = settings.share_email_max_recipients
+    if len(body.recipients) > max_recipients:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"at most {max_recipients} recipients per send",
+        )
+    message = body.message.strip()[: settings.share_email_max_message_chars]
+    lang = share_mail_copy.normalize_lang(body.lang)
+
+    allowed, retry_after = await state.share_email_rate_limiter.check(
+        user_id=claims.sub, cost=len(body.recipients)
+    )
+    if not allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="share e-mail rate limit reached",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    base = settings.app_base_url.rstrip("/")
+    granted: list[UUID] = []
+    recipients: list[share_email.Recipient] = []
+    created_link_id: UUID | None = None
+
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        (me,) = await repo.fetch_members(conn, subs=[claims.sub]) or [None]
+
+        for address in body.recipients:
+            member = await repo.find_member_by_email(conn, email=address)
+            if member is not None:
+                note, newly = await _grant_member(conn, note, member.sub)
+                if newly:
+                    granted.append(member.sub)
+                recipients.append(
+                    share_email.Recipient(
+                        email=address,
+                        access=share_mail_copy.ACCESS_MEMBER,
+                        link_url=f"{base}/notes/{note_id}",
+                    )
+                )
+                continue
+            link, created = await _ensure_public_link(conn, claims, note_id)
+            if created:
+                created_link_id = link.id
+            token = token_for(link.id, key_hex=settings.share_link_hmac_key_hex)
+            recipients.append(
+                share_email.Recipient(
+                    email=address,
+                    access=share_mail_copy.ACCESS_LINK,
+                    link_url=f"{base}/s/{token}",
+                )
+            )
+
+        view = await _sharing_view(conn, note, claims)
+
+    sharer_name = (me.display_name if me else "") or "A colleague"
+    sharer_email = me.email if me else ""
+    shared_at = datetime.now(UTC)
+
+    # Outside the connection block on purpose: a slow relay must not hold
+    # a pooled DB connection for the length of a send.
+    outcomes = await share_email.send_many(
+        state.email_provider,
+        recipients,
+        lang=lang,
+        sharer_name=sharer_name,
+        sharer_email=sharer_email,
+        note_title=note.title,
+        message=message,
+        shared_at=shared_at,
+        timeout_seconds=settings.share_email_timeout_s,
+    )
+
+    if created_link_id is not None:
+        await _audit(
+            claims,
+            audit_kinds.NOTE_LINK_CREATED,
+            note_id,
+            {
+                "link_id": str(created_link_id),
+                "expires_at": view.public_link.expires_at if view.public_link else None,
+                "via": "email",
+            },
+        )
+    for member_sub in granted:
+        await _notify_shared(claims, note, member_sub, sharer_name)
+    await _audit(
+        claims,
+        audit_kinds.NOTE_LINK_EMAILED,
+        note_id,
+        {
+            # Counts and outcomes, never the addresses: who a note went
+            # to is in the sharer's own sent mail, and an audit log that
+            # accumulates third-party e-mail addresses is a liability
+            # nobody asked for.
+            "recipients": len(recipients),
+            "members": sum(1 for r in recipients if r.access == share_mail_copy.ACCESS_MEMBER),
+            "sent": sum(1 for o in outcomes if o.status == "sent"),
+            "failed": sum(1 for o in outcomes if o.status != "sent"),
+            "had_message": bool(message),
+        },
+    )
+
+    return ShareEmailResponse(
+        sharing=view,
+        results=[
+            ShareEmailOutcome(email=o.email, access=o.access, status=o.status)  # type: ignore[arg-type]
+            for o in outcomes
+        ],
+        public_link_created=created_link_id is not None,
+    )
 
 
 @router.delete("/{note_id}/share/{user_sub}", response_model=SharingView)

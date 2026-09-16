@@ -248,27 +248,24 @@
         "title": "LockdownResponse",
         "type": "object"
       },
-      "LoginResponse": {
+      "LogoutRequest": {
+        "additionalProperties": false,
         "properties": {
-          "access_token": {
-            "title": "Access Token",
-            "type": "string"
-          },
-          "expires_in": {
-            "title": "Expires In",
-            "type": "integer"
-          },
-          "token_type": {
-            "default": "Bearer",
-            "title": "Token Type",
-            "type": "string"
+          "refresh_token": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
           }
         },
-        "required": [
-          "access_token",
-          "expires_in"
-        ],
-        "title": "LoginResponse",
+        "title": "LogoutRequest",
         "type": "object"
       },
       "MemberAdd": {
@@ -487,6 +484,58 @@
         "title": "PolicyResponse",
         "type": "object"
       },
+      "RefreshRequest": {
+        "additionalProperties": false,
+        "description": "Native clients send their token here; browsers send nothing at all.\n\nOptional rather than required so one route serves both transports \u2014\na browser POSTing an empty body must not be answered 422 for\ndeclining to put its HttpOnly cookie in a field it cannot read.\n\nThe cap is 4096 rather than `session_native`'s 512: a Keycloak\nrefresh token is a signed JWT carrying a realm's worth of claims, not\nthe short opaque handle the native issuer mints.",
+        "properties": {
+          "refresh_token": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          }
+        },
+        "title": "RefreshRequest",
+        "type": "object"
+      },
+      "ResendRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "lang": {
+            "anyOf": [
+              {
+                "enum": [
+                  "en",
+                  "de",
+                  "uk"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lang"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ResendRequest",
+        "type": "object"
+      },
       "ResetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -596,6 +645,72 @@
           "current"
         ],
         "title": "SessionSummary",
+        "type": "object"
+      },
+      "SignupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "lang": {
+            "anyOf": [
+              {
+                "enum": [
+                  "en",
+                  "de",
+                  "uk"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lang"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "display_name"
+        ],
+        "title": "SignupRequest",
+        "type": "object"
+      },
+      "SignupResponse": {
+        "additionalProperties": false,
+        "description": "Identical for every address. Nothing here varies by branch.",
+        "properties": {
+          "resend_after": {
+            "title": "Resend After",
+            "type": "integer"
+          },
+          "status": {
+            "const": "verification_sent",
+            "default": "verification_sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resend_after"
+        ],
+        "title": "SignupResponse",
         "type": "object"
       },
       "SwitchOut": {
@@ -1181,6 +1296,66 @@
         "title": "TenantUpdate",
         "type": "object"
       },
+      "TokenResponse": {
+        "additionalProperties": false,
+        "description": "Superset of the pre-IDX ``LoginResponse`` \u2014 every old reader still parses it.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_expires_in": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Expires In"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in",
+          "tenant_id",
+          "roles"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
       "UserDetail": {
         "properties": {
           "created_at": {
@@ -1381,7 +1556,7 @@
         "title": "ValidationError",
         "type": "object"
       },
-      "VerifyRequest": {
+      "auth_service__routers__mfa__VerifyRequest": {
         "additionalProperties": false,
         "properties": {
           "code": {
@@ -1397,7 +1572,7 @@
         "title": "VerifyRequest",
         "type": "object"
       },
-      "VerifyResponse": {
+      "auth_service__routers__mfa__VerifyResponse": {
         "additionalProperties": false,
         "properties": {
           "enrolled": {
@@ -1415,6 +1590,41 @@
         ],
         "title": "VerifyResponse",
         "type": "object"
+      },
+      "auth_service__routers__signup__VerifyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "title": "VerifyRequest",
+        "type": "object"
+      },
+      "auth_service__routers__signup__VerifyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "verified": {
+            "const": true,
+            "default": true,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "title": "VerifyResponse",
+        "type": "object"
       }
     }
   },
@@ -1425,6 +1635,52 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/.well-known/jwks.json": {
+      "get": {
+        "operationId": "jwks__well_known_jwks_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Jwks  Well Known Jwks Json Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Public signing keys (active + not yet retired)",
+        "tags": [
+          "issuer"
+        ]
+      }
+    },
+    "/.well-known/openid-configuration": {
+      "get": {
+        "operationId": "openid_configuration__well_known_openid_configuration_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Openid Configuration  Well Known Openid Configuration Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "OIDC discovery for the native issuer",
+        "tags": [
+          "issuer"
+        ]
+      }
+    },
     "/admin/users": {
       "get": {
         "operationId": "list_users_admin_users_get",
@@ -2171,7 +2427,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LoginResponse"
+                  "$ref": "#/components/schemas/TokenResponse"
                 }
               }
             },
@@ -2206,6 +2462,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LogoutRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -2272,7 +2545,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Return verified claims + DB user state",
+        "summary": "Return verified claims, the identity, and its memberships",
         "tags": [
           "auth"
         ]
@@ -2352,7 +2625,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VerifyRequest"
+                "$ref": "#/components/schemas/auth_service__routers__mfa__VerifyRequest"
               }
             }
           },
@@ -2363,7 +2636,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VerifyResponse"
+                  "$ref": "#/components/schemas/auth_service__routers__mfa__VerifyResponse"
                 }
               }
             },
@@ -2643,30 +2916,29 @@
     "/auth/refresh": {
       "post": {
         "operationId": "refresh_auth_refresh_post",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "mdx_rt",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Mdx Rt"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RefreshRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LoginResponse"
+                  "$ref": "#/components/schemas/TokenResponse"
                 }
               }
             },
@@ -2683,7 +2955,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Rotate refresh cookie; return a new access token",
+        "summary": "Rotate the refresh token; return a new access token",
         "tags": [
           "auth"
         ]
@@ -2823,6 +3095,129 @@
         "summary": "Sign out of every device, including this one",
         "tags": [
           "password"
+        ]
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "operationId": "signup_auth_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create an account; a confirmation code goes to the address",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/signup/resend": {
+      "post": {
+        "operationId": "resend_auth_signup_resend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send a fresh confirmation code",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/signup/verify": {
+      "post": {
+        "operationId": "verify_auth_signup_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/auth_service__routers__signup__VerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/auth_service__routers__signup__VerifyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Spend the confirmation code and enable the account",
+        "tags": [
+          "auth"
         ]
       }
     },

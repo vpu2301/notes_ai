@@ -1,0 +1,8 @@
+{"id":"m05_en_incident_review","language":"en","transcript":[
+{"speaker":"SPEAKER_1","t_start_ms":0,"t_end_ms":10000,"text":"This is the review of Tuesday's outage. Forty minutes of failed uploads between two and two forty p.m."},
+{"speaker":"SPEAKER_2","t_start_ms":10000,"t_end_ms":26000,"text":"Root cause was the storage credentials rotating without the upload service reloading them. The alert fired but paged the wrong rotation."},
+{"speaker":"SPEAKER_3","t_start_ms":26000,"t_end_ms":38000,"text":"Two follow-ups from my side. First, the upload service should reload credentials on rotation. Second, fix the paging rotation so it hits the on-call engineer."},
+{"speaker":"SPEAKER_1","t_start_ms":38000,"t_end_ms":50000,"text":"Agreed on both. Lin takes the credential reload, due next Friday. Sam fixes the paging rotation this week."},
+{"speaker":"SPEAKER_2","t_start_ms":50000,"t_end_ms":58000,"text":"One decision: we will not add a manual retry button in the app. The upload queue already retries; a button would hide the real problem."},
+{"speaker":"SPEAKER_1","t_start_ms":58000,"t_end_ms":62000,"text":"Noted, no manual retry button. Thanks everyone."}],
+"expect":{"min_action_items":2,"must_mention":["credential","paging rotation"]}}

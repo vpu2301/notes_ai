@@ -10,12 +10,14 @@ from opentelemetry import metrics
 from redis.asyncio import Redis
 
 from audit import AuditWriter, Severity
-from auth import JwksCache
+from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
 from storage import EncryptedObjectStore, S3Client
 
 from . import audit_kinds
+from .adapters.email import EmailProvider
+from .adapters.email import build_provider as build_email_provider
 from .config import settings
 from .domain.autosave_rate_limit import AutosaveRateLimiter
 from .domain.cache import TemplateCache
@@ -25,10 +27,27 @@ from .domain.draft_audit_buffer import DraftAuditBuffer
 from .domain.google_calendar import GoogleCalendarClient
 from .domain.ics_calendar import IcsFeedClient
 from .domain.search_audit_buffer import SearchAuditBuffer
+from .domain.share_email import ShareEmailRateLimiter
 
 logger = logging.getLogger(__name__)
 _meter = metrics.get_meter("mdx.note")
 
+
+def auth_issuers() -> list[IssuerConfig]:
+    """The issuers this service trusts (FND-1 / ADR-0047).
+
+    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
+    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
+    Both the JWKS cache and ``build_current_user`` are built from THIS
+    list, so the keys a token can be verified with and the issuers a
+    token may claim can never drift apart.
+    """
+    return issuers_from_env(
+        settings.auth_issuers_json,
+        issuer=settings.auth_issuer,
+        jwks_url=settings.auth_jwks_url,
+        audience=settings.auth_audience,
+    )
 
 @dataclass
 class ServiceState:
@@ -62,6 +81,11 @@ class ServiceState:
     # 0020: calendar links (iCal feeds) — fetched with the SSRF policy in
     # domain/ics_calendar; needs no configuration.
     ics_feeds: IcsFeedClient
+    # Sharing a note by e-mail: the provider that actually delivers it,
+    # and the per-sender hourly cap that keeps the endpoint from being a
+    # spam relay wearing our From address.
+    email_provider: EmailProvider
+    share_email_rate_limiter: ShareEmailRateLimiter
     # Metric handles (kept on state so routers don't recreate them).
     diff_cache_hit_metric: object
     autosave_conflicts_metric: object
@@ -70,7 +94,13 @@ class ServiceState:
 
 
 async def build_state() -> ServiceState:
-    jwks_cache = JwksCache(issuer_to_url={settings.auth_issuer: settings.auth_jwks_url})
+    issuers = auth_issuers()
+    # FND-1: log what this process will actually accept. During the
+    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
+    # issuer?" has to be answerable from one log line, not from a token
+    # that mysteriously 401s an hour later.
+    logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
+    jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     app_pool = await create_pool(
         settings.db_app_role_dsn,
         application_name=f"{settings.service_name}/app",
@@ -196,6 +226,21 @@ async def build_state() -> ServiceState:
 
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
 
+    email_provider = build_email_provider(
+        kind=settings.email_provider,
+        is_production=settings.is_production,
+        host=settings.note_smtp_host,
+        port=settings.note_smtp_port,
+        from_address=settings.note_email_from,
+        from_name=settings.note_email_from_name,
+        use_tls=settings.note_smtp_use_tls,
+        username=settings.note_smtp_username,
+        password=settings.note_smtp_password.value(),
+        reply_to=settings.note_email_reply_to,
+        timeout=settings.share_email_timeout_s,
+    )
+    logger.info("note.email_provider", extra={"provider": settings.email_provider})
+
     google_calendar = GoogleCalendarClient(
         client_id=settings.google_calendar_client_id,
         client_secret=settings.google_calendar_client_secret.value(),
@@ -217,6 +262,10 @@ async def build_state() -> ServiceState:
         transcripts_store=transcripts_store,
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
+        email_provider=email_provider,
+        share_email_rate_limiter=ShareEmailRateLimiter(
+            redis, per_hour=settings.share_emails_per_user_per_hour
+        ),
         search_audit_buffer=search_audit_buffer,
         envelope=envelope,
         google_calendar=google_calendar,
@@ -232,6 +281,7 @@ async def teardown_state(state: ServiceState) -> None:
     await state.draft_audit_buffer.stop()
     await state.search_audit_buffer.stop()
     await state.redis.aclose()
+    await state.email_provider.aclose()
     await state.google_calendar.aclose()
     await state.ics_feeds.aclose()
     await state.jwks_cache.aclose()

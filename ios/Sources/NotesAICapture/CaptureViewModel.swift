@@ -88,6 +88,7 @@ final class CaptureViewModel: ObservableObject {
         guard !phase.isBusy else { return }
         do {
             try await recorder.start()
+            boundTenantId = app.tenantId
             phase = .recording
         } catch RecorderError.permissionDenied {
             phase = .microphoneDenied
@@ -105,21 +106,68 @@ final class CaptureViewModel: ObservableObject {
         let meetingTitle = trimmed.isEmpty ? Self.defaultTitle() : trimmed
         // The card and the list should agree on the name while it processes.
         title = meetingTitle
-        pipelineTask = Task { await process(fileURL: fileURL, meetingTitle: meetingTitle) }
+        // The workspace as it was when the recording started, not as it is
+        // when the upload finally goes out: switching workspaces during a
+        // meeting must not re-file the meeting (IDX-I2 G).
+        let tenantId = boundTenantId ?? app.tenantId
+        boundTenantId = nil
+        pipelineTask = Task {
+            await process(fileURL: fileURL, meetingTitle: meetingTitle, tenantId: tenantId)
+        }
     }
 
-    private func process(fileURL: URL, meetingTitle: String) async {
-        defer { try? FileManager.default.removeItem(at: fileURL) }
-        var jobId: String?
+    /// The workspace the current recording belongs to, captured when it
+    /// started.
+    private var boundTenantId: String?
+
+    private func process(fileURL: URL, meetingTitle: String, tenantId: String?) async {
+        // The recording is deleted only once the server has it. Every other
+        // exit from this function — a failed upload, a lost session, the
+        // app being killed mid-pipeline — moves it to `pending/` with a
+        // sidecar instead. A meeting cannot be recorded twice (IDX-I1 F).
+        var uploaded = false
+        let recordedAt = Date()
+        defer {
+            if uploaded {
+                try? FileManager.default.removeItem(at: fileURL)
+            } else {
+                keep(fileURL, title: meetingTitle, recordedAt: recordedAt, tenantId: tenantId)
+            }
+        }
         do {
             phase = .uploading
             let job = try await app.api.submitJob(fileURL: fileURL,
                                                   contentType: recorder.format.contentType,
-                                                  language: language, diarize: diarize)
-            jobId = job.id
+                                                  language: language, diarize: diarize,
+                                                  tenantId: tenantId)
+            uploaded = true
             activeJobId = job.id
             app.addRecent(jobId: job.id, title: meetingTitle)
+            await follow(job, meetingTitle: meetingTitle, language: language)
+        } catch is CancellationError {
+            // reset() was called; nothing to do.
+        } catch {
+            phase = .failed(AuthCopy.message(for: error))
+        }
+    }
 
+    /// Poll a job that is already on the server and draft its note.
+    ///
+    /// Split out of `process` because a retried recording (IDX-I2) joins
+    /// the pipeline here: the upload has happened, the file is gone, and
+    /// what is left is the same waiting and the same note.
+    func follow(jobId: String, title meetingTitle: String, language: String) async {
+        activeJobId = jobId
+        guard let job = try? await app.api.jobStatus(id: jobId) else {
+            phase = .transcribing
+            return
+        }
+        pipelineTask = Task { await follow(job, meetingTitle: meetingTitle, language: language) }
+        await pipelineTask?.value
+    }
+
+    private func follow(_ job: TranscriptionJob, meetingTitle: String, language: String) async {
+        do {
             phase = .transcribing
             var current = job
             while !current.status.isTerminal {
@@ -151,11 +199,28 @@ final class CaptureViewModel: ObservableObject {
         } catch is CancellationError {
             // reset() was called; nothing to do.
         } catch {
-            let message = error.localizedDescription
-            if let jobId {
-                app.updateRecent(jobId: jobId, errorMessage: message)
-            }
+            let message = AuthCopy.message(for: error)
+            app.updateRecent(jobId: job.id, errorMessage: message)
             phase = .failed(message)
+        }
+    }
+
+    /// Put the recording somewhere it will still be there tomorrow, and
+    /// say in the banner where it went — a file the person is not told
+    /// about is only technically not lost.
+    private func keep(_ fileURL: URL, title: String, recordedAt: Date, tenantId: String?) {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let kept = PendingCaptures.keep(fileURL, info: PendingCapture.Info(
+            title: title,
+            language: language,
+            diarize: diarize,
+            recordedAt: recordedAt,
+            identityId: app.identityId,
+            tenantId: tenantId ?? app.tenantId))
+        guard kept != nil else { return }
+        app.refreshPending()
+        if case .failed(let message) = phase {
+            phase = .failed(message + " The recording was kept on this phone.")
         }
     }
 

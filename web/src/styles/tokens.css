@@ -1,14 +1,18 @@
 /* ─────────────────────────────────────────────────────────────────────────
    Notes AI — design tokens
 
-   The macOS capture app's look (macos/…/Views/Theme.swift), brought to the
-   web: paper and ink, hairline frames instead of shadows, generous radii, a
-   display face over a quiet sans. The ground is pure WHITE (not warm
-   off-white). Frames are QUIET at rest — a warm neutral hairline with only
-   a whisper of the accent in it — and turn ORANGE only when a frame is
-   live: hovered, focused, selected. The accent FAMILY derives from
-   --accent with color-mix, so one hex re-tints frames, tints, text and
-   focus rings together.
+   One palette across web, macOS and iOS (macos|ios/…/Views/Theme.swift):
+   paper and ink with a MOSS accent, hairline frames instead of shadows,
+   generous continuous radii, a display face over a quiet sans.
+
+   Two rules the whole system rests on:
+
+     · Frames never carry the accent. Every hairline — resting, hovered,
+       selected — is a warm neutral. The accent lives in tints, icons and
+       text, never in a border.
+     · The ground is warm paper, not white, and corners are continuous
+       (squircle) wherever the browser can draw them, so the surfaces read
+       soft rather than boxed.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -20,12 +24,12 @@
   --display: "Avenir Next", "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Ground & surfaces — white, with warm greys for the second surface. */
-  --bg: #ffffff;
+  /* Ground & surfaces — the Mac's warm paper, with white for raised cards. */
+  --bg: #fbfaf7;
   --surface: #ffffff;
-  --surface-2: #f6f4f0;
-  --surface-hover: #faf8f5;
-  --sidebar: #ffffff;
+  --surface-2: #f3f1ec;
+  --surface-hover: #f6f4f0;
+  --sidebar: #f6f4ef;
 
   /* Ink scale — warm, never pure black (as on the Mac). */
   --text-1: #1a1816;
@@ -38,23 +42,22 @@
   --ink: #1a1816;
   --ink-text: #ffffff;
 
-  /* Accent family — a soft, earthy orange (apricot/terracotta), not neon. */
-  --accent: #d97b45;
-  --accent-2: color-mix(in srgb, var(--accent) 84%, #000);
-  --accent-soft: color-mix(in srgb, var(--accent) 10%, #fff);
-  --accent-text: color-mix(in srgb, var(--accent) 78%, #000);
+  /* Accent family — moss, the same green the Mac and iPhone apps use. */
+  --accent: #4f7a5e;
+  --accent-2: #3f6650;
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, #fff);
+  --accent-text: #3f6650;
   --accent-fill: var(--accent);
-  --accent-ink: #fff;
+  --accent-ink: #ffffff;
 
-  /* Frames. --line is every resting hairline: card borders, the sidebar
-     edge, the topbar rule, input outlines — a warm neutral with a hint of
-     the accent. --line-2 is the quieter divider between rows inside a
-     card. --line-hover and --line-active are the ONLY places the frame
-     goes orange: a hovered card, a selected tab, the current sidebar row. */
-  --line: color-mix(in srgb, var(--accent) 12%, #e3ddd5);
-  --line-2: color-mix(in srgb, var(--accent) 7%, #eeeae4);
-  --line-hover: color-mix(in srgb, var(--accent) 45%, #fff);
-  --line-active: color-mix(in srgb, var(--accent) 62%, #fff);
+  /* Frames. Warm neutrals, all of them — no hue from the accent ever mixes
+     in. --line is every resting hairline; --line-2 the quieter divider
+     between rows inside a card; --line-hover and --line-active are the same
+     neutral walked a step darker so a live frame is felt, not coloured. */
+  --line: #e6e2db;
+  --line-2: #efece6;
+  --line-hover: #d9d3c9;
+  --line-active: #c8c1b5;
   --hairline: 1px;
 
   /* Second hue ("amended") — a dusty plum, as on the Mac. */
@@ -76,7 +79,7 @@
   --info: #4b6f9e;
   --info-soft: color-mix(in srgb, var(--info) 10%, #fff);
 
-  --mark-bg: #fdefc8;
+  --mark-bg: #f6ecc4;
 
   /* Shadows are for floating things only (menus, modals, toasts). Cards
      and panels are framed by a hairline, never lifted. */
@@ -84,10 +87,24 @@
   --shadow-2: 0 6px 20px -6px rgba(26, 24, 22, 0.14), 0 1px 3px rgba(26, 24, 22, 0.06);
   --shadow-3: 0 16px 40px -12px rgba(26, 24, 22, 0.22);
 
-  /* Radii — the Mac's, rounder than before. */
-  --radius: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  /* Radii. Rounder than the Mac's by a couple of points, because the web
+     draws a circular arc where AppKit draws a continuous one — and where
+     the browser CAN draw a continuous corner (`corner-shape`, base.css)
+     these same numbers turn into true squircles. --radius-pill is the
+     fully round end used by the record control and every capsule. */
+  --radius-xs: 7px;
+  --radius-sm: 9px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  /* Motion. One organic easing — quick out of the gate, long settle — and
+     three durations. Nothing in the UI moves on a linear curve. */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --t-fast: 0.14s;
+  --t: 0.22s;
+  --t-slow: 0.34s;
 
   /* Two scale knobs: --density scales SPACE, --fs scales TEXT. Every padding
      is authored as calc(Npx * var(--density)) and every font-size as
@@ -100,7 +117,7 @@
 
   /* The dot print behind the home page, sign-in and empty states: small
      ink dots on a 20px grid, fading out from the top (DSDots on the Mac). */
-  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 16%, transparent) 1.1px, transparent 1.4px);
+  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 15%, transparent) 1.1px, transparent 1.4px);
   --dots-size: 20px 20px;
   --dots-fade: radial-gradient(900px 900px at 50% 0, #000, rgba(0, 0, 0, 0.35) 55%, transparent 100%);
   /* A soft light sweeps around the print: the angle turns, and the dots under
@@ -129,17 +146,17 @@
   --ink: #ece8e1;
   --ink-text: #171512;
 
-  --accent: #e39a68;
-  --accent-2: color-mix(in srgb, var(--accent) 70%, #fff);
+  --accent: #8fbf9c;
+  --accent-2: #a9d3b4;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-text: color-mix(in srgb, var(--accent) 80%, #fff);
+  --accent-text: #a9d3b4;
   --accent-fill: var(--accent);
   --accent-ink: #171512;
 
-  --line: color-mix(in srgb, var(--accent) 10%, #302b26);
-  --line-2: color-mix(in srgb, var(--accent) 6%, #272320);
-  --line-hover: color-mix(in srgb, var(--accent) 40%, var(--surface));
-  --line-active: color-mix(in srgb, var(--accent) 58%, var(--surface));
+  --line: #2c2824;
+  --line-2: #241f1c;
+  --line-hover: #3b352f;
+  --line-active: #4a433b;
 
   --indigo: #b3a4d6;
   --indigo-soft: color-mix(in srgb, var(--indigo) 12%, transparent);
@@ -157,13 +174,13 @@
   --info: #8fb0dd;
   --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
 
-  --mark-bg: #4a3f16;
+  --mark-bg: #40401f;
 
   --shadow-1: none;
   --shadow-2: 0 6px 20px -6px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-3: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
 
-  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 14%, transparent) 1.1px, transparent 1.4px);
+  --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 13%, transparent) 1.1px, transparent 1.4px);
 }
 
 [data-density="compact"]  { --density: 0.85; }

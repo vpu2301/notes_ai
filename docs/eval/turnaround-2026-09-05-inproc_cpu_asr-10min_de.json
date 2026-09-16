@@ -1,0 +1,27 @@
+{
+  "kind": "turnaround",
+  "backend": "inproc_cpu_asr",
+  "date": "2026-09-05",
+  "generated_at": "2026-09-05T09:41:32+00:00",
+  "git": "7f1294e",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "fixture": "10min_de",
+  "language_requested": "de",
+  "language_out": "de",
+  "audio_seconds": 605.4,
+  "wall_seconds": 47.4,
+  "warmup_seconds": 2.8,
+  "turnaround_ratio": 0.0783,
+  "segments": 120,
+  "words": 1390,
+  "words_with_timings_share": 1.0,
+  "model_id": "tiny",
+  "backend_kind": "asr_inproc",
+  "processor": null,
+  "a2_gate_pass": true
+}

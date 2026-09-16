@@ -22,13 +22,16 @@ members = [
     "diarization",
     "dictation-service",
     "generation-service",
+    "jobs",
     "messaging",
+    "models",
     "nlp-service",
     "note-models",
     "note-service",
     "notification-events",
     "notification-service",
     "observability",
+    "ratelimit",
     "secret",
     "storage",
     "template-models",
@@ -377,6 +380,7 @@ dependencies = [
     { name = "faster-whisper", marker = "sys_platform != 'darwin'" },
     { name = "httpx" },
     { name = "messaging" },
+    { name = "models" },
     { name = "notification-events" },
     { name = "numpy" },
     { name = "observability" },
@@ -412,6 +416,7 @@ requires-dist = [
     { name = "faster-whisper", marker = "sys_platform != 'darwin'", specifier = ">=1.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "messaging", editable = "libs/messaging" },
+    { name = "models", editable = "libs/models" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "notification-events", editable = "libs/notification_events" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -555,6 +560,7 @@ name = "auth"
 version = "0.2.0"
 source = { editable = "libs/auth" }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -574,6 +580,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -610,6 +617,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-json-logger" },
     { name = "python-multipart" },
+    { name = "ratelimit" },
     { name = "redis" },
     { name = "secret" },
     { name = "uvicorn", extra = ["standard"] },
@@ -647,6 +655,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "python-json-logger", specifier = ">=2.0.7" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "ratelimit", editable = "libs/ratelimit" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "secret", editable = "libs/secret" },
@@ -2032,6 +2041,46 @@ wheels = [
 ]
 
 [[package]]
+name = "jobs"
+version = "0.1.0"
+source = { editable = "libs/jobs" }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "db" },
+    { name = "models" },
+    { name = "observability" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.29.0" },
+    { name = "db", editable = "libs/db" },
+    { name = "models", editable = "libs/models" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
+    { name = "observability", editable = "libs/observability" },
+    { name = "opentelemetry-api", specifier = ">=1.24.0" },
+    { name = "pydantic", specifier = ">=2.7.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "librt"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2265,6 +2314,42 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "redis", specifier = ">=5.0.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "models"
+version = "0.1.0"
+source = { editable = "libs/models" }
+dependencies = [
+    { name = "asr-models" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asr-models", editable = "libs/asr_models" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
+    { name = "pydantic", specifier = ">=2.7.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
 
@@ -2526,6 +2611,7 @@ name = "note-service"
 version = "0.8.0"
 source = { editable = "services/note-service" }
 dependencies = [
+    { name = "aiosmtplib" },
     { name = "asyncpg" },
     { name = "audit" },
     { name = "auth" },
@@ -2534,6 +2620,7 @@ dependencies = [
     { name = "db" },
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "models" },
     { name = "note-models" },
     { name = "notification-events" },
     { name = "observability" },
@@ -2565,6 +2652,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosmtplib", specifier = ">=3.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "audit", editable = "libs/audit" },
     { name = "auth", editable = "libs/auth" },
@@ -2576,6 +2664,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.103" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "models", editable = "libs/models" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "note-models", editable = "libs/note_models" },
     { name = "notification-events", editable = "libs/notification_events" },
@@ -3766,6 +3855,32 @@ wheels = [
 ]
 
 [[package]]
+name = "ratelimit"
+version = "0.1.0"
+source = { editable = "libs/ratelimit" }
+dependencies = [
+    { name = "redis" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "redis", specifier = ">=5.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "redis"
 version = "7.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4474,6 +4589,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260815"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/72/b56089aeee6c496d969bac42376bedb6e3eeab4682e1018fa3137122f94b/types_pyyaml-6.0.12.20260815.tar.gz", hash = "sha256:28764110c9cf35846e733da32d8d734df7473c5dde9ef67c3b7332ec0e819858", size = 18545, upload-time = "2026-08-15T02:41:51.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/52/eefeba09be4ef2a1eb989eb92934561e8e502a6ee3c32654996e4be7e399/types_pyyaml-6.0.12.20260815-py3-none-any.whl", hash = "sha256:6f332212b7e191f3afd5016a713c510b6340593b7ebec573c7d5d20aa5386d3b", size = 21148, upload-time = "2026-08-15T02:41:50.555Z" },
 ]
 
 [[package]]

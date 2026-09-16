@@ -35,7 +35,6 @@ JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 LOKI_URL="${LOKI_URL:-http://localhost:3100}"
-MINIO_URL="${MINIO_URL:-http://localhost:9000}"
 
 # ── Pretty output ─────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -110,7 +109,6 @@ cmd_infra() {
   check_get "Prometheus"  "$PROMETHEUS_URL/-/healthy"  "Prometheus Server is Healthy"
   check_get "Grafana"     "$GRAFANA_URL/api/health"    "ok"
   check_get "Loki ready"  "$LOKI_URL/ready"            "ready"
-  check_get "MinIO live"  "$MINIO_URL/minio/health/live"
 }
 
 cmd_health() {
@@ -216,7 +214,7 @@ ${B}Usage:${X} bash scripts/dev/mdx-test.sh <command>
 ${B}Stack:${X}
   doctor        Check local prerequisites (make doctor)
   up            dev-up + migrate-up + seed
-  infra         Health-check Jaeger/Prometheus/Grafana/Loki/MinIO
+  infra         Health-check Jaeger/Prometheus/Grafana/Loki
   health        Health-check every service /healthz + /readyz
   all           infra + health + keycloak token check
 

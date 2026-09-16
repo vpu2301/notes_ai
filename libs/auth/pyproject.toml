@@ -10,6 +10,8 @@ dependencies = [
     "fastapi>=0.111.0",
     # Sprint 16: session-revocation denylist (auth.revocation).
     "redis>=5.0",
+    # IDX-A2: auth.testing mints RS256 tokens for contract tests.
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

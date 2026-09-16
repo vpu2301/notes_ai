@@ -1,6 +1,6 @@
 """Smoke test for the FastAPI app factory.
 
-Doesn't invoke the lifespan (which would attempt DB / Redis / MinIO
+Doesn't invoke the lifespan (which would attempt DB / Redis / S3
 connections); just verifies the app can be constructed and its
 ``/healthz`` route returns 200.
 """

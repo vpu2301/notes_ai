@@ -7,7 +7,6 @@ DB/audit boundary stubbed — no infra required (mirrors
 
 from __future__ import annotations
 
-import ast
 import contextlib
 import json
 from datetime import UTC, datetime
@@ -109,12 +108,10 @@ def _template(sections):
 
 
 def _detail(resp):
-    """Recover the (dict) HTTPException detail from the RFC 9457 envelope.
-
-    The service's global handler str()-wraps dict details into the
-    ``detail`` member, so we round-trip via ``ast.literal_eval``.
-    """
-    return ast.literal_eval(resp.json()["detail"])
+    """The RFC 9457 body. A dict raised as ``HTTPException.detail`` is
+    lifted to the top level by the shared handler, so its members
+    (``error``, ``expected_version`` …) are read straight off the body."""
+    return resp.json()
 
 
 @pytest.fixture

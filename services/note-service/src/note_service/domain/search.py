@@ -88,6 +88,10 @@ class SearchHit:
     snippet: str
     created_at: datetime
     updated_at: datetime
+    # 0016 — who can open it, for the list's private / shared / public badge.
+    visibility: str = "private"
+    shared_with_count: int = 0
+    has_public_link: bool = False
 
 
 def encode_cursor(*, created_at: datetime, note_id: UUID) -> str:
@@ -166,6 +170,13 @@ async def search_notes(
             n.id, n.code, n.title, n.status, n.template_id,
             n.primary_author_id, n.co_author_ids,
             n.created_at, n.updated_at,
+            n.visibility::text AS visibility,
+            cardinality(n.shared_with_ids) AS shared_with_count,
+            EXISTS (
+                SELECT 1 FROM note_share_links l
+                WHERE l.note_id = n.id AND l.revoked_at IS NULL
+                  AND (l.expires_at IS NULL OR l.expires_at > now())
+            ) AS has_public_link,
             {snippet_expr} AS snippet
         FROM notes n
         JOIN note_versions v ON v.id = n.current_version_id
@@ -191,6 +202,9 @@ async def search_notes(
                 snippet=r["snippet"] or "",
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
+                visibility=r["visibility"],
+                shared_with_count=r["shared_with_count"] or 0,
+                has_public_link=r["has_public_link"],
             )
         )
     next_cursor: str | None = None

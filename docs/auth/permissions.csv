@@ -209,3 +209,9 @@ viewer,synonym.write,synonym,false,curation is administration
 auditor,synonym.write,synonym,false,read-only role
 service,synonym.write,synonym,false,human curation only
 device,synonym.write,synonym,false,room-capture hardware: capture only; no search surface
+tenant_admin,device.manage,credential,true,IDX-B1b — the JWT role an owner/admin membership maps to
+member,device.manage,credential,false,room devices are workspace infrastructure, not authoring
+viewer,device.manage,credential,false,room devices are workspace infrastructure, not authoring
+auditor,device.manage,credential,false,read-only role: sees the credential.* audit trail, changes nothing
+device,device.manage,credential,false,a room device cannot provision another room device
+service,device.manage,credential,false,S2S callers do not manage hardware

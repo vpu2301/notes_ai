@@ -2,11 +2,25 @@ import Foundation
 import LocalAuthentication
 import Security
 
-/// The saved sign-in, kept in the Keychain behind Face ID / Touch ID so
-/// the password never has to be typed again. The item is created with
-/// `.biometryCurrentSet`: only the biometrics enrolled at save time can
-/// open it (re-enrolling a face forgets the password), and it never leaves
-/// this device. Reading it is what shows the Face ID prompt.
+/// The saved password, kept in the Keychain behind Face ID / Touch ID so a
+/// Keycloak user never has to type it again.
+///
+/// IDX-I1 deleted this file: a native session makes a stored password
+/// pointless, because a refresh token can be revoked and a password cannot.
+/// IOS-1 brings it back **for the dual-issuer period only** (ADR-0047).
+/// During `dual` the two issuers are live at once and existing users still
+/// sign in with a Keycloak password; taking their saved password away in
+/// the same release that adds email codes would be a regression they never
+/// asked for, for a benefit they cannot yet have.
+///
+/// It is therefore deliberately unchanged from the pre-IDX-I1 version:
+/// same service, same account, same access control, so a phone that
+/// updates finds the item it already had. `LegacyCredentials.purge()` in
+/// `SessionStore.swift` is what deletes it, and it is not called until
+/// IDX-A4/A5 move these users onto native sessions.
+///
+/// Nothing here is reachable for a native (`nrt_`) session — see
+/// `SessionKind.canSavePassword`.
 enum CredentialStore {
     struct Credentials: Codable, Equatable {
         let email: String
@@ -28,7 +42,10 @@ enum CredentialStore {
         }
     }
 
-    private static let service = "ai.notes.capture.credentials"
+    /// The same service `LegacyCredentials` names, from the one place that
+    /// owns the string: an item this app writes and an item the migration
+    /// deletes must never be able to drift apart.
+    static var service: String { LegacyCredentials.service }
     private static let account = "sign-in"
 
     private static var baseQuery: [String: Any] {
@@ -41,25 +58,11 @@ enum CredentialStore {
 
     // MARK: - Biometrics on this device
 
-    /// "Face ID", "Touch ID", or nil when the device has neither enrolled.
-    static var biometryName: String? {
-        let context = LAContext()
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else { return nil }
-        switch context.biometryType {
-        case .faceID: return "Face ID"
-        case .touchID: return "Touch ID"
-        case .opticID: return "Optic ID"
-        default: return nil
-        }
-    }
-
-    static var biometrySymbol: String {
-        switch LAContext().biometryType {
-        case .touchID: return "touchid"
-        case .opticID: return "opticid"
-        default: return "faceid"
-        }
-    }
+    // `Biometrics` (SessionStore.swift) is the one reader of `LAContext`
+    // in this app since IDX-I1; these are the names this file used before
+    // and the sign-in screen still uses.
+    static var biometryName: String? { Biometrics.name }
+    static var biometrySymbol: String { Biometrics.symbol }
 
     // MARK: - The saved sign-in
 
@@ -84,6 +87,7 @@ enum CredentialStore {
         var attributes = baseQuery
         attributes[kSecAttrAccessControl as String] = access
         attributes[kSecValueData as String] = payload
+        attributes[kSecAttrSynchronizable as String] = false
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else { throw Failure.keychain(status) }
     }

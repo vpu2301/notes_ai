@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/Toaster";
 import { createBlankNote } from "../lib/createBlankNote";
 import { useDismiss } from "../lib/useDismiss";
+import { BrandMark } from "../components/BrandMark";
 import {
   BellIcon,
   ChevronDownIcon,
@@ -18,11 +19,14 @@ import {
   MicIcon,
   NotesIcon,
   MonitorIcon,
+  SettingsIcon,
   MoonIcon,
   SunIcon,
   UploadIcon,
 } from "../components/icons";
 import { relativeTime } from "../lib/time";
+import { useSpaces } from "../spaces/SpacesContext";
+import { SpacesNav } from "./SpacesNav";
 import { useTheme, type ThemePref } from "./theme";
 
 const COLLAPSE_KEY = "notesai.sidebar.collapsed";
@@ -178,11 +182,14 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
 }
 
 function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
-  const { me, displayName } = useAuth();
+  // `identity`, not `db_user`: IDX-B2 deletes the per-tenant `users` row,
+  // and `AuthContext` already reconciles whichever shape `/auth/me` sends.
+  const { identity, displayName } = useAuth();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const ref = useDismiss<HTMLDivElement>(open, close);
-  const email = me?.db_user?.email ?? "";
+  const email = identity?.email ?? "";
 
   return (
     <div className="sb-user-wrap" ref={ref}>
@@ -212,6 +219,18 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
             <strong>{displayName}</strong>
             {email && <span>{email}</span>}
           </div>
+          <div className="sb-user-menu-sep" />
+          <button
+            className="sb-user-menu-item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              navigate("/settings/account");
+            }}
+          >
+            <SettingsIcon size={14} />
+            <span>Settings</span>
+          </button>
           <div className="sb-user-menu-sep" />
           <button
             className="sb-user-menu-item danger"
@@ -331,8 +350,9 @@ function NotificationBell() {
 }
 
 /** Route → topbar title. Pages that need a richer crumb own their heading. */
-function titleFor(pathname: string): string {
+function titleFor(pathname: string, spaceName?: string): string {
   if (pathname === "/") return "Notes";
+  if (pathname.startsWith("/spaces/")) return spaceName ?? "Space";
   if (pathname.startsWith("/meeting/new")) return "New meeting";
   if (pathname.startsWith("/new")) return "New from template";
   if (pathname.startsWith("/notes/")) return "Note";
@@ -341,6 +361,7 @@ function titleFor(pathname: string): string {
 
 function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
   const { pathname } = useLocation();
+  const { spaces } = useSpaces();
   const [stuck, setStuck] = useState(false);
 
   useEffect(() => {
@@ -354,7 +375,9 @@ function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
 
   return (
     <header className={`tb ${stuck ? "is-stuck" : ""}`}>
-      <div className="tb-title">{titleFor(pathname)}</div>
+      <div className="tb-title">
+        {titleFor(pathname, spaces.find((s) => pathname === `/spaces/${s.id}`)?.name)}
+      </div>
       <div className="tb-spacer" />
       <div className="tb-actions">
         <NotificationBell />
@@ -469,7 +492,7 @@ export function AppShell() {
         <div className="sb-brand">
           <NavLink to="/" className="sb-brand-inner" title="Notes AI">
             <span className="sb-brand-mark" aria-hidden="true">
-              N
+              <BrandMark size={26} />
             </span>
             {!collapsed && (
               <span className="sb-wordmark">
@@ -498,7 +521,8 @@ export function AppShell() {
         />
 
         <nav className="sb-nav" aria-label="Main">
-          <SideLink to="/" end icon={<NotesIcon size={14} />} label="Notes" collapsed={collapsed} />
+          <SideLink to="/" end icon={<NotesIcon size={14} />} label="All notes" collapsed={collapsed} />
+          <SpacesNav collapsed={collapsed} />
         </nav>
 
         <div className="sb-spacer" />

@@ -190,3 +190,24 @@ build time — see docs/models/PINS.md § Re-asserted at startup.
   large-v3 working set → raise the weight, or split.
 - Conversation demand becoming the dominant load → a dedicated pool may win
   on operational simplicity rather than on interference.
+
+## Amendment 2026-09-05 (DEP-S0, ADR-0046) — GPU line deferred; dev-Mac and CPU numbers
+
+The A10G rig referenced above was never procured. Under the Foundation plan
+(rev 1.1) the only GPU spend before beta is the DEP-S6 metered 2-hour
+sandbox; **the GPU re-run this ADR waits on is deferred to that sandbox**.
+Until then the release gates are measured on the founder's Mac and on the
+CPU path through the `libs/models` seam (`make measure-turnaround`,
+`docs/eval/turnaround-2026-09-05-*.json`; synthetic German TTS fixtures,
+so these are *turnaround* numbers, not WER/DER):
+
+| Backend | Model | Fixture | Wall | Turnaround | A2 gate (≤ 0.08×) |
+|---|---|---|---|---|---|
+| `dev_mac_asr` (whisper.cpp, Metal, Apple M5 24 GB) | large-v3-turbo | 10 min | 77 s | **0.127×** | miss |
+| `dev_mac_asr` (whisper.cpp, Metal, Apple M5 24 GB) | large-v3-turbo | 60 min | 339 s | **0.094×** | miss |
+| `inproc_cpu_asr` (faster-whisper, CPU int8, same Mac) | tiny | 10 min | 47 s | **0.078×** | pass (tiny-quality) |
+
+Reading: a large-class model on Apple-silicon Metal lands at ~0.09–0.13×
+of meeting length; the ≤ 0.08× gate needs either the `hf_eu_asr` endpoint
+(DEP-S1, numbers due by 18 Sep) or the DEP-S6 GPU sandbox. Diarization
+numbers are unchanged (still CPU-measured, still in-process).

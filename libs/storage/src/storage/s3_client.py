@@ -1,7 +1,7 @@
-"""Async S3/MinIO adapter — the only place we touch ``aioboto3``.
+"""Async S3 adapter — the only place we touch ``aioboto3``.
 
 Centralizing the client makes it trivial to swap implementations later
-(e.g., to a direct ``aiohttp`` MinIO client) and means CI's grep for
+(e.g., to a direct ``aiohttp`` S3 client) and means CI's grep for
 ``boto3`` / ``aioboto3`` imports has exactly one allowed origin.
 """
 

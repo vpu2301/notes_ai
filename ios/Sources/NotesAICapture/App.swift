@@ -4,6 +4,8 @@ import SwiftUI
 struct NotesAICaptureApp: App {
     @StateObject private var app = AppState()
 
+    init() { DSAppearance.apply() }
+
     var body: some Scene {
         WindowGroup {
             RootView()

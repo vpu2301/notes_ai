@@ -1,6 +1,9 @@
-import { api, apiBlob } from "./http";
+import { api, apiBlob, ApiError } from "./http";
+import { ASK_HISTORY_LIMIT } from "./types";
 import type {
   AmendResponse,
+  AskResponse,
+  AskTurn,
   FinalizeResponse,
   FromTranscriptResponse,
   NoteAmendmentType,
@@ -10,8 +13,10 @@ import type {
   NoteVersionDetail,
   NoteVersionSummary,
   NoteVisibility,
+  ReadPurpose,
   SearchResponse,
   SharedNoteView,
+  ShareEmailResponse,
   SharingView,
   SourceJobLink,
   TemplateDetail,
@@ -38,9 +43,20 @@ export function createNote(content: NoteContent): Promise<NoteCreatedResponse> {
   });
 }
 
-export function getNote(id: string): Promise<NoteEnvelope> {
+/**
+ * The problem `type` the server answers a non-author read that came without
+ * `?purpose=`. The page retries once with a purpose and says whose note it
+ * is showing; see `ReadPurpose`.
+ */
+export const READ_PURPOSE_REQUIRED = "https://errors.notes-ai/missing-read-purpose";
+
+export function needsReadPurpose(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 422 && err.type === READ_PURPOSE_REQUIRED;
+}
+
+export function getNote(id: string, purpose?: ReadPurpose): Promise<NoteEnvelope> {
   return api<NoteEnvelope>("note", `/v1/notes/${id}`, {
-    query: { include_content: true },
+    query: { include_content: true, purpose },
   });
 }
 
@@ -102,16 +118,22 @@ export function searchNotes(params: {
   });
 }
 
-export function listVersions(id: string): Promise<NoteVersionSummary[]> {
-  return api<NoteVersionSummary[]>("note", `/v1/notes/${id}/versions`);
+export function listVersions(id: string, purpose?: ReadPurpose): Promise<NoteVersionSummary[]> {
+  return api<NoteVersionSummary[]>("note", `/v1/notes/${id}/versions`, { query: { purpose } });
 }
 
-export function getVersion(id: string, versionNumber: number): Promise<NoteVersionDetail> {
-  return api<NoteVersionDetail>("note", `/v1/notes/${id}/versions/${versionNumber}`);
+export function getVersion(
+  id: string,
+  versionNumber: number,
+  purpose?: ReadPurpose,
+): Promise<NoteVersionDetail> {
+  return api<NoteVersionDetail>("note", `/v1/notes/${id}/versions/${versionNumber}`, {
+    query: { purpose },
+  });
 }
 
-export function downloadPdf(id: string): Promise<Blob> {
-  return apiBlob("note", `/v1/notes/${id}/pdf`);
+export function downloadPdf(id: string, purpose?: ReadPurpose): Promise<Blob> {
+  return apiBlob("note", `/v1/notes/${id}/pdf`, { query: { purpose } });
 }
 
 export function createFromTranscript(params: {
@@ -155,6 +177,31 @@ export function shareWithMember(id: string, email: string): Promise<SharingView>
   return api<SharingView>("note", `/v1/notes/${id}/share`, { method: "POST", json: { email } });
 }
 
+/**
+ * Mail the note to people, from the server.
+ *
+ * The old "Email link…" built a `mailto:` URL and let the browser hand it
+ * to the desktop mail client, which produced an unstyled draft the sender
+ * still had to send — and on macOS surfaced whatever Mail.app already had
+ * open. This sends the real thing: workspace members are granted access
+ * and pointed at the note, everyone else gets the public link.
+ */
+export function shareByEmail(
+  id: string,
+  body: { recipients: string[]; message?: string; lang?: string },
+): Promise<ShareEmailResponse> {
+  return api<ShareEmailResponse>("note", `/v1/notes/${id}/share/email`, {
+    method: "POST",
+    json: {
+      recipients: body.recipients,
+      message: body.message ?? "",
+      // The sender's UI language. The recipient's is unknowable — half of
+      // them have no account here — and people share within a team.
+      lang: body.lang ?? navigator.language,
+    },
+  });
+}
+
 export function unshareMember(id: string, sub: string): Promise<SharingView> {
   return api<SharingView>("note", `/v1/notes/${id}/share/${sub}`, { method: "DELETE" });
 }
@@ -175,4 +222,19 @@ export function getSharedNote(token: string): Promise<SharedNoteView> {
 
 export function downloadSharedPdf(token: string): Promise<Blob> {
   return apiBlob("note", `/v1/shared/${encodeURIComponent(token)}/pdf`, { auth: false });
+}
+
+// ── ask this note ─────────────────────────────────────────────────────
+
+/**
+ * Ask a question about one note. The answer comes from the model the
+ * workspace is configured for, over the note's text and its transcript;
+ * `history` is the conversation so far, oldest first, and the server
+ * takes at most `ASK_HISTORY_LIMIT` turns of it.
+ */
+export function askNote(id: string, question: string, history: AskTurn[]): Promise<AskResponse> {
+  return api<AskResponse>("note", `/v1/notes/${id}/ask`, {
+    method: "POST",
+    json: { question, history: history.slice(-ASK_HISTORY_LIMIT) },
+  });
 }

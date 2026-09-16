@@ -66,7 +66,7 @@ def main() -> int:
             print(f"  {path.relative_to(repo)}:{line}  {snippet}", file=sys.stderr)
         print(
             "\nUse libs/storage.EncryptedObjectStore instead. PHI bytes must "
-            "never be written to MinIO/S3 outside the envelope path.",
+            "never be written to S3 outside the envelope path.",
             file=sys.stderr,
         )
         return 1

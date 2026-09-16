@@ -1,0 +1,5 @@
+#include "Common.xcconfig"
+
+// Development stacks are plain http: localhost on the simulator, the Mac's
+// LAN address on a phone. Only the Debug build is allowed to talk to them.
+INFOPLIST_PREPROCESSOR_DEFINITIONS = $(inherited) DEV_HTTP=1

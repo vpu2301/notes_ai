@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -44,6 +46,12 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
+    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
+    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
+    # token's own `iss` selects which entry verifies it. Unset (the
+    # default) means the three values above build a one-element list, so
+    # a deployment that has not been migrated behaves exactly as before.
+    auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     # ── CORS (SPA integration) ──────────────────────────────────────────
@@ -82,7 +90,7 @@ class Settings(BaseSettings):
     template_cache_ttl_seconds: int = Field(default=60, alias="MDX_TEMPLATE_CACHE_TTL_SECONDS")
 
     # Issuing organisation printed on the exported PDF (M1·A3).
-    pdf_issuer_name: str = Field(default="Klarnote", alias="MDX_PDF_ISSUER_NAME")
+    pdf_issuer_name: str = Field(default="Notes AI", alias="MDX_PDF_ISSUER_NAME")
 
     # Sprint 13: typed-field extraction at draft assembly (ADR-0028).
     # Fail-open — an unreachable nlp-service costs proposals, not drafts.
@@ -93,6 +101,37 @@ class Settings(BaseSettings):
     # asr-service base URL — create-from-transcript fetches the
     # completed job's transcript from there, forwarding the caller's JWT.
     asr_service_base_url: str = Field(default="http://localhost:8001", alias="ASR_SERVICE_BASE_URL")
+
+    # ── "Ask this note" (libs/models chat provider, ADR-0046) ──────────
+    # The registry in config/models.yaml decides which backend answers
+    # (dev: the Mac's Ollama; staging/prod: the EU endpoint). Resolved
+    # on first use, so a Mac without a model server still serves notes.
+    models_config: str = Field(default="config/models.yaml", alias="MODELS_CONFIG")
+    # Registry env name: dev | test | staging | prod. Derived from
+    # ENVIRONMENT when unset (development→dev, production→prod).
+    models_env: str = Field(default="", alias="ENV")
+    ask_max_tokens: int = Field(default=700, alias="MDX_ASK_MAX_TOKENS")
+    # How much of the note + transcript goes into the prompt (characters).
+    ask_context_chars: int = Field(default=60_000, alias="MDX_ASK_CONTEXT_CHARS")
+
+    @staticmethod
+    def registry_environ() -> Mapping[str, str]:
+        """The mapping ``${VAR}`` placeholders in config/models.yaml resolve
+        from — here because config.py is the one module allowed to read the
+        process environment (check-no-os-environ gate)."""
+        return os.environ
+
+    def registry_env(self) -> str:
+        if self.models_env:
+            return self.models_env
+        if self.testing:
+            return "test"
+        return {
+            "development": "dev",
+            "production": "prod",
+            "test": "test",
+            "staging": "staging",
+        }.get(self.environment, self.environment)
 
     # ── Note synthesis (spec item 1) ──────────────────────────────────
     # "mock" (default) is the deterministic offline engine — no external
@@ -201,11 +240,62 @@ class Settings(BaseSettings):
         extra = [p.strip() for p in self.calendar_return_to_extra.split(",") if p.strip()]
         return [*self.cors_origins_list, "notesai://", *extra]
 
+    # ── Outbound mail (sharing a note by e-mail) ────────────────────────
+    # "Send" in the share modal delivers a branded HTML mail from the
+    # server. It replaces the old `mailto:` hand-off, which opened
+    # whatever the desktop mail client had lying around and put the
+    # link in an unstyled draft the sender had to send themselves.
+    #
+    # `mock` captures in memory and refuses to run in production; `smtp`
+    # talks to Mailpit in dev and the real relay in prod. Same env name
+    # as auth-service so one deployment-wide switch flips both.
+    email_provider: str = Field(default="mock", alias="MDX_EMAIL_PROVIDER")
+    note_smtp_host: str = Field(default="localhost", alias="MDX_NOTE_SMTP_HOST")
+    note_smtp_port: int = Field(default=1025, alias="MDX_NOTE_SMTP_PORT")
+    note_smtp_use_tls: bool = Field(default=False, alias="MDX_NOTE_SMTP_USE_TLS")
+    note_smtp_username: str = Field(default="", alias="MDX_NOTE_SMTP_USERNAME")
+    # Google Workspace has refused plain account passwords for SMTP since
+    # 2024 — this must be a 16-character App Password. The symptom of
+    # getting it wrong is `535-5.7.8 Username and Password not accepted`.
+    note_smtp_password: SecretStrEnv = Field(
+        default_factory=lambda: Secret(""), alias="MDX_NOTE_SMTP_PASSWORD"
+    )
+    note_email_from: str = Field(default="notes@notes-ai.local", alias="MDX_NOTE_EMAIL_FROM")
+    note_email_from_name: str = Field(default="Notes AI", alias="MDX_NOTE_EMAIL_FROM_NAME")
+    # Replies go to the person who shared, not to us — set per-send.
+    # This is only the fallback when the sharer has no address on file.
+    note_email_reply_to: str = Field(
+        default="notes@notes-ai.local", alias="MDX_NOTE_EMAIL_REPLY_TO"
+    )
+    # SPA origin the mailed links point at. A share mail is only useful
+    # if it lands on the app the recipient actually runs.
+    app_base_url: str = Field(default="http://localhost:5173", alias="MDX_APP_BASE_URL")
+    # A hung relay must not hold an HTTP worker until the client gives up.
+    share_email_timeout_s: float = Field(default=15.0, alias="MDX_SHARE_EMAIL_TIMEOUT_S")
+    # Per request, and per sender per hour. The second is the one that
+    # matters: a share endpoint that mails anywhere is a spam relay
+    # wearing our From address.
+    share_email_max_recipients: int = Field(default=10, alias="MDX_SHARE_EMAIL_MAX_RECIPIENTS")
+    share_emails_per_user_per_hour: int = Field(
+        default=60, alias="MDX_SHARE_EMAILS_PER_USER_PER_HOUR"
+    )
+    # How much of the sharer's own words to carry. Long enough for a
+    # paragraph of context, short enough that the mail stays a pointer.
+    share_email_max_message_chars: int = Field(
+        default=1000, alias="MDX_SHARE_EMAIL_MAX_MESSAGE_CHARS"
+    )
+
     # ── Session revocation check (sprint 16) ────────────────────────────
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0041). Same env name across the fleet; off in dev.
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
+
+    @property
+    def is_production(self) -> bool:
+        # Staging counts: a staging deployment that silently swallowed
+        # share mail would prove nothing about the one that matters.
+        return self.environment in {"production", "staging"}
 
 
 settings = Settings()

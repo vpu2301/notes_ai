@@ -19,6 +19,8 @@ struct RootView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ZStack { DSWash(); DSDots() })
+            case .locked:
+                LockedView()
             case .signedOut:
                 ScrollView {
                     SignInView()
@@ -36,14 +38,30 @@ struct RootView: View {
                 MainView()
             }
         }
+        .sheet(item: $app.reauth) { prompt in
+            ReauthSheet(prompt: prompt)
+        }
+        .onOpenURL { url in app.handle(url) }
         .preferredColorScheme(app.themePref.colorScheme)
         .tint(DS.accentText)
         .onChange(of: scenePhase) { _, phase in
+            // Coming back to a locked app asks for the face again; coming
+            // back to an unchecked session (the phone was asleep on a
+            // train) tries the server once more.
+            if phase == .active, app.authState == .locked {
+                Task { await app.unlock() }
+            }
             guard phase == .active, app.authState == .signedIn else { return }
+            if app.reconnecting { Task { await app.reconnect() } }
             app.calendar.recheckAccess()
+            // A recording kept while the app was away, and a membership
+            // removed while it was away, are both only discoverable here.
+            app.refreshPending()
             Task {
+                await app.refreshWorkspaces()
                 await app.refreshRecents()
                 await app.refreshNotes()
+                await app.refreshSpaces()
                 await app.googleCalendar.refresh()
             }
         }
@@ -62,6 +80,9 @@ struct MainView: View {
                 .navigationDestination(for: Selection.self) { selection in
                     DetailView(selection: selection)
                 }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if app.reconnecting { ReconnectingBanner() }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             CaptureBar()

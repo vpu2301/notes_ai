@@ -202,7 +202,7 @@ class MockProvider(EmailProvider):
             "auth.email.mock_send",
             extra={"to": message.to_address, "subject": message.subject},
         )
-        return SendResult(provider_message_id=f"<mock-{len(self.sent)}@klarnote.local>")
+        return SendResult(provider_message_id=f"<mock-{len(self.sent)}@notes-ai.local>")
 
     async def aclose(self) -> None:
         return None

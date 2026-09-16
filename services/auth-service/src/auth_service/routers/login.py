@@ -1,20 +1,41 @@
-"""POST /auth/login, POST /auth/refresh, POST /auth/logout.
+"""POST /auth/login, POST /auth/refresh, POST /auth/logout — Keycloak.
+
+Mounted in **keycloak mode only** since IDX-M1. In native mode the same
+three paths are served by `session_native.py` against `auth_sessions`;
+this router proxies to Keycloak in every line below, so under a native
+issuer it could only ever answer 502 — and its `/auth/refresh` would
+shadow the native one that clients actually hold a token for. IDX-A4
+brings the native password grant that `/auth/login` still owes.
+
+Where the refresh token travels is ``X-Client-Type``'s decision, exactly
+as it is in native mode (``domain/transport.py``, and `session_native.py`
+for the same three paths): a browser's refresh token is in the HttpOnly
+``mdx_rt`` cookie and never in a body; a native client's is in the body
+and never in a cookie. Until this router honoured that, a Mac or iPhone
+signing in here was handed a cookie it has no jar for — the app read a
+200 with nothing to keep and said so ("this server cannot keep this Mac
+signed in"), which was the truth about the response and a bug about the
+server.
 
 Login flow:
   1. Take {username, password} from JSON body.
   2. Proxy to Keycloak via the confidential mdx-backend client.
-  3. On success: set the refresh token as a HttpOnly cookie (path=AUTH_COOKIE_PATH,
-     SameSite=Strict, Secure in non-dev), return access_token + expires_in in JSON.
+  3. On success: hand the refresh token to the client the way that client
+     can keep it — HttpOnly cookie (path=AUTH_COOKIE_PATH, SameSite per
+     settings, Secure in non-dev) for a browser, ``refresh_token`` +
+     ``refresh_expires_in`` in the JSON body for a native app — and
+     return access_token + expires_in either way.
   4. Verify the access token to extract claims and emit an audit ``auth.login`` event.
 
 Refresh flow:
-  1. Read the refresh token from the cookie.
-  2. Call Keycloak refresh; on success, rotate the cookie (new refresh, old invalidated).
+  1. Read the refresh token from the body (native) or the cookie (browser).
+  2. Call Keycloak refresh; on success, rotate it back the same way.
   3. On "Token is not active" / 400 → audit ``auth.refresh_replay_detected`` (severity sec).
      The old refresh was consumed by an earlier call; this attempt is a replay.
 
 Logout flow:
-  1. Read cookie; call Keycloak logout to revoke; clear cookie; 204.
+  1. Read the token from the body or the cookie; call Keycloak logout to
+     revoke; clear the cookie; 204.
 
 MFA is intentionally NOT enforced here — pilot deployment runs MFA-off per
 the user's instruction. Re-enabling it later means flipping the
@@ -24,45 +45,62 @@ the user's instruction. Re-enabling it later means flipping the
 from __future__ import annotations
 
 import logging
+import time
 from typing import Annotated, Any
+from uuid import UUID
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
-from opentelemetry import metrics
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from audit import Severity
 from auth import verify_token
 
-from .. import audit_kinds
+from .. import audit_kinds, auth_metrics
 from ..config import settings
 from ..deps import get_state
+from ..domain.transport import TokenResponse, client_type_of, token_response
 from ..keycloak_client import KeycloakError
+from ..main_deps import auth_issuers
 
-_meter = metrics.get_meter("mdx.auth")
-_login_counter = _meter.create_counter(
-    "mdx_auth_login_total",
-    description="Login attempts by outcome",
-    unit="1",
-)
-_refresh_replay_counter = _meter.create_counter(
-    "mdx_auth_refresh_replay_total",
-    description="Refresh-token replays detected (always anomalous)",
-    unit="1",
-)
-_logout_counter = _meter.create_counter(
-    "mdx_auth_logout_total",
-    description="Logout calls",
-    unit="1",
-)
+# Shared with `session_native`, which serves refresh/logout in native mode:
+# one declaration per instrument name, one series per counter.
+_login_counter = auth_metrics.login_counter
+_refresh_replay_counter = auth_metrics.refresh_replay_counter
+_logout_counter = auth_metrics.logout_counter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class LoginResponse(BaseModel):
-    access_token: str
-    expires_in: int
-    token_type: str = "Bearer"
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RefreshRequest(_Strict):
+    """Native clients send their token here; browsers send nothing at all.
+
+    Optional rather than required so one route serves both transports —
+    a browser POSTing an empty body must not be answered 422 for
+    declining to put its HttpOnly cookie in a field it cannot read.
+
+    The cap is 4096 rather than `session_native`'s 512: a Keycloak
+    refresh token is a signed JWT carrying a realm's worth of claims, not
+    the short opaque handle the native issuer mints.
+    """
+
+    refresh_token: str | None = Field(default=None, min_length=1, max_length=4096)
+
+
+class LogoutRequest(_Strict):
+    refresh_token: str | None = Field(default=None, min_length=1, max_length=4096)
+
+
+def _presented_token(request: Request, body: RefreshRequest | LogoutRequest | None) -> str | None:
+    """The body's token wins over the cookie: it is the one the caller
+    could only have got by being the client it claims to be."""
+    if body is not None and body.refresh_token:
+        return body.refresh_token
+    return request.cookies.get(settings.auth_cookie_name)
 
 
 async def _extract_credentials(request: Request) -> tuple[str, str, str | None]:
@@ -112,22 +150,40 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-async def _audit_login(state: Any, *, access_token: str, kind: str, severity: Severity) -> None:
-    """Verify the access token to recover tid+sub, then emit an audit event."""
+async def _verified_claims(state: Any, access_token: str, *, event: str) -> Any:
+    """Claims of a token we just minted, or ``None`` if it will not verify.
+
+    One verification per request, shared by the three things that need
+    it: the MFA gate, the audit event, and the tenant/roles the response
+    carries. Failing to verify a token Keycloak just issued means the
+    JWKS path is broken — log loudly, and let each caller decide what a
+    missing tenant context means for its own half.
+    """
     try:
-        claims = await verify_token(
+        return await verify_token(
             access_token,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
+            # FND-1: the service's own list. In `dual` that is Keycloak
+            # AND the native issuer; this path only ever sees the former,
+            # but a single hard-wired issuer here is exactly the drift
+            # the gate exists to prevent.
+            issuers=auth_issuers(),
             jwks_cache=state.jwks_cache,
         )
-    except Exception as exc:
-        # Pre-pilot we don't expect tokens we issued to fail verify; log
-        # loudly and skip the audit (no usable tenant context).
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "audit_login.verify_failed",
-            extra={"kind": kind, "error": str(exc), "error_class": type(exc).__name__},
+            event,
+            extra={"error": str(exc), "error_class": type(exc).__name__},
         )
+        return None
+
+
+async def _audit_login(state: Any, *, claims: Any, kind: str, severity: Severity) -> None:
+    """Emit the audit event for a sign-in or a rotation.
+
+    Skipped when the token did not verify: there is no usable tenant
+    context, and an audit row on a guessed tenant is worse than none.
+    """
+    if claims is None:
         return
 
     await state.audit_writer.write_event(
@@ -142,12 +198,13 @@ async def _audit_login(state: Any, *, access_token: str, kind: str, severity: Se
 
 @router.post(
     "/login",
-    response_model=LoginResponse,
+    response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
     summary="Exchange username + password for an access token",
 )
-async def login(request: Request, response: Response) -> LoginResponse:
+async def login(request: Request, response: Response) -> TokenResponse:
     state = get_state()
+    client_type = client_type_of(request)
     username, password, otp = await _extract_credentials(request)
     try:
         tok = await state.keycloak.password_grant(username=username, password=password)
@@ -163,6 +220,27 @@ async def login(request: Request, response: Response) -> LoginResponse:
                 status_code=status.HTTP_423_LOCKED,
                 detail=f"account locked: {kc_desc}",
             ) from exc
+        # BE-0: an account created by self-serve signup is disabled in
+        # Keycloak until its address is confirmed, and Keycloak answers a
+        # disabled account with exactly the same `invalid_grant` it gives
+        # a wrong password. Told that, the person retypes a password that
+        # was never wrong. So before answering 401 we ask one question:
+        # is there an `invited` row for this address? If there is, the
+        # honest answer is "confirm your email", with a resend button.
+        #
+        # It is not an enumeration leak. The caller supplied a password
+        # that Keycloak accepted as belonging to this account — reaching
+        # this branch already requires knowing the credential.
+        if await _is_unverified_signup(state, username):
+            _login_counter.add(1, {"result": "email_not_verified"})
+            await _audit_login_refused(state, username=username, reason="email_not_verified")
+            refusal = HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="confirm your email address to finish signing up",
+            )
+            refusal.problem_extras = {"code": "email_not_verified"}  # type: ignore[attr-defined]
+            raise refusal from exc
+
         _login_counter.add(1, {"result": "invalid_creds"})
         logger.info(
             "auth.login_failed",
@@ -185,46 +263,104 @@ async def login(request: Request, response: Response) -> LoginResponse:
     # point (ADR-0039). Enrolment status comes from the token's own
     # `mfa_enrolled` claim (attribute-mapped), so the check costs no extra
     # Keycloak round-trip for the unenrolled majority.
-    await _enforce_totp_if_enrolled(state, access_token=tok.access_token, otp=otp)
+    claims = await _verified_claims(state, tok.access_token, event="auth.login.verify_failed")
+    await _enforce_totp_if_enrolled(state, claims=claims, otp=otp)
 
-    _set_refresh_cookie(response, tok.refresh_token, tok.refresh_expires_in)
+    if not client_type.native:
+        # A native app has no cookie jar for this; it gets the token in
+        # the body below and must not also be handed one it cannot read.
+        _set_refresh_cookie(response, tok.refresh_token, tok.refresh_expires_in)
     _login_counter.add(1, {"result": "success"})
 
     # Audit the success (out of band; failures are logged only because we
     # don't yet have reliable tenant resolution for unknown users).
     await _audit_login(
         state,
-        access_token=tok.access_token,
+        claims=claims,
         kind=audit_kinds.AUTH_LOGIN,
         severity=Severity.INFO,
     )
 
-    return LoginResponse(access_token=tok.access_token, expires_in=tok.expires_in)
+    return token_response(
+        client_type=client_type,
+        access_token=tok.access_token,
+        expires_in=tok.expires_in,
+        tenant_id=str(claims.tid) if claims is not None else "",
+        roles=list(claims.roles) if claims is not None else [],
+        refresh_token=tok.refresh_token,
+        refresh_expires_in=tok.refresh_expires_in,
+    )
 
 
-async def _enforce_totp_if_enrolled(state: Any, *, access_token: str, otp: str | None) -> None:
+async def _is_unverified_signup(state: Any, username: str) -> bool:
+    """Is this address a BE-0 signup that never confirmed?
+
+    `users.status = 'invited'` is the marker. `deactivated` is
+    deliberately NOT included: an account an operator switched off keeps
+    today's 403 `account_disabled`, and telling its owner to "confirm
+    your email" would send them round a loop that cannot end.
+
+    Best-effort by construction — a database hiccup must not turn a
+    wrong-password 401 into a 500 — so any failure falls through to the
+    ordinary refusal.
+    """
+    try:
+        # `identities`, not `users`. Both carry the fact, but `users` is
+        # RLS-scoped per tenant and there is no tenant in hand yet — the
+        # caller has no token. `identities` is not tenant-scoped (a person
+        # spans workspaces) and `tenant_writer` reads it under a
+        # permissive policy, so this is the one that can answer.
+        #
+        # `email_verified_at IS NULL` is the marker: the 0027 backfill
+        # stamped every migrated identity, and both signup paths stamp
+        # theirs at creation or at verification. Only a BE-0 account that
+        # never confirmed is NULL.
+        async with state.tenant_writer_pool.acquire() as conn:
+            row = await conn.fetchval(
+                "SELECT 1 FROM identities"
+                " WHERE email = $1 AND email_verified_at IS NULL AND status = 'active'"
+                " LIMIT 1",
+                (username or "").strip().lower(),
+            )
+        return bool(row)
+    except Exception:  # noqa: BLE001
+        logger.warning("auth.login.unverified_lookup_failed")
+        return False
+
+
+async def _audit_login_refused(state: Any, *, username: str, reason: str) -> None:
+    """A refusal on the platform tenant: there is no verified tenant yet.
+
+    The address is not written — the payload carries only the reason and a
+    salted hash, because an audit row is the wrong place for the address
+    of somebody who may not have an account at all.
+    """
+    try:
+        await state.audit_writer.write_event(
+            tenant_id=UUID(settings.auth_platform_tenant_id),
+            kind="auth.login_refused",
+            actor_sub=None,
+            target_kind="user",
+            target_id=None,
+            payload={"reason": reason, "username_hash": _hash_for_log(username)},
+            severity=Severity.WARN,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("auth.login.refusal_audit_failed")
+
+
+async def _enforce_totp_if_enrolled(state: Any, *, claims: Any, otp: str | None) -> None:
     """Reject the login (401) when the user is TOTP-enrolled and ``otp``
     is missing or wrong. No-op for unenrolled users.
 
     Machine codes for the SPA: ``otp_required`` (ask for the code) and
     ``otp_invalid`` (wrong code — retry).
+
+    ``claims`` is ``None`` when the token we just minted would not
+    verify: the JWKS path is broken, which `_verified_claims` has already
+    logged, and inventing an MFA state on top of it would not help.
     """
-    try:
-        claims = await verify_token(
-            access_token,
-            expected_audience=settings.auth_audience,
-            expected_issuer=settings.auth_issuer,
-            jwks_cache=state.jwks_cache,
-        )
-    except Exception as exc:
-        # We just minted this token via Keycloak; if we cannot verify it,
-        # the JWKS path is broken — log loudly, don't invent an MFA state.
-        logger.warning(
-            "auth.login.mfa_check_verify_failed",
-            extra={"error": str(exc), "error_class": type(exc).__name__},
-        )
-        return
-    if not claims.mfa_enrolled:
+    if claims is None or not claims.mfa_enrolled:
         return
 
     def _reject(code: str, detail: str) -> HTTPException:
@@ -276,23 +412,29 @@ async def _enforce_totp_if_enrolled(state: Any, *, access_token: str, otp: str |
 
 @router.post(
     "/refresh",
-    response_model=LoginResponse,
+    response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
-    summary="Rotate refresh cookie; return a new access token",
+    summary="Rotate the refresh token; return a new access token",
 )
 async def refresh(
     response: Response,
     request: Request,
-    mdx_rt: Annotated[str | None, Cookie(alias=None)] = None,
-) -> LoginResponse:
+    body: RefreshRequest | None = None,
+) -> TokenResponse:
     state = get_state()
-    # Pydantic Cookie() doesn't accept dynamic alias; resolve via raw cookies.
-    refresh_token = request.cookies.get(settings.auth_cookie_name)
+    client_type = client_type_of(request)
+    refresh_token = _presented_token(request, body)
     if not refresh_token:
-        raise HTTPException(
+        # A distinct code (docs/api/error-codes.md), the same one
+        # `session_native` uses: "you sent nothing" is a client bug and
+        # "your session is over" is a user event, and a client that
+        # cannot tell them apart retries the wrong one.
+        missing = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="no refresh cookie",
+            detail="no refresh token was presented",
         )
+        missing.problem_extras = {"code": "no_refresh_token"}  # type: ignore[attr-defined]
+        raise missing
 
     try:
         tok = await state.keycloak.refresh(refresh_token=refresh_token)
@@ -302,6 +444,22 @@ async def refresh(
         kc_desc = body_obj.get("error_description", "")
         # Replay / invalid: the refresh has already been consumed (rotation
         # is on at the realm level, so a re-used refresh is a sec event).
+        if kc_error == "invalid_grant" and _is_expired(refresh_token):
+            # …unless the token expired on its own, which Keycloak reports
+            # with the same `invalid_grant`. A Mac whose lid was shut past
+            # `ssoSessionIdleTimeout` presents exactly that, and nobody
+            # replayed anything: charging it as a replay would raise a
+            # `sec` audit event, kill every other session the person has
+            # and denylist their account over a closed laptop. The token
+            # says so itself — its own `exp` is behind us — so read it
+            # before reaching for the alarm.
+            _clear_refresh_cookie(response)
+            expired = HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="the session has expired",
+            )
+            expired.problem_extras = {"code": "session_expired"}  # type: ignore[attr-defined]
+            raise expired from exc
         if kc_error == "invalid_grant":
             # Try to extract the user's sub from the unverified refresh
             # payload so we can audit + force-revoke their sessions.
@@ -379,15 +537,25 @@ async def refresh(
             detail=f"identity provider error: {kc_desc or kc_error}",
         ) from exc
 
-    _set_refresh_cookie(response, tok.refresh_token, tok.refresh_expires_in)
+    if not client_type.native:
+        _set_refresh_cookie(response, tok.refresh_token, tok.refresh_expires_in)
     _login_counter.add(1, {"result": "refresh"})
+    claims = await _verified_claims(state, tok.access_token, event="auth.refresh.verify_failed")
     await _audit_login(
         state,
-        access_token=tok.access_token,
+        claims=claims,
         kind=audit_kinds.AUTH_REFRESH,
         severity=Severity.INFO,
     )
-    return LoginResponse(access_token=tok.access_token, expires_in=tok.expires_in)
+    return token_response(
+        client_type=client_type,
+        access_token=tok.access_token,
+        expires_in=tok.expires_in,
+        tenant_id=str(claims.tid) if claims is not None else "",
+        roles=list(claims.roles) if claims is not None else [],
+        refresh_token=tok.refresh_token,
+        refresh_expires_in=tok.refresh_expires_in,
+    )
 
 
 @router.post(
@@ -398,6 +566,7 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
+    body: LogoutRequest | None = None,
     authorization: Annotated[str | None, "Authorization"] = None,
 ) -> Response:
     """Revoke the refresh token, clear the cookie.
@@ -409,7 +578,7 @@ async def logout(
     context and skip the audit.
     """
     state = get_state()
-    refresh_token = request.cookies.get(settings.auth_cookie_name)
+    refresh_token = _presented_token(request, body)
     # Audit context — prefer the access token (verified); fall back to the
     # refresh token's sub (unverified) for log-line correlation only.
     tid_for_audit = None
@@ -420,8 +589,10 @@ async def logout(
         try:
             claims = await verify_token(
                 raw_auth[len("Bearer ") :],
-                expected_audience=settings.auth_audience,
-                expected_issuer=settings.auth_issuer,
+                # In `dual` the bearer accompanying a Keycloak logout may
+                # be native (a client that switched login methods), so
+                # this verifies against both.
+                issuers=auth_issuers(),
                 jwks_cache=state.jwks_cache,
             )
             tid_for_audit = claims.tid
@@ -517,8 +688,24 @@ def _unverified_jwt_payload(token: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _is_expired(token: str) -> bool:
+    """Is this refresh token past its own ``exp``?
+
+    Read unverified, and only ever to answer "did this expire?" — never
+    for authorisation. A token we cannot read at all is not called
+    expired: the replay path is the safe answer for something this
+    service does not recognise.
+    """
+    payload = _unverified_jwt_payload(token)
+    if payload is None:
+        return False
+    exp = payload.get("exp")
+    if not isinstance(exp, int | float):
+        return False
+    return exp <= time.time()
+
+
 def _unverified_sub(token: str) -> Any:
-    from uuid import UUID
 
     payload = _unverified_jwt_payload(token)
     if payload is None:

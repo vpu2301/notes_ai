@@ -1,0 +1,8 @@
+{"id":"m04_en_hiring","language":"en","transcript":[
+{"speaker":"SPEAKER_1","t_start_ms":0,"t_end_ms":7000,"text":"Quick hiring debrief for the backend role. Three candidates, we need a decision by end of day."},
+{"speaker":"SPEAKER_2","t_start_ms":7000,"t_end_ms":20000,"text":"Candidate B was the strongest on the system design round. Candidate A struggled with the concurrency question. C was fine but not exceptional."},
+{"speaker":"SPEAKER_3","t_start_ms":20000,"t_end_ms":30000,"text":"I agree on B. One concern: B asked for a start date in November, which is later than we wanted."},
+{"speaker":"SPEAKER_1","t_start_ms":30000,"t_end_ms":42000,"text":"November is acceptable. Let's make the offer to B. Marta, please send the offer letter tomorrow and loop in finance on the salary band."},
+{"speaker":"SPEAKER_3","t_start_ms":42000,"t_end_ms":48000,"text":"Will do, offer letter goes out tomorrow and I'll loop in finance."},
+{"speaker":"SPEAKER_2","t_start_ms":48000,"t_end_ms":56000,"text":"I'll send the rejection notes to A and C on Wednesday, after the offer is accepted."}],
+"expect":{"min_action_items":2,"must_mention":["offer letter","November"]}}

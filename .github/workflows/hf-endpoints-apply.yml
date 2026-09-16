@@ -1,0 +1,40 @@
+# Manual, environment-protected apply of deploy/hf/endpoints/*.yaml (DEP-S1-01).
+# Creating or resizing an endpoint spends money; this workflow requires a
+# reviewer approval on the `staging` / `prod` GitHub environment.
+name: HF endpoints — apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Target environment
+        required: true
+        type: choice
+        options: [staging, prod]
+      action:
+        description: apply | pause | resume | status
+        required: true
+        default: apply
+        type: choice
+        options: [apply, pause, resume, status]
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.29"
+      - run: uv sync --all-packages
+      - name: Plan
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_NAMESPACE: ${{ vars.HF_NAMESPACE }}
+        run: uv run python scripts/models/hf_endpoints.py plan --env ${{ inputs.env }} || true
+      - name: ${{ inputs.action }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_NAMESPACE: ${{ vars.HF_NAMESPACE }}
+        run: uv run python scripts/models/hf_endpoints.py ${{ inputs.action }} --env ${{ inputs.env }}

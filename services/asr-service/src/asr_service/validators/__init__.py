@@ -24,7 +24,7 @@ from .codec import validate_codec
 from .duration import validate_duration
 from .hash import compute_hash
 from .magic_bytes import validate_magic_bytes
-from .mime import validate_mime
+from .mime import normalize_mime, validate_mime
 from .quota import validate_quota
 from .result import UploadFacts, ValidationCode, ValidationResult, ok, reject
 from .runner import run_all
@@ -41,6 +41,7 @@ __all__ = [
     "validate_codec",
     "validate_duration",
     "validate_magic_bytes",
+    "normalize_mime",
     "validate_mime",
     "validate_quota",
     "validate_size",

@@ -1,0 +1,104 @@
+{
+  "kind": "smoke",
+  "backend": "dev_mac",
+  "date": "2026-09-05",
+  "generated_at": "2026-09-05T09:48:36+00:00",
+  "git": "7f1294e",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "summary": {
+    "meetings": 5,
+    "failed": 0,
+    "hallucination_rate": 0.0,
+    "latency_ms_p50": 21701,
+    "latency_ms_max": 24751,
+    "model_id": "gemma3:4b",
+    "structured_mode": "json_schema",
+    "processor": {
+      "name": "Developer machine",
+      "region": "local"
+    }
+  },
+  "results": [
+    {
+      "meeting": "m01_en_product_sync",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 23706,
+      "input_tokens": 320,
+      "output_tokens": 348,
+      "action_items": 2,
+      "decisions": 2,
+      "evidence_quotes": 4,
+      "hallucinated_quotes": 0,
+      "model_id": "gemma3:4b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m02_de_kundenprojekt",
+      "language": "de",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 24751,
+      "input_tokens": 281,
+      "output_tokens": 370,
+      "action_items": 3,
+      "decisions": 1,
+      "evidence_quotes": 4,
+      "hallucinated_quotes": 0,
+      "model_id": "gemma3:4b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m03_uk_planning",
+      "language": "uk",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 20192,
+      "input_tokens": 302,
+      "output_tokens": 310,
+      "action_items": 2,
+      "decisions": 1,
+      "evidence_quotes": 3,
+      "hallucinated_quotes": 0,
+      "model_id": "gemma3:4b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m04_en_hiring",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 21701,
+      "input_tokens": 292,
+      "output_tokens": 325,
+      "action_items": 2,
+      "decisions": 2,
+      "evidence_quotes": 4,
+      "hallucinated_quotes": 0,
+      "model_id": "gemma3:4b",
+      "structured_mode": "json_schema"
+    },
+    {
+      "meeting": "m05_en_incident_review",
+      "language": "en",
+      "ok": true,
+      "problems": [],
+      "latency_ms": 19057,
+      "input_tokens": 301,
+      "output_tokens": 300,
+      "action_items": 2,
+      "decisions": 1,
+      "evidence_quotes": 3,
+      "hallucinated_quotes": 0,
+      "model_id": "gemma3:4b",
+      "structured_mode": "json_schema"
+    }
+  ],
+  "max_tokens": 1500
+}

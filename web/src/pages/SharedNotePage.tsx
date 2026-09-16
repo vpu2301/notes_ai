@@ -5,6 +5,7 @@ import { downloadSharedPdf, getSharedNote } from "../api/notes";
 import type { SharedNoteView } from "../api/types";
 import { AlertIcon, DownloadIcon, FileDownIcon } from "../components/icons";
 import { StatusBadge } from "../components/StatusBadge";
+import { RichText } from "../components/RichText";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime } from "../lib/time";
 
@@ -100,7 +101,10 @@ export function SharedNotePage() {
               {note.sections.map((s) => (
                 <section key={s.section_key} className="doc-section">
                   <h2 className="section-name">{s.name}</h2>
-                  <p className="shared-text">{s.text}</p>
+                  {/* The same typesetting the note gets in the app — a
+                      recipient who only has the link should read the
+                      document, not its markdown. */}
+                  <RichText text={s.text} placeholder="Nothing entered." />
                 </section>
               ))}
             </div>

@@ -309,11 +309,19 @@ extension Connector {
 
 // MARK: - Keychain
 
-/// Generic-password items under one service; one per connector id.
+/// Generic-password items in this phone's Keychain.
+///
+/// Two services use it: connector tokens (the default) and, since IDX-I1,
+/// the sign-in session (`SessionStore`). Both are device-only, never
+/// synchronised to iCloud, and readable only after the first unlock — an
+/// upload that finishes while the phone is in a pocket still has to be
+/// able to refresh, and a refresh token that syncs is a refresh token on
+/// every device the person has ever owned.
 enum Keychain {
-    private static let service = "ai.notes.capture.connectors"
+    static let connectorService = "ai.notes.capture.connectors"
+    static let sessionService = "ai.notes.capture.session"
 
-    static func read(account: String) -> Data? {
+    static func read(account: String, service: String = connectorService) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -326,7 +334,16 @@ enum Keychain {
         return result as? Data
     }
 
-    static func write(account: String, secret: Data) {
+    /// Writes the secret, returning the `OSStatus` of the attempt.
+    ///
+    /// The status is returned rather than swallowed because a session that
+    /// silently failed to persist looks exactly like one that persisted:
+    /// signed in now, signed out after the next restart, for no reason the
+    /// person can see. `SessionStore` turns a non-success into a sign-in
+    /// error; the connector callers, whose secrets can be re-fetched by
+    /// signing in to the server again, ignore it as they always have.
+    @discardableResult
+    static func write(account: String, secret: Data, service: String = connectorService) -> OSStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -335,14 +352,16 @@ enum Keychain {
         let attributes: [String: Any] = [
             kSecValueData as String: secret,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrSynchronizable as String: false,
         ]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
-            SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)
+            return SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)
         }
+        return status
     }
 
-    static func delete(account: String) {
+    static func delete(account: String, service: String = connectorService) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

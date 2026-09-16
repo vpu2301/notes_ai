@@ -10,8 +10,12 @@ precedent). ADR-0041 records the choice.
 
 The runner owns the loop mechanics and the Prometheus-side contract:
 
-- ``mdx_scheduler_job_runs_total{job, outcome}``
-- ``mdx_scheduler_job_duration_seconds{job}``
+- ``mdx_scheduler_job_runs_total{job_name, outcome}``
+- ``mdx_scheduler_job_duration_seconds{job_name}``
+
+The label is ``job_name``, not ``job``: the collector's Prometheus
+exporter stamps every series with a constant ``job`` (the service name)
+and refuses a metric whose own label collides with it.
 
 The per-run **audit row** is the job's own concern (jobs hold the audit
 writer and tenant context; this leaf lib must not import libs/audit) —
@@ -71,8 +75,8 @@ async def run_job_once(
         logger.exception("scheduler.job_failed", extra={"job": job_name})
         result = None
     duration = time.monotonic() - started
-    _runs_total.add(1, {"job": job_name, "outcome": outcome})
-    _duration.record(duration, {"job": job_name})
+    _runs_total.add(1, {"job_name": job_name, "outcome": outcome})
+    _duration.record(duration, {"job_name": job_name})
     logger.info(
         "scheduler.job_finished",
         extra={"job": job_name, "outcome": outcome, "duration_s": round(duration, 3)},

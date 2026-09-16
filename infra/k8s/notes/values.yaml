@@ -11,11 +11,15 @@ global:
   imageRegistry: ""            # staging: local images imported into k3d
   imagePullPolicy: IfNotPresent
   otlpEndpoint: http://otel-collector:4317
+  # Object storage. The in-cluster MinIO store was removed — point this
+  # (and every service's S3_ENDPOINT below) at a real S3-compatible
+  # endpoint to re-enable audio at rest. Empty = no object store.
+  s3Endpoint: ""
 
 # ── Stateful stores ─────────────────────────────────────────────────
 # staging: simple single-replica in-cluster workloads with PVCs.
 # prod (values-prod.yaml): inCluster=false — operator-managed
-# (CloudNativePG / Redis operator / MinIO operator) or managed services
+# (CloudNativePG / Redis operator) or managed services
 # per the hosting choice; endpoints below then point at those.
 stateful:
   inCluster: true
@@ -80,6 +84,13 @@ networkPolicies:
   # (Calico/Cilium per hosting choice) where they behave; staging k3d
   # runs with them off. docs/deploy/hosting-gap.md carries the item.
   enabled: false
+  # Worker egress allowlist (DEP-S1-04): pods with label mdx-egress=models
+  # may only reach DNS, in-namespace stateful/observability pods and these
+  # CIDRs on :443 (the HF Inference Endpoint front door, resolved by
+  # scripts/k8s/egress-allowlist.sh — hostnames need an FQDN-capable CNI).
+  egress:
+    enabled: false
+    allowedCidrs: []
 
 externalSecrets:
   # prod only: External Secrets Operator → Vault (same trust root as the
@@ -94,6 +105,7 @@ externalSecrets:
 secretRefs:
   keycloakClients: mdx-keycloak-clients   # KEYCLOAK_LOGIN/ADMIN_CLIENT_SECRET
   masterKey: mdx-master-key               # /etc/mdx/master.key
+  hfEndpoints: mdx-hf-endpoints           # HF_CHAT_ENDPOINT_URL, HF_ASR_ENDPOINT_URL, HF_TOKEN, HF_*_MODEL_PIN (DEP-S1)
 
 # ── Shared environment (mirrors the compose x-anchors) ──────────────
 commonEnv:
@@ -101,6 +113,18 @@ commonEnv:
   LOG_LEVEL: INFO
   AUTH_ISSUER: http://keycloak:8080/realms/notes
   AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
+  # FND-1 / ADR-0047 — the fleet trusts BOTH issuers for the length of the
+  # `dual` period. Deployed before auth-service starts minting: its JWKS
+  # answers `{"keys": []}` until BE-2, which is a valid document that
+  # rejects tokens without affecting Keycloak's. See
+  # docs/runbooks/idx-issuer-cutover.md for the rollout order.
+  AUTH_ISSUERS_JSON: |-
+    [{"issuer":"http://keycloak:8080/realms/notes",
+      "jwks_url":"http://keycloak:8080/realms/notes/protocol/openid-connect/certs",
+      "audience":"mdx-api"},
+     {"issuer":"http://auth-service:8000",
+      "jwks_url":"http://auth-service:8000/.well-known/jwks.json",
+      "audience":"mdx-api"}]
   CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,https://vpu2301.github.io
   DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
   DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
@@ -135,7 +159,7 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_NLP_BASE_URL: http://nlp-service:8000
     masterKey: true
@@ -152,12 +176,24 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_DEVICE: cpu
       MD_ASR_COMPUTE_TYPE: int8
       MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "40.0"
+      # Model-provider registry (libs/models, DEP-S0/S1). ENV selects the
+      # registry environment; ASR_BACKEND names a backend in
+      # config/models.yaml. staging-up.sh flips ASR_BACKEND to hf_eu_asr
+      # when the HF endpoint secret is present (DEP-S1-07).
+      ENV: staging
+      MODELS_CONFIG: /app/config/models.yaml
+      ASR_BACKEND: inproc_cpu_asr
+    # HF_CHAT_ENDPOINT_URL / HF_ASR_ENDPOINT_URL / HF_TOKEN / *_MODEL_PIN —
+    # created out of band (staging-up.sh; prod: External Secrets from Vault).
+    secretEnv: [mdx-hf-endpoints]
     masterKey: true
+    podLabels:
+      mdx-egress: models   # subject to workers-egress-allowlist (networkpolicies.yaml)
 
   dictation-service:
     image: notes-ai-dictation-service:latest
@@ -178,7 +214,7 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MDX_TMPFS_ROOT: /run/dictation
       MD_ASR_DEVICE: cpu
@@ -213,8 +249,22 @@ apps:
       ASR_SERVICE_BASE_URL: http://asr-service:8000
       REDIS_URL: redis://redis:6379/0
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
+      # "Ask this note" (POST /v1/notes/{id}/ask) answers through the
+      # model registry (libs/models): routing.understand → hf_eu here.
+      # Resolved on first question, so a missing chat endpoint degrades
+      # to a 503 `model_not_configured` instead of a boot failure.
+      ENV: staging
+      MODELS_CONFIG: /app/config/models.yaml
+    # HF_CHAT_ENDPOINT_URL / HF_TOKEN / HF_CHAT_MODEL_PIN (same secret the
+    # worker reads; staging-up.sh creates it).
+    secretEnv: [mdx-hf-endpoints]
+    # NOT labelled mdx-egress: models — that allowlist admits only DNS,
+    # stateful stores, OTel and the model CIDRs, and note-service also has
+    # to reach asr-service (transcripts) and calendar feeds. Putting the
+    # ask path under the exfiltration allowlist means either widening the
+    # policy for app-tier peers or moving the call into a worker (open).
     masterKey: true
 
   autocomplete-service:

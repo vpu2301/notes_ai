@@ -1,11 +1,118 @@
-// DTOs verified against docs/api/*-openapi.json snapshots.
+// DTOs verified against docs/api/*-openapi.json snapshots — except the
+// auth-service block below. `docs/api/auth-service-openapi.json` predates
+// IDX-A3/A5/B1b (no /auth/email/*, no /auth/reauth*, no /auth/oauth/token),
+// so those DTOs are verified against the routers and
+// `services/auth-service/src/auth_service/domain/transport.py` instead.
+// Re-verify when the snapshot is regenerated (IDX-W1 debt).
 
 // ── auth-service ───────────────────────────────────────────────────────
 
+/**
+ * The pre-IDX login body, and the subset every old reader still parses.
+ * `POST /auth/login`, `/auth/refresh` answer exactly this today (both are
+ * still Keycloak-backed in both `MDX_IDP_MODE`s).
+ */
 export interface LoginResponse {
   access_token: string;
   expires_in: number;
   token_type?: string;
+  /** Native sessions add these two; web responses omit them. */
+  tenant_id?: string;
+  roles?: string[];
+}
+
+/** `IdentitySummary` — the global principal, independent of workspace. */
+export interface Identity {
+  id: string;
+  email: string;
+  display_name: string;
+  mfa_enabled: boolean;
+  has_password: boolean;
+  status: string;
+}
+
+/** `MembershipSummary` — one workspace this identity belongs to. */
+export interface Membership {
+  tenant_id: string;
+  name: string;
+  kind: "personal" | "team" | string;
+  role: string;
+  status: string;
+}
+
+/**
+ * What a sign-in attempt returns (`domain/transport.py::AuthResult`).
+ *
+ * Discriminated on `status`, NOT on a `kind` field. `mfa_required` is a
+ * real 200 carrying an empty `access_token`: the first factor passed and
+ * the session has not started. Branch on `status` before reading a token.
+ *
+ * `refresh_token` is deliberately absent from this type. Native clients
+ * get one in the body; a web client must never see or read it — the
+ * HttpOnly `mdx_rt` cookie is its only refresh channel, and
+ * `tests/no-refresh-token.test.ts` holds that line.
+ */
+export interface AuthResult {
+  status: "authenticated" | "mfa_required";
+  access_token: string;
+  expires_in: number;
+  token_type?: string;
+  tenant_id: string;
+  roles: string[];
+  is_new_identity: boolean;
+  identity: Identity | null;
+  memberships: Membership[];
+  default_tenant_id: string | null;
+  /** mfa_required only. */
+  challenge_id: string | null;
+  methods: string[] | null;
+  /** Set only when the sign-in spent a recovery code. Zero is the case that matters. */
+  recovery_codes_left: number | null;
+  recovery_codes_exhausted: boolean | null;
+}
+
+/**
+ * `POST /auth/signup` and `/auth/signup/resend` — the uniform 202.
+ *
+ * Identical for a new address, an address that already has an account, and
+ * one with nothing to resend. Nothing in this body varies by branch, so no
+ * UI built on it can imply the server recognised the address.
+ */
+export interface SignupAccepted {
+  status: "verification_sent";
+  /** Seconds before `/auth/signup/resend` will send another code. */
+  resend_after: number;
+}
+
+/** `POST /auth/email/start` — identical in shape for every address. */
+export interface EmailChallenge {
+  challenge_id: string;
+  expires_in: number;
+  resend_after: number;
+}
+
+export type MfaMethod = "totp" | "recovery_code";
+
+/** `POST /auth/reauth/start` — the server decides which methods are offered. */
+export interface ReauthOptions {
+  /** "totp" + "recovery_code" for an MFA account, else "email_code". */
+  methods: string[];
+  /** Present only for the email-code path. */
+  challenge_id: string | null;
+  expires_in: number;
+}
+
+/** `POST /auth/security/lockdown` — "this wasn't me". */
+export interface LockdownResult {
+  reset_token: string;
+  expires_in: number;
+  sessions_revoked: boolean;
+}
+
+/** `GET /auth/password/policy`. */
+export interface PasswordPolicy {
+  min_length: number;
+  max_length: number;
 }
 
 export interface MeResponse {
@@ -17,6 +124,11 @@ export interface MeResponse {
     mfa?: boolean;
     iss?: string;
   };
+  /**
+   * The per-tenant `users` row. IDX-B2 deletes it; `AuthContext` derives an
+   * `Identity` from it only when `identity` is null (keycloak mode), and
+   * nothing outside `AuthContext` reads it.
+   */
   db_user: {
     sub: string;
     tenant_id: string;
@@ -27,6 +139,111 @@ export interface MeResponse {
     mfa_enrolled_at: string | null;
     last_login_at: string | null;
   } | null;
+  /**
+   * The global principal, and every workspace it holds (IDX-B3).
+   *
+   * Optional in the type rather than required because both are null/empty
+   * in keycloak mode — and because this is what a page load hydrates from,
+   * so a client older than the server must not break on their absence.
+   */
+  identity?: Identity | null;
+  memberships?: Membership[];
+}
+
+// ── auth-service: account & security (IDX-A5, W2) ─────────────────────
+
+/** One live session on this account (`GET /auth/sessions`). */
+export interface SessionInfo {
+  sid: string;
+  client_type: string;
+  device_name: string;
+  user_agent: string;
+  ip_last: string;
+  created_at: string;
+  last_used_at: string;
+  last_authenticated_at: string;
+  /** The browser reading this. Never offered for revocation — that is "sign out". */
+  current: boolean;
+}
+
+/** `POST /auth/mfa/totp/enroll` — the one response that carries the secret. */
+export interface TotpEnrolment {
+  enrollment_id: string;
+  /** Base32, for typing in by hand when a camera is not an option. */
+  secret: string;
+  /** What the QR encodes. Never leaves the page. */
+  otpauth_uri: string;
+  expires_in: number;
+}
+
+/** `POST /auth/mfa/totp/confirm` and `POST /auth/mfa/recovery-codes`. */
+export interface RecoveryCodes {
+  recovery_codes: string[];
+}
+
+/** `POST /auth/email/change/start`. */
+export interface EmailChangeChallenge {
+  challenge_id: string;
+  expires_in: number;
+}
+
+/** `POST /auth/account/delete`. */
+export interface AccountDeletion {
+  purge_after: string;
+  workspaces_dissolved: number;
+}
+
+/** `POST /auth/sessions/revoke-others`. */
+export interface RevokedCount {
+  revoked: number;
+}
+
+// ── auth-service: room devices (IDX-B1b) ──────────────────────────────
+
+/** A secret's public half — enough to recognise it, never to use it. */
+export interface CredentialSecret {
+  prefix: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+/** A non-human principal: a meeting-room capture device, or a service. */
+export interface Credential {
+  id: string;
+  kind: string;
+  tenant_id: string | null;
+  name: string;
+  roles: string[];
+  status: string;
+  last_used_at: string | null;
+  created_at: string;
+  secrets: CredentialSecret[];
+}
+
+/** `POST /tenants/{id}/devices` — the only response that ever carries a secret. */
+export interface CreatedCredential {
+  credential: Credential;
+  secret: string;
+}
+
+/** `POST /tenants/{id}/devices/{id}/rotate`. */
+export interface RotatedCredential {
+  secret: string;
+  old_expires_at: string;
+}
+
+// ── auth-service: tenants (pre-IDX routes) ────────────────────────────
+
+/** One row of `GET /tenants` — the workspaces the caller belongs to. */
+export interface TenantSummary {
+  id: string;
+  name: string;
+  display_name: string;
+  slug: string | null;
+  status: string;
+  is_active: boolean;
+  logo_url: string;
+  my_role: string;
 }
 
 // ── note-service: templates ────────────────────────────────────────────
@@ -133,6 +350,12 @@ export interface NoteEnvelope {
   /** Who may read it beyond the author team. */
   visibility?: NoteVisibility;
   shared_with_ids?: string[];
+  /**
+   * Set only when the reader is not on the author team and was not shared
+   * the note (an oversight read, sent with `?purpose=`): whose note this
+   * is, so the page can say so.
+   */
+  primary_author_name?: string | null;
   content?: NoteContent | null;
   section_labels?: SectionLabel[] | null;
 }
@@ -140,6 +363,13 @@ export interface NoteEnvelope {
 // ── note-service: sharing (0016) ────────────────────────────────────────
 
 export type NoteVisibility = "private" | "workspace";
+
+/**
+ * Why someone who is not the note's author is reading it. The server
+ * refuses a non-author read without one (422 `missing-read-purpose`) and
+ * records the value in the audit trail.
+ */
+export type ReadPurpose = "review" | "audit" | "legal" | "export" | "collaboration";
 
 export interface SharedMember {
   sub: string;
@@ -164,6 +394,22 @@ export interface SharingView {
   can_delete: boolean;
   shared_with: SharedMember[];
   public_link: PublicLink | null;
+}
+
+/** One recipient of a server-sent share mail, and what became of it. */
+export interface ShareEmailOutcome {
+  email: string;
+  /** `member` — granted access, mailed an app link. `link` — mailed the public link. */
+  access: "member" | "link";
+  /** `rejected` is a relay refusing the mailbox: a typo the sender can fix. */
+  status: "sent" | "rejected" | "failed";
+}
+
+export interface ShareEmailResponse {
+  sharing: SharingView;
+  results: ShareEmailOutcome[];
+  /** True when this send minted the public link, so the sheet can say so. */
+  public_link_created: boolean;
 }
 
 /** What an anonymous reader gets from a public link. */
@@ -235,6 +481,10 @@ export interface SearchHit {
   co_author_ids: string[];
   snippet: string;
   updated_at: string;
+  /** Sharing state for the list badge (0016). Absent from an older server. */
+  visibility?: NoteVisibility | null;
+  shared_with_count?: number | null;
+  has_public_link?: boolean | null;
 }
 
 export interface SearchResponse {
@@ -456,4 +706,40 @@ export interface UpcomingEventsResponse {
   events: UpcomingEvent[];
   problems: CalendarProblem[];
   fetched_at: string;
+}
+
+// ── spaces (note-service, 0021) ───────────────────────────────────────
+
+/** A personal folder of notes, the same on every device. */
+export interface Space {
+  id: string;
+  name: string;
+  created_at: string;
+  /** The notes filed here, newest filing last. */
+  note_ids: string[];
+}
+
+export interface SpacesResponse {
+  spaces: Space[];
+}
+
+// ── ask this note (POST /v1/notes/{id}/ask) ───────────────────────────
+
+/**
+ * One line of the conversation under a note. The client keeps the
+ * thread; the server gets it back as context with every question, so a
+ * follow-up ("and who owns that?") lands with something to refer to.
+ */
+export interface AskTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** The server refuses more than this many turns of history. */
+export const ASK_HISTORY_LIMIT = 12;
+
+export interface AskResponse {
+  answer: string;
+  backend: string;
+  model_id: string;
 }

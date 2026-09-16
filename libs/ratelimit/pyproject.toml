@@ -1,0 +1,28 @@
+[project]
+name = "ratelimit"
+version = "0.1.0"
+description = "Fixed-window Redis rate limiter (house INCR+EXPIRE pattern) with explicit fail-open/fail-closed posture, plus trusted-proxy client-IP resolution (IDX-A3)"
+requires-python = ">=3.12"
+dependencies = [
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ratelimit"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v"

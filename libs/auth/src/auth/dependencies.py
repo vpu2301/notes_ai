@@ -5,12 +5,14 @@ Usage in a service::
     from auth.dependencies import build_current_user
     from auth.jwks import JwksCache
 
-    jwks_cache = JwksCache(issuer_to_url={settings.issuer: settings.jwks_url})
-    current_user = build_current_user(
-        jwks_cache=jwks_cache,
-        expected_audience=settings.expected_audience,
-        expected_issuer=settings.issuer,
+    issuers = issuers_from_env(
+        settings.auth_issuers_json,
+        issuer=settings.auth_issuer,
+        jwks_url=settings.auth_jwks_url,
+        audience=settings.auth_audience,
     )
+    jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
+    current_user = build_current_user(jwks_cache=jwks_cache, issuers=issuers)
 
     @router.get("/me")
     async def me(claims: Annotated[Claims, Depends(current_user)]) -> ...:
@@ -23,7 +25,7 @@ problem-details handler renders it as RFC 9457 ``application/problem+json``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from typing import Annotated
 
 from fastapi import Header, HTTPException, Request, status
@@ -39,6 +41,7 @@ from .exceptions import (
     KidNotFoundError,
     MalformedClaimsError,
 )
+from .issuers import IssuerConfig
 from .jwks import JwksCache
 from .revocation import SessionDenylist
 from .verifier import verify_token
@@ -60,8 +63,9 @@ def _unauthorized(detail: str, *, extra_challenge: str | None = None) -> HTTPExc
 def build_current_user(
     *,
     jwks_cache: JwksCache,
-    expected_audience: str,
-    expected_issuer: str,
+    issuers: Sequence[IssuerConfig] | None = None,
+    expected_audience: str | None = None,
+    expected_issuer: str | None = None,
     clock_skew_seconds: int = 30,
     denylist: SessionDenylist | None = None,
 ) -> Callable[..., Coroutine[None, None, Claims]]:
@@ -71,6 +75,11 @@ def build_current_user(
     verifies the token, sets the per-request claims ContextVar, stashes
     the claims on ``request.state.claims`` for non-Depends consumers, and
     returns the :class:`Claims` instance.
+
+    ``issuers`` (FND-1) is the list this service trusts; the token's own
+    ``iss`` selects which entry verifies it. ``expected_audience`` +
+    ``expected_issuer`` remain accepted as the one-element shorthand, so
+    a caller written before FND-1 keeps its exact behaviour.
 
     ``denylist`` (sprint 16): when provided, a signature-valid token whose
     ``sid`` or ``sub`` is on the revocation denylist is rejected 401 — this
@@ -95,9 +104,10 @@ def build_current_user(
         try:
             claims = await verify_token(
                 token,
+                jwks_cache=jwks_cache,
+                issuers=issuers,
                 expected_audience=expected_audience,
                 expected_issuer=expected_issuer,
-                jwks_cache=jwks_cache,
                 clock_skew_seconds=clock_skew_seconds,
             )
         except ExpiredTokenError as exc:

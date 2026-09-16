@@ -1131,7 +1131,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Readiness probe \u2014 verifies DB, Redis, MinIO reachable",
+        "summary": "Readiness probe \u2014 verifies DB, Redis, object storage reachable",
         "tags": [
           "health"
         ]

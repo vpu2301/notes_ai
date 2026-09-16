@@ -1,7 +1,7 @@
 {{- /*
 STAGING-ONLY in-cluster stateful stores (single replica + PVC).
 Production sets stateful.inCluster=false and points the DSNs/hosts at
-operator-managed stores (CloudNativePG, Redis operator, MinIO operator)
+operator-managed stores (CloudNativePG, Redis operator)
 or managed services — docs/deploy/hosting-gap.md records the mapping.
 */ -}}
 {{- if .Values.stateful.inCluster }}
@@ -88,47 +88,6 @@ metadata:
 spec:
   selector: {app: redis}
   ports: [{port: 6379, targetPort: redis}]
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: minio
-  labels: {app: minio, mdx-tier: stateful}
-spec:
-  serviceName: minio
-  replicas: 1
-  selector: {matchLabels: {app: minio}}
-  template:
-    metadata:
-      labels: {app: minio, mdx-tier: stateful}
-    spec:
-      containers:
-        - name: minio
-          image: {{ .Values.stateful.minio.image }}
-          args: ["server", "/data"]
-          env:
-            - name: MINIO_ROOT_USER
-              valueFrom: {secretKeyRef: {name: mdx-minio, key: user}}
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom: {secretKeyRef: {name: mdx-minio, key: password}}
-          ports: [{containerPort: 9000, name: s3}]
-          readinessProbe:
-            httpGet: {path: /minio/health/ready, port: s3}
-            periodSeconds: 5
-          volumeMounts: [{name: data, mountPath: /data}]
-  volumeClaimTemplates:
-    - metadata: {name: data}
-      spec:
-        accessModes: [ReadWriteOnce]
-        resources: {requests: {storage: {{ .Values.stateful.minio.storage }}}}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: minio
-spec:
-  selector: {app: minio}
-  ports: [{port: 9000, targetPort: s3}]
 ---
 apiVersion: apps/v1
 kind: Deployment

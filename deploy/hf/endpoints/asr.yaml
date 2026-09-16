@@ -1,0 +1,30 @@
+# hf_eu_asr — batch transcription backend with word timestamps.
+name: notes-asr-{env}
+task: automatic-speech-recognition
+type: protected
+model:
+  repository: openai/whisper-large-v3-turbo
+  revision: 41f01f3fe87f28c78e2fbf8b568835947dd65ed9   # docs/models/PINS.md (fetched 2026-09-05)
+  framework: pytorch
+  # Served behind an OpenAI-compatible /v1/audio/transcriptions handler that
+  # returns verbose_json with words[] (the asr_http probe rejects anything
+  # else at startup — ADR-0037 word timings are a contract).
+  image:
+    custom:
+      url: ghcr.io/speaches-ai/speaches:0.8.2-cuda   # faster-whisper server, OpenAI route, word timestamps
+      port: 8000
+      health_route: /health
+      env:
+        WHISPER__MODEL: deepdml/faster-whisper-large-v3-turbo-ct2   # CTranslate2 conversion of the repo above; pin 4df90f753211 in PINS.md
+        WHISPER__COMPUTE_TYPE: float16
+provider:
+  vendor: aws
+  region: eu-west-1
+compute:
+  accelerator: gpu
+  instance_type: nvidia-t4
+  instance_size: x1
+  scaling:
+    min_replica: 0
+    max_replica: 2
+    scale_to_zero_timeout: 15

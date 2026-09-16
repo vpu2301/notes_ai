@@ -1,0 +1,99 @@
+# Model backends and routing — the single place a backend is named.
+# Foundation plan decision 11: switching a tier's backend is a config PR
+# reviewed like a migration (eval parity → shadow run → flip → rollback).
+#
+# ${VAR} / ${VAR:-default} are resolved from the process environment by the
+# service's config.py at startup. A backend whose variables are unset is fine
+# as long as it is not enabled in the current ENV; if it IS, the process
+# refuses to start (ConfigError: missing_env). Never commit values here.
+version: 1
+
+backends:
+  # ── founder's Mac (dev only; refused on staging/prod even by typo) ──────
+  dev_mac:
+    kind: openai_compat
+    base_url: ${DEV_MAC_MODEL_URL:-http://host.docker.internal:11434/v1}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { chat: "${DEV_MAC_CHAT_MODEL:-notes-chat}" }
+    structured_output: json_schema
+    context_window: 32768
+    max_concurrency: 1
+    timeout_seconds: 600
+    processor: { name: "Developer machine", region: "local" }
+
+  dev_mac_asr:
+    kind: asr_http
+    base_url: ${DEV_MAC_ASR_URL:-http://host.docker.internal:8080}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { asr: "${DEV_MAC_ASR_MODEL:-whisper-large-v3-turbo}" }
+    timeout_seconds: 3600
+    processor: { name: "Developer machine", region: "local" }
+
+  # ── Hugging Face Inference Endpoints, EU region (beta default) ─────────
+  hf_eu:
+    kind: openai_compat
+    base_url: ${HF_CHAT_ENDPOINT_URL}
+    auth: bearer:${HF_TOKEN}
+    enabled_in_envs: [staging, prod]
+    models: { chat: "${HF_CHAT_MODEL_PIN}" }
+    structured_output: probe
+    context_window: 32768
+    max_concurrency: 4
+    cold_start_seconds: 300
+    timeout_seconds: 300
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  hf_eu_asr:
+    kind: asr_http
+    base_url: ${HF_ASR_ENDPOINT_URL}
+    auth: bearer:${HF_TOKEN}
+    enabled_in_envs: [staging, prod]
+    models: { asr: "${HF_ASR_MODEL_PIN}" }
+    cold_start_seconds: 240
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  # ── our own EU GPU host (vLLM) — registered, disabled until gate H0 ────
+  hosted_eu:
+    kind: openai_compat
+    enabled: false
+    base_url: ${HOSTED_MODEL_URL:-}
+    auth: bearer:${HOSTED_MODEL_TOKEN:-}
+    enabled_in_envs: [staging, prod]
+    models: { chat: "${HOSTED_CHAT_MODEL_PIN:-}" }
+    structured_output: guided_json
+    context_window: 32768
+    max_concurrency: 8
+    timeout_seconds: 300
+    processor: { name: "Notes AI (own EU host)", region: "EU" }
+
+  # ── opt-in vendor processor (BE-S3); requires Data-page acknowledgement ─
+  anthropic:
+    kind: anthropic
+    enabled: false
+    models: { chat: "${ANTHROPIC_MODEL_PIN:-}" }
+    processor: { name: "Anthropic", region: "US/EU" }
+
+  # ── in-process faster-whisper (CI, self-host, today's worker) ──────────
+  inproc_cpu_asr:
+    kind: asr_inproc
+    enabled_in_envs: [dev, test, staging, prod]
+
+  # ── test env: cassettes, never the network ─────────────────────────────
+  recorded:
+    kind: recorded
+    enabled_in_envs: [test]
+    cassette_dir: ${MODELS_CASSETTE_DIR:-tests/fixtures/eval/cassettes}
+
+# operation -> tier -> backend. `premium` flips to hosted_eu at gate H0 by PR.
+routing:
+  understand: { standard: hf_eu,     premium: hf_eu }
+  summarize:  { standard: hf_eu,     premium: hf_eu }
+  asr:        { standard: hf_eu_asr, premium: hf_eu_asr }
+
+# Per-environment override of an operation *kind*, applied before routing.
+env_overrides:
+  dev:  { chat: dev_mac,  asr: dev_mac_asr }
+  test: { chat: recorded, asr: inproc_cpu_asr }

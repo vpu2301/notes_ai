@@ -2,7 +2,7 @@
 
 The S3-client surface is small; we substitute an in-memory dict so tests
 run with no external dependencies. Integration tests against the real
-Compose MinIO live under tests/integration/.
+Compose object storage lives under tests/integration/.
 """
 
 from __future__ import annotations

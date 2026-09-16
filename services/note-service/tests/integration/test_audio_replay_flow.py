@@ -1,7 +1,7 @@
 """Sprint-15 audio replay — end-to-end pipeline against live infra.
 
 Needs ``RUN_DB_INTEGRATION=1`` + ``make dev-up && make migrate-up && make seed``
-(Postgres, MinIO, the dev master key). Proves the whole chain the POST
+(Postgres, an S3 endpoint, the dev master key). Proves the whole chain the POST
 endpoint drives: session row + encrypted WAV → resolve → full GCM decrypt
 (the ONLY read path — no range mode exists) → ms slice (+pad) → opus →
 encrypted clip object → token stream-back, with the slice verified by
@@ -25,7 +25,7 @@ import pytest
 pytestmark = [
     pytest.mark.skipif(
         os.environ.get("RUN_DB_INTEGRATION") != "1",
-        reason="set RUN_DB_INTEGRATION=1; needs dev-up + migrate-up + seed + MinIO",
+        reason="set RUN_DB_INTEGRATION=1; needs dev-up + migrate-up + seed + an S3 endpoint",
     ),
     pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed"),
 ]

@@ -11,8 +11,8 @@ global:
   imageRegistry: registry.notes.internal/notes   # registry close to the cluster
 
 stateful:
-  # Operator-managed / external stores (CloudNativePG, Redis operator,
-  # MinIO operator — or managed equivalents per hosting choice).
+  # Operator-managed / external stores (CloudNativePG, Redis operator
+  # — or managed equivalents per hosting choice).
   inCluster: false
 
 observability:

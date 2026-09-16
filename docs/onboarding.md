@@ -29,7 +29,7 @@ Re-run `make doctor` until every line is `✓`.
 ## 2. Bring up the stack
 
 ```bash
-make dev-up      # Postgres, Redis, MinIO, Kafka, Keycloak, OTel + Loki + Prometheus + Grafana + Jaeger
+make dev-up      # Postgres, Redis, Kafka, Keycloak, OTel + Loki + Prometheus + Grafana + Jaeger
 make migrate-up  # apply SQL migrations to the `notes` database
 make seed        # dev tenants, users, templates, starter content
 make smoke       # curls every health endpoint

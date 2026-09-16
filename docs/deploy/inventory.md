@@ -24,7 +24,6 @@ silently; the deliberate non-migrations are justified inline.
 |---|---|---|
 | postgres | staging: StatefulSet+PVC; prod: CloudNativePG / managed (hosting-gap.md) | init.sql roles via ConfigMap |
 | redis | staging: Deployment; prod: Redis operator / managed | |
-| minio (+minio-init) | staging: StatefulSet+PVC + init Job (buckets+ILM); prod: MinIO operator / managed object store | |
 | keycloak | staging: Deployment (dev realm import); prod: realm from `gen-prod-realm.py` (regenerated secrets, no dev users) | |
 | kafka | **NOT MIGRATED** — no service consumes it; libs/messaging is Redis Streams. Legacy compose infra; drop. | |
 | otel-collector | Deployment `otel-collector` | OTLP → Prometheus exposition |
@@ -49,7 +48,7 @@ image (carries every lib it imports).
 
 | Compose volume | Cluster counterpart |
 |---|---|
-| postgres_data / minio_data | PVCs (staging); operator-managed (prod) |
+| postgres_data | PVC (staging); operator-managed (prod) |
 | redis_data | staging: emptyDir + AOF (cache + streams tolerate pod loss; prod operator adds persistence) |
 | kafka_data | dropped with kafka |
 | prometheus/grafana/loki data | kube-prometheus-stack PVCs (prod) |

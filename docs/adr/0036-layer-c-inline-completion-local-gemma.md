@@ -85,3 +85,22 @@ Layer C's requirements are unlike section synthesis: synchronous, tiny
 - Alerts: LayerCInlineLatencyHigh / LayerCFilterRateHigh /
   LayerCBackendErrors (sprint-15-alerts.yml); dashboard
   sprint-15-layer-c-replay-search.
+
+## Amendment 2026-09-05 (DEP-S0, ADR-0046) — GPU line deferred; provider seam generalised
+
+The "number must be pasted from the rig" clause above now reads **deferred
+to the DEP-S6 metered GPU sandbox**; no GPU is rented before gate H0. The
+`InferenceClient` seam this ADR introduced for Layer C is superseded for
+every *new* LLM workload by `libs/models` (ADR-0046): one
+`OpenAICompatibleChatProvider` for Ollama / llama-server / LM Studio / TGI /
+vLLM / HF Inference Endpoints, resolved from `config/models.yaml` by
+workspace tier and env. Layer C's own `LlamaCppClient`/`OllamaClient`
+stay as-is (generation-service is off the default deployment, decision 1)
+and should be folded into the seam if the service returns.
+
+Chat numbers through the seam on the same M5 (24 GB), structured
+`json_schema` output, ~300-token meeting prompts, 300–370 output tokens
+(`docs/eval/smoke-2026-09-05-dev_mac-*.json`): gemma3:4b Q4_K_M via
+Ollama 0.32.5 answers in 18–23 s per meeting (~16 tok/s generation
+including prompt processing). The 5-meeting smoke eval and the
+model-family decision are recorded in ADR-0046.

@@ -109,7 +109,7 @@ notes_ai/
 # 1. Check your environment
 make doctor
 
-# 2. Start the infra stack (PostgreSQL, Redis, MinIO, Kafka, Keycloak, observability)
+# 2. Start the infra stack (PostgreSQL, Redis, Kafka, Keycloak, observability)
 make dev-up
 
 # 3. Apply migrations and seed the dev database
@@ -126,8 +126,6 @@ make smoke-test
 |---------|-----|-------------|
 | PostgreSQL | `localhost:5432` | `postgres/postgres` |
 | Redis | `localhost:6379` | — |
-| MinIO (API) | `http://localhost:9000` | `minioadmin/minioadmin` |
-| MinIO (Console) | `http://localhost:9001` | `minioadmin/minioadmin` |
 | Kafka | `localhost:9092` | — |
 | Keycloak | `http://localhost:8088` | `admin/admin` |
 | Jaeger UI | `http://localhost:16686` | — |
@@ -243,7 +241,8 @@ make security      # bandit + pip-audit + semgrep
 make migrate-up    # apply SQL migrations
 make seed          # seed dev tenants, users, templates, starter content
 make openapi-dump  # refresh docs/api/*-openapi.json
-make dev-down      # stop & remove containers
+make dev-down      # stop & remove containers (volumes kept)
+make dev-nuke      # DESTRUCTIVE: also delete all volumes (asks to confirm)
 make doctor        # environment health check
 make help          # full target list
 ```

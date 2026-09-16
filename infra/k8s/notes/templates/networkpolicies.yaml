@@ -50,3 +50,48 @@ spec:
         - namespaceSelector:
             matchLabels: {"kubernetes.io/metadata.name": {{ .Release.Namespace | quote }}}
 {{- end }}
+{{- if and .Values.networkPolicies.enabled .Values.networkPolicies.egress.enabled }}
+---
+# Worker egress allowlist (DEP-S1-04). Pods labelled mdx-egress: models may
+# reach: DNS, in-namespace stateful stores (Postgres/Redis), the
+# in-cluster OTel collector, and the model-endpoint CIDRs listed in values —
+# nothing else. A prompt injection that tries to exfiltrate to an arbitrary
+# host is stopped at the CNI. Hostname-based rules need a CNI that supports
+# FQDN policies (Cilium); until the hosting decision (docs/deploy/hosting-gap.md)
+# the allowlist is CIDR-based and refreshed by scripts/k8s/egress-allowlist.sh.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workers-egress-allowlist
+  labels: {{- include "notes.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      mdx-egress: models
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              mdx-tier: stateful
+    - to:
+        - podSelector:
+            matchLabels:
+              mdx-tier: observability
+    {{- range .Values.networkPolicies.egress.allowedCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+{{- end }}
+

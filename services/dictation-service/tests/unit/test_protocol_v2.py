@@ -187,13 +187,13 @@ def test_v2_decode_start_session_conversation() -> None:
             "protocol_version": 2,
             "language": "uk",
             "mode": "conversation",
-            "vocabulary_hint": "Klarnote roadmap OKR",
+            "vocabulary_hint": "Notes AI roadmap OKR",
         }
     )
     msg = codec.decode_text(frame, PROTOCOL_VERSION_V2)
     assert isinstance(msg, StartSessionV2)
     assert msg.mode == "conversation"
-    assert msg.vocabulary_hint == "Klarnote roadmap OKR"
+    assert msg.vocabulary_hint == "Notes AI roadmap OKR"
 
 
 def test_v2_decode_set_speaker_mapping() -> None:

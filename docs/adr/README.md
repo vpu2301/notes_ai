@@ -57,6 +57,8 @@ medical vertical; the numbers are retired, not reused.
 | 0043  | Clinical corpus governance                                                       | Withdrawn — medical vertical removed |
 | 0044  | LLM-assisted corpus review                                                       | Withdrawn — medical vertical removed |
 | 0045  | [Batch diarization: N-speaker agglomerative clustering, word-level attribution, speaker naming](0045-batch-diarization-nspeaker-and-naming.md) | Accepted |
+| 0046  | [Model hosting is configuration — `libs/models` and the backend registry](0046-model-hosting-is-configuration.md) | Accepted |
+| 0047  | [A bounded dual-issuer period — `MDX_IDP_MODE=dual`](0047-dual-issuer-period.md) (= ADR-IDX-09) | Accepted |
 
 ## Template
 

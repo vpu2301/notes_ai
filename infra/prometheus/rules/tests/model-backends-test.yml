@@ -1,0 +1,54 @@
+rule_files:
+  - ../model-backends.yml
+evaluation_interval: 30s
+tests:
+  - interval: 1m
+    name: warming too long fires only past 2x cold start
+    input_series:
+      - series: 'mdx_model_waiting_oldest_seconds{backend="hf_eu"}'
+        values: "0 60 120 180 240 300 360 420 480 540 600 660 720 780 840"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: ModelBackendWarmingTooLong
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: ModelBackendWarmingTooLong
+        exp_alerts:
+          - exp_labels: {severity: warn, team: platform, backend: hf_eu}
+            exp_annotations:
+              summary: "Model backend hf_eu has jobs waiting on warm-up for > 10 min"
+              description: |
+                Jobs are parked in waiting_on_model for hf_eu longer than 2× its cold start. Check the endpoint state (make hf-endpoints ARGS="status --env staging"), quota and the last apply.
+                Runbook: docs/runbooks/model-backends.md#warming-too-long
+
+  - interval: 1m
+    name: auth pages immediately, unavailable needs ten quiet minutes
+    input_series:
+      - series: 'mdx_model_calls_total{backend="hf_eu",operation="chat.complete",outcome="auth"}'
+        values: "0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+      - series: 'mdx_model_calls_total{backend="hf_eu_asr",operation="asr.transcribe",outcome="unavailable"}'
+        values: "0+2x15"
+      - series: 'mdx_model_calls_total{backend="hf_eu_asr",operation="asr.transcribe",outcome="ok"}'
+        values: "5+0x15"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ModelBackendAuth
+        exp_alerts:
+          - exp_labels: {severity: page, team: platform, backend: hf_eu}
+            exp_annotations:
+              summary: "Model backend hf_eu rejects our token (auth errors in the last 5 min)"
+              description: |
+                Calls to hf_eu fail with kind=auth. Jobs fail immediately (no retry storm). Rotate/restore HF_TOKEN from the secret manager and restart the workers.
+                Runbook: docs/runbooks/model-backends.md#auth
+      - eval_time: 5m
+        alertname: ModelBackendUnavailable
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ModelBackendUnavailable
+        exp_alerts:
+          - exp_labels: {severity: page, team: platform, backend: hf_eu_asr}
+            exp_annotations:
+              summary: "Model backend hf_eu_asr unavailable for 10 min (no successful call)"
+              description: |
+                Every call to hf_eu_asr in the last 10 minutes failed with kind=unavailable. Endpoint failed/deleted or the HF region is down; jobs are retrying with backoff. Notes ship with transcript only (BE-S2 degrade).
+                Runbook: docs/runbooks/model-backends.md#unavailable

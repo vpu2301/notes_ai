@@ -88,7 +88,7 @@ export function NewNotePage() {
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="card tpl-card" aria-hidden="true">
               <div className="tpl-card-h">
-                <Skeleton width={32} height={32} style={{ borderRadius: 9 }} />
+                <Skeleton width={32} height={32} style={{ borderRadius: "var(--radius-sm)" }} />
                 <Skeleton width="60%" height={14} />
               </div>
               <Skeleton width="40%" height={12} />

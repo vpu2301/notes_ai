@@ -29,12 +29,13 @@ from asr_models import (
     TranscriptionOutput,
     WordTiming,
 )
+from models import TranscriptionCancelledError as _SeamCancelled
 
 from .config import settings
 from .vad import SpeechSegment, detect_speech
 
 
-class TranscriptionCancelledError(Exception):
+class TranscriptionCancelledError(_SeamCancelled):
     """The job was cancelled while inference was running.
 
     Not a failure: the user asked for it. The processor turns this

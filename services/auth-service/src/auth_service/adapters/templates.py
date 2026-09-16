@@ -28,7 +28,22 @@ TEMPLATE_DIR: Final = Path(__file__).parent / "templates"
 # The duplication with ``domain.copy.KINDS`` / ``SUPPORTED_LANGS`` is
 # deliberate and cheap to police: the parametrised render test iterates
 # the domain's vocabulary and would fail the moment the two disagree.
-KINDS: Final[tuple[str, ...]] = ("password_reset", "password_changed")
+KINDS: Final[tuple[str, ...]] = (
+    "password_reset",
+    "password_changed",
+    "auth_code",
+    "auth_locked",
+    # IDX-A5 account notices.
+    "mfa_enabled",
+    "mfa_disabled",
+    "recovery_code_used",
+    "email_changed",
+    "account_deletion_scheduled",
+    # BE-0 self-serve signup.
+    "signup_verify",
+    "signup_exists",
+    "concierge_welcome",
+)
 SUPPORTED_LANGS: Final[tuple[str, ...]] = ("en", "de", "uk")
 
 

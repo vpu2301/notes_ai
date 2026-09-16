@@ -21,6 +21,7 @@ WORKDIR /build
 COPY pyproject.toml uv.lock /build/
 COPY libs/ /build/libs/
 COPY services/note-service/ /build/services/note-service/
+COPY config/models.yaml /build/config/models.yaml
 
 RUN uv pip install --system --no-cache \
     --target /deps \
@@ -31,7 +32,9 @@ RUN uv pip install --system --no-cache \
     /build/libs/db \
     /build/libs/template_models \
     /build/libs/note_models \
-    /build/libs/secret
+    /build/libs/secret \
+    /build/libs/models \
+    /build/libs/asr_models
 
 # Editable workspace libs install as .pth files, which Python only honors
 # in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
@@ -40,7 +43,10 @@ RUN uv pip install --system --no-cache \
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
 ENV PYTHONPATH=/deps \
-    PATH="/deps/bin:${PATH}"
+    PATH="/deps/bin:${PATH}" \
+    MODELS_CONFIG=/app/config/models.yaml
+
+COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
 
 USER nonroot
 WORKDIR /app

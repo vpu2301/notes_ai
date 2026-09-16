@@ -1,0 +1,30 @@
+{
+  "kind": "turnaround",
+  "backend": "dev_mac_asr",
+  "date": "2026-09-05",
+  "generated_at": "2026-09-05T09:40:41+00:00",
+  "git": "7f1294e",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "fixture": "60min_de",
+  "language_requested": "de",
+  "language_out": "de",
+  "audio_seconds": 3612.2,
+  "wall_seconds": 339.5,
+  "warmup_seconds": 2.9,
+  "turnaround_ratio": 0.094,
+  "segments": 1066,
+  "words": 11889,
+  "words_with_timings_share": 0.922,
+  "model_id": "whisper-large-v3-turbo",
+  "backend_kind": "asr_http",
+  "processor": {
+    "name": "Developer machine",
+    "region": "local"
+  },
+  "a2_gate_pass": false
+}

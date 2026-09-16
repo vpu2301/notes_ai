@@ -26,10 +26,17 @@ final class NoteViewModel: ObservableObject {
 
     @Published private(set) var note: NoteEnvelope?
     @Published private(set) var sections: [TemplateSectionDef] = []
+    /// The template's display name, for the note's meta line; nil when the
+    /// template could not be read (deprecated, or not ours to see).
+    @Published private(set) var templateName: String?
     @Published var content: NoteContent?
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
     @Published private(set) var conflict = false
+    /// Set when this is not our note and nobody shared it with us — a
+    /// workspace admin opening a colleague's note. Every read is then sent
+    /// with this purpose (the server records it) and the screen says so.
+    @Published private(set) var readPurpose: ReadPurpose?
     @Published private(set) var loadError: String?
     @Published private(set) var isLoading = true
     @Published private(set) var busy = false
@@ -48,8 +55,23 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var transcriptError: String?
     @Published private(set) var renamingSpeaker = false
 
+    /// "Ask this note": the thread under the document. Lives here only —
+    /// the server answers one question at a time and keeps nothing.
+    @Published private(set) var chat: [ChatMessage] = []
+    @Published private(set) var asking = false
+    @Published var askError: String?
+
+    struct ChatMessage: Identifiable, Equatable {
+        let id = UUID()
+        let role: AskTurn.Role
+        let text: String
+    }
+
     private let api: APIClient
+    /// The autosave timer (cancelled and restarted on every edit).
     private var saveTask: Task<Void, Never>?
+    /// The write on the wire, if one is running.
+    private var saveInFlight: Task<Void, Never>?
     private var pending: (content: NoteContent, version: Int)?
     private static let autosaveDelay: Duration = .milliseconds(900)
 
@@ -60,6 +82,13 @@ final class NoteViewModel: ObservableObject {
     }
 
     var isDraft: Bool { note?.status == .draft }
+
+    /// "Ada's note" — who this note belongs to, when it is not ours.
+    var oversightLabel: String? {
+        guard readPurpose != nil else { return nil }
+        let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? "A colleague's note" : "\(name)'s note"
+    }
     var editable: Bool { isDraft }
 
     // MARK: - Load
@@ -68,7 +97,15 @@ final class NoteViewModel: ObservableObject {
         loadError = nil
         isLoading = note == nil
         do {
-            let envelope = try await api.fetchNote(id: noteId)
+            let envelope: NoteEnvelope
+            do {
+                envelope = try await api.fetchNote(id: noteId)
+                readPurpose = nil
+            } catch let error as APIError where error.needsReadPurpose {
+                // Not our note: read it as a reviewer, on the record.
+                envelope = try await api.fetchNote(id: noteId, purpose: .review)
+                readPurpose = .review
+            }
             note = envelope
             content = envelope.content
             version = envelope.currentVersionNumber
@@ -76,9 +113,11 @@ final class NoteViewModel: ObservableObject {
             conflict = false
             if let templateId = envelope.content?.templateId,
                let template = try? await api.fetchTemplate(id: templateId) {
+                templateName = template.name
                 sections = template.schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
             } else {
                 // Template unavailable: the envelope's labels as plain text sections.
+                templateName = nil
                 sections = (envelope.sectionLabels ?? []).map {
                     TemplateSectionDef(id: $0.sectionKey,
                                        name: $0.name["en"] ?? $0.name["uk"] ?? $0.sectionKey,
@@ -162,6 +201,33 @@ final class NoteViewModel: ObservableObject {
                                               withTemplate: template)
     }
 
+    // MARK: - Ask this note
+
+    /// The server sees the last few turns for context; it caps the thread.
+    private static let historyLimit = 12
+
+    func ask(_ question: String) async {
+        let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !asking else { return }
+        askError = nil
+        let history = chat.suffix(Self.historyLimit).map { AskTurn(role: $0.role, text: $0.text) }
+        chat.append(ChatMessage(role: .user, text: text))
+        asking = true
+        defer { asking = false }
+        do {
+            let reply = try await api.askNote(id: noteId, question: text, history: Array(history))
+            chat.append(ChatMessage(role: .assistant, text: reply.answer))
+        } catch {
+            // The question stays in the thread so it can be retried by eye.
+            askError = error.localizedDescription
+        }
+    }
+
+    func clearChat() {
+        chat = []
+        askError = nil
+    }
+
     // MARK: - Editing (drafts autosave; other states are read-only here)
 
     func setTitle(_ title: String) {
@@ -193,10 +259,26 @@ final class NoteViewModel: ObservableObject {
 
     /// Write the pending content now (also called before finalize).
     func flush() async {
+        // Stop the timer. When flush() runs *inside* the timer task this
+        // cancels the current task too, and a cancelled task makes
+        // URLSession fail with "cancelled" before anything is sent — so the
+        // write below runs in its own task, out of reach of that cancellation.
         saveTask?.cancel()
+        saveTask = nil
+        if let inFlight = saveInFlight { await inFlight.value }
         guard let snapshot = pending else { return }
         pending = nil
         saveState = .saving
+        let write = Task { [weak self] in
+            guard let self else { return }
+            await self.write(snapshot)
+        }
+        saveInFlight = write
+        await write.value
+        if saveInFlight == write { saveInFlight = nil }
+    }
+
+    private func write(_ snapshot: (content: NoteContent, version: Int)) async {
         do {
             let result = try await api.updateDraft(id: noteId, content: snapshot.content,
                                                    expectedVersion: snapshot.version)
@@ -245,7 +327,7 @@ final class NoteViewModel: ObservableObject {
         actionError = nil
         defer { busy = false }
         do {
-            let data = try await api.notePDF(id: noteId)
+            let data = try await api.notePDF(id: noteId, purpose: readPurpose == nil ? nil : .export)
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "\(note?.code ?? "note").pdf"
             panel.allowedContentTypes = [.pdf]
@@ -287,19 +369,30 @@ final class NoteViewModel: ObservableObject {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
     }
 
-    /// Returns false when the address belongs to nobody in the workspace.
-    func share(email: String) async -> Bool {
+    /// Mail the note to the people named, from the server.
+    ///
+    /// Returns the per-recipient outcomes, or nil when the call itself
+    /// failed (the reason is on `actionError`). Members are granted
+    /// access as a side effect, so the sharing view is refreshed from
+    /// the reply rather than re-fetched.
+    func sendShareEmail(recipients: [String], message: String) async -> [ShareEmailOutcome]? {
         busy = true
         actionError = nil
         defer { busy = false }
         do {
-            sharing = try await api.shareWithMember(id: noteId, email: email)
-            return true
-        } catch let APIError.http(status, _) where status == 404 {
-            return false
+            let result = try await api.shareByEmail(
+                id: noteId,
+                recipients: recipients,
+                message: message,
+                // The sender's language. The recipient's is unknowable —
+                // half of them have no account here — and people share
+                // within a team.
+                lang: Locale.current.language.languageCode?.identifier ?? "en")
+            sharing = result.sharing
+            return result.results
         } catch {
             actionError = error.localizedDescription
-            return false
+            return nil
         }
     }
 
