@@ -558,6 +558,40 @@ def test_logout_denylists_the_session_it_ended(env: Any) -> None:
     assert env.denylist.sids == [str(env.sid)]
 
 
+# ── a Keycloak-shaped token is refused, never 422'd ──────────────────────
+
+
+# A realistic Keycloak refresh token: a signed JWT carrying a realm's worth
+# of claims, comfortably past the ~50 chars a native `nrt_` handle needs.
+KEYCLOAK_SHAPED = "eyJhbGciOiJIUzI1NiJ9." + "A" * 900 + ".signature"
+
+
+def test_a_keycloak_shaped_token_is_refused_not_rejected_as_malformed(env: Any) -> None:
+    """Length must not be what answers this request.
+
+    In `dual` this router owns `/auth/refresh` for both issuers and hands
+    JWT-shaped tokens to `login.py`; a body cap below a real Keycloak
+    token 422s that client before the delegation can happen. Here in
+    `native` the token is a stale credential and 401 is the right answer —
+    either way the client learns its session is over and signs in again,
+    which a 422 never tells it.
+    """
+    resp = _refresh(env, KEYCLOAK_SHAPED)
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["code"] == "session_expired"
+
+
+def test_logout_accepts_a_keycloak_shaped_token(env: Any) -> None:
+    """Same cap, same delegation — a client that cannot log out is stuck."""
+    resp = env.client.post("/auth/logout", json={"refresh_token": KEYCLOAK_SHAPED}, headers=MAC)
+    assert resp.status_code == 204, resp.text
+
+
+def test_a_token_past_the_cap_is_still_rejected(env: Any) -> None:
+    """The guard is loosened, not removed."""
+    assert _refresh(env, "x" * 5000).status_code == 422
+
+
 # ── the origin check still applies ───────────────────────────────────────
 
 

@@ -9,13 +9,12 @@ PROMTOOL_IMAGE = prom/prometheus:v2.54.1
 
 ##@ Local Development
 
-dev-up: ## Start the full local stack (PostgreSQL, Redis, MinIO, Kafka, Keycloak, observability)
+dev-up: ## Start the full local stack (PostgreSQL, Redis, Kafka, Keycloak, observability)
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d --wait
 	@echo ""
 	@echo "Stack is up. Service URLs:"
 	@echo "  PostgreSQL   : localhost:5432"
 	@echo "  Redis        : localhost:6379"
-	@echo "  MinIO        : http://localhost:9000 (console: http://localhost:9001)"
 	@echo "  Kafka        : localhost:9092"
 	@echo "  Keycloak     : http://localhost:8088"
 	@echo "  Jaeger UI    : http://localhost:16686"
@@ -30,7 +29,7 @@ dev-up: ## Start the full local stack (PostgreSQL, Redis, MinIO, Kafka, Keycloak
 dev-down: ## Stop and remove all containers (named volumes are KEPT)
 	$(COMPOSE) -f $(COMPOSE_FILE) down
 
-dev-nuke: ## DESTRUCTIVE — stop containers AND delete all volumes (Postgres, MinIO, Kafka, …)
+dev-nuke: ## DESTRUCTIVE — stop containers AND delete all volumes (Postgres, Kafka, …)
 	@echo "This deletes every local note, space, recording and the Keycloak realm."
 	@printf 'Type "nuke" to confirm: ' && read ans && [ "$$ans" = "nuke" ] || { echo "aborted"; exit 1; }
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
@@ -277,7 +276,7 @@ web-e2e-stack: ## Bring the stack up in the shape the browser tests need (native
 	MDX_AUTH_SMTP_USE_TLS=false \
 	MDX_AUTH_EMAIL_FROM=sales@notes-ai.local \
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml up -d --wait \
-	    postgres redis minio mailpit auth-service note-service asr-service asr-worker
+	    postgres redis mailpit auth-service note-service asr-service asr-worker
 	@echo ""
 	@echo "auth-service is in native mode. Mailpit inbox: http://localhost:8025"
 	@echo "Put it back with: make dev-up"

@@ -16,6 +16,8 @@ struct HomeView: View {
     @State private var newSpaceName = ""
     @State private var renamingSpace: Space?
     @State private var renameDraft = ""
+    /// True while the search field holds the keyboard — see `searchBar`.
+    @State private var searching = false
 
     init(calendar: CalendarService, google: GoogleCalendarService) {
         self.calendar = calendar
@@ -56,6 +58,9 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
+        // `isSearching` only reaches views *inside* the searchable one, so
+        // the answer is fetched by a child and kept here.
+        .overlay(alignment: .top) { SearchProbe(active: $searching) }
         .scrollDismissesKeyboard(.immediately)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -70,6 +75,14 @@ struct HomeView: View {
         }
         .searchable(text: $app.searchQuery, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search notes")
+        // An active search field must not be see-through. The field's own
+        // fill is opaque from `DSAppearance`; this is the other half — the
+        // bar it sits in, which is transparent by default at the top of a
+        // page, so the notes scrolling under it would show through the
+        // gaps around the box. Only while searching: at rest the dotted
+        // ground is meant to run up behind the toolbar.
+        .toolbarBackground(searching ? .visible : .automatic, for: .navigationBar)
+        .toolbarBackground(DS.bg, for: .navigationBar)
         .refreshable {
             await app.refreshNotes()
             await app.refreshSpaces()
@@ -310,6 +323,23 @@ struct HomeView: View {
     }
 }
 
+// MARK: - Search
+
+/// Nothing to look at: it exists to read `isSearching`, which SwiftUI only
+/// publishes to the children of the searchable view, and hand it back up
+/// to `HomeView` — where the toolbar's background is decided.
+private struct SearchProbe: View {
+    @Environment(\.isSearching) private var isSearching
+    @Binding var active: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: isSearching) { _, now in active = now }
+    }
+}
+
 // MARK: - Spaces
 
 /// The user's spaces as a row of chips: All notes, each space (hold for
@@ -388,6 +418,7 @@ private struct NoteRow: View {
     @EnvironmentObject private var app: AppState
     let note: NoteSummary
     let trash: () -> Void
+    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -423,6 +454,9 @@ private struct NoteRow: View {
                         }
                     }
                     Spacer(minLength: 8)
+                    if let access = note.access {
+                        AccessBadge(access: access, expanded: hover)
+                    }
                     Text(note.updatedAt.formatted(date: .omitted, time: .shortened))
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
@@ -433,9 +467,11 @@ private struct NoteRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(note.access?.help ?? "")
             DSMenu(dim: true, items: menuItems)
                 .padding(.trailing, 6)
         }
+        .onHover { hover = $0 }
         .contextMenu { DSMenuContent(items: menuItems()) }
     }
 
@@ -459,6 +495,30 @@ private struct NoteRow: View {
         items.append(.separator)
         items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
         return items
+    }
+}
+
+/// Private or public. There is no pointer on a phone, so the glyph
+/// always shows; an iPad pointer on the row spells it out.
+private struct AccessBadge: View {
+    let access: NoteAccess
+    let expanded: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: access.symbol)
+                .font(.system(size: 11, weight: .medium))
+            if expanded {
+                Text(access.label)
+                    .font(.ds(11, .medium))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(access.isPublic ? DS.accentText : (expanded ? DS.text3 : DS.muted))
+        .padding(.horizontal, expanded ? 7 : 0)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(expanded ? (access.isPublic ? DS.accentSoft : DS.surface2) : .clear))
+        .accessibilityHidden(true)
     }
 }
 

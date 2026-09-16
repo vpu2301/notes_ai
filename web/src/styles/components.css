@@ -386,6 +386,24 @@
 .row-meta { display: flex; align-items: center; gap: calc(8px * var(--density)); font-size: calc(11.5px * var(--fs)); color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
 .row-side { display: flex; align-items: center; gap: calc(8px * var(--density)); flex: none; }
 .row-chev { color: var(--muted); flex: none; }
+/* Private / shared / public — appears while the pointer is on the row. It
+   keeps its place at rest (opacity, not display) so nothing jumps and a
+   screen reader still hears it. */
+.access-badge {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  padding: 2px 7px; border-radius: 99px;
+  font-size: calc(10.5px * var(--fs)); font-weight: 500; white-space: nowrap;
+  background: var(--surface-2); color: var(--text-3);
+  opacity: 0; transition: opacity var(--t-fast) var(--ease);
+}
+.access-badge.public { background: var(--accent-soft); color: var(--accent-text); }
+.row.click:hover .access-badge,
+.row.click:focus-visible .access-badge { opacity: 1; }
+@media (hover: none) {
+  .access-badge { opacity: 1; background: none; padding: 2px 0; color: var(--muted); }
+  .access-badge.public { background: none; color: var(--accent-text); }
+  .access-badge .access-label { display: none; }
+}
 .row-err { font-size: calc(12px * var(--fs)); color: var(--rec); margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .err-kind {
   font-family: var(--mono);
@@ -603,6 +621,52 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .share-modal .field + .field, .share-modal form.field { margin-top: calc(16px * var(--density)); }
 .share-modal .help.right { text-align: right; }
 .danger-text { color: var(--danger-text); }
+
+/* The recipient box: a field that happens to contain chips. It borrows
+   the .input look rather than inheriting it, because a <div> holding an
+   <input> cannot be one — and the focus ring has to belong to the box,
+   not to the bare caret inside it. */
+.chip-input {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: calc(6px * var(--density));
+  width: 100%;
+  background: var(--surface);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: calc(5px * var(--density)) calc(8px * var(--density));
+  min-height: calc(34px * var(--density));
+  cursor: text;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.chip-input:hover:not(:focus-within) { border-color: var(--line-hover); }
+.chip-input:focus-within {
+  border-color: var(--line-active);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.chip-input input {
+  flex: 1; min-width: 140px;
+  border: 0; outline: none; background: transparent;
+  padding: calc(2px * var(--density)) 0;
+  font: inherit; font-size: calc(13px * var(--fs)); color: var(--text-1);
+}
+.recipient-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface-2); color: var(--text-2);
+  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-pill);
+  padding: calc(2px * var(--density)) calc(4px * var(--density)) calc(2px * var(--density)) calc(9px * var(--density));
+  font-size: calc(12px * var(--fs));
+  max-width: 100%;
+}
+.recipient-chip button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: 0; border-radius: var(--radius-pill);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.recipient-chip button:hover:not(:disabled) { background: var(--line-2); color: var(--text-1); }
+.share-modal .share-message { margin-top: calc(8px * var(--density)); }
+.share-modal .row-actions { margin-top: calc(10px * var(--density)); }
 .share-people { list-style: none; margin: 0; padding: 0; border: var(--hairline) solid var(--line); border-radius: var(--radius-lg); }
 .share-people li { display: flex; align-items: center; gap: 10px; padding: calc(8px * var(--density)) calc(12px * var(--density)); }
 .share-people li + li { border-top: var(--hairline) solid var(--line-2); }

@@ -68,6 +68,10 @@ class SearchHitDTO(BaseModel):
     co_author_ids: list[UUID]
     snippet: str
     updated_at: str
+    # 0016 — sharing state for the list badge. None in stats mode.
+    visibility: str | None = None
+    shared_with_count: int | None = None
+    has_public_link: bool | None = None
 
 
 class SearchResponse(BaseModel):
@@ -187,6 +191,9 @@ async def search_notes(
                 co_author_ids=h.co_author_ids,
                 snippet=snippet,
                 updated_at=h.updated_at.isoformat(),
+                visibility=h.visibility,
+                shared_with_count=h.shared_with_count,
+                has_public_link=h.has_public_link,
             )
         )
 

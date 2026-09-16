@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # source-level cut-off for a notification storm (E1).
     notifications_enabled: bool = Field(default=True, alias="MDX_NOTIFICATIONS_ENABLED")
 
-    # ── MinIO / S3 (finalized audio uploads) ───────────────────────────
+    # ── S3 object storage (finalized audio uploads) ────────────────────
     s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
     s3_region: str = Field(default="us-east-1", alias="S3_REGION")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")

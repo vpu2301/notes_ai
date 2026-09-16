@@ -2611,6 +2611,7 @@ name = "note-service"
 version = "0.8.0"
 source = { editable = "services/note-service" }
 dependencies = [
+    { name = "aiosmtplib" },
     { name = "asyncpg" },
     { name = "audit" },
     { name = "auth" },
@@ -2651,6 +2652,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosmtplib", specifier = ">=3.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "audit", editable = "libs/audit" },
     { name = "auth", editable = "libs/auth" },

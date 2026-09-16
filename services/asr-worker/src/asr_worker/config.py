@@ -164,7 +164,7 @@ class Settings(BaseSettings):
     asr_jobs_max_retries: int = Field(default=3, alias="MD_ASR_JOBS_MAX_RETRIES")
     asr_jobs_idle_reclaim_ms: int = Field(default=60_000, alias="MD_ASR_JOBS_IDLE_RECLAIM_MS")
 
-    s3_endpoint: str = Field(default="http://minio:9000", alias="S3_ENDPOINT")
+    s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
     s3_region: str = Field(default="us-east-1", alias="S3_REGION")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(default="minioadmin", alias="S3_SECRET_KEY")

@@ -396,6 +396,22 @@ export interface SharingView {
   public_link: PublicLink | null;
 }
 
+/** One recipient of a server-sent share mail, and what became of it. */
+export interface ShareEmailOutcome {
+  email: string;
+  /** `member` — granted access, mailed an app link. `link` — mailed the public link. */
+  access: "member" | "link";
+  /** `rejected` is a relay refusing the mailbox: a typo the sender can fix. */
+  status: "sent" | "rejected" | "failed";
+}
+
+export interface ShareEmailResponse {
+  sharing: SharingView;
+  results: ShareEmailOutcome[];
+  /** True when this send minted the public link, so the sheet can say so. */
+  public_link_created: boolean;
+}
+
 /** What an anonymous reader gets from a public link. */
 export interface SharedNoteView {
   code: string;
@@ -465,6 +481,10 @@ export interface SearchHit {
   co_author_ids: string[];
   snippet: string;
   updated_at: string;
+  /** Sharing state for the list badge (0016). Absent from an older server. */
+  visibility?: NoteVisibility | null;
+  shared_with_count?: number | null;
+  has_public_link?: boolean | null;
 }
 
 export interface SearchResponse {
@@ -701,4 +721,25 @@ export interface Space {
 
 export interface SpacesResponse {
   spaces: Space[];
+}
+
+// ── ask this note (POST /v1/notes/{id}/ask) ───────────────────────────
+
+/**
+ * One line of the conversation under a note. The client keeps the
+ * thread; the server gets it back as context with every question, so a
+ * follow-up ("and who owns that?") lands with something to refer to.
+ */
+export interface AskTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** The server refuses more than this many turns of history. */
+export const ASK_HISTORY_LIMIT = 12;
+
+export interface AskResponse {
+  answer: string;
+  backend: string;
+  model_id: string;
 }

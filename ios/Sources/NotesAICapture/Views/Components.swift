@@ -204,6 +204,14 @@ struct DSSkeleton: View {
 // MARK: - Share sheet
 
 /// The system share sheet (Files, Mail, AirDrop, …) for an exported file.
+///
+/// `UIActivityViewController` takes its items once, at construction, and
+/// there is no way to change them afterwards — which is why
+/// `updateUIViewController` is empty rather than merely unimplemented.
+/// So the items must not change under a live controller: give the view
+/// `.id(...)` on whatever identifies the file at the call site, and
+/// SwiftUI builds a new controller for a new file instead of re-showing
+/// the old one with the old attachment.
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 

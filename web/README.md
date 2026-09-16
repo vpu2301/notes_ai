@@ -171,9 +171,14 @@ _(add screenshots here)_
   with can open it. *Everyone in the workspace* makes it visible to all members.
 - A **public link** (`/s/<token>`) opens a read-only page with PDF / Markdown
   download and no sign-in. Turn it off from the same dialog.
-- **Share with a colleague** takes an e-mail address; a workspace member gets
-  read access plus an in-app and e-mail notification (the mail carries the note
-  code and who shared it, never the content). An outside address gets a
-  pre-filled mail with the public link instead.
+- **Send to** takes any number of e-mail addresses and an optional message,
+  and the SERVER sends the mail — a branded HTML message with the note's title,
+  your words and one link. A workspace member is granted read access and
+  pointed at the note in the app (plus the usual content-free "shared with
+  you" notification); anyone else gets the public link, minted for them if the
+  note has none. The sheet reports what happened to each address, and keeps
+  the ones that failed so a typo can be fixed and sent again.
+  It used to hand a `mailto:` URL to the desktop mail client, which produced
+  an unstyled draft the sender still had to send.
 - **Delete** is a soft delete: the note leaves every list, its links stop
   working, and the row stays for the workspace's records.

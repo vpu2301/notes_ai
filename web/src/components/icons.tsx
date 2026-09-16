@@ -211,6 +211,34 @@ export function UserIcon({ size = 16 }: IconProps) {
   );
 }
 
+export function UsersIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="7.5" cy="7.5" r="2.75" />
+      <path d="M2.5 16.5a5 5 0 0 1 10 0" />
+      <path d="M13 4.9a2.75 2.75 0 0 1 0 5.2M15 12.2a5 5 0 0 1 2.5 4.3" />
+    </svg>
+  );
+}
+
+export function LockIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="4.25" y="9" width="11.5" height="8" rx="2" />
+      <path d="M6.75 9V6.5a3.25 3.25 0 0 1 6.5 0V9" />
+    </svg>
+  );
+}
+
+export function GlobeIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M3 10h14M10 3c1.9 2 2.8 4.3 2.8 7s-.9 5-2.8 7c-1.9-2-2.8-4.3-2.8-7s.9-5 2.8-7Z" />
+    </svg>
+  );
+}
+
 export function FileTextIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>
@@ -283,6 +311,16 @@ export function ShareIcon({ size = 16 }: IconProps) {
       <circle cx="5" cy="10" r="2.2" />
       <circle cx="15" cy="15" r="2.2" />
       <path d="M7 9l6-3M7 11l6 3" />
+    </svg>
+  );
+}
+
+/** An envelope. Marks the "send this note by e-mail" action. */
+export function MailIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="2" />
+      <path d="M3 6l7 5 7-5" />
     </svg>
   );
 }
@@ -366,6 +404,25 @@ export function FolderPlusIcon({ size = 16 }: IconProps) {
     <svg {...base(size)}>
       <path d="M2.75 5.5A1.25 1.25 0 0 1 4 4.25h3.3l1.6 1.9H16A1.25 1.25 0 0 1 17.25 7.4v7.35A1.25 1.25 0 0 1 16 16H4a1.25 1.25 0 0 1-1.25-1.25z" />
       <path d="M10 8.75v4.5M7.75 11h4.5" />
+    </svg>
+  );
+}
+
+/** "Written by the model" — the spark that marks an enhanced note and
+    every answer in the ask thread. */
+export function SparkleIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M8 2.75l1.15 3.1L12.25 7 9.15 8.15 8 11.25 6.85 8.15 3.75 7l3.1-1.15z" />
+      <path d="M14.25 11.5l.6 1.65 1.65.6-1.65.6-.6 1.65-.6-1.65-1.65-.6 1.65-.6z" />
+    </svg>
+  );
+}
+
+export function ArrowUpIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M10 16V4.5M5.25 9.25 10 4.5l4.75 4.75" />
     </svg>
   );
 }

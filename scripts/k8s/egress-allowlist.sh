@@ -7,7 +7,7 @@
 #   scripts/k8s/egress-allowlist.sh test           # from inside the cluster/compose: worker must NOT reach example.com
 #
 # Allowed: HF endpoint hostnames (HF_CHAT_ENDPOINT_URL / HF_ASR_ENDPOINT_URL,
-# the shared api front door endpoints.huggingface.cloud), Postgres, MinIO,
+# the shared api front door endpoints.huggingface.cloud), Postgres,
 # Redis, OTel collector, DNS. Everything else is dropped. Hostname rules
 # need an FQDN-capable CNI (Cilium) — until the hosting decision the list
 # is CIDR-based and must be re-resolved when HF rotates front-door IPs

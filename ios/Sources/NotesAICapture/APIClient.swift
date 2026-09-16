@@ -779,6 +779,26 @@ actor APIClient {
         return try decode(SharingView.self, from: data)
     }
 
+    /// Mail the note to people, from the server.
+    ///
+    /// Replaces the old `mailto:` hand-off, which opened Mail.app with an
+    /// unstyled draft the sender still had to send — and, often enough,
+    /// with whatever message Mail already had open in front of it.
+    /// Members are granted access and pointed at the note; everyone else
+    /// gets the public link, minted server-side if the note has none.
+    func shareByEmail(
+        id: String, recipients: [String], message: String, lang: String
+    ) async throws -> ShareEmailResponse {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "recipients": recipients,
+            "message": message,
+            "lang": lang,
+        ])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/share/email",
+                                  method: "POST", jsonBody: body, authorized: true)
+        return try decode(ShareEmailResponse.self, from: data)
+    }
+
     // MARK: - Transcription jobs (asr-service)
 
     /// Plaintext transcript of a COMPLETE job (409 while it is still running).
@@ -786,6 +806,16 @@ actor APIClient {
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/result", method: "GET",
                                   authorized: true)
         return try decode(TranscriptResult.self, from: data)
+    }
+
+    /// Ask a question about a note. The answer comes from the model the
+    /// server routes this environment to, grounded in the note and its
+    /// transcript; `history` is the thread so far (the server stores nothing).
+    func askNote(id: String, question: String, history: [AskTurn]) async throws -> AskNoteResponse {
+        let body = try JSONEncoder().encode(AskNoteRequest(question: question, history: history))
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/ask", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(AskNoteResponse.self, from: data)
     }
 
     /// Name the diarized speakers of a job (the complete label → name map;

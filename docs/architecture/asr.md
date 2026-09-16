@@ -14,7 +14,7 @@ its dependency.
                                                        │ 1. encrypt + put
                                                        ▼
                                                ┌───────────────┐
-                                               │     MinIO     │
+                                               │   Object store│
                                                │  mdx-audio    │
                                                └───────────────┘
                                                        │
@@ -47,7 +47,7 @@ its dependency.
                                                        │ 6. encrypt + put
                                                        ▼
                                                ┌───────────────┐
-                                               │     MinIO     │
+                                               │   Object store│
                                                │ mdx-transcripts│
                                                └───────────────┘
 ```
@@ -67,7 +67,7 @@ its dependency.
 │                           ephemeral, never persisted plaintext)  │
 │                          │                                       │
 │                  encrypts ▼                                       │
-│              ciphertext  (in MinIO, header || ciphertext)        │
+│              ciphertext  (in the object store, header || ciphertext)        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,14 +101,14 @@ Consumer (asr-worker):
 | Where                  | What                          | Recovery                                |
 | ---------------------- | ----------------------------- | --------------------------------------- |
 | API: validator         | Reject upload                 | RFC 9457 problem detail; client retries |
-| API: storage           | MinIO put fails               | 5xx; no row inserted; client retries    |
-| API: DB                | INSERT fails after MinIO put  | Orphan ciphertext → cleanup cron        |
+| API: storage           | S3 put fails                  | 5xx; no row inserted; client retries    |
+| API: DB                | INSERT fails after the S3 put | Orphan ciphertext → cleanup cron        |
 | Queue: XADD            | Redis down                    | 5xx; orchestrator retries               |
 | Worker: fetch          | Object missing                | Mark failed, `corrupt_audio`            |
 | Worker: ffmpeg         | Decode fails                  | Mark failed, `corrupt_audio`            |
 | Worker: Whisper        | OOM                           | Mark failed, `gpu_oom`; release cache   |
 | Worker: Whisper        | Timeout                       | Mark failed, `timeout`                  |
-| Worker: storage put    | MinIO put of transcript fails | Mark failed; XACK; alert                |
+| Worker: storage put    | S3 put of transcript fails    | Mark failed; XACK; alert                |
 | Worker: ack            | Crashed before XACK           | XAUTOCLAIM reclaims → next consumer      |
 | Worker: ack            | Reclaimed > 3 times           | Move to DLQ; ops investigates           |
 

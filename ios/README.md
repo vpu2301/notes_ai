@@ -36,8 +36,10 @@ Mac app — a note captured here shows up there and the other way round.
    the bar, conflict banner on 409), a **Transcript** tab for notes captured
    on this phone (speaker turns; tap a name to rename the speaker on the
    job so the web app agrees), and a ⋯ menu with *Open in web app*,
-   sharing (workspace visibility, public link, e-mail, share with a
-   colleague), *Share PDF / Markdown* (the system share sheet: Files, Mail,
+   sharing (workspace visibility, public link, and **Send by email…** —
+   a sheet that takes addresses and a message and has the SERVER send a
+   branded mail; members are granted access, anyone else gets the public
+   link), *Share PDF / Markdown* (the system share sheet: Files, Mail,
    AirDrop…), *Finalize note* / *Revert to draft*, *Amend in web app…*,
    *Move to …* and *Move to trash*.
 5. Everything else lives in **Settings** (the avatar in the top-right):

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { errorMessage } from "../api/http";
 import { searchNotes } from "../api/notes";
 import type { SearchHit } from "../api/types";
+import { AccessBadge, noteAccess } from "../components/AccessBadge";
 import { ComingUp } from "../components/ComingUp";
 import { EmptyState } from "../components/EmptyState";
 import { FolderIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
@@ -126,6 +127,7 @@ function NoteRow({
   moveItems: MenuItem[];
   onOpen: () => void;
 }) {
+  const access = noteAccess(hit);
   return (
     <div
       className="row click"
@@ -158,6 +160,7 @@ function NoteRow({
           </span>
         )}
       </span>
+      {access && <AccessBadge access={access} />}
       <span className="row-time">{relativeTime(hit.updated_at)}</span>
       {moveItems.length > 0 && (
         <span className="row-side" onClick={(e) => e.stopPropagation()}>

@@ -11,11 +11,15 @@ global:
   imageRegistry: ""            # staging: local images imported into k3d
   imagePullPolicy: IfNotPresent
   otlpEndpoint: http://otel-collector:4317
+  # Object storage. The in-cluster MinIO store was removed — point this
+  # (and every service's S3_ENDPOINT below) at a real S3-compatible
+  # endpoint to re-enable audio at rest. Empty = no object store.
+  s3Endpoint: ""
 
 # ── Stateful stores ─────────────────────────────────────────────────
 # staging: simple single-replica in-cluster workloads with PVCs.
 # prod (values-prod.yaml): inCluster=false — operator-managed
-# (CloudNativePG / Redis operator / MinIO operator) or managed services
+# (CloudNativePG / Redis operator) or managed services
 # per the hosting choice; endpoints below then point at those.
 stateful:
   inCluster: true
@@ -29,11 +33,6 @@ stateful:
   redis:
     image: redis:7.2-alpine
     host: redis
-  minio:
-    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
-    mcImage: minio/mc:RELEASE.2024-04-18T16-45-29Z
-    storage: 20Gi
-    host: minio
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     host: keycloak
@@ -155,7 +154,7 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_NLP_BASE_URL: http://nlp-service:8000
     masterKey: true
@@ -172,7 +171,7 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_DEVICE: cpu
       MD_ASR_COMPUTE_TYPE: int8
@@ -210,7 +209,7 @@ apps:
     env:
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MDX_TMPFS_ROOT: /run/dictation
       MD_ASR_DEVICE: cpu
@@ -245,7 +244,7 @@ apps:
       ASR_SERVICE_BASE_URL: http://asr-service:8000
       REDIS_URL: redis://redis:6379/0
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ""
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       # "Ask this note" (POST /v1/notes/{id}/ask) answers through the
       # model registry (libs/models): routing.understand → hf_eu here.

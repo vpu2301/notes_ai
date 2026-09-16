@@ -47,7 +47,10 @@ natively, in a window laid out like the Claude / Codex desktop apps
    save state in the bar, conflict banner on 409), a **Transcript** tab for
    notes captured on this Mac (`GET /asr/jobs/{id}/result`, grouped into
    speaker turns, copyable), and a ⋯ menu with *Open in web app* (⌘⇧O),
-   sharing, *Download PDF / Markdown*, *Finalize note* / *Revert to draft*,
+   sharing (workspace visibility, public link, and **Send by email…** — a
+   sheet that takes addresses and a message and has the SERVER send a
+   branded mail; members are granted access, anyone else gets the public
+   link), *Download PDF / Markdown*, *Finalize note* / *Revert to draft*,
    *Amend in web app…*, *Move to …* and *Move to trash*. A meeting without a
    note shows the live card while it is being processed, its failure, or a
    **Create note** button when the transcript finished without a note.

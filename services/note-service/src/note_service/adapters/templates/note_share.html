@@ -1,0 +1,102 @@
+{#
+  The mail a shared note arrives in.
+
+  One file for every language, unlike auth-service's per-language
+  templates: the prose here is nine short strings, and three copies of
+  400 lines of table markup to vary nine strings is three places for a
+  layout fix to be forgotten. The strings come in as `t`, from
+  adapters/share_mail_copy.py, where a proofreader can read all three
+  languages side by side.
+
+  Table layout, inline styles, no external assets: Outlook and Gmail
+  strip <style> blocks and refuse remote CSS. The one <style> block is
+  for the mobile width query, which is additive — the mail is correct
+  without it.
+#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<meta name="supported-color-schemes" content="light dark" />
+<title>{{ t.title }}</title>
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<style>
+  @media only screen and (max-width:700px){
+    .wrap{width:100% !important;}
+    .pad{padding-left:26px !important;padding-right:26px !important;}
+    .h1{font-size:30px !important;line-height:36px !important;}
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#E6E1D6;">
+<span style="display:none;font-size:1px;color:#E6E1D6;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">{{ t.preheader }}</span>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#E6E1D6;">
+ <tr><td align="center" style="padding:40px 12px 48px 12px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="680" class="wrap" style="width:680px;max-width:680px;">
+
+   <tr><td style="padding:0 0 18px 4px;" class="pad">
+     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+       <td style="font-family:Georgia, 'Times New Roman', Times, serif;font-size:19px;line-height:26px;mso-line-height-rule:exactly;letter-spacing:0.02em;color:#1F1C18;">Notes AI</td>
+       <td align="right" style="font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:10px;line-height:26px;mso-line-height-rule:exactly;letter-spacing:0.14em;color:#6E675C;">{{ t.eyebrow }}</td>
+     </tr></table>
+   </td></tr>
+
+   {# ── who shared it, and what ───────────────────────────────────── #}
+   <tr><td style="background-color:#FAF7F0;border-radius:14px 14px 0 0;padding:56px 56px 0 56px;" class="pad">
+     <p style="margin:0 0 10px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:13px;line-height:20px;mso-line-height-rule:exactly;color:#C4643F;">{{ t.kicker }}</p>
+     <p class="h1" style="margin:0 0 20px 0;font-family:Georgia, 'Times New Roman', Times, serif;font-size:40px;line-height:47px;mso-line-height-rule:exactly;color:#1F1C18;letter-spacing:-0.01em;">{{ note_title }}</p>
+     <p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:16px;line-height:26px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.lede }}</p>
+   </td></tr>
+
+   {# ── the sharer's own words, when there are any ────────────────── #}
+   {% if message_paragraphs %}
+   <tr><td style="background-color:#FAF7F0;padding:30px 56px 0 56px;" class="pad">
+     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#F2E7DC;border-radius:12px;">
+       <tr><td style="padding:26px 28px 26px 28px;">
+         {% for paragraph in message_paragraphs %}
+         <p style="margin:{{ '0 0 12px 0' if not loop.last else '0' }};font-family:Georgia, 'Times New Roman', Times, serif;font-size:17px;line-height:27px;mso-line-height-rule:exactly;color:#1F1C18;">{{ paragraph }}</p>
+         {% endfor %}
+         <p style="margin:16px 0 0 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:13px;line-height:21px;mso-line-height-rule:exactly;color:#6E675C;">&mdash; {{ sharer_name }}</p>
+       </td></tr>
+     </table>
+   </td></tr>
+   {% endif %}
+
+   {# ── the one thing to do ───────────────────────────────────────── #}
+   <tr><td style="background-color:#FAF7F0;padding:32px 56px 0 56px;" class="pad">
+     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+       <td style="background-color:#1F1C18;border-radius:10px;">
+         <a href="{{ link_url }}" style="display:inline-block;padding:16px 34px;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:15px;line-height:20px;mso-line-height-rule:exactly;color:#FAF7F0;text-decoration:none;font-weight:bold;">{{ t.cta }}</a>
+       </td>
+     </tr></table>
+     <p style="margin:16px 0 0 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:13px;line-height:21px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.access_note }}</p>
+   </td></tr>
+
+   {# The bare URL as well: a share mail is forwarded, printed and
+      pasted into chats, and a button alone survives none of that. #}
+   <tr><td style="background-color:#FAF7F0;padding:20px 56px 0 56px;" class="pad">
+     <p style="margin:0 0 6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:12px;line-height:19px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.link_label }}</p>
+     <p style="margin:0;font-family:'Courier New', Courier, monospace;font-size:13px;line-height:21px;mso-line-height-rule:exactly;color:#1F1C18;word-break:break-all;"><a href="{{ link_url }}" style="color:#1F1C18;text-decoration:underline;">{{ link_url }}</a></p>
+   </td></tr>
+
+   <tr><td style="background-color:#FAF7F0;border-radius:0 0 14px 14px;padding:34px 56px 46px 56px;" class="pad">
+     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-top:1px solid #E3DCCE;">
+       <tr><td style="padding:26px 0 0 0;">
+         <p style="margin:0 0 6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:13px;line-height:21px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.from_label }}: {{ sharer_name }}{% if sharer_email %} &lt;{{ sharer_email }}&gt;{% endif %}</p>
+         <p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:13px;line-height:21px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.sent_label }}: {{ shared_at }}</p>
+       </td></tr>
+     </table>
+   </td></tr>
+
+   <tr><td style="padding:26px 56px 0 56px;" class="pad">
+     <p style="margin:0 0 6px 0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:12px;line-height:19px;mso-line-height-rule:exactly;color:#6E675C;">{{ t.footer_why }}</p>
+     <p style="margin:0;font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif;font-size:12px;line-height:19px;mso-line-height-rule:exactly;color:#6E675C;">Notes AI &middot; 100 Velyka Vasylkivska St, Kyiv 03150, Ukraine</p>
+   </td></tr>
+
+  </table>
+ </td></tr>
+</table>
+</body>
+</html>

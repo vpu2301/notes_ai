@@ -1,6 +1,9 @@
 import { api, apiBlob, ApiError } from "./http";
+import { ASK_HISTORY_LIMIT } from "./types";
 import type {
   AmendResponse,
+  AskResponse,
+  AskTurn,
   FinalizeResponse,
   FromTranscriptResponse,
   NoteAmendmentType,
@@ -13,6 +16,7 @@ import type {
   ReadPurpose,
   SearchResponse,
   SharedNoteView,
+  ShareEmailResponse,
   SharingView,
   SourceJobLink,
   TemplateDetail,
@@ -173,6 +177,31 @@ export function shareWithMember(id: string, email: string): Promise<SharingView>
   return api<SharingView>("note", `/v1/notes/${id}/share`, { method: "POST", json: { email } });
 }
 
+/**
+ * Mail the note to people, from the server.
+ *
+ * The old "Email link…" built a `mailto:` URL and let the browser hand it
+ * to the desktop mail client, which produced an unstyled draft the sender
+ * still had to send — and on macOS surfaced whatever Mail.app already had
+ * open. This sends the real thing: workspace members are granted access
+ * and pointed at the note, everyone else gets the public link.
+ */
+export function shareByEmail(
+  id: string,
+  body: { recipients: string[]; message?: string; lang?: string },
+): Promise<ShareEmailResponse> {
+  return api<ShareEmailResponse>("note", `/v1/notes/${id}/share/email`, {
+    method: "POST",
+    json: {
+      recipients: body.recipients,
+      message: body.message ?? "",
+      // The sender's UI language. The recipient's is unknowable — half of
+      // them have no account here — and people share within a team.
+      lang: body.lang ?? navigator.language,
+    },
+  });
+}
+
 export function unshareMember(id: string, sub: string): Promise<SharingView> {
   return api<SharingView>("note", `/v1/notes/${id}/share/${sub}`, { method: "DELETE" });
 }
@@ -193,4 +222,19 @@ export function getSharedNote(token: string): Promise<SharedNoteView> {
 
 export function downloadSharedPdf(token: string): Promise<Blob> {
   return apiBlob("note", `/v1/shared/${encodeURIComponent(token)}/pdf`, { auth: false });
+}
+
+// ── ask this note ─────────────────────────────────────────────────────
+
+/**
+ * Ask a question about one note. The answer comes from the model the
+ * workspace is configured for, over the note's text and its transcript;
+ * `history` is the conversation so far, oldest first, and the server
+ * takes at most `ASK_HISTORY_LIMIT` turns of it.
+ */
+export function askNote(id: string, question: string, history: AskTurn[]): Promise<AskResponse> {
+  return api<AskResponse>("note", `/v1/notes/${id}/ask`, {
+    method: "POST",
+    json: { question, history: history.slice(-ASK_HISTORY_LIMIT) },
+  });
 }

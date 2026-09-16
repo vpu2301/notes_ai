@@ -30,22 +30,27 @@ import type {
   TranscriptTurn,
 } from "../api/types";
 import { defaultSpeakerName } from "../api/types";
+import { AskNote } from "../components/AskNote";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   AlertIcon,
   ArrowLeftIcon,
+  CalendarIcon,
   CheckIcon,
   CopyIcon,
   DownloadIcon,
   FileDownIcon,
   FolderIcon,
+  FolderPlusIcon,
   HistoryIcon,
   PenIcon,
   ShareIcon,
+  SparkleIcon,
   TrashIcon,
   UserIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
+import { RichText } from "../components/RichText";
 import { ShareDialog } from "../components/ShareDialog";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
@@ -53,6 +58,7 @@ import { useToast } from "../components/Toaster";
 import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
+import { useDismiss } from "../lib/useDismiss";
 import { useSpaces } from "../spaces/SpacesContext";
 
 const AUTOSAVE_MS = 900;
@@ -96,9 +102,22 @@ interface FieldProps {
   onChange: (next: NoteSection) => void;
 }
 
+/**
+ * One free-text section.
+ *
+ * A note is a document first: what the model wrote is typeset — headings,
+ * nested bullets, checklists — rather than dumped as the raw `- ` and
+ * `**…**` a plain box used to show. On a draft the document is also the
+ * way in: click it and the same words come back as their markdown source
+ * in a seamless editor, and leaving the field sets them again. A section
+ * with nothing in it skips straight to the editor — there is no document
+ * to read yet, only a prompt to write one.
+ */
 function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [editing, setEditing] = useState(false);
   const text = section.text ?? "";
+  const placeholder = def.min_chars ? `At least ${def.min_chars} characters…` : "Start writing…";
 
   // Auto-grow to fit content.
   useEffect(() => {
@@ -106,19 +125,47 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [text]);
+  }, [text, editing]);
 
-  if (readOnly) {
-    return <div className={`section-ro ${text ? "" : "empty-val"}`}>{text || "Nothing entered."}</div>;
+  // Put the caret at the end, not at the start of the text we just typeset.
+  const onFocusEditor = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const end = e.target.value.length;
+    e.target.setSelectionRange(end, end);
+  };
+
+  if (readOnly) return <RichText text={text} />;
+
+  if (!editing && text.trim() !== "") {
+    return (
+      <div
+        className="doc-edit"
+        role="button"
+        tabIndex={0}
+        aria-label={`Edit ${def.name}`}
+        onClick={() => setEditing(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setEditing(true);
+          }
+        }}
+      >
+        <RichText text={text} placeholder={placeholder} />
+      </div>
+    );
   }
+
   return (
     <textarea
       ref={ref}
       className="textarea seamless"
       rows={2}
       value={text}
-      placeholder={def.min_chars ? `At least ${def.min_chars} characters…` : "Start writing…"}
+      autoFocus={editing}
+      placeholder={placeholder}
       aria-label={def.name}
+      onFocus={onFocusEditor}
+      onBlur={() => setEditing(false)}
       onChange={(e) => onChange({ ...section, text: e.target.value })}
     />
   );
@@ -437,6 +484,107 @@ function TranscriptView({ jobId, onSpeakerRenamed }: TranscriptViewProps) {
   );
 }
 
+/**
+ * The note's title. A textarea rather than an input, so a meeting's real
+ * name — which is a sentence, not a label — wraps onto a second line
+ * instead of scrolling out of sight. Return is not a line break here: a
+ * title is one line of text however many rows it takes to show.
+ */
+function TitleField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      className="title-input"
+      rows={1}
+      value={value}
+      placeholder="Untitled note"
+      aria-label="Note title"
+      disabled={disabled}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.preventDefault();
+      }}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+    />
+  );
+}
+
+// ── meta row ──────────────────────────────────────────────────────────
+
+/**
+ * The "filed in" pill. A note already in a space links to it; one that
+ * isn't opens the list of spaces so filing it is one click, not a trip
+ * through the ⋯ menu. With no spaces yet there is nothing to offer, so
+ * the pill stays out of the row entirely.
+ */
+function SpacePill({ noteId }: { noteId: string }) {
+  const { spaces, spaceOf, file } = useSpaces();
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const ref = useDismiss<HTMLDivElement>(open, close);
+  const current = spaceOf[noteId];
+  const space = spaces.find((sp) => sp.id === current);
+
+  if (spaces.length === 0) return null;
+  if (space) {
+    return (
+      <Link to={`/spaces/${space.id}`} className="doc-pill" title="Open this space">
+        <FolderIcon size={13} />
+        {space.name}
+      </Link>
+    );
+  }
+  return (
+    <div className="dropdown-host" ref={ref}>
+      <button
+        type="button"
+        className={`doc-pill ${open ? "on" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <FolderPlusIcon size={13} />
+        Add to space
+      </button>
+      {open && (
+        <div className="dropdown left" role="menu" aria-label="Spaces">
+          {spaces.map((sp) => (
+            <button
+              key={sp.id}
+              type="button"
+              className="anchored-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void file(noteId, sp.id);
+              }}
+            >
+              <FolderIcon size={14} />
+              <span className="anchored-menu-label">{sp.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── the page ──────────────────────────────────────────────────────────
 
 type Tab = "notes" | "transcript";
@@ -446,11 +594,12 @@ export function NoteEditorPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const { spaces, spaceOf, file: fileInSpace, forgetNote } = useSpaces();
-  const noteSpace = spaces.find((s) => s.id === spaceOf[noteId]);
 
   const [note, setNote] = useState<NoteEnvelope | null>(null);
   const [sections, setSections] = useState<TemplateSection[] | null>(null);
   const [content, setContent] = useState<NoteContent | null>(null);
+  /** The template's display name, for the meta row; null when it could not be read. */
+  const [templateName, setTemplateName] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
@@ -506,10 +655,12 @@ export function NoteEditorPage() {
       if (env.content?.template_id) {
         try {
           const tpl = await getTemplate(env.content.template_id);
+          setTemplateName(tpl.name);
           setSections([...tpl.schema_jsonb.sections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
         } catch {
           // Template unavailable (deprecated/permissions): fall back to the
           // envelope's section labels as plain free-text sections.
+          setTemplateName(null);
           setSections(
             (env.section_labels ?? []).map((l) => ({
               id: l.section_key,
@@ -518,6 +669,7 @@ export function NoteEditorPage() {
           );
         }
       } else {
+        setTemplateName(null);
         setSections([]);
       }
     } catch (err) {
@@ -869,28 +1021,37 @@ export function NoteEditorPage() {
           <Menu items={menu} />
         </div>
 
-        <input
-          className="title-input"
+        <TitleField
           value={shownContent.title ?? ""}
-          placeholder="Untitled note"
-          aria-label="Note title"
           disabled={!editable}
-          onChange={(e) => onContentChange({ ...shownContent, title: e.target.value })}
+          onChange={(title) => onContentChange({ ...shownContent, title })}
         />
+        {/* The meta line is a row of pills, not a run of text: when it
+            was taken, whose it is, what wrote it, where it is filed, what
+            it is called. Only the space is a control — the rest are the
+            facts you want at a glance without reading a sentence. */}
         <div className="doc-meta">
-          <span>{formatDateTime(note.created_at)}</span>
-          <span className="sep">·</span>
-          <span>Updated {relativeTime(note.updated_at)}</span>
-          <span className="sep">·</span>
-          <span className="mono">{note.code}</span>
-          {noteSpace && (
-            <>
-              <span className="sep">·</span>
-              <Link to={`/spaces/${noteSpace.id}`} className="doc-space">
-                <FolderIcon size={12} /> {noteSpace.name}
-              </Link>
-            </>
+          <span className="doc-pill" title={`Created ${formatDateTime(note.created_at)}`}>
+            <CalendarIcon size={13} />
+            {formatDateTime(note.created_at)}
+          </span>
+          <span className="doc-pill" title={`Updated ${formatDateTime(note.updated_at)}`}>
+            Updated {relativeTime(note.updated_at)}
+          </span>
+          <span className="doc-pill">
+            <UserIcon size={13} />
+            {readPurpose ? authorName : "Me"}
+          </span>
+          {templateName && (
+            <span className="doc-pill tpl" title="The template this note was written from">
+              <SparkleIcon size={13} />
+              {templateName}
+            </span>
           )}
+          <SpacePill noteId={noteId} />
+          <span className="doc-pill mono" title="This note's code">
+            {note.code}
+          </span>
         </div>
 
         {conflict && (
@@ -982,6 +1143,12 @@ export function NoteEditorPage() {
             ))}
           </div>
         )}
+
+        {/* Ask this note. It hangs off the foot of the document, so the
+            answer arrives under the text it is about — and it is offered
+            for the note as it stands, never for an old version you are
+            only looking at. */}
+        {!viewing && <AskNote noteId={noteId} />}
       </div>
 
       {showVersions && (

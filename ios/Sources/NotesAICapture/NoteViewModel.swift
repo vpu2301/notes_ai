@@ -32,6 +32,9 @@ final class NoteViewModel: ObservableObject {
 
     @Published private(set) var note: NoteEnvelope?
     @Published private(set) var sections: [TemplateSectionDef] = []
+    /// The template's display name, for the note's meta line; nil when the
+    /// template could not be read (deprecated, or not ours to see).
+    @Published private(set) var templateName: String?
     @Published var content: NoteContent?
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
@@ -59,6 +62,18 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var speakerNames: [String: String] = [:]
     @Published private(set) var transcriptError: String?
     @Published private(set) var renamingSpeaker = false
+
+    /// "Ask this note": the thread under the document. Lives here only —
+    /// the server answers one question at a time and keeps nothing.
+    @Published private(set) var chat: [ChatMessage] = []
+    @Published private(set) var asking = false
+    @Published var askError: String?
+
+    struct ChatMessage: Identifiable, Equatable {
+        let id = UUID()
+        let role: AskTurn.Role
+        let text: String
+    }
 
     private let api: APIClient
     /// The autosave timer (cancelled and restarted on every edit).
@@ -106,9 +121,11 @@ final class NoteViewModel: ObservableObject {
             conflict = false
             if let templateId = envelope.content?.templateId,
                let template = try? await api.fetchTemplate(id: templateId) {
+                templateName = template.name
                 sections = template.schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
             } else {
                 // Template unavailable: the envelope's labels as plain text sections.
+                templateName = nil
                 sections = (envelope.sectionLabels ?? []).map {
                     TemplateSectionDef(id: $0.sectionKey,
                                        name: $0.name["en"] ?? $0.name["uk"] ?? $0.sectionKey,
@@ -190,6 +207,33 @@ final class NoteViewModel: ObservableObject {
         let template = "$1" + NSRegularExpression.escapedTemplate(for: to) + ": "
         return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
                                               withTemplate: template)
+    }
+
+    // MARK: - Ask this note
+
+    /// The server sees the last few turns for context; it caps the thread.
+    private static let historyLimit = 12
+
+    func ask(_ question: String) async {
+        let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !asking else { return }
+        askError = nil
+        let history = chat.suffix(Self.historyLimit).map { AskTurn(role: $0.role, text: $0.text) }
+        chat.append(ChatMessage(role: .user, text: text))
+        asking = true
+        defer { asking = false }
+        do {
+            let reply = try await api.askNote(id: noteId, question: text, history: Array(history))
+            chat.append(ChatMessage(role: .assistant, text: reply.answer))
+        } catch {
+            // The question stays in the thread so it can be retried by eye.
+            askError = error.localizedDescription
+        }
+    }
+
+    func clearChat() {
+        chat = []
+        askError = nil
     }
 
     // MARK: - Editing (drafts autosave; other states are read-only here)
@@ -308,9 +352,22 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
+    /// Write an export to a directory of its own.
+    ///
+    /// The per-export subdirectory is the point. Writing every export to
+    /// `exports/<code>.pdf` meant the same file URL every time, and a
+    /// share sheet keyed on that URL could hand Mail the PREVIOUS file —
+    /// the one still on disk from the last export, or from the last run
+    /// of the app. A fresh directory makes each export a distinct URL,
+    /// so what is attached is always what was just exported. Earlier
+    /// ones are swept as we go rather than left in tmp for iOS to
+    /// reclaim whenever it feels like it.
     private static func exportFile(named name: String, data: Data) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("exports", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("exports", isDirectory: true)
+        try? fm.removeItem(at: root)
+        let dir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return url
@@ -344,19 +401,30 @@ final class NoteViewModel: ObservableObject {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
     }
 
-    /// Returns false when the address belongs to nobody in the workspace.
-    func share(email: String) async -> Bool {
+    /// Mail the note to the people named, from the server.
+    ///
+    /// Returns the per-recipient outcomes, or nil when the call itself
+    /// failed (the reason is on `actionError`). Members are granted
+    /// access as a side effect, so the sharing view is refreshed from
+    /// the reply rather than re-fetched.
+    func sendShareEmail(recipients: [String], message: String) async -> [ShareEmailOutcome]? {
         busy = true
         actionError = nil
         defer { busy = false }
         do {
-            sharing = try await api.shareWithMember(id: noteId, email: email)
-            return true
-        } catch let APIError.http(status, _) where status == 404 {
-            return false
+            let result = try await api.shareByEmail(
+                id: noteId,
+                recipients: recipients,
+                message: message,
+                // The sender's language. The recipient's is unknowable —
+                // half of them have no account here — and people share
+                // within a team.
+                lang: Locale.current.language.languageCode?.identifier ?? "en")
+            sharing = result.sharing
+            return result.results
         } catch {
             actionError = error.localizedDescription
-            return false
+            return nil
         }
     }
 

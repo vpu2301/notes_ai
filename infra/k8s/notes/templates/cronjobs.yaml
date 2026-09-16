@@ -65,7 +65,7 @@ spec:
                   value: {{ $v | quote }}
                 {{- end }}
                 - name: S3_ENDPOINT
-                  value: http://minio:9000
+                  value: {{ $.Values.global.s3Endpoint | quote }}
                 - name: MDX_MASTER_KEY_PATH
                   value: /etc/mdx/master.key
               volumeMounts:

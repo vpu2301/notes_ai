@@ -2,7 +2,8 @@
 
 Needs the full stack up (`docker compose up`) with the dev seed users.
 Exercises create, read, draft update, optimistic-lock conflict, versions,
-diff, sharing (member / visibility / public link / anonymous read + PDF),
+diff, sharing (member / visibility / public link / anonymous read + PDF /
+send by e-mail),
 synthesis, PDF, search scoping, finalize, revert, amend, cancel and delete
 as four different callers (author, another member, tenant_admin, a member
 of another tenant, and an anonymous reader). Exit 1 on any failure.
@@ -176,6 +177,40 @@ r = member.delete(f"/v1/notes/{nid}/public-link")
 check("revoke public link", r.status_code == 200 and r.json()["public_link"] is None, r.text[:120])
 r = anon.get(f"/v1/shared/{token}")
 check("revoked link -> 404", r.status_code == 404, r.text[:120])
+
+# 6b. send it by e-mail (mail is captured by Mailpit in the dev stack)
+r = member.post(
+    f"/v1/notes/{nid}/share/email",
+    json={
+        "recipients": ["viewer@tenant-a.example", "outsider@example.org"],
+        "message": "Recap of what we agreed.",
+        "lang": "en",
+    },
+)
+body = r.json() if r.status_code == 200 else {}
+check(
+    "share by e-mail sends to both kinds of recipient",
+    r.status_code == 200 and all(x["status"] == "sent" for x in body.get("results", [])),
+    r.text[:300],
+)
+check(
+    "member is granted access, outsider gets the public link",
+    sorted(x["access"] for x in body.get("results", [])) == ["link", "member"],
+    r.text[:300],
+)
+check(
+    "a link was minted for the outsider",
+    body.get("public_link_created") is True and body.get("sharing", {}).get("public_link"),
+    r.text[:300],
+)
+r = viewer.get(f"/v1/notes/{nid}")
+check("e-mailed member can read it", r.status_code == 200, r.text[:120])
+r = member.post(f"/v1/notes/{nid}/share/email", json={"recipients": ["not an address"]})
+check("nonsense address -> 422", r.status_code == 422, r.text[:120])
+r = member.delete(f"/v1/notes/{nid}/public-link")
+check("link from the e-mail can be turned off", r.status_code == 200, r.text[:120])
+r = member.delete(f"/v1/notes/{nid}/share/{viewer_sub}")
+check("unshare after e-mail", r.status_code == 200, r.text[:120])
 
 # 7. synthesize, pdf, search
 r = member.post(f"/v1/notes/{nid}/synthesize", json={"language": "en"})

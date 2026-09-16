@@ -46,7 +46,10 @@ struct PendingUploadsSection: View {
             .dsCard(padding: 0)
         }
         .sheet(item: $exporting) { capture in
+            // Keyed on the recording, so exporting a second one builds a
+            // new controller rather than re-offering the first file.
             ShareSheet(items: [capture.audioURL])
+                .id(capture.id)
         }
         .confirmationDialog(
             "Delete this recording?",

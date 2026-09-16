@@ -1,7 +1,6 @@
 {{- /*
 One-shot jobs. migrate runs as a Helm hook before every install/upgrade
-(the compose `migrate` counterpart); seed is staging-only. minio-init
-carries the bucket + ILM bootstrap from infra/compose/base.yml.
+(the compose `migrate` counterpart); seed is staging-only.
 */ -}}
 ---
 apiVersion: batch/v1
@@ -101,42 +100,4 @@ spec:
               value: notes
             - name: POSTGRES_PASSWORD
               valueFrom: {secretKeyRef: {name: mdx-postgres, key: password}}
-{{- end }}
-{{- if .Values.stateful.inCluster }}
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: mdx-minio-init-{{ .Release.Revision }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "1"
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  backoffLimit: 10
-  template:
-    metadata:
-      labels: {app: mdx-minio-init, mdx-tier: job}
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: mc
-          image: {{ .Values.stateful.minio.mcImage }}
-          command: ["/bin/sh", "-c"]
-          env:
-            - name: MINIO_ROOT_USER
-              valueFrom: {secretKeyRef: {name: mdx-minio, key: user}}
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom: {secretKeyRef: {name: mdx-minio, key: password}}
-          args:
-            - |
-              set -eu
-              mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
-              mc mb --ignore-existing local/mdx-audio
-              mc mb --ignore-existing local/mdx-transcripts
-              mc mb --ignore-existing local/mdx-audio-clips
-              mc version enable local/mdx-audio || true
-              mc version enable local/mdx-transcripts || true
-              mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
-              mc ilm rule add --expire-days 1 local/mdx-audio-clips
 {{- end }}

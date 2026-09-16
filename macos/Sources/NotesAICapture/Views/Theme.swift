@@ -28,6 +28,10 @@ enum DS {
     // Hairlines
     static let line         = Color.ds("e6e2db", "2c2824")
     static let line2        = Color.ds("efece6", "241f1c")
+    /// The same warm neutral walked a step darker, so a live frame is
+    /// felt rather than coloured (`--line-hover` / `--line-active`).
+    static let lineHover    = Color.ds("d9d3c9", "3b352f")
+    static let lineActive   = Color.ds("c8c1b5", "4a433b")
     /// Border weight for every hairline: half a point on Retina.
     static let hairline: CGFloat = 0.5
 
@@ -66,6 +70,13 @@ enum DS {
     static let radiusXl: CGFloat = 20
 
     // Layout
+    /// The note document's column — the web's `--doc-w`. The body, the
+    /// ask composer and the loading skeleton all measure against it.
+    static let docWidth: CGFloat = 720
+    /// The note document's reading size. A note is a page, not a pane of
+    /// chrome, so its body sits a step above the 13.5 pt UI text.
+    static let docText: CGFloat = 16
+
     static let topbarHeight: CGFloat = 52
     static let sidebarWidth: CGFloat = 256
     /// Room for the traffic lights under the hidden title bar.
@@ -109,6 +120,8 @@ extension Font {
     static let dsDoc     = Font.dsDisplay(27)
     static let dsH2      = Font.dsDisplay(17)
     static let dsBody    = Font.ds(13.5)
+    /// The note document's body — see `DS.docText`.
+    static let dsDocBody = Font.ds(DS.docText)
     static let dsUI      = Font.ds(13, .medium)
     static let dsMeta    = Font.ds(11.5)
     static let dsLabel   = Font.ds(10.5, .semibold)
@@ -652,5 +665,46 @@ extension JobStatus {
         case .failed: return DS.recSoft
         case .cancelled: return DS.warnSoft
         }
+    }
+}
+
+/// A pill on the note's meta line (`.doc-pill` on the web): an icon and a
+/// short fact — when the note was taken, what wrote it, where it is
+/// filed. `interactive` is for the ones that are also controls; they take
+/// the hover paper, the plain facts stay still.
+struct DSMetaPill: View {
+    var symbol: String?
+    let text: String
+    var tone: Tone = .neutral
+    var mono = false
+    var interactive = false
+
+    enum Tone { case neutral, accent }
+
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(tone == .accent ? DS.accentText : DS.muted)
+            }
+            Text(text)
+                .font(mono ? .dsMono(10.5) : .ds(11.5, .medium))
+        }
+        .foregroundStyle(tone == .accent ? DS.accentText : (hover && interactive ? DS.text1 : DS.text3))
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(
+            Capsule().fill(tone == .accent ? DS.accentSoft : (hover && interactive ? DS.surface2 : .clear))
+        )
+        .overlay(
+            Capsule().strokeBorder(tone == .accent ? .clear : (hover && interactive ? DS.lineHover : DS.line),
+                                   lineWidth: DS.hairline)
+        )
+        .contentShape(Capsule())
+        .onHover { hover = interactive && $0 }
+        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }

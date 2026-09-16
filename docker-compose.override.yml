@@ -87,6 +87,15 @@ x-common-env: &common-env
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
 
+# Object storage (S3-compatible). The local MinIO container was removed —
+# there is no object store in the dev stack by default. Point these at a
+# real S3-compatible endpoint in `.env` to re-enable audio at rest; left
+# empty the services start fine and only the audio paths fail.
+x-s3-env: &s3-env
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+
 x-svc-healthcheck: &svc-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else sys.exit(1)"]
   interval: 15s
@@ -95,29 +104,6 @@ x-svc-healthcheck: &svc-healthcheck
   start_period: 30s
 
 services:
-  # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
-  minio-init:
-    image: minio/mc:RELEASE.2024-04-18T16-45-29Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
-        mc mb --ignore-existing local/mdx-audio
-        mc mb --ignore-existing local/mdx-transcripts
-        mc version enable local/mdx-audio || true
-        mc version enable local/mdx-transcripts || true
-        # Replay clips — 5-min token/registry TTL is the real lifetime;
-        # 1-day ILM is the ciphertext backstop (ADR-0037).
-        mc mb --ignore-existing local/mdx-audio-clips
-        mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
-        mc ilm rule add --expire-days 1 local/mdx-audio-clips
-        echo "minio-init: buckets ready"
-    restart: "no"
-
   # ── DB schema migrations (one-shot, runs as the postgres superuser
   #    because migrations CREATE ROLE / extensions) ──────────────────
   migrate:
@@ -263,10 +249,9 @@ services:
       dockerfile: services/asr-service/Dockerfile
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_NLP_BASE_URL: http://nlp-service:8000
     volumes:
@@ -279,12 +264,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       keycloak:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -302,7 +283,7 @@ services:
       dockerfile: services/asr-worker/Dockerfile.cpu
     restart: unless-stopped
     environment:
-      <<: [*common-env, *postgres-dsns]
+      <<: [*common-env, *postgres-dsns, *s3-env]
       MD_ASR_DEVICE: cpu
       MD_ASR_MODEL: /opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_COMPUTE_TYPE: int8
@@ -322,7 +303,6 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
@@ -332,10 +312,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -352,7 +328,7 @@ services:
       dockerfile: services/dictation-service/Dockerfile.cpu
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       MD_ASR_DEVICE: cpu
       MD_ASR_MODEL: /opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_COMPUTE_TYPE: int8
@@ -387,7 +363,6 @@ services:
       MDX_WORKER_ID: dictation-dev-1
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MDX_TMPFS_ROOT: /run/dictation
       # Keep in sync with x-cors-env above — the SPA opens the WS from the
@@ -417,12 +392,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       keycloak:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
 
@@ -456,7 +427,7 @@ services:
       dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
     environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
+      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
       # Notification producer — lifecycle transitions publish onto the
@@ -467,7 +438,6 @@ services:
       # Audio replay (ADR-0037): decrypt-slice-encode needs the same
       # S3 + envelope-crypto wiring dictation-service has.
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      S3_ENDPOINT: http://minio:9000
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       # Google Calendar (0019). Calendar links (0020, iCal addresses)
       # need none of this. Leave the client id empty and the
@@ -477,6 +447,26 @@ services:
       GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
       GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:8006/v1/calendar/google/callback}
+      # ── Sharing a note by e-mail ─────────────────────────────────
+      # "Send" in the share sheet delivers a branded HTML mail from
+      # here. Captured by Mailpit (http://localhost:8025) in the dev
+      # stack: every value is `${VAR:-<mailpit default>}`, so with no
+      # `.env` present nothing can escape to a real mailbox.
+      MDX_EMAIL_PROVIDER: "${MDX_EMAIL_PROVIDER:-smtp}"
+      MDX_NOTE_SMTP_HOST: "${MDX_NOTE_SMTP_HOST:-mailpit}"
+      MDX_NOTE_SMTP_PORT: "${MDX_NOTE_SMTP_PORT:-1025}"
+      MDX_NOTE_SMTP_USE_TLS: "${MDX_NOTE_SMTP_USE_TLS:-false}"
+      MDX_NOTE_SMTP_USERNAME: "${MDX_NOTE_SMTP_USERNAME:-}"
+      MDX_NOTE_SMTP_PASSWORD: "${MDX_NOTE_SMTP_PASSWORD:-}"
+      MDX_NOTE_EMAIL_FROM: "${MDX_NOTE_EMAIL_FROM:-notes@notes-ai.local}"
+      MDX_NOTE_EMAIL_FROM_NAME: "${MDX_NOTE_EMAIL_FROM_NAME:-Notes AI}"
+      # Replies normally go to the colleague who pressed Send; this is
+      # the fallback for a sharer with no address on file.
+      MDX_NOTE_EMAIL_REPLY_TO: "${MDX_NOTE_EMAIL_REPLY_TO:-notes@notes-ai.local}"
+      MDX_SHARE_EMAIL_TIMEOUT_S: "${MDX_SHARE_EMAIL_TIMEOUT_S:-15}"
+      # Where the mailed links point. Must be the origin the SPA is
+      # actually served from, or every shared note 404s.
+      MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
@@ -491,8 +481,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
 
   # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:

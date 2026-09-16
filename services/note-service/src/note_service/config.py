@@ -240,11 +240,62 @@ class Settings(BaseSettings):
         extra = [p.strip() for p in self.calendar_return_to_extra.split(",") if p.strip()]
         return [*self.cors_origins_list, "notesai://", *extra]
 
+    # ── Outbound mail (sharing a note by e-mail) ────────────────────────
+    # "Send" in the share modal delivers a branded HTML mail from the
+    # server. It replaces the old `mailto:` hand-off, which opened
+    # whatever the desktop mail client had lying around and put the
+    # link in an unstyled draft the sender had to send themselves.
+    #
+    # `mock` captures in memory and refuses to run in production; `smtp`
+    # talks to Mailpit in dev and the real relay in prod. Same env name
+    # as auth-service so one deployment-wide switch flips both.
+    email_provider: str = Field(default="mock", alias="MDX_EMAIL_PROVIDER")
+    note_smtp_host: str = Field(default="localhost", alias="MDX_NOTE_SMTP_HOST")
+    note_smtp_port: int = Field(default=1025, alias="MDX_NOTE_SMTP_PORT")
+    note_smtp_use_tls: bool = Field(default=False, alias="MDX_NOTE_SMTP_USE_TLS")
+    note_smtp_username: str = Field(default="", alias="MDX_NOTE_SMTP_USERNAME")
+    # Google Workspace has refused plain account passwords for SMTP since
+    # 2024 — this must be a 16-character App Password. The symptom of
+    # getting it wrong is `535-5.7.8 Username and Password not accepted`.
+    note_smtp_password: SecretStrEnv = Field(
+        default_factory=lambda: Secret(""), alias="MDX_NOTE_SMTP_PASSWORD"
+    )
+    note_email_from: str = Field(default="notes@notes-ai.local", alias="MDX_NOTE_EMAIL_FROM")
+    note_email_from_name: str = Field(default="Notes AI", alias="MDX_NOTE_EMAIL_FROM_NAME")
+    # Replies go to the person who shared, not to us — set per-send.
+    # This is only the fallback when the sharer has no address on file.
+    note_email_reply_to: str = Field(
+        default="notes@notes-ai.local", alias="MDX_NOTE_EMAIL_REPLY_TO"
+    )
+    # SPA origin the mailed links point at. A share mail is only useful
+    # if it lands on the app the recipient actually runs.
+    app_base_url: str = Field(default="http://localhost:5173", alias="MDX_APP_BASE_URL")
+    # A hung relay must not hold an HTTP worker until the client gives up.
+    share_email_timeout_s: float = Field(default=15.0, alias="MDX_SHARE_EMAIL_TIMEOUT_S")
+    # Per request, and per sender per hour. The second is the one that
+    # matters: a share endpoint that mails anywhere is a spam relay
+    # wearing our From address.
+    share_email_max_recipients: int = Field(default=10, alias="MDX_SHARE_EMAIL_MAX_RECIPIENTS")
+    share_emails_per_user_per_hour: int = Field(
+        default=60, alias="MDX_SHARE_EMAILS_PER_USER_PER_HOUR"
+    )
+    # How much of the sharer's own words to carry. Long enough for a
+    # paragraph of context, short enough that the mail stays a pointer.
+    share_email_max_message_chars: int = Field(
+        default=1000, alias="MDX_SHARE_EMAIL_MAX_MESSAGE_CHARS"
+    )
+
     # ── Session revocation check (sprint 16) ────────────────────────────
     # When on, current_user rejects tokens whose sid/sub is on the Redis
     # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
     # on Redis outage (ADR-0041). Same env name across the fleet; off in dev.
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
+
+    @property
+    def is_production(self) -> bool:
+        # Staging counts: a staging deployment that silently swallowed
+        # share mail would prove nothing about the one that matters.
+        return self.environment in {"production", "staging"}
 
 
 settings = Settings()

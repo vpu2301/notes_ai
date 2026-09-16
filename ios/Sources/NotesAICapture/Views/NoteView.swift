@@ -11,13 +11,17 @@ struct NoteView: View {
     @StateObject private var model: NoteViewModel
     @State private var confirmFinalize = false
     @State private var confirmDelete = false
-    @State private var sharePrompt = false
-    @State private var shareEmail = ""
-    @State private var shareNotMember: String?
+    @State private var shareByEmail = false
     /// Which speaker label is being renamed, and the text so far.
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
     @State private var copied = false
+    /// Which section is open in its editor. A draft reads as a document
+    /// until you tap into one, and only one is ever open at a time.
+    @State private var editingSection: String?
+    /// What is typed in the ask bar at the foot of the note.
+    @State private var askDraft = ""
+    @FocusState private var askFocused: Bool
 
     /// The capture this note came from, when it is one of this phone's.
     private let capture: RecentCapture?
@@ -57,6 +61,7 @@ struct NoteView: View {
         }
         .sheet(item: $model.shareItem) { item in
             ShareSheet(items: [item.url])
+                .id(item.id)
                 .presentationDetents([.medium, .large])
         }
         .alert("Move this note to the trash?", isPresented: $confirmDelete) {
@@ -65,36 +70,13 @@ struct NoteView: View {
         } message: {
             Text("It disappears from everyone's list and any public link stops working. The note is kept for the workspace's records.")
         }
-        .alert("Share with a colleague", isPresented: $sharePrompt) {
-            TextField("name@company.com", text: $shareEmail)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-            Button("Share") {
-                let email = shareEmail.trimmingCharacters(in: .whitespaces)
-                Task {
-                    if await model.share(email: email) {
-                        shareEmail = ""
-                    } else if model.actionError == nil {
-                        shareNotMember = email
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("They get a notification and an e-mail, and can read the note.")
-        }
-        .alert("Not in your workspace", isPresented: Binding(
-            get: { shareNotMember != nil },
-            set: { if !$0 { shareNotMember = nil } }
-        )) {
-            Button("Email a link") {
-                let to = shareNotMember ?? ""
-                shareNotMember = nil
-                Task { await emailPublicLink(to: to) }
-            }
-            Button("Cancel", role: .cancel) { shareNotMember = nil }
-        } message: {
-            Text("\(shareNotMember ?? "That address") isn't a member here. You can e-mail them a public link instead.")
+        .sheet(isPresented: $shareByEmail) {
+            ShareEmailSheet(
+                noteTitle: model.content?.title ?? "",
+                send: { recipients, message in
+                    await model.sendShareEmail(recipients: recipients, message: message)
+                },
+                onClose: { shareByEmail = false })
         }
         .alert("Finalize this note?", isPresented: $confirmFinalize) {
             Button("Finalize") { Task { await model.finalize() } }
@@ -169,21 +151,6 @@ struct NoteView: View {
         }
     }
 
-    /// Open the mail app with the public link (creating it first).
-    private func emailPublicLink(to: String) async {
-        guard let url = await model.publicLinkURL(webAppURL: app.settings.webAppURL) else { return }
-        let title = model.content?.title ?? ""
-        let subject = title.isEmpty ? "A note" : title
-        var parts = URLComponents()
-        parts.scheme = "mailto"
-        parts.path = to
-        parts.queryItems = [
-            .init(name: "subject", value: subject),
-            .init(name: "body", value: "Here is the note \"\(subject)\":\n\n\(url.absoluteString)\n"),
-        ]
-        if let mail = parts.url { await UIApplication.shared.open(mail) }
-    }
-
     private func menuItems() -> [DSMenuItem] {
         let canManage = model.sharing?.canManage ?? true
         let hasLink = model.sharing?.publicLink != nil
@@ -207,12 +174,10 @@ struct NoteView: View {
                     }
                 }
             },
-            .item("Email link…", symbol: "envelope", disabled: model.busy || !canManage) {
-                Task { await emailPublicLink(to: "") }
-            },
-            .item("Share with a colleague…", symbol: "person.badge.plus",
-                  disabled: model.busy || !canManage) {
-                sharePrompt = true
+            // One entry, not two: whether a recipient is a colleague or
+            // an outsider is the server's problem, not the sender's.
+            .item("Send by email…", symbol: "envelope", disabled: model.busy || !canManage) {
+                shareByEmail = true
             },
         ]
         if hasLink && canManage {
@@ -253,6 +218,12 @@ struct NoteView: View {
                 })
             }
         }
+        if !model.chat.isEmpty {
+            items.append(.separator)
+            items.append(.item("Clear chat", symbol: "bubble.left.and.text.bubble.right") {
+                model.clearChat()
+            })
+        }
         items.append(.separator)
         if let capture {
             items.append(.item("Copy job ID", symbol: "number") { copyToPasteboard(capture.jobId) })
@@ -268,31 +239,39 @@ struct NoteView: View {
     // MARK: - Document
 
     private var document: some View {
-        ScrollView {
+        ScrollViewReader { proxy in
+            ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 TextField("Untitled note", text: Binding(
                     get: { model.content?.title ?? "" },
                     set: { model.setTitle($0) }
                 ), axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.dsDoc)
+                .font(.dsDisplay(29))
                 .foregroundStyle(DS.text1)
                 .disabled(!model.editable)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
 
+                // The meta line is a row of pills, not a run of text: when
+                // it was taken, what wrote it, where it is filed, what it
+                // is called. Only the space is a control — the rest are the
+                // facts you want at a glance. It scrolls sideways rather
+                // than wrapping into three ragged rows on a narrow phone.
                 if let note = model.note {
-                    HStack(spacing: 6) {
-                        Text(formatDateTime(note.createdAt))
-                        Text("·")
-                        Text("Updated \(relativeTime(note.updatedAt))")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            DSMetaPill(symbol: "calendar", text: formatDateTime(note.createdAt))
+                            DSMetaPill(text: "Updated \(relativeTime(note.updatedAt))")
+                            if let template = model.templateName {
+                                DSMetaPill(symbol: "sparkles", text: template, tone: .accent)
+                            }
+                            spacePill
+                            DSMetaPill(text: note.code, mono: true)
+                        }
+                        .padding(.horizontal, DS.gutter)
                     }
-                    .font(.dsMeta)
-                    .foregroundStyle(DS.muted)
-                    .padding(.bottom, 2)
-                    Text(note.code)
-                        .font(.dsMono(12))
-                        .foregroundStyle(DS.muted)
-                        .padding(.bottom, 18)
+                    .padding(.horizontal, -DS.gutter)
+                    .padding(.bottom, 18)
                 }
 
                 if model.conflict {
@@ -319,27 +298,157 @@ struct NoteView: View {
                 case .notes: sections
                 case .transcript: transcript
                 }
+
+                if !model.chat.isEmpty || model.asking || model.askError != nil {
+                    askThread.padding(.top, 32)
+                }
+                Color.clear.frame(height: 1).id("ask-end")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DS.gutter)
             .padding(.top, 12)
-            .padding(.bottom, 40)
+            // The composer is a bottom safe-area inset, so the scroll view
+            // already keeps its height clear; this is just breathing room
+            // under the last line.
+            .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: model.chat.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) }
+            }
+            .onChange(of: model.asking) { _, asking in
+                if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
+            }
         }
-        .scrollDismissesKeyboard(.interactively)
+        // The composer sits over the document, under a short wash of the
+        // page ground so a line of text never runs into it.
+        .safeAreaInset(edge: .bottom, spacing: 0) { askBar }
+    }
+
+    // MARK: - Ask this note
+
+    /// The thread: questions on the right in a quiet bubble, answers as a
+    /// typeset document under a spark — one conversation about this note.
+    private var askThread: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(model.chat) { message in
+                switch message.role {
+                case .user:
+                    HStack {
+                        Spacer(minLength: 48)
+                        Text(message.text)
+                            .font(.dsBody)
+                            .foregroundStyle(DS.text1)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                                    .fill(DS.surface2)
+                            )
+                    }
+                case .assistant:
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(DS.accentText)
+                            .frame(width: 20)
+                        // An answer arrives as bullets and headings just as
+                        // the note does, so it is typeset the same way.
+                        RichTextView(text: message.text)
+                    }
+                }
+            }
+            if model.asking {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(DS.accentText)
+                        .frame(width: 20)
+                    Text("Thinking…")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if let error = model.askError {
+                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
+            }
+        }
+    }
+
+    /// The composer, floating over the foot of the document: one field,
+    /// the send button lights up as soon as there is something to send.
+    private var askBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(DS.accentText)
+            TextField("Ask about this note…", text: $askDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.ds(16))
+                .foregroundStyle(DS.text1)
+                .lineLimit(1...5)
+                .focused($askFocused)
+                .submitLabel(.send)
+            Button {
+                sendQuestion()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.inkText)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(DS.ink))
+            }
+            .buttonStyle(.plain)
+            .disabled(model.asking || askDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(model.asking || askDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.3 : 1)
+            .accessibilityLabel("Send")
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 7)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusXl, style: .continuous)
+                .fill(DS.surface)
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusXl, style: .continuous)
+                .strokeBorder(DS.line, lineWidth: DS.hairline)
+        )
+        .padding(.horizontal, DS.gutter)
+        .padding(.bottom, 10)
+        .padding(.top, 6)
+        .background(
+            LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
+                .allowsHitTesting(false)
+        )
+    }
+
+    private func sendQuestion() {
+        let question = askDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty, !model.asking else { return }
+        askDraft = ""
+        askFocused = false
+        Task { await model.ask(question) }
     }
 
     private var sections: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 22) {
             if model.sections.isEmpty {
                 Text("This note's template has no sections.")
                     .font(.dsBody)
                     .foregroundStyle(DS.muted)
             }
             ForEach(model.sections) { def in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
+                        // No hanging "#" here — a phone has no gutter to
+                        // hang it in, which is why the web drops it below
+                        // 820px too.
                         Text(def.name)
-                            .font(.dsDisplay(16, .medium))
+                            .font(.dsDisplay(18, .semibold))
                             .foregroundStyle(DS.text1)
                         if def.required == true {
                             Text("required")
@@ -351,22 +460,54 @@ struct NoteView: View {
                         }
                     }
                     if def.isFreeText {
-                        SectionEditor(
+                        SectionField(
                             text: Binding(
                                 get: { model.content?.section(def.id).text ?? "" },
                                 set: { model.setSectionText(def.id, $0) }
                             ),
+                            name: def.name,
                             placeholder: def.minChars.map { "At least \($0) characters…" } ?? "Start writing…",
-                            editable: model.editable)
+                            editable: model.editable,
+                            editing: Binding(
+                                get: { editingSection == def.id },
+                                set: { editingSection = $0 ? def.id : nil }
+                            ))
                     } else {
                         // Structured fields (choice, date, number) are edited in
                         // the web app; show the value read-only here.
-                        let text = model.content?.section(def.id).text ?? ""
-                        Text(text.isEmpty ? "Nothing entered." : text)
-                            .font(.dsBody)
-                            .foregroundStyle(text.isEmpty ? DS.muted : DS.text1)
-                            .textSelection(.enabled)
+                        RichTextView(text: model.content?.section(def.id).text ?? "")
                     }
+                }
+            }
+        }
+    }
+
+    /// The "filed in" pill. A note already in a space names it; one that
+    /// isn't offers the list, so filing it is one tap rather than a trip
+    /// through the ⋯ menu. With no spaces yet there is nothing to offer.
+    @ViewBuilder
+    private var spacePill: some View {
+        if !app.spaces.isEmpty {
+            let current = app.spaceOf[model.noteId]
+            if let space = app.spaces.first(where: { $0.id == current }) {
+                Button {
+                    app.file(noteId: model.noteId, in: nil)
+                } label: {
+                    DSMetaPill(symbol: "folder", text: space.name)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Take this note out of \(space.name)")
+            } else {
+                Menu {
+                    ForEach(app.spaces) { space in
+                        Button {
+                            app.file(noteId: model.noteId, in: space.id)
+                        } label: {
+                            Label(space.name, systemImage: "folder")
+                        }
+                    }
+                } label: {
+                    DSMetaPill(symbol: "folder.badge.plus", text: "Add to space")
                 }
             }
         }
@@ -495,12 +636,52 @@ struct NoteView: View {
     }
 }
 
+/// One free-text section.
+///
+/// A note is a document first: what the model wrote is typeset — headings,
+/// nested bullets, checklists — rather than shown as the raw `- ` and
+/// `**…**` a plain string used to carry. On a draft the document is also
+/// the way in: tap it and the same words come back as their markdown
+/// source in the seamless editor, and dismissing the keyboard sets them
+/// again. A section with nothing in it skips straight to the editor —
+/// there is no document to read yet, only a prompt to write one.
+private struct SectionField: View {
+    @Binding var text: String
+    let name: String
+    let placeholder: String
+    let editable: Bool
+    @Binding var editing: Bool
+
+    var body: some View {
+        if !editable {
+            RichTextView(text: text)
+        } else if editing || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            SectionEditor(text: $text, placeholder: placeholder, editable: true, focusNow: editing) {
+                editing = false
+            }
+        } else {
+            RichTextView(text: text)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .padding(.horizontal, -8)
+                .contentShape(Rectangle())
+                .onTapGesture { editing = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Edit \(name)")
+                .accessibilityAction { editing = true }
+        }
+    }
+}
+
 /// A seamless, auto-growing text area (`.textarea.seamless`): no chrome
 /// until it is focused, then a faint surface behind it.
 private struct SectionEditor: View {
     @Binding var text: String
     let placeholder: String
     let editable: Bool
+    /// Take the keyboard as soon as this appears — it was opened by a tap.
+    var focusNow = false
+    var onDone: () -> Void = {}
 
     @FocusState private var focused: Bool
 
@@ -524,6 +705,13 @@ private struct SectionEditor: View {
                     .strokeBorder(focused ? DS.text3.opacity(0.6) : .clear, lineWidth: 1)
             )
             .padding(.horizontal, -8)
+            .onAppear { if focusNow { focused = true } }
+            .onChange(of: focused) { _, isFocused in
+                // Dismissing the keyboard closes the editor and the section
+                // goes back to being read; the text was already saved on
+                // every keystroke.
+                if !isFocused, focusNow { onDone() }
+            }
             .animation(.easeOut(duration: 0.12), value: focused)
     }
 }

@@ -57,7 +57,7 @@ typos at import.
 | `tenant.switched`                 | info     | auth-service POST /tenants/{id}/switch | User switched their active tenant                            |
 | `audit.chain_verified`            | info/sec | nightly verifier (`scripts/jobs/nightly_verify.py`) | One per tenant per verify run. severity flips to `sec` on divergence |
 | `asr.audio_uploaded`              | info     | asr-service POST /asr/jobs       | Audio file enveloped + persisted; row inserted in `audio_files`    |
-| `asr.audio_deleted`               | sec      | retention tooling                | Crypto-shred of a recording: MinIO object + metadata row (its wrapped DEK) destroyed. Constant reserved; no runtime emitter today. |
+| `asr.audio_deleted`               | sec      | retention tooling                | Crypto-shred of a recording: stored object + metadata row (its wrapped DEK) destroyed. Constant reserved; no runtime emitter today. |
 | `asr.job_queued`                  | info     | asr-service POST /asr/jobs       | Job durably recorded + enqueued on Redis Streams                   |
 | `asr.transcription_started`       | info     | asr-worker processor             | Worker picked the job up; row moved to `running`                   |
 | `asr.transcription_complete`      | info     | asr-worker processor             | Inference + encrypted transcript stored; row moved to `complete`   |
@@ -73,7 +73,7 @@ typos at import.
 | `dictation.session.finalized`     | info     | dictation-service finalize       | Session ended cleanly; transcript + audio persisted                |
 | `dictation.session.abandoned`     | info     | dictation-service abandon timer  | Reconnecting > 30 min with no client; resources freed              |
 | `dictation.session.failed`        | error    | dictation-service handler        | Worker_failed / opus_fatal / internal                              |
-| `dictation.audio.uploaded`        | info     | dictation-service finalize       | End-of-session WAV encrypted + stored to MinIO                     |
+| `dictation.audio.uploaded`        | info     | dictation-service finalize       | End-of-session WAV encrypted + stored to S3                     |
 | `dictation.audio.truncated`       | warn     | dictation-service finalize       | tmpfs ring wrapped; audio file shorter than total received         |
 | `dictation.upgrade.failed`        | warn/sec | dictation-service ws upgrade     | Auth / rate-limit / subprotocol / origin rejection. sec on repeats |
 | `voice_command.executed`          | info     | frontend (forwarded)             | Sprint 05 — the user's intent fired in the editor                  |
@@ -112,6 +112,7 @@ typos at import.
 | `note.unshared`                   | info     | note-service DELETE /v1/notes/{id}/share/{sub} | 0016 — access taken back. Payload: with (sub) |
 | `note.link_created`               | info     | note-service POST /v1/notes/{id}/public-link | 0016 — an "anyone with the link" token was minted. Payload: link_id, expires_at. Never the token. |
 | `note.link_revoked`               | info     | note-service DELETE /v1/notes/{id}/public-link | 0016 — public link(s) revoked. Payload: revoked (count) |
+| `note.link_emailed`               | info     | note-service POST /v1/notes/{id}/share/email | The note was mailed to people the sharer named, from the server (replaces the clients' `mailto:` hand-off). Payload: recipients, members, sent, failed, had_message — counts only, never the addresses: who a note went to is in the sharer's own sent mail, and an audit log that accumulates third-party e-mail addresses is a liability nobody asked for. |
 | `note.viewed_via_link`            | info     | note-service GET /v1/shared/{token}[/pdf] | 0016 — anonymous read through a public link; no actor. Payload: link_id, format |
 | `calendar.connected`              | info     | note-service GET /v1/calendar/google/callback, POST /v1/calendar/ics/connect | 0019/0020 — a calendar was connected (or re-connected) for the actor: a Google account (`provider: google`) or a calendar link (`provider: ics`). Payload: provider. The account's e-mail / the feed URL is on the row (the URL sealed), never in the payload. |
 | `calendar.disconnected`           | info     | note-service DELETE /v1/calendar/connections/{id} | 0019/0020 — the actor disconnected a calendar; a Google token is revoked at Google best-effort, a link is simply forgotten; the row is stamped revoked. Payload: provider. |

@@ -53,7 +53,7 @@ spec:
 {{- if and .Values.networkPolicies.enabled .Values.networkPolicies.egress.enabled }}
 ---
 # Worker egress allowlist (DEP-S1-04). Pods labelled mdx-egress: models may
-# reach: DNS, in-namespace stateful stores (Postgres/MinIO/Redis), the
+# reach: DNS, in-namespace stateful stores (Postgres/Redis), the
 # in-cluster OTel collector, and the model-endpoint CIDRs listed in values —
 # nothing else. A prompt injection that tries to exfiltrate to an arbitrary
 # host is stopped at the CNI. Hostname-based rules need a CNI that supports

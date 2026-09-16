@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     asr_jobs_group: str = Field(default="asr-workers", alias="MD_ASR_JOBS_GROUP")
     asr_jobs_maxlen: int = Field(default=100_000, alias="MD_ASR_JOBS_MAXLEN")
 
-    # ── MinIO / S3 ──────────────────────────────────────────────────────
+    # ── S3 object storage ──────────────────────────────────────────────────
     s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
     s3_region: str = Field(default="us-east-1", alias="S3_REGION")
     s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")

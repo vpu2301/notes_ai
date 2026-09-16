@@ -76,6 +76,78 @@
         "title": "AmendResponse",
         "type": "object"
       },
+      "AskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/AskTurn"
+            },
+            "maxItems": 12,
+            "title": "History",
+            "type": "array"
+          },
+          "question": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskRequest",
+        "type": "object"
+      },
+      "AskResponse": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer",
+          "backend",
+          "model_id"
+        ],
+        "title": "AskResponse",
+        "type": "object"
+      },
+      "AskTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "text"
+        ],
+        "title": "AskTurn",
+        "type": "object"
+      },
       "AudioSegmentOut": {
         "additionalProperties": false,
         "properties": {
@@ -956,6 +1028,28 @@
         "title": "FieldType",
         "type": "string"
       },
+      "FileNoteBody": {
+        "additionalProperties": false,
+        "properties": {
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          }
+        },
+        "required": [
+          "space_id"
+        ],
+        "title": "FileNoteBody",
+        "type": "object"
+      },
       "FinalizeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1355,6 +1449,17 @@
             "format": "uuid",
             "title": "Primary Author Id",
             "type": "string"
+          },
+          "primary_author_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Author Name"
           },
           "section_labels": {
             "anyOf": [
@@ -1800,6 +1905,17 @@
             "title": "Code",
             "type": "string"
           },
+          "has_public_link": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Public Link"
+          },
           "note_id": {
             "format": "uuid",
             "title": "Note Id",
@@ -1809,6 +1925,17 @@
             "format": "uuid",
             "title": "Primary Author Id",
             "type": "string"
+          },
+          "shared_with_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared With Count"
           },
           "snippet": {
             "title": "Snippet",
@@ -1830,6 +1957,17 @@
           "updated_at": {
             "title": "Updated At",
             "type": "string"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
           }
         },
         "required": [
@@ -2000,6 +2138,94 @@
         "title": "SectionPromptResponse",
         "type": "object"
       },
+      "ShareEmailOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "enum": [
+              "member",
+              "link"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "sent",
+              "rejected",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "access",
+          "status"
+        ],
+        "title": "ShareEmailOutcome",
+        "type": "object"
+      },
+      "ShareEmailRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lang": {
+            "default": "en",
+            "maxLength": 16,
+            "title": "Lang",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "recipients": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Recipients",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recipients"
+        ],
+        "title": "ShareEmailRequest",
+        "type": "object"
+      },
+      "ShareEmailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "public_link_created": {
+            "title": "Public Link Created",
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ShareEmailOutcome"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "sharing": {
+            "$ref": "#/components/schemas/SharingView"
+          }
+        },
+        "required": [
+          "sharing",
+          "results",
+          "public_link_created"
+        ],
+        "title": "ShareEmailResponse",
+        "type": "object"
+      },
       "ShareRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2165,6 +2391,73 @@
           "status"
         ],
         "title": "SourceJobLink",
+        "type": "object"
+      },
+      "SpaceBody": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SpaceBody",
+        "type": "object"
+      },
+      "SpaceView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Note Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "note_ids"
+        ],
+        "title": "SpaceView",
+        "type": "object"
+      },
+      "SpacesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceView"
+            },
+            "title": "Spaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "spaces"
+        ],
+        "title": "SpacesResponse",
         "type": "object"
       },
       "SynonymGroupBody": {
@@ -4728,6 +5021,78 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/ask": {
+      "post": {
+        "operationId": "ask_note_v1_notes__note_id__ask_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Problem with `code` `model_not_configured` (no chat backend for this environment) or `model_unavailable` (the backend failed; `kind` names the failure class)."
+          }
+        },
+        "summary": "Ask a question about this note (answered by the model over note + transcript).",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/cancel": {
       "post": {
         "operationId": "cancel_note_v1_notes__note_id__cancel_post",
@@ -5483,6 +5848,76 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/share/email": {
+      "post": {
+        "description": "Mail the note to the people the sharer named, from the server.\n\nTwo kinds of recipient, one button. A workspace member is granted\naccess and mailed a link to the note in the app; anybody else is\nmailed the public link, which is minted here if the note has none \u2014\nthat is the only way to hand a note to somebody with no account, and\nthe mail says plainly that anyone holding the link can read it.\n\nSending is per-recipient and never raises: one dead address must not\nswallow the four mails that would have arrived. The response says\nwhat happened to each one so the sender can fix a typo rather than\nwonder.",
+        "operationId": "share_by_email_v1_notes__note_id__share_email_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareEmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Share By Email",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/share/{user_sub}": {
       "delete": {
         "operationId": "unshare_member_v1_notes__note_id__share__user_sub__delete",
@@ -5608,6 +6043,68 @@
         "summary": "Get Sharing",
         "tags": [
           "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/space": {
+      "put": {
+        "operationId": "file_note_v1_notes__note_id__space_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileNoteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "File Note",
+        "tags": [
+          "spaces"
         ]
       }
     },
@@ -6129,6 +6626,231 @@
         "summary": "Read Shared Note Pdf",
         "tags": [
           "shared"
+        ]
+      }
+    },
+    "/v1/spaces": {
+      "get": {
+        "operationId": "list_spaces_v1_spaces_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpacesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Spaces",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "post": {
+        "operationId": "create_space_v1_spaces_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Space",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/v1/spaces/{space_id}": {
+      "delete": {
+        "operationId": "delete_space_v1_spaces__space_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Space",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "put": {
+        "operationId": "rename_space_v1_spaces__space_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename Space",
+        "tags": [
+          "spaces"
         ]
       }
     },

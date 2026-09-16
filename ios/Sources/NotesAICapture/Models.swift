@@ -855,6 +855,30 @@ struct SharingView: Decodable, Sendable {
     }
 }
 
+/// One recipient of a server-sent share mail, and what became of it.
+struct ShareEmailOutcome: Decodable, Sendable, Identifiable {
+    let email: String
+    /// `member` — granted access, mailed an app link. `link` — mailed the public link.
+    let access: String
+    /// `rejected` is a relay refusing the mailbox: a typo the sender can fix.
+    let status: String
+
+    var id: String { email }
+    var sent: Bool { status == "sent" }
+}
+
+struct ShareEmailResponse: Decodable, Sendable {
+    let sharing: SharingView
+    let results: [ShareEmailOutcome]
+    /// True when this send minted the public link, so the sheet can say so.
+    let publicLinkCreated: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case sharing, results
+        case publicLinkCreated = "public_link_created"
+    }
+}
+
 struct UpdateDraftRequest: Encodable, Sendable {
     let content: NoteContent
     let expectedVersion: Int
@@ -971,6 +995,32 @@ func defaultSpeakerName(_ label: String) -> String {
 /// What the transcript body shows for speech nobody was matched to.
 let unknownSpeakerName = "Unknown speaker"
 
+// MARK: - Ask this note (POST /v1/notes/{id}/ask)
+
+/// One line of the conversation under a note. The client keeps the thread;
+/// the server gets it back as context with every question.
+struct AskTurn: Codable, Equatable, Sendable {
+    enum Role: String, Codable, Sendable { case user, assistant }
+    let role: Role
+    let text: String
+}
+
+struct AskNoteRequest: Encodable, Sendable {
+    let question: String
+    let history: [AskTurn]
+}
+
+struct AskNoteResponse: Decodable, Sendable {
+    let answer: String
+    let backend: String
+    let modelId: String
+
+    enum CodingKeys: String, CodingKey {
+        case answer, backend
+        case modelId = "model_id"
+    }
+}
+
 struct SpeakerNamesRequest: Encodable, Sendable {
     let names: [String: String]
 }
@@ -995,13 +1045,17 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     let status: NoteStatus?
     let snippet: String
     let updatedAt: Date
+    /// Who can open it (0016). Nil from a server that predates the badge.
+    let access: NoteAccess?
 
     var id: String { noteId }
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id"
-        case code, title, status, snippet
+        case code, title, status, snippet, visibility
         case updatedAt = "updated_at"
+        case sharedWithCount = "shared_with_count"
+        case hasPublicLink = "has_public_link"
     }
 
     init(from decoder: Decoder) throws {
@@ -1012,6 +1066,66 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         status = NoteStatus(rawValue: try c.decode(String.self, forKey: .status))
         snippet = (try? c.decode(String.self, forKey: .snippet)) ?? ""
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        if let visibility = try? c.decodeIfPresent(String.self, forKey: .visibility) {
+            let link = (try? c.decodeIfPresent(Bool.self, forKey: .hasPublicLink)) ?? false
+            let shared = (try? c.decodeIfPresent(Int.self, forKey: .sharedWithCount)) ?? 0
+            access = NoteAccess(visibility: visibility, sharedWithCount: shared, hasPublicLink: link)
+        } else {
+            access = nil
+        }
+    }
+}
+
+/// The widest audience a note reaches — what the list's badge says.
+enum NoteAccess: Equatable, Sendable {
+    /// Only the author team.
+    case privateNote
+    /// Private, plus named workspace members.
+    case shared(Int)
+    /// Everyone in the workspace.
+    case workspace
+    /// Anyone with the public link, signed in or not.
+    case publicLink
+
+    init(visibility: String, sharedWithCount: Int, hasPublicLink: Bool) {
+        if hasPublicLink {
+            self = .publicLink
+        } else if visibility == "workspace" {
+            self = .workspace
+        } else if sharedWithCount > 0 {
+            self = .shared(sharedWithCount)
+        } else {
+            self = .privateNote
+        }
+    }
+
+    var isPublic: Bool { self == .publicLink }
+
+    var label: String {
+        switch self {
+        case .privateNote: return "Private"
+        case .shared(let n): return n == 1 ? "Shared with 1" : "Shared with \(n)"
+        case .workspace: return "Workspace"
+        case .publicLink: return "Public"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .privateNote: return "lock"
+        case .shared: return "lock"
+        case .workspace: return "person.2"
+        case .publicLink: return "globe"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .privateNote: return "Private — only the note's authors can open it"
+        case .shared(let n): return "Private — shared with \(n) \(n == 1 ? "person" : "people") in the workspace"
+        case .workspace: return "Visible to everyone in the workspace"
+        case .publicLink: return "Public — anyone with the link can open it"
+        }
     }
 }
 

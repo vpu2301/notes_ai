@@ -1,7 +1,9 @@
 """Liveness + readiness for asr-service.
 
-``/readyz`` actively probes DB, Redis, and MinIO to support k8s readiness
-gating. Sprint 03 introduces the first multi-dependency readiness path —
+``/readyz`` actively probes DB, Redis, and object storage to support k8s readiness
+gating. With no ``S3_ENDPOINT`` configured there is no object store to probe
+(the local MinIO container is gone), so that leg reports ``skipped`` rather
+than holding the pod out of the load balancer forever. Sprint 03 introduces the first multi-dependency readiness path —
 keep it cheap (each probe ≤ 250 ms) so the cluster doesn't churn replicas.
 """
 
@@ -10,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
+from ..config import settings
 from ..deps import get_state
 
 router = APIRouter(tags=["health"])
@@ -39,7 +42,7 @@ async def healthz() -> HealthResponse:
 @router.get(
     "/readyz",
     status_code=status.HTTP_200_OK,
-    summary="Readiness probe — verifies DB, Redis, MinIO reachable",
+    summary="Readiness probe — verifies DB, Redis, object storage reachable",
 )
 async def readyz(response: Response) -> ReadyResponse:
     state = get_state()
@@ -60,13 +63,17 @@ async def readyz(response: Response) -> ReadyResponse:
     except Exception as exc:  # noqa: BLE001
         redis_ok = f"fail: {type(exc).__name__}"
 
-    try:
-        await state.s3.head_bucket(state.audio_store.bucket)
-    except Exception as exc:  # noqa: BLE001
-        s3_ok = f"fail: {type(exc).__name__}"
+    if not settings.s3_endpoint:
+        s3_ok = "skipped: no S3_ENDPOINT"
+    else:
+        try:
+            await state.s3.head_bucket(state.audio_store.bucket)
+        except Exception as exc:  # noqa: BLE001
+            s3_ok = f"fail: {type(exc).__name__}"
 
-    # Any non-ok flips the response code.
-    if db_ok != "ok" or redis_ok != "ok" or s3_ok != "ok":
+    # Any failing dependency flips the response code (a skipped object
+    # store does not: there is nothing to be unready about).
+    if db_ok != "ok" or redis_ok != "ok" or s3_ok.startswith("fail"):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return ReadyResponse(status="not_ready", db=db_ok, redis=redis_ok, s3=s3_ok)
     return ReadyResponse(status="ready", db=db_ok, redis=redis_ok, s3=s3_ok)

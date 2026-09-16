@@ -77,13 +77,23 @@ class RefreshRequest(_Strict):
     Optional rather than required so one route serves both transports —
     a browser POSTing an empty body must not be answered 422 for
     declining to put its HttpOnly cookie in a field it cannot read.
+
+    The cap matches `login.py`'s 4096 rather than the ~50 chars a native
+    handle needs, because in `dual` this router owns `/auth/refresh` for
+    *both* issuers: a Keycloak refresh token — a signed JWT carrying a
+    realm's worth of claims — is validated against this model before
+    `_belongs_to_keycloak` can hand it to `login.py`'s handler. A tighter
+    cap here 422s that client on every refresh, which reads to it as a
+    bug rather than an expiry, so it never falls back to signing in.
+    Length is only a shape guard; `is_native_refresh_token` is what
+    actually decides which issuer serves the request.
     """
 
-    refresh_token: str | None = Field(default=None, min_length=1, max_length=512)
+    refresh_token: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class LogoutRequest(_Strict):
-    refresh_token: str | None = Field(default=None, min_length=1, max_length=512)
+    refresh_token: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class TokenRequest(_Strict):

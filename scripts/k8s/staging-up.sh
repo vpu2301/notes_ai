@@ -58,9 +58,6 @@ k3d image import -c "$CLUSTER" "${IMAGES[@]}"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mdx-postgres \
   --from-literal=password=postgres --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$NS" create secret generic mdx-minio \
-  --from-literal=user=minioadmin --from-literal=password=minioadmin \
-  --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mdx-keycloak-admin \
   --from-literal=user=admin --from-literal=password=admin \
   --dry-run=client -o yaml | kubectl apply -f -
@@ -94,7 +91,7 @@ kubectl -n "$NS" create configmap mdx-keycloak-realm \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 4. Deploy. The post-install hooks run migrate (with the idempotent
-#    init.sql initContainer) → minio-init → seed.
+#    init.sql initContainer) → seed.
 helm upgrade --install notes infra/k8s/notes -n "$NS" --timeout 15m \
   --set "apps.asr-worker.env.ASR_BACKEND=$ASR_BACKEND_VALUE" "$@"
 

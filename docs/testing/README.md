@@ -44,7 +44,7 @@ $ brew install ffmpeg jq      # macOS
 ## 1. Bring the stack up
 
 ```bash
-$ make dev-up        # Postgres, Redis, MinIO, Kafka, Keycloak, OTel/Jaeger/Prom/Grafana/Loki
+$ make dev-up        # Postgres, Redis, Kafka, Keycloak, OTel/Jaeger/Prom/Grafana/Loki
 $ make migrate-up    # apply SQL migrations
 $ make seed          # dev tenants + users + sample data
 ```
@@ -93,7 +93,6 @@ Or with the CLI: `bash scripts/dev/mdx-test.sh infra`.
 | ---- | ------- | -------- |
 | Postgres | `pg_isready -h localhost -p 5432` | `localhost:5432 - accepting connections` |
 | Redis | `redis-cli -h localhost ping` | `PONG` |
-| MinIO | `curl -s localhost:9000/minio/health/live -o /dev/null -w '%{http_code}\n'` | `200` |
 | Keycloak | `curl -s localhost:8088/realms/notes/.well-known/openid-configuration \| jq .issuer` | `"http://localhost:8088/realms/notes"` |
 | Prometheus | `curl -s localhost:9090/-/healthy` | `Prometheus Server is Healthy.` |
 | Grafana | `curl -s localhost:3001/api/health \| jq .database` | `"ok"` |
@@ -209,7 +208,7 @@ $ curl -s localhost:8001/readyz  | jq      # → {"status":"ready", "checks":{�
 
 Expected `/healthz` (liveness, no deps): `{"status":"ok"}`.
 Expected `/readyz` (readiness, checks pools): `{"status":"ready", …}` — a `503`
-with `"status":"not_ready"` means a dependency (DB/Redis/MinIO) is down.
+with `"status":"not_ready"` means a dependency (DB/Redis/object store) is down.
 
 CLI: `bash scripts/dev/mdx-test.sh health` checks every service at once and
 **skips** (∅, not ✗) the ones you haven't started.
@@ -378,7 +377,7 @@ $ bash scripts/dev/mdx-test.sh help
 | ------- | ---- |
 | `doctor` | `make doctor` |
 | `up` | `dev-up` + `migrate-up` + `seed` |
-| `infra` | health-check Jaeger/Prometheus/Grafana/Loki/MinIO |
+| `infra` | health-check Jaeger/Prometheus/Grafana/Loki |
 | `health` | health-check every service `/healthz` + `/readyz` (skips ones not started) |
 | `all` | `infra` + `health` + token check |
 | `token` | fetch an access token and decode its claims |
@@ -416,7 +415,7 @@ REALM CLIENT_ID`.
 | Tenant-B admin | `admin@tenant-b.example` | `dev-password` |
 | Member | `member@tenant-a.example` | `dev-password` |
 
-Infra creds (`postgres/postgres`, `minioadmin/minioadmin`, Grafana `admin/admin`)
+Infra creds (`postgres/postgres`, Grafana `admin/admin`)
 are in the root `README.md` service-URL table.
 
 > The `keycloak-test.sh` / `mdx-test.sh` / `asr-smoke.sh` default user is
@@ -430,7 +429,7 @@ are in the root `README.md` service-URL table.
 ```bash
 $ make dev-down      # stop + remove containers (volumes kept)
 $ make reset-db      # wipe & recreate the Postgres volume (also re-imports Keycloak realm)
-$ make dev-nuke      # DESTRUCTIVE: containers + every volume (Postgres, MinIO, Kafka)
+$ make dev-nuke      # DESTRUCTIVE: containers + every volume (Postgres, Kafka)
 ```
 
 > Don't drop the Postgres volume by hand — Keycloak shares that server, and an

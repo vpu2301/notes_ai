@@ -265,6 +265,9 @@ private struct NoteRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
+                if hover, let access = note.access {
+                    AccessBadge(access: access)
+                }
                 Text(note.updatedAt.formatted(date: .omitted, time: .shortened))
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
@@ -280,6 +283,7 @@ private struct NoteRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .accessibilityValue(note.access?.help ?? "")
         .contextMenu {
             Button("Open") { app.openNote(note.noteId) }
             Button("Open in Web App") { app.openNoteInBrowser(note.noteId) }
@@ -311,6 +315,28 @@ private struct NoteRow: View {
         items.append(.separator)
         items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
         return items
+    }
+}
+
+/// Private or public, shown while the pointer is on the row.
+private struct AccessBadge: View {
+    let access: NoteAccess
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: access.symbol)
+                .font(.system(size: 10, weight: .medium))
+            Text(access.label)
+                .font(.ds(10.5, .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(access.isPublic ? DS.accentText : DS.text3)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(access.isPublic ? DS.accentSoft : DS.surface2))
+        .help(access.help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(access.help)
     }
 }
 

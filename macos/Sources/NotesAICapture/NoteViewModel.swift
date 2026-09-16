@@ -26,6 +26,9 @@ final class NoteViewModel: ObservableObject {
 
     @Published private(set) var note: NoteEnvelope?
     @Published private(set) var sections: [TemplateSectionDef] = []
+    /// The template's display name, for the note's meta line; nil when the
+    /// template could not be read (deprecated, or not ours to see).
+    @Published private(set) var templateName: String?
     @Published var content: NoteContent?
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
@@ -110,9 +113,11 @@ final class NoteViewModel: ObservableObject {
             conflict = false
             if let templateId = envelope.content?.templateId,
                let template = try? await api.fetchTemplate(id: templateId) {
+                templateName = template.name
                 sections = template.schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
             } else {
                 // Template unavailable: the envelope's labels as plain text sections.
+                templateName = nil
                 sections = (envelope.sectionLabels ?? []).map {
                     TemplateSectionDef(id: $0.sectionKey,
                                        name: $0.name["en"] ?? $0.name["uk"] ?? $0.sectionKey,
@@ -364,19 +369,30 @@ final class NoteViewModel: ObservableObject {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
     }
 
-    /// Returns false when the address belongs to nobody in the workspace.
-    func share(email: String) async -> Bool {
+    /// Mail the note to the people named, from the server.
+    ///
+    /// Returns the per-recipient outcomes, or nil when the call itself
+    /// failed (the reason is on `actionError`). Members are granted
+    /// access as a side effect, so the sharing view is refreshed from
+    /// the reply rather than re-fetched.
+    func sendShareEmail(recipients: [String], message: String) async -> [ShareEmailOutcome]? {
         busy = true
         actionError = nil
         defer { busy = false }
         do {
-            sharing = try await api.shareWithMember(id: noteId, email: email)
-            return true
-        } catch let APIError.http(status, _) where status == 404 {
-            return false
+            let result = try await api.shareByEmail(
+                id: noteId,
+                recipients: recipients,
+                message: message,
+                // The sender's language. The recipient's is unknowable —
+                // half of them have no account here — and people share
+                // within a team.
+                lang: Locale.current.language.languageCode?.identifier ?? "en")
+            sharing = result.sharing
+            return result.results
         } catch {
             actionError = error.localizedDescription
-            return false
+            return nil
         }
     }
 

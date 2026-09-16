@@ -10,7 +10,7 @@ choice.
 |---|---|---|
 | Cluster itself | — | on-prem k3s/RKE2, or a managed cloud region |
 | GPU node pool | `values-prod.yaml` (`mdx-pool: gpu` selector, `gpu=true:NoSchedule` taint, `nvidia.com/gpu` resources) | node provisioning + NVIDIA device plugin install |
-| Stateful stores | `stateful.inCluster=false` + DSN/hosts in values | CloudNativePG / Redis operator / MinIO operator, or managed equivalents |
+| Stateful stores | `stateful.inCluster=false` + DSN/hosts in values | CloudNativePG / Redis operator, or managed equivalents |
 | Public ingress + TLS | none in-chart — nothing in the namespace is internet-reachable | the provider's ingress/LB + cert issuance in front of the SPA/API, plus WAF/CDN if wanted |
 | Vault endpoint | `MDX_VAULT_ADDR`, ExternalSecrets ClusterSecretStore | the production Vault (same trust root as ADR-0011 KMS) |
 | Registry | `global.imageRegistry` | a registry close to the cluster (multi-GB model-baked images) |

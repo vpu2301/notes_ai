@@ -32,6 +32,9 @@ NOTE_SHARED: Final = "note.shared"  # a member was given read access
 NOTE_UNSHARED: Final = "note.unshared"
 NOTE_LINK_CREATED: Final = "note.link_created"  # public "anyone with the link"
 NOTE_LINK_REVOKED: Final = "note.link_revoked"
+# The note was mailed to somebody, from the server. Counts only — the
+# addresses stay out of the audit log on purpose.
+NOTE_LINK_EMAILED: Final = "note.link_emailed"
 NOTE_VIEWED_VIA_LINK: Final = "note.viewed_via_link"  # anonymous read
 
 # Spec item 1: note synthesis (raw dictation → clean prose).

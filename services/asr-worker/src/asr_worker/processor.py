@@ -6,7 +6,7 @@ Lifecycle of a job:
 2. Parse :class:`JobEnqueuePayload` from the message value.
 3. Idempotency check: SELECT status from transcription_jobs.
 4. Mark running, audit ``asr.transcription_started``.
-5. Fetch encrypted audio bytes from MinIO via ``EncryptedObjectStore``.
+5. Fetch encrypted audio bytes from S3 via ``EncryptedObjectStore``.
 6. Decode via ffmpeg into mono 16 kHz float32 PCM.
 7. Run ``WhisperEngine.transcribe`` (the payload's optional free-text
    vocabulary hint feeds Whisper's initial_prompt).
@@ -320,7 +320,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             # envelope. Deterministic, and an operator's problem — the
             # user re-uploading the same file changes nothing.
             raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 — S3/MinIO transport
+        except Exception as exc:  # noqa: BLE001 — S3 transport
             raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
 
         try:

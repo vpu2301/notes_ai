@@ -37,28 +37,6 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      # NOTE (Sprint A1): this MinIO release ships without curl/wget, so the
-      # original curl-based healthcheck always failed even though the server is
-      # up. `mc ready local` is MinIO's bundled readiness probe.
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 10s
-
   kafka:
     # NOTE (Sprint A1): upstream `bitnami/kafka:3.7` was removed from Docker Hub
     # when Bitnami relocated its catalog (2025). `bitnamilegacy/kafka:3.7` is the
@@ -213,7 +191,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
   kafka_data:
   prometheus_data:
   grafana_data:
