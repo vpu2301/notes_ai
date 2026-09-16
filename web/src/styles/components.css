@@ -386,23 +386,28 @@
 .row-meta { display: flex; align-items: center; gap: calc(8px * var(--density)); font-size: calc(11.5px * var(--fs)); color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
 .row-side { display: flex; align-items: center; gap: calc(8px * var(--density)); flex: none; }
 .row-chev { color: var(--muted); flex: none; }
-/* Private / shared / public — appears while the pointer is on the row. It
-   keeps its place at rest (opacity, not display) so nothing jumps and a
-   screen reader still hears it. */
+/* Private / shared / public — appears while the pointer is on the row,
+   and stays while its menu is open. It keeps its place at rest (opacity,
+   not display) so nothing jumps and a screen reader still finds it. */
+.access-menu { display: inline-flex; flex: none; }
 .access-badge {
-  display: inline-flex; align-items: center; gap: 4px; flex: none;
-  padding: 2px 7px; border-radius: 99px;
-  font-size: calc(10.5px * var(--fs)); font-weight: 500; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 10px; border-radius: 99px;
+  font-size: calc(12px * var(--fs)); font-weight: 500; white-space: nowrap;
   background: var(--surface-2); color: var(--text-3);
-  opacity: 0; transition: opacity var(--t-fast) var(--ease);
+  opacity: 0; transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
+.access-badge:hover { background: var(--line); color: var(--text-1); }
+.access-badge svg:last-child { opacity: .7; }
 .access-badge.public { background: var(--accent-soft); color: var(--accent-text); }
 .row.click:hover .access-badge,
-.row.click:focus-visible .access-badge { opacity: 1; }
+.row.click:focus-within .access-badge,
+.access-badge[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) {
-  .access-badge { opacity: 1; background: none; padding: 2px 0; color: var(--muted); }
+  .access-badge { opacity: 1; background: none; padding: 0 6px; color: var(--muted); }
   .access-badge.public { background: none; color: var(--accent-text); }
-  .access-badge .access-label { display: none; }
+  .access-badge .access-label,
+  .access-badge svg:last-child { display: none; }
 }
 .row-err { font-size: calc(12px * var(--fs)); color: var(--rec); margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .err-kind {

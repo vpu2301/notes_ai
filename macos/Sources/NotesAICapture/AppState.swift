@@ -573,6 +573,31 @@ final class AppState: ObservableObject {
         return notes.filter { spaceOf[$0.noteId] == space }
     }
 
+    /// Private ↔ workspace, from the list's access pill.
+    func setVisibility(noteId: String, workspace: Bool) async throws {
+        applySharing(try await api.setVisibility(id: noteId, visibility: workspace ? "workspace" : "private"))
+    }
+
+    /// The note's public link, minted on first use.
+    func publicLink(noteId: String) async throws -> URL? {
+        let sharing = try await api.createPublicLink(id: noteId)
+        applySharing(sharing)
+        guard let path = sharing.publicLink?.path,
+              let root = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return root.appending(path: String(path.dropFirst()))
+    }
+
+    func revokePublicLink(noteId: String) async throws {
+        applySharing(try await api.revokePublicLink(id: noteId))
+    }
+
+    /// Show a sharing change on the list row without reloading the list.
+    private func applySharing(_ sharing: SharingView) {
+        guard let index = notes.firstIndex(where: { $0.noteId.lowercased() == sharing.noteId.lowercased() })
+        else { return }
+        notes[index].access = NoteAccess(sharing)
+    }
+
     /// Soft-delete on the server, then drop every local trace.
     func moveToTrash(noteId: String) async throws {
         try await api.deleteNote(id: noteId)

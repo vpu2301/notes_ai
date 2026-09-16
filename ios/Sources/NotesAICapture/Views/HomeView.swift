@@ -12,6 +12,7 @@ struct HomeView: View {
     @ObservedObject private var google: GoogleCalendarService
     @State private var pendingTrash: NoteSummary?
     @State private var trashError: String?
+    @State private var accessError: String?
     @State private var addingSpace = false
     @State private var newSpaceName = ""
     @State private var renamingSpace: Space?
@@ -111,6 +112,13 @@ struct HomeView: View {
             Button("OK") { trashError = nil }
         } message: {
             Text(trashError ?? "")
+        }
+        .alert("Couldn't change who can open the note", isPresented: Binding(
+            get: { accessError != nil }, set: { if !$0 { accessError = nil } }
+        )) {
+            Button("OK") { accessError = nil }
+        } message: {
+            Text(accessError ?? "")
         }
         .alert("New space", isPresented: $addingSpace) {
             TextField("Space name", text: $newSpaceName)
@@ -261,7 +269,7 @@ struct HomeView: View {
             ForEach(groups(notes), id: \.title) { group in
                 section(group.title) {
                     rows(group.items.map { note in
-                        AnyView(NoteRow(note: note, trash: { pendingTrash = note }))
+                        AnyView(NoteRow(note: note, trash: { pendingTrash = note }, failed: { accessError = $0 }))
                     })
                 }
             }
@@ -418,6 +426,7 @@ private struct NoteRow: View {
     @EnvironmentObject private var app: AppState
     let note: NoteSummary
     let trash: () -> Void
+    let failed: (String) -> Void
     @State private var hover = false
 
     var body: some View {
@@ -454,9 +463,6 @@ private struct NoteRow: View {
                         }
                     }
                     Spacer(minLength: 8)
-                    if let access = note.access {
-                        AccessBadge(access: access, expanded: hover)
-                    }
                     Text(note.updatedAt.formatted(date: .omitted, time: .shortened))
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
@@ -468,11 +474,51 @@ private struct NoteRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityValue(note.access?.help ?? "")
+            // Beside the row's button, not inside it: a menu nested in a
+            // button's label loses its tap to the row on iOS.
+            if let access = note.access {
+                DSMenu(items: { accessItems(access) }) {
+                    AccessPill(access: access, expanded: hover)
+                }
+            }
             DSMenu(dim: true, items: menuItems)
                 .padding(.trailing, 6)
         }
         .onHover { hover = $0 }
         .contextMenu { DSMenuContent(items: menuItems()) }
+    }
+
+    /// The pill's menu: who can open the note. The server decides whether
+    /// this person may change it; a refusal comes back as an alert.
+    private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
+        let id = note.noteId
+        var items: [DSMenuItem] = [
+            .header("Who can open this note"),
+            .item("Private", symbol: "lock", checked: !access.isWorkspace) {
+                if access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: false) } }
+            },
+            .item("Everyone in the workspace", symbol: "person.2", checked: access.isWorkspace) {
+                if !access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: true) } }
+            },
+            .separator,
+            .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
+                run {
+                    if let url = try await app.publicLink(noteId: id) { copyToPasteboard(url.absoluteString) }
+                }
+            },
+        ]
+        if access.hasPublicLink {
+            items.append(.item("Turn off public link", symbol: "xmark.circle") {
+                run { try await app.revokePublicLink(noteId: id) }
+            })
+        }
+        return items
+    }
+
+    private func run(_ work: @escaping () async throws -> Void) {
+        Task {
+            do { try await work() } catch { failed(error.localizedDescription) }
+        }
     }
 
     private func menuItems() -> [DSMenuItem] {
@@ -498,27 +544,32 @@ private struct NoteRow: View {
     }
 }
 
-/// Private or public. There is no pointer on a phone, so the glyph
-/// always shows; an iPad pointer on the row spells it out.
-private struct AccessBadge: View {
+/// Private or public, and the trigger for the access menu. There is no
+/// pointer on a phone, so the glyph always shows; an iPad pointer on the
+/// row spells it out with the chevron, like the Mac.
+private struct AccessPill: View {
     let access: NoteAccess
     let expanded: Bool
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: access.symbol)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 11, weight: .semibold))
             if expanded {
                 Text(access.label)
-                    .font(.ds(11, .medium))
+                    .font(.ds(12.5, .medium))
                     .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .opacity(0.75)
             }
         }
         .foregroundStyle(access.isPublic ? DS.accentText : (expanded ? DS.text3 : DS.muted))
-        .padding(.horizontal, expanded ? 7 : 0)
-        .padding(.vertical, 2)
+        .padding(.horizontal, expanded ? 10 : 6)
+        .frame(minWidth: 28, minHeight: 28)
         .background(Capsule().fill(expanded ? (access.isPublic ? DS.accentSoft : DS.surface2) : .clear))
-        .accessibilityHidden(true)
+        .contentShape(Capsule())
+        .accessibilityLabel(access.help)
     }
 }
 

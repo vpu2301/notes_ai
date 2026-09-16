@@ -12,6 +12,7 @@ struct HomeView: View {
     @ObservedObject private var google: GoogleCalendarService
     @State private var pendingTrash: NoteSummary?
     @State private var trashError: String?
+    @State private var accessError: String?
 
     init(calendar: CalendarService, google: GoogleCalendarService) {
         self.calendar = calendar
@@ -65,6 +66,13 @@ struct HomeView: View {
             Button("OK") { trashError = nil }
         } message: {
             Text(trashError ?? "")
+        }
+        .alert("Couldn't change who can open the note", isPresented: Binding(
+            get: { accessError != nil }, set: { if !$0 { accessError = nil } }
+        )) {
+            Button("OK") { accessError = nil }
+        } message: {
+            Text(accessError ?? "")
         }
     }
 
@@ -163,7 +171,7 @@ struct HomeView: View {
             ForEach(groups(notes), id: \.title) { group in
                 section(group.title) {
                     rows(group.items.map { note in
-                        AnyView(NoteRow(note: note, trash: { pendingTrash = note }))
+                        AnyView(NoteRow(note: note, trash: { pendingTrash = note }, failed: { accessError = $0 }))
                     })
                 }
             }
@@ -232,7 +240,9 @@ private struct NoteRow: View {
     @EnvironmentObject private var app: AppState
     let note: NoteSummary
     let trash: () -> Void
+    let failed: (String) -> Void
     @State private var hover = false
+    @State private var accessMenuOpen = false
 
     var body: some View {
         Button {
@@ -265,8 +275,10 @@ private struct NoteRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                if hover, let access = note.access {
-                    AccessBadge(access: access)
+                if hover || accessMenuOpen, let access = note.access {
+                    DSMenu(width: 250, onOpenChange: { accessMenuOpen = $0 }, items: { accessItems(access) }) {
+                        AccessPill(access: access)
+                    }
                 }
                 Text(note.updatedAt.formatted(date: .omitted, time: .shortened))
                     .font(.dsMeta)
@@ -292,15 +304,50 @@ private struct NoteRow: View {
         }
     }
 
+    /// The pill's menu: who can open the note. The server decides whether
+    /// this person may change it; a refusal comes back as an alert.
+    private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
+        let id = note.noteId
+        var items: [DSMenuItem] = [
+            .header("Who can open this note"),
+            .item("Private", symbol: "lock", checked: !access.isWorkspace) {
+                if access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: false) } }
+            },
+            .item("Everyone in the workspace", symbol: "person.2", checked: access.isWorkspace) {
+                if !access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: true) } }
+            },
+            .separator,
+            .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
+                run {
+                    if let url = try await app.publicLink(noteId: id) { copy(url.absoluteString) }
+                }
+            },
+        ]
+        if access.hasPublicLink {
+            items.append(.item("Turn off public link", symbol: "xmark.circle") {
+                run { try await app.revokePublicLink(noteId: id) }
+            })
+        }
+        return items
+    }
+
+    private func run(_ work: @escaping () async throws -> Void) {
+        Task {
+            do { try await work() } catch { failed(error.localizedDescription) }
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     private func menuItems() -> [DSMenuItem] {
         var items: [DSMenuItem] = [
             .item("Open", symbol: "doc.text") { app.openNote(note.noteId) },
             .item("Open in web app", symbol: "safari") { app.openNoteInBrowser(note.noteId) },
             .item("Copy link", symbol: "link") {
-                if let url = app.noteURL(note.noteId) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                }
+                if let url = app.noteURL(note.noteId) { copy(url.absoluteString) }
             },
         ]
         if !app.spaces.isEmpty {
@@ -318,24 +365,32 @@ private struct NoteRow: View {
     }
 }
 
-/// Private or public, shown while the pointer is on the row.
-private struct AccessBadge: View {
+/// Private or public, shown while the pointer is on the row: the lock (or
+/// globe), the word, and a chevron that opens the access menu.
+private struct AccessPill: View {
     let access: NoteAccess
+    @State private var hover = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: access.symbol)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 10, weight: .semibold))
             Text(access.label)
-                .font(.ds(10.5, .medium))
+                .font(.ds(12, .medium))
                 .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .bold))
+                .opacity(0.75)
         }
         .foregroundStyle(access.isPublic ? DS.accentText : DS.text3)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(access.isPublic ? DS.accentSoft : DS.surface2))
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(
+            Capsule().fill(access.isPublic ? DS.accentSoft : (hover ? DS.lineHover : DS.surface2))
+        )
+        .contentShape(Capsule())
+        .onHover { hover = $0 }
         .help(access.help)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(access.help)
     }
 }
