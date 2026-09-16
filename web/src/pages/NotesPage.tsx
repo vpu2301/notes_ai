@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { errorMessage } from "../api/http";
 import { searchNotes } from "../api/notes";
-import type { SearchHit } from "../api/types";
-import { AccessBadge, noteAccess } from "../components/AccessBadge";
+import type { SearchHit, SharingView } from "../api/types";
+import { AccessMenu, noteAccess, withSharing } from "../components/AccessBadge";
 import { ComingUp } from "../components/ComingUp";
 import { EmptyState } from "../components/EmptyState";
 import { FolderIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
@@ -120,12 +120,14 @@ function NoteRow({
   spaceName,
   moveItems,
   onOpen,
+  onAccessChange,
 }: {
   hit: SearchHit;
   /** Shown as a chip when the list is not already narrowed to that space. */
   spaceName?: string;
   moveItems: MenuItem[];
   onOpen: () => void;
+  onAccessChange: (view: SharingView) => void;
 }) {
   const access = noteAccess(hit);
   return (
@@ -160,7 +162,7 @@ function NoteRow({
           </span>
         )}
       </span>
-      {access && <AccessBadge access={access} />}
+      {access && <AccessMenu hit={hit} access={access} onChange={onAccessChange} />}
       <span className="row-time">{relativeTime(hit.updated_at)}</span>
       {moveItems.length > 0 && (
         <span className="row-side" onClick={(e) => e.stopPropagation()}>
@@ -474,6 +476,9 @@ export function NotesPage() {
                   spaceName={spaceId ? undefined : spaces.find((s) => s.id === spaceOf[hit.note_id])?.name}
                   moveItems={moveItems(hit.note_id)}
                   onOpen={() => navigate(`/notes/${hit.note_id}`)}
+                  onAccessChange={(view) =>
+                    setHits((prev) => prev?.map((h) => (h.note_id === view.note_id ? withSharing(h, view) : h)) ?? prev)
+                  }
                 />
               ))}
             </div>

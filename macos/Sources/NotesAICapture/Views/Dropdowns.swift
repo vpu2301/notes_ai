@@ -131,15 +131,19 @@ struct DSMenu<Label: View>: View {
     let items: () -> [DSMenuItem]
     var width: CGFloat = 220
     var edge: Edge = .bottom
+    /// Told when the panel opens and closes — for a trigger that only
+    /// shows on hover and must stay put while its menu is up.
+    var onOpenChange: ((Bool) -> Void)?
     @ViewBuilder let label: () -> Label
 
     @State private var open = false
 
-    init(width: CGFloat = 220, edge: Edge = .bottom,
+    init(width: CGFloat = 220, edge: Edge = .bottom, onOpenChange: ((Bool) -> Void)? = nil,
          items: @escaping () -> [DSMenuItem], @ViewBuilder label: @escaping () -> Label) {
         self.items = items
         self.width = width
         self.edge = edge
+        self.onOpenChange = onOpenChange
         self.label = label
     }
 
@@ -153,6 +157,7 @@ struct DSMenu<Label: View>: View {
         .popover(isPresented: $open, arrowEdge: edge) {
             DSMenuPanel(items: items(), width: width) { open = false }
         }
+        .onChange(of: open) { _, isOpen in onOpenChange?(isOpen) }
     }
 }
 

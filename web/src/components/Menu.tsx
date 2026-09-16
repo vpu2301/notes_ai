@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useDismiss } from "../lib/useDismiss";
-import { MoreIcon } from "./icons";
+import { CheckIcon, MoreIcon } from "./icons";
 
 export interface MenuItem {
   label: string;
@@ -10,6 +10,8 @@ export interface MenuItem {
   danger?: boolean;
   /** Draw a separator above this item. */
   sep?: boolean;
+  /** The current choice among options — a check at the end of the row. */
+  checked?: boolean;
 }
 
 const MENU_W = 240;
@@ -20,9 +22,14 @@ export function Menu({
   items,
   label = "More actions",
   anchored = false,
+  trigger,
+  triggerClassName = "icon-btn",
 }: {
   items: MenuItem[];
   label?: string;
+  /** What the trigger shows; the ⋯ icon by default. */
+  trigger?: ReactNode;
+  triggerClassName?: string;
   /**
    * Position the panel `fixed` off the trigger instead of absolutely inside
    * it — needed wherever an ancestor clips overflow (a list panel, the
@@ -54,7 +61,8 @@ export function Menu({
       {it.sep && <div className="menu-sep" />}
       <button
         className={`anchored-menu-item ${it.danger ? "danger" : ""}`}
-        role="menuitem"
+        role={it.checked === undefined ? "menuitem" : "menuitemradio"}
+        aria-checked={it.checked}
         disabled={it.disabled}
         onClick={() => {
           setOpen(false);
@@ -63,6 +71,7 @@ export function Menu({
       >
         {it.icon}
         <span className="anchored-menu-label">{it.label}</span>
+        {it.checked && <CheckIcon size={13} />}
       </button>
     </div>
   ));
@@ -71,14 +80,14 @@ export function Menu({
     <div className="dropdown-host" ref={ref}>
       <button
         ref={btn}
-        className="icon-btn"
+        className={triggerClassName}
         aria-label={label}
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={toggle}
       >
-        <MoreIcon />
+        {trigger ?? <MoreIcon />}
       </button>
       {open &&
         (anchored ? (

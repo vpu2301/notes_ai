@@ -832,7 +832,8 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     let snippet: String
     let updatedAt: Date
     /// Who can open it (0016). Nil from a server that predates the badge.
-    let access: NoteAccess?
+    /// Mutable so a change made from the list shows without a reload.
+    var access: NoteAccess?
 
     var id: String { noteId }
 
@@ -862,56 +863,51 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     }
 }
 
-/// The widest audience a note reaches — what the list's badge says.
-enum NoteAccess: Equatable, Sendable {
-    /// Only the author team.
-    case privateNote
-    /// Private, plus named workspace members.
-    case shared(Int)
-    /// Everyone in the workspace.
-    case workspace
-    /// Anyone with the public link, signed in or not.
-    case publicLink
+/// Who can open a note — what the list's pill says, and what its menu
+/// changes.
+struct NoteAccess: Equatable, Sendable {
+    /// "private" or "workspace".
+    var visibility: String
+    var sharedWithCount: Int
+    var hasPublicLink: Bool
 
     init(visibility: String, sharedWithCount: Int, hasPublicLink: Bool) {
-        if hasPublicLink {
-            self = .publicLink
-        } else if visibility == "workspace" {
-            self = .workspace
-        } else if sharedWithCount > 0 {
-            self = .shared(sharedWithCount)
-        } else {
-            self = .privateNote
-        }
+        self.visibility = visibility
+        self.sharedWithCount = sharedWithCount
+        self.hasPublicLink = hasPublicLink
     }
 
-    var isPublic: Bool { self == .publicLink }
+    init(_ sharing: SharingView) {
+        self.init(visibility: sharing.visibility, sharedWithCount: sharing.sharedWith.count,
+                  hasPublicLink: sharing.publicLink != nil)
+    }
+
+    var isWorkspace: Bool { visibility == "workspace" }
+
+    /// The widest audience wins: a public link reaches more people than
+    /// the workspace, which reaches more than a named few.
+    var isPublic: Bool { hasPublicLink }
 
     var label: String {
-        switch self {
-        case .privateNote: return "Private"
-        case .shared(let n): return n == 1 ? "Shared with 1" : "Shared with \(n)"
-        case .workspace: return "Workspace"
-        case .publicLink: return "Public"
-        }
+        if hasPublicLink { return "Public" }
+        if isWorkspace { return "Workspace" }
+        if sharedWithCount > 0 { return "Shared with \(sharedWithCount)" }
+        return "Private"
     }
 
     var symbol: String {
-        switch self {
-        case .privateNote: return "lock"
-        case .shared: return "lock"
-        case .workspace: return "person.2"
-        case .publicLink: return "globe"
-        }
+        if hasPublicLink { return "globe" }
+        if isWorkspace { return "person.2.fill" }
+        return "lock.fill"
     }
 
     var help: String {
-        switch self {
-        case .privateNote: return "Private — only the note's authors can open it"
-        case .shared(let n): return "Private — shared with \(n) \(n == 1 ? "person" : "people") in the workspace"
-        case .workspace: return "Visible to everyone in the workspace"
-        case .publicLink: return "Public — anyone with the link can open it"
+        if hasPublicLink { return "Public — anyone with the link can open it" }
+        if isWorkspace { return "Visible to everyone in the workspace" }
+        if sharedWithCount > 0 {
+            return "Private — shared with \(sharedWithCount) \(sharedWithCount == 1 ? "person" : "people") in the workspace"
         }
+        return "Private — only the note's authors can open it"
     }
 }
 
