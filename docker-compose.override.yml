@@ -74,7 +74,9 @@ x-svc-healthcheck: &svc-healthcheck
 services:
   # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
   minio-init:
-    image: minio/mc:RELEASE.2024-04-18T16-45-29Z
+    # NOTE: see the MinIO server note — `minio/mc` was withdrawn from Docker
+    # Hub too; quay.io is the upstream registry.
+    image: quay.io/minio/mc:RELEASE.2024-04-18T16-45-29Z
     depends_on:
       minio:
         condition: service_healthy
