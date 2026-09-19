@@ -149,7 +149,7 @@ function NoteRow({
       <span className="row-body">
         <span className="row-1">
           <span className="row-name">{hit.title || "Untitled note"}</span>
-          {hit.status !== "draft" && <StatusBadge status={hit.status} />}
+          {hit.status === "cancelled" && <StatusBadge status={hit.status} />}
           {spaceName && (
             <span className="chip space-chip">
               <FolderIcon size={11} /> {spaceName}

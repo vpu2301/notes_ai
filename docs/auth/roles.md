@@ -204,3 +204,15 @@ for the subject's own banner.
 - Next refresh after a Keycloak-side role change carries the new role
   set in the new access token (Keycloak rebuilds the claim set on
   refresh, not on access-token verify).
+
+## The founding user of a self-serve workspace (Sprint 21, ADR-0048)
+
+A person who creates a workspace through `/join` or `/signup` is its
+only member and holds **both** `tenant_admin` and `member` realm roles
+from the first sign-in (`onboarding_service.SIGNUP_REALM_ROLES`), with
+`users.role = tenant_admin` and an `owner` membership. This is a
+deliberate exception to the admin/content separation above: an admin
+who cannot read notes is a locked-out workspace when there is nobody
+else. Do not "fix" it by removing `member`; an admin-only account is
+still expressible through `PUT /admin/users/{sub}/roles` when a second
+person exists to do the work.

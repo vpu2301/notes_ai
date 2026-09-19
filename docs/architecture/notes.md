@@ -32,25 +32,23 @@ A note belongs to a **tenant + author** (`primary_author_id` +
 
 ## Status lifecycle
 
-Allowed transitions (`domain/note_lifecycle.py`):
+A note is a living document. It is `draft` from creation until it is
+cancelled; there is no "done" state (migration 0042 retired the
+finalize → amend lifecycle and moved every frozen row back to
+`draft`; `finalized_at` is kept as history). The one transition
+(`domain/note_lifecycle.py`):
 
 ```
-   ┌──────────┐   finalize   ┌──────────────┐   amend    ┌─────────┐
-   │  draft   │─────────────►│  finalized   │───────────►│ amended │──┐
-   └────┬─────┘ ◄────revert──└──────┬───────┘            └─────────┘  │ amend
-        │     (1h, author)          │                         ▲       │ (again)
-        │ cancel                    │ cancel                  └───────┘
-        ▼                           ▼
-   ┌──────────┐                ┌──────────┐
-   │ cancelled│                │ cancelled│
-   └──────────┘                └──────────┘
+   ┌──────────┐   cancel    ┌───────────┐
+   │  draft   │────────────►│ cancelled │
+   └──────────┘             └───────────┘
 ```
 
-Finalize is a plain lifecycle transition with validation (required
-sections present, typed-field completeness). Transitions are
-single-statement UPDATEs with `WHERE status = expected_from`;
-concurrent transitions are caught and 409'd. The revert window is 1
-hour and limited to the primary author.
+It is a single-statement UPDATE with `WHERE status = expected_from`;
+a concurrent transition is caught and 409'd. Every edit appends a
+version (see below), sharing works on any live note, and action
+items are derived lazily from whichever version is current when it is
+first read (`domain/action_items.py::ensure_items`).
 
 ## Optimistic locking
 
@@ -65,18 +63,17 @@ Idempotent retries use `metadata.body_hash`: same body + same
 `expected_version` returns the prior version with `idempotent_replay:
 true`.
 
-## Amendments
+## Amendments (retired)
 
-`POST /v1/notes/{id}/amend` is allowed on finalized (or already
-amended) notes. It creates a new `note_versions` row with
-`is_amendment=true` and moves the note to `amended`; further
-amendments keep appending versions.
+`POST /v1/notes/{id}/amend` was removed with the finalize lifecycle
+(0042). The `is_amendment` / `amendment_type` / `amendment_reason`
+columns on `note_versions` remain as history and are still returned
+on version listings; every new version is an ordinary autosave.
 
 ## Chain integrity
 
 `domain/chain_integrity.py` is a pure-Python verifier; it's called
 by:
-- The CI property test (`tests/property/test_amendment_chain.py`),
 - The daily reconciler (`jobs/chain_reconciler.py`, cron 04:30 UTC).
 
 Anomalies recorded both in `audit.note_chain_failures` (for the
@@ -131,9 +128,9 @@ are always safe.
 `GET /v1/notes/{id}/pdf` renders the current version through
 Jinja2 + WeasyPrint (`domain/pdf.py`, deterministic byte-equal
 output). Tenant branding (`domain/branding.py`) supplies the issuer
-name from the `tenants` row. Draft notes always carry a bilingual
-DRAFT watermark; `?variant=clean` is honoured only for
-finalized/amended notes; cancelled notes are refused (409).
+name from the `tenants` row. The output is clean by default;
+`?variant=draft` adds the bilingual DRAFT watermark when the author
+wants a copy marked provisional; cancelled notes are refused (409).
 
 ## Observability
 
@@ -155,8 +152,8 @@ finalized/amended notes; cancelled notes are refused (409).
   is deterministic keyword scoring (`domain/template_match.py`) with a
   `meeting_notes` fallback. `GET /v1/notes/by-source-job` powers the
   jobs-list "already assigned" badge.
-- **Dictation sessions**: sessions create drafts via `POST /v1/notes`;
-  finalize can backfill `source_session_id`.
+- **Dictation sessions**: sessions create drafts via `POST /v1/notes`
+  and stamp `source_session_id`.
 - **Audio replay (ADR-0037)**: per-section segment listing under
   `/v1/notes/{id}/sections/{key}/audio-clips` plus the ephemeral
   clip pipeline under `/v1/audio-clips`.
@@ -208,32 +205,47 @@ Common rules (enforced by the typed models):
   `META_MODEL_BY_FIELD_TYPE` in `note_models.field_metadata` — never
   by bypassing it.
 
-## Typed finalize completeness (sprint 13)
+## Typed-field provenance (sprint 13)
 
-`min_chars` measures prose, so it says nothing about a `choice`
-section whose answer lives in `field_specific_metadata`. Each typed
-field type gets its own "filled" rule. Free-text sections behave
-exactly as they did in sprint 08 — zero change for existing templates.
+A typed section may carry `source: "extracted"` in its metadata. That
+is deliberate and honest: the hash chain covers the content including
+its provenance marker, so a reader can always tell which values a
+machine proposed and the author left standing, versus which they
+entered or confirmed themselves. (Sprint 13's finalize completeness
+rules were retired with finalize itself, 0042.)
 
-| `field_type` | filled when | violation code |
-| --- | --- | --- |
-| `free_text` | `min_chars` (unchanged) | `missing_required_section` / `below_min_chars` |
-| `choice` | metadata `selected` present (any `source`) | `choice_not_selected` |
-| `multi_choice` | `selected` non-empty (any `source`) | `choice_not_selected` |
-| `numeric_with_unit` | metadata `value` **and** `unit` present | `numeric_not_filled` |
-| `date` / `date_with_note` | metadata `date` present; `date_with_note` also applies `min_chars` to the note | `date_not_filled` (+ `below_min_chars`) |
+## Action items as a derived projection (Sprint 20, migration 0037)
 
-All violations travel in the existing sprint-08 `FinalizeProblem`
-shape at **422** (409 stays reserved for status/version conflicts);
-the codes are registered in `_REASON_BY_CODE`.
+`note_action_items` is **derived** from the `action_items` / `next_steps`
+section text of one `note_versions` row, materialised the first time
+that version is read — author items view or shared page
+(`domain/action_items.py::ensure_items`) — and never edited directly
+except for `status`. The section text stays
+canonical: the version hash chain, the editor, PDF, Markdown and search
+are unchanged, and nothing can drift from the prose.
 
-An `extracted` value satisfies "filled": the author saw the proposal
-and chose to finalize, which is acceptance.
+**Line grammar** (deterministic, no model): `[bullet] [Owner:] task [— [by|due] date]`.
+An explicit `Name:` prefix (≤ 4 words) is the owner with confidence 1.0;
+two leading capitalised words are an *inferred* owner at 0.5, shown to
+the author as "check owner". The date goes through `parse_due` — ISO,
+`DD.MM[.YYYY]`, `18 Sep`, `Sep 18`, month names in en/uk/de, weekdays,
+today/tomorrow/next week — anchored to today in the tenant's time zone.
+Unparseable text keeps `due_text` with no `due_date`.
 
-### Provenance in finalized content
+**`item_key`** = first 16 hex of sha256(normalised task text without
+owner/date/bullets, lower-cased). It is the identity a recipient's
+response attaches to: an unchanged line keeps its key — and its
+responses and status — across an edit; an edited line starts clean,
+because the recipient confirmed *that* wording. Duplicate lines within
+one version collapse to the first.
 
-A non-required typed section may carry `source: "extracted"` into a
-finalized note. That is deliberate and honest: the hash chain covers
-the content including its provenance marker, so a reader can always
-tell which values a machine proposed and the author left standing,
-versus which they entered or confirmed themselves.
+`share_link_responses` holds what a recipient did (`confirm` / `done` /
+`dispute` on an item, `flag` on a section) keyed by link and target, one
+live row per (link, target); a new stance replaces the old one, which is
+cleared rather than deleted. The comment is text, capped at 280
+characters, refused if it carries a URL, and rendered as text only —
+never Markdown, HTML or an e-mail body.
+
+The extractor is a seam (`ActionItemExtractor`); `rules` is the only
+implementation. A model-backed extractor would replace the parser, not
+the projection.

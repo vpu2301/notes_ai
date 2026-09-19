@@ -282,7 +282,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-function buildUrl(base: ServiceBase, path: string, query?: RequestOptions["query"]): string {
+/** Absolute URL of a service path — for `<a href>` / `<img src>`, not for `api()`. */
+export function buildUrl(base: ServiceBase, path: string, query?: RequestOptions["query"]): string {
   const url = new URL(BASES[base] + path);
   if (query) {
     for (const [key, value] of Object.entries(query)) {

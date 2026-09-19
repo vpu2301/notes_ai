@@ -439,3 +439,28 @@ def test_dialogue_fallback_uses_speaker_names_when_present() -> None:
         "speaker_names": {"SPEAKER_1": "Mark"},
     }
     assert _transcript_text(result) == "Mark: Hi.\n\nSpeaker 2: Hello."
+
+
+# ── where the transcript lands ────────────────────────────────────────
+
+
+def test_transcript_prefers_a_prose_section_over_the_attendee_list() -> None:
+    from note_service.routers.notes_from_transcript import _transcript_home
+
+    meeting = _definition(
+        "meeting",
+        "Meeting",
+        "meetings",
+        [("attendees", "Attendees"), ("agenda", "Agenda"), ("discussion", "Discussion")],
+    )
+    assert _transcript_home(sorted(meeting.sections, key=lambda s: s.order)).id == "discussion"
+
+    no_prose_key = _definition(
+        "x", "X", "meetings", [("attendees", "Attendees"), ("outcome", "Outcome")]
+    )
+    assert _transcript_home(sorted(no_prose_key.sections, key=lambda s: s.order)).id == "outcome"
+
+    only_attendees = _definition("y", "Y", "meetings", [("attendees", "Attendees")])
+    assert (
+        _transcript_home(sorted(only_attendees.sections, key=lambda s: s.order)).id == "attendees"
+    )

@@ -324,13 +324,39 @@ final class AppState: ObservableObject {
     /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
     /// IDX-B2's to extend), so this is a no-op today and the account screen
     /// falls back to the address the Keychain item carries.
+    /// Sprint 21: true for an account younger than a day that has not
+    /// dismissed the "record your first meeting" card on this device.
+    @Published var isFirstRun = false
+
+    private static let firstRunSeenKey = "notesai.first_run_seen"
+
+    func dismissFirstRun() {
+        isFirstRun = false
+        UserDefaults.standard.set(true, forKey: Self.firstRunSeenKey)
+    }
+
+    private func detectFirstRun(_ identity: IdentitySummary) {
+        guard let created = identity.createdAt,
+              Date().timeIntervalSince(created) < 24 * 3600,
+              !UserDefaults.standard.bool(forKey: Self.firstRunSeenKey) else { return }
+        isFirstRun = true
+    }
+
     private func hydrateIdentity() async {
         guard let response = try? await api.me() else { return }
-        if let identity = response.identity { self.identity = identity }
+        if let identity = response.identity {
+            self.identity = identity
+            detectFirstRun(identity)
+        }
         if let memberships = response.memberships { self.memberships = memberships }
     }
 
+    /// Sprint 23: what the workspace admin allows. Permissive until known,
+    /// so an older server changes nothing.
+    @Published private(set) var sharingRules: SharingConstraints = .permissive
+
     private func loadWorkspace() async {
+        if let rules = try? await api.sharingConstraints() { sharingRules = rules }
         await refreshWorkspaces(force: true)
         refreshPending()
         await refreshNotes()
@@ -392,8 +418,10 @@ final class AppState: ObservableObject {
     /// over and to sign them in afterwards, which it already does: a BE-0
     /// account is an ordinary password account here.
     func openSignup() {
+        // Sprint 21: `/join` picks signup or the lead form by the server's
+        // config, so the app never has to know which one is on.
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
-            .appending(path: "signup") else { return }
+            .appending(path: "join") else { return }
         UIApplication.shared.open(url)
     }
 

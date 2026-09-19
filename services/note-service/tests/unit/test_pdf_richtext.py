@@ -27,6 +27,22 @@ def test_paragraphs_are_paragraphs() -> None:
     assert out == "<p>First line soft wrapped.</p><p>Second block.</p>"
 
 
+def test_speaker_turns_are_labelled() -> None:
+    out = render_rich_text(
+        "Anna: we ship Friday.\n\nTom Client: fine by me.\n\nhttp://x: not a turn"
+    )
+    assert out == (
+        '<p class="turn"><span class="speaker">Anna</span> we ship Friday.</p>'
+        '<p class="turn"><span class="speaker">Tom Client</span> fine by me.</p>'
+        "<p>http://x: not a turn</p>"
+    )
+
+
+def test_a_long_lead_is_not_a_speaker() -> None:
+    out = render_rich_text("One two three four five: not a label")
+    assert out == "<p>One two three four five: not a label</p>"
+
+
 def test_bullets_become_a_list() -> None:
     out = render_rich_text("- one\n- two\n* three")
     assert out == "<ul><li>one</li><li>two</li><li>three</li></ul>"

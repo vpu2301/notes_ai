@@ -56,7 +56,7 @@ _IDENTITY_COLUMNS = """
     id, email, email_verified_at, display_name, status, mfa_enabled,
     (password_hash IS NOT NULL) AS has_password, last_tenant_id,
     failed_login_count, lock_count, locked_until, lock_notified_at,
-    deletion_requested_at, locale, timezone, legacy_idp
+    deletion_requested_at, locale, timezone, legacy_idp, created_at
 """
 
 # Management role on the membership → the platform roles the JWT carries.
@@ -145,6 +145,8 @@ class Identity:
     # factor. NOT inferable from `has_password` — a native signup has no
     # password hash either (see the migration header).
     legacy_idp: bool = False
+    # Sprint 21: when the account came to exist, for first-run hints.
+    created_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: asyncpg.Record) -> Identity:
@@ -165,6 +167,7 @@ class Identity:
             locale=row["locale"],
             timezone=row["timezone"],
             legacy_idp=row["legacy_idp"],
+            created_at=row.get("created_at"),
         )
 
 

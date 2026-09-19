@@ -299,8 +299,6 @@ async def test_repo_rebind_ok_updates_row() -> None:
         ({"source_exists": False}, "template_not_found"),
         ({"note_exists": False}, "note_not_found"),
         ({"note_template": uuid4()}, "not_bound"),
-        ({"note_status": "finalized"}, "not_draft"),
-        ({"note_status": "finalized"}, "not_draft"),
         ({"note_status": "cancelled"}, "not_draft"),
         ({"target_exists": False}, "target_not_found"),
         ({"target_status": "deprecated"}, "target_deprecated"),

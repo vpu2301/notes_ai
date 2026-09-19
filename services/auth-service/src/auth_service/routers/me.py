@@ -71,6 +71,7 @@ async def _identity_and_memberships(
             "mfa_enabled": identity.mfa_enabled,
             "has_password": identity.has_password,
             "status": identity.status,
+            "created_at": (identity.created_at.isoformat() if identity.created_at else None),
         },
         [
             {
@@ -128,6 +129,8 @@ async def me(claims: Annotated[Claims, Depends(current_user)]) -> dict[str, Any]
             "status": row["status"],
             "mfa_enrolled_at": (enrolled_at.isoformat() if enrolled_at else None),
             "last_login_at": (row["last_login_at"].isoformat() if row["last_login_at"] else None),
+            # Sprint 21: lets a client show a first-run hint to a brand-new account.
+            "created_at": (row["created_at"].isoformat() if row["created_at"] else None),
             "mfa_reminder": reminder,
         }
 

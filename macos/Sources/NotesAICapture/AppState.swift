@@ -75,6 +75,12 @@ final class AppState: ObservableObject {
     }
     /// What the main window's detail pane shows; nil is the home page.
     @Published var selection: Selection?
+    /// Sprint 23: what the workspace admin allows. Permissive until known,
+    /// so an older server changes nothing.
+    @Published private(set) var sharingRules: SharingConstraints = .permissive
+    /// A note id the menu-bar popover asked to "Share with client…";
+    /// `NoteView` opens the sheet when it shows that note and clears it.
+    @Published var pendingClientShare: String?
 
     /// The sidebar shrunk to an icon rail, persisted like the web app's.
     @Published var sidebarCollapsed: Bool {
@@ -445,9 +451,30 @@ final class AppState: ObservableObject {
     /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
     /// IDX-B2's to extend), so this is a no-op today and the account screen
     /// falls back to the address the Keychain item carries.
+    /// Sprint 21: true for an account younger than a day that has not
+    /// dismissed the "record your first meeting" card on this device.
+    @Published var isFirstRun = false
+
+    private static let firstRunSeenKey = "notesai.first_run_seen"
+
+    func dismissFirstRun() {
+        isFirstRun = false
+        UserDefaults.standard.set(true, forKey: Self.firstRunSeenKey)
+    }
+
+    private func detectFirstRun(_ identity: IdentitySummary) {
+        guard let created = identity.createdAt,
+              Date().timeIntervalSince(created) < 24 * 3600,
+              !UserDefaults.standard.bool(forKey: Self.firstRunSeenKey) else { return }
+        isFirstRun = true
+    }
+
     private func hydrateIdentity() async {
         guard let response = try? await api.me() else { return }
-        if let identity = response.identity { self.identity = identity }
+        if let identity = response.identity {
+            self.identity = identity
+            detectFirstRun(identity)
+        }
         if let memberships = response.memberships { self.memberships = memberships }
     }
 
@@ -835,6 +862,13 @@ final class AppState: ObservableObject {
 
     /// Open a note inside this app. A note that came from one of this
     /// Mac's captures opens as that capture (so the transcript tab is there).
+    /// The fastest post-meeting path: open the note and go straight to
+    /// the per-recipient link sheet.
+    func shareWithClient(noteId: String) {
+        pendingClientShare = noteId
+        openNote(noteId)
+    }
+
     func openNote(_ noteId: String) {
         if let recent = recents.first(where: { $0.noteId == noteId }) {
             selection = .capture(jobId: recent.jobId)
@@ -893,8 +927,10 @@ final class AppState: ObservableObject {
     /// here. The Mac's job is to get the person to it and to be ready when
     /// they come back.
     var signupURL: URL? {
+        // Sprint 21: `/join` picks signup or the lead form by the server's
+        // config, so the app never has to know which one is on.
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
-            .appending(path: "signup")
+            .appending(path: "join")
     }
 
     func openSignup() {
@@ -1054,6 +1090,7 @@ extension AppState {
     }
 
     func loadWorkspaceData() async {
+        if let rules = try? await api.sharingConstraints() { sharingRules = rules }
         await refreshNotes()
         await refreshSpaces()
         await googleCalendar.refresh(force: true)

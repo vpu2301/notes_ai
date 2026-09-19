@@ -325,3 +325,11 @@ cronJobs:
   nightlyVerify:
     schedule: "0 2 * * *"
     databaseUrl: postgresql://postgres:postgres@postgres:5432/notes
+  # Sprint 22: the weekly loop-funnel CSV, as the read-only role.
+  weeklyFunnel:
+    schedule: "15 6 * * 1"
+    databaseUrl: postgresql://funnel_reader:funnel_reader@postgres:5432/notes
+  # Sprint 23: nightly retention on expired recipient links.
+  shareRetention:
+    schedule: "30 2 * * *"
+    databaseUrl: postgresql://app_role:app_role@postgres:5432/notes

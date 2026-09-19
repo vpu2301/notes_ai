@@ -329,6 +329,26 @@ async def submit_job(
     )
 
 
+class AsrLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_duration_seconds: int
+    max_upload_mb: int
+
+
+@router.get(
+    "/limits",
+    response_model=AsrLimits,
+    summary="What one upload may be — so a client can warn before, not fail after.",
+)
+async def limits(
+    claims: Annotated[Claims, Depends(requires("asr.read", "asr_job"))] = ...,  # type: ignore[assignment]
+) -> AsrLimits:
+    return AsrLimits(
+        max_duration_seconds=settings.max_duration_seconds, max_upload_mb=settings.max_upload_mb
+    )
+
+
 @router.get(
     "/jobs/{job_id}",
     response_model=TranscriptionJobView,

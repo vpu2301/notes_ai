@@ -110,6 +110,34 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         email_template="note_shared",
     ),
     CategorySpec(
+        category=Category.NOTE_RECIPIENT_RESPONDED,
+        # The author team, by hint — note-service names them. No actor:
+        # the recipient has no account.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.DIGEST,
+        severity=Severity.INFO,
+        digest_eligible=True,
+        email_template="note_recipient_responded",
+    ),
+    CategorySpec(
+        category=Category.SHARE_REPORTED,
+        recipient_rule=RecipientRule.TENANT_ADMINS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.WARNING,
+        digest_eligible=False,
+    ),
+    CategorySpec(
+        category=Category.NOTE_LINK_STATUS_CHANGED,
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        # Never mail: a chip on a screen, not a message worth an inbox.
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+    ),
+    CategorySpec(
         category=Category.DICTATION_COMPLETED,
         # The dictating user, named by dictation-service, which owns
         # the session row. Nobody else has any interest in the fact that

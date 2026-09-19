@@ -49,7 +49,7 @@ don't auto-update.
 `DELETE /templates/{id}` returns 409 with `detail: "templates referenced by draft notes cannot be deprecated; ..."`.
 
 The tenant has **draft** notes still bound to this template
-(finalized/amended/cancelled notes never block — they keep
+(cancelled notes never block — they keep
 their historical binding). Since sprint-17 the resolution is the
 admin-console re-bind flow:
 

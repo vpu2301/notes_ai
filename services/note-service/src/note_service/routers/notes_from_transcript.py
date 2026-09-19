@@ -6,7 +6,7 @@ forwarded; asr-service authorizes + tenant-scopes the read and audits
 it), pick a template (explicit ``template_id`` or deterministic
 auto-match), and create a draft note whose first free-text section
 holds the transcript. The note then follows the normal note
-lifecycle (edit → finalize).
+lifecycle (edit, share).
 
 ``GET /v1/notes/by-source-job`` — bulk lookup so the transcription
 jobs list can badge jobs that are already assigned.
@@ -230,6 +230,22 @@ def _transcript_text(result: dict[str, Any]) -> str:
     return " ".join(p for p in parts if p)
 
 
+# Section ids that are made for running prose, best first.
+_PROSE_HOMES = ("transcript", "discussion", "notes", "summary", "conversation", "body")
+
+
+def _transcript_home(ordered: list[Any]) -> Any:
+    free = [s for s in ordered if s.field_type == FieldType.FREE_TEXT]
+    for key in _PROSE_HOMES:
+        for s in free:
+            if s.id == key:
+                return s
+    for s in free:
+        if s.id != "attendees":
+            return s
+    return free[0] if free else ordered[0]
+
+
 def _content_for_template(
     *,
     definition: TemplateDefinition,
@@ -239,9 +255,13 @@ def _content_for_template(
     title: str,
     extracted_fields: dict[str, dict[str, Any]] | None = None,
 ) -> NoteContent:
-    """All template sections in order; the transcript lands in the first
+    """All template sections in order; the transcript lands in ONE
     free-text section (dictations are linear speech — distributing text
-    across sections is the author's edit, not a guess we make).
+    across sections is the author's edit, not a guess we make). Which
+    one: a section made for prose (discussion, notes, summary…) first,
+    then any free-text section that is not the attendee list — a 3 KB
+    transcript under "Attendees" reads as a wall of names on the shared
+    page and in the PDF.
 
     Sprint 13: typed sections additionally carry the extractor's
     PROPOSALS in ``field_specific_metadata`` (``source: "extracted"``).
@@ -249,7 +269,7 @@ def _content_for_template(
     never consumes or rewrites what was dictated.
     """
     ordered = sorted(definition.sections, key=lambda s: s.order)
-    target = next((s for s in ordered if s.field_type == FieldType.FREE_TEXT), ordered[0])
+    target = _transcript_home(ordered)
     proposals = extracted_fields or {}
     sections = [
         NoteSection(

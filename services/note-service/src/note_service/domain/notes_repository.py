@@ -53,6 +53,8 @@ class NoteRow:
     finalized_at: datetime | None
     cancelled_at: datetime | None
     source_session_id: UUID | None = None
+    # The transcription job this note was made from, when it was.
+    source_asr_job_id: UUID | None = None
     # 0016 — who may read it beyond the author team, and whether it is
     # in the bin. Defaults keep older call sites and fixtures valid.
     visibility: str = "workspace"
@@ -96,7 +98,7 @@ async def fetch_note(
                n.current_version_id, v.version_number AS current_version_number,
                n.primary_author_id, n.co_author_ids,
                n.title, n.created_at, n.updated_at, n.finalized_at,
-               n.cancelled_at, n.source_session_id,
+               n.cancelled_at, n.source_session_id, n.source_asr_job_id,
                n.visibility, n.shared_with_ids, n.deleted_at
         FROM notes n
         LEFT JOIN note_versions v ON v.id = n.current_version_id
@@ -123,6 +125,7 @@ async def fetch_note(
         finalized_at=row["finalized_at"],
         cancelled_at=row["cancelled_at"],
         source_session_id=row["source_session_id"],
+        source_asr_job_id=row["source_asr_job_id"],
         visibility=str(row["visibility"]),
         shared_with_ids=list(row["shared_with_ids"] or []),
         deleted_at=row["deleted_at"],
@@ -177,12 +180,33 @@ async def soft_delete_note(conn: asyncpg.Connection, *, note_id: UUID, actor_sub
     )
     await conn.execute(
         """
-        UPDATE note_share_links SET revoked_at = now(), revoked_by = $2
+        UPDATE note_share_links
+        SET revoked_at = now(), revoked_by = $2, recipient_email = NULL
         WHERE note_id = $1 AND revoked_at IS NULL
         """,
         note_id,
         actor_sub,
     )
+    # Sprint 20: recipient responses go unreachable with the note. The
+    # rows stay for audit; every read path filters on cleared_at.
+    await conn.execute(
+        """
+        UPDATE share_link_responses SET cleared_at = now(), cleared_by = $2
+        WHERE note_id = $1 AND cleared_at IS NULL
+        """,
+        note_id,
+        actor_sub,
+    )
+
+
+async def fetch_tenant_locale(conn: asyncpg.Connection, *, tenant_id: UUID) -> str:
+    value = await conn.fetchval("SELECT locale FROM tenants WHERE id = $1", tenant_id)
+    return str(value or "en")
+
+
+async def fetch_tenant_timezone(conn: asyncpg.Connection, *, tenant_id: UUID) -> str:
+    value = await conn.fetchval("SELECT timezone FROM tenants WHERE id = $1", tenant_id)
+    return str(value or "UTC")
 
 
 @dataclass(slots=True)
@@ -233,8 +257,7 @@ async def fetch_members(conn: asyncpg.Connection, *, subs: list[UUID]) -> list[M
     if not subs:
         return []
     rows = await conn.fetch(
-        "SELECT sub, display_name, email FROM profile_of_subs($1::uuid[])"
-        " ORDER BY display_name",
+        "SELECT sub, display_name, email FROM profile_of_subs($1::uuid[]) ORDER BY display_name",
         subs,
     )
     return [MemberRow(sub=r["sub"], email=r["email"], display_name=r["display_name"]) for r in rows]
@@ -249,6 +272,31 @@ class ShareLinkRow:
     expires_at: datetime | None
     last_viewed_at: datetime | None
     view_count: int
+    # 0035 — per-recipient links. Defaults keep older fixtures valid.
+    kind: str = "public"
+    label: str = ""
+    recipient_email: str | None = None
+    draft_acknowledged: bool = False
+    first_viewed_at: datetime | None = None
+    cta_clicked_at: datetime | None = None
+    ref_code: str | None = None
+    # 0039 — the product mailed the link.
+    delivery_status: str = "not_sent"
+    sent_at: datetime | None = None
+    send_count: int = 0
+    last_send_error: str = ""
+    revoked_at: datetime | None = None
+    # 0041 — verified recipient, and the version they last looked at.
+    verified_at: datetime | None = None
+    last_seen_version_id: UUID | None = None
+
+
+_LINK_COLUMNS = (
+    "id, note_id, created_by, created_at, expires_at, last_viewed_at, view_count, "
+    "kind, label, recipient_email, draft_acknowledged, first_viewed_at, cta_clicked_at, ref_code, "
+    "delivery_status::text AS delivery_status, sent_at, send_count, last_send_error, revoked_at, "
+    "verified_at, last_seen_version_id"
+)
 
 
 def _link_row(row: asyncpg.Record) -> ShareLinkRow:
@@ -260,18 +308,75 @@ def _link_row(row: asyncpg.Record) -> ShareLinkRow:
         expires_at=row["expires_at"],
         last_viewed_at=row["last_viewed_at"],
         view_count=int(row["view_count"]),
+        kind=str(row["kind"]),
+        label=row["label"],
+        recipient_email=row["recipient_email"],
+        draft_acknowledged=bool(row["draft_acknowledged"]),
+        first_viewed_at=row["first_viewed_at"],
+        cta_clicked_at=row["cta_clicked_at"],
+        ref_code=row["ref_code"],
+        delivery_status=str(row["delivery_status"]),
+        sent_at=row["sent_at"],
+        send_count=int(row["send_count"]),
+        last_send_error=row["last_send_error"] or "",
+        revoked_at=row["revoked_at"],
+        verified_at=row["verified_at"],
+        last_seen_version_id=row["last_seen_version_id"],
     )
 
 
 async def fetch_live_share_link(conn: asyncpg.Connection, *, note_id: UUID) -> ShareLinkRow | None:
+    """The note's live PUBLIC ("anyone with the link") link, if any."""
     row = await conn.fetchrow(
-        """
-        SELECT id, note_id, created_by, created_at, expires_at, last_viewed_at, view_count
+        f"""
+        SELECT {_LINK_COLUMNS}
         FROM note_share_links
-        WHERE note_id = $1 AND revoked_at IS NULL
+        WHERE note_id = $1 AND revoked_at IS NULL AND kind = 'public'
           AND (expires_at IS NULL OR expires_at > now())
         """,
         note_id,
+    )
+    return _link_row(row) if row is not None else None
+
+
+async def fetch_share_link(conn: asyncpg.Connection, *, link_id: UUID) -> ShareLinkRow | None:
+    row = await conn.fetchrow(
+        f"SELECT {_LINK_COLUMNS} FROM note_share_links WHERE id = $1", link_id
+    )
+    return _link_row(row) if row is not None else None
+
+
+async def list_live_share_links(conn: asyncpg.Connection, *, note_id: UUID) -> list[ShareLinkRow]:
+    """Every live link on the note, newest first — public and recipient."""
+    rows = await conn.fetch(
+        f"""
+        SELECT {_LINK_COLUMNS}
+        FROM note_share_links
+        WHERE note_id = $1 AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC
+        """,
+        note_id,
+    )
+    return [_link_row(r) for r in rows]
+
+
+async def find_live_recipient_link(
+    conn: asyncpg.Connection, *, note_id: UUID, recipient_email: str
+) -> ShareLinkRow | None:
+    """The live recipient link already minted for this address, if any."""
+    row = await conn.fetchrow(
+        f"""
+        SELECT {_LINK_COLUMNS}
+        FROM note_share_links
+        WHERE note_id = $1 AND revoked_at IS NULL AND kind = 'recipient'
+          AND lower(recipient_email) = lower($2)
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        note_id,
+        recipient_email,
     )
     return _link_row(row) if row is not None else None
 
@@ -285,13 +390,19 @@ async def create_share_link(
     token_hash: str,
     created_by: UUID,
     expires_at: datetime | None,
+    kind: str = "public",
+    label: str = "",
+    recipient_email: str | None = None,
+    draft_acknowledged: bool = False,
+    ref_code: str | None = None,
 ) -> ShareLinkRow:
     row = await conn.fetchrow(
-        """
+        f"""
         INSERT INTO note_share_links
-            (id, tenant_id, note_id, token_hash, created_by, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, note_id, created_by, created_at, expires_at, last_viewed_at, view_count
+            (id, tenant_id, note_id, token_hash, created_by, expires_at,
+             kind, label, recipient_email, draft_acknowledged, ref_code)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::share_link_kind, $8, $9, $10, $11)
+        RETURNING {_LINK_COLUMNS}
         """,
         link_id,
         tenant_id,
@@ -299,15 +410,24 @@ async def create_share_link(
         token_hash,
         created_by,
         expires_at,
+        kind,
+        label,
+        recipient_email,
+        draft_acknowledged,
+        ref_code,
     )
     assert row is not None
     return _link_row(row)
 
 
 async def revoke_share_links(conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID) -> int:
+    """Revoke every live link on the note. The recipient address is
+    dropped with the link: once nobody can open it, there is nothing
+    left to label."""
     result = await conn.execute(
         """
-        UPDATE note_share_links SET revoked_at = now(), revoked_by = $2
+        UPDATE note_share_links
+        SET revoked_at = now(), revoked_by = $2, recipient_email = NULL
         WHERE note_id = $1 AND revoked_at IS NULL
         """,
         note_id,
@@ -315,6 +435,24 @@ async def revoke_share_links(conn: asyncpg.Connection, *, note_id: UUID, actor_s
     )
     # asyncpg returns "UPDATE n".
     return int(result.split()[-1]) if result else 0
+
+
+async def revoke_share_link(
+    conn: asyncpg.Connection, *, note_id: UUID, link_id: UUID, actor_sub: UUID
+) -> bool:
+    """Revoke one link. Queried with both ids so a link id from another
+    note (or another tenant, which RLS already hides) is a no-op."""
+    result = await conn.execute(
+        """
+        UPDATE note_share_links
+        SET revoked_at = now(), revoked_by = $3, recipient_email = NULL
+        WHERE note_id = $1 AND id = $2 AND revoked_at IS NULL
+        """,
+        note_id,
+        link_id,
+        actor_sub,
+    )
+    return bool(result) and result.split()[-1] == "1"
 
 
 async def resolve_share_link(
@@ -328,15 +466,235 @@ async def resolve_share_link(
     return row["tenant_id"], row["note_id"], row["link_id"]
 
 
-async def record_share_link_view(conn: asyncpg.Connection, *, link_id: UUID) -> None:
-    await conn.execute(
+async def record_share_link_view(conn: asyncpg.Connection, *, link_id: UUID) -> bool:
+    """Count a read. Returns True on the FIRST open of the link — the
+    "reached the recipient" signal the loop funnel starts from."""
+    row = await conn.fetchrow(
         """
         UPDATE note_share_links
-        SET view_count = view_count + 1, last_viewed_at = now()
+        SET view_count = view_count + 1,
+            last_viewed_at = now(),
+            first_viewed_at = COALESCE(first_viewed_at, now())
         WHERE id = $1
+        RETURNING view_count
         """,
         link_id,
     )
+    return row is not None and int(row["view_count"]) == 1
+
+
+async def record_cta_click(conn: asyncpg.Connection, *, link_id: UUID) -> bool:
+    """Stamp the first CTA click; later clicks change nothing. Returns
+    True when this call set it."""
+    result = await conn.execute(
+        "UPDATE note_share_links SET cta_clicked_at = now() WHERE id = $1 AND cta_clicked_at IS NULL",
+        link_id,
+    )
+    return bool(result) and result.split()[-1] == "1"
+
+
+async def record_send_outcome(
+    conn: asyncpg.Connection, *, link_id: UUID, status: str, error_class: str = ""
+) -> ShareLinkRow | None:
+    """Sprint 22: the product tried to mail the link. `status` is
+    ``sent`` | ``failed``; the error class (never the message) is kept
+    for the sender's "Retry" chip."""
+    row = await conn.fetchrow(
+        f"""
+        UPDATE note_share_links
+        SET delivery_status = $2::share_delivery_status,
+            sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE sent_at END,
+            send_count = send_count + 1,
+            last_send_error = $3
+        WHERE id = $1
+        RETURNING {_LINK_COLUMNS}
+        """,
+        link_id,
+        status,
+        error_class,
+    )
+    return _link_row(row) if row else None
+
+
+async def is_share_mail_suppressed(conn: asyncpg.Connection, *, email_hash: bytes) -> bool:
+    return bool(await conn.fetchval("SELECT public.is_share_mail_suppressed($1)", email_hash))
+
+
+async def add_share_mail_suppression(
+    conn: asyncpg.Connection, *, email_hash: bytes, reason: str
+) -> None:
+    await conn.execute("SELECT public.add_share_mail_suppression($1, $2)", email_hash, reason)
+
+
+async def suppress_links_for_email(conn: asyncpg.Connection, *, tenant_id: UUID, email: str) -> int:
+    """Every live link in the tenant addressed to this recipient stops
+    being mailable. The links themselves keep working until they expire."""
+    result = await conn.execute(
+        """
+        UPDATE note_share_links
+        SET delivery_status = 'suppressed'
+        WHERE tenant_id = $1 AND revoked_at IS NULL AND lower(recipient_email) = lower($2)
+        """,
+        tenant_id,
+        email,
+    )
+    return int(result.split()[-1]) if result else 0
+
+
+async def tenant_of_share_link(conn: asyncpg.Connection, *, link_id: UUID) -> UUID | None:
+    """SECURITY DEFINER lookup for the unsubscribe route, which arrives
+    with a link id and no tenant context (0039)."""
+    value = await conn.fetchval("SELECT public.tenant_of_share_link($1)", link_id)
+    return UUID(str(value)) if value else None
+
+
+async def sharing_stats(conn: asyncpg.Connection, *, days: int) -> dict[str, object]:
+    """PII-free aggregates over the tenant's recipient links (Sprint 22).
+    Counts only; the sender leaderboard carries subs for the router to
+    resolve to display names."""
+    row = await conn.fetchrow(
+        """
+        WITH links AS (
+            SELECT * FROM note_share_links
+            WHERE kind = 'recipient' AND created_at >= now() - ($1 || ' days')::interval
+        ),
+        resp AS (
+            SELECT r.link_id, r.kind::text AS kind FROM share_link_responses r
+            JOIN links l ON l.id = r.link_id WHERE r.cleared_at IS NULL
+        )
+        SELECT
+            (SELECT count(*) FROM links)                                            AS links_created,
+            (SELECT count(*) FROM links WHERE delivery_status = 'sent')             AS links_sent,
+            (SELECT count(*) FROM links WHERE first_viewed_at IS NOT NULL)          AS links_opened,
+            (SELECT count(DISTINCT link_id) FROM resp)                              AS links_responded,
+            (SELECT count(*) FROM links WHERE cta_clicked_at IS NOT NULL)           AS cta_clicks,
+            (SELECT count(*) FROM resp WHERE kind = 'dispute')                      AS disputes,
+            (SELECT count(*) FROM resp WHERE kind IN ('confirm', 'done', 'dispute')) AS item_responses,
+            (SELECT count(*) FROM links WHERE delivery_status = 'suppressed')       AS opted_out
+        """,
+        str(int(days)),
+    )
+    senders = await conn.fetch(
+        """
+        SELECT created_by, count(*) AS n FROM note_share_links
+        WHERE kind = 'recipient' AND created_at >= now() - ($1 || ' days')::interval
+        GROUP BY created_by ORDER BY n DESC LIMIT 5
+        """,
+        str(int(days)),
+    )
+    assert row is not None
+    return {
+        # asyncpg iterates a Record's VALUES; `.keys()` is the only way to the names.
+        **{k: int(row[k] or 0) for k in row.keys()},  # noqa: SIM118
+        "top_senders": [(r["created_by"], int(r["n"])) for r in senders],
+    }
+
+
+async def mark_link_seen(conn: asyncpg.Connection, *, link_id: UUID, version_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE note_share_links SET last_seen_version_id = $2 WHERE id = $1", link_id, version_id
+    )
+
+
+async def mark_link_verified(conn: asyncpg.Connection, *, link_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE note_share_links SET verified_at = COALESCE(verified_at, now()) WHERE id = $1",
+        link_id,
+    )
+
+
+async def put_link_otp(
+    conn: asyncpg.Connection, *, tenant_id: UUID, link_id: UUID, code_hash: bytes, ttl_seconds: int
+) -> None:
+    """One live code per link; a new request replaces the old code."""
+    await conn.execute(
+        """
+        INSERT INTO share_link_otps (link_id, tenant_id, code_hash, expires_at)
+        VALUES ($1, $2, $3, now() + ($4 || ' seconds')::interval)
+        ON CONFLICT (link_id) DO UPDATE
+            SET code_hash = EXCLUDED.code_hash, issued_at = now(),
+                expires_at = EXCLUDED.expires_at, attempts = 0
+        """,
+        link_id,
+        tenant_id,
+        code_hash,
+        str(int(ttl_seconds)),
+    )
+
+
+async def fetch_link_otp(
+    conn: asyncpg.Connection, *, link_id: UUID
+) -> tuple[bytes, bool, int] | None:
+    """(code_hash, live, attempts) or None."""
+    row = await conn.fetchrow(
+        "SELECT code_hash, expires_at > now() AS live, attempts FROM share_link_otps WHERE link_id = $1",
+        link_id,
+    )
+    return (bytes(row["code_hash"]), bool(row["live"]), int(row["attempts"])) if row else None
+
+
+async def bump_link_otp_attempts(conn: asyncpg.Connection, *, link_id: UUID) -> int:
+    value = await conn.fetchval(
+        "UPDATE share_link_otps SET attempts = attempts + 1 WHERE link_id = $1 RETURNING attempts",
+        link_id,
+    )
+    return int(value or 0)
+
+
+async def delete_link_otp(conn: asyncpg.Connection, *, link_id: UUID) -> None:
+    await conn.execute("DELETE FROM share_link_otps WHERE link_id = $1", link_id)
+
+
+async def add_abuse_report(
+    conn: asyncpg.Connection, *, tenant_id: UUID, link_id: UUID, note_id: UUID, reason: str
+) -> None:
+    await conn.execute(
+        "INSERT INTO share_abuse_reports (tenant_id, link_id, note_id, reason) VALUES ($1, $2, $3, $4)",
+        tenant_id,
+        link_id,
+        note_id,
+        reason,
+    )
+
+
+async def spam_reports_for_sender(conn: asyncpg.Connection, *, created_by: UUID) -> int:
+    """Spam reports against links one person minted — the abuse guard's input."""
+    value = await conn.fetchval(
+        """
+        SELECT count(*) FROM share_abuse_reports r
+        JOIN note_share_links l ON l.id = r.link_id
+        WHERE r.reason = 'spam' AND l.created_by = $1
+        """,
+        created_by,
+    )
+    return int(value or 0)
+
+
+async def revoke_all_external_links(conn: asyncpg.Connection, *, actor_sub: UUID) -> list[UUID]:
+    """Every live link in the tenant, revoked; returns the note ids touched."""
+    rows = await conn.fetch(
+        """
+        UPDATE note_share_links
+        SET revoked_at = now(), revoked_by = $1, recipient_email = NULL
+        WHERE revoked_at IS NULL
+        RETURNING note_id
+        """,
+        actor_sub,
+    )
+    return sorted({r["note_id"] for r in rows}, key=str)
+
+
+async def fetch_tenant_logo(
+    conn: asyncpg.Connection, *, tenant_id: UUID
+) -> tuple[bytes, str] | None:
+    """(bytes, content type) of the workspace logo, or None when there is
+    none. Read under `tenants_self_select` on the tenant-scoped connection."""
+    row = await conn.fetchrow(
+        "SELECT logo_bytes, logo_content_type FROM tenants WHERE id = $1", tenant_id
+    )
+    if row is None or not row["logo_bytes"] or not row["logo_content_type"]:
+        return None
+    return bytes(row["logo_bytes"]), str(row["logo_content_type"])
 
 
 async def set_source_session_id_if_absent(

@@ -417,3 +417,14 @@ def test_locked_mail_has_no_links_and_names_the_unlock_time(lang: str) -> None:
     rendered = _render(copy_mod.KIND_AUTH_LOCKED, lang)
     assert "href=" not in rendered.html_body
     assert "2026" in rendered.text_body
+
+
+@pytest.mark.parametrize("kind", templates.KINDS)
+@pytest.mark.parametrize("lang", templates.SUPPORTED_LANGS)
+def test_every_mail_carries_the_legal_sender_line(kind: str, lang: str) -> None:
+    """Both parts end with the company name and postal address."""
+    fields, secrets = _fields(kind, lang)
+    html = templates.render_html(kind, lang, {**fields, **secrets})
+    assert "3Days Labs Inc &middot; 2166 Market Street, San Francisco, CA 94114" in html
+    text = copy_mod.text_body(kind, lang, compose.text_values(kind, lang, fields, secrets))
+    assert text.endswith(copy_mod.LEGAL_LINE)

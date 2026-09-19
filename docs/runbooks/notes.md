@@ -257,15 +257,19 @@ read the same list; the web app does not use spaces yet.
 
 ## Sharing a note by e-mail
 
-`POST /v1/notes/{id}/share/email` takes `{recipients, message, lang}` and
-sends a branded HTML mail per recipient, inline. Recipients split two
-ways: a workspace member is granted read access and mailed a link to the
-note in the app (plus the usual content-free `note.shared_with_you`
-notification); anybody else is mailed the note's public link, minted by
-this call if the note has none. The reply reports `sent` / `rejected` /
-`failed` per address, so one dead mailbox never loses the rest of the
-batch, and the audit event `note.link_emailed` records counts only —
-never the addresses.
+`POST /v1/notes/{id}/share/email` takes `{recipients, message, lang,
+expires_in_days}` and sends a branded HTML mail per recipient, inline.
+Recipients split two ways: a workspace member is granted read access and
+mailed a link to the note in the app (plus the usual content-free
+`note.shared_with_you` notification); anybody else gets their own
+recipient link (one per address, reused on a resend, expiring after
+`expires_in_days` clipped to the workspace ceiling) and is mailed that,
+so the sender sees who opened it and can turn one off without the
+others. The public link is never mailed. The reply reports `sent` /
+`rejected` / `failed` per address (the outcome is also recorded on the
+link, for the sheet's Sent / Retry chips), so one dead mailbox never
+loses the rest of the batch, and the audit event `note.link_emailed`
+records counts only — never the addresses.
 
 **"Nothing arrives."** In order:
 
@@ -299,3 +303,116 @@ username.
 not calls — `MDX_SHARE_EMAILS_PER_USER_PER_HOUR`. The counter is a Redis
 key per sender per hour (`note:share-mail-rl:<sub>:<bucket>`) and fails
 OPEN if Redis is down, so a 429 means the cap was genuinely reached.
+
+## Recipient links (Sprint 19)
+
+Migration 0035 lets a note carry many live links: the one `public` link
+from 0016 plus any number of `recipient` links, each labelled, expiring
+(90 days by default, `MDX_RECIPIENT_LINK_DEFAULT_DAYS`) and revocable on
+its own. Routes: `POST/GET /v1/notes/{id}/links`, `DELETE
+/v1/notes/{id}/links[/{link_id}]`. The anonymous page
+(`GET /v1/shared/{token}`) now also serves the sender's logo
+(`/logo`) and counts the product CTA (`/cta` → 302 to
+`MDX_APP_BASE_URL/join?ref=<ref_code>`), and every `/v1/shared/*` route
+is rate-limited per IP (60/min), per link (300/h) and per IP on the CTA
+(20/h). Keys: `note:shared-rl:{ip|link|cta}:<subject>:<window>`.
+
+**"Can a draft be shared?"** Yes — since 0042 a note is a living
+document with no finalize step, and any live note can be shared. The
+recipient sees the current text plus a "what changed" strip when it
+moved since their last visit.
+
+**"Every reader gets 429."** The per-IP bucket collapsed to one address:
+the service sits behind a proxy that is not in `TRUSTED_PROXY_CIDRS`, so
+every request looks like it came from the proxy. Set the CIDR (same
+variable auth-service uses); the alert `SharedPageRateLimitHigh` is the
+usual way this is noticed. With Redis down the caps fail OPEN and the
+log carries `ratelimit.backend_error` + `note.shared_rate_limit_degraded`.
+
+**"The CTA lands on the wrong host."** `MDX_APP_BASE_URL` is the only
+thing the redirect is built from — the same setting share mails use.
+
+**Erasing a recipient's data (data-subject request).** Two places hold a
+recipient's address and nothing else does:
+
+1. `note_share_links.recipient_email` in the sender's tenant — revoking
+   the link (`DELETE /v1/notes/{id}/links/{link_id}`, or the sheet's
+   "Turn off") sets it to NULL; the label the sender typed stays.
+2. `referrals.lead_email` (auth-service, global) — the `/join` fake door.
+   `uv run python scripts/ops/erase_lead.py <email>` deletes every lead
+   row for the address (needs `DB_TENANT_WRITER_DSN`).
+
+Audit payloads never carry the address, the token or the ref code
+(`note.link_created`, `note.viewed_via_link`, `note.cta_clicked`,
+`lead.captured` — see `docs/audit/event-kinds.md`).
+
+**Rolling back 0035** refuses to run while any note has more than one
+live link; revoke recipient links first (`DELETE /v1/notes/{id}/links`).
+
+## Recipient responses (Sprint 20)
+
+Migration 0037 adds `note_action_items` (derived from the section text
+the first time a version is read — see `docs/architecture/notes.md`) and
+`share_link_responses` (what a recipient did on the shared page).
+Anonymous writes: `PUT/DELETE /v1/shared/{token}/items/{key}/response`
+and `…/sections/{key}/flag`, capped at 60 per link per hour
+(`MDX_SHARED_RL_WRITE_PER_HOUR`, key `note:shared-rl:write:<link>:<window>`)
+on top of the Sprint 19 per-IP cap. The author team is notified
+(`note.recipient_responded`) once per link per
+`MDX_RESPONSE_NOTIFY_DEBOUNCE_S` (600 s; Redis key `note:resp-notify:<link>`).
+
+**Warming items after deploying 0037.** Items are derived on first
+read, so nothing is required; `uv run python scripts/ops/backfill_action_items.py`
+(idempotent; `--tenant <uuid>` for one workspace) only pre-computes them.
+
+**"An abusive or wrong comment shows on the note."** The author clears
+it from the Responses tab (`POST /v1/notes/{id}/responses/{rid}/clear`);
+the row stays with `cleared_by`/`cleared_at` for audit and disappears
+from every read. Turning the link off (`DELETE /v1/notes/{id}/links/{link_id}`)
+stops further writes from that recipient. Comments never reach an
+e-mail — the digest carries the link label and the kind only.
+
+**"A recipient says their confirmation vanished."** The line was edited
+in an edit, so its `item_key` changed and the response stayed on
+the old wording (by design). The Responses tab with `?include_cleared`
+still lists it; the recipient re-confirms the new text.
+
+**Dispute rate alert (`SharedPageDisputeRateHigh`).** More than 20% of
+acted-on items disputed over 7 days is the concept doc's kill signal:
+stop scaling distribution and look at extraction quality (the
+"check owner" items and the `parsed_owner`/`parsed_due` panel) before
+anything else.
+
+## Recipient mail from the product (Sprint 22, ADR-0049)
+
+`POST /v1/notes/{id}/links/{link_id}/send` (and `POST …/links` with
+`send: true`) mails a recipient link inline through the same SMTP
+adapter as `/share/email` (`MDX_NOTE_SMTP_*`, `MDX_EMAIL_PROVIDER`). The
+outcome is on the link row: `delivery_status`, `sent_at`, `send_count`,
+`last_send_error` (an error class). Caps: 3 per link, 50 per sender,
+200 per workspace per day (`MDX_SHARE_MAIL_*_PER_DAY`, Redis keys
+`note:share-mail:{link|user|tenant}:…`).
+
+**"Nothing arrives."** Same checklist as the share mail section above
+(`MDX_NOTE_SMTP_*`, not the auth block). The mail's unsubscribe link is
+built from `MDX_API_PUBLIC_BASE_URL` — if that is `localhost` in a
+deployed environment, recipients cannot opt out.
+
+**"Send answers 409 `recipient_opted_out`."** The address is on the
+global suppression list (`share_mail_suppressions`, hashed). The sender
+can still copy the link. To honour a recipient who changed their mind,
+delete the row as `tenant_writer`: compute the hash with
+`note_service.domain.recipient_mail.email_hash(address)` (needs the
+deployment's `MDX_SHARE_MAIL_SUPPRESSION_PEPPER_HEX`) and
+`DELETE FROM share_mail_suppressions WHERE email_hash = $1`. The same
+lookup answers a data-subject request: the row is the only trace.
+
+**"Every send from one workspace is 429."** The daily workspace cap —
+usually a script, occasionally a big team. Raise
+`MDX_SHARE_MAIL_TENANT_PER_DAY` deliberately; the counter
+`mdx_recipient_mail_sent_total` shows the volume.
+
+**Funnel.** `scripts/jobs/weekly_funnel.py` writes the weekly CSV as
+`funnel_reader`; Grafana's "Funnel" datasource uses the same role
+(migration 0040). If the panel is empty, the role has no policy on a
+table the query touches — `check-rls` lists policies per table.

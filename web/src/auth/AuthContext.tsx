@@ -94,6 +94,11 @@ function identityFromMe(me: MeResponse): Identity | null {
   };
 }
 
+/** Routes served to people with no account: never touch the session. */
+export function isAnonymousRoute(pathname: string): boolean {
+  return pathname.startsWith("/s/") || pathname === "/join" || pathname.startsWith("/join/");
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("restoring");
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -182,6 +187,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Restore the session on first load via the HttpOnly refresh cookie.
   useEffect(() => {
     let cancelled = false;
+    if (isAnonymousRoute(window.location.pathname)) {
+      // A recipient opening a shared link, or the lead page behind its
+      // CTA, has no account and must not be the reason `/auth/refresh`
+      // fires: the refresh cookie rotates, and a stray call from a page
+      // that never needed a session is exactly the kind of re-use that
+      // revokes every session the person does have elsewhere.
+      setStatus("anonymous");
+      return;
+    }
     void (async () => {
       const ok = await refreshSession();
       if (cancelled) return;

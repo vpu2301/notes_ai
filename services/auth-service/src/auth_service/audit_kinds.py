@@ -125,3 +125,8 @@ TENANT_MEMBER_ADDED: Final[str] = "tenant.member_added"
 TENANT_MEMBER_ROLE_CHANGED: Final[str] = "tenant.member_role_changed"
 TENANT_MEMBER_REMOVED: Final[str] = "tenant.member_removed"
 TENANT_SWITCHED: Final[str] = "tenant.switched"
+
+# ── Sprint 19: referral leads from the shared page's CTA ─────────────
+# Written to the platform tenant — the lead belongs to nobody's workspace
+# yet. Payload: ref_present only; never the address.
+LEAD_CAPTURED: Final[str] = "lead.captured"

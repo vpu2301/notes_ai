@@ -1,39 +1,125 @@
-"""Anonymous reads of a publicly shared note (0016).
+"""Anonymous reads of a shared note (0016, extended for Sprint 19).
 
     GET /v1/shared/{token}        the note, rendered for reading
     GET /v1/shared/{token}/pdf    the same as a PDF
+    GET /v1/shared/{token}/logo   the sender workspace's logo
+    GET /v1/shared/{token}/cta    counts the click, 302 → the web app's /join
+    GET /v1/shared/unsubscribe/{token}   one-click opt-out from recipient mail (Sprint 22)
+    PUT    /v1/shared/{token}/items/{item_key}/response      confirm | done | dispute
+    DELETE /v1/shared/{token}/items/{item_key}/response      withdraw
+    PUT    /v1/shared/{token}/sections/{section_key}/flag    "this is inaccurate"
+    DELETE /v1/shared/{token}/sections/{section_key}/flag    withdraw
+
+Sprint 20 lets the recipient ACT: the link is their identity, one live
+response per (link, kind, target), and a short comment that is stored
+and rendered as text only. A public link is not a person, so it reads
+the items but cannot respond. Writes are capped per link on top of the
+per-IP cap, and the author is told once per link per ten minutes.
 
 No bearer, no tenant claim: the token is the whole credential. It is
 resolved through the SECURITY DEFINER function from migration 0016 and
 only then does the request get an ordinary RLS-scoped connection for
 the tenant it turned out to belong to. Every read is audited against
 that tenant with no actor — the reader is, by definition, unknown.
+
+Sprint 19 makes this page the product's front door for people with no
+account: it carries the sender's identity (issuer name, logo, who
+shared), a DRAFT badge when the note is one, and the product header with
+the "create your own workspace" CTA. Every route is rate-limited per IP,
+and the note itself additionally per link. What the page never carries:
+transcript, audio, version history, the recipient's own address.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import re
+import secrets
+from dataclasses import dataclass
+from datetime import date
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from audit import Severity
 from db import tenant_connection
 from note_models import NoteStatus
+from notification_events import Category
 
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state
+from ..domain import action_items, recipient_mail, sharing_policy
+from ..domain import action_items_repository as items_repo
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
+from ..domain.diff_engine import compute_diff, section_diff_summary
 from ..domain.pdf import render_note_pdf
 from ..domain.share_tokens import hash_token, looks_like_token
+from ..notifications import emit_note_event
+from ..share_metrics import (
+    cta_clicks,
+    share_abuse_reports,
+    share_otp_requests,
+    shared_flags,
+    shared_responses,
+    shared_views,
+)
 from .notes import _resolve_section_labels, _resolve_section_names
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/shared", tags=["shared"])
+
+async def _limit_ip(request: Request) -> None:
+    await get_state().public_rate_limiter.check_ip(request)
+
+
+router = APIRouter(prefix="/v1/shared", tags=["shared"], dependencies=[Depends(_limit_ip)])
+
+SectionRole = Literal["decisions", "action_items", "attendees", "transcript", "other"]
+
+# Template section ids → the page's fixed hierarchy. Ids come from the
+# seed templates (infra/seeds/templates); anything else is "other" and
+# collapses below the fold.
+_SECTION_ROLES: dict[str, SectionRole] = {
+    "decisions": "decisions",
+    "action_items": "action_items",
+    "next_steps": "action_items",
+    "attendees": "attendees",
+}
+
+# "Anna: we ship Friday" — the shape of a transcript turn (the same rule
+# the renderers use to typeset one).
+_TURN_RE = re.compile(r"^(?!https?:)[^\s*_`:][^*_`:]{0,39}?:\s+\S")
+
+
+def _is_transcript(text: str) -> bool:
+    """A section whose paragraphs are mostly speaker turns is the
+    transcript, whatever template slot it landed in: the page shows it
+    behind its own tab instead of as a wall under "Attendees"."""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(paragraphs) < 2:
+        return False
+    turns = sum(1 for p in paragraphs if _TURN_RE.match(p))
+    return turns * 10 >= len(paragraphs) * 6
+
+
+def _role_for(section_key: str, text: str) -> SectionRole:
+    if _is_transcript(text):
+        return "transcript"
+    return _SECTION_ROLES.get(section_key, "other")
+
+
+HEADER_TEXT = {
+    "en": "Meeting summary generated by {brand}. Create your own workspace free.",
+    "de": "Besprechungsnotizen, erstellt mit {brand}. Eigenen Workspace kostenlos anlegen.",
+    "uk": "Підсумок зустрічі створено в {brand}. Створіть власний робочий простір безкоштовно.",
+}
 
 
 class SharedSection(BaseModel):
@@ -42,6 +128,58 @@ class SharedSection(BaseModel):
     section_key: str
     name: str
     text: str
+    role: SectionRole
+
+
+class SharedSender(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The workspace's display / legal name — never a person's e-mail.
+    issuer_name: str
+    has_logo: bool
+    logo_path: str | None
+    # The sharer's display name. A name they chose to show, not an address.
+    shared_by_display: str
+
+
+class SharedProduct(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brand_name: str
+    header_text: str
+    cta_path: str
+    # Sprint 23 (G-1): a paid workspace may turn the product line off.
+    cta_enabled: bool = True
+
+
+class SharedChanges(BaseModel):
+    """What changed since this link last loaded the note (Sprint 23).
+    Keys only — the page highlights, it does not narrate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    since_version: int
+    sections_changed: list[str]
+    items_added: list[str]
+    items_removed: list[str]
+    items_changed: list[str]
+
+
+ResponseKind = Literal["confirm", "done", "dispute"]
+
+
+class SharedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_key: str
+    text: str
+    owner_label: str | None
+    due_date: date | None
+    due_text: str | None
+    status: Literal["open", "done", "dropped"]
+    # This link's live response on the item, if any.
+    my_response: ResponseKind | None
+    my_comment: str | None
 
 
 class SharedNoteView(BaseModel):
@@ -52,9 +190,74 @@ class SharedNoteView(BaseModel):
     status: str
     updated_at: str
     sections: list[SharedSection]
-    # Whose workspace this came from — the tenant's display name, not a
-    # person's.
+    # Kept for clients that read it before `sender` existed.
     issuer_name: str
+    sender: SharedSender
+    product: SharedProduct
+    expires_at: str | None
+    # Sprint 20: the action items as objects, and what this link already did.
+    items: list[SharedItem]
+    my_flags: list[str]
+    # False for a public link: anyone may read it, so nobody can sign it.
+    can_respond: bool
+    # Sprint 23: the workspace asks recipients to prove the mailbox first.
+    requires_verification: bool = False
+    # The page's language: the note's template, then the workspace.
+    lang: str = "en"
+    changes: SharedChanges | None = None
+
+
+_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean_comment(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = _CONTROL_RE.sub("", value).strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 280:
+        raise ValueError("comment is longer than 280 characters")
+    if _URL_RE.search(cleaned):
+        raise ValueError("no_links_in_comment")
+    return cleaned
+
+
+class ItemResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ResponseKind
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("comment")
+    @classmethod
+    def _comment(cls, value: str | None) -> str | None:
+        return _clean_comment(value)
+
+
+class FlagRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("comment")
+    @classmethod
+    def _comment(cls, value: str | None) -> str | None:
+        return _clean_comment(value)
+
+
+class ResponseAck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: Literal[True] = True
+
+
+@dataclass(frozen=True, slots=True)
+class _Resolved:
+    tenant_id: UUID
+    note_id: UUID
+    link: repo.ShareLinkRow
 
 
 def _not_found() -> HTTPException:
@@ -70,11 +273,40 @@ async def _resolve(token: str) -> tuple[UUID, UUID, UUID]:
         found = await repo.resolve_share_link(conn, token_hash=hash_token(token))
     if found is None:
         raise _not_found()
+    await state.public_rate_limiter.check_link(found[2])
     return found
 
 
-async def _audit_view(tenant_id: UUID, note_id: UUID, link_id: UUID, *, fmt: str) -> None:
+async def _load(conn: object, tenant_id: UUID, note_id: UUID, link_id: UUID) -> _Resolved:
+    """The link row, on the tenant-scoped connection. The resolver already
+    proved it live; the row itself carries what the page shows."""
+    link = await repo.fetch_share_link(conn, link_id=link_id)  # type: ignore[arg-type]
+    if link is None:
+        raise _not_found()
+    return _Resolved(tenant_id=tenant_id, note_id=note_id, link=link)
+
+
+async def _load_note(conn: object, note_id: UUID) -> tuple[repo.NoteRow, repo.VersionRow]:
+    note = await repo.fetch_note(conn, note_id=note_id)  # type: ignore[arg-type]
+    if note is None or note.status == NoteStatus.CANCELLED:
+        raise _not_found()
+    version = await repo.fetch_version(conn, version_id=note.current_version_id)  # type: ignore[arg-type]
+    if version is None:
+        raise _not_found()
+    return note, version
+
+
+async def _audit_view(
+    tenant_id: UUID,
+    note_id: UUID,
+    link: repo.ShareLinkRow,
+    *,
+    fmt: str,
+    first_view: bool,
+    has_changes: bool = False,
+) -> None:
     state = get_state()
+    shared_views.add(1, {"kind": link.kind, "first_view": first_view})
     await state.audit_writer.write_event(
         tenant_id=tenant_id,
         kind=audit_kinds.NOTE_VIEWED_VIA_LINK,
@@ -82,25 +314,113 @@ async def _audit_view(tenant_id: UUID, note_id: UUID, link_id: UUID, *, fmt: str
         actor_role=None,
         target_kind="note",
         target_id=note_id,
-        payload={"link_id": str(link_id), "format": fmt},
+        payload={
+            "link_id": str(link.id),
+            "format": fmt,
+            "kind": link.kind,
+            "first_view": first_view,
+            "has_changes": has_changes,
+        },
         severity=Severity.INFO,
     )
 
 
+def _issuer(branding: object) -> str:
+    name = getattr(branding, "issuer_name", "—")
+    return name if name != "—" else settings.pdf_issuer_name
+
+
+def _requires_verification(link: repo.ShareLinkRow, policy: sharing_policy.SharingPolicy) -> bool:
+    return (
+        link.kind == "recipient"
+        and policy.verified_recipients_required
+        and link.verified_at is None
+    )
+
+
+async def _changes_since(
+    conn: object, link: repo.ShareLinkRow, note: repo.NoteRow, version: repo.VersionRow
+) -> SharedChanges | None:
+    """The section and item keys that differ from the version this link
+    last loaded. None on a first load or when nothing changed."""
+    if link.last_seen_version_id is None or link.last_seen_version_id == version.id:
+        return None
+    previous = await repo.fetch_version(conn, version_id=link.last_seen_version_id)  # type: ignore[arg-type]
+    if previous is None:
+        return None
+    diff = compute_diff(
+        note_id=str(note.id),
+        from_version_id=str(previous.id),
+        from_version_number=previous.version_number,
+        from_content=previous.content,
+        to_version_id=str(version.id),
+        to_version_number=version.version_number,
+        to_content=version.content,
+    )
+    summary = section_diff_summary(diff)
+    before = {i.item_key: i for i in await items_repo.fetch_items(conn, version_id=previous.id)}  # type: ignore[arg-type]
+    after = {i.item_key: i for i in await items_repo.fetch_items(conn, version_id=version.id)}  # type: ignore[arg-type]
+    changed = [
+        k
+        for k in after
+        if k in before
+        and (before[k].owner_label, before[k].due_date, before[k].due_text)
+        != (after[k].owner_label, after[k].due_date, after[k].due_text)
+    ]
+    sections = sorted({*summary["added"], *summary["removed"], *summary["modified"]})
+    added, removed = sorted(set(after) - set(before)), sorted(set(before) - set(after))
+    if not (sections or added or removed or changed):
+        return None
+    return SharedChanges(
+        since_version=previous.version_number,
+        sections_changed=sections,
+        items_added=added,
+        items_removed=removed,
+        items_changed=changed,
+    )
+
+
+async def _page_lang(conn: object, version: repo.VersionRow, tenant_id: UUID) -> str:
+    from ..domain.repository import get_template
+
+    try:
+        row = await get_template(conn, template_id=version.content.template_id)  # type: ignore[arg-type]
+        if row is not None and row["language"] in ("en", "de", "uk"):
+            return str(row["language"])
+    except Exception:  # noqa: BLE001 — a lost template is not a lost page
+        pass
+    locale = await repo.fetch_tenant_locale(conn, tenant_id=tenant_id)  # type: ignore[arg-type]
+    return locale if locale in ("en", "de", "uk") else "en"
+
+
 @router.get("/{token}", response_model=SharedNoteView)
-async def read_shared_note(token: str) -> SharedNoteView:
+async def read_shared_note(token: str, response: Response) -> SharedNoteView:
+    view = await _page(token)
+    # The page is personal to whoever holds the token: no shared cache
+    # may keep a copy, and a revoked link must stop answering at once.
+    response.headers["Cache-Control"] = "private, no-store"
+    return view
+
+
+async def _page(token: str) -> SharedNoteView:
     tenant_id, note_id, link_id = await _resolve(token)
     state = get_state()
     async with tenant_connection(state.app_pool, tenant_id) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None or note.status == NoteStatus.CANCELLED:
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+        if resolved.link.kind == "recipient" and not settings.external_sharing_enabled:
+            # The deployment switched the loop off: recipient links go dark.
             raise _not_found()
-        version = await repo.fetch_version(conn, version_id=note.current_version_id)
-        if version is None:
-            raise _not_found()
+        note, version = await _load_note(conn, note_id)
         labels = await _resolve_section_labels(conn, content=version.content) or []
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
-        await repo.record_share_link_view(conn, link_id=link_id)
+        policy, plan = await sharing_policy.load_policy(conn, tenant_id=tenant_id)
+        lang = await _page_lang(conn, version, tenant_id)
+        sharer = await repo.fetch_members(conn, subs=[resolved.link.created_by])
+        items = await action_items.ensure_items(conn, note=note, version=version)
+        mine = await items_repo.responses_for_link(conn, link_id=link_id)
+        changes = await _changes_since(conn, resolved.link, note, version)
+        await repo.mark_link_seen(conn, link_id=link_id, version_id=version.id)
+        first_view = await repo.record_share_link_view(conn, link_id=link_id)
 
     names = {label.section_key: label.name.en or label.name.uk for label in labels}
     order = [label.section_key for label in labels]
@@ -108,7 +428,31 @@ async def read_shared_note(token: str) -> SharedNoteView:
         version.content.sections or [],
         key=lambda s: order.index(s.section_key) if s.section_key in order else len(order),
     )
-    await _audit_view(tenant_id, note_id, link_id, fmt="html")
+    await _audit_view(
+        tenant_id,
+        note_id,
+        resolved.link,
+        fmt="html",
+        first_view=first_view,
+        has_changes=changes is not None,
+    )
+    if first_view and resolved.link.kind == "recipient":
+        # Sprint 22: the sender's "Opened" chip, without polling — an
+        # in-app-only category (no mail), payload ids and a label the
+        # sender typed.
+        await emit_note_event(
+            state.redis,
+            category=Category.NOTE_LINK_STATUS_CHANGED,
+            tenant_id=tenant_id,
+            note_id=note_id,
+            note_code=note.code,
+            actor_user_id=None,
+            primary_author_id=note.primary_author_id,
+            co_author_ids=tuple(note.co_author_ids),
+            extra_payload={"link_label": resolved.link.label, "delivery_status": "opened"},
+        )
+    base = f"/v1/shared/{token}"
+    issuer = _issuer(branding)
     return SharedNoteView(
         code=note.code,
         title=version.content.title or note.title,
@@ -119,13 +463,55 @@ async def read_shared_note(token: str) -> SharedNoteView:
                 section_key=s.section_key,
                 name=names.get(s.section_key, s.section_key),
                 text=s.text or "",
+                role=_role_for(s.section_key, s.text or ""),
             )
             for s in sections
             if (s.text or "").strip()
         ],
-        issuer_name=(
-            branding.issuer_name if branding.issuer_name != "—" else settings.pdf_issuer_name
+        issuer_name=issuer,
+        sender=SharedSender(
+            issuer_name=issuer,
+            has_logo=branding.has_logo,
+            logo_path=f"{base}/logo" if branding.has_logo else None,
+            shared_by_display=(sharer[0].display_name if sharer else "") or "A colleague",
         ),
+        product=SharedProduct(
+            brand_name=settings.product_brand_name,
+            header_text=HEADER_TEXT.get(lang, HEADER_TEXT["en"]).format(
+                brand=settings.product_brand_name
+            ),
+            cta_path=f"{base}/cta",
+            cta_enabled=sharing_policy.cta_shown(policy, plan),
+        ),
+        expires_at=resolved.link.expires_at.isoformat() if resolved.link.expires_at else None,
+        items=[
+            SharedItem(
+                item_key=it.item_key,
+                text=it.text,
+                owner_label=it.owner_label,
+                due_date=it.due_date,
+                due_text=it.due_text,
+                status=it.status,  # type: ignore[arg-type]
+                my_response=next(
+                    (r.kind for r in mine if r.item_key == it.item_key and r.kind != "flag"),  # type: ignore[misc]
+                    None,
+                ),
+                my_comment=next(
+                    (r.comment for r in mine if r.item_key == it.item_key and r.kind == "dispute"),
+                    None,
+                ),
+            )
+            for it in items
+        ],
+        my_flags=[r.section_key for r in mine if r.kind == "flag" and r.section_key],
+        can_respond=(
+            resolved.link.kind == "recipient"
+            and settings.recipient_actions_enabled
+            and not _requires_verification(resolved.link, policy)
+        ),
+        requires_verification=_requires_verification(resolved.link, policy),
+        lang=lang,
+        changes=changes,
     )
 
 
@@ -134,29 +520,496 @@ async def read_shared_note_pdf(token: str) -> Response:
     tenant_id, note_id, link_id = await _resolve(token)
     state = get_state()
     async with tenant_connection(state.app_pool, tenant_id) as conn:
-        note = await repo.fetch_note(conn, note_id=note_id)
-        if note is None or note.status == NoteStatus.CANCELLED:
-            raise _not_found()
-        version = await repo.fetch_version(conn, version_id=note.current_version_id)
-        if version is None:
-            raise _not_found()
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+        note, version = await _load_note(conn, note_id)
         section_names = await _resolve_section_names(conn, content=version.content)
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
-        await repo.record_share_link_view(conn, link_id=link_id)
+        first_view = await repo.record_share_link_view(conn, link_id=link_id)
 
-    issuer = branding.issuer_name if branding.issuer_name != "—" else settings.pdf_issuer_name
-    is_draft = note.status not in (NoteStatus.FINALIZED, NoteStatus.AMENDED)
+        lang = await _page_lang(conn, version, tenant_id)
+
     pdf_bytes = render_note_pdf(
         note=note,
         version=version,
-        issuer_name=issuer,
-        is_draft=is_draft,
-        language="en",
+        issuer_name=_issuer(branding),
+        language=lang,
         section_names=section_names,
     )
-    await _audit_view(tenant_id, note_id, link_id, fmt="pdf")
+    await _audit_view(tenant_id, note_id, resolved.link, fmt="pdf", first_view=first_view)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{note.code}.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{note.code}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
     )
+
+
+async def _cached_logo(state: object, tenant_id: UUID) -> tuple[bytes, str] | None:
+    """Sprint 23: the logo is up to 2 MB and every page load asks for it;
+    Redis keeps it for an hour so Postgres serves it once. `absent` is
+    cached too, so a workspace without a logo costs nothing either."""
+    key = f"workspace:{tenant_id}:logo"
+    redis = getattr(state, "redis", None)
+    try:
+        cached = await redis.get(key) if redis is not None else None
+    except Exception:  # noqa: BLE001 — cache miss on outage
+        cached = None
+    if cached is not None:
+        if cached == b"absent":
+            return None
+        content_type, _, data = bytes(cached).partition(b"\n")
+        return data, content_type.decode("ascii", "ignore")
+    async with tenant_connection(state.app_pool, tenant_id) as conn:  # type: ignore[attr-defined]
+        logo = await repo.fetch_tenant_logo(conn, tenant_id=tenant_id)
+    try:
+        if redis is not None:
+            payload = b"absent" if logo is None else logo[1].encode("ascii") + b"\n" + logo[0]
+            await redis.set(key, payload, ex=3600)
+    except Exception:  # noqa: BLE001
+        pass
+    return logo
+
+
+@router.get("/{token}/logo", responses={200: {"content": {"image/*": {}}}, 404: {}})
+async def read_sender_logo(token: str, request: Request) -> Response:
+    """The sender workspace's logo. Public to anyone holding a token —
+    that is the sender's choice when they upload one (validated to an
+    image type and 2 MB at upload)."""
+    tenant_id, _note_id, _link_id = await _resolve(token)
+    state = get_state()
+    logo = await _cached_logo(state, tenant_id)
+    if logo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no logo")
+    data, content_type = logo
+    etag = f'"{hashlib.sha256(data).hexdigest()[:32]}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=data, media_type=content_type, headers=headers)
+
+
+@router.get("/{token}/cta", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse)
+async def click_cta(token: str, request: Request) -> RedirectResponse:
+    """Count the click server-side (so it counts without JavaScript) and
+    send the browser to the web app's lead page. The only destination is
+    ``MDX_APP_BASE_URL`` + a fixed path — nothing from the request decides
+    where the redirect goes."""
+    state = get_state()
+    await state.public_rate_limiter.check_cta(request)
+    tenant_id, note_id, link_id = await _resolve(token)
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+        first_click = await repo.record_cta_click(conn, link_id=link_id)
+    if first_click:
+        cta_clicks.add(1)
+        await state.audit_writer.write_event(
+            tenant_id=tenant_id,
+            kind=audit_kinds.NOTE_CTA_CLICKED,
+            actor_sub=None,
+            actor_role=None,
+            target_kind="note",
+            target_id=note_id,
+            payload={"link_id": str(link_id)},
+            severity=Severity.INFO,
+        )
+    target = f"{settings.app_base_url.rstrip('/')}/join"
+    if resolved.link.ref_code:
+        target = f"{target}?ref={resolved.link.ref_code}"
+    return RedirectResponse(
+        target, status_code=status.HTTP_302_FOUND, headers={"Cache-Control": "no-store"}
+    )
+
+
+# ── Sprint 20: the recipient acts ────────────────────────────────────
+
+
+async def _writable(token: str, request: Request) -> _Resolved:
+    """Resolve, cap writes per link, refuse public links (403)."""
+    state = get_state()
+    tenant_id, note_id, link_id = await _resolve(token)
+    await state.public_rate_limiter.check_write(link_id)
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+    if resolved.link.kind != "recipient":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "link_kind_public",
+                "detail": "a public link can read the note but cannot respond to it",
+            },
+        )
+    if not settings.recipient_actions_enabled:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "actions_disabled", "detail": "responding is switched off"},
+        )
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        policy, _plan = await sharing_policy.load_policy(conn, tenant_id=tenant_id)
+    if _requires_verification(resolved.link, policy):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "verification_required",
+                "detail": "confirm the e-mailed code before responding",
+            },
+        )
+    return resolved
+
+
+async def _after_write(resolved: _Resolved, *, kind: str, target: str, note: repo.NoteRow) -> None:
+    """Audit (ids and enums only), count, and tell the author — once per
+    link per debounce window, so five confirms are one notification."""
+    state = get_state()
+    await state.audit_writer.write_event(
+        tenant_id=resolved.tenant_id,
+        kind=audit_kinds.NOTE_RECIPIENT_RESPONDED,
+        actor_sub=None,
+        actor_role=None,
+        target_kind="note",
+        target_id=resolved.note_id,
+        payload={"link_id": str(resolved.link.id), "kind": kind, "target": target},
+        severity=Severity.INFO,
+    )
+    if kind == "flag":
+        shared_flags.add(1)
+    else:
+        shared_responses.add(1, {"kind": kind})
+    try:
+        first = await state.redis.set(
+            f"note:resp-notify:{resolved.link.id}",
+            "1",
+            nx=True,
+            ex=settings.response_notify_debounce_s,
+        )
+    except Exception as exc:  # noqa: BLE001 — a notification is not worth a failed write
+        logger.warning(
+            "note.response_notify_debounce_error", extra={"error_class": type(exc).__name__}
+        )
+        first = False
+    if first:
+        await emit_note_event(
+            state.redis,
+            category=Category.NOTE_RECIPIENT_RESPONDED,
+            tenant_id=resolved.tenant_id,
+            note_id=resolved.note_id,
+            note_code=note.code,
+            actor_user_id=None,
+            primary_author_id=note.primary_author_id,
+            co_author_ids=tuple(note.co_author_ids),
+            extra_payload={"link_label": resolved.link.label, "kind": kind},
+        )
+
+
+async def _current_item(conn: object, note: repo.NoteRow, item_key: str) -> items_repo.ItemRow:
+    items = await items_repo.fetch_items(conn, version_id=note.current_version_id)  # type: ignore[arg-type]
+    for it in items:
+        if it.item_key == item_key:
+            return it
+    # An item from an older version, or a made-up key: the same 404 as a
+    # dead link, on purpose.
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="item not found")
+
+
+@router.put("/{token}/items/{item_key}/response", response_model=ResponseAck)
+async def respond_to_item(
+    token: str, item_key: str, body: ItemResponseRequest, request: Request
+) -> ResponseAck:
+    if body.comment is not None and body.kind != "dispute":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "comment_only_on_dispute",
+                "detail": "only a dispute carries a comment",
+            },
+        )
+    resolved = await _writable(token, request)
+    state = get_state()
+    async with tenant_connection(state.app_pool, resolved.tenant_id) as conn:
+        note, _version = await _load_note(conn, resolved.note_id)
+        await _current_item(conn, note, item_key)
+        await items_repo.upsert_response(
+            conn,
+            tenant_id=resolved.tenant_id,
+            note_id=resolved.note_id,
+            link_id=resolved.link.id,
+            kind=body.kind,
+            item_key=item_key,
+            section_key=None,
+            comment=body.comment,
+        )
+    await _after_write(resolved, kind=body.kind, target="item", note=note)
+    return ResponseAck()
+
+
+@router.delete("/{token}/items/{item_key}/response", response_model=ResponseAck)
+async def withdraw_item_response(token: str, item_key: str, request: Request) -> ResponseAck:
+    resolved = await _writable(token, request)
+    state = get_state()
+    async with tenant_connection(state.app_pool, resolved.tenant_id) as conn:
+        await items_repo.withdraw_response(
+            conn, link_id=resolved.link.id, item_key=item_key, section_key=None
+        )
+    return ResponseAck()
+
+
+@router.put("/{token}/sections/{section_key}/flag", response_model=ResponseAck)
+async def flag_section(
+    token: str, section_key: str, body: FlagRequest, request: Request
+) -> ResponseAck:
+    resolved = await _writable(token, request)
+    state = get_state()
+    async with tenant_connection(state.app_pool, resolved.tenant_id) as conn:
+        note, version = await _load_note(conn, resolved.note_id)
+        if section_key not in {s.section_key for s in version.content.sections or []}:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="section not found")
+        await items_repo.upsert_response(
+            conn,
+            tenant_id=resolved.tenant_id,
+            note_id=resolved.note_id,
+            link_id=resolved.link.id,
+            kind="flag",
+            item_key=None,
+            section_key=section_key,
+            comment=body.comment,
+        )
+    await _after_write(resolved, kind="flag", target="section", note=note)
+    return ResponseAck()
+
+
+@router.delete("/{token}/sections/{section_key}/flag", response_model=ResponseAck)
+async def unflag_section(token: str, section_key: str, request: Request) -> ResponseAck:
+    resolved = await _writable(token, request)
+    state = get_state()
+    async with tenant_connection(state.app_pool, resolved.tenant_id) as conn:
+        await items_repo.withdraw_response(
+            conn, link_id=resolved.link.id, item_key=None, section_key=section_key
+        )
+    return ResponseAck()
+
+
+# ── Sprint 22: one-click opt-out ─────────────────────────────────────
+
+_UNSUBSCRIBE_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Unsubscribed</title>
+<style>body{font-family:Georgia,serif;background:#E6E1D6;margin:0;padding:48px 16px;color:#1F1C18}
+main{max-width:520px;margin:0 auto;background:#FAF7F0;border-radius:14px;padding:40px}
+p{font-family:Arial,sans-serif;line-height:1.5;color:#6E675C}</style></head>
+<body><main><h1>You're unsubscribed</h1>
+<p>You won't receive further e-mails from {brand} users. Links you already have keep working until they expire.</p>
+</main></body></html>"""
+
+
+@router.get("/unsubscribe/{token}", response_class=HTMLResponse)
+async def unsubscribe(token: str) -> HTMLResponse:
+    """Opt out of recipient mail from EVERY workspace, in one click, with
+    no login and no address in the URL. The page is the same whether the
+    signature verified or not: a forged link learns nothing, and a real
+    one is honoured silently."""
+    state = get_state()
+    page = HTMLResponse(
+        _UNSUBSCRIBE_HTML.replace("{brand}", settings.product_brand_name),
+        headers={"Cache-Control": "no-store"},
+    )
+    link_id = recipient_mail.verify_unsubscribe_token(token)
+    if link_id is None:
+        return page
+    async with state.app_pool.acquire() as conn:
+        tenant_id = await repo.tenant_of_share_link(conn, link_id=link_id)
+    if tenant_id is None:
+        return page
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        link = await repo.fetch_share_link(conn, link_id=link_id)
+        if link is None or not link.recipient_email:
+            return page
+        await repo.add_share_mail_suppression(
+            conn, email_hash=recipient_mail.email_hash(link.recipient_email), reason="unsubscribed"
+        )
+        await repo.suppress_links_for_email(conn, tenant_id=tenant_id, email=link.recipient_email)
+    await state.audit_writer.write_event(
+        tenant_id=tenant_id,
+        kind=audit_kinds.NOTE_RECIPIENT_UNSUBSCRIBED,
+        actor_sub=None,
+        actor_role=None,
+        target_kind="note",
+        target_id=link.note_id,
+        payload={"link_id": str(link_id)},
+        severity=Severity.INFO,
+    )
+    return page
+
+
+# ── Sprint 23: verified recipients ───────────────────────────────────
+
+
+class VerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=16)
+
+
+class Accepted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["accepted"] = "accepted"
+
+
+@router.post(
+    "/{token}/verify/request", response_model=Accepted, status_code=status.HTTP_202_ACCEPTED
+)
+async def request_verification(token: str) -> Accepted:
+    """Mail a six-digit code to the address the link was sent to. 202
+    whatever happens: a link with no address, or one that is already
+    verified, learns nothing from the answer."""
+    state = get_state()
+    tenant_id, note_id, link_id = await _resolve(token)
+    await state.public_rate_limiter.check_otp(link_id)
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+        policy, _plan = await sharing_policy.load_policy(conn, tenant_id=tenant_id)
+        link = resolved.link
+        if not (_requires_verification(link, policy) and link.recipient_email):
+            return Accepted()
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        await repo.put_link_otp(
+            conn,
+            tenant_id=tenant_id,
+            link_id=link_id,
+            code_hash=recipient_mail.otp_hash(code, link_id),
+            ttl_seconds=settings.share_otp_ttl_seconds,
+        )
+        _note, version = await _load_note(conn, note_id)
+        lang = await _page_lang(conn, version, tenant_id)
+    share_otp_requests.add(1)
+    await recipient_mail.send_otp(
+        state.email_provider, to_address=link.recipient_email, code=code, lang=lang
+    )
+    await state.audit_writer.write_event(
+        tenant_id=tenant_id,
+        kind=audit_kinds.NOTE_RECIPIENT_VERIFICATION_REQUESTED,
+        actor_sub=None,
+        actor_role=None,
+        target_kind="note",
+        target_id=note_id,
+        payload={"link_id": str(link_id)},
+        severity=Severity.INFO,
+    )
+    return Accepted()
+
+
+@router.post("/{token}/verify", response_model=SharedNoteView)
+async def verify_recipient(token: str, body: VerifyRequest) -> SharedNoteView:
+    """Spend the code. Five wrong answers retire it; success is remembered
+    on the link (whoever controls the mailbox is the recipient), and the
+    page comes back with `can_respond` on."""
+    state = get_state()
+    tenant_id, note_id, link_id = await _resolve(token)
+    code = body.code.replace(" ", "").strip()
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        otp = await repo.fetch_link_otp(conn, link_id=link_id)
+        if otp is None or not otp[1]:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "code_expired",
+                    "detail": "that code has expired; request a new one",
+                },
+            )
+        code_hash, _live, attempts = otp
+        if attempts >= settings.share_otp_max_attempts:
+            await repo.delete_link_otp(conn, link_id=link_id)
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "too_many_attempts", "detail": "request a new code"},
+            )
+        if not hmac.compare_digest(code_hash, recipient_mail.otp_hash(code, link_id)):
+            used = await repo.bump_link_otp_attempts(conn, link_id=link_id)
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "code_invalid",
+                    "detail": "that code is not right",
+                    "attempts_left": max(settings.share_otp_max_attempts - used, 0),
+                },
+            )
+        await repo.mark_link_verified(conn, link_id=link_id)
+        await repo.delete_link_otp(conn, link_id=link_id)
+    await state.audit_writer.write_event(
+        tenant_id=tenant_id,
+        kind=audit_kinds.NOTE_RECIPIENT_VERIFIED,
+        actor_sub=None,
+        actor_role=None,
+        target_kind="note",
+        target_id=note_id,
+        payload={"link_id": str(link_id)},
+        severity=Severity.INFO,
+    )
+    return await _page(token)
+
+
+# ── Sprint 23: "report this page" ────────────────────────────────────
+
+
+class ReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Literal["spam", "not_me", "inaccurate", "sensitive", "other"]
+
+
+@router.post("/{token}/report", response_model=Accepted, status_code=status.HTTP_202_ACCEPTED)
+async def report_page(token: str, body: ReportRequest, request: Request) -> Accepted:
+    """A recipient says something is wrong with this page. Stored,
+    audited, the workspace's admins told; three `spam` reports against
+    one sender's links switch that workspace's product mail off until an
+    admin turns it back on."""
+    state = get_state()
+    await state.public_rate_limiter.check_report(request)
+    tenant_id, note_id, link_id = await _resolve(token)
+    async with tenant_connection(state.app_pool, tenant_id) as conn:
+        resolved = await _load(conn, tenant_id, note_id, link_id)
+        note, _version = await _load_note(conn, note_id)
+        await repo.add_abuse_report(
+            conn, tenant_id=tenant_id, link_id=link_id, note_id=note_id, reason=body.reason
+        )
+        auto_disabled = False
+        if body.reason == "spam":
+            spam = await repo.spam_reports_for_sender(conn, created_by=resolved.link.created_by)
+            policy, _plan = await sharing_policy.load_policy(conn, tenant_id=tenant_id)
+            if spam >= 3 and policy.product_email_enabled:
+                await sharing_policy.save_policy(
+                    conn,
+                    tenant_id=tenant_id,
+                    policy=policy.model_copy(
+                        update={
+                            "product_email_enabled": False,
+                            "auto_disabled_reason": "abuse_reports",
+                        }
+                    ),
+                )
+                auto_disabled = True
+    share_abuse_reports.add(1, {"reason": body.reason})
+    await state.audit_writer.write_event(
+        tenant_id=tenant_id,
+        kind=audit_kinds.NOTE_LINK_REPORTED,
+        actor_sub=None,
+        actor_role=None,
+        target_kind="note",
+        target_id=note_id,
+        payload={"link_id": str(link_id), "reason": body.reason, "auto_disabled": auto_disabled},
+        severity=Severity.SEC,
+    )
+    await emit_note_event(
+        state.redis,
+        category=Category.SHARE_REPORTED,
+        tenant_id=tenant_id,
+        note_id=note_id,
+        note_code=note.code,
+        actor_user_id=None,
+        extra_payload={"reason": body.reason},
+    )
+    return Accepted()

@@ -36,7 +36,8 @@ export interface ListItem {
 
 export type Block =
   | { kind: "heading"; level: number; spans: Inline[] }
-  | { kind: "para"; spans: Inline[] }
+  /** `speaker` is set when the paragraph opens with a short `Name:` label — a transcript turn. */
+  | { kind: "para"; spans: Inline[]; speaker?: string }
   | { kind: "list"; items: ListItem[] }
   | { kind: "quote"; spans: Inline[] }
   | { kind: "rule" }
@@ -50,6 +51,32 @@ const ORDERED = /^(\s*)(\d{1,3})[.)]\s+(.*)$/;
 const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const RULE = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$/;
+
+/**
+ * "Anna: we ship Friday" — a transcript turn, or a run-in label. At most
+ * four words, no markup, not a URL scheme; the paragraph keeps the rest.
+ */
+const SPEAKER = /^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)/;
+
+/**
+ * A section whose paragraphs are mostly speaker turns is the transcript,
+ * whatever template slot it landed in — the same rule note-service uses
+ * for the shared page. It goes behind the Transcript tab, never into the
+ * notes.
+ */
+export function isTranscript(text: string): boolean {
+  const paragraphs = text
+    .replace(/\r\n?/g, "\n")
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length < 2) return false;
+  const turns = paragraphs.filter((p) => {
+    const m = SPEAKER.exec(p);
+    return m !== null && (m[1] ?? "").trim().split(/\s+/).length <= 4;
+  }).length;
+  return turns * 10 >= paragraphs.length * 6;
+}
 
 // ── inline shapes ─────────────────────────────────────────────────────
 const INLINE = new RegExp(
@@ -116,7 +143,13 @@ export function parseRichText(text: string): Block[] {
       .filter(Boolean)
       .join(" ");
     para = [];
-    if (body) blocks.push({ kind: "para", spans: inlineSpans(body) });
+    if (!body) return;
+    const turn = SPEAKER.exec(body);
+    if (turn && (turn[1] ?? "").trim().split(/\s+/).length <= 4) {
+      blocks.push({ kind: "para", spans: inlineSpans(body.slice(turn[0].length)), speaker: turn[1] });
+      return;
+    }
+    blocks.push({ kind: "para", spans: inlineSpans(body) });
   };
 
   const flushList = () => {

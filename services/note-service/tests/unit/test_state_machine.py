@@ -1,14 +1,12 @@
 """Unit tests for NoteStateMachine.
 
 These tests use a stub asyncpg.Connection so we can drive the SQL paths
-without a live DB. The state machine is the irreversibility hotspot —
-every allowed/disallowed transition is exercised here, with concurrent
-+ cross-user variants where applicable.
+without a live DB. Cancel is the one transition left (0042): the happy
+path, the illegal sources and the concurrent race are exercised here.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -18,8 +16,6 @@ from note_service.domain.note_lifecycle import (
     ConcurrentTransitionError,
     IllegalTransitionError,
     NoteStateMachine,
-    NotPrimaryAuthorError,
-    RevertWindowExceededError,
     TransitionAction,
 )
 
@@ -58,30 +54,7 @@ def _row(**kw):
     return kw
 
 
-# ── Allowed transitions ─────────────────────────────────────────────
-
-
-@_aio
-async def test_finalize_happy_path():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    conn.push_fetchrow(_row(id=uuid4()))  # UPDATE...RETURNING success
-    result = await sm.finalize(conn, note_id=uuid4())
-    assert result.from_status == NoteStatus.DRAFT
-    assert result.to_status == NoteStatus.FINALIZED
-    assert result.action == TransitionAction.FINALIZE
-
-
-@_aio
-async def test_finalize_concurrent_returns_observed_state():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    # First fetchrow (UPDATE...RETURNING) returns None → no row updated.
-    # Second fetchrow (SELECT status) returns the observed state.
-    conn.push_fetchrow(None, _row(status="finalized"))
-    with pytest.raises(ConcurrentTransitionError) as exc:
-        await sm.finalize(conn, note_id=uuid4())
-    assert exc.value.observed_status == NoteStatus.FINALIZED
+# ── Cancel ──────────────────────────────────────────────────────────
 
 
 @_aio
@@ -91,134 +64,54 @@ async def test_cancel_from_draft_allowed():
     conn.push_fetchrow(_row(id=uuid4()))
     result = await sm.cancel(conn, note_id=uuid4(), from_status=NoteStatus.DRAFT, reason="dup")
     assert result.to_status == NoteStatus.CANCELLED
+    sql, args = conn.executed[0]
+    assert "cancelled_reason" in sql
+    assert args[3] == "dup"
 
 
 @_aio
-async def test_cancel_from_amended_disallowed():
+@pytest.mark.parametrize("status", [NoteStatus.CANCELLED, NoteStatus.FINALIZED, NoteStatus.AMENDED])
+async def test_cancel_from_anything_but_draft_disallowed(status):
     sm = NoteStateMachine()
     conn = StubConn()
     with pytest.raises(IllegalTransitionError):
-        await sm.cancel(
-            conn,
-            note_id=uuid4(),
-            from_status=NoteStatus.AMENDED,
-            reason="never",
-        )
+        await sm.cancel(conn, note_id=uuid4(), from_status=status, reason="x")
+    assert conn.executed == []
 
 
 @_aio
-async def test_revert_happy_path_inside_window():
+async def test_cancel_concurrent_returns_observed_state():
     sm = NoteStateMachine()
     conn = StubConn()
-    actor = uuid4()
-    now = datetime.now(UTC)
-    conn.push_fetchrow(
-        _row(
-            status="finalized",
-            primary_author_id=actor,
-            finalized_at=now - timedelta(minutes=30),
-        ),
-        _row(id=uuid4()),
-    )
-    result = await sm.revert_to_draft(conn, note_id=uuid4(), actor_user_id=actor, now=now)
-    assert result.to_status == NoteStatus.DRAFT
+    # UPDATE matched nothing; the re-read says it is already cancelled.
+    conn.push_fetchrow(None, _row(status="cancelled"))
+    with pytest.raises(ConcurrentTransitionError) as ei:
+        await sm.cancel(conn, note_id=uuid4(), from_status=NoteStatus.DRAFT, reason="x")
+    assert ei.value.observed_status == NoteStatus.CANCELLED
 
 
 @_aio
-async def test_revert_outside_window_rejected():
+async def test_cancel_concurrent_deleted_row():
     sm = NoteStateMachine()
     conn = StubConn()
-    actor = uuid4()
-    now = datetime.now(UTC)
-    conn.push_fetchrow(
-        _row(
-            status="finalized",
-            primary_author_id=actor,
-            finalized_at=now - timedelta(hours=2),
-        ),
-    )
-    with pytest.raises(RevertWindowExceededError):
-        await sm.revert_to_draft(conn, note_id=uuid4(), actor_user_id=actor, now=now)
+    conn.push_fetchrow(None, None)
+    with pytest.raises(ConcurrentTransitionError) as ei:
+        await sm.cancel(conn, note_id=uuid4(), from_status=NoteStatus.DRAFT, reason="x")
+    assert ei.value.observed_status is None
 
 
-@_aio
-async def test_revert_non_primary_author_rejected():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    actor = uuid4()
-    other = uuid4()
-    now = datetime.now(UTC)
-    conn.push_fetchrow(
-        _row(
-            status="finalized",
-            primary_author_id=other,
-            finalized_at=now - timedelta(minutes=5),
-        ),
-    )
-    with pytest.raises(NotPrimaryAuthorError):
-        await sm.revert_to_draft(conn, note_id=uuid4(), actor_user_id=actor, now=now)
-
-
-@_aio
-async def test_revert_from_draft_disallowed():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    actor = uuid4()
-    conn.push_fetchrow(
-        _row(status="draft", primary_author_id=actor, finalized_at=None),
-    )
-    with pytest.raises(IllegalTransitionError):
-        await sm.revert_to_draft(conn, note_id=uuid4(), actor_user_id=actor)
-
-
-@_aio
-async def test_revert_from_amended_disallowed():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    actor = uuid4()
-    now = datetime.now(UTC)
-    conn.push_fetchrow(
-        _row(
-            status="amended",
-            primary_author_id=actor,
-            finalized_at=now - timedelta(minutes=10),
-        ),
-    )
-    with pytest.raises(IllegalTransitionError):
-        await sm.revert_to_draft(conn, note_id=uuid4(), actor_user_id=actor, now=now)
-
-
-@_aio
-async def test_amend_from_finalized_transitions_to_amended():
-    sm = NoteStateMachine()
-    conn = StubConn()
-    conn.push_fetchrow(_row(id=uuid4()))
-    result = await sm.mark_amended(conn, note_id=uuid4(), from_status=NoteStatus.FINALIZED)
-    assert result.to_status == NoteStatus.AMENDED
-    assert result.action == TransitionAction.AMEND
-
-
-# ── Allowed-action table coverage (sync tests) ─────────────────────
+# ── Table ───────────────────────────────────────────────────────────
 
 
 def test_allowed_actions_match_spec_table():
     sm = NoteStateMachine()
-    assert set(sm.allowed_actions(NoteStatus.DRAFT)) == {
-        TransitionAction.FINALIZE,
-        TransitionAction.CANCEL,
-    }
-    assert set(sm.allowed_actions(NoteStatus.FINALIZED)) == {
-        TransitionAction.REVERT_TO_DRAFT,
-        TransitionAction.AMEND,
-        TransitionAction.CANCEL,
-    }
-    assert set(sm.allowed_actions(NoteStatus.AMENDED)) == {TransitionAction.AMEND}
-    assert sm.allowed_actions(NoteStatus.CANCELLED) == []
+    assert sm.allowed_actions(NoteStatus.DRAFT) == [TransitionAction.CANCEL]
+    for status in (NoteStatus.FINALIZED, NoteStatus.AMENDED, NoteStatus.CANCELLED):
+        assert sm.allowed_actions(status) == []
 
 
 def test_expected_to_lookup_raises_on_disallowed():
     sm = NoteStateMachine()
+    assert sm.expected_to(NoteStatus.DRAFT, TransitionAction.CANCEL) == NoteStatus.CANCELLED
     with pytest.raises(IllegalTransitionError):
-        sm.expected_to(NoteStatus.AMENDED, TransitionAction.FINALIZE)
-    with pytest.raises(IllegalTransitionError):
-        sm.expected_to(NoteStatus.CANCELLED, TransitionAction.AMEND)
+        sm.expected_to(NoteStatus.CANCELLED, TransitionAction.CANCEL)

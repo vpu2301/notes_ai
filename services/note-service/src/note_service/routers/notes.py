@@ -85,6 +85,9 @@ class NoteEnvelope(BaseModel):
     updated_at: str
     finalized_at: str | None
     cancelled_at: str | None
+    # The transcription job the note was made from, so a client can open
+    # the recording's transcript (and rename its speakers) from any device.
+    source_job_id: UUID | None = None
     # 0016 — who may read it beyond the author team.
     visibility: str = "workspace"
     shared_with_ids: list[UUID] = Field(default_factory=list)
@@ -119,6 +122,7 @@ def _envelope(
         updated_at=row.updated_at.isoformat(),
         finalized_at=row.finalized_at.isoformat() if row.finalized_at else None,
         cancelled_at=row.cancelled_at.isoformat() if row.cancelled_at else None,
+        source_job_id=row.source_asr_job_id,
         visibility=row.visibility,
         shared_with_ids=row.shared_with_ids,
         primary_author_name=primary_author_name,

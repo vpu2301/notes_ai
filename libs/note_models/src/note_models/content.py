@@ -27,6 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class NoteStatus(StrEnum):
     DRAFT = "draft"
+    # Legacy values: the finalize lifecycle was retired (note-service
+    # migration 0042, ADR-0051). Kept so history decodes; never produced.
     FINALIZED = "finalized"
     AMENDED = "amended"
     CANCELLED = "cancelled"

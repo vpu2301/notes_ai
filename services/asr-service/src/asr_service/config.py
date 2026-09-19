@@ -116,8 +116,12 @@ class Settings(BaseSettings):
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
     # ── Upload validation ───────────────────────────────────────────────
-    max_upload_mb: int = Field(default=100, alias="MD_ASR_MAX_UPLOAD_MB")
-    max_duration_seconds: int = Field(default=30 * 60, alias="MD_ASR_MAX_DURATION_SECONDS")
+    # A meeting, not a memo: two hours by default. The clients read this
+    # (GET /asr/limits), warn five minutes before it and stop at it, so a
+    # recording is never refused after the fact. 250 MB covers two hours
+    # of the WAV fallback (16 kHz mono 16-bit ≈ 115 MB/h); FLAC is a third.
+    max_upload_mb: int = Field(default=250, alias="MD_ASR_MAX_UPLOAD_MB")
+    max_duration_seconds: int = Field(default=2 * 3600, alias="MD_ASR_MAX_DURATION_SECONDS")
     # Floor, not a cap: below this an upload cannot carry a usable
     # utterance, and Whisper answers a fraction of a second of noise with a
     # confident hallucination. Rejecting is safer than storing it.
@@ -143,11 +147,11 @@ class Settings(BaseSettings):
     # The grace windows are the ONLY interlock: asr-worker publishes no
     # heartbeat. Keep `running` comfortably above the worst case the worker
     # allows itself — max_duration_seconds × the worker's inference
-    # multiplier (30 min × 5 = 2.5 h at the defaults), plus a redelivery.
+    # multiplier (2 h × 5 = 10 h at the defaults), plus a redelivery.
     job_reaper_enabled: bool = Field(default=True, alias="MD_ASR_JOB_REAPER_ENABLED")
     job_reaper_interval_s: float = Field(default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S")
     job_reaper_running_grace_s: float = Field(
-        default=3 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
+        default=11 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
     )
     # A job nobody has claimed in this long is not backlogged, it is lost.
     job_reaper_queued_grace_s: float = Field(

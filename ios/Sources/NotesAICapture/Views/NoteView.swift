@@ -4,14 +4,13 @@ import UIKit
 /// The note as a document, the way the web editor shows it: the title, a
 /// meta line, Notes / Transcript tabs, and one seamless text area per
 /// template section; status, save state and ⋯ live in the navigation bar.
-/// Drafts autosave; finalized notes are read-only here (amend and history
-/// stay in the web app).
+/// Every note autosaves until it is cancelled (history stays in the web app).
 struct NoteView: View {
     @EnvironmentObject private var app: AppState
     @StateObject private var model: NoteViewModel
-    @State private var confirmFinalize = false
     @State private var confirmDelete = false
     @State private var shareByEmail = false
+    @State private var shareWithClient = false
     /// Which speaker label is being renamed, and the text so far.
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
@@ -54,6 +53,7 @@ struct NoteView: View {
         }
         .task(id: model.noteId) { await model.load() }
         .task(id: model.noteId) { await model.loadSharing() }
+        .task(id: model.version) { await model.loadItems() }
         .onDisappear { Task { await model.flush() } }
         .onChange(of: model.deleted) { _, deleted in
             // The note is gone; drop every local trace and go back home.
@@ -70,6 +70,13 @@ struct NoteView: View {
         } message: {
             Text("It disappears from everyone's list and any public link stops working. The note is kept for the workspace's records.")
         }
+        .sheet(isPresented: $shareWithClient) {
+            ShareWithClientSheet(model: model, webAppURL: app.settings.webAppURL) { url in
+                // Hand the link straight to Mail / Messages / WhatsApp.
+                shareWithClient = false
+                model.shareItem = NoteViewModel.ShareItem(url: url)
+            } onClose: { shareWithClient = false }
+        }
         .sheet(isPresented: $shareByEmail) {
             ShareEmailSheet(
                 noteTitle: model.content?.title ?? "",
@@ -77,12 +84,6 @@ struct NoteView: View {
                     await model.sendShareEmail(recipients: recipients, message: message)
                 },
                 onClose: { shareByEmail = false })
-        }
-        .alert("Finalize this note?", isPresented: $confirmFinalize) {
-            Button("Finalize") { Task { await model.finalize() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Finalizing freezes the current version. You can still amend it later from the web app; every amendment is kept in the note's history.")
         }
         .alert("Rename speaker", isPresented: Binding(
             get: { editingSpeaker != nil },
@@ -100,7 +101,7 @@ struct NoteView: View {
         } message: {
             Text(model.isDraft
                  ? "The name is used in the transcript and at the start of each turn in the note."
-                 : "The name is used in the transcript; a finalized note keeps its text.")
+                 : "The name is used in the transcript; a cancelled note keeps its text.")
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { model.actionError != nil },
@@ -117,7 +118,7 @@ struct NoteView: View {
     @ViewBuilder
     private var barTitle: some View {
         HStack(spacing: 8) {
-            if let note = model.note, note.status != .draft {
+            if let note = model.note, note.status == .cancelled {
                 DSChip(text: note.status.label, tint: note.status.tint, soft: note.status.soft)
             }
             if model.conflict {
@@ -180,6 +181,13 @@ struct NoteView: View {
                 shareByEmail = true
             },
         ]
+        if model.rules.externalLinksEnabled {
+            // The client-facing path (Sprint 19): one link per recipient.
+            // Hidden, not disabled, when the workspace admin switched it off.
+            items.insert(.item("Share with client…", symbol: "paperplane", disabled: model.busy || !canManage) {
+                shareWithClient = true
+            }, at: 3)
+        }
         if hasLink && canManage {
             items.append(.item("Turn off public link", symbol: "globe.badge.chevron.backward",
                                disabled: model.busy) {
@@ -193,22 +201,6 @@ struct NoteView: View {
         items.append(.item("Share Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
-        if model.note?.status == .draft {
-            items.append(.separator)
-            items.append(.item("Finalize note", symbol: "checkmark.seal", disabled: model.busy) {
-                confirmFinalize = true
-            })
-        } else if model.note?.status == .finalized || model.note?.status == .amended {
-            items.append(.separator)
-            items.append(.item("Amend in web app…", symbol: "pencil.line") {
-                app.openNoteInBrowser(model.noteId)
-            })
-            if model.note?.status == .finalized {
-                items.append(.item("Revert to draft", symbol: "arrow.uturn.backward", disabled: model.busy) {
-                    Task { await model.revertToDraft() }
-                })
-            }
-        }
         if !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[model.noteId]
@@ -284,7 +276,7 @@ struct NoteView: View {
                     .padding(.bottom, 16)
                 }
 
-                if capture?.status == .complete {
+                if capture?.status == .complete || model.hasTranscript {
                     DSSegmentedPill(
                         options: [
                             .init(NoteViewModel.Tab.notes, label: "Notes"),
@@ -436,12 +428,23 @@ struct NoteView: View {
 
     private var sections: some View {
         VStack(alignment: .leading, spacing: 22) {
+            if !model.items.isEmpty {
+                // Sprint 20: the action items as objects, with what the
+                // recipients did. The section text below stays the source.
+                ActionItemsSection(model: model)
+            }
             if model.sections.isEmpty {
                 Text("This note's template has no sections.")
                     .font(.dsBody)
                     .foregroundStyle(DS.muted)
             }
-            ForEach(model.sections) { def in
+            if model.noteSections.isEmpty, !model.sections.isEmpty {
+                Text("No notes yet — the transcript is under the other tab.")
+                    .font(.dsBody)
+                    .foregroundStyle(DS.muted)
+            }
+
+            ForEach(model.noteSections) { def in
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
                         // No hanging "#" here — a phone has no gutter to
@@ -518,7 +521,43 @@ struct NoteView: View {
     @ViewBuilder
     private var transcript: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let error = model.transcriptError {
+            if model.jobId == nil || (model.transcriptError != nil && !model.textTurns.isEmpty) {
+                ForEach(model.textTurns) { turn in
+                    HStack(alignment: .top, spacing: 12) {
+                        SpeakerAvatar(name: turn.speaker ?? unknownSpeakerName)
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let speaker = turn.speaker {
+                                Button {
+                                    speakerDraft = speaker
+                                    editingSpeaker = speaker
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text(speaker)
+                                            .font(.dsDisplay(15, .semibold))
+                                            .foregroundStyle(DS.text1)
+                                        Image(systemName: "pencil")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(DS.muted)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Rename this speaker")
+                            } else {
+                                Text(unknownSpeakerName)
+                                    .font(.dsDisplay(15, .semibold))
+                                    .italic()
+                                    .foregroundStyle(DS.muted)
+                            }
+                            Text(turn.text)
+                                .font(.dsBody)
+                                .foregroundStyle(DS.text1)
+                                .lineSpacing(4)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            } else if let error = model.transcriptError {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             } else if let turns = model.turns {
                 HStack {
@@ -540,6 +579,8 @@ struct NoteView: View {
                     .disabled(turns.isEmpty)
                 }
                 ForEach(turns) { turn in
+                    HStack(alignment: .top, spacing: 12) {
+                    if model.diarized { SpeakerAvatar(name: model.displayName(for: turn)) }
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             if model.diarized {
@@ -557,6 +598,7 @@ struct NoteView: View {
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                    }
                     }
                 }
             } else {
@@ -578,11 +620,11 @@ struct NoteView: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(model.displayName(for: turn))
-                        .font(.dsDisplay(15, .medium))
-                        .foregroundStyle(DS.accentText)
+                        .font(.dsDisplay(15, .semibold))
+                        .foregroundStyle(DS.text1)
                     Image(systemName: "pencil")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(DS.accentText.opacity(0.6))
+                        .foregroundStyle(DS.muted)
                 }
             }
             .buttonStyle(.plain)
@@ -590,7 +632,7 @@ struct NoteView: View {
             .accessibilityHint("Rename this speaker")
         } else {
             Text(unknownSpeakerName)
-                .font(.dsDisplay(15, .medium))
+                .font(.dsDisplay(15, .semibold))
                 .italic()
                 .foregroundStyle(DS.muted)
         }
@@ -713,5 +755,39 @@ private struct SectionEditor: View {
                 if !isFocused, focusNow { onDone() }
             }
             .animation(.easeOut(duration: 0.12), value: focused)
+    }
+}
+
+
+/// Initials in a tinted circle; the tint is a stable function of the
+/// name (same palette and hash as the web), so a person keeps their
+/// colour everywhere.
+struct SpeakerAvatar: View {
+    let name: String
+
+    private static let tints: [Color] = [
+        Color.ds("4f7a5e", "4f7a5e"), Color.ds("b5673c", "b5673c"), Color.ds("8a6d2f", "8a6d2f"),
+        Color.ds("4a6d8c", "4a6d8c"), Color.ds("7a5a8c", "7a5a8c"), Color.ds("3f7f7a", "3f7f7a"),
+    ]
+
+    private var tint: Color {
+        let h = name.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % Self.tints.count }
+        return Self.tints[h]
+    }
+
+    private var initials: String {
+        let words = name.split(whereSeparator: \.isWhitespace).map(String.init)
+        let pick = words.count >= 2 ? [words[0], words[words.count - 1]] : Array(words.prefix(1))
+        let out = pick.compactMap { $0.first.map { String($0).uppercased() } }.joined()
+        return out.isEmpty ? "•" : out
+    }
+
+    var body: some View {
+        Text(initials)
+            .font(.dsDisplay(11.5, .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(tint.opacity(0.16)))
+            .padding(.top, 1)
     }
 }

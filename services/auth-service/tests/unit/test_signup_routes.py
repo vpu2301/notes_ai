@@ -177,7 +177,7 @@ class FakeConn:
     def __init__(self, store: FakeStore) -> None:
         self._store = store
 
-    async def execute(self, sql: str, *args: Any) -> None:
+    async def execute(self, sql: str, *args: Any) -> str | None:
         if self._store.fail_writes:
             raise RuntimeError("database is down")
         sql_l = " ".join(sql.split()).lower()
@@ -189,7 +189,22 @@ class FakeConn:
                 exc.constraint_name = "tenants_name_key"  # type: ignore[attr-defined]
                 raise exc
             self._store.tenant_names.add(args[1])
-            self._store.tenants[args[0]] = {"name": args[1], "locale": args[4]}
+            self._store.tenants[args[0]] = {
+                "name": args[1],
+                "locale": args[4],
+                "signup_source": args[5],
+                "plan_limits": args[6],
+            }
+        elif sql_l.startswith("insert into referrals"):
+            self._store.referrals.append({"ref_code": args[0], "sub": args[1], "tenant_id": None})
+        elif sql_l.startswith("update referrals"):
+            stamped = 0
+            for row in self._store.referrals:
+                if row["sub"] == args[0] and row["tenant_id"] is None:
+                    row["tenant_id"] = args[1]
+                    stamped += 1
+            self._store.referrals_stamped += stamped
+            return f"UPDATE {stamped}"
         elif sql_l.startswith("insert into tenant_memberships"):
             self._store.memberships.append((args[0], args[1]))
         elif sql_l.startswith("insert into identities"):
@@ -217,8 +232,12 @@ class FakeConn:
 
     async def fetchval(self, sql: str, *args: Any) -> Any:
         sql_l = " ".join(sql.split()).lower()
+        if sql_l.startswith("update referrals"):
+            return None
         if "select 1 from identities where email" in sql_l:
-            return 1 if any(i["email"] == args[0] for i in self._store.identities.values()) else None
+            return (
+                1 if any(i["email"] == args[0] for i in self._store.identities.values()) else None
+            )
         if "select id from identities" in sql_l and "email_verified_at is null" in sql_l:
             for ident_id, row in self._store.identities.items():
                 if row["email"] == args[0] and row["verified_at"] is None:
@@ -244,6 +263,8 @@ class _Ctx:
 @dataclass
 class FakeStore:
     tenants: dict[UUID, dict[str, Any]] = field(default_factory=dict)
+    referrals: list[dict[str, Any]] = field(default_factory=list)
+    referrals_stamped: int = 0
     tenant_names: set[str] = field(default_factory=set)
     memberships: list[tuple[UUID, UUID]] = field(default_factory=list)
     users: dict[UUID, dict[str, Any]] = field(default_factory=dict)
@@ -314,7 +335,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Env:
         pool=store,  # type: ignore[arg-type]
         challenges=challenges,
         mailer=mailer,
-        config=SignupConfig(),
+        config=SignupConfig(disposable_domains=frozenset({"mailinator.com"})),
         limiter=limiter,
         audit=_audit,
     )
@@ -324,6 +345,9 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Env:
 
     deps.install_state(_State())  # type: ignore[arg-type]
     monkeypatch.setattr(settings, "signup_resend_seconds", 60)
+    # The timing floor is a property of the deployment, not of the logic
+    # under test; holding every request for 300 ms would only slow this file.
+    monkeypatch.setattr(settings, "signup_min_response_ms", 0)
 
     app = FastAPI()
     from observability import register_exception_handlers
@@ -603,7 +627,7 @@ async def test_the_concierge_path_creates_an_enabled_account_and_sends_no_code(
     # No verification mail: the operator IS the verification.
     assert not any(m.kind == "signup_verify" for m in env.mailer.sent)
     signup_event = next(a for a in env.audit if a["kind"] == "auth.signup")
-    assert signup_event["payload"] == {"source": "concierge"}
+    assert signup_event["payload"] == {"source": "concierge", "plan": "free", "ref_present": False}
 
 
 def test_a_generated_password_satisfies_the_policy_it_will_be_checked_against() -> None:
@@ -660,3 +684,98 @@ def test_an_expired_challenge_is_refused(env: Env) -> None:
     response = _verify(env, UNKNOWN, _code_for(env, UNKNOWN))
     assert response.status_code == 400
     assert response.json()["code"] == "challenge_expired"
+
+
+# ── Sprint 21: the conversion step ───────────────────────────────────
+
+
+def test_a_referred_signup_records_plan_source_and_attribution(env: Env) -> None:
+    r = env.client.post(
+        "/auth/signup",
+        json={
+            "email": UNKNOWN,
+            "password": GOOD_PASSWORD,
+            "display_name": "Tom",
+            "ref": "abcdefghijkl",
+        },
+    )
+    assert r.status_code == 202
+    (tenant,) = env.store.tenants.values()
+    assert tenant["signup_source"] == "referral"
+    assert tenant["plan_limits"] == '{"notes_per_month": 50, "members": 3}'
+    assert env.store.referrals == [
+        {"ref_code": "abcdefghijkl", "sub": _sub_of(env, UNKNOWN), "tenant_id": None}
+    ]
+    signup_event = next(a for a in env.audit if a["kind"] == "auth.signup")
+    assert signup_event["payload"] == {"source": "referral", "plan": "free", "ref_present": True}
+    assert "abcdefghijkl" not in repr(env.audit)
+
+    # Verifying makes the workspace real, and that is when it is attributed.
+    v = env.client.post(
+        "/auth/signup/verify", json={"email": UNKNOWN, "code": _code_for(env, UNKNOWN)}
+    )
+    assert v.status_code == 200
+    assert env.store.referrals[0]["tenant_id"] == _tenant_of(env, UNKNOWN)
+    verified_event = next(a for a in env.audit if a["kind"] == "auth.email_verified")
+    assert verified_event["payload"] == {"ref_present": True}
+
+
+def test_a_plain_signup_is_self_serve_with_no_referral_row(env: Env) -> None:
+    assert _signup(env, UNKNOWN).status_code == 202
+    (tenant,) = env.store.tenants.values()
+    assert tenant["signup_source"] == "self_serve"
+    assert env.store.referrals == []
+    env.client.post("/auth/signup/verify", json={"email": UNKNOWN, "code": _code_for(env, UNKNOWN)})
+    assert env.store.referrals_stamped == 0
+
+
+def test_a_bad_ref_code_is_refused_before_anything_is_created(env: Env) -> None:
+    r = env.client.post(
+        "/auth/signup",
+        json={
+            "email": UNKNOWN,
+            "password": GOOD_PASSWORD,
+            "display_name": "Tom",
+            "ref": "not a code",
+        },
+    )
+    assert r.status_code == 422
+    assert env.store.tenants == {}
+
+
+def test_a_disposable_address_gets_the_same_202_and_nothing_else(env: Env) -> None:
+    r = _signup(env, "throwaway@mailinator.com")
+    assert r.status_code == 202
+    assert r.json() == _signup(env, UNKNOWN).json()
+    assert "throwaway@mailinator.com" not in env.kc.users
+    assert not any(m.to == "throwaway@mailinator.com" for m in env.mailer.sent)
+    assert all(t["name"] != "throwaway" for t in env.store.tenants.values())
+
+
+def test_config_says_whether_signup_is_on(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auth_service import deps
+
+    r = env.client.get("/auth/signup/config")
+    assert r.status_code == 200
+    assert r.json() == {
+        "enabled": True,
+        "min_password_length": 12,
+        "disposable_domains_blocked": True,
+    }
+
+    class _Off:
+        onboarding_service = None
+
+    deps.install_state(_Off())  # type: ignore[arg-type]
+    assert env.client.get("/auth/signup/config").json()["enabled"] is False
+    assert _signup(env, UNKNOWN).status_code == 404
+
+
+def _sub_of(env: Env, email: str) -> UUID:
+    return env.kc.users[email]["id"]
+
+
+def _tenant_of(env: Env, email: str) -> UUID:
+    return next(
+        row["last_tenant_id"] for row in env.store.identities.values() if row["email"] == email
+    )

@@ -308,6 +308,47 @@ def test_result_410_when_ciphertext_erased(
     assert rig.audit.events == []  # nothing served → nothing audited
 
 
+def test_result_503_when_object_store_not_configured(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stack may run with ``S3_ENDPOINT`` empty. A complete job's
+    transcript then cannot be read, and the answer has to say so: 503 with
+    a code, not the opaque 500 that aiobotocore's ``Invalid endpoint``
+    ValueError produced (request 39BEEB90-…, NOTE-2026-00016). This is
+    not the 410: the ciphertext is still there, the service just has
+    nowhere to read it from — and nothing was served, so nothing is audited."""
+    from asr_service import deps
+    from asr_service.routers import jobs
+    from storage import EncryptedObjectStore, S3Client
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return _job_view(JobStatus.COMPLETE)
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    unconfigured = EncryptedObjectStore(
+        s3=S3Client(endpoint_url="", access_key="", secret_key=""),
+        bucket="mdx-transcripts",
+        envelope=object(),  # type: ignore[arg-type]  — never reached: the S3 call fails first
+    )
+    deps.install_state(
+        SimpleNamespace(  # type: ignore[arg-type]
+            app_pool=object(),
+            transcript_store=unconfigured,
+            audit_writer=rig.audit,
+            nlp_client=rig.nlp,
+        )
+    )
+
+    resp = rig.client.get(f"/asr/jobs/{uuid4()}/result")
+    assert resp.status_code == 503, resp.text
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert body["code"] == "object_store_not_configured"
+    assert body["type"] == "urn:mdx:storage:not-configured"
+    assert "S3_ENDPOINT" in body["detail"]
+    assert rig.audit.events == []
+
+
 # ── Speaker structure survives enrichment (Ambient Capture) ─────────
 
 
@@ -452,3 +493,17 @@ def test_put_speakers_404_for_unknown_job(
     monkeypatch.setattr(jobs.repository, "set_speaker_names", _set)
     resp = rig.client.put(f"/asr/jobs/{uuid4()}/speakers", json={"names": {"SPEAKER_1": "A"}})
     assert resp.status_code == 404
+
+
+def test_limits_say_what_one_upload_may_be(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The clients read this before recording, so they can warn before the
+    cap rather than be refused after it."""
+    from asr_service.config import settings
+
+    monkeypatch.setattr(settings, "max_duration_seconds", 5400)
+    monkeypatch.setattr(settings, "max_upload_mb", 250)
+    resp = rig.client.get("/asr/limits")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"max_duration_seconds": 5400, "max_upload_mb": 250}

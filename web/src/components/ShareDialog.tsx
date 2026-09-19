@@ -1,4 +1,4 @@
-import {
+import React, {
   useCallback,
   useEffect,
   useState,
@@ -8,16 +8,54 @@ import {
 } from "react";
 import { errorMessage } from "../api/http";
 import {
+  createLink,
   createPublicLink,
   getSharing,
+  revokeLink,
+  sendLink,
   revokePublicLink,
   setVisibility,
   shareByEmail,
   unshareMember,
 } from "../api/notes";
-import type { NoteVisibility, ShareEmailOutcome, SharingView } from "../api/types";
+import type { LinkView, NoteVisibility, ShareEmailOutcome, SharingView } from "../api/types";
 import { useToast } from "./Toaster";
-import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, MailIcon } from "./icons";
+import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, GlobeIcon, LockIcon, MailIcon, UsersIcon } from "./icons";
+import { speakerInitials, speakerTint } from "../lib/speakers";
+import { Select } from "./Select";
+
+const EXPIRY_OPTIONS = [7, 30, 90, 180] as const;
+/** Public links may also live forever (0 = never). */
+const PUBLIC_EXPIRY_OPTIONS = [0, 7, 30, 90, 180] as const;
+
+function opened(link: LinkView): string {
+  if (!link.first_viewed_at) return "Not opened";
+  return `Opened ${new Date(link.first_viewed_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}
+
+const MAX_SENDS = 3;
+
+/** The chip text for one link: what the product did with it. */
+export function deliveryLabel(link: LinkView): string {
+  switch (link.delivery_status ?? "not_sent") {
+    case "sent":
+      return link.sent_at
+        ? `Sent ${new Date(link.sent_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+        : "Sent";
+    case "failed":
+      return "Failed";
+    case "suppressed":
+      return "Opted out";
+    default:
+      return "Not sent";
+  }
+}
+
+/** A label from an address when the sender left the label empty: "tom @ client.com". */
+export function labelFromEmail(email: string): string {
+  const [local, domain] = email.trim().split("@");
+  return domain ? `${local} @ ${domain}` : email.trim();
+}
 
 /** Full URL an outsider opens for a public link. */
 export function publicLinkUrl(path: string): string {
@@ -38,13 +76,30 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
  * Here the addresses are picked, the message is typed, and the server
  * sends the real mail.
  */
+export interface ShareOwner {
+  name: string;
+  email: string;
+  isMe: boolean;
+}
+
+function Avatar({ name }: { name: string }) {
+  return (
+    <span className="speaker-avatar share-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
+      {speakerInitials(name)}
+    </span>
+  );
+}
+
 export function ShareDialog({
   noteId,
   noteTitle,
+  owner,
   onClose,
 }: {
   noteId: string;
   noteTitle: string;
+  /** The note's author, shown first under "People with access". */
+  owner?: ShareOwner;
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -52,6 +107,17 @@ export function ShareDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // The client link form (Sprint 19).
+  const [clientLabel, setClientLabel] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientMessage, setClientMessage] = useState("");
+  const [clientDays, setClientDays] = useState<(typeof EXPIRY_OPTIONS)[number]>(90);
+  const [newLink, setNewLink] = useState<LinkView | null>(null);
+  const [linkFormOpen, setLinkFormOpen] = useState(false);
+  // How long the next public link lives; 0 = never.
+  const [publicDays, setPublicDays] = useState<(typeof PUBLIC_EXPIRY_OPTIONS)[number]>(0);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   // The compose box: confirmed addresses, plus whatever is half-typed.
   const [recipients, setRecipients] = useState<string[]>([]);
@@ -97,17 +163,6 @@ export function ShareDialog({
   const subject = noteTitle.trim() || "A note";
   const link = view?.public_link ? publicLinkUrl(view.public_link.path) : null;
   const canManage = view?.can_manage ?? false;
-
-  const copyLink = async () => {
-    if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Could not copy — select the link and copy it by hand.");
-    }
-  };
 
   // ── the compose box ───────────────────────────────────────────────
 
@@ -173,7 +228,7 @@ export function ShareDialog({
     setError(null);
     setFailures([]);
     try {
-      const result = await shareByEmail(noteId, { recipients: to, message });
+      const result = await shareByEmail(noteId, { recipients: to, message, expires_in_days: clientDays });
       setView(result.sharing);
       const sent = result.results.filter((r) => r.status === "sent");
       setFailures(result.results.filter((r) => r.status !== "sent"));
@@ -193,12 +248,165 @@ export function ShareDialog({
 
   const readyToSend = recipients.length > 0 || EMAIL_RE.test(draft.trim());
 
+  // ── client links ──────────────────────────────────────────────────
+
+  const clientLinks = (view?.links ?? []).filter((l) => l.kind === "recipient");
+  // Sprint 23: the workspace's rules. Older servers send no constraints.
+  const rules = view?.constraints;
+  const externalOff = rules ? !rules.external_links_enabled : false;
+  const publicOff = rules ? !rules.public_links_enabled : false;
+  const expiryOptions = EXPIRY_OPTIONS.filter((d) => !rules || d <= rules.max_link_days);
+  const emailRequired = rules?.verified_recipients_required ?? false;
+  useEffect(() => {
+    const at = view?.public_link?.expires_at;
+    if (!view?.public_link) return;
+    if (!at) {
+      setPublicDays(0);
+      return;
+    }
+    const days = Math.round((new Date(at).getTime() - new Date(view.public_link.created_at).getTime()) / 86_400_000);
+    const nearest = PUBLIC_EXPIRY_OPTIONS.reduce((best, d) => (d > 0 && Math.abs(d - days) < Math.abs(best - days) ? d : best), 180 as (typeof PUBLIC_EXPIRY_OPTIONS)[number]);
+    setPublicDays(nearest);
+  }, [view?.public_link]);
+
+  useEffect(() => {
+    if (rules && clientDays > rules.max_link_days) {
+      setClientDays((expiryOptions[expiryOptions.length - 1] ?? 30) as (typeof EXPIRY_OPTIONS)[number]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rules?.max_link_days]);
+
+  const copyText = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedLink(key);
+      window.setTimeout(() => setCopiedLink(null), 1500);
+    } catch {
+      toast.error("Could not copy — select the link and copy it by hand.");
+    }
+  };
+
+  const createClientLink = async (e: FormEvent, send = false) => {
+    e.preventDefault();
+    const email = clientEmail.trim();
+    const label = clientLabel.trim() || (email ? labelFromEmail(email) : "");
+    if (!label) return;
+    if (email && !EMAIL_RE.test(email)) {
+      setError(`“${email}” doesn’t look like an e-mail address.`);
+      return;
+    }
+    if (send && !email) {
+      setError("Add the recipient's e-mail address to send the link.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const link = await createLink(noteId, {
+        label,
+        recipient_email: email || undefined,
+        expires_in_days: clientDays,
+        send,
+        personal_message: send && clientMessage.trim() ? clientMessage.trim() : undefined,
+        lang: send ? navigator.language.slice(0, 2) : undefined,
+        source: "dialog",
+      });
+      setNewLink(link);
+      setClientLabel("");
+      setClientEmail("");
+      setClientMessage("");
+      setView(await getSharing(noteId));
+      toast.success(send ? (link.delivery_status === "sent" ? `Sent to ${email}` : "Link created, but the e-mail did not go out") : "Link created");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendClientLink = async (link: LinkView) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await sendLink(noteId, link.id, { lang: navigator.language.slice(0, 2) });
+      setView(await getSharing(noteId));
+      toast.success(next.delivery_status === "sent" ? "Sent" : "The e-mail did not go out");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revokeClientLink = async (link: LinkView) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeLink(noteId, link.id);
+      if (newLink?.id === link.id) setNewLink(null);
+      setView(await getSharing(noteId));
+      toast.success("Link turned off");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const members = view?.shared_with ?? [];
+  const hasPeople = owner !== undefined || members.length > 0 || clientLinks.length > 0;
+  const composing = recipients.length > 0 || draft.trim().length > 0;
+
+  // General access, the way a file's share sheet says it: one choice.
+  const accessValue: "private" | "workspace" | "link" = link ? "link" : (view?.visibility ?? "private");
+  const setAccess = (value: "private" | "workspace" | "link") => {
+    if (!view || value === accessValue) return;
+    if (value === "link") {
+      void run(() => createPublicLink(noteId, publicDays || undefined), "Anyone with the link can now open it");
+      return;
+    }
+    void run(async () => {
+      if (link) await revokePublicLink(noteId);
+      return view.visibility === value ? getSharing(noteId) : setVisibility(noteId, value as NoteVisibility);
+    });
+  };
+  const accessText = {
+    private: "Only you and the people you share it with can open it.",
+    workspace: "Everyone in your workspace can open it.",
+    link: "Anyone with the link can read and download it, without signing in — but not respond.",
+  }[accessValue];
+
+  /** A public link's expiry can only be set when it is minted: changing
+      it later mints a new link, and the old one stops working. */
+  const renewPublicLink = (days: (typeof PUBLIC_EXPIRY_OPTIONS)[number]) => {
+    setPublicDays(days);
+    if (!link) return;
+    void run(async () => {
+      await revokePublicLink(noteId);
+      return createPublicLink(noteId, days || undefined);
+    }, "New link created — the previous one no longer works");
+  };
+  const publicExpiry = view?.public_link?.expires_at
+    ? `Expires ${new Date(view.public_link.expires_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
+    : "Never expires";
+  const AccessIcon = accessValue === "link" ? GlobeIcon : accessValue === "workspace" ? UsersIcon : LockIcon;
+
+  const copyFooterLink = async () => {
+    const url = link ?? `${window.location.origin}/notes/${noteId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy — select the link and copy it by hand.");
+    }
+  };
+
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share note">
         <div className="modal-h">
           <h2>Share “{subject}”</h2>
-          <p>Send it to people, or decide who can see it.</p>
           <button className="icon-btn modal-x" aria-label="Close" onClick={onClose}>
             <CloseIcon size={14} />
           </button>
@@ -214,179 +422,274 @@ export function ShareDialog({
 
           {view && (
             <>
-              {/* ── send it ────────────────────────────────────────── */}
-              <form className="field" onSubmit={(e) => void send(e)}>
-                <span className="label">Send to</span>
-                <div className="chip-input" onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>
-                  {recipients.map((address) => (
-                    <span className="recipient-chip" key={address.toLowerCase()}>
-                      {address}
-                      <button
-                        type="button"
-                        aria-label={`Remove ${address}`}
-                        disabled={busy}
-                        onClick={() =>
-                          setRecipients((current) => current.filter((r) => r !== address))
-                        }
-                      >
-                        <CloseIcon size={11} />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    type="email"
-                    multiple
-                    aria-label="E-mail address"
-                    placeholder={recipients.length ? "" : "name@company.com"}
-                    value={draft}
-                    disabled={busy || !canManage}
-                    onChange={(e) => {
-                      setDraft(e.target.value);
-                      setDraftError(null);
-                    }}
-                    onKeyDown={onDraftKeyDown}
-                    onPaste={onPaste}
-                    onBlur={() => commitDraft()}
-                  />
-                </div>
-                {draftError && <span className="help danger-text">{draftError}</span>}
-
-                <textarea
-                  className="textarea share-message"
-                  rows={3}
-                  placeholder="Add a message (optional)"
-                  aria-label="Message"
-                  value={message}
-                  disabled={busy || !canManage}
-                  maxLength={1000}
-                  onChange={(e) => setMessage(e.target.value)}
-                />
-
-                <div className="row-actions">
-                  <button className="btn primary sm" type="submit" disabled={busy || !canManage || !readyToSend}>
-                    <MailIcon size={13} /> {busy ? "Sending…" : "Send"}
-                  </button>
-                  <span className="help grow">
-                    People in your workspace get access to the note. Anyone else gets a link
-                    they can open without signing in.
-                  </span>
-                </div>
-
-                {failures.length > 0 && (
-                  <div className="banner banner-warn">
-                    <AlertIcon size={15} />
-                    <span className="grow">
-                      {failures.map((f) => f.email).join(", ")} did not go out —{" "}
-                      {failures.every((f) => f.status === "rejected")
-                        ? "the address was refused. Check the spelling."
-                        : "the mail server did not take it. Try again in a moment."}
-                    </span>
-                  </div>
-                )}
-              </form>
-
-              {/* ── visibility ─────────────────────────────────────── */}
-              <div className="field">
-                <span className="label">In the workspace</span>
-                <div className="seg" role="group" aria-label="Visibility">
-                  {(
-                    [
-                      ["private", "Only me and people I share with"],
-                      ["workspace", "Everyone in the workspace"],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className="seg-opt"
-                      aria-pressed={view.visibility === value}
-                      disabled={busy || !canManage}
-                      onClick={() =>
-                        view.visibility !== value &&
-                        void run(() => setVisibility(noteId, value as NoteVisibility))
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* ── public link ────────────────────────────────────── */}
-              <div className="field">
-                <span className="label">Anyone with the link</span>
-                {link ? (
-                  <>
-                    <div className="share-link-row">
-                      <input className="input mono" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
-                      <button className="btn sm" onClick={() => void copyLink()} title="Copy link">
-                        {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />} {copied ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                    <div className="row-actions">
-                      {canManage && (
+              {/* ── send ───────────────────────────────────────────── */}
+              <section className="share-sec" aria-label="Send">
+                <form className="share-sec" onSubmit={(e) => void send(e)}>
+                  <div className="chip-input share-people-box" onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>
+                    {recipients.map((address) => (
+                      <span className="recipient-chip" key={address.toLowerCase()}>
+                        {address}
                         <button
-                          className="btn ghost sm danger-text"
+                          type="button"
+                          aria-label={`Remove ${address}`}
                           disabled={busy}
-                          onClick={() => void run(() => revokePublicLink(noteId), "Link turned off")}
+                          onClick={() => setRecipients((current) => current.filter((r) => r !== address))}
                         >
-                          Turn off link
+                          <CloseIcon size={11} />
                         </button>
-                      )}
-                      <span className="help grow right">
-                        {view.public_link?.view_count
-                          ? `Opened ${view.public_link.view_count} time${view.public_link.view_count === 1 ? "" : "s"}`
-                          : "Not opened yet"}
+                      </span>
+                    ))}
+                    <input
+                      type="email"
+                      multiple
+                      aria-label="E-mail address"
+                      placeholder={recipients.length ? "" : "Add people by e-mail"}
+                      value={draft}
+                      disabled={busy || !canManage}
+                      onChange={(e) => {
+                        setDraft(e.target.value);
+                        setDraftError(null);
+                      }}
+                      onKeyDown={onDraftKeyDown}
+                      onPaste={onPaste}
+                      onBlur={() => commitDraft()}
+                    />
+                  </div>
+                  {draftError && <span className="help danger-text">{draftError}</span>}
+                  {composing && (
+                  <>
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    placeholder="Add a message (optional)"
+                    aria-label="Message"
+                    value={message}
+                    disabled={busy || !canManage}
+                    maxLength={1000}
+                    onChange={(e) => setMessage(e.target.value)}
+                  />
+                  <div className="share-send-row">
+                    {!externalOff && (
+                      <Select
+                        label="Link expires after"
+                        value={clientDays}
+                        disabled={busy}
+                        options={expiryOptions.map((d) => ({ value: d, label: `Link expires in ${d} days` }))}
+                        onChange={setClientDays}
+                      />
+                    )}
+                    <span className="help grow">
+                      {externalOff
+                        ? "Workspace members get access. Sharing outside the workspace is off for this workspace."
+                        : "Members get access. Anyone else gets their own link: they can read, download the PDF and confirm or dispute action items, and you see when they open it."}
+                    </span>
+                    <button className="btn moss" type="submit" disabled={busy || !canManage || !readyToSend}>
+                      <MailIcon size={13} /> {busy ? "Sending…" : "Send"}
+                    </button>
+                  </div>
+                  </>
+                  )}
+                  {failures.length > 0 && (
+                    <div className="banner banner-warn">
+                      <AlertIcon size={15} />
+                      <span className="grow">
+                        {failures.map((f) => f.email).join(", ")} did not go out —{" "}
+                        {failures.every((f) => f.status === "rejected")
+                          ? "the address was refused. Check the spelling."
+                          : "the mail server did not take it. Try again in a moment."}
                       </span>
                     </div>
-                  </>
-                ) : (
-                  <div className="row-actions">
-                    <button
-                      className="btn sm"
-                      disabled={busy || !canManage}
-                      onClick={() => void run(() => createPublicLink(noteId), "Public link created")}
-                    >
-                      Create public link
+                  )}
+                </form>
+
+                {canManage && !externalOff && (
+                  <div className="share-more">
+                    <button type="button" className="btn ghost sm" aria-expanded={linkFormOpen} onClick={() => setLinkFormOpen((o) => !o)}>
+                      {linkFormOpen ? "Hide" : "Create a link without sending…"}
                     </button>
-                    <span className="help">Anyone who has it can read the note, without signing in.</span>
+                    {linkFormOpen && (
+                      <form className="share-link-form" onSubmit={(e) => void createClientLink(e, false)}>
+                        <input
+                          className="input"
+                          aria-label="Recipient label"
+                          placeholder="Who is it for? e.g. Tom @ Client"
+                          value={clientLabel}
+                          disabled={busy}
+                          maxLength={120}
+                          onChange={(e) => setClientLabel(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          type="email"
+                          aria-label="Recipient e-mail"
+                          placeholder={emailRequired ? "Their e-mail" : "Their e-mail (optional)"}
+                          value={clientEmail}
+                          disabled={busy}
+                          onChange={(e) => setClientEmail(e.target.value)}
+                        />
+                        <button
+                          className="btn sm"
+                          type="submit"
+                          disabled={busy || (!clientLabel.trim() && !clientEmail.trim()) || (emailRequired && !clientEmail.trim())}
+                        >
+                          Create link only
+                        </button>
+                        {emailRequired && (
+                          <span className="help share-link-form-help">Recipients must confirm a code sent to their e-mail before they can respond.</span>
+                        )}
+                        {newLink && (
+                          <div className="share-link-row share-link-form-row">
+                            <input
+                              className="input mono"
+                              readOnly
+                              aria-label="Client link"
+                              value={publicLinkUrl(newLink.path)}
+                              onFocus={(e) => e.currentTarget.select()}
+                            />
+                            <button type="button" className="btn sm" onClick={() => void copyText(publicLinkUrl(newLink.path), newLink.id)} title="Copy link">
+                              {copiedLink === newLink.id ? <CheckIcon size={13} /> : <CopyIcon size={13} />} {copiedLink === newLink.id ? "Copied" : "Copy"}
+                            </button>
+                          </div>
+                        )}
+                      </form>
+                    )}
                   </div>
                 )}
-              </div>
+              </section>
 
-              {view.shared_with.length > 0 && (
-                <div className="field">
-                  <span className="label">People with access</span>
+              {/* ── people ─────────────────────────────────────────── */}
+              {hasPeople && (
+                <section className="share-sec">
+                  <h3 className="share-h">People with access</h3>
                   <ul className="share-people" aria-label="People with access">
-                    {view.shared_with.map((m) => (
+                    {owner && (
+                      <li>
+                        <Avatar name={owner.name || owner.email} />
+                        <span className="share-person">
+                          <span className="row-name">
+                            {owner.name || owner.email}
+                            {owner.isMe && " (you)"}
+                          </span>
+                          {owner.name && <span className="help">{owner.email}</span>}
+                        </span>
+                        <span className="share-role">Owner</span>
+                      </li>
+                    )}
+                    {members.map((m) => (
                       <li key={m.sub}>
+                        <Avatar name={m.display_name || m.email} />
                         <span className="share-person">
                           <span className="row-name">{m.display_name || m.email}</span>
-                          <span className="help">{m.email}</span>
+                          {m.display_name && <span className="help">{m.email}</span>}
                         </span>
+                        <span className="share-role">Member</span>
                         {canManage && (
-                          <button
-                            className="icon-btn"
-                            aria-label={`Remove ${m.email}`}
-                            title="Remove"
-                            disabled={busy}
-                            onClick={() => void run(() => unshareMember(noteId, m.sub))}
-                          >
+                          <button className="icon-btn" aria-label={`Remove ${m.email}`} title="Remove" disabled={busy} onClick={() => void run(() => unshareMember(noteId, m.sub))}>
                             <CloseIcon size={13} />
                           </button>
                         )}
                       </li>
                     ))}
+                    {clientLinks.map((l) => (
+                      <li key={l.id}>
+                        <Avatar name={l.label || l.recipient_email || "Link"} />
+                        <span className="share-person">
+                          <span className="row-name">
+                            {l.label || l.recipient_email || "Link"}
+                            {l.cta_clicked_at && <span className="cta-dot" title="Clicked “create your own workspace”" />}
+                          </span>
+                          <span className="share-meta">
+                            <span className={`chip delivery-${l.delivery_status ?? "not_sent"}`}>{deliveryLabel(l)}</span>
+                            <span className="help">{opened(l)}</span>
+                            {(l.response_count ?? 0) > 0 && <span className="help">· Responded ({l.response_count})</span>}
+                            {l.expires_at && <span className="help">· expires {new Date(l.expires_at).toLocaleDateString()}</span>}
+                          </span>
+                        </span>
+                        <span className="share-actions">
+                          {l.recipient_email && l.delivery_status !== "suppressed" && (l.send_count ?? 0) < MAX_SENDS && (
+                            <button type="button" className="btn ghost sm" disabled={busy} onClick={() => void resendClientLink(l)}>
+                              {l.delivery_status === "failed" ? "Retry" : (l.send_count ?? 0) > 0 ? "Resend" : "Send"}
+                            </button>
+                          )}
+                          <button type="button" className="btn ghost sm" disabled={busy} onClick={() => void copyText(publicLinkUrl(l.path), l.id)}>
+                            {copiedLink === l.id ? "Copied" : "Copy"}
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`Turn off link for ${l.label || l.recipient_email || "recipient"}`}
+                            title="Turn off"
+                            disabled={busy}
+                            onClick={() => void revokeClientLink(l)}
+                          >
+                            <CloseIcon size={13} />
+                          </button>
+                        </span>
+                      </li>
+                    ))}
                   </ul>
-                </div>
+                </section>
               )}
+
+              {/* ── general access ─────────────────────────────────── */}
+              <section className="share-sec">
+                <h3 className="share-h">General access</h3>
+                <div className="share-access">
+                  <span className={`share-access-icon ${accessValue}`} aria-hidden="true">
+                    <AccessIcon size={16} />
+                  </span>
+                  <div className="share-access-body">
+                    <Select<"private" | "workspace" | "link">
+                      label="General access"
+                      variant="text"
+                      value={accessValue}
+                      disabled={busy || !canManage}
+                      options={[
+                        { value: "private", label: "Restricted" },
+                        { value: "workspace", label: "Everyone in the workspace" },
+                        ...(!publicOff || link ? [{ value: "link" as const, label: "Anyone with the link" }] : []),
+                      ]}
+                      onChange={setAccess}
+                    />
+                    <span className="help">{accessText}</span>
+                  </div>
+                </div>
+                {accessValue === "link" && (
+                  <div className="share-access share-access-sub">
+                    <span className="share-access-spacer" aria-hidden="true" />
+                    <div className="share-access-body">
+                      <Select
+                        label="Public link expires"
+                        value={publicDays}
+                        disabled={busy || !canManage}
+                        options={PUBLIC_EXPIRY_OPTIONS.map((d) => ({
+                          value: d,
+                          label: d === 0 ? "Permanent — never expires" : `Limited — ${d} days`,
+                        }))}
+                        onChange={renewPublicLink}
+                      />
+                      <span className="help">
+                        {link ? `${publicExpiry} · ` : ""}
+                        {view.public_link?.view_count
+                          ? `opened ${view.public_link.view_count} time${view.public_link.view_count === 1 ? "" : "s"}`
+                          : "not opened yet"}
+                        {link && " · changing the duration creates a new link"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </section>
             </>
           )}
           {!view && !error && <p className="help">Loading…</p>}
         </div>
 
-        <div className="modal-f">
-          <button className="btn" onClick={onClose}>
+        <div className="modal-f share-f">
+          <button className="btn moss-outline" onClick={() => void copyFooterLink()} title={link ? "Copy the public link" : "Copy the link to this note"}>
+            {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy link"}
+          </button>
+          <span className="grow" />
+          <button className="btn moss" onClick={onClose}>
             Done
           </button>
         </div>

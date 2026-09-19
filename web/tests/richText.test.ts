@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inlineSpans, parseRichText, richTextPreview } from "../src/lib/richText";
+import { inlineSpans, isTranscript, parseRichText, richTextPreview } from "../src/lib/richText";
 
 /** The flat text of a block, ignoring where the emphasis fell. */
 function flat(spans: { text: string }[]): string {
@@ -18,6 +18,15 @@ describe("parseRichText", () => {
     expect(blocks[0]).toMatchObject({ kind: "para" });
     expect(flat((blocks[0] as { spans: { text: string }[] }).spans)).toBe("one two");
     expect(flat((blocks[1] as { spans: { text: string }[] }).spans)).toBe("three");
+  });
+
+  it("reads a short `Name:` lead as a speaker turn", () => {
+    const blocks = parseRichText("Anna: we ship\nFriday.\n\nTom Client: fine.\n\nOne two three four five: prose\n\nhttps://x.test/a: link");
+    expect(blocks[0]).toMatchObject({ kind: "para", speaker: "Anna" });
+    expect(flat((blocks[0] as { spans: { text: string }[] }).spans)).toBe("we ship Friday.");
+    expect(blocks[1]).toMatchObject({ kind: "para", speaker: "Tom Client" });
+    expect((blocks[2] as { speaker?: string }).speaker).toBeUndefined();
+    expect((blocks[3] as { speaker?: string }).speaker).toBeUndefined();
   });
 
   it("starts body headings at h3 — h1 and h2 are the document's own", () => {
@@ -85,6 +94,18 @@ describe("parseRichText", () => {
   it("carries a heading's text through unescaped — React does the escaping", () => {
     const blocks = parseRichText("# <script>alert(1)</script>");
     expect(flat((blocks[0] as { spans: { text: string }[] }).spans)).toBe("<script>alert(1)</script>");
+  });
+});
+
+describe("isTranscript", () => {
+  it("is true when most paragraphs are speaker turns", () => {
+    expect(isTranscript("Speaker 1: eins\n\nUnknown speaker: zwei\n\nNote to self")).toBe(true);
+    expect(isTranscript("Anna: hi.\n\nTom: hi.")).toBe(true);
+  });
+  it("is false for a roster, prose or links", () => {
+    expect(isTranscript("Anna, Tom")).toBe(false);
+    expect(isTranscript("Decision: ship it.\n\nWe discussed the roadmap at length.")).toBe(false);
+    expect(isTranscript("https://x.test: a\n\nhttps://y.test: b")).toBe(false);
   });
 });
 

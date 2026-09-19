@@ -35,6 +35,12 @@
 .btn.ghost:hover:not([disabled]) { background: var(--surface-2); border-color: transparent; color: var(--text-1); }
 .btn.ghost[aria-pressed="true"] { background: var(--surface-2); color: var(--text-1); }
 /* Destructive: filled red, as on the Mac. */
+/* Moss: the one action that matters in a sheet (Send, Done), and its
+   outlined companion (Copy link). */
+.btn.moss { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink); }
+.btn.moss:hover:not([disabled]) { background: var(--accent-2); border-color: var(--accent-2); color: var(--accent-ink); }
+.btn.moss-outline { background: transparent; border-color: var(--accent); color: var(--accent-text); }
+.btn.moss-outline:hover:not([disabled]) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover:not([disabled]) { background: var(--danger-2); border-color: var(--danger-2); color: #fff; }
 /* The one loud red: the recording control. */
@@ -198,7 +204,7 @@
   text-transform: capitalize;
 }
 .chip.draft     { background: var(--surface-2); color: var(--muted); }
-.chip.finalized { background: var(--ok-soft); color: var(--ok); }
+.chip.done { background: var(--ok-soft); color: var(--ok); }
 .chip.amended   { background: var(--indigo-soft); color: var(--indigo); }
 .chip.cancelled { background: var(--warn-soft); color: var(--warn); }
 .chip.queued    { background: var(--surface-2); color: var(--muted); }
@@ -616,15 +622,71 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 }
 
 /* ─── Share dialog (0016) ───────────────────────────────────────────────── */
-.share-modal { max-width: 520px; }
+.share-modal { max-width: 560px; }
 .share-modal .modal-h { position: relative; padding-right: calc(52px * var(--density)); }
+.share-modal .modal-b > * + * { margin-top: 0; }
 .modal-x { position: absolute; top: calc(12px * var(--density)); right: calc(14px * var(--density)); }
+/* Three blocks — send, people, access — each a column with one rhythm,
+   separated by a hairline rather than by whitespace alone. */
+.share-sec { display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
+.share-sec + .share-sec { margin-top: calc(20px * var(--density)); padding-top: calc(18px * var(--density)); border-top: var(--hairline) solid var(--line-2); }
+.share-sec .banner { margin-top: 0; }
+.share-send-row { display: flex; align-items: center; gap: calc(10px * var(--density)); }
+.share-send-row .help { flex: 1; min-width: 0; line-height: 1.4; }
+.share-send-row .dropdown-host { flex: none; }
+.share-more { display: flex; flex-direction: column; gap: calc(8px * var(--density)); align-items: flex-start; }
+.share-more .btn.ghost { padding-left: 0; height: auto; font-size: calc(12.5px * var(--fs)); color: var(--accent-text); }
+.share-more .btn.ghost:hover:not([disabled]) { background: transparent; text-decoration: underline; }
+.share-link-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: calc(8px * var(--density)); align-items: center; width: 100%; }
+.share-link-form-help, .share-link-form-row { grid-column: 1 / -1; }
 .share-link-row { display: flex; gap: calc(8px * var(--density)); align-items: center; }
 .share-link-row .input { flex: 1; min-width: 0; }
-.share-modal .seg { display: flex; }
-.share-modal .seg-opt { flex: 1; justify-content: center; }
-.share-modal .field + .field, .share-modal form.field { margin-top: calc(16px * var(--density)); }
-.share-modal .help.right { text-align: right; }
+.share-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.share-h { margin: 0; font-family: var(--display); font-size: calc(15px * var(--fs)); font-weight: 600; letter-spacing: -0.005em; color: var(--text-1); }
+.share-people-box { min-height: calc(42px * var(--density)); padding: calc(7px * var(--density)) calc(12px * var(--density)); }
+.share-people-box input { font-size: calc(14px * var(--fs)); }
+.share-modal .share-people { border: 0; border-radius: 0; }
+.share-modal .share-people li { padding: calc(6px * var(--density)) 0; border-top: 0; }
+.share-avatar { width: 32px; height: 32px; font-size: 12.5px; }
+.share-role { font-size: calc(12.5px * var(--fs)); color: var(--muted); flex: none; }
+.share-access { display: flex; align-items: center; gap: calc(12px * var(--density)); }
+.share-access-icon { width: 36px; height: 36px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text-2); }
+.share-access-icon.workspace { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text); }
+.share-access-icon.link { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--accent-text); }
+.share-access-body { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
+.share-access-sub { margin-top: calc(2px * var(--density)); }
+.share-access-sub .share-access-body { gap: 6px; }
+
+.share-access-spacer { width: 36px; flex: none; }
+/* The app's own dropdown trigger: a field, or a bare sentence with a chevron. */
+.select-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: calc(32px * var(--density)); padding: 0 calc(9px * var(--density)) 0 calc(11px * var(--density));
+  background: var(--surface); border: var(--hairline) solid var(--line); border-radius: var(--radius);
+  font: inherit; font-size: calc(12.5px * var(--fs)); color: var(--text-2); cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.select-btn:hover:not([disabled]) { border-color: var(--line-hover); color: var(--text-1); }
+.select-btn[aria-expanded="true"] { border-color: var(--line-active); box-shadow: 0 0 0 3px var(--accent-soft); }
+.select-btn[disabled] { background: var(--surface-2); color: var(--text-3); cursor: default; }
+.select-btn svg { color: var(--muted); flex: none; }
+.select-btn-label { white-space: nowrap; }
+.select-btn.select-text {
+  height: auto; padding: 2px 4px 2px 6px; margin-left: -6px; border-color: transparent; background: transparent;
+  font-size: calc(14px * var(--fs)); font-weight: 500; color: var(--text-1); border-radius: var(--radius-sm);
+}
+.select-btn.select-text:hover:not([disabled]) { background: var(--surface-2); }
+.select-btn.select-text[aria-expanded="true"] { background: var(--surface-2); box-shadow: none; }
+.select-btn.select-text[disabled] { background: transparent; color: var(--text-2); }
+.select-btn.select-text svg { color: var(--text-1); }
+.share-access-body .dropdown-host { align-self: flex-start; }
+.share-f .btn { height: 34px; padding: 0 calc(16px * var(--density)); border-radius: var(--radius-pill); }
+.share-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+@media (max-width: 560px) {
+  .share-send-row { flex-wrap: wrap; }
+  .share-send-row .help { order: 3; flex-basis: 100%; }
+  .share-link-form { grid-template-columns: 1fr; }
+}
 .danger-text { color: var(--danger-text); }
 
 /* The recipient box: a field that happens to contain chips. It borrows
@@ -670,8 +732,6 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   background: transparent; color: var(--muted); cursor: pointer;
 }
 .recipient-chip button:hover:not(:disabled) { background: var(--line-2); color: var(--text-1); }
-.share-modal .share-message { margin-top: calc(8px * var(--density)); }
-.share-modal .row-actions { margin-top: calc(10px * var(--density)); }
 .share-people { list-style: none; margin: 0; padding: 0; border: var(--hairline) solid var(--line); border-radius: var(--radius-lg); }
 .share-people li { display: flex; align-items: center; gap: 10px; padding: calc(8px * var(--density)) calc(12px * var(--density)); }
 .share-people li + li { border-top: var(--hairline) solid var(--line-2); }
@@ -700,4 +760,11 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .link-btn:focus-visible {
   outline: none; border-radius: var(--radius-xs);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ─── Share sheet: client links (Sprint 19) ─────────────────────────── */
+@media (min-width: 560px) { .client-link-form { grid-template-columns: 1.2fr 1.2fr auto; } }
+.cta-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); margin-left: 6px; vertical-align: middle;
 }

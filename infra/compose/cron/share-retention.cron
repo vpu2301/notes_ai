@@ -1,0 +1,7 @@
+# Nightly share retention (Sprint 23)
+#
+# Clears responses, recipient addresses and verification codes on links
+# expired longer than MDX_SHARE_RETENTION_DAYS (30). Runs per tenant on a
+# tenant-scoped connection (scripts/jobs/share_retention.py).
+CRON_TZ=UTC
+30 2 * * *  cd /opt/notes-ai-backend && DATABASE_URL=postgresql://app_role:app_role@localhost:5432/notes /usr/bin/env uv run python scripts/jobs/share_retention.py >> /var/log/mdx/share-retention.log 2>&1

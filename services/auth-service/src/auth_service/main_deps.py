@@ -7,6 +7,7 @@ via :func:`auth_service.deps.get_state`.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -284,9 +285,7 @@ class _SelfServingTransport(httpx.AsyncBaseTransport):
     one of them is us.
     """
 
-    def __init__(
-        self, self_url: str, serve: Callable[[httpx.Request], httpx.Response]
-    ) -> None:
+    def __init__(self, self_url: str, serve: Callable[[httpx.Request], httpx.Response]) -> None:
         self._self_url = self_url
         self._serve = serve
         self._network = httpx.AsyncHTTPTransport()
@@ -571,6 +570,17 @@ async def build_state() -> ServiceState:
     return state
 
 
+def _free_limits() -> dict[str, int]:
+    """`MDX_SIGNUP_FREE_LIMITS` as a dict; a malformed value falls back to
+    the documented default rather than taking signup down with it."""
+    try:
+        parsed = json.loads(settings.signup_free_limits)
+        return {str(k): int(v) for k, v in dict(parsed).items()}
+    except (ValueError, TypeError):
+        logger.error("auth.signup.free_limits_invalid")
+        return {"notes_per_month": 50, "members": 3}
+
+
 def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -> Any:
     """Wire BE-0 self-serve signup, or return None so its routes 404.
 
@@ -594,14 +604,13 @@ def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -
         logger.error("auth.signup.disabled_no_mail_provider")
         return None
 
+    from .domain import disposable_domains
     from .domain.onboarding_service import OnboardingService, SignupConfig
     from .domain.signup_mailer import SignupMailer
 
     _identities, challenges, _sessions = build_repositories(state.tenant_writer_pool)
     limiter = (
-        FixedWindowLimiter(redis_client, prefix="mdx:auth:rl")
-        if redis_client is not None
-        else None
+        FixedWindowLimiter(redis_client, prefix="mdx:auth:rl") if redis_client is not None else None
     )
     if limiter is None:
         # The per-IP and per-email caps fail CLOSED, and a limiter that is
@@ -633,6 +642,8 @@ def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -
             verify_email_window_seconds=settings.signup_verify_email_window_seconds,
             resend_email_limit=settings.signup_resend_email_limit,
             resend_email_window_seconds=settings.signup_resend_email_window_seconds,
+            free_limits=_free_limits(),
+            disposable_domains=disposable_domains.load(settings.disposable_domains_file or None),
         ),
         limiter=limiter,
         audit=_audit_writer_for(state),

@@ -31,6 +31,12 @@ ALLOWED_PAYLOAD_KEYS: Final[dict[Category, frozenset[str]]] = {
     Category.NOTE_AMENDED: frozenset({"note_code", "version"}),
     Category.NOTE_CHAIN_FAILURE: frozenset({"note_code", "detected_at", "check_name"}),
     Category.NOTE_SHARED_WITH_YOU: frozenset({"note_code", "shared_by_display"}),
+    # Sprint 20. `link_label` is what the SENDER typed when minting the
+    # link ("Tom @ Client"), never recipient input; `kind` is a closed
+    # vocabulary. The recipient's comment is read in the app only.
+    Category.NOTE_RECIPIENT_RESPONDED: frozenset({"note_code", "link_label", "kind"}),
+    Category.NOTE_LINK_STATUS_CHANGED: frozenset({"note_code", "link_label", "delivery_status"}),
+    Category.SHARE_REPORTED: frozenset({"note_code", "reason"}),
     # Counts and durations only. The transcript is the sensitive content
     # here, and no amount of it — not even a leading fragment as a
     # "preview" — is admissible: this row is read back by the digest
@@ -96,6 +102,14 @@ def deep_link(event: NotificationEvent, *, base_url: str) -> str:
     return notification_deep_link(event.resource_type, event.resource_id, base_url=base_url)
 
 
+_RESPONSE_VERBS: Final[dict[str, str]] = {
+    "confirm": "confirmed an item on",
+    "done": "marked an item done on",
+    "dispute": "disputed an item on",
+    "flag": "flagged a section on",
+}
+
+
 def render_title(event: NotificationEvent) -> str:
     fields = safe_payload(event)
     code = _code(fields)
@@ -108,6 +122,14 @@ def render_title(event: NotificationEvent) -> str:
             return f"Version-chain integrity failure ({code})"
         case Category.NOTE_SHARED_WITH_YOU:
             return f"Note {code} was shared with you"
+        case Category.NOTE_RECIPIENT_RESPONDED:
+            who = fields.get("link_label") or "A recipient"
+            return f"{who} responded on note {code}"
+        case Category.NOTE_LINK_STATUS_CHANGED:
+            who = fields.get("link_label") or "A recipient"
+            return f"{who} opened note {code}"
+        case Category.SHARE_REPORTED:
+            return f"A shared page of note {code} was reported"
         case Category.DICTATION_COMPLETED:
             return "Dictation completed"
         case Category.TRANSCRIPTION_COMPLETED:
@@ -141,6 +163,19 @@ def render_body(event: NotificationEvent) -> str:
         case Category.NOTE_SHARED_WITH_YOU:
             who = fields.get("shared_by_display", "A colleague")
             return f"{who} gave you access to note {code}."
+        case Category.NOTE_RECIPIENT_RESPONDED:
+            who = fields.get("link_label") or "A recipient"
+            verb = _RESPONSE_VERBS.get(fields.get("kind", ""), "responded to")
+            return f"{who} {verb} note {code}. Open the note to see the responses."
+        case Category.NOTE_LINK_STATUS_CHANGED:
+            who = fields.get("link_label") or "A recipient"
+            return f"{who} opened the link to note {code}."
+        case Category.SHARE_REPORTED:
+            reason = fields.get("reason", "other")
+            return (
+                f"A recipient reported the shared page of note {code} ({reason}). "
+                "Review the note's links."
+            )
         case Category.DICTATION_COMPLETED:
             return f"Your dictation session was processed. Segments: {fields.get('segments', '0')}."
         case Category.TRANSCRIPTION_COMPLETED:

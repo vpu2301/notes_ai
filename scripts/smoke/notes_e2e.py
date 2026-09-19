@@ -4,7 +4,7 @@ Needs the full stack up (`docker compose up`) with the dev seed users.
 Exercises create, read, draft update, optimistic-lock conflict, versions,
 diff, sharing (member / visibility / public link / anonymous read + PDF /
 send by e-mail),
-synthesis, PDF, search scoping, finalize, revert, amend, cancel and delete
+synthesis, PDF, search scoping, editing, cancel and delete
 as four different callers (author, another member, tenant_admin, a member
 of another tenant, and an anonymous reader). Exit 1 on any failure.
 
@@ -207,8 +207,12 @@ r = viewer.get(f"/v1/notes/{nid}")
 check("e-mailed member can read it", r.status_code == 200, r.text[:120])
 r = member.post(f"/v1/notes/{nid}/share/email", json={"recipients": ["not an address"]})
 check("nonsense address -> 422", r.status_code == 422, r.text[:120])
-r = member.delete(f"/v1/notes/{nid}/public-link")
-check("link from the e-mail can be turned off", r.status_code == 200, r.text[:120])
+r = member.get(f"/v1/notes/{nid}/sharing")
+outsider = next((l for l in r.json().get("links", []) if l.get("recipient_email") == "outsider@example.org"), None)
+check("outsider got their own link", outsider is not None, r.text[:200])
+if outsider:
+    r = member.delete(f"/v1/notes/{nid}/links/{outsider['id']}")
+    check("link from the e-mail can be turned off", r.status_code == 200, r.text[:120])
 r = member.delete(f"/v1/notes/{nid}/share/{viewer_sub}")
 check("unshare after e-mail", r.status_code == 200, r.text[:120])
 
@@ -230,30 +234,32 @@ check(
     r.text[:200],
 )
 
-# 8. finalize / amend / revert
+# 8. a note is a living document (0042): no finalize, no draft gate
 r = member.post(f"/v1/notes/{nid}/finalize", json={"expected_version": 2})
-check("finalize", r.status_code == 200 and r.json()["status"] == "finalized", r.text[:200])
-time.sleep(5.2)
-r = member.put(f"/v1/notes/{nid}/draft", json={"expected_version": 2, "content": content("x", "y")})
-check("draft write on finalized rejected", r.status_code in (409, 422), r.text[:120])
-r = member.post(f"/v1/notes/{nid}/revert-to-draft")
-check("revert to draft", r.status_code == 200 and r.json()["status"] == "draft", r.text[:120])
-r = member.post(f"/v1/notes/{nid}/finalize", json={"expected_version": 2})
-check("finalize again", r.status_code == 200, r.text[:120])
-r = member.post(
-    f"/v1/notes/{nid}/amend",
+check("finalize route is gone (404)", r.status_code == 404, r.text[:120])
+r = member.put(
+    f"/v1/notes/{nid}/draft",
     json={
-        "amendment_type": "correction",
-        "amendment_reason": "typo in decision",
+        "expected_version": 2,
         "content": content(
             "E2E sharing note",
             "We discussed the quarterly roadmap. Decision: hire three engineers.",
         ),
     },
 )
-check("amend", r.status_code in (200, 201) and r.json()["note_status"] == "amended", r.text[:200])
-r = member.get(f"/v1/notes/{nid}/pdf", params={"variant": "clean"})
-check("clean pdf after amend", r.status_code == 200, r.text[:120])
+check("edit keeps working", r.status_code == 200, r.text[:200])
+r = member.get(f"/v1/notes/{nid}/pdf")
+check(
+    "pdf is clean by default",
+    r.status_code == 200 and "-draft" not in r.headers.get("content-disposition", ""),
+    r.text[:120],
+)
+r = member.get(f"/v1/notes/{nid}/pdf", params={"variant": "draft"})
+check(
+    "pdf draft treatment on request",
+    r.status_code == 200 and "-draft.pdf" in r.headers.get("content-disposition", ""),
+    r.text[:120],
+)
 r = member.get(f"/v1/notes/{nid}/versions")
 check("versions grew (3)", len(r.json()) == 3, r.text[:120])
 

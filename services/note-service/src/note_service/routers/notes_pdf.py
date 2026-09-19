@@ -89,11 +89,9 @@ async def get_note_pdf(
         # the tenant carries no branding.
         branding = await load_tenant_branding(conn, tenant_id=str(claims.tid))
 
-    # Draft treatment whenever the note is still a draft, OR when explicitly
-    # requested via ``variant=draft``. ``clean`` is only honoured for
-    # finalized/amended notes; a draft is forced to draft regardless.
-    is_final = note.status in (NoteStatus.FINALIZED, NoteStatus.AMENDED)
-    is_draft = (not is_final) or variant == "draft"
+    # A note is a living document (0042): the watermark is opt-in via
+    # ``variant=draft`` for a copy the author wants marked as provisional.
+    is_draft = variant == "draft"
     language = lang or "en"
 
     # Prefer the tenant's registered/legal name as the document issuer; fall

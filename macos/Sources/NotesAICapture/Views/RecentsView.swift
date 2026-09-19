@@ -43,6 +43,15 @@ struct MeetingRow: View {
                     Text(capture.createdAt.formatted(date: .omitted, time: .shortened))
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
+                    // Sprint 20: a recipient disputed something on this note.
+                    if let disputes = app.notes.first(where: { $0.noteId == capture.noteId })?.openDisputes,
+                       disputes > 0 {
+                        Text("·").font(.dsMeta).foregroundStyle(DS.muted)
+                        Circle().fill(DS.dangerText).frame(width: 6, height: 6)
+                        Text("\(disputes) disputed")
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.dangerText)
+                    }
                     if let error = capture.errorMessage, !error.isEmpty,
                        capture.status == .failed || capture.noteId == nil {
                         Text("·").font(.dsMeta).foregroundStyle(DS.muted)
@@ -100,6 +109,7 @@ struct MeetingRow: View {
             .item("Open", symbol: "macwindow") { app.select(jobId: capture.jobId) },
         ]
         if let noteId = capture.noteId {
+            items.append(.item("Share with client…", symbol: "paperplane") { app.shareWithClient(noteId: noteId) })
             items.append(.item("Open in web app", symbol: "safari") { app.openNoteInBrowser(noteId) })
             items.append(.item("Copy link", symbol: "link") {
                 if let url = app.noteURL(noteId) { copy(url.absoluteString) }

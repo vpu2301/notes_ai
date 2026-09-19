@@ -215,8 +215,8 @@ export function LoginPage() {
             anything — `/auth/email/*` is not mounted and the code never
             arrives. `/signup` is the way in there, and a person who needs
             it should not have to guess the URL. */}
-        <Link className="link-btn" to="/signup">
-          Create an account
+        <Link className="link-btn" to="/join">
+          Create a free workspace
         </Link>
       </p>
     </LoginShell>

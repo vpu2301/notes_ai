@@ -2,7 +2,7 @@
 
 ``/readyz`` actively probes DB, Redis, and object storage to support k8s readiness
 gating. With no ``S3_ENDPOINT`` configured there is no object store to probe
-(the local MinIO container is gone), so that leg reports ``skipped`` rather
+(a stack deliberately run without one), so that leg reports ``skipped`` rather
 than holding the pod out of the load balancer forever. Sprint 03 introduces the first multi-dependency readiness path —
 keep it cheap (each probe ≤ 250 ms) so the cluster doesn't churn replicas.
 """

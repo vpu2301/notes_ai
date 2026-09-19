@@ -54,6 +54,10 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "session_id",
         "session_token",
         "csrf_token",
+        # Signup / verification (Sprint 21)
+        "verify_url",
+        "verification_code",
+        "otp_code",
         # MFA / recovery
         "mfa_secret",
         "totp_secret",

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// One open note: the envelope, its template's sections, the editable
-/// content with debounced autosave (drafts only), finalize / revert, the
+/// content with debounced autosave, the
 /// transcript it came from, and PDF export. Mirrors the web editor page.
 @MainActor
 final class NoteViewModel: ObservableObject {
@@ -22,7 +22,9 @@ final class NoteViewModel: ObservableObject {
     enum Tab: Hashable { case notes, transcript }
 
     let noteId: String
-    let jobId: String?
+    /// Given by the caller (a recording made here) or learnt from the
+    /// note itself, so a note made elsewhere still opens its transcript.
+    @Published private(set) var jobId: String?
 
     @Published private(set) var note: NoteEnvelope?
     @Published private(set) var sections: [TemplateSectionDef] = []
@@ -42,6 +44,21 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var busy = false
     @Published var actionError: String?
     @Published var tab: Tab = .notes
+
+    /// Sections whose text is the raw transcript (dialogue-shaped): shown
+    /// behind the Transcript tab, never among the notes.
+    var transcriptSections: [TemplateSectionDef] {
+        sections.filter { TranscriptText.isTranscript(content?.section($0.id).text ?? "") }
+    }
+    var noteSections: [TemplateSectionDef] {
+        let hidden = Set(transcriptSections.map(\.id))
+        return sections.filter { !hidden.contains($0.id) }
+    }
+    /// The transcript as text turns, for a note without a readable job.
+    var textTurns: [TranscriptText.Turn] {
+        transcriptSections.flatMap { TranscriptText.turns(content?.section($0.id).text ?? "") }
+    }
+    var hasTranscript: Bool { jobId != nil || !transcriptSections.isEmpty }
 
     /// Who can see the note (0016); loaded lazily the first time the menu asks.
     @Published private(set) var sharing: SharingView?
@@ -81,7 +98,11 @@ final class NoteViewModel: ObservableObject {
         self.api = api
     }
 
-    var isDraft: Bool { note?.status == .draft }
+    /// A note is a living document (ADR-0051): editable until cancelled.
+    var isDraft: Bool {
+        guard let status = note?.status else { return false }
+        return status != .cancelled
+    }
 
     /// "Ada's note" — who this note belongs to, when it is not ours.
     var oversightLabel: String? {
@@ -108,6 +129,7 @@ final class NoteViewModel: ObservableObject {
             }
             note = envelope
             content = envelope.content
+            if jobId == nil, let job = envelope.sourceJobId { jobId = job }
             version = envelope.currentVersionNumber
             saveState = .saved
             conflict = false
@@ -154,14 +176,22 @@ final class NoteViewModel: ObservableObject {
     }
 
     /// Rename a speaker everywhere: on the job (so the web app agrees), in
-    /// this transcript, and — while the note is still a draft — in the note
-    /// body, whose turn lines start with the name. A finalized note is a
-    /// record; its text stays and only the transcript shows the new name.
+    /// this transcript, and — while the note is live — in the note body,
+    /// whose turn lines start with the name. A cancelled note is a record;
+    /// its text stays and only the transcript shows the new name.
     func renameSpeaker(label: String, to rawName: String) async {
-        let from = speakerNames[label] ?? defaultSpeakerName(label)
+        // Without a readable job the "label" is the name as it stands in
+        // the note text; the rename rewrites the turn prefixes and the note
+        // autosaves, so it is on the server either way.
+        let textOnly = jobId == nil || transcriptError != nil
+        let from = textOnly ? label : (speakerNames[label] ?? defaultSpeakerName(label))
         let trimmed = rawName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        let to = trimmed.isEmpty ? defaultSpeakerName(label) : String(trimmed.prefix(80))
-        guard to != from, let jobId else { return }
+        let to = trimmed.isEmpty ? (textOnly ? from : defaultSpeakerName(label)) : String(trimmed.prefix(80))
+        guard to != from else { return }
+        guard let jobId, !textOnly else {
+            renameSpeakerInNote(from: from, to: to)
+            return
+        }
 
         // Only the names people gave are stored; defaults are implied.
         var custom = speakerNames.filter { $0.value != defaultSpeakerName($0.key) }
@@ -257,7 +287,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Write the pending content now (also called before finalize).
+    /// Write the pending content now.
     func flush() async {
         // Stop the timer. When flush() runs *inside* the timer task this
         // cancels the current task too, and a cancelled task makes
@@ -289,34 +319,6 @@ final class NoteViewModel: ObservableObject {
             saveState = .error
         } catch {
             saveState = .error
-            actionError = error.localizedDescription
-        }
-    }
-
-    // MARK: - Lifecycle actions
-
-    func finalize() async {
-        busy = true
-        actionError = nil
-        defer { busy = false }
-        do {
-            await flush()
-            guard saveState != .error else { return }
-            try await api.finalizeNote(id: noteId, expectedVersion: version)
-            await load()
-        } catch {
-            actionError = error.localizedDescription
-        }
-    }
-
-    func revertToDraft() async {
-        busy = true
-        actionError = nil
-        defer { busy = false }
-        do {
-            try await api.revertToDraft(id: noteId)
-            await load()
-        } catch {
             actionError = error.localizedDescription
         }
     }
@@ -367,6 +369,141 @@ final class NoteViewModel: ObservableObject {
 
     func revokePublicLink() async {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
+    }
+
+    // MARK: - Per-recipient links (Sprint 19)
+
+    var recipientLinks: [LinkView] { sharing?.recipientLinks ?? [] }
+
+    /// Sprint 23: the note's sharing view carries the workspace rules.
+    var rules: SharingConstraints { sharing?.constraints ?? .permissive }
+
+    /// Mint a link for one recipient and hand back its full URL, or nil
+    /// when the call failed (the reason is on `actionError`).
+    /// The last link the product mailed from this screen, for the sheet's notice.
+    @Published var lastSent: LinkView?
+
+    func createRecipientLink(label: String, email: String, expiresInDays: Int,
+                             webAppURL: String, send: Bool = false, message: String = "",
+                             source: String = "native") async -> URL? {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            let link = try await api.createLink(id: noteId, label: label,
+                                                recipientEmail: email.isEmpty ? nil : email,
+                                                expiresInDays: expiresInDays,
+                                                mail: send, personalMessage: message, source: source)
+            if send { lastSent = link }
+            await loadSharing()
+            guard let root = URL(string: webAppURL.trimmingCharacters(in: .whitespaces)) else { return nil }
+            return root.appending(path: String(link.path.dropFirst()))
+        } catch {
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Sprint 22: mail (again). The outcome lands on the link row; a
+    /// refusal (opted out, cap) is the error the sheet shows.
+    func sendLink(_ link: LinkView, message: String = "") async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            lastSent = try await api.sendLink(id: noteId, linkId: link.id, personalMessage: message)
+            await loadSharing()
+        } catch APIError.http(_, let problem) where problem?.code == "recipient_opted_out" {
+            actionError = "This recipient asked not to receive e-mails. Copy the link instead."
+            await loadSharing()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    func revokeLink(_ link: LinkView) async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            try await api.revokeLink(id: noteId, linkId: link.id)
+            await loadSharing()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+
+    // MARK: - Action items + recipient responses (Sprint 20)
+
+    @Published private(set) var items: [ActionItem] = []
+    @Published private(set) var responses: [ItemResponse] = []
+
+    /// Items are derived from the note text on read. Read-only cache: nothing
+    /// user-authored lives here, so nothing can be lost offline.
+    func loadItems() async {
+        guard isDraft else {
+            items = []
+            responses = []
+            return
+        }
+        async let i = api.items(noteId: noteId)
+        async let r = api.responses(noteId: noteId)
+        items = (try? await i) ?? []
+        responses = (try? await r) ?? []
+    }
+
+    var liveDisputes: Int { responses.filter { $0.kind == .dispute && $0.clearedAt == nil }.count }
+
+    /// Optimistic; reverts on failure.
+    func setStatus(_ item: ActionItem, _ status: ActionItemStatus) async {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let before = items[idx].status
+        items[idx].status = status
+        actionError = nil
+        do {
+            items[idx] = try await api.setItemStatus(noteId: noteId, itemId: item.id, status: status)
+        } catch {
+            items[idx].status = before
+            actionError = error.localizedDescription
+        }
+    }
+
+    func markDone(_ item: ActionItem) async {
+        await setStatus(item, item.status == .done ? .open : .done)
+    }
+
+    /// One-click sender action: everything confirmed and undisputed is done.
+    func markAllConfirmedDone() async {
+        for item in items where item.status == .open && item.counts.confirms > 0 && item.counts.disputes == 0 {
+            await setStatus(item, .done)
+        }
+    }
+
+    func clear(_ response: ItemResponse) async {
+        let beforeResponses = responses
+        let beforeItems = items
+        responses.removeAll { $0.id == response.id }
+        if let idx = items.firstIndex(where: { $0.itemKey == response.itemKey }) {
+            items[idx].responses.removeAll { $0.id == response.id }
+            items[idx].counts = ItemCounts(
+                confirms: items[idx].counts.confirms - (response.kind == .confirm ? 1 : 0),
+                dones: items[idx].counts.dones - (response.kind == .done ? 1 : 0),
+                disputes: items[idx].counts.disputes - (response.kind == .dispute ? 1 : 0))
+        }
+        actionError = nil
+        do {
+            try await api.clearResponse(noteId: noteId, responseId: response.id)
+        } catch {
+            responses = beforeResponses
+            items = beforeItems
+            actionError = error.localizedDescription
+        }
+    }
+
+    func linkURL(_ link: LinkView, webAppURL: String) -> URL? {
+        URL(string: webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: String(link.path.dropFirst()))
     }
 
     /// Mail the note to the people named, from the server.

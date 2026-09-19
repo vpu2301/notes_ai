@@ -15,11 +15,14 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from observability import bootstrap, register_exception_handlers
+from observability.problem_details import http_exception_handler
+from storage import ObjectStoreNotConfiguredError
 
 from .config import settings
 from .deps import install_state
@@ -76,6 +79,27 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("asr-service shutting down")
 
 
+async def _object_store_not_configured(
+    request: Request, exc: ObjectStoreNotConfiguredError
+) -> JSONResponse:
+    """The service runs without an object store when ``S3_ENDPOINT`` is
+    empty, but a transcript (or audio) then cannot be fetched or stored.
+    Say so with a 503 and a machine-readable code instead of the 500
+    "An unexpected error occurred" that hid the cause (request
+    39BEEB90-…, NOTE-2026-00016). The stored transcript is not gone —
+    that is the 410 — the service just has nowhere to read it from."""
+    logger.warning(
+        "object_store_not_configured",
+        extra={"path": str(request.url.path), "method": request.method},
+    )
+    http_exc = HTTPException(status_code=503, detail=str(exc))
+    http_exc.problem_extras = {  # type: ignore[attr-defined]
+        "type_uri": "urn:mdx:storage:not-configured",
+        "code": "object_store_not_configured",
+    }
+    return await http_exception_handler(request, http_exc)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ASR Service",
@@ -88,6 +112,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
+    app.add_exception_handler(ObjectStoreNotConfiguredError, _object_store_not_configured)  # type: ignore[arg-type]
     # CORS for the SPA. allow_credentials=True is required so the browser sends
     # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
     # origin, so origins are an explicit allow-list (mirror auth-service A3).

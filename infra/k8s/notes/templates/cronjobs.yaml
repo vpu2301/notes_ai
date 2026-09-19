@@ -15,7 +15,9 @@ data:
 {{ .Files.Get "files/jobs/nightly_verify.py" | indent 4 }}
 {{- $cron := .Values.cronJobs }}
 {{- range $job := list
-      (dict "name" "nightly-verify" "script" "nightly_verify.py" "schedule" $cron.nightlyVerify.schedule) }}
+      (dict "name" "nightly-verify" "script" "nightly_verify.py" "schedule" $cron.nightlyVerify.schedule "databaseUrl" $cron.nightlyVerify.databaseUrl)
+      (dict "name" "weekly-funnel" "script" "weekly_funnel.py" "schedule" $cron.weeklyFunnel.schedule "databaseUrl" $cron.weeklyFunnel.databaseUrl)
+      (dict "name" "share-retention" "script" "share_retention.py" "schedule" $cron.shareRetention.schedule "databaseUrl" $cron.shareRetention.databaseUrl) }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -57,7 +59,7 @@ spec:
               command: ["python", "/ops/{{ $job.script }}"]
               env:
                 - name: DATABASE_URL
-                  value: {{ $cron.nightlyVerify.databaseUrl | quote }}
+                  value: {{ $job.databaseUrl | quote }}
                 - name: OTEL_EXPORTER_OTLP_ENDPOINT
                   value: {{ $.Values.global.otlpEndpoint | quote }}
                 {{- range $k, $v := $.Values.commonEnv }}

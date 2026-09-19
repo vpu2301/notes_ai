@@ -1,5 +1,7 @@
+import AppKit
 import Combine
 import Foundation
+import UserNotifications
 
 /// Drives the capture pipeline: record → upload → poll → create note.
 @MainActor
@@ -38,6 +40,10 @@ final class CaptureViewModel: ObservableObject {
     /// The ASR job of the capture being processed (or just finished), so the
     /// window can show the live card for that meeting and nothing else.
     @Published private(set) var activeJobId: String?
+    /// Set five minutes before the recording cap; cleared on the next start.
+    @Published private(set) var limitWarning: String?
+    /// True when the cap, not the person, stopped the last recording.
+    @Published private(set) var stoppedAtLimit = false
 
     let recorder = AudioRecorder()
     private unowned let app: AppState
@@ -54,6 +60,8 @@ final class CaptureViewModel: ObservableObject {
         recorderSubscription = recorder.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        recorder.onLimitWarning = { [weak self] in self?.limitApproaching() }
+        recorder.onLimitReached = { [weak self] in self?.limitReached() }
     }
 
     var isRecording: Bool { recorder.isRecording }
@@ -71,6 +79,8 @@ final class CaptureViewModel: ObservableObject {
         pipelineTask = nil
         phase = .idle
         activeJobId = nil
+        limitWarning = nil
+        stoppedAtLimit = false
     }
 
     /// The one-click path: clear any finished state and start recording now.
@@ -82,10 +92,54 @@ final class CaptureViewModel: ObservableObject {
         Task { await beginRecording() }
     }
 
+    // MARK: - The recording cap
+
+    private func limitApproaching() {
+        let lead = formatElapsed(AudioRecorder.warningLead)
+        limitWarning = "\(lead) left — recordings stop at \(formatLimit(recorder.limitSeconds)). Stop and start a new meeting to keep going."
+        NSSound.beep()
+        NSApp.requestUserAttention(.criticalRequest)
+        notify(title: "5 minutes of recording left",
+               body: "Recordings stop at \(formatLimit(recorder.limitSeconds)). Stop and start a new meeting to keep going.")
+    }
+
+    private func limitReached() {
+        guard recorder.isRecording else { return }
+        stoppedAtLimit = true
+        limitWarning = nil
+        finishRecording()
+        NSSound.beep()
+        notify(title: "Recording stopped at the \(formatLimit(recorder.limitSeconds)) limit",
+               body: "The note is being drafted. Start a new meeting to keep recording.")
+    }
+
+    /// A system notification, when this process can post one: a bare
+    /// `swift build` binary has no bundle and UNUserNotificationCenter
+    /// would abort, so the in-app banner and the Dock bounce carry it then.
+    private func notify(title: String, body: String) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+
     // MARK: - Pipeline
 
     private func beginRecording() async {
         guard !phase.isBusy else { return }
+        limitWarning = nil
+        stoppedAtLimit = false
+        // The cap as the server has it today; the fallback stands if the
+        // call fails, and the server's own check still applies.
+        if let limits = try? await app.api.asrLimits() {
+            recorder.limitSeconds = TimeInterval(limits.maxDurationSeconds)
+        }
         do {
             try await recorder.start()
             phase = .recording

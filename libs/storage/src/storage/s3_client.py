@@ -38,6 +38,21 @@ class ObjectNotFoundError(Exception):
         super().__init__(f"object not found: s3://{bucket}/{key}")
 
 
+class ObjectStoreNotConfiguredError(RuntimeError):
+    """No object store endpoint is configured (``S3_ENDPOINT`` is empty).
+
+    A service may start without an object store — the dev stack can run
+    that way and ``/readyz`` reports the leg as skipped — but every read
+    or write against it must then fail as a recognisable dependency error.
+    Left to aiobotocore, an empty endpoint surfaces as
+    ``ValueError: Invalid endpoint:`` from deep inside a request, which the
+    services render as an opaque 500 "An unexpected error occurred."
+    """
+
+    def __init__(self) -> None:
+        super().__init__("object store is not configured (S3_ENDPOINT is empty)")
+
+
 class S3Client:
     """Lazily-bound aioboto3 session + per-call client context.
 
@@ -69,6 +84,8 @@ class S3Client:
         self._session = aioboto3.Session()
 
     def _client(self) -> Any:
+        if not self._endpoint:
+            raise ObjectStoreNotConfiguredError
         return self._session.client(
             "s3",
             endpoint_url=self._endpoint,

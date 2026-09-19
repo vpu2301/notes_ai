@@ -40,6 +40,13 @@ BEGIN
     CREATE ROLE tenant_writer LOGIN PASSWORD 'tenant_writer';
   END IF;
 
+  -- funnel_reader (Sprint 22): SELECT-only, for Grafana's Postgres
+  -- datasource and the weekly loop report. Its policies come with
+  -- migration 0040; no service connects as it.
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'funnel_reader') THEN
+    CREATE ROLE funnel_reader LOGIN PASSWORD 'funnel_reader';
+  END IF;
+
   -- audit_writer: the only role permitted to INSERT into audit.*.
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'audit_writer') THEN
     CREATE ROLE audit_writer LOGIN PASSWORD 'audit_writer';

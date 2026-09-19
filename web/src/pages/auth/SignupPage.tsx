@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as authApi from "../../api/auth";
 import { ApiError } from "../../api/http";
 import { useAuth } from "../../auth/AuthContext";
@@ -50,6 +50,10 @@ export function SignupPage() {
    * app.
    */
   const handover = (location.state ?? null) as { email?: string; verifyOnly?: boolean } | null;
+  // Sprint 21: the shared page's CTA parks its referral code in the URL
+  // and in sessionStorage (JoinPage). Read once; never stored elsewhere.
+  const [params] = useSearchParams();
+  const ref = readRef(params.get("ref"));
   const verifyOnly = handover?.verifyOnly === true;
 
   const [step, setStep] = useState<"form" | "code">(verifyOnly ? "code" : "form");
@@ -107,6 +111,7 @@ export function SignupPage() {
         email: email.trim(),
         password,
         display_name: name.trim(),
+        ref: ref ?? undefined,
       });
       setResendIn(accepted.resend_after);
       setCode("");
@@ -147,6 +152,12 @@ export function SignupPage() {
     // mounted in `keycloak` mode, and a 404 here must not block the way in.
     const zone = browserTimezone();
     if (zone) void saveProfile({ timezone: zone }).catch(() => {});
+    // A referred person came for the thing they saw: land them on
+    // "record your first meeting" rather than an empty list.
+    if (ref) {
+      navigate("/meeting/new?first_run=1", { replace: true });
+      return;
+    }
     navigate("/", { replace: true, state: { focusNewMeeting: true } });
   };
 
@@ -346,4 +357,17 @@ export function SignupPage() {
       </p>
     </LoginShell>
   );
+}
+
+const REF_RE = /^[a-z2-7]{12}$/;
+
+/** The query wins; otherwise what `/join` remembered for this tab. */
+function readRef(fromQuery: string | null): string | null {
+  const candidates = [fromQuery];
+  try {
+    candidates.push(window.sessionStorage.getItem("klarnote.ref"));
+  } catch {
+    /* private mode */
+  }
+  return candidates.find((c): c is string => !!c && REF_RE.test(c)) ?? null;
 }

@@ -24,6 +24,8 @@ const LANGUAGES: ReadonlyArray<readonly [AsrLanguage, string]> = [
  * The recording uploads itself, transcribes, becomes a note, and the note
  * opens — no "transcribe" step, no "create note" step.
  */
+const FIRST_RUN_KEY = "klarnote.first_run_seen";
+
 export function MeetingPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -32,6 +34,24 @@ export function MeetingPage() {
   // A calendar event's title arrives as ?title= from the home page's
   // "Start" button; otherwise the field starts empty.
   const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
+  // Sprint 21: `/meeting/new?first_run=1` is where a new workspace lands.
+  // Shown once per browser; a per-viewer convenience, so localStorage.
+  const [firstRun, setFirstRun] = useState(() => {
+    if (params.get("first_run") !== "1") return false;
+    try {
+      return window.localStorage.getItem(FIRST_RUN_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
+  const dismissFirstRun = () => {
+    setFirstRun(false);
+    try {
+      window.localStorage.setItem(FIRST_RUN_KEY, "1");
+    } catch {
+      /* private mode */
+    }
+  };
   // Auto by default: the transcript and the note come out in whatever
   // language the meeting was held in. Pinning is an option, not a step.
   const [language, setLanguage] = useState<AsrLanguage>("auto");
@@ -203,6 +223,16 @@ export function MeetingPage() {
         if (!rec.recording) onFile(e.dataTransfer.files?.[0]);
       }}
     >
+      {firstRun && (
+        <div className="banner banner-info first-run" role="status">
+          <span className="grow">
+            Record or upload your first meeting — your notes will be ready to share in minutes.
+          </span>
+          <button className="btn ghost sm" onClick={dismissFirstRun}>
+            Got it
+          </button>
+        </div>
+      )}
       <div className="meeting-head">
         <input
           className="title-input"
@@ -214,7 +244,7 @@ export function MeetingPage() {
         />
       </div>
 
-      <div className={`meeting-stage ${rec.recording ? "live" : ""}`}>
+      <div className={`meeting-stage ${rec.recording ? "live" : "idle"}`}>
         <div className={`level-meter ${rec.recording ? "live" : ""}`} aria-hidden="true">
           {rec.levels.map((lvl, i) => (
             <span

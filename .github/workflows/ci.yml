@@ -186,6 +186,10 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      # Sprint 20: recipient comments are text. The only raw-HTML sink is
+      # the locally generated QR code; anything else is a red build.
+      - name: No raw HTML from data
+        run: npm run check:no-danger
       - name: Production build
         run: npm run build
 

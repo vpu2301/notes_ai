@@ -55,3 +55,36 @@ image (carries every lib it imports).
 | host tmpfs `/run/dictation` (shared, 2 g) | **per-POD** `emptyDir medium: Memory, sizeLimit: 2Gi` — the §tmpfs-pressure fix |
 | infra/dev/master.key bind-mounts | Secret `mdx-master-key` (staging script / ExternalSecret→Vault prod) |
 | HF-cache model mounts (large-v3) | **prod: baked in images** (house pattern, PINS.md); staging k3d uses the baked tiny |
+
+## Trusted proxies (`TRUSTED_PROXY_CIDRS`)
+
+auth-service and, since Sprint 19, note-service key their per-IP abuse
+caps on the client address. `X-Forwarded-For` is believed only when the
+TCP peer is inside `TRUSTED_PROXY_CIDRS` (comma-separated; empty means
+the peer is the client). In k8s (`infra/k8s/notes`) set it to the
+ingress controller's pod/network CIDR on BOTH services; left empty
+behind an ingress, every reader of `/v1/shared/*` shares one bucket and
+`SharedPageRateLimitHigh` fires.
+
+## Public API hostname for recipient mail (Sprint 22)
+
+Recipient links point at the web app (`MDX_APP_BASE_URL`), but the
+unsubscribe link in every recipient mail points at note-service:
+`MDX_API_PUBLIC_BASE_URL` + `/v1/shared/unsubscribe/…`. The
+`/v1/shared/*` routes must therefore be reachable on a public hostname
+(they are anonymous and rate-limited by design). Set both variables per
+environment; the dev defaults are `localhost`.
+
+## External sharing flags and rollout (Sprint 23)
+
+Flags per environment: `MDX_EXTERNAL_SHARING_ENABLED`,
+`MDX_RECIPIENT_ACTIONS_ENABLED`, `MDX_SIGNUP_ENABLED`, the
+`MDX_SHARE_MAIL_*_PER_DAY` caps and `MDX_SHARE_RETENTION_DAYS`. Stages
+and exit criteria: `docs/runbooks/external-sharing.md`.
+
+`/v1/shared/*` is served cross-origin without credentials
+(`AnonymousCorsMiddleware`), so it may sit behind a public hostname that
+differs from the SPA's; every other route keeps the credentialed
+allow-list. No Ingress objects exist in the chart yet; the public
+exposure of note-service's `/v1/shared/*` and the SPA's `/s/*` is an
+environment-level decision to record here when made.

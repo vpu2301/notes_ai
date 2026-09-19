@@ -105,11 +105,15 @@ struct IdentitySummary: Codable, Equatable, Sendable {
     var hasPassword: Bool = false
     var status: String = "active"
 
+    /// Sprint 21: when the account came to exist; absent on an older server.
+    let createdAt: Date?
+
     enum CodingKeys: String, CodingKey {
         case id, email, status
         case displayName = "display_name"
         case mfaEnabled = "mfa_enabled"
         case hasPassword = "has_password"
+        case createdAt = "created_at"
     }
 }
 
@@ -677,6 +681,8 @@ struct RecentCapture: Codable, Identifiable, Equatable, Sendable {
 // MARK: - Notes (note-service) — the document the app opens natively
 
 enum NoteStatus: String, Codable, Sendable {
+    /// `finalized` / `amended` are legacy values a note no longer takes
+    /// (finalize retired, ADR-0051); kept so old rows decode.
     case draft, finalized, amended, cancelled
 
     var label: String {
@@ -793,9 +799,12 @@ struct NoteEnvelope: Decodable, Sendable {
     let primaryAuthorName: String?
     let content: NoteContent?
     let sectionLabels: [SectionLabel]?
+    /// The transcription job the note was made from, if any.
+    let sourceJobId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, code, status, title, content, visibility
+        case sourceJobId = "source_job_id"
         case currentVersionNumber = "current_version_number"
         case primaryAuthorId = "primary_author_id"
         case primaryAuthorName = "primary_author_name"
@@ -844,14 +853,113 @@ struct SharingView: Decodable, Sendable {
     let canDelete: Bool
     let sharedWith: [SharedMember]
     let publicLink: PublicLink?
+    /// Every live link, newest first (Sprint 19). Absent on an older server.
+    let links: [LinkView]
+    /// Sprint 23: the workspace's effective sharing rules. Absent on an older server.
+    let constraints: SharingConstraints?
 
     enum CodingKeys: String, CodingKey {
-        case visibility
+        case visibility, links, constraints
         case noteId = "note_id"
         case canManage = "can_manage"
         case canDelete = "can_delete"
         case sharedWith = "shared_with"
         case publicLink = "public_link"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        noteId = try c.decode(String.self, forKey: .noteId)
+        visibility = try c.decode(String.self, forKey: .visibility)
+        canManage = try c.decode(Bool.self, forKey: .canManage)
+        canDelete = try c.decode(Bool.self, forKey: .canDelete)
+        sharedWith = try c.decode([SharedMember].self, forKey: .sharedWith)
+        publicLink = try c.decodeIfPresent(PublicLink.self, forKey: .publicLink)
+        links = try c.decodeIfPresent([LinkView].self, forKey: .links) ?? []
+        constraints = try? c.decodeIfPresent(SharingConstraints.self, forKey: .constraints)
+    }
+
+    /// The client-facing links only.
+    var recipientLinks: [LinkView] { links.filter { $0.kind == .recipient } }
+}
+
+// MARK: - Per-recipient links (Sprint 19, 0035)
+
+enum ShareLinkKind: String, Decodable, Sendable {
+    case `public`, recipient
+}
+
+/// One share link: the public one or a per-recipient one. Decoded from
+/// `LinkView`; the token is only ever returned to people who may manage
+/// the note.
+struct LinkView: Decodable, Sendable, Identifiable {
+    let id: String
+    let kind: ShareLinkKind
+    let label: String
+    let recipientEmail: String?
+    let token: String
+    /// SPA path; prefix with the web app origin for a full URL.
+    let path: String
+    let refCode: String?
+    let createdAt: Date
+    let expiresAt: Date?
+    let viewCount: Int
+    let firstViewedAt: Date?
+    let lastViewedAt: Date?
+    let ctaClickedAt: Date?
+    /// Sprint 20: live responses from this link. Absent on an older server.
+    let responseCount: Int?
+    /// Sprint 22: the product mailed the link. Raw so an unknown value
+    /// from a newer server decodes rather than failing the whole sheet.
+    let deliveryStatusRaw: String?
+    let sentAt: Date?
+    let sendCount: Int?
+    let lastSendError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, label, token, path
+        case recipientEmail = "recipient_email"
+        case refCode = "ref_code"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case viewCount = "view_count"
+        case firstViewedAt = "first_viewed_at"
+        case lastViewedAt = "last_viewed_at"
+        case ctaClickedAt = "cta_clicked_at"
+        case responseCount = "response_count"
+        case deliveryStatusRaw = "delivery_status"
+        case sentAt = "sent_at"
+        case sendCount = "send_count"
+        case lastSendError = "last_send_error"
+    }
+
+    enum DeliveryStatus: String { case notSent = "not_sent", sent, failed, suppressed }
+
+    var deliveryStatus: DeliveryStatus { DeliveryStatus(rawValue: deliveryStatusRaw ?? "") ?? .notSent }
+
+    /// "Sent 12:31 · Opened 17 Sep · Responded (2)"
+    var statusLine: String {
+        var parts: [String] = []
+        switch deliveryStatus {
+        case .sent:
+            if let sentAt { parts.append("Sent " + sentAt.formatted(date: .omitted, time: .shortened)) } else { parts.append("Sent") }
+        case .failed: parts.append("Failed")
+        case .suppressed: parts.append("Opted out")
+        case .notSent: parts.append("Not sent")
+        }
+        parts.append(opened)
+        if let n = responseCount, n > 0 { parts.append("Responded (\(n))") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The product may mail it (again): an address, not opted out, under the cap.
+    var canSend: Bool {
+        recipientEmail != nil && deliveryStatus != .suppressed && (sendCount ?? 0) < 3
+    }
+
+    var opened: String {
+        guard let firstViewedAt else { return "Not opened" }
+        return "Opened " + firstViewedAt.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
@@ -1048,6 +1156,8 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     /// Who can open it (0016). Nil from a server that predates the badge.
     /// Mutable so a change made from the list shows without a reload.
     var access: NoteAccess?
+    /// Sprint 20 — live recipient disputes, for the "1 disputed" marker.
+    var openDisputes: Int = 0
 
     var id: String { noteId }
 
@@ -1057,6 +1167,7 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         case updatedAt = "updated_at"
         case sharedWithCount = "shared_with_count"
         case hasPublicLink = "has_public_link"
+        case openDisputes = "open_disputes"
     }
 
     init(from decoder: Decoder) throws {
@@ -1067,6 +1178,7 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         status = NoteStatus(rawValue: try c.decode(String.self, forKey: .status))
         snippet = (try? c.decode(String.self, forKey: .snippet)) ?? ""
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        openDisputes = (try? c.decodeIfPresent(Int.self, forKey: .openDisputes)) ?? 0
         if let visibility = try? c.decodeIfPresent(String.self, forKey: .visibility) {
             let link = (try? c.decodeIfPresent(Bool.self, forKey: .hasPublicLink)) ?? false
             let shared = (try? c.decodeIfPresent(Int.self, forKey: .sharedWithCount)) ?? 0
@@ -1098,30 +1210,37 @@ struct NoteAccess: Equatable, Sendable {
 
     var isWorkspace: Bool { visibility == "workspace" }
 
-    /// The widest audience wins: a public link reaches more people than
-    /// the workspace, which reaches more than a named few.
+    /// A live public link: the pill is tinted and carries a globe, but the
+    /// word stays the workspace visibility — the two are separate facts,
+    /// and "Public" next to a checked "Private" read as a contradiction.
     var isPublic: Bool { hasPublicLink }
 
     var label: String {
-        if hasPublicLink { return "Public" }
         if isWorkspace { return "Workspace" }
         if sharedWithCount > 0 { return "Shared with \(sharedWithCount)" }
         return "Private"
     }
 
     var symbol: String {
-        if hasPublicLink { return "globe" }
         if isWorkspace { return "person.2.fill" }
         return "lock.fill"
     }
 
     var help: String {
-        if hasPublicLink { return "Public — anyone with the link can open it" }
-        if isWorkspace { return "Visible to everyone in the workspace" }
-        if sharedWithCount > 0 {
-            return "Private — shared with \(sharedWithCount) \(sharedWithCount == 1 ? "person" : "people") in the workspace"
+        let base: String
+        if isWorkspace {
+            base = "Visible to everyone in the workspace"
+        } else if sharedWithCount > 0 {
+            base = "Private — shared with \(sharedWithCount) \(sharedWithCount == 1 ? "person" : "people") in the workspace"
+        } else {
+            base = "Private — only the note's authors can open it"
         }
-        return "Private — only the note's authors can open it"
+        return hasPublicLink ? base + ". A public link is on: anyone with it can open the note" : base
+    }
+
+    /// The menu's line about the link, under its own header.
+    var publicLinkHint: String {
+        hasPublicLink ? "On — anyone with the link can open the note" : "Off"
     }
 }
 
@@ -1297,4 +1416,167 @@ struct UpcomingEventsResponse: Decodable, Sendable {
     let connected: Bool
     let events: [UpcomingEvent]
     let problems: [CalendarProblem]
+}
+
+// MARK: - Action items + recipient responses (Sprint 20, 0037)
+
+enum ActionItemStatus: String, Codable, Sendable {
+    case open, done, dropped
+}
+
+enum ResponseKind: String, Decodable, Sendable {
+    case confirm, done, dispute, flag
+}
+
+/// What a recipient did on the shared page. `comment` is theirs and is
+/// only ever shown as text.
+struct ItemResponse: Decodable, Sendable, Identifiable {
+    let id: String
+    let linkId: String
+    let linkLabel: String
+    let kind: ResponseKind
+    let itemKey: String?
+    let sectionKey: String?
+    let comment: String?
+    let createdAt: Date
+    let clearedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, comment
+        case linkId = "link_id"
+        case linkLabel = "link_label"
+        case itemKey = "item_key"
+        case sectionKey = "section_key"
+        case createdAt = "created_at"
+        case clearedAt = "cleared_at"
+    }
+}
+
+struct ItemCounts: Decodable, Sendable {
+    let confirms: Int
+    let dones: Int
+    let disputes: Int
+}
+
+/// One action item of the note's current version, with the responses on it.
+struct ActionItem: Decodable, Sendable, Identifiable {
+    let id: String
+    let itemKey: String
+    let position: Int
+    let text: String
+    let ownerLabel: String?
+    let ownerConfidence: Double?
+    let dueDate: String?
+    let dueText: String?
+    var status: ActionItemStatus
+    var counts: ItemCounts
+    var responses: [ItemResponse]
+
+    enum CodingKeys: String, CodingKey {
+        case id, position, text, status, counts, responses
+        case itemKey = "item_key"
+        case ownerLabel = "owner_label"
+        case ownerConfidence = "owner_confidence"
+        case dueDate = "due_date"
+        case dueText = "due_text"
+    }
+
+    /// "Owner inferred — check it" when the parser only guessed.
+    var ownerNeedsCheck: Bool { ownerLabel != nil && (ownerConfidence ?? 1) < 1 }
+
+    var summary: String {
+        var parts: [String] = []
+        if counts.confirms > 0 { parts.append("\(counts.confirms) confirmed") }
+        if counts.dones > 0 { parts.append("\(counts.dones) done") }
+        if counts.disputes > 0 { parts.append("\(counts.disputes) disputed") }
+        return parts.isEmpty ? "No responses yet" : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Sharing constraints (Sprint 23)
+
+/// What the workspace admin allows. Read from `GET /v1/notes/sharing/constraints`
+/// and carried on every `SharingView`; the clients hide what the server
+/// would refuse.
+struct SharingConstraints: Decodable, Sendable, Equatable {
+    let externalLinksEnabled: Bool
+    let publicLinksEnabled: Bool
+    let maxLinkDays: Int
+    let productEmailEnabled: Bool
+    let verifiedRecipientsRequired: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case externalLinksEnabled = "external_links_enabled"
+        case publicLinksEnabled = "public_links_enabled"
+        case maxLinkDays = "max_link_days"
+        case productEmailEnabled = "product_email_enabled"
+        case verifiedRecipientsRequired = "verified_recipients_required"
+    }
+
+    static let permissive = SharingConstraints(
+        externalLinksEnabled: true, publicLinksEnabled: true,
+        maxLinkDays: 180, productEmailEnabled: true, verifiedRecipientsRequired: false)
+}
+
+
+// MARK: - Transcript-shaped text
+
+/// "Anna: we ship Friday" — a paragraph that opens with a short speaker
+/// label. The same rule note-service and the web use, so a section reads
+/// as the transcript on every surface or on none.
+enum TranscriptText {
+    struct Turn: Identifiable, Equatable {
+        let id: Int
+        let speaker: String?
+        let text: String
+    }
+
+    private static let lead = try! NSRegularExpression(  // swiftlint:disable:this force_try
+        pattern: "^(?!https?:)([^\\s*_`:][^*_`:]{0,39}?):\\s+(?=\\S)")
+
+    static func paragraphs(_ text: String) -> [String] {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .split(whereSeparator: { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+            .map { $0.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ") }
+            .filter { !$0.isEmpty }
+    }
+
+    /// (speaker, rest) when the paragraph is a turn.
+    static func split(_ paragraph: String) -> (String, String)? {
+        let range = NSRange(paragraph.startIndex..., in: paragraph)
+        guard let m = lead.firstMatch(in: paragraph, range: range),
+              let nameRange = Range(m.range(at: 1), in: paragraph),
+              let whole = Range(m.range, in: paragraph) else { return nil }
+        let name = String(paragraph[nameRange])
+        guard name.split(whereSeparator: \.isWhitespace).count <= 4 else { return nil }
+        return (name, String(paragraph[whole.upperBound...]))
+    }
+
+    /// Mostly turns (≥ 60 % of at least two paragraphs) → the transcript.
+    static func isTranscript(_ text: String) -> Bool {
+        let paras = paragraphs(text)
+        guard paras.count >= 2 else { return false }
+        let turns = paras.filter { split($0) != nil }.count
+        return turns * 10 >= paras.count * 6
+    }
+
+    static func turns(_ text: String) -> [Turn] {
+        paragraphs(text).enumerated().map { i, p in
+            if let (name, rest) = split(p) { return Turn(id: i, speaker: name, text: rest) }
+            return Turn(id: i, speaker: nil, text: p)
+        }
+    }
+}
+
+/// What one upload may be (`GET /asr/limits`), read before a recording
+/// starts so the app can warn before the cap rather than fail after it.
+struct AsrLimits: Decodable, Sendable {
+    let maxDurationSeconds: Int
+    let maxUploadMb: Int
+
+    enum CodingKeys: String, CodingKey {
+        case maxDurationSeconds = "max_duration_seconds"
+        case maxUploadMb = "max_upload_mb"
+    }
 }

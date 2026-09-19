@@ -371,6 +371,22 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 .rt > :last-child { margin-bottom: 0; }
 .rt.empty-val { color: var(--muted); }
 .rt-p { margin: 0 0 calc(9px * var(--density)); }
+/* A transcript turn, as a chat reads: initials in a tinted circle, the
+   name in dark semibold, the words below. No rules, no colour on text. */
+.rt-turn, .turn {
+  display: grid; grid-template-columns: 28px 1fr; column-gap: calc(12px * var(--density)); row-gap: 2px;
+  align-items: start; margin: 0 0 calc(18px * var(--density));
+}
+.rt-turn:last-child, .turn:last-child { margin-bottom: 0; }
+.speaker-avatar {
+  grid-row: 1 / span 2; width: 28px; height: 28px; border-radius: 50%; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--tint, var(--accent)) 16%, var(--surface));
+  color: color-mix(in srgb, var(--tint, var(--accent)) 72%, var(--text-1));
+}
+.rt-speaker { grid-column: 2; font-family: var(--display); font-size: calc(14.5px * var(--fs)); font-weight: 600; letter-spacing: -0.005em; line-height: 1.35; color: var(--text-1); }
+.rt-turn-text { grid-column: 2; margin: 0; }
 .rt-h {
   position: relative;
   font-family: var(--display);
@@ -580,13 +596,15 @@ ol.rt-list > li::before {
 .amend-bar .select { max-width: 180px; }
 
 /* ─── Transcript ────────────────────────────────────────────────────────── */
-.transcript { display: flex; flex-direction: column; gap: calc(18px * var(--density)); padding-top: calc(8px * var(--density)); }
+.transcript { display: flex; flex-direction: column; gap: 0; padding-top: calc(8px * var(--density)); }
+.transcript-bar { margin-bottom: calc(14px * var(--density)); }
 .transcript-bar { display: flex; align-items: center; gap: calc(8px * var(--density)); }
-.turn { display: flex; flex-direction: column; gap: 3px; }
-.turn-h { display: flex; align-items: baseline; gap: calc(8px * var(--density)); }
-.turn-speaker { font-family: var(--display); font-size: calc(13.5px * var(--fs)); font-weight: 500; color: var(--accent-text); }
+.turn-h { grid-column: 2; display: flex; align-items: baseline; gap: calc(8px * var(--density)); line-height: 1.35; }
+.turn-speaker { font-family: var(--display); font-size: calc(14.5px * var(--fs)); font-weight: 600; letter-spacing: -0.005em; color: var(--text-1); }
+.turn-speaker:hover { color: var(--accent-text); }
 .turn-time { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; }
-.turn-text { margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
+.turn-text { grid-column: 2; margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
+.turn-text + .turn-text { margin-top: calc(6px * var(--density)); }
 
 /* ─── New meeting ───────────────────────────────────────────────────────── */
 /* ActiveCaptureCard: the stage is a framed card with the xl radius. */
@@ -612,6 +630,12 @@ ol.rt-list > li::before {
     radial-gradient(120% 78% at 50% 62%, var(--accent-soft), transparent 62%),
     var(--surface);
   transition: border-color var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
+}
+/* Before anything is recorded the stage has no card at all: the record button
+   sits straight on the paper, with only the soft moss pool behind it. */
+.meeting-stage.idle {
+  border-color: transparent;
+  background: radial-gradient(60% 52% at 50% 58%, var(--accent-soft), transparent 70%);
 }
 .meeting-stage.live {
   border-color: color-mix(in srgb, var(--rec) 40%, var(--line));
@@ -853,3 +877,80 @@ ol.rt-list > li::before {
 }
 .qr-frame svg { width: 100%; height: 100%; display: block; }
 .qr-fallback { color: #6b6560; font-size: calc(11.5px * var(--fs)); text-align: center; }
+
+/* ─── Shared Outcome Page (Sprint 19) ──────────────────────────────────── */
+.shared-bar { flex-wrap: wrap; gap: 10px; }
+.shared-sender { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.shared-logo { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; background: var(--surface); }
+.shared-logo-initials { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); }
+.shared-status { display: inline-flex; align-items: center; gap: 8px; }
+.shared-product {
+  padding: 8px 20px; text-align: center; font-size: calc(13px * var(--fs));
+  color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.shared-cta { font-weight: 600; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.shared-cta:hover { text-decoration: underline; }
+.shared-attendees { margin: 0 0 12px; color: var(--muted); }
+.shared-attendees .label { margin-right: 4px; }
+.shared-key { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); margin-bottom: 14px; }
+.shared-more { margin-top: 8px; }
+.shared-more > summary { cursor: pointer; color: var(--muted); font-size: calc(13px * var(--fs)); padding: 10px 0; min-height: 44px; display: flex; align-items: center; }
+.shared-more .doc-section { margin-top: 12px; }
+.shared-actions { display: flex; gap: 10px; margin-top: 20px; }
+.shared-actions .btn { min-height: 44px; }
+.shared-updated { display: block; margin-top: 4px; }
+@media (max-width: 640px) {
+  .shared-doc { padding: 20px 16px; }
+  .shared-bar { padding-left: 16px; padding-right: 16px; }
+  .shared-product { padding-left: 16px; padding-right: 16px; }
+  .shared-title { font-size: calc(22px * var(--fs)); }
+}
+
+/* ─── Shared page: interactive items (Sprint 20) ───────────────────────── */
+.shared-progress { margin: 0 0 10px; color: var(--muted); font-size: calc(13px * var(--fs)); }
+.shared-item-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.shared-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.shared-item:first-child { border-top: 0; }
+.shared-item-glyph { font-size: 18px; line-height: 1.2; color: var(--muted); flex: none; }
+.shared-item.state-confirm .shared-item-glyph, .shared-item.state-done .shared-item-glyph { color: var(--accent); }
+.shared-item.state-dispute .shared-item-glyph { color: var(--danger, #b3261e); }
+.shared-item-body { flex: 1; min-width: 0; }
+.shared-item-text { display: block; }
+.shared-item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip.owner { background: var(--surface); border: 1px solid var(--line); }
+.chip.due.overdue { color: var(--danger, #b3261e); border-color: currentColor; }
+.shared-item-comment { margin: 6px 0 0; color: var(--muted); font-size: calc(13px * var(--fs)); white-space: pre-wrap; }
+.shared-item-actions { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.shared-item-actions .btn { min-height: 44px; }
+.shared-comment { margin-top: 8px; }
+.shared-flag { margin-top: 8px; }
+.shared-flag .btn { min-height: 44px; }
+@media (max-width: 640px) {
+  .shared-item { flex-wrap: wrap; }
+  .shared-item-actions { width: 100%; padding-left: 28px; }
+}
+
+/* ─── Editor: responses tab (Sprint 20) ────────────────────────────────── */
+.response-item-head { display: flex; gap: 10px; align-items: flex-start; }
+.response-item-text { font-weight: 500; }
+.response-item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
+.response-list { list-style: none; margin: 10px 0 0 28px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.response { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.response-comment { flex-basis: 100%; margin: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; }
+.response-badge { margin-left: 8px; cursor: pointer; border: 0; }
+
+/* ─── Sharing stats (Sprint 22) ─────────────────────────────────────────── */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0 24px; }
+.stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.stat-value { font-family: var(--display); font-size: calc(28px * var(--fs)); letter-spacing: -0.02em; }
+.chip.delivery-sent { color: var(--accent); }
+.chip.delivery-failed, .chip.delivery-suppressed { color: var(--danger, #b3261e); }
+
+/* ─── Shared page: verification, changes, report (Sprint 23) ─────────── */
+.shared-key.changed, .shared-item.changed { box-shadow: inset 3px 0 0 var(--accent); }
+.shared-changes { align-items: center; }
+.shared-code .input { max-width: 180px; letter-spacing: 0.2em; font-size: 20px; }
+.shared-report .btn { margin: 2px; }
+.shared-preview { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; height: auto; padding: 10px 14px; }
+.shared-privacy p { margin: 0 0 16px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .shared-shell * { transition: none !important; animation: none !important; } }

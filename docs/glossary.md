@@ -7,7 +7,7 @@ introduces them.
 | ---- | ------- |
 | **Tenant**            | A company / workspace. Isolated end-to-end via row-level security. |
 | **Workspace**         | User-facing name for a tenant. |
-| **Note**              | The core content object: a template-based structured document with append-only versions (draft / finalized / amended / cancelled). |
+| **Note**              | The core content object: a template-based structured document with append-only versions (draft / cancelled; finalize retired in 0042). |
 | **Template**          | A JSONB-defined note structure (sections, field types) — e.g. meeting notes, 1-on-1, interview debrief (ADR-0016). |
 | **RLS**               | Row-Level Security — Postgres policy filtering rows by `current_setting('app.tenant_id')`. |
 | **`tenant_connection`** | The single sanctioned helper that scopes a DB connection to a tenant (ADR-0004). |

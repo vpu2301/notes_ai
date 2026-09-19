@@ -15,11 +15,7 @@ TEMPLATE_REBOUND: Final = "template.rebound"  # sprint-17: draft moved to succes
 # Sprint-08: notes slice.
 NOTE_CREATED: Final = "note.created"
 NOTE_DRAFT_UPDATED: Final = "note.draft.updated"  # aggregated per session
-NOTE_FINALIZED: Final = "note.finalized"
-NOTE_COMPLETED: Final = "note.completed"  # finalize completion summary (M1·A5)
-NOTE_REVERTED: Final = "note.reverted"
 NOTE_CANCELLED: Final = "note.cancelled"
-NOTE_AMENDED: Final = "note.amended"  # finalized → amended (versioned amendment)
 NOTE_VIEWED_FULL: Final = "note.viewed_full"  # carries purpose
 NOTE_SEARCHED: Final = "note.searched"
 NOTE_CHAIN_INTEGRITY_FAILURE: Final = "note.chain_integrity_failure"
@@ -36,6 +32,24 @@ NOTE_LINK_REVOKED: Final = "note.link_revoked"
 # addresses stay out of the audit log on purpose.
 NOTE_LINK_EMAILED: Final = "note.link_emailed"
 NOTE_VIEWED_VIA_LINK: Final = "note.viewed_via_link"  # anonymous read
+# Sprint 19: the recipient clicked the shared page's "create your own
+# workspace" CTA. Payload: link_id only — the recipient is unknown by design.
+NOTE_CTA_CLICKED: Final = "note.cta_clicked"
+# Sprint 20: the recipient acted on the shared page. Payload: link_id,
+# kind (closed vocab), target (item|section) — never the comment or a key.
+NOTE_RECIPIENT_RESPONDED: Final = "note.recipient_responded"
+NOTE_ITEM_STATUS_CHANGED: Final = "note.item_status_changed"  # item_key, from, to
+NOTE_RESPONSE_CLEARED: Final = "note.response_cleared"  # kind
+# Sprint 22: the product mailed a recipient link. Payload: link_id,
+# resend, outcome (sent|failed). Never the address.
+NOTE_LINK_SENT: Final = "note.link_sent"
+# The recipient opted out of mail from every workspace. Payload: link_id.
+NOTE_RECIPIENT_UNSUBSCRIBED: Final = "note.recipient_unsubscribed"
+# Sprint 23: policy, verification, abuse.
+TENANT_SHARING_POLICY_CHANGED: Final = "tenant.sharing_policy_changed"  # changed_keys
+NOTE_RECIPIENT_VERIFICATION_REQUESTED: Final = "note.recipient_verification_requested"  # link_id
+NOTE_RECIPIENT_VERIFIED: Final = "note.recipient_verified"  # link_id
+NOTE_LINK_REPORTED: Final = "note.link_reported"  # link_id, reason
 
 # Spec item 1: note synthesis (raw dictation → clean prose).
 NOTE_SYNTHESIS_STARTED: Final = "note.synthesis_started"
@@ -48,10 +62,8 @@ NOTE_SYNTHESIS_COMPLETED: Final = "note.synthesis_completed"
 # for closed vocabularies — the option slug. Free-text values are NEVER
 # included; a "what did they change it to" payload over prose would put
 # note content in the audit chain. Test-enforced.
-# Emitted ONCE per finalized note, summarising how many typed fields
-# carried machine-extracted values at the moment of finalize. Aggregated
-# on purpose: a row per utterance would be audit-chain pollution.
-FIELD_EXTRACTED: Final = "note.field.extracted"
+# `note.field.extracted` (one aggregated row per finalize) retired with
+# the finalize lifecycle (migration 0042).
 FIELD_CONFIRMED: Final = "note.field.confirmed"
 FIELD_OVERRIDDEN: Final = "note.field.overridden"
 

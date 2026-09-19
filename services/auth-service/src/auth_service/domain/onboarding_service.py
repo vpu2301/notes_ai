@@ -35,10 +35,11 @@ already control.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets as _secrets
 import string
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -51,6 +52,7 @@ from ratelimit import RateLimiterUnavailableError
 from ..keycloak_client import KeycloakError
 from . import compose
 from . import email_code as ec
+from .disposable_domains import is_disposable
 from .errors import ApiError
 from .password_policy import check_password
 
@@ -65,6 +67,12 @@ _signup_counter = _meter.create_counter(
 _signup_verify_counter = _meter.create_counter(
     "mdx_auth_signup_verify_total",
     description="Signup confirmation submissions by outcome",
+    unit="1",
+)
+# Sprint 21: the loop's conversion step. `stage` = requested | verified.
+_signup_referred_counter = _meter.create_counter(
+    "mdx_auth_signup_referred_total",
+    description="Signups that arrived through a shared note's CTA, by stage",
     unit="1",
 )
 
@@ -109,6 +117,12 @@ class SignupConfig:
     verify_email_window_seconds: int = 3600
     resend_email_limit: int = 3
     resend_email_window_seconds: int = 3600
+    # Sprint 21: the free plan, recorded on the tenant (not enforced).
+    free_limits: dict[str, int] = field(
+        default_factory=lambda: {"notes_per_month": 50, "members": 3}
+    )
+    # Throwaway-mail domains answer 202 and create nothing.
+    disposable_domains: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +214,7 @@ class OnboardingService:
         ip: str = "",
         user_agent: str = "",
         lang: str = "en",
+        ref_code: str | None = None,
     ) -> None:
         """The public path. Answers nothing: every outcome is the same 202.
 
@@ -211,7 +226,9 @@ class OnboardingService:
         address = ec.normalise_email(email)
         if not compose.looks_like_email(address):
             _signup_counter.add(1, {"result": "invalid_email"})
-            raise SignupError("invalid_email", 400, detail="that does not look like an email address")
+            raise SignupError(
+                "invalid_email", 400, detail="that does not look like an email address"
+            )
 
         display_name = (display_name or "").strip()
         if not display_name:
@@ -243,6 +260,12 @@ class OnboardingService:
 
         await self._check_signup_limits(address=address, ip=ip)
 
+        if is_disposable(address, self._cfg.disposable_domains):
+            # Sprint 21: a throwaway address gets the same 202 and nothing
+            # else — no user, no tenant, no mail it would never read.
+            _signup_counter.add(1, {"result": "disposable"})
+            return
+
         if await self._address_is_taken(address):
             # The uniform branch. One mail, no user, no challenge — and
             # crucially the same 202 the new-address path returns.
@@ -255,12 +278,15 @@ class OnboardingService:
             password=password,
             display_name=display_name,
             locale=locale,
-            source="self_serve",
+            source="referral" if ref_code else "self_serve",
+            ref_code=ref_code,
         )
         await self._open_challenge_and_mail(
             email=address, lang=lang, user_agent=user_agent, identity_sub=account.sub
         )
         _signup_counter.add(1, {"result": "created"})
+        if ref_code:
+            _signup_referred_counter.add(1, {"stage": "requested"})
 
     async def create_account(
         self,
@@ -271,6 +297,7 @@ class OnboardingService:
         locale: str = "en",
         source: str = "self_serve",
         verified: bool = False,
+        ref_code: str | None = None,
     ) -> Account:
         """Keycloak user + tenant + membership + `users` row, or nothing at all.
 
@@ -295,7 +322,9 @@ class OnboardingService:
                 # Keycloak knows the address even though our own lookup
                 # did not — a user created outside this flow, or a race.
                 # Same outward behaviour as the taken branch.
-                raise SignupError("email_taken", 409, detail="that address is already registered") from exc
+                raise SignupError(
+                    "email_taken", 409, detail="that address is already registered"
+                ) from exc
             _signup_counter.add(1, {"result": "unavailable"})
             logger.error("auth.signup.keycloak_failed", extra={"status": exc.status})
             raise SignupError(
@@ -319,6 +348,8 @@ class OnboardingService:
                 locale=locale,
                 names=names,
                 status="active" if verified else "invited",
+                source=source,
+                ref_code=ref_code,
             )
         except Exception as exc:  # noqa: BLE001 — every failure compensates
             # The compensation the whole ordering exists for. A Keycloak
@@ -344,7 +375,10 @@ class OnboardingService:
             tenant_id=tenant_id,
             kind="auth.signup",
             actor_sub=sub,
-            payload={"source": source},
+            # Sprint 21: the plan and whether a shared note brought them.
+            # Never the ref code itself: it is the join key to a sender's
+            # tenant, and the audit log of the NEW tenant must not hold it.
+            payload={"source": source, "plan": "free", "ref_present": ref_code is not None},
         )
         return Account(
             sub=sub,
@@ -365,6 +399,8 @@ class OnboardingService:
         names: ec.WorkspaceNames,
         status: str,
         attempts: int = 3,
+        source: str = "self_serve",
+        ref_code: str | None = None,
     ) -> None:
         """Tenant + membership + `users` + identity, in ONE transaction.
 
@@ -392,14 +428,17 @@ class OnboardingService:
                         """
                         INSERT INTO tenants
                             (id, name, display_name, slug, kind, locale, timezone,
-                             status, is_active)
-                        VALUES ($1, $2, $3, $4, 'personal', $5, 'Europe/Kyiv', 'active', true)
+                             status, is_active, plan, signup_source, plan_limits)
+                        VALUES ($1, $2, $3, $4, 'personal', $5, 'Europe/Kyiv', 'active', true,
+                                'free', $6, $7::jsonb)
                         """,
                         tenant_id,
                         name,
                         f"{display_name}'s workspace",
                         names.slug,
                         locale,
+                        source,
+                        json.dumps(self._cfg.free_limits),
                     )
                     await conn.execute(
                         """
@@ -441,6 +480,18 @@ class OnboardingService:
                         _OWNER_USER_ROLE,
                         status,
                     )
+                    if ref_code:
+                        # Attribution, half of it: the person. The workspace
+                        # id lands on this row at verify, when it is real.
+                        # No FK and no sender tenant id — by design (0036).
+                        await conn.execute(
+                            """
+                            INSERT INTO referrals (ref_code, referred_sub, source)
+                            VALUES ($1, $2, 'signup')
+                            """,
+                            ref_code,
+                            sub,
+                        )
                 return
             except asyncpg.UniqueViolationError as exc:
                 constraint = str(getattr(exc, "constraint_name", "") or exc)
@@ -507,13 +558,31 @@ class OnboardingService:
         tenant_id = await self._activate_user(sub)
         _signup_verify_counter.add(1, {"result": "ok"})
         if tenant_id is not None:
+            referred = await self._attribute_referral(sub, tenant_id)
+            if referred:
+                _signup_referred_counter.add(1, {"stage": "verified"})
             await self._write_audit(
                 tenant_id=tenant_id,
                 kind="auth.email_verified",
                 actor_sub=sub,
-                payload={},
+                payload={"ref_present": referred},
                 severity="sec",
             )
+
+    async def _attribute_referral(self, sub: UUID, tenant_id: UUID) -> bool:
+        """Sprint 21: the workspace is now real, so the referral row that
+        signup opened for this person gets the tenant id. True when a row
+        was stamped — i.e. the person came through a shared note."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE referrals SET referred_tenant_id = $2
+                WHERE referred_sub = $1 AND referred_tenant_id IS NULL
+                """,
+                sub,
+                tenant_id,
+            )
+        return bool(result) and result.split()[-1] != "0"
 
     async def _activate_user(self, sub: UUID) -> UUID | None:
         """`users.status` → active, and stamp the identity as verified.
@@ -554,9 +623,7 @@ class OnboardingService:
         if decision.consume:
             await self._challenges.consume(challenge.id)
         elif decision.attempts_after != challenge.attempts:
-            await self._challenges.record_attempt(
-                challenge.id, attempts=decision.attempts_after
-            )
+            await self._challenges.record_attempt(challenge.id, attempts=decision.attempts_after)
 
         outcome = decision.outcome
         _signup_verify_counter.add(1, {"result": str(outcome)})
@@ -565,9 +632,7 @@ class OnboardingService:
                 "challenge_expired", 400, detail="that code has expired; request a new one"
             )
         if outcome is ec.VerifyOutcome.CONSUMED:
-            raise SignupError(
-                "challenge_consumed", 400, detail="that code has already been used"
-            )
+            raise SignupError("challenge_consumed", 400, detail="that code has already been used")
         if outcome is ec.VerifyOutcome.EXHAUSTED:
             raise SignupError(
                 "too_many_attempts", 429, detail="too many attempts; request a new code"
@@ -618,9 +683,7 @@ class OnboardingService:
     async def _address_is_taken(self, email: str) -> bool:
         """Ours OR Keycloak's. Both, because either one blocks a create."""
         async with self._pool.acquire() as conn:
-            known = await conn.fetchval(
-                "SELECT 1 FROM identities WHERE email = $1 LIMIT 1", email
-            )
+            known = await conn.fetchval("SELECT 1 FROM identities WHERE email = $1 LIMIT 1", email)
         if known:
             return True
         try:
@@ -760,5 +823,3 @@ class OnboardingService:
                 detail="too many attempts; please wait",
                 retry_after=decision.retry_after,
             )
-
-

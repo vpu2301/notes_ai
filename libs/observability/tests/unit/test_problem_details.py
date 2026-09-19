@@ -73,3 +73,29 @@ def test_problem_extras_still_attach() -> None:
 
 def resp_text(body: dict) -> str:
     return " ".join(str(v) for v in body.values())
+
+
+def test_problem_extras_may_name_the_type() -> None:
+    """asr-service's job endpoints attach ``{"type_uri": …}`` through
+    ``problem_extras``. That key used to collide with the handler's own
+    ``type_uri=`` keyword, so every such 409/410 died inside the handler
+    and reached the client as a 500 "An unexpected error occurred."""
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/not-ready")
+    async def _not_ready() -> None:
+        exc = HTTPException(409, detail="job is in status 'running', not 'complete'")
+        exc.problem_extras = {  # type: ignore[attr-defined]
+            "type_uri": "urn:mdx:asr:result:not-ready",
+            "job_status": "running",
+        }
+        raise exc
+
+    resp = TestClient(app).get("/not-ready")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["type"] == "urn:mdx:asr:result:not-ready"
+    assert body["job_status"] == "running"
+    assert "type_uri" not in body
+    assert body["detail"] == "job is in status 'running', not 'complete'"

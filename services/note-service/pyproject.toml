@@ -37,6 +37,8 @@ dependencies = [
     "python-dateutil>=2.9",
     # "Ask this note" (ADR-0046): the model-provider seam
     "models",
+    # Sprint 19: abuse caps on the anonymous shared-note surface
+    "ratelimit",
 ]
 
 [tool.uv.sources]
@@ -48,6 +50,7 @@ template_models = { workspace = true }
 note_models = { workspace = true }
 notification_events = { workspace = true }
 secret = { workspace = true }
+ratelimit = { workspace = true }
 crypto = { workspace = true }
 storage = { workspace = true }
 models = { workspace = true }

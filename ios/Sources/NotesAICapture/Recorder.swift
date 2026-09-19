@@ -83,6 +83,18 @@ final class AudioRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Double = 0
+    /// The server's cap on one recording. The app reads the real value
+    /// before each recording (`AsrLimits`); this is the fallback.
+    @Published var limitSeconds: TimeInterval = 2 * 3600
+    /// Seconds until the cap.
+    var remaining: TimeInterval { max(0, limitSeconds - elapsed) }
+    /// How far ahead of the cap the warning fires.
+    static let warningLead: TimeInterval = 5 * 60
+    /// Called once, `warningLead` before the cap, and once at the cap.
+    var onLimitWarning: (() -> Void)?
+    var onLimitReached: (() -> Void)?
+    private var warned = false
+    private var limitHit = false
     /// True while a call or Siri has the microphone.
     @Published private(set) var interrupted = false
 
@@ -147,6 +159,8 @@ final class AudioRecorder: ObservableObject {
         self.startedAt = Date()
         self.elapsed = 0
         self.level = 0
+        self.warned = false
+        self.limitHit = false
         self.interrupted = false
         self.isRecording = true
         observeSession()
@@ -180,6 +194,14 @@ final class AudioRecorder: ObservableObject {
         guard isRecording, let startedAt else { return }
         elapsed = Date().timeIntervalSince(startedAt)
         level = interrupted ? 0 : sink.currentLevel()
+        if !warned, remaining <= Self.warningLead {
+            warned = true
+            onLimitWarning?()
+        }
+        if !limitHit, elapsed >= limitSeconds {
+            limitHit = true
+            onLimitReached?()
+        }
     }
 
     // MARK: - Interruptions & route changes
@@ -331,4 +353,14 @@ private final class TapSink: @unchecked Sendable {
         let db = 20 * log10(max(Double(rms), 1e-7))
         return max(0, min(1, (db + 50) / 50))
     }
+}
+
+/// "2 hours" / "90 minutes" — the cap, the way a person says it.
+func formatLimit(_ seconds: TimeInterval) -> String {
+    let minutes = Int(seconds / 60)
+    if minutes % 60 == 0 {
+        let hours = minutes / 60
+        return hours == 1 ? "1 hour" : "\(hours) hours"
+    }
+    return "\(minutes) minutes"
 }

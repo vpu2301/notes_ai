@@ -1,24 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getResult, listJobs, setSpeakerNames } from "../api/asr";
 import { ApiError, errorMessage } from "../api/http";
 import {
-  amendNote,
   deleteNote,
   downloadPdf,
-  finalizeNote,
+  getItems,
   getNote,
+  getResponses,
   getTemplate,
   getVersion,
   listVersions,
   needsReadPurpose,
   notesBySourceJob,
-  revertToDraft,
   updateDraft,
 } from "../api/notes";
 import type {
   FieldMetadata,
-  NoteAmendmentType,
+  ItemView,
+  ResponseView,
   NoteContent,
   NoteEnvelope,
   NoteSection,
@@ -32,6 +32,7 @@ import type {
 import { defaultSpeakerName } from "../api/types";
 import { AskNote } from "../components/AskNote";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ResponsesPanel } from "../components/ResponsesPanel";
 import {
   AlertIcon,
   ArrowLeftIcon,
@@ -43,7 +44,6 @@ import {
   FolderIcon,
   FolderPlusIcon,
   HistoryIcon,
-  PenIcon,
   ShareIcon,
   SparkleIcon,
   TrashIcon,
@@ -51,10 +51,13 @@ import {
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { RichText } from "../components/RichText";
+import { isTranscript, parseRichText } from "../lib/richText";
+import { speakerInitials, speakerTint } from "../lib/speakers";
 import { ShareDialog } from "../components/ShareDialog";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
+import { useAuth } from "../auth/AuthContext";
 import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
@@ -335,9 +338,97 @@ interface TranscriptViewProps {
   jobId: string;
   /** A speaker was renamed on the job — the note body may want to follow. */
   onSpeakerRenamed?: (from: string, to: string) => void;
+  /** Shown instead of the error when the job cannot be read (the note's own text). */
+  fallback?: ReactNode;
 }
 
-function TranscriptView({ jobId, onSpeakerRenamed }: TranscriptViewProps) {
+/**
+ * The transcript as it stands in the note text, for a note without a
+ * readable recording job. Speaker names are still editable: a rename
+ * rewrites every turn of that speaker in the note, which autosaves.
+ */
+function TextTranscriptView({
+  texts,
+  editable,
+  onRename,
+}: {
+  texts: string[];
+  editable: boolean;
+  onRename: (from: string, to: string) => void;
+}) {
+  const [editing, setEditing] = useState<{ name: string; value: string } | null>(null);
+  const blocks = useMemo(() => texts.flatMap((t) => parseRichText(t)), [texts]);
+  const speakers = useMemo(
+    () => new Set(blocks.flatMap((b) => (b.kind === "para" && b.speaker ? [b.speaker] : []))),
+    [blocks],
+  );
+
+  const commit = () => {
+    if (!editing) return;
+    const { name, value } = editing;
+    setEditing(null);
+    const to = value.trim().split(/\s+/).join(" ").slice(0, 80);
+    if (to && to !== name) onRename(name, to);
+  };
+
+  return (
+    <div className="transcript">
+      <div className="transcript-bar">
+        <span className="help">
+          {speakers.size === 0
+            ? "Speakers were not told apart in this recording."
+            : `${speakers.size === 1 ? "1 speaker" : `${speakers.size} speakers`}${editable ? " · click a name to rename" : ""}`}
+        </span>
+      </div>
+      {blocks.map((block, i) => {
+        if (block.kind !== "para") return null;
+        const text = block.spans.map((s) => s.text).join("");
+        if (!block.speaker) {
+          return (
+            <p key={i} className="turn-text" style={{ gridColumn: "1 / -1" }}>
+              {text}
+            </p>
+          );
+        }
+        const name = block.speaker;
+        const isEditing = editing !== null && editing.name === name;
+        return (
+          <div key={i} className="turn">
+            <span className="speaker-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
+              {speakerInitials(name)}
+            </span>
+            <div className="turn-h">
+              {isEditing ? (
+                <input
+                  className="input speaker-input"
+                  aria-label="Speaker name"
+                  autoFocus
+                  value={editing.value}
+                  maxLength={80}
+                  onChange={(e) => setEditing({ name, value: e.target.value })}
+                  onBlur={commit}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commit();
+                    if (e.key === "Escape") setEditing(null);
+                  }}
+                />
+              ) : editable ? (
+                <button type="button" className="turn-speaker" title="Rename this speaker" onClick={() => setEditing({ name, value: name })}>
+                  {name}
+                </button>
+              ) : (
+                <span className="turn-speaker">{name}</span>
+              )}
+            </div>
+            <p className="turn-text">{text}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewProps) {
   const toast = useToast();
   const [result, setResult] = useState<TranscriptResult | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -405,6 +496,7 @@ function TranscriptView({ jobId, onSpeakerRenamed }: TranscriptViewProps) {
   };
 
   if (error) {
+    if (fallback) return <>{fallback}</>;
     return (
       <div className="banner banner-danger" role="alert">
         <AlertIcon size={15} />
@@ -441,6 +533,11 @@ function TranscriptView({ jobId, onSpeakerRenamed }: TranscriptViewProps) {
         const isEditing = editing !== null && t.speaker !== null && editing.label === t.speaker;
         return (
           <div key={i} className="turn">
+            {diarized && (
+              <span className="speaker-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
+                {speakerInitials(name)}
+              </span>
+            )}
             <div className="turn-h">
               {diarized &&
                 (isEditing ? (
@@ -587,11 +684,12 @@ function SpacePill({ noteId }: { noteId: string }) {
 
 // ── the page ──────────────────────────────────────────────────────────
 
-type Tab = "notes" | "transcript";
+type Tab = "notes" | "transcript" | "responses";
 
 export function NoteEditorPage() {
   const { noteId = "" } = useParams();
   const toast = useToast();
+  const { identity } = useAuth();
   const navigate = useNavigate();
   const { spaces, spaceOf, file: fileInSpace, forgetNote } = useSpaces();
 
@@ -611,25 +709,49 @@ export function NoteEditorPage() {
    */
   const [readPurpose, setReadPurpose] = useState<ReadPurpose | null>(null);
 
-  const [tab, setTab] = useState<Tab>("notes");
+  const [params] = useSearchParams();
+  // `?tab=responses` is the notification's deep link (Sprint 20).
+  const [tab, setTab] = useState<Tab>(params.get("tab") === "responses" ? "responses" : "notes");
+  const [items, setItems] = useState<ItemView[]>([]);
+  const [responses, setResponses] = useState<ResponseView[]>([]);
   const [sourceJobId, setSourceJobId] = useState<string | null>(() => jobForNote(noteId));
 
   const [versions, setVersions] = useState<NoteVersionSummary[] | null>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [viewing, setViewing] = useState<NoteVersionDetail | null>(null);
 
-  const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [amending, setAmending] = useState(false);
-  const [amendType, setAmendType] = useState<NoteAmendmentType>("correction");
-  const [amendReason, setAmendReason] = useState("");
-
   const saveTimer = useRef<number | null>(null);
   const latest = useRef<{ content: NoteContent; version: number } | null>(null);
+
+  // Sprint 20: items are derived from the "Action items" section on
+  // read; the tab shows whenever there is something to act on.
+  const responseCount = responses.length;
+  const hasResponsesTab = items.length > 0 || responses.length > 0;
+  useEffect(() => {
+    if (!note || note.status === "cancelled") {
+      setItems([]);
+      setResponses([]);
+      return;
+    }
+    let live = true;
+    Promise.all([getItems(noteId), getResponses(noteId)])
+      .then(([i, r]) => {
+        if (!live) return;
+        setItems(i);
+        setResponses(r);
+      })
+      .catch(() => {
+        /* a reader without manage rights, or an old server: the tab simply stays hidden */
+      });
+    return () => {
+      live = false;
+    };
+  }, [noteId, note?.status, note?.current_version_id]);
 
   // ── load ────────────────────────────────────────────────────────────
 
@@ -647,6 +769,7 @@ export function NoteEditorPage() {
         setReadPurpose("review");
       }
       setNote(env);
+      if (env.source_job_id) setSourceJobId(env.source_job_id);
       setContent(env.content ?? null);
       setVersion(env.current_version_number);
       setSaveState("saved");
@@ -704,7 +827,7 @@ export function NoteEditorPage() {
     };
   }, [noteId, sourceJobId]);
 
-  // ── autosave (drafts and live amendments share the debounce) ────────
+  // ── autosave ────────────────────────────────────────────────────────
 
   const flushSave = useCallback(async () => {
     const snap = latest.current;
@@ -743,17 +866,17 @@ export function NoteEditorPage() {
     [],
   );
 
-  const isDraft = note?.status === "draft";
-  const editable = (isDraft || amending) && !viewing;
+  // A note is a living document (ADR-0051): editable until cancelled.
+  const isDraft = note !== null && note.status !== "cancelled";
+  const editable = isDraft && !viewing;
 
   const onContentChange = (next: NoteContent) => {
     setContent(next);
-    // Amendments are saved explicitly (one audited version), never autosaved.
     if (isDraft) scheduleSave(next, version);
   };
 
   // A speaker renamed in the transcript is renamed in the note too — the
-  // draft's turn lines start with the name. A finalized note is a record;
+  // note's turn lines start with the name. A cancelled note is a record;
   // its text stays, and only the transcript shows the new name.
   const onSpeakerRenamed = (from: string, to: string) => {
     if (!content || !isDraft) {
@@ -771,56 +894,6 @@ export function NoteEditorPage() {
   };
 
   // ── actions ─────────────────────────────────────────────────────────
-
-  const onFinalize = async () => {
-    setBusy(true);
-    setActionError(null);
-    try {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      await flushSave();
-      await finalizeNote(noteId, version);
-      setConfirmFinalize(false);
-      toast.success("Note finalized");
-      await load();
-    } catch (err) {
-      setActionError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onRevert = async () => {
-    setBusy(true);
-    try {
-      await revertToDraft(noteId);
-      toast.success("Back to draft");
-      await load();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onSaveAmendment = async () => {
-    if (!content) return;
-    if (!amendReason.trim()) {
-      toast.error("An amendment needs a short reason — it goes on the record.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await amendNote(noteId, content, amendType, amendReason.trim());
-      setAmending(false);
-      setAmendReason("");
-      toast.success("Amendment recorded");
-      await load();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const fileBase = () => safeFilename(shownContent?.title ?? "", note?.code ?? "note");
 
@@ -887,6 +960,13 @@ export function NoteEditorPage() {
   // ── render ──────────────────────────────────────────────────────────
 
   const shownContent = viewing ? viewing.content : content;
+  // A dialogue-shaped section is the raw transcript: it lives behind the
+  // Transcript tab (read-only, speaker turns typeset), never in the notes.
+  const transcriptDefs = (sections ?? []).filter(
+    (def) => shownContent !== null && isTranscript(sectionOf(shownContent, def.id).text ?? ""),
+  );
+  const noteDefs = (sections ?? []).filter((def) => !transcriptDefs.includes(def));
+  const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
   const saveLabel = useMemo(() => {
     switch (saveState) {
       case "saving":
@@ -936,28 +1016,6 @@ export function NoteEditorPage() {
     { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
     { label: showVersions ? "Hide history" : "History", icon: <HistoryIcon size={14} />, onClick: () => void toggleVersions() },
   ];
-  if (!viewing && isDraft) {
-    menu.push({
-      label: "Finalize note",
-      icon: <CheckIcon size={14} />,
-      sep: true,
-      onClick: () => {
-        setActionError(null);
-        setConfirmFinalize(true);
-      },
-    });
-  }
-  if (!viewing && (note.status === "finalized" || note.status === "amended") && !amending) {
-    menu.push({
-      label: note.status === "amended" ? "Amend again" : "Amend",
-      icon: <PenIcon size={14} />,
-      sep: true,
-      onClick: () => setAmending(true),
-    });
-    if (note.status === "finalized") {
-      menu.push({ label: "Revert to draft", onClick: () => void onRevert(), disabled: busy });
-    }
-  }
   if (!viewing && spaces.length > 0) {
     const current = spaceOf[noteId];
     spaces.forEach((sp, i) => {
@@ -1009,7 +1067,7 @@ export function NoteEditorPage() {
               </button>
             </>
           ) : (
-            note.status !== "draft" && <StatusBadge status={note.status} />
+            note.status === "cancelled" && <StatusBadge status={note.status} />
           )}
           <span className="grow" />
           {isDraft && !viewing && (
@@ -1064,73 +1122,72 @@ export function NoteEditorPage() {
           </div>
         )}
 
-        {amending && (
-          <div className="amend-bar">
-            <h3>
-              <PenIcon size={14} /> Recording an amendment
-            </h3>
-            <div className="row-actions">
-              <select
-                className="select"
-                value={amendType}
-                aria-label="Amendment type"
-                onChange={(e) => setAmendType(e.target.value as NoteAmendmentType)}
-              >
-                <option value="correction">Correction</option>
-                <option value="addition">Addition</option>
-                <option value="clarification">Clarification</option>
-              </select>
-              <input
-                className="input"
-                style={{ flex: 1, minWidth: 200 }}
-                placeholder="Why is this changing? (kept on the record)"
-                value={amendReason}
-                onChange={(e) => setAmendReason(e.target.value)}
-              />
-              <button className="btn primary sm" onClick={() => void onSaveAmendment()} disabled={busy}>
-                {busy ? "Saving…" : "Save amendment"}
-              </button>
-              <button
-                className="btn ghost sm"
-                disabled={busy}
-                onClick={() => {
-                  setAmending(false);
-                  void load();
-                }}
-              >
-                Discard
-              </button>
-            </div>
-          </div>
-        )}
-
-        {sourceJobId && (
+        {(hasTranscript || hasResponsesTab) && (
           <div className="tabs doc-tabs" role="tablist">
             <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
               Notes
             </button>
-            <button
-              className={`tab ${tab === "transcript" ? "on" : ""}`}
-              role="tab"
-              aria-selected={tab === "transcript"}
-              onClick={() => setTab("transcript")}
-            >
-              Transcript
-            </button>
+            {hasTranscript && (
+              <button
+                className={`tab ${tab === "transcript" ? "on" : ""}`}
+                role="tab"
+                aria-selected={tab === "transcript"}
+                onClick={() => setTab("transcript")}
+              >
+                Transcript
+              </button>
+            )}
+            {hasResponsesTab && (
+              <button
+                className={`tab ${tab === "responses" ? "on" : ""}`}
+                role="tab"
+                aria-selected={tab === "responses"}
+                onClick={() => setTab("responses")}
+              >
+                Responses{responseCount > 0 && <span className="count">{responseCount}</span>}
+              </button>
+            )}
           </div>
         )}
 
-        {tab === "transcript" && sourceJobId ? (
-          <TranscriptView jobId={sourceJobId} onSpeakerRenamed={onSpeakerRenamed} />
+        {tab === "responses" && hasResponsesTab ? (
+          <ResponsesPanel
+            noteId={noteId}
+            items={items}
+            responses={responses}
+            sections={sections}
+            onItems={setItems}
+            onResponses={setResponses}
+          />
+        ) : tab === "transcript" && (sourceJobId || transcriptDefs.length > 0) ? (
+          (() => {
+            const textView =
+              transcriptDefs.length > 0 ? (
+                <TextTranscriptView
+                  texts={transcriptDefs.map((def) => sectionOf(shownContent, def.id).text ?? "")}
+                  editable={editable}
+                  onRename={onSpeakerRenamed}
+                />
+              ) : undefined;
+            return sourceJobId ? <TranscriptView jobId={sourceJobId} onSpeakerRenamed={onSpeakerRenamed} fallback={textView} /> : textView;
+          })()
         ) : (
           <div className="doc-body">
             {sections.length === 0 && <div className="section-ro empty-val">This note's template has no sections.</div>}
-            {sections.map((def) => (
+            {noteDefs.length === 0 && sections.length > 0 && (
+              <div className="section-ro empty-val">No notes yet — the transcript is under the other tab.</div>
+            )}
+            {noteDefs.map((def) => (
               <section key={def.id} className="doc-section">
                 <div className="field">
                   <span className="section-name">
                     {def.name}
                     {def.required && <span className="req-tag">required</span>}
+                    {(def.id === "action_items" || def.id === "next_steps") && responseCount > 0 && (
+                      <button type="button" className="chip version response-badge" onClick={() => setTab("responses")}>
+                        {responseCount} response{responseCount === 1 ? "" : "s"}
+                      </button>
+                    )}
                   </span>
                   <SectionField
                     def={def}
@@ -1181,21 +1238,6 @@ export function NoteEditorPage() {
         </aside>
       )}
 
-      {confirmFinalize && (
-        <ConfirmDialog
-          title="Finalize this note?"
-          subtitle="Finalizing freezes the current version."
-          confirmLabel="Finalize"
-          busy={busy}
-          error={actionError}
-          onConfirm={() => void onFinalize()}
-          onCancel={() => setConfirmFinalize(false)}
-        >
-          You can still amend it later — every amendment is recorded in the note's history with a typed
-          reason.
-        </ConfirmDialog>
-      )}
-
       {confirmDelete && (
         <ConfirmDialog
           title="Delete this note?"
@@ -1212,7 +1254,18 @@ export function NoteEditorPage() {
       )}
 
       {showShare && (
-        <ShareDialog noteId={noteId} noteTitle={shownContent.title ?? ""} onClose={() => setShowShare(false)} />
+        <ShareDialog
+          noteId={noteId}
+          noteTitle={shownContent.title ?? ""}
+          owner={
+            identity && note.primary_author_id === identity.id
+              ? { name: identity.display_name, email: identity.email, isMe: true }
+              : note.primary_author_name
+                ? { name: note.primary_author_name, email: "", isMe: false }
+                : undefined
+          }
+          onClose={() => setShowShare(false)}
+        />
       )}
     </div>
   );

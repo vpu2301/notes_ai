@@ -8,3 +8,4 @@ Open: {{ deep_link }}
 --
 This is an automated message from Notes AI.
 It deliberately contains no note content or personal data.
+3Days Labs Inc, 2166 Market Street, San Francisco, CA 94114

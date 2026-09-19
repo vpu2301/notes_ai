@@ -29,6 +29,8 @@ export interface Identity {
   mfa_enabled: boolean;
   has_password: boolean;
   status: string;
+  /** Sprint 21: when the account came to exist; drives first-run hints. */
+  created_at?: string | null;
 }
 
 /** `MembershipSummary` — one workspace this identity belongs to. */
@@ -78,6 +80,13 @@ export interface AuthResult {
  * one with nothing to resend. Nothing in this body varies by branch, so no
  * UI built on it can imply the server recognised the address.
  */
+/** `GET /auth/signup/config` — answers in every mode; `/join` picks its form by it. */
+export interface SignupConfig {
+  enabled: boolean;
+  min_password_length: number;
+  disposable_domains_blocked: true;
+}
+
 export interface SignupAccepted {
   status: "verification_sent";
   /** Seconds before `/auth/signup/resend` will send another code. */
@@ -303,6 +312,7 @@ export interface TemplateDetail extends TemplateSummary {
 
 // ── note-service: notes ────────────────────────────────────────────────
 
+/** `finalized` / `amended` are legacy values that no longer occur (ADR-0051). */
 export type NoteStatus = "draft" | "finalized" | "amended" | "cancelled";
 
 /**
@@ -346,6 +356,8 @@ export interface NoteEnvelope {
   created_at: string;
   updated_at: string;
   finalized_at: string | null;
+  /** The transcription job the note was made from, if any. */
+  source_job_id?: string | null;
   cancelled_at: string | null;
   /** Who may read it beyond the author team. */
   visibility?: NoteVisibility;
@@ -377,14 +389,66 @@ export interface SharedMember {
   display_name: string;
 }
 
-export interface PublicLink {
+export type ShareLinkKind = "public" | "recipient";
+
+/** One share link — the public one (0016) or a per-recipient one (Sprint 19). */
+export interface LinkView {
+  id: string;
+  kind: ShareLinkKind;
+  /** The sender's own name for the recipient; empty for public links. */
+  label: string;
+  recipient_email: string | null;
   token: string;
   /** SPA path; prefix with the current origin to get a full URL. */
   path: string;
+  /** Opaque referral code the CTA carries into `/join?ref=`. */
+  ref_code: string | null;
   created_at: string;
   expires_at: string | null;
   view_count: number;
+  first_viewed_at: string | null;
   last_viewed_at: string | null;
+  cta_clicked_at: string | null;
+  /** Sprint 20: live responses from this link. */
+  response_count?: number;
+  /** Sprint 22: the product mailed the link. */
+  delivery_status?: DeliveryStatus;
+  sent_at?: string | null;
+  send_count?: number;
+  /** The error class of the last failed send, never a message. */
+  last_send_error?: string;
+}
+
+export type DeliveryStatus = "not_sent" | "sent" | "failed" | "suppressed";
+
+/** `GET /v1/admin/sharing/stats` — counts only. */
+export interface SharingStats {
+  days: 30 | 90;
+  links_created: number;
+  links_sent: number;
+  links_opened: number;
+  links_responded: number;
+  cta_clicks: number;
+  item_responses: number;
+  disputes: number;
+  opted_out: number;
+  dispute_rate: number;
+  top_senders: { display_name: string; links: number }[];
+}
+
+/** @deprecated name kept for older call sites; the shape is `LinkView`. */
+export type PublicLink = LinkView;
+
+export interface CreateLinkRequest {
+  kind?: "recipient";
+  label: string;
+  recipient_email?: string;
+  expires_in_days?: number;
+  /** Sprint 22: create and mail in one call. */
+  send?: boolean;
+  personal_message?: string;
+  lang?: string;
+  source?: "dialog" | "nudge" | "native";
 }
 
 export interface SharingView {
@@ -393,7 +457,44 @@ export interface SharingView {
   can_manage: boolean;
   can_delete: boolean;
   shared_with: SharedMember[];
-  public_link: PublicLink | null;
+  public_link: LinkView | null;
+  /** Every live link, newest first. Empty for readers who may not manage the note. */
+  links: LinkView[];
+  /** Sprint 23: the workspace's effective sharing rules. */
+  constraints: SharingConstraints;
+}
+
+export interface SharingConstraints {
+  external_links_enabled: boolean;
+  public_links_enabled: boolean;
+  max_link_days: number;
+  product_email_enabled: boolean;
+  verified_recipients_required: boolean;
+}
+
+/** `GET/PUT /v1/admin/sharing/policy` — the whole policy, every time. */
+export interface SharingPolicy {
+  external_links_enabled: boolean;
+  public_links_enabled: boolean;
+  max_link_days: number;
+  verified_recipients_required: boolean;
+  product_email_enabled: boolean;
+  cta_enabled: boolean;
+  auto_disabled_reason: "abuse_reports" | null;
+}
+
+/** `GET /tenants/{id}` (auth-service) — the branding half the settings page edits. */
+export interface TenantProfile {
+  id: string;
+  name: string;
+  display_name: string;
+  legal_name: string;
+  locale: string;
+  timezone: string;
+  logo_url: string;
+  has_logo?: boolean;
+  contact_email: string;
+  plan?: string;
 }
 
 /** One recipient of a server-sent share mail, and what became of it. */
@@ -413,13 +514,104 @@ export interface ShareEmailResponse {
 }
 
 /** What an anonymous reader gets from a public link. */
+export type SharedSectionRole = "decisions" | "action_items" | "attendees" | "transcript" | "other";
+
+export interface SharedSection {
+  section_key: string;
+  name: string;
+  text: string;
+  /** Drives the page's fixed hierarchy; `other` collapses below the fold. */
+  role: SharedSectionRole;
+}
+
 export interface SharedNoteView {
   code: string;
   title: string;
   status: string;
   updated_at: string;
-  sections: { section_key: string; name: string; text: string }[];
+  sections: SharedSection[];
   issuer_name: string;
+  sender: {
+    issuer_name: string;
+    has_logo: boolean;
+    logo_path: string | null;
+    shared_by_display: string;
+  };
+  product: {
+    brand_name: string;
+    header_text: string;
+    cta_path: string;
+    /** Sprint 23: a paid workspace may turn the product line off. */
+    cta_enabled?: boolean;
+  };
+  expires_at: string | null;
+  /** Sprint 23: prove the mailbox before acting; reading is still allowed. */
+  requires_verification?: boolean;
+  lang?: "en" | "de" | "uk";
+  changes?: {
+    since_version: number;
+    sections_changed: string[];
+    items_added: string[];
+    items_removed: string[];
+    items_changed: string[];
+  } | null;
+  /** Sprint 20: the action items as objects, and what this link already did. */
+  items: SharedItem[];
+  my_flags: string[];
+  /** False on a public link: anyone may read it, so nobody can sign it. */
+  can_respond: boolean;
+}
+
+// ── Sprint 20: action items + recipient responses ────────────────────
+
+export type ItemStatus = "open" | "done" | "dropped";
+export type ResponseKind = "confirm" | "done" | "dispute" | "flag";
+
+export interface ResponseView {
+  id: string;
+  link_id: string;
+  /** The sender's own label for the recipient ("Tom @ Client"). */
+  link_label: string;
+  kind: ResponseKind;
+  item_key: string | null;
+  section_key: string | null;
+  /** Recipient-authored. Render as text, never as markup. */
+  comment: string | null;
+  created_at: string;
+  cleared_at: string | null;
+}
+
+export interface ItemCounts {
+  confirms: number;
+  dones: number;
+  disputes: number;
+}
+
+export interface ItemView {
+  id: string;
+  item_key: string;
+  position: number;
+  text: string;
+  owner_label: string | null;
+  /** 1 when the line said `Name:`; 0.5 when inferred — show "check owner". */
+  owner_confidence: number | null;
+  due_date: string | null;
+  due_text: string | null;
+  due_confidence: number | null;
+  status: ItemStatus;
+  counts: ItemCounts;
+  responses: ResponseView[];
+}
+
+export interface SharedItem {
+  item_key: string;
+  text: string;
+  owner_label: string | null;
+  due_date: string | null;
+  due_text: string | null;
+  status: ItemStatus;
+  my_response: "confirm" | "done" | "dispute" | null;
+  my_comment: string | null;
 }
 
 export interface NoteCreatedResponse {
@@ -438,22 +630,8 @@ export interface UpdateDraftResponse {
   idempotent_replay?: boolean;
 }
 
-export interface FinalizeResponse {
-  id: string;
-  status: string;
-}
-
+/** History only: amendments were retired with the finalize lifecycle (ADR-0051). */
 export type NoteAmendmentType = "correction" | "addition" | "clarification";
-
-export interface AmendResponse {
-  version_id: string;
-  version_number: number;
-  parent_version_id: string;
-  is_amendment: boolean;
-  amendment_type: NoteAmendmentType;
-  note_status: string;
-  diff_summary: Record<string, string[]>;
-}
 
 export interface NoteVersionSummary {
   id: string;
@@ -485,6 +663,8 @@ export interface SearchHit {
   visibility?: NoteVisibility | null;
   shared_with_count?: number | null;
   has_public_link?: boolean | null;
+  /** Sprint 20 — live recipient disputes, for the "1 disputed" marker. */
+  open_disputes?: number;
 }
 
 export interface SearchResponse {

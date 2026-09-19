@@ -28,6 +28,7 @@ export function SettingsLayout() {
         <SettingsTab to="/settings/account" label="Account" />
         <SettingsTab to="/settings/security" label="Security" />
         {manages && <SettingsTab to="/settings/devices" label="Room devices" />}
+        {manages && <SettingsTab to="/settings/workspace" label="Workspace" />}
       </nav>
 
       <Outlet />

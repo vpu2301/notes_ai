@@ -23,6 +23,7 @@ import {
   MoonIcon,
   SunIcon,
   UploadIcon,
+  ShareIcon,
 } from "../components/icons";
 import { relativeTime } from "../lib/time";
 import { useSpaces } from "../spaces/SpacesContext";
@@ -421,7 +422,7 @@ function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => void; on
 
 export function AppShell() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { activeRole, logout } = useAuth();
   const { pref, setPref } = useTheme();
   const toast = useToast();
   const scroller = useRef<HTMLDivElement>(null);
@@ -522,6 +523,10 @@ export function AppShell() {
 
         <nav className="sb-nav" aria-label="Main">
           <SideLink to="/" end icon={<NotesIcon size={14} />} label="All notes" collapsed={collapsed} />
+          {(activeRole === "owner" || activeRole === "admin") && (
+            /* Sprint 22: the workspace's recipient loop, counts only; the API refuses everyone else. */
+            <SideLink to="/admin/sharing" icon={<ShareIcon size={14} />} label="Sharing" collapsed={collapsed} />
+          )}
           <SpacesNav collapsed={collapsed} />
         </nav>
 

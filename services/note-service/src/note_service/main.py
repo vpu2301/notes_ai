@@ -16,18 +16,18 @@ from observability import bootstrap, register_exception_handlers
 from .config import settings
 from .deps import install_state
 from .main_deps import build_state, teardown_state
-from .middleware import RequestIDMiddleware
+from .middleware import AnonymousCorsMiddleware, RequestIDMiddleware
 from .routers import (
     audio_clips,
     calendar,
     health,
     notes,
-    notes_amend,
     notes_ask,
     notes_audio,
     notes_diff,
     notes_drafts,
     notes_from_transcript,
+    notes_items,
     notes_lifecycle,
     notes_pdf,
     notes_search,
@@ -36,6 +36,7 @@ from .routers import (
     notes_versions,
     search_tips,
     shared_public,
+    sharing_stats,
     spaces,
     synonyms,
     templates,
@@ -124,6 +125,9 @@ def create_app() -> FastAPI:
         expose_headers=["WWW-Authenticate"],
         max_age=600,
     )
+    # Sprint 23: the anonymous shared surface is world-readable by design.
+    # Added last, so it is the outermost layer and sees preflights first.
+    app.add_middleware(AnonymousCorsMiddleware)
     app.include_router(health.router)
     app.include_router(templates.router)
     # Search route must be registered BEFORE the parameterised ``{note_id}``
@@ -136,16 +140,19 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(notes_drafts.router)
     app.include_router(notes_lifecycle.router)
-    app.include_router(notes_amend.router)
     app.include_router(notes_diff.router)
     app.include_router(notes_versions.router)
     app.include_router(notes_pdf.router)
     app.include_router(notes_sharing.router)
+    # Sprint 20: action items + recipient responses, author side.
+    app.include_router(notes_items.router)
     app.include_router(notes_synthesis.router)
     # "Ask this note" — a question over the note and its transcript.
     app.include_router(notes_ask.router)
     # Anonymous, token-addressed reads — no auth dependency at all.
     app.include_router(shared_public.router)
+    # Sprint 22: workspace-level sharing stats for admins (counts only).
+    app.include_router(sharing_stats.router)
     # Sprint 15: audio replay (ADR-0037). No ordering hazard: the
     # multi-segment sections path can't be swallowed by /{note_id}.
     app.include_router(notes_audio.router)

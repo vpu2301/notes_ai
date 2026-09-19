@@ -1,5 +1,6 @@
-import { Fragment, type ReactNode, useMemo } from "react";
+import React, { Fragment, type ReactNode, useMemo } from "react";
 import { type Block, type Inline, type ListItem, parseRichText } from "../lib/richText";
+import { speakerInitials, speakerTint } from "../lib/speakers";
 
 /** Inline runs — code, bold and italic; everything else is plain text. */
 function Spans({ spans }: { spans: Inline[] }) {
@@ -83,6 +84,20 @@ function Blocks({ blocks }: { blocks: Block[] }) {
         break;
       }
       case "para":
+        if (block.speaker) {
+          out.push(
+            <div key={b} className="rt-turn">
+              <span className="speaker-avatar" style={{ "--tint": speakerTint(block.speaker) } as React.CSSProperties} aria-hidden="true">
+                {speakerInitials(block.speaker)}
+              </span>
+              <span className="rt-speaker">{block.speaker}</span>
+              <p className="rt-p rt-turn-text">
+                <Spans spans={block.spans} />
+              </p>
+            </div>,
+          );
+          break;
+        }
         out.push(
           <p key={b} className="rt-p">
             <Spans spans={block.spans} />

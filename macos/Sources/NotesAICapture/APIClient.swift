@@ -688,7 +688,7 @@ actor APIClient {
         return try decode(FromTranscriptResponse.self, from: data)
     }
 
-    // MARK: - Notes (note-service): open, edit, finalize, export
+    // MARK: - Notes (note-service): open, edit, export
 
     /// `purpose` is required when the note is not ours and was not shared
     /// with us; the server says so with `APIError.needsReadPurpose`.
@@ -711,17 +711,6 @@ actor APIClient {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/draft", method: "PUT",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true)
         return try decode(UpdateDraftResponse.self, from: data)
-    }
-
-    func finalizeNote(id: String, expectedVersion: Int) async throws {
-        let body = try JSONSerialization.data(withJSONObject: ["expected_version": expectedVersion])
-        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/finalize", method: "POST",
-                           jsonBody: body, authorized: true)
-    }
-
-    func revertToDraft(id: String) async throws {
-        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/revert-to-draft", method: "POST",
-                           authorized: true)
     }
 
     /// The tenant's notes, newest first; `q` runs the server's full-text
@@ -770,6 +759,84 @@ actor APIClient {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/public-link", method: "DELETE",
                                   authorized: true)
         return try decode(SharingView.self, from: data)
+    }
+
+
+
+    // MARK: - Action items + recipient responses (Sprint 20)
+
+    func items(noteId: String) async throws -> [ActionItem] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items", method: "GET",
+                                  authorized: true)
+        return try decode([ActionItem].self, from: data)
+    }
+
+    func setItemStatus(noteId: String, itemId: String, status: ActionItemStatus) async throws -> ActionItem {
+        let body = try JSONSerialization.data(withJSONObject: ["status": status.rawValue])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items/\(itemId)", method: "PATCH",
+                                  jsonBody: body, authorized: true)
+        return try decode(ActionItem.self, from: data)
+    }
+
+    func responses(noteId: String) async throws -> [ItemResponse] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/responses", method: "GET",
+                                  authorized: true)
+        return try decode([ItemResponse].self, from: data)
+    }
+
+    func clearResponse(noteId: String, responseId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/responses/\(responseId)/clear",
+                           method: "POST", authorized: true)
+    }
+
+    // MARK: - Per-recipient links (Sprint 19)
+
+    /// 201 with the new link, or 200 with the one already minted for that
+    /// address.
+    func createLink(id: String, label: String, recipientEmail: String?, expiresInDays: Int,
+                    mail: Bool = false, personalMessage: String = "",
+                    source: String = "native") async throws -> LinkView {
+        var payload: [String: Any] = ["label": label, "expires_in_days": expiresInDays, "source": source]
+        if let recipientEmail, !recipientEmail.isEmpty { payload["recipient_email"] = recipientEmail }
+        if mail {
+            // Sprint 22: create and mail in one call, in the app's language.
+            payload["send"] = true
+            if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
+            payload["lang"] = Locale.preferredLanguageCode ?? "en"
+        }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(LinkView.self, from: data)
+    }
+
+    /// Sprint 22: mail (or re-mail) a recipient link from the product.
+    /// 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap.
+    func sendLink(id: String, linkId: String, personalMessage: String) async throws -> LinkView {
+        var payload: [String: Any] = ["lang": Locale.preferredLanguageCode ?? "en"]
+        if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links/\(linkId)/send", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(LinkView.self, from: data)
+    }
+
+    /// Sprint 23: the workspace's sharing rules, for any member.
+    func sharingConstraints() async throws -> SharingConstraints {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/sharing/constraints", method: "GET",
+                                  authorized: true)
+        return try decode(SharingConstraints.self, from: data)
+    }
+
+    func listLinks(id: String) async throws -> [LinkView] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links", method: "GET",
+                                  authorized: true)
+        return try decode([LinkView].self, from: data)
+    }
+
+    func revokeLink(id: String, linkId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links/\(linkId)", method: "DELETE",
+                           authorized: true)
     }
 
     /// 404 `not_a_member` when nobody in the workspace has that address.
@@ -846,6 +913,11 @@ actor APIClient {
                                   contentType: "multipart/form-data; boundary=\(boundary)",
                                   authorized: true, tenant: tenant)
         return try decode(TranscriptionJob.self, from: data)
+    }
+
+    func asrLimits() async throws -> AsrLimits {
+        let data = try await send(base: \.asrBaseURL, path: "/asr/limits", method: "GET", authorized: true)
+        return try decode(AsrLimits.self, from: data)
     }
 
     func jobStatus(id: String, tenant: String? = nil) async throws -> TranscriptionJob {

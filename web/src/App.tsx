@@ -14,11 +14,15 @@ import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
 import { SecuritySettingsPage } from "./pages/settings/SecuritySettingsPage";
 import { SettingsLayout } from "./pages/settings/SettingsLayout";
+import { WorkspaceSettingsPage } from "./pages/settings/WorkspaceSettingsPage";
 import { MeetingPage } from "./pages/MeetingPage";
 import { NewNotePage } from "./pages/NewNotePage";
 import { NoteEditorPage } from "./pages/NoteEditorPage";
 import { NotesPage } from "./pages/NotesPage";
+import { JoinPage } from "./pages/JoinPage";
 import { SharedNotePage } from "./pages/SharedNotePage";
+import { SharedPrivacyPage } from "./pages/SharedPrivacyPage";
+import { SharingStatsPage } from "./pages/SharingStatsPage";
 import { AppShell } from "./shell/AppShell";
 import { SpacesProvider } from "./spaces/SpacesContext";
 
@@ -80,7 +84,10 @@ export function App() {
             <Route path="/account-recovery" element={<AccountRecoveryPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
             {/* Public link: anyone with the token, no sign-in. */}
+            <Route path="/s/privacy" element={<SharedPrivacyPage />} />
             <Route path="/s/:token" element={<SharedNotePage />} />
+            {/* Where the shared page's CTA lands (Sprint 19 fake door). */}
+            <Route path="/join" element={<JoinPage />} />
             <Route
               element={
                 <RequireAuth>
@@ -97,6 +104,8 @@ export function App() {
               <Route path="/meeting/new" element={<MeetingPage />} />
               <Route path="/new" element={<NewNotePage />} />
               <Route path="/notes/:noteId" element={<NoteEditorPage />} />
+              {/* Sprint 22: workspace admins only; the API enforces it. */}
+              <Route path="/admin/sharing" element={<SharingStatsPage />} />
               <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />
               <Route path="/settings" element={<SettingsLayout />}>
                 <Route index element={<Navigate to="/settings/account" replace />} />
@@ -104,6 +113,8 @@ export function App() {
                 <Route path="security" element={<SecuritySettingsPage />} />
                 {/* Server-checked as well — see DevicesSettingsPage. */}
                 <Route path="devices" element={<DevicesSettingsPage />} />
+                {/* Sprint 23: branding + external sharing policy (admins). */}
+                <Route path="workspace" element={<WorkspaceSettingsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -298,6 +298,9 @@ _ENTITY_TABLES: tuple[str, ...] = (
     "abbreviation_dictionary",  # abbreviation
     "templates",  # template
     "notes",  # note
+    "note_share_links",  # share link (0016/0035)
+    "note_action_items",  # action item projection (0037)
+    "share_link_responses",  # recipient response (0037)
 )
 
 
@@ -372,12 +375,40 @@ async def test_every_entity_table_isolates_tenants(
                 f"NOTE-2026-{a.hex[:5]}",
                 author_a,
             )
+            link_id = uuid4()
+            await c.execute(
+                "INSERT INTO note_share_links (id, tenant_id, note_id, token_hash, created_by, "
+                "kind, label, recipient_email) "
+                "VALUES ($1,$2,$3,$4,$5,'recipient','Tom','tom@client.example')",
+                link_id,
+                a,
+                note_id,
+                f"hash-{a.hex}",
+                author_a,
+            )
+            await c.execute(
+                "INSERT INTO share_link_responses (id, tenant_id, note_id, link_id, kind, item_key) "
+                "VALUES ($1,$2,$3,$4,'confirm','k1')",
+                uuid4(),
+                a,
+                note_id,
+                link_id,
+            )
+            version_id = uuid4()
             await c.execute(
                 "INSERT INTO note_versions (id, note_id, version_number, created_by, "
                 "content_jsonb) VALUES ($1,$2,1,$3,'{}'::jsonb)",
-                uuid4(),
+                version_id,
                 note_id,
                 author_a,
+            )
+            await c.execute(
+                "INSERT INTO note_action_items (id, tenant_id, note_id, note_version_id, item_key, "
+                "position, text) VALUES ($1,$2,$3,$4,'k1',0,'send the proposal')",
+                uuid4(),
+                a,
+                note_id,
+                version_id,
             )
 
         # Tenant B sees none of tenant A's rows.

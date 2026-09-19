@@ -87,14 +87,15 @@ x-common-env: &common-env
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
 
-# Object storage (S3-compatible). The local MinIO container was removed —
-# there is no object store in the dev stack by default. Point these at a
-# real S3-compatible endpoint in `.env` to re-enable audio at rest; left
-# empty the services start fine and only the audio paths fail.
+# Object storage (S3-compatible). Defaults to the stack's own MinIO
+# (docker-compose.yml), which holds every recording and transcript written
+# so far. Point these at another S3-compatible endpoint in `.env` only
+# after moving those objects across; an empty S3_ENDPOINT makes every
+# transcript and audio read answer 503 `object_store_not_configured`.
 x-s3-env: &s3-env
-  S3_ENDPOINT: ${S3_ENDPOINT:-}
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
 
 x-svc-healthcheck: &svc-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else sys.exit(1)"]
@@ -104,6 +105,29 @@ x-svc-healthcheck: &svc-healthcheck
   start_period: 30s
 
 services:
+  # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
+  minio-init:
+    image: minio/mc:RELEASE.2024-04-18T16-45-29Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
+        mc mb --ignore-existing local/mdx-audio
+        mc mb --ignore-existing local/mdx-transcripts
+        mc version enable local/mdx-audio || true
+        mc version enable local/mdx-transcripts || true
+        # Replay clips — 5-min token/registry TTL is the real lifetime;
+        # 1-day ILM is the ciphertext backstop (ADR-0037).
+        mc mb --ignore-existing local/mdx-audio-clips
+        mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
+        mc ilm rule add --expire-days 1 local/mdx-audio-clips
+        echo "minio-init: buckets ready"
+    restart: "no"
+
   # ── DB schema migrations (one-shot, runs as the postgres superuser
   #    because migrations CREATE ROLE / extensions) ──────────────────
   migrate:
@@ -268,6 +292,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   # ── asr-worker — batch Whisper inference (Redis-stream consumer) ──
   # Runs large-v3 (the production model) on CPU/int8 for real transcript
@@ -313,6 +341,10 @@ services:
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
         condition: service_completed_successfully
 
   # ── dictation-service — real-time streaming ASR over WebSocket ────
@@ -395,6 +427,10 @@ services:
       keycloak:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
         condition: service_completed_successfully
 
   # ── nlp-service — post-processing pipeline ────────────────────────
@@ -480,6 +516,10 @@ services:
       keycloak:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
         condition: service_completed_successfully
       mailpit:
         condition: service_healthy

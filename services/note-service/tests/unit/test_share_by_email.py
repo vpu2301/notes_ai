@@ -5,7 +5,7 @@ overridden auth dependency, monkeypatched repository functions and the
 in-memory mail provider.
 
 What is worth asserting here is the split — a member is granted access
-and sent into the app, a stranger gets the public link and nothing else —
+and sent into the app, a stranger gets their own recipient link —
 and that one bad address does not swallow the rest of the batch. That
 split is the whole reason the endpoint exists.
 """
@@ -22,7 +22,9 @@ from fastapi.testclient import TestClient
 
 from auth import Claims
 from note_service.adapters.email import EmailDeliveryError, EmailPermanentError, MockProvider
+from note_service.domain import action_items_repository as items_repo
 from note_service.domain import notes_repository as repo
+from note_service.domain import sharing_policy
 
 USER = UUID("11111111-1111-1111-1111-111111111111")
 TENANT = UUID("22222222-2222-2222-2222-222222222222")
@@ -113,7 +115,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(router_mod, "emit_note_event", _emit)
 
-    state = {"note": _note(), "link": None, "links_created": 0}
+    state: dict = {"note": _note(), "links": [], "links_created": 0}
 
     async def _fetch_note(conn, *, note_id):  # noqa: ANN001
         return state["note"] if note_id == NOTE else None
@@ -139,23 +141,39 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         state["note"] = _note(shared_with_ids=[*note.shared_with_ids, user_sub])
 
     async def _fetch_link(conn, *, note_id):  # noqa: ANN001
-        return state["link"]
+        return next((row for row in state["links"] if row.kind == "public"), None)
+
+    async def _list_links(conn, *, note_id):  # noqa: ANN001
+        return list(state["links"])
+
+    async def _find_recipient(conn, *, note_id, recipient_email):  # noqa: ANN001
+        return next((row for row in state["links"] if row.recipient_email == recipient_email), None)
 
     async def _create_link(
-        conn, *, link_id, tenant_id, note_id, token_hash, created_by, expires_at
-    ):  # noqa: ANN001
+        conn, *, link_id, tenant_id, note_id, token_hash, created_by, expires_at, **extra
+    ):  # noqa: ANN001, ANN003
         state["links_created"] += 1
         row = repo.ShareLinkRow(
-            id=LINK,
+            id=link_id,
             note_id=note_id,
             created_by=created_by,
             created_at=NOW,
             expires_at=expires_at,
             last_viewed_at=None,
             view_count=0,
+            **extra,
         )
-        state["link"] = row
+        state["links"].append(row)
         return row
+
+    async def _record_outcome(conn, *, link_id, status, error_class=""):  # noqa: ANN001
+        for row in state["links"]:
+            if row.id == link_id:
+                row.delivery_status = status
+                row.send_count += 1
+                row.last_send_error = error_class
+                return row
+        return None
 
     for name, fn in {
         "fetch_note": _fetch_note,
@@ -163,9 +181,24 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "fetch_members": _fetch_members,
         "add_shared_with": _add_shared,
         "fetch_live_share_link": _fetch_link,
+        "list_live_share_links": _list_links,
+        "find_live_recipient_link": _find_recipient,
         "create_share_link": _create_link,
+        "record_send_outcome": _record_outcome,
     }.items():
         monkeypatch.setattr(repo, name, fn)
+
+    async def _no_counts(conn, *, note_id):  # noqa: ANN001
+        return {}
+
+    monkeypatch.setattr(items_repo, "live_response_counts_by_link", _no_counts)
+
+    policy_box = {"policy": sharing_policy.SharingPolicy(), "plan": "free"}
+
+    async def _load_policy(conn, *, tenant_id):  # noqa: ANN001
+        return policy_box["policy"], policy_box["plan"]
+
+    monkeypatch.setattr(sharing_policy, "load_policy", _load_policy)
 
     app = create_app()
     app.dependency_overrides[deps.current_user] = _claims
@@ -174,6 +207,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     c.audit = audit_calls  # type: ignore[attr-defined]
     c.notified = notified  # type: ignore[attr-defined]
     c.state_ = state  # type: ignore[attr-defined]
+    c.policy_box = policy_box  # type: ignore[attr-defined]
     return c
 
 
@@ -206,31 +240,48 @@ def test_member_is_granted_access_and_sent_an_app_link(client: TestClient) -> No
     assert mail.reply_to == "anna@acme.com"
 
 
-def test_stranger_gets_a_public_link_minted_for_them(client: TestClient) -> None:
-    r = _send(client, recipients=["outsider@example.com"])
+def test_stranger_gets_their_own_recipient_link(client: TestClient) -> None:
+    r = _send(client, recipients=["outsider@example.com"], expires_in_days=30)
     assert r.status_code == 200, r.text
     body = r.json()
 
     assert body["results"][0]["access"] == "link"
-    assert body["public_link_created"] is True
+    # Never the public link: one link per person, so it can be turned off alone.
+    assert body["public_link_created"] is False
+    assert body["sharing"]["public_link"] is None
     assert client.state_["links_created"] == 1
-    assert body["sharing"]["public_link"]["path"].startswith("/s/")
+    (link,) = body["sharing"]["links"]
+    assert link["kind"] == "recipient"
+    assert link["recipient_email"] == "outsider@example.com"
+    assert link["label"] == "outsider @ example.com"
+    assert link["delivery_status"] == "sent"
+    assert link["path"].startswith("/s/")
 
     (mail,) = client.provider.sent
-    token = body["sharing"]["public_link"]["token"]
-    assert f"{BASE}/s/{token}" in mail.text_body
+    assert f"{BASE}/s/{link['token']}" in mail.text_body
     # The mail says what a public link means, rather than implying an
     # account is involved.
     assert "no account needed" in mail.text_body.lower()
     assert client.notified == []
 
 
-def test_one_batch_mints_at_most_one_link(client: TestClient) -> None:
+def test_one_link_per_stranger_and_none_for_a_member(client: TestClient) -> None:
     r = _send(client, recipients=["a@example.com", "b@example.com", "colleague@acme.com"])
     assert r.status_code == 200, r.text
-    assert client.state_["links_created"] == 1
+    assert client.state_["links_created"] == 2
     assert [x["access"] for x in r.json()["results"]] == ["link", "link", "member"]
     assert len(client.provider.sent) == 3
+    # Sending again reuses the links rather than minting a second pair.
+    _send(client, recipients=["a@example.com"])
+    assert client.state_["links_created"] == 2
+
+
+def test_external_sharing_off_refuses_a_stranger(client: TestClient) -> None:
+    client.policy_box["policy"] = sharing_policy.SharingPolicy(external_links_enabled=False)
+    r = _send(client, recipients=["outsider@example.com"])
+    assert r.status_code == 403
+    assert r.json()["code"] == "external_sharing_disabled"
+    assert client.provider.sent == []
 
 
 def test_a_dead_address_does_not_swallow_the_rest(
@@ -258,6 +309,12 @@ def test_a_dead_address_does_not_swallow_the_rest(
         "ok@example.com": "sent",
     }
     assert [m.to_address for m in client.provider.sent] == ["ok@example.com"]
+    by_email = {row.recipient_email: row.delivery_status for row in client.state_["links"]}
+    assert by_email == {
+        "bounce@example.com": "failed",
+        "flaky@example.com": "failed",
+        "ok@example.com": "sent",
+    }
 
 
 def test_addresses_are_deduped_case_insensitively(client: TestClient) -> None:

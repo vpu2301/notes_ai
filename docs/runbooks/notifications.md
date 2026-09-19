@@ -20,7 +20,7 @@ anything publishes for X at all. It is not always yes.
 
 | category | published by | file |
 | --- | --- | --- |
-| `note.finalized` | note-service | `routers/notes_lifecycle.py` |
+| `note.finalized` | (retired 0042 — historical rows only) | — |
 | `note.chain_failure` | note-service | `jobs/chain_reconciler.py` |
 | `dictation.completed` | dictation-service | `ws/handler.py::_finalize_normal` |
 | `transcription.completed` | asr-worker | `processor.py::_process_one` |

@@ -1,12 +1,9 @@
-import { api, apiBlob, ApiError } from "./http";
+import { api, apiBlob, ApiError, buildUrl } from "./http";
 import { ASK_HISTORY_LIMIT } from "./types";
 import type {
-  AmendResponse,
   AskResponse,
   AskTurn,
-  FinalizeResponse,
   FromTranscriptResponse,
-  NoteAmendmentType,
   NoteContent,
   NoteCreatedResponse,
   NoteEnvelope,
@@ -15,6 +12,11 @@ import type {
   NoteVisibility,
   ReadPurpose,
   SearchResponse,
+  CreateLinkRequest,
+  ItemStatus,
+  ItemView,
+  LinkView,
+  ResponseView,
   SharedNoteView,
   ShareEmailResponse,
   SharingView,
@@ -68,35 +70,6 @@ export function updateDraft(
   return api<UpdateDraftResponse>("note", `/v1/notes/${id}/draft`, {
     method: "PUT",
     json: { content, expected_version: expectedVersion },
-  });
-}
-
-export function finalizeNote(id: string, expectedVersion: number): Promise<FinalizeResponse> {
-  return api<FinalizeResponse>("note", `/v1/notes/${id}/finalize`, {
-    method: "POST",
-    json: { expected_version: expectedVersion },
-  });
-}
-
-export function revertToDraft(id: string): Promise<FinalizeResponse> {
-  return api<FinalizeResponse>("note", `/v1/notes/${id}/revert-to-draft`, {
-    method: "POST",
-  });
-}
-
-export function amendNote(
-  id: string,
-  content: NoteContent,
-  amendmentType: NoteAmendmentType,
-  amendmentReason: string,
-): Promise<AmendResponse> {
-  return api<AmendResponse>("note", `/v1/notes/${id}/amend`, {
-    method: "POST",
-    json: {
-      content,
-      amendment_type: amendmentType,
-      amendment_reason: amendmentReason,
-    },
   });
 }
 
@@ -184,17 +157,18 @@ export function shareWithMember(id: string, email: string): Promise<SharingView>
  * to the desktop mail client, which produced an unstyled draft the sender
  * still had to send — and on macOS surfaced whatever Mail.app already had
  * open. This sends the real thing: workspace members are granted access
- * and pointed at the note, everyone else gets the public link.
+ * and pointed at the note, everyone else gets their own link.
  */
 export function shareByEmail(
   id: string,
-  body: { recipients: string[]; message?: string; lang?: string },
+  body: { recipients: string[]; message?: string; lang?: string; expires_in_days?: number },
 ): Promise<ShareEmailResponse> {
   return api<ShareEmailResponse>("note", `/v1/notes/${id}/share/email`, {
     method: "POST",
     json: {
       recipients: body.recipients,
       message: body.message ?? "",
+      expires_in_days: body.expires_in_days,
       // The sender's UI language. The recipient's is unknowable — half of
       // them have no account here — and people share within a team.
       lang: body.lang ?? navigator.language,
@@ -207,8 +181,12 @@ export function unshareMember(id: string, sub: string): Promise<SharingView> {
 }
 
 /** Idempotent: returns the existing live link if there is one. */
-export function createPublicLink(id: string): Promise<SharingView> {
-  return api<SharingView>("note", `/v1/notes/${id}/public-link`, { method: "POST" });
+/** `expiresInDays` undefined → the link never expires. */
+export function createPublicLink(id: string, expiresInDays?: number): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/public-link`, {
+    method: "POST",
+    json: expiresInDays ? { expires_in_days: expiresInDays } : {},
+  });
 }
 
 export function revokePublicLink(id: string): Promise<SharingView> {
@@ -216,6 +194,125 @@ export function revokePublicLink(id: string): Promise<SharingView> {
 }
 
 /** Anonymous — no bearer, no session. */
+// ── Sprint 19: per-recipient links ────────────────────────────────
+
+/** 201 with the new link, or 200 with the existing one for that e-mail. */
+export function createLink(id: string, body: CreateLinkRequest): Promise<LinkView> {
+  return api<LinkView>("note", `/v1/notes/${id}/links`, { method: "POST", json: body });
+}
+
+/** Sprint 22: mail the link from the product. 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap. */
+export function sendLink(
+  id: string,
+  linkId: string,
+  body: { personal_message?: string; lang?: string } = {},
+): Promise<LinkView> {
+  return api<LinkView>("note", `/v1/notes/${id}/links/${linkId}/send`, { method: "POST", json: body });
+}
+
+export function listLinks(id: string): Promise<LinkView[]> {
+  return api<LinkView[]>("note", `/v1/notes/${id}/links`);
+}
+
+export function revokeLink(id: string, linkId: string): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/links/${linkId}`, { method: "DELETE" });
+}
+
+export function revokeAllLinks(id: string): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/links`, { method: "DELETE" });
+}
+
+/** The sender's logo, for an `<img src>` on the shared page. */
+export function sharedLogoUrl(token: string): string {
+  return buildUrl("note", `/v1/shared/${encodeURIComponent(token)}/logo`);
+}
+
+/** The CTA `<a href>`: a server-side redirect, so the click counts without JavaScript. */
+export function sharedCtaUrl(token: string): string {
+  return buildUrl("note", `/v1/shared/${encodeURIComponent(token)}/cta`);
+}
+
+// ── Sprint 20: action items + recipient responses ────────────────
+
+export function getItems(id: string): Promise<ItemView[]> {
+  return api<ItemView[]>("note", `/v1/notes/${id}/items`);
+}
+
+export function setItemStatus(id: string, itemId: string, status: ItemStatus): Promise<ItemView> {
+  return api<ItemView>("note", `/v1/notes/${id}/items/${itemId}`, { method: "PATCH", json: { status } });
+}
+
+export function getResponses(id: string, includeCleared = false): Promise<ResponseView[]> {
+  return api<ResponseView[]>("note", `/v1/notes/${id}/responses`, {
+    query: { include_cleared: includeCleared },
+  });
+}
+
+export function clearResponse(id: string, responseId: string): Promise<ResponseView> {
+  return api<ResponseView>("note", `/v1/notes/${id}/responses/${responseId}/clear`, { method: "POST" });
+}
+
+/** Anonymous, token-scoped. 403 `link_kind_public` on a public link. */
+export function respondToItem(
+  token: string,
+  itemKey: string,
+  kind: "confirm" | "done" | "dispute",
+  comment?: string,
+): Promise<void> {
+  return api<void>(
+    "note",
+    `/v1/shared/${encodeURIComponent(token)}/items/${encodeURIComponent(itemKey)}/response`,
+    { method: "PUT", json: { kind, comment: comment || undefined }, auth: false },
+  );
+}
+
+export function withdrawItemResponse(token: string, itemKey: string): Promise<void> {
+  return api<void>(
+    "note",
+    `/v1/shared/${encodeURIComponent(token)}/items/${encodeURIComponent(itemKey)}/response`,
+    { method: "DELETE", auth: false },
+  );
+}
+
+export function flagSection(token: string, sectionKey: string, comment?: string): Promise<void> {
+  return api<void>(
+    "note",
+    `/v1/shared/${encodeURIComponent(token)}/sections/${encodeURIComponent(sectionKey)}/flag`,
+    { method: "PUT", json: { comment: comment || undefined }, auth: false },
+  );
+}
+
+export function unflagSection(token: string, sectionKey: string): Promise<void> {
+  return api<void>(
+    "note",
+    `/v1/shared/${encodeURIComponent(token)}/sections/${encodeURIComponent(sectionKey)}/flag`,
+    { method: "DELETE", auth: false },
+  );
+}
+
+// ── Sprint 23: verification + report ──────────────────────────────
+
+export function requestSharedVerification(token: string): Promise<void> {
+  return api<void>("note", `/v1/shared/${encodeURIComponent(token)}/verify/request`, { method: "POST", auth: false });
+}
+
+/** 400 `code_invalid` / `code_expired`, 429 `too_many_attempts`; success returns the page. */
+export function verifyShared(token: string, code: string): Promise<SharedNoteView> {
+  return api<SharedNoteView>("note", `/v1/shared/${encodeURIComponent(token)}/verify`, {
+    method: "POST",
+    json: { code },
+    auth: false,
+  });
+}
+
+export function reportShared(token: string, reason: string): Promise<void> {
+  return api<void>("note", `/v1/shared/${encodeURIComponent(token)}/report`, {
+    method: "POST",
+    json: { reason },
+    auth: false,
+  });
+}
+
 export function getSharedNote(token: string): Promise<SharedNoteView> {
   return api<SharedNoteView>("note", `/v1/shared/${encodeURIComponent(token)}`, { auth: false });
 }

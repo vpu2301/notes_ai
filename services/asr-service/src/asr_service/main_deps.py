@@ -40,6 +40,7 @@ def auth_issuers() -> list[IssuerConfig]:
         audience=settings.auth_audience,
     )
 
+
 @dataclass
 class ServiceState:
     """Container for runtime singletons. Stored on ``app.state.svc``."""

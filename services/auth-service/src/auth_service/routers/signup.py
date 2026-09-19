@@ -31,7 +31,9 @@ way in.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -63,6 +65,9 @@ class SignupRequest(_Strict):
     # The interface language for the mail. There is no session to infer it
     # from — the person does not have an account yet.
     lang: Literal["en", "de", "uk"] | None = None
+    # Sprint 21: the referral code a shared note's CTA carried into /join.
+    # Opaque; 12 base32 characters (note-service share_links).
+    ref: str | None = Field(default=None, pattern=r"^[a-z2-7]{12}$")
 
 
 class SignupResponse(_Strict):
@@ -86,6 +91,14 @@ class VerifyResponse(_Strict):
 class ResendRequest(_Strict):
     email: EmailStr
     lang: Literal["en", "de", "uk"] | None = None
+
+
+class SignupPublicConfig(_Strict):
+    """What the SPA needs to pick a form: signup, or the lead capture."""
+
+    enabled: bool
+    min_password_length: int
+    disposable_domains_blocked: Literal[True] = True
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -144,6 +157,7 @@ def _lang(request: Request, explicit: str | None) -> str:
 async def signup(body: SignupRequest, request: Request) -> SignupResponse:
     service = _service()
     lang = _lang(request, body.lang)
+    started = time.monotonic()
     try:
         await service.signup(
             email=str(body.email),
@@ -153,6 +167,7 @@ async def signup(body: SignupRequest, request: Request) -> SignupResponse:
             ip=_resolve_ip(request),
             user_agent=request.headers.get("user-agent", ""),
             lang=lang,
+            ref_code=body.ref,
         )
     except SignupError as exc:
         if exc.code == "email_taken":
@@ -163,9 +178,32 @@ async def signup(body: SignupRequest, request: Request) -> SignupResponse:
             # sent by the service on the branch it could detect, and this
             # is the narrow race where it could not.
             logger.info("auth.signup.race_existing")
+            await _hold_until_floor(started)
             return SignupResponse(resend_after=settings.signup_resend_seconds)
         raise _as_problem(exc) from exc
+    # Sprint 21: the branches behind the uniform 202 do different amounts
+    # of work (a disposable address does none; a new one talks to
+    # Keycloak). A floor on the response time keeps the clock from
+    # telling what the body will not.
+    await _hold_until_floor(started)
     return SignupResponse(resend_after=settings.signup_resend_seconds)
+
+
+async def _hold_until_floor(started: float) -> None:
+    remaining = settings.signup_min_response_ms / 1000 - (time.monotonic() - started)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+
+
+@router.get("/config", response_model=SignupPublicConfig, summary="Is self-serve signup on here?")
+async def signup_config() -> SignupPublicConfig:
+    """Answers in every mode and never 404s: the SPA's `/join` shows the
+    signup form when this says `enabled`, and the Sprint 19 lead form
+    otherwise. Nothing here is secret."""
+    return SignupPublicConfig(
+        enabled=getattr(get_state(), "onboarding_service", None) is not None,
+        min_password_length=settings.signup_min_password_length,
+    )
 
 
 @router.post(
@@ -177,9 +215,7 @@ async def signup(body: SignupRequest, request: Request) -> SignupResponse:
 async def verify(body: VerifyRequest, request: Request) -> VerifyResponse:
     service = _service()
     try:
-        await service.verify(
-            email=str(body.email), code=body.code, ip=_resolve_ip(request)
-        )
+        await service.verify(email=str(body.email), code=body.code, ip=_resolve_ip(request))
     except SignupError as exc:
         raise _as_problem(exc) from exc
     return VerifyResponse()

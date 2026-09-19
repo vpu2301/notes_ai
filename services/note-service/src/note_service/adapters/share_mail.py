@@ -61,9 +61,17 @@ def render(
     access: str,
     shared_at: datetime,
     env: Environment | None = None,
+    # Sprint 22 — the recipient-link mail adds who the workspace is, when
+    # the link expires, the product line and an opt-out. All optional so
+    # the member/public share mail is unchanged.
+    issuer_name: str = "",
+    expires_on: str = "",
+    brand_line: str = "",
+    unsubscribe_url: str = "",
 ) -> RenderedEmail:
     lang = copy.normalize_lang(lang)
     strings = copy.strings(lang, sharer=sharer_name, access=access)
+    strings = {**strings, **copy.recipient_strings(lang)}
     # Blank lines separate paragraphs; the template renders each as its
     # own <p>. Splitting here rather than with `nl2br` in the template
     # keeps the escaping automatic — no `|safe` anywhere near text a
@@ -81,7 +89,18 @@ def render(
             sharer_email=sharer_email,
             link_url=link_url,
             shared_at=copy.format_datetime(shared_at, lang),
+            issuer_name=issuer_name,
+            expires_on=expires_on,
+            brand_line=brand_line,
+            unsubscribe_url=unsubscribe_url,
         )
+    )
+    footer = copy.recipient_text_footer(
+        lang,
+        issuer_name=issuer_name,
+        expires_on=expires_on,
+        brand_line=brand_line,
+        unsubscribe_url=unsubscribe_url,
     )
     return RenderedEmail(
         # A newline in a subject is a header-injection primitive: the
@@ -100,6 +119,7 @@ def render(
             link_url=link_url,
             access=access,
             shared_at=shared_at,
-        ).strip(),
+        ).strip()
+        + footer,
         html_body=html.strip(),
     )

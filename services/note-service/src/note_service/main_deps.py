@@ -26,6 +26,8 @@ from .domain.diff_cache import DiffCache
 from .domain.draft_audit_buffer import DraftAuditBuffer
 from .domain.google_calendar import GoogleCalendarClient
 from .domain.ics_calendar import IcsFeedClient
+from .domain.public_rate_limit import PublicRateLimiter
+from .domain.recipient_mail import ShareMailCaps
 from .domain.search_audit_buffer import SearchAuditBuffer
 from .domain.share_email import ShareEmailRateLimiter
 
@@ -48,6 +50,7 @@ def auth_issuers() -> list[IssuerConfig]:
         jwks_url=settings.auth_jwks_url,
         audience=settings.auth_audience,
     )
+
 
 @dataclass
 class ServiceState:
@@ -86,6 +89,10 @@ class ServiceState:
     # spam relay wearing our From address.
     email_provider: EmailProvider
     share_email_rate_limiter: ShareEmailRateLimiter
+    # Sprint 19: abuse caps on the anonymous shared-note surface.
+    public_rate_limiter: PublicRateLimiter
+    # Sprint 22: sends per link / sender / workspace per day.
+    share_mail_caps: ShareMailCaps
     # Metric handles (kept on state so routers don't recreate them).
     diff_cache_hit_metric: object
     autosave_conflicts_metric: object
@@ -265,6 +272,15 @@ async def build_state() -> ServiceState:
         email_provider=email_provider,
         share_email_rate_limiter=ShareEmailRateLimiter(
             redis, per_hour=settings.share_emails_per_user_per_hour
+        ),
+        share_mail_caps=ShareMailCaps(redis),
+        public_rate_limiter=PublicRateLimiter(
+            redis,
+            ip_per_minute=settings.shared_rl_ip_per_minute,
+            link_per_hour=settings.shared_rl_link_per_hour,
+            cta_per_hour=settings.shared_rl_cta_per_hour,
+            trusted_proxy_cidrs=settings.trusted_proxy_cidrs,
+            write_per_hour=settings.shared_rl_write_per_hour,
         ),
         search_audit_buffer=search_audit_buffer,
         envelope=envelope,

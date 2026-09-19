@@ -61,12 +61,16 @@ struct ActiveCaptureCard: View {
                 .font(.dsDisplay(18, .medium))
                 .foregroundStyle(DS.text1)
                 .submitLabel(.done)
-            Text(capture.recorder.interrupted
-                 ? "Paused for a call. Recording resumes when it ends."
-                 : "Recording this phone's microphone. Stop when the meeting ends — the note is drafted for you.")
-                .font(.dsMeta)
-                .foregroundStyle(DS.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            if let warning = capture.limitWarning {
+                DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
+            } else {
+                Text(capture.recorder.interrupted
+                     ? "Paused for a call. Recording resumes when it ends."
+                     : "Recording this phone's microphone. Stop when the meeting ends — the note is drafted for you.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -82,6 +86,10 @@ struct ActiveCaptureCard: View {
                     .lineLimit(1)
             }
             PipelineSteps(phase: capture.phase)
+            if capture.stoppedAtLimit {
+                DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark",
+                         text: "Stopped at the \(formatLimit(capture.recorder.limitSeconds)) limit. The note is being drafted — start a new meeting to keep recording.")
+            }
             Text("Keep the app open until the upload finishes; the rest happens on the server.")
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)

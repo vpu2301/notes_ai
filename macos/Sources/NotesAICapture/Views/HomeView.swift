@@ -24,6 +24,9 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 Color.clear.frame(height: DS.titlebarInset - 12)
                 header
+                if app.isFirstRun {
+                    FirstRunCard()
+                }
                 if case .idle = capture.phase {} else {
                     ActiveCaptureCard()
                         .dsCard(padding: 16, radius: DS.radiusXl)
@@ -317,6 +320,7 @@ private struct NoteRow: View {
                 if !access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: true) } }
             },
             .separator,
+            .header("Public link", hint: access.publicLinkHint),
             .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
                 run {
                     if let url = try await app.publicLink(noteId: id) { copy(url.absoluteString) }
@@ -378,6 +382,11 @@ private struct AccessPill: View {
             Text(access.label)
                 .font(.ds(12, .medium))
                 .lineLimit(1)
+            if access.hasPublicLink {
+                Image(systemName: "globe")
+                    .font(.system(size: 10, weight: .semibold))
+                    .help("A public link is on")
+            }
             Image(systemName: "chevron.down")
                 .font(.system(size: 8, weight: .bold))
                 .opacity(0.75)
@@ -747,5 +756,34 @@ private struct ComingUpRow: View {
         let start = item.start.formatted(date: .omitted, time: .shortened)
         let end = item.end.formatted(date: .omitted, time: .shortened)
         return "\(start) – \(end)"
+    }
+}
+
+/// Sprint 21: the one thing a brand-new workspace should do first.
+/// Shown once per device; `AppState.dismissFirstRun` remembers.
+struct FirstRunCard: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "mic.fill")
+                .foregroundStyle(DS.accent)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Record your first meeting")
+                    .font(.ds(15, .semibold))
+                    .foregroundStyle(DS.text1)
+                Text("Your notes will be ready to share in minutes.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Got it") { app.dismissFirstRun() }
+                .buttonStyle(.plain)
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+        }
+        .dsCard()
     }
 }

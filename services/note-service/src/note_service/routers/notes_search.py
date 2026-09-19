@@ -72,6 +72,7 @@ class SearchHitDTO(BaseModel):
     visibility: str | None = None
     shared_with_count: int | None = None
     has_public_link: bool | None = None
+    open_disputes: int = 0
 
 
 class SearchResponse(BaseModel):
@@ -194,6 +195,7 @@ async def search_notes(
                 visibility=h.visibility,
                 shared_with_count=h.shared_with_count,
                 has_public_link=h.has_public_link,
+                open_disputes=h.open_disputes,
             )
         )
 

@@ -24,12 +24,14 @@ export function Menu({
   anchored = false,
   trigger,
   triggerClassName = "icon-btn",
+  disabled = false,
 }: {
   items: MenuItem[];
   label?: string;
   /** What the trigger shows; the ⋯ icon by default. */
   trigger?: ReactNode;
   triggerClassName?: string;
+  disabled?: boolean;
   /**
    * Position the panel `fixed` off the trigger instead of absolutely inside
    * it — needed wherever an ancestor clips overflow (a list panel, the
@@ -48,8 +50,11 @@ export function Menu({
       const r = btn.current.getBoundingClientRect();
       const height = items.length * ITEM_H + 10;
       const below = r.bottom + 6;
+      // A select opens under its own left edge; an overflow menu hangs
+      // off the right of the ⋯.
+      const left = triggerClassName.startsWith("select-btn") ? r.left : r.right - MENU_W;
       setPos({
-        left: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
+        left: Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8)),
         top: below + height > window.innerHeight - 8 ? Math.max(8, r.top - height - 6) : below,
       });
     }
@@ -60,6 +65,7 @@ export function Menu({
     <div key={it.label}>
       {it.sep && <div className="menu-sep" />}
       <button
+        type="button"
         className={`anchored-menu-item ${it.danger ? "danger" : ""}`}
         role={it.checked === undefined ? "menuitem" : "menuitemradio"}
         aria-checked={it.checked}
@@ -79,12 +85,14 @@ export function Menu({
   return (
     <div className="dropdown-host" ref={ref}>
       <button
+        type="button"
         ref={btn}
         className={triggerClassName}
         aria-label={label}
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={disabled}
         onClick={toggle}
       >
         {trigger ?? <MoreIcon />}
