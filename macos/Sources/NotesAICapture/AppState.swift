@@ -60,6 +60,10 @@ final class AppState: ObservableObject {
     @Published private(set) var email: String
     @Published private(set) var authState: AuthState = .restoring
     @Published private(set) var recents: [RecentCapture] = []
+    /// Jobs whose speakers are being re-labelled right now (Sprint 29), as
+    /// an open note follows them. Not persisted: a relaunch forgets, and the
+    /// note says so again when it is opened.
+    @Published private(set) var relabelling: Set<String> = []
     /// The Settings sheet in the main window; the popover's menu sets it too.
     @Published var settingsPresented = false
     /// Which tab the Settings sheet opens on.
@@ -479,8 +483,14 @@ final class AppState: ObservableObject {
     }
 
     func signOut() async {
+        let signedOut = identityId
         await api.logout()
         clearSignedInState()
+        // Sprint 32: the names the account brought to kept recordings and
+        // the per-job answers go with it; the recordings stay.
+        SignOutCleanup.run(identityId: signedOut)
+        capture.forgetContext()
+        pending.reload()
         signedOutNotice = nil
         authState = .signedOut
     }
@@ -803,6 +813,10 @@ final class AppState: ObservableObject {
         if let noteId { recents[index].noteId = noteId }
         if let errorMessage { recents[index].errorMessage = errorMessage }
         persistRecents()
+    }
+
+    func setRelabelling(jobId: String, _ running: Bool) {
+        if running { relabelling.insert(jobId) } else { relabelling.remove(jobId) }
     }
 
     func removeRecents(jobIds: Set<String>) {
@@ -1155,6 +1169,8 @@ extension AppState: PendingUploadsHost {
     var uploadIdentityId: String {
         identityId.isEmpty ? (lastIdentity?.identityId ?? "") : identityId
     }
+
+    var uploadLocalSpeakerName: String? { LocalSpeakerName.normalized(identity?.displayName) }
 
     func workspaceName(_ tenantId: String?) -> String {
         guard let tenantId else { return "that workspace" }

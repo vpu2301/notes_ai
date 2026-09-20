@@ -159,6 +159,21 @@ class Settings(BaseSettings):
     )
     job_reaper_batch_limit: int = Field(default=100, alias="MD_ASR_JOB_REAPER_BATCH_LIMIT")
 
+    # ── Speaker re-labelling (Sprint 29, POST /asr/jobs/{id}/rediarize) ──
+    # A re-run is a full diarization pass over the stored audio: capped per
+    # job (one in flight, this many in total) and per user per hour.
+    rediarize_max_runs: int = Field(default=5, alias="MD_ASR_REDIARIZE_MAX_RUNS")
+    rediarize_user_hourly_limit: int = Field(default=10, alias="MD_ASR_REDIARIZE_USER_HOURLY_LIMIT")
+
+    # ── Name suggestions + re-label offer (Sprint 32) ───────────────────
+    # Suggestions ship DARK: on only after the shadow experiment shows
+    # ≥ 95 % precision (docs/product/speaker-decisions.md).
+    name_suggestions_enabled: bool = Field(default=False, alias="MDX_NAME_SUGGESTIONS_ENABLED")
+    # The engine the worker diarizes with now (keep equal to the worker's
+    # MDX_DIAR_ENGINE, as its engine id). A transcript made by another one
+    # is offered "Re-label with the current engine".
+    current_diar_engine: str = Field(default="legacy-ecapa-ahc", alias="MDX_DIAR_CURRENT_ENGINE")
+
     # ── NLP batch enrichment (sprint 05 pipeline over batch results) ────
     # GET /asr/jobs/{id}/result runs the raw transcript through
     # nlp-service (voice commands → punctuation → numbers → …) before

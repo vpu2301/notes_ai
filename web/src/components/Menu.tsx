@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDismiss } from "../lib/useDismiss";
 import { CheckIcon, MoreIcon } from "./icons";
 
@@ -44,6 +44,40 @@ export function Menu({
   const close = useCallback(() => setOpen(false), []);
   const ref = useDismiss<HTMLDivElement>(open, close);
   const btn = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+
+  const enabledItems = () =>
+    Array.from(panel.current?.querySelectorAll<HTMLButtonElement>(".anchored-menu-item:not([disabled])") ?? []);
+
+  // A menu opens with its first choice focused, so it is usable from the
+  // keyboard alone (WAI-ARIA menu button); arrows move, Escape goes back.
+  const shown = open && (!anchored || pos !== null);
+  useEffect(() => {
+    if (shown) enabledItems()[0]?.focus();
+  }, [shown]);
+
+  const closeToTrigger = () => {
+    setOpen(false);
+    btn.current?.focus();
+  };
+
+  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const list = enabledItems();
+    const at = list.indexOf(document.activeElement as HTMLButtonElement);
+    const go = (i: number) => {
+      e.preventDefault();
+      list[(i + list.length) % list.length]?.focus();
+    };
+    if (e.key === "ArrowDown") go(at + 1);
+    else if (e.key === "ArrowUp") go(at < 0 ? list.length - 1 : at - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(list.length - 1);
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeToTrigger();
+    } else if (e.key === "Tab") setOpen(false);
+  };
 
   const toggle = () => {
     if (!open && anchored && btn.current) {
@@ -70,8 +104,9 @@ export function Menu({
         role={it.checked === undefined ? "menuitem" : "menuitemradio"}
         aria-checked={it.checked}
         disabled={it.disabled}
+        tabIndex={-1}
         onClick={() => {
-          setOpen(false);
+          closeToTrigger();
           it.onClick();
         }}
       >
@@ -94,18 +129,31 @@ export function Menu({
         aria-expanded={open}
         disabled={disabled}
         onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" && !open) {
+            e.preventDefault();
+            toggle();
+          }
+        }}
       >
         {trigger ?? <MoreIcon />}
       </button>
       {open &&
         (anchored ? (
           pos && (
-            <div className="anchored-menu" role="menu" aria-label={label} style={{ ...pos, minWidth: MENU_W }}>
+            <div
+              className="anchored-menu"
+              role="menu"
+              aria-label={label}
+              ref={panel}
+              onKeyDown={onMenuKey}
+              style={{ ...pos, minWidth: MENU_W }}
+            >
               {body}
             </div>
           )
         ) : (
-          <div className="dropdown" role="menu" aria-label={label}>
+          <div className="dropdown" role="menu" aria-label={label} ref={panel} onKeyDown={onMenuKey}>
             {body}
           </div>
         ))}

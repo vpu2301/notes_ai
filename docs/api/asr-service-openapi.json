@@ -1,12 +1,49 @@
 {
   "components": {
     "schemas": {
+      "AsrLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "max_duration_seconds": {
+            "title": "Max Duration Seconds",
+            "type": "integer"
+          },
+          "max_upload_mb": {
+            "title": "Max Upload Mb",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_duration_seconds",
+          "max_upload_mb"
+        ],
+        "title": "AsrLimits",
+        "type": "object"
+      },
       "Body_submit_job_asr_jobs_post": {
         "properties": {
           "audio": {
             "contentMediaType": "application/octet-stream",
             "description": "Audio file to transcribe.",
             "title": "Audio",
+            "type": "string"
+          },
+          "capture_source": {
+            "anyOf": [
+              {
+                "pattern": "^(calendar_event|manual|upload)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Source"
+          },
+          "channel_layout": {
+            "default": "mono",
+            "pattern": "^(mono|mic_system)$",
+            "title": "Channel Layout",
             "type": "string"
           },
           "diarize": {
@@ -18,6 +55,56 @@
             "pattern": "^(auto|uk|en)$",
             "title": "Language",
             "type": "string"
+          },
+          "local_speaker_name": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Speaker Name"
+          },
+          "name_candidates": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Candidates"
+          },
+          "speakers_expected": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Expected"
+          },
+          "speakers_max": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Max"
           },
           "vocabulary_hint": {
             "anyOf": [
@@ -65,9 +152,239 @@
         "title": "ConfidenceSpanView",
         "type": "object"
       },
+      "DiarizationStats": {
+        "description": "Why a diarized job produced N speakers (Sprint 28). Numbers only:\nno labels-to-names mapping, no text, no embeddings.",
+        "properties": {
+          "both_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Both Share"
+          },
+          "channel_layout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Layout"
+          },
+          "chunks": {
+            "minimum": 0.0,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "clusters_after_merge": {
+            "minimum": 0.0,
+            "title": "Clusters After Merge",
+            "type": "integer"
+          },
+          "clusters_dropped": {
+            "minimum": 0.0,
+            "title": "Clusters Dropped",
+            "type": "integer"
+          },
+          "clusters_raw": {
+            "minimum": 0.0,
+            "title": "Clusters Raw",
+            "type": "integer"
+          },
+          "count_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count Confidence"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "hint_max_speakers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Max Speakers"
+          },
+          "hint_num_speakers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Num Speakers"
+          },
+          "leak_gain_db": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leak Gain Db"
+          },
+          "local_speakers": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Speakers"
+          },
+          "overlap_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Share"
+          },
+          "remote_speakers": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Speakers"
+          },
+          "seconds": {
+            "minimum": 0.0,
+            "title": "Seconds",
+            "type": "number"
+          },
+          "speaker_speech_seconds": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Speaker Speech Seconds",
+            "type": "array"
+          },
+          "speakers": {
+            "minimum": 0.0,
+            "title": "Speakers",
+            "type": "integer"
+          },
+          "speakers_dissolved": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Speakers Dissolved",
+            "type": "integer"
+          },
+          "speech_seconds": {
+            "minimum": 0.0,
+            "title": "Speech Seconds",
+            "type": "number"
+          },
+          "unknown_share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Unknown Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "engine",
+          "engine_version",
+          "chunks",
+          "clusters_raw",
+          "clusters_after_merge",
+          "clusters_dropped",
+          "speakers",
+          "speech_seconds",
+          "unknown_share",
+          "seconds"
+        ],
+        "title": "DiarizationStats",
+        "type": "object"
+      },
+      "DismissSuggestionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "name"
+        ],
+        "title": "DismissSuggestionRequest",
+        "type": "object"
+      },
       "EnrichedSegment": {
         "description": "One segment as served by ``GET /asr/jobs/{id}/result``.\n\n``text`` is the NLP post-processed rendering (dictated punctuation\napplied, numbers/dates normalized) when the view's ``nlp_applied``\nis true; otherwise it equals ``raw_text``. ``words`` always carry\nthe raw Whisper timings.",
         "properties": {
+          "artifact_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Index"
+          },
+          "artifact_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Artifact Indices",
+            "type": "array"
+          },
           "avg_confidence": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -100,6 +417,16 @@
               }
             ],
             "title": "Speaker"
+          },
+          "speaker_cleared": {
+            "default": false,
+            "title": "Speaker Cleared",
+            "type": "boolean"
+          },
+          "speaker_uncertain": {
+            "default": false,
+            "title": "Speaker Uncertain",
+            "type": "boolean"
           },
           "start_ms": {
             "minimum": 0.0,
@@ -165,6 +492,55 @@
         "title": "JobStatus",
         "type": "string"
       },
+      "NameSuggestionView": {
+        "description": "A name offered for an unnamed speaker, with the quote that justifies\nit (Sprint 32). Evidence is shown before a person accepts.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "segment_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Segment Indices",
+            "type": "array"
+          },
+          "source": {
+            "const": "self_introduction",
+            "default": "self_introduction",
+            "title": "Source",
+            "type": "string"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "name",
+          "quote",
+          "start_ms",
+          "end_ms"
+        ],
+        "title": "NameSuggestionView",
+        "type": "object"
+      },
       "ReadyResponse": {
         "properties": {
           "db": {
@@ -193,6 +569,180 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "RediarizeRequest": {
+        "additionalProperties": false,
+        "description": "``speakers_expected``: the count a person states; ``null`` lets the\nengine decide again (e.g. after an engine upgrade).",
+        "properties": {
+          "speakers_expected": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Expected"
+          }
+        },
+        "title": "RediarizeRequest",
+        "type": "object"
+      },
+      "RediarizeStatusView": {
+        "properties": {
+          "diarization_rev": {
+            "title": "Diarization Rev",
+            "type": "integer"
+          },
+          "diarization_status": {
+            "title": "Diarization Status",
+            "type": "string"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "diarization_status",
+          "diarization_rev"
+        ],
+        "title": "RediarizeStatusView",
+        "type": "object"
+      },
+      "SpeakerEditResult": {
+        "properties": {
+          "created_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created Label"
+          },
+          "edit_id": {
+            "format": "uuid",
+            "title": "Edit Id",
+            "type": "string"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "speaker_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Names",
+            "type": "object"
+          },
+          "speaker_stats": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerStatView"
+            },
+            "title": "Speaker Stats",
+            "type": "array"
+          },
+          "speakers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Speakers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "job_id",
+          "edit_id",
+          "speakers",
+          "speaker_names",
+          "speaker_stats"
+        ],
+        "title": "SpeakerEditResult",
+        "type": "object"
+      },
+      "SpeakerEditView": {
+        "description": "A live (not reverted) speaker edit applied to the transcript.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "creates_label": {
+            "default": false,
+            "title": "Creates Label",
+            "type": "boolean"
+          },
+          "from_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Label"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "to_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Label"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "created_at"
+        ],
+        "title": "SpeakerEditView",
+        "type": "object"
+      },
+      "SpeakerMergeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "From",
+            "type": "string"
+          },
+          "into": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "Into",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "into"
+        ],
+        "title": "SpeakerMergeRequest",
+        "type": "object"
+      },
       "SpeakerNamesUpdate": {
         "additionalProperties": false,
         "description": "``PUT /asr/jobs/{id}/speakers`` body: the complete label \u2192 name\nmapping. A label left out (or given an empty name) goes back to its\nneutral default.",
@@ -203,6 +753,19 @@
             },
             "maxProperties": 64,
             "title": "Names",
+            "type": "object"
+          },
+          "sources": {
+            "additionalProperties": {
+              "enum": [
+                "picklist",
+                "typed",
+                "suggestion"
+              ],
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Sources",
             "type": "object"
           }
         },
@@ -231,9 +794,101 @@
         "title": "SpeakerNamesView",
         "type": "object"
       },
+      "SpeakerReassignRequest": {
+        "additionalProperties": false,
+        "description": "Move turns: ``to`` is a roster label, ``\"new\"`` (a speaker the system\nmissed) or ``null`` (unattributed). ``segment_indices`` are the turn's\n``segment_indices`` from the result view \u2014 artifact index space, valid\nonly for ``result_rev``.",
+        "properties": {
+          "result_rev": {
+            "minimum": 1.0,
+            "title": "Result Rev",
+            "type": "integer"
+          },
+          "segment_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Segment Indices",
+            "type": "array"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "result_rev",
+          "segment_indices",
+          "to"
+        ],
+        "title": "SpeakerReassignRequest",
+        "type": "object"
+      },
+      "SpeakerStatView": {
+        "description": "Talk time of one roster label, after speaker edits.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "type": "number"
+          },
+          "speech_ms": {
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "turns": {
+            "minimum": 0.0,
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "speech_ms",
+          "share",
+          "turns"
+        ],
+        "title": "SpeakerStatView",
+        "type": "object"
+      },
       "TranscriptResultView": {
         "description": "Plaintext transcript response for a COMPLETE job (proxy-decrypt).\n\nThe stored artifact stays :class:`TranscriptionOutput` (raw ASR);\nNLP enrichment is applied at read time and degrades gracefully \u2014\n``nlp_applied=False`` means the segments are the raw transcript.",
         "properties": {
+          "count_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count Confidence"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerEditView"
+            },
+            "title": "Edits",
+            "type": "array"
+          },
           "job_id": {
             "format": "uuid",
             "title": "Job Id",
@@ -263,6 +918,27 @@
           "metadata": {
             "$ref": "#/components/schemas/TranscriptionMetadata"
           },
+          "name_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Name Candidates",
+            "type": "array"
+          },
+          "name_suggestions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NameSuggestionView"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Suggestions"
+          },
           "nlp_applied": {
             "default": false,
             "title": "Nlp Applied",
@@ -279,6 +955,16 @@
             ],
             "title": "Nlp Pipeline Version"
           },
+          "relabel_available": {
+            "default": false,
+            "title": "Relabel Available",
+            "type": "boolean"
+          },
+          "result_rev": {
+            "default": 1,
+            "title": "Result Rev",
+            "type": "integer"
+          },
           "schema_version": {
             "default": 1,
             "title": "Schema Version",
@@ -291,6 +977,13 @@
             "title": "Segments",
             "type": "array"
           },
+          "speaker_name_sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Name Sources",
+            "type": "object"
+          },
           "speaker_names": {
             "additionalProperties": {
               "type": "string"
@@ -298,12 +991,41 @@
             "title": "Speaker Names",
             "type": "object"
           },
+          "speaker_sides": {
+            "additionalProperties": {
+              "enum": [
+                "local",
+                "remote"
+              ],
+              "type": "string"
+            },
+            "title": "Speaker Sides",
+            "type": "object"
+          },
+          "speaker_stats": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerStatView"
+            },
+            "title": "Speaker Stats",
+            "type": "array"
+          },
           "speakers": {
             "items": {
               "type": "string"
             },
             "title": "Speakers",
             "type": "array"
+          },
+          "speakers_hint": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Hint"
           },
           "turns": {
             "items": {
@@ -370,6 +1092,11 @@
             "minimum": 0.0,
             "title": "Start Ms",
             "type": "integer"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -393,6 +1120,11 @@
             "title": "Audio Id",
             "type": "string"
           },
+          "can_undo_rediarize": {
+            "default": false,
+            "title": "Can Undo Rediarize",
+            "type": "boolean"
+          },
           "cancel_requested": {
             "default": false,
             "title": "Cancel Requested",
@@ -408,6 +1140,44 @@
               }
             ],
             "title": "Detected Language"
+          },
+          "diarization_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diarization Error"
+          },
+          "diarization_rev": {
+            "default": 1,
+            "title": "Diarization Rev",
+            "type": "integer"
+          },
+          "diarization_runs": {
+            "default": 0,
+            "title": "Diarization Runs",
+            "type": "integer"
+          },
+          "diarization_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "complete",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diarization Status"
           },
           "diarize": {
             "default": false,
@@ -486,6 +1256,17 @@
               }
             ],
             "title": "Finished At"
+          },
+          "hints_applied": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hints Applied"
           },
           "id": {
             "format": "uuid",
@@ -571,6 +1352,16 @@
             "minimum": 1.0,
             "title": "Beam Size",
             "type": "integer"
+          },
+          "diarization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiarizationStats"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "gpu_seconds": {
             "default": 0.0,
@@ -792,6 +1583,23 @@
         "parameters": [
           {
             "in": "header",
+            "name": "X-Client-Type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Client-Type"
+            }
+          },
+          {
+            "in": "header",
             "name": "Authorization",
             "required": false,
             "schema": {
@@ -965,6 +1773,135 @@
         ]
       }
     },
+    "/asr/jobs/{job_id}/rediarize": {
+      "post": {
+        "description": "\"There were 2 people\": new speaker labels in minutes, words untouched.\n\nThe job's ``status`` stays ``complete`` \u2014 the transcript is readable\nthe whole time; progress rides ``diarization_status``. Sprint 28 merges\nbelong to the replaced labelling and stop applying. Capped: one run in\nflight and ``rediarize_max_runs`` per job, plus a per-user hourly\nlimit. Re-runs do not count against the tenant's concurrent-job cap.",
+        "operationId": "rediarize_asr_jobs__job_id__rediarize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RediarizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RediarizeStatusView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Re-label a complete job's speakers from its stored audio (no re-transcription).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/rediarize/undo": {
+      "post": {
+        "operationId": "undo_rediarize_asr_jobs__job_id__rediarize_undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RediarizeStatusView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Go back to the speaker labels the last re-run replaced (one step).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
     "/asr/jobs/{job_id}/result": {
       "get": {
         "description": "Architecture rule: presigned URLs serve ciphertext \u2014 useless to a\nbrowser \u2014 so the transcript is decrypted through the envelope path and\nreturned on this AUTHENTICATED endpoint (ADR-0011 forbids client-side\ndecrypt). Every plaintext read is audited.\n\nThe raw transcript is run through nlp-service's batch pipeline\n(dictated \u00ab\u043a\u0440\u0430\u043f\u043a\u0430\u00bb\u2192\".\" + punctuation/number normalization) with the\ncaller's own bearer forwarded; on any NLP failure the raw transcript\nis returned with ``nlp_applied=false``.",
@@ -1090,6 +2027,373 @@
           }
         },
         "summary": "Name the diarized speakers of a job (label \u2192 display name).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/edits/reset": {
+      "post": {
+        "description": "Back to what the diarizer produced for this revision. Idempotent;\nthe stored transcript was never changed, so nothing else moves.",
+        "operationId": "reset_speaker_edits_asr_jobs__job_id__speakers_edits_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revert every speaker edit of the current revision.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/edits/{edit_id}": {
+      "delete": {
+        "description": "Only the latest live edit can be undone \u2014 keeps the fold deterministic.",
+        "operationId": "undo_speaker_edit_asr_jobs__job_id__speakers_edits__edit_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edit_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Edit Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo the latest speaker edit of a job.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/merge": {
+      "post": {
+        "description": "Every segment of ``from`` reads as ``into`` from now on \u2014 in the\nroster, the names, the turns and the talk time. The stored transcript\nis not touched; the edit is undone with ``DELETE \u2026/speakers/edits/{id}``.\nIf ``from`` has a name and ``into`` has none, ``into`` takes the name.",
+        "operationId": "merge_speakers_asr_jobs__job_id__speakers_merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeakerEditResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge one diarized speaker into another (reversible overlay).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/reassign": {
+      "post": {
+        "description": "One wrong reply fixed in two clicks. An overlay edit like a merge:\nthe stored transcript never changes, the latest edit can be undone,\nand the edit applies only to the revision it was made on.",
+        "operationId": "reassign_turns_asr_jobs__job_id__speakers_reassign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerReassignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeakerEditResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move turns to another speaker, a new speaker, or unattributed.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/suggestions/dismiss": {
+      "post": {
+        "operationId": "dismiss_name_suggestion_asr_jobs__job_id__speakers_suggestions_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissSuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Never offer this name for this speaker again (this job).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/limits": {
+      "get": {
+        "operationId": "limits_asr_limits_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsrLimits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "What one upload may be \u2014 so a client can warn before, not fail after.",
         "tags": [
           "asr"
         ]

@@ -8,6 +8,8 @@ need a wire-version bump and a migration story.
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt
@@ -46,6 +48,43 @@ class Segment(BaseModel):
     # None when the job was not diarized, or when the diarizer could not
     # attribute this segment with confidence (never a guess).
     speaker: str | None = None
+    # Sprint 30: part of this segment's label came from smoothing (a word
+    # the diarizer could not place took its neighbours' speaker, or a
+    # one-word island was folded). Turns built on it are marked uncertain.
+    speaker_uncertain: bool = False
+
+
+class DiarizationStats(BaseModel):
+    """Why a diarized job produced N speakers (Sprint 28). Numbers only:
+    no labels-to-names mapping, no text, no embeddings."""
+
+    engine: str
+    engine_version: str
+    hint_num_speakers: int | None = None
+    hint_max_speakers: int | None = None
+    chunks: NonNegativeInt
+    clusters_raw: NonNegativeInt  # after agglomeration
+    clusters_after_merge: NonNegativeInt  # after the centroid merge
+    clusters_dropped: NonNegativeInt  # below the speaker floor / over the cap
+    speakers: NonNegativeInt  # labels that reached a segment
+    speech_seconds: NonNegativeFloat
+    speaker_speech_seconds: list[float] = Field(default_factory=list)  # descending
+    unknown_share: float = Field(ge=0.0, le=1.0)
+    seconds: NonNegativeFloat  # wall time of the diarization step
+    # Sprint 29 roster guard. ``count_confidence`` is a word, not a
+    # probability: "low" when a kept speaker is tiny, a dissolved one was
+    # not, or much of the speech overlaps. None on pre-Sprint-29 results.
+    count_confidence: Literal["high", "low"] | None = None
+    speakers_dissolved: NonNegativeInt = 0
+    overlap_share: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Sprint 31 dual-channel capture: "mono" | "mic_system" |
+    # "mono_fallback" (the channel analysis failed and the mixdown was
+    # diarized instead). Numbers only.
+    channel_layout: str | None = None
+    leak_gain_db: float | None = None
+    local_speakers: NonNegativeInt | None = None
+    remote_speakers: NonNegativeInt | None = None
+    both_share: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class TranscriptionMetadata(BaseModel):
@@ -55,6 +94,8 @@ class TranscriptionMetadata(BaseModel):
     gpu_seconds: NonNegativeFloat = 0.0
     peak_gpu_mem_mb: NonNegativeInt = 0
     beam_size: int = Field(ge=1)
+    # None for undiarized jobs and for transcripts stored before Sprint 28.
+    diarization: DiarizationStats | None = None
 
 
 class TranscriptionOutput(BaseModel):
@@ -74,6 +115,12 @@ class TranscriptionOutput(BaseModel):
     # job was not diarized (additive — older stored transcripts decode
     # with an empty list).
     speakers: list[str] = Field(default_factory=list)
+    # Sprint 30: where two people spoke at once, per the diarizer (engine
+    # v2 only; empty for legacy and older transcripts). Time intervals only.
+    overlap_ms: list[tuple[int, int]] = Field(default_factory=list)
+    # Sprint 31: label → "local" (this Mac's microphone) | "remote" (the
+    # call audio). Empty for mono captures.
+    speaker_sides: dict[str, Literal["local", "remote"]] = Field(default_factory=dict)
     schema_version: int = 1
 
 
@@ -108,6 +155,16 @@ class EnrichedSegment(BaseModel):
     confidence_spans: list[ConfidenceSpanView] = Field(default_factory=list)
     # Carried through from the stored transcript for diarized jobs.
     speaker: str | None = None
+    # Sprint 30: which stored-artifact segment(s) this rendering is. NLP can
+    # fold a punctuation-only segment into its predecessor, so one served
+    # segment may stand for several artifact segments; edits address the
+    # artifact, never positions in this list.
+    artifact_index: int | None = None
+    artifact_indices: list[int] = Field(default_factory=list)
+    speaker_uncertain: bool = False
+    # A person moved this segment to "Unknown": turn building must not fold
+    # it back into the neighbouring speaker.
+    speaker_cleared: bool = False
 
 
 class TranscriptTurnView(BaseModel):
@@ -128,8 +185,47 @@ class TranscriptTurnView(BaseModel):
     start_ms: NonNegativeInt
     end_ms: NonNegativeInt
     paragraphs: list[str]
-    # Indices into ``segments`` — lets a client jump from a turn back to
-    # the timed words behind it.
+    # Indices of the STORED ARTIFACT's segments behind this turn (Sprint 30:
+    # artifact index space, not positions in ``segments``). Opaque to
+    # clients: sent back as-is to reassign the turn; a served segment's
+    # ``artifact_index`` maps between the two.
+    segment_indices: list[int] = Field(default_factory=list)
+    # People talked over each other here, or the label was smoothed across
+    # speech the diarizer could not place — where corrections are likeliest.
+    uncertain: bool = False
+
+
+class SpeakerStatView(BaseModel):
+    """Talk time of one roster label, after speaker edits."""
+
+    label: str
+    speech_ms: NonNegativeInt
+    share: float = Field(ge=0.0, le=1.0)
+    turns: NonNegativeInt
+
+
+class SpeakerEditView(BaseModel):
+    """A live (not reverted) speaker edit applied to the transcript."""
+
+    id: UUID
+    kind: str  # "merge" | "reassign" (Sprint 30)
+    from_label: str | None = None
+    to_label: str | None = None
+    created_at: datetime
+    # A reassign that moved turns to a speaker the system missed (Sprint 30).
+    creates_label: bool = False
+
+
+class NameSuggestionView(BaseModel):
+    """A name offered for an unnamed speaker, with the quote that justifies
+    it (Sprint 32). Evidence is shown before a person accepts."""
+
+    label: str
+    name: str  # calendar spelling
+    source: Literal["self_introduction"] = "self_introduction"
+    quote: str
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
     segment_indices: list[int] = Field(default_factory=list)
 
 
@@ -156,6 +252,33 @@ class TranscriptResultView(BaseModel):
     # The transcript as speaker turns with paragraphs — derived from
     # ``segments``; clients render this, not the raw segment list.
     turns: list[TranscriptTurnView] = Field(default_factory=list)
+    # Talk time per roster label (after edits), roster order.
+    speaker_stats: list[SpeakerStatView] = Field(default_factory=list)
+    # Diarization run the edits apply to; bumped by a re-run (Sprint 29).
+    result_rev: int = 1
+    # Live speaker edits, application order. The stored artifact is never
+    # rewritten: edits are an overlay applied at read time.
+    edits: list[SpeakerEditView] = Field(default_factory=list)
+    # How sure the diarizer is of the NUMBER of speakers (Sprint 29);
+    # mirrors ``metadata.diarization.count_confidence``. None = undiarized
+    # or a result stored before the roster guard existed.
+    count_confidence: Literal["high", "low"] | None = None
+    # The exact count a person asked for on this labelling, if any. More
+    # than ``len(speakers)`` means fewer voices could be told apart.
+    speakers_hint: int | None = None
+    # Names offered for renaming (Sprint 30): the calendar invitees captured
+    # with the recording. A picklist — the product never assigns them.
+    name_candidates: list[str] = Field(default_factory=list)
+    # Sprint 31: which side each speaker was heard on (dual-channel only),
+    # and how each name came about — "channel" means the server named the
+    # only local speaker after the account owner; one click clears it.
+    speaker_sides: dict[str, Literal["local", "remote"]] = Field(default_factory=dict)
+    speaker_name_sources: dict[str, str] = Field(default_factory=dict)
+    # Sprint 32. ``None`` = suggestions are switched off server-side.
+    name_suggestions: list[NameSuggestionView] | None = None
+    # Made by an older engine (or never by the current one) and the audio
+    # still exists: "Re-label with the current engine" can be offered.
+    relabel_available: bool = False
     nlp_applied: bool = False
     nlp_pipeline_version: str | None = None
     schema_version: int = 1

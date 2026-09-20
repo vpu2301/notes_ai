@@ -17,3 +17,42 @@ export function speakerInitials(name: string): string {
   const out = pick.map((w) => (w ?? "")[0]?.toUpperCase() ?? "").join("");
   return out || "•";
 }
+
+function nameKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+/**
+ * The names a rename can offer for `label`: the job's `name_candidates`
+ * (calendar invitees) minus any already given to another speaker, in the
+ * server's order, without repeats.
+ */
+export function pickableNames(
+  candidates: readonly string[] | undefined,
+  names: Record<string, string>,
+  label: string,
+): string[] {
+  const used = new Set(
+    Object.entries(names)
+      .filter(([l]) => l !== label)
+      .map(([, n]) => nameKey(n)),
+  );
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of candidates ?? []) {
+    const key = nameKey(c);
+    if (!key || used.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(c.trim());
+  }
+  return out;
+}
+
+/**
+ * The segment indices of some turns, concatenated in transcript order —
+ * one reassign call per action however many turns are selected. They are
+ * opaque (artifact index space): sent back exactly as the result gave them.
+ */
+export function segmentIndicesOf(turns: ReadonlyArray<{ segment_indices?: number[] }>): number[] {
+  return turns.flatMap((t) => t.segment_indices ?? []);
+}

@@ -161,11 +161,9 @@
 .home .empty { margin: 0; }
 
 /* ─── First use ─────────────────────────────────────────────────────────
-   The empty workspace. Deliberately unlike `.empty`: that one reports a
-   state ("nothing matches"), this one is an invitation, so it gets the
-   same soft moss light the recorder stage uses rather than the flat
-   surface a report sits on. Frame stays neutral — the accent is in the
-   light and the button, never in the edge. */
+   The empty workspace: an invitation, one sentence and one button. Like
+   `.empty` it carries no frame and no fill of its own — the empty
+   workspace looks like the workspace, only without the rows. */
 .first-use {
   display: flex;
   flex-direction: column;
@@ -173,11 +171,7 @@
   text-align: center;
   gap: calc(12px * var(--density));
   padding: calc(44px * var(--density)) calc(24px * var(--density));
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-xl);
-  background:
-    radial-gradient(120% 78% at 50% 58%, var(--accent-soft), transparent 62%),
-    var(--surface);
+  background: transparent;
 }
 .first-use-art {
   width: 46px; height: 46px;
@@ -616,6 +610,7 @@ ol.rt-list > li::before {
 }
 .meeting-head { display: flex; align-items: center; gap: calc(12px * var(--density)); }
 .meeting-head .title-input { flex: 1; min-width: 0; }
+.meeting-context { margin: calc(-4px * var(--density)) 0 0; color: var(--muted); }
 .meeting-stage {
   min-height: 380px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -954,3 +949,107 @@ ol.rt-list > li::before {
 .shared-preview { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; height: auto; padding: 10px 14px; }
 .shared-privacy p { margin: 0 0 16px; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .shared-shell * { transition: none !important; animation: none !important; } }
+
+/* ─── Speaker roster (Sprint 28) ────────────────────────────────────────── */
+.speaker-roster { display: flex; flex-direction: column; gap: calc(8px * var(--density)); flex: 1; min-width: 0; }
+.speaker-chips { display: flex; flex-wrap: wrap; gap: calc(6px * var(--density)); }
+.speaker-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 3px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text-1);
+  font-size: calc(12.5px * var(--fs)); cursor: pointer;
+}
+.speaker-chip:hover { border-color: var(--line-hover); background: var(--surface-hover); }
+.speaker-avatar.sm { width: 22px; height: 22px; font-size: 10px; margin-top: 0; }
+.speaker-share { color: var(--muted); font-size: calc(11px * var(--fs)); font-variant-numeric: tabular-nums; }
+.speaker-prompt { align-items: center; }
+.speaker-undo { display: flex; align-items: center; gap: 8px; font-size: calc(12.5px * var(--fs)); color: var(--text-2); }
+/* Sprint 31: microphone / call-audio side, and a name taken from the microphone. */
+.speaker-side { display: inline-flex; align-items: center; color: var(--muted); }
+.speaker-source { color: var(--muted); font-size: calc(11px * var(--fs)); }
+.speaker-chip-host { display: inline-flex; align-items: center; gap: 2px; }
+.speaker-chip-clear { width: 22px; height: 22px; border-radius: 999px; }
+
+/* ─── Speaker count (Sprint 29) ─────────────────────────────────────────── */
+.speaker-count { align-self: flex-start; font-size: calc(12.5px * var(--fs)); }
+.speaker-count-pop {
+  width: 260px; min-width: 0;
+  display: flex; flex-direction: column; gap: calc(8px * var(--density));
+  padding: calc(12px * var(--density));
+}
+.speaker-count-pop .help { margin: 0; }
+.speaker-count-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.speaker-error { color: var(--danger); }
+.note-relabel { margin-bottom: calc(12px * var(--density)); }
+
+/* ─── Turn-level correction (Sprint 30) ─────────────────────────────────── */
+/* The avatar is a button that opens "move this turn to"; the host takes the
+   avatar's grid slot so the menu can hang off it. */
+.turn-avatar-host { grid-row: 1 / span 2; grid-column: 1; position: relative; display: inline-flex; }
+.turn-avatar { border: 0; padding: 0; cursor: pointer; grid-row: auto; }
+.turn-avatar:hover:not(:disabled) { box-shadow: 0 0 0 2px var(--line-hover); }
+.turn-avatar:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.turn-avatar:disabled { cursor: default; }
+.turn-uncertain {
+  position: absolute; right: -4px; bottom: -3px;
+  width: 14px; height: 14px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9.5px; font-weight: 700; line-height: 1;
+  background: var(--surface); color: var(--text-2); border: var(--hairline) solid var(--line);
+}
+.turn { border-radius: var(--radius-sm); }
+.turn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.turn.selected { background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); }
+.turn-select { margin-left: auto; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.turn:hover .turn-select, .turn:focus-within .turn-select,
+.transcript.selecting .turn-select, .turn-select:checked { opacity: 1; }
+@media (hover: none) { .turn-select { opacity: 1; } }
+.turn-actions {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: calc(12px * var(--density)); padding: 6px 10px;
+  background: var(--surface); border: var(--hairline) solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-2); font-size: calc(12.5px * var(--fs));
+}
+.speaker-more { align-self: center; }
+.speaker-name-edit { display: inline-flex; }
+.speaker-picklist { min-width: 220px; max-height: 280px; overflow-y: auto; }
+.speaker-pick { width: 100%; }
+
+/* ─── Name suggestions & accessibility (Sprint 32) ──────────────────────── */
+/* Read by screen readers, never seen. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.name-suggestions { display: flex; flex-direction: column; gap: calc(6px * var(--density)); }
+.name-suggestion {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  padding: 4px 4px 4px 10px; border: 1px dashed var(--line-active); border-radius: var(--radius);
+  background: var(--surface); color: var(--text-1); font-size: calc(12.5px * var(--fs));
+}
+.name-suggestion.inline { grid-column: 2; margin-top: calc(6px * var(--density)); justify-self: start; }
+.name-suggestion-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.name-suggestion-text strong { font-weight: 600; }
+.name-suggestion-quote { color: var(--text-2); font-style: italic; }
+.name-suggestion .link-btn.name-suggestion-quote { color: var(--accent-text); text-align: left; }
+.name-suggestion-time { color: var(--text-3); font-size: calc(11px * var(--fs)); }
+.name-suggestion-dismiss { width: 24px; height: 24px; }
+.turn.highlighted { background: var(--info-soft); box-shadow: 0 0 0 6px var(--info-soft); transition: background var(--t) var(--ease); }
+@media (prefers-reduced-motion: reduce) { .turn.highlighted { transition: none; } }
+
+/* Contrast ≥ 4.5:1 for the small text of the speaker controls (Sprint 28–31):
+   --muted is ~3.7:1 on the surfaces here; --text-3 clears AA in both themes. */
+.speaker-share, .speaker-source, .speaker-side, .turn-time, .seg-opt,
+.speaker-roster .help, .transcript-bar .help, .seg + .help { color: var(--text-3); }
+/* Initials in the small avatars (chips, menus) and the turn avatars: less tint, more ink. */
+.speaker-avatar.sm, .turn-avatar { color: color-mix(in srgb, var(--tint, var(--accent)) 35%, var(--text-1)); }
+.seg-opt[disabled] { color: var(--muted); }
+
+/* Visible focus: the soft accent halo is too faint to see (< 3:1); a solid ring is not. */
+.turn:focus-visible, .turn-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.turn:focus-visible:not(.selected):not(.highlighted), .turn-avatar:focus-visible,
+.speaker-roster .link-btn:focus-visible { box-shadow: none; }
+.speaker-roster .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.anchored-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.speaker-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 999px; }

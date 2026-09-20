@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import * as calApi from "../api/calendar";
 import { errorMessage } from "../api/http";
 import type { CalendarConnection, CalendarEntry, UpcomingEvent, UpcomingEventsResponse } from "../api/types";
+import { saveCaptureContext } from "../lib/captureContext";
 import { AlertIcon, CalendarClockIcon, CalendarIcon, LinkOffIcon, MicIcon, PlusIcon, RefreshIcon, VideoIcon } from "./icons";
 import { Menu, type MenuItem } from "./Menu";
 import { useToast } from "./Toaster";
@@ -383,7 +384,13 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
     }
   };
 
-  const start = (ev: UpcomingEvent) => navigate(`/meeting/new?title=${encodeURIComponent(ev.title)}`);
+  // The title and the event id ride the URL; the invitees' names never do
+  // (URLs end up in history and logs) — they wait in sessionStorage.
+  const start = (ev: UpcomingEvent) => {
+    saveCaptureContext(ev);
+    const q = new URLSearchParams({ title: ev.title, event: ev.id });
+    navigate(`/meeting/new?${q.toString()}`);
+  };
 
   const menu = useMemo<MenuItem[]>(() => {
     const items: MenuItem[] = [];

@@ -41,7 +41,13 @@ struct NoteView: View {
                 document
             }
         }
-        .task(id: model.noteId) { await model.load() }
+        .task(id: model.noteId) {
+            // A re-label this note follows shows in the recents list too.
+            model.onRelabellingChange = { [weak app] jobId, running in
+                app?.setRelabelling(jobId: jobId, running)
+            }
+            await model.load()
+        }
         .task(id: model.noteId) { await model.loadSharing() }
         .task(id: model.version) { await model.loadItems() }
         .onChange(of: model.deleted) { _, deleted in
@@ -250,6 +256,11 @@ struct NoteView: View {
             .onChange(of: model.asking) { _, asking in
                 if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
             }
+            // Sprint 32: a suggestion's quote was clicked — show its turn.
+            .onChange(of: model.revealedTurn) { _, reveal in
+                guard let reveal else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(reveal.turnId, anchor: .center) }
+            }
         }
         // The composer sits over the document, under a short wash of the
         // page ground so a line of text never runs into it.
@@ -257,7 +268,13 @@ struct NoteView: View {
             LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
                 .frame(height: 96)
                 .allowsHitTesting(false)
-                .overlay(alignment: .bottom) { askBar }
+                .overlay(alignment: .bottom) {
+                    if model.selectedTurnIds.isEmpty { askBar } else { moveBar }
+                }
+        }
+        .onChange(of: model.tab) { _, _ in model.endSelection() }
+        .onChange(of: model.online) { _, online in
+            if !online { model.endSelection() }
         }
     }
 
@@ -547,6 +564,12 @@ struct NoteView: View {
             } else if let error = model.transcriptError {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             } else if let turns = model.turns {
+                if model.diarized, !model.speakers.isEmpty {
+                    SpeakerRosterView(model: model) { label in
+                        speakerDraft = model.name(for: label)
+                        editingSpeaker = label
+                    }
+                }
                 HStack {
                     Text(turns.isEmpty ? "Nothing was said." : speakerSummary)
                         .font(.dsMeta)
@@ -562,7 +585,7 @@ struct NoteView: View {
                 }
                 ForEach(turns) { turn in
                     HStack(alignment: .top, spacing: 12) {
-                    if model.diarized { SpeakerAvatar(name: model.displayName(for: turn)) }
+                    if model.diarized { turnAvatar(turn) }
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
                             if model.diarized {
@@ -582,7 +605,23 @@ struct NoteView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    Spacer(minLength: 0)
                     }
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                            .fill(turnTint(turn))
+                    )
+                    .padding(-6)
+                    .contentShape(Rectangle())
+                    // Sprint 30: ⌘-click picks turns for a move together.
+                    .simultaneousGesture(TapGesture().modifiers(.command).onEnded {
+                        if model.canEditSpeakers { model.toggleSelection(turn) }
+                    })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityAddTraits(model.selectedTurnIds.contains(turn.id) ? .isSelected : [])
+                    .animation(.easeOut(duration: 0.2), value: model.highlightedTurnId)
+                    .id(turn.id)
                 }
             } else {
                 DSSkeleton(height: 56)
@@ -593,10 +632,109 @@ struct NoteView: View {
         .task { await model.loadTranscript() }
     }
 
+    /// A picked turn, or the one a suggestion's quote pointed at (2 s).
+    private func turnTint(_ turn: TranscriptTurn) -> Color {
+        if model.selectedTurnIds.contains(turn.id) { return DS.accent.opacity(0.1) }
+        if model.highlightedTurnId == turn.id { return DS.accent.opacity(0.16) }
+        return .clear
+    }
+
     private var speakerSummary: String {
         guard model.diarized else { return "Speakers were not told apart in this recording." }
         let count = model.speakerCount
         return (count <= 1 ? "1 speaker" : "\(count) speakers") + " · click a name to rename"
+            + (model.canMoveTurns ? " · ⌘-click turns to move them" : "")
+    }
+
+    /// The turn's avatar: a click offers to move the turn to another
+    /// speaker (Sprint 30). A "?" marks a turn where people talked over
+    /// each other.
+    @ViewBuilder
+    private func turnAvatar(_ turn: TranscriptTurn) -> some View {
+        let avatar = SpeakerAvatar(name: model.displayName(for: turn))
+            .overlay(alignment: .bottomTrailing) {
+                if turn.isUncertain { UncertainMarker() }
+            }
+        if model.canMove(turn) {
+            Menu {
+                Section("Move this turn to") {
+                    moveButtons(for: [turn])
+                }
+                // Sprint 32: the keyboard's way to what ⌘-click does.
+                Divider()
+                Button(model.selectedTurnIds.contains(turn.id) ? "Deselect this turn" : "Select to move with others") {
+                    model.toggleSelection(turn)
+                }
+            } label: {
+                avatar
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(!model.canEditSpeakers)
+            .help(turn.isUncertain
+                  ? "\(UncertainMarker.explanation) Click to move this turn to another speaker."
+                  : "Move this turn to another speaker")
+            .accessibilityLabel("Move this turn to another speaker")
+            .accessibilityValue(turn.isUncertain ? UncertainMarker.explanation : "")
+        } else {
+            avatar
+        }
+    }
+
+    /// Where turns can go: the other speakers, a new one, Unknown.
+    @ViewBuilder
+    private func moveButtons(for moving: [TranscriptTurn]) -> some View {
+        ForEach(model.moveTargets(for: moving), id: \.self) { label in
+            Button(model.name(for: label)) {
+                Task { await model.moveTurns(moving, to: .speaker(label)) }
+            }
+        }
+        Divider()
+        if model.canAddSpeaker {
+            Button("New speaker") { Task { await model.moveTurns(moving, to: .new) } }
+        }
+        if model.canMoveToUnknown(moving) {
+            Button("Unknown") { Task { await model.moveTurns(moving, to: .unknown) } }
+        }
+    }
+
+    /// The ⌘-click selection's action bar: "Move N turns to ▸".
+    private var moveBar: some View {
+        HStack(spacing: 10) {
+            Text("\(model.selectedTurnIds.count) selected")
+                .font(.ds(12.5, .medium))
+                .foregroundStyle(DS.text2)
+            Menu {
+                moveButtons(for: model.selectedTurns)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(model.moveSelectionTitle)
+                    Image(systemName: "chevron.right")
+                }
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .disabled(!model.canEditSpeakers)
+            .accessibilityLabel(model.moveSelectionTitle)
+            .accessibilityHint("Choose the speaker these turns belong to")
+            Button("Clear") { model.endSelection() }
+                .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Clear selection")
+                .help("Clear the selection (Esc)")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Selected turns")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusXl, style: .continuous)
+                .fill(DS.surface)
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
+        )
+        .padding(.bottom, 16)
     }
 
     // MARK: - States
@@ -781,10 +919,14 @@ private struct SpeakerName: View {
 
     @FocusState private var focused: Bool
     @State private var hover = false
+    /// The pointer is over the completion list: losing focus to a click
+    /// there is a pick, not a commit of what was typed.
+    @State private var overCompletions = false
 
     var body: some View {
         if let label = turn.speaker {
             if editingLabel == label {
+                VStack(alignment: .leading, spacing: 4) {
                 TextField("Name", text: $draft)
                     .textFieldStyle(.plain)
                     .font(.dsDisplay(15, .semibold))
@@ -804,8 +946,10 @@ private struct SpeakerName: View {
                     .onSubmit { commit(label) }
                     .onExitCommand { editingLabel = nil }
                     .onChange(of: focused) { _, isFocused in
-                        if !isFocused, editingLabel == label { commit(label) }
+                        if !isFocused, editingLabel == label, !overCompletions { commit(label) }
                     }
+                completions(label)
+                }
             } else {
                 Button {
                     draft = model.displayName(for: turn)
@@ -820,6 +964,13 @@ private struct SpeakerName: View {
                 .disabled(model.renamingSpeaker)
                 .help("Rename this speaker")
                 .onHover { hover = $0 }
+                .contextMenu {
+                    Button("Rename…") {
+                        draft = model.displayName(for: turn)
+                        editingLabel = label
+                    }
+                    MergeMenu(model: model, label: label)
+                }
             }
         } else {
             Text(unknownSpeakerName)
@@ -829,10 +980,47 @@ private struct SpeakerName: View {
         }
     }
 
+    /// Sprint 30: the calendar's invitees not yet used on another speaker,
+    /// narrowed by what is typed. A click names the speaker.
+    @ViewBuilder
+    private func completions(_ label: String) -> some View {
+        let names = model.nameCompletions(for: label, typed: draft)
+        if !names.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(names, id: \.self) { name in
+                    Button {
+                        overCompletions = false
+                        editingLabel = nil
+                        Task { await model.renameSpeaker(label: label, to: name, picked: true) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            SpeakerAvatar(name: name).scaleEffect(0.75).frame(width: 20, height: 20)
+                            Text(name).font(.ds(13)).foregroundStyle(DS.text1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(width: 200, alignment: .leading)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(DS.text3.opacity(0.35), lineWidth: 1)
+            )
+            .onHover { overCompletions = $0 }
+            .accessibilityLabel("Invited people")
+        }
+    }
+
     private func commit(_ label: String) {
         let name = draft
         editingLabel = nil
-        Task { await model.renameSpeaker(label: label, to: name) }
+        Task { await model.renameSpeaker(label: label, to: name, picked: false) }
     }
 }
 
@@ -921,5 +1109,22 @@ private struct TextSpeakerName: View {
         let to = draft
         editingLabel = nil
         Task { await model.renameSpeaker(label: name, to: to) }
+    }
+}
+
+/// Sprint 30: a small "?" on a turn's avatar — the attribution is a guess
+/// because people talked over each other.
+struct UncertainMarker: View {
+    static let explanation = "People talked over each other here."
+
+    var body: some View {
+        Text("?")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(DS.inkText)
+            .frame(width: 13, height: 13)
+            .background(Circle().fill(DS.warn))
+            .offset(x: 3, y: 3)
+            .help(Self.explanation)
+            .accessibilityLabel(Self.explanation)
     }
 }

@@ -55,6 +55,35 @@ backends:
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
+  # ── speaker diarization (Sprint 29 B-9, shape B — ADR-0052) ───────────
+  # Our own image (deploy/diar-server), pyannote community-1 on a GPU.
+  # Audio is sent as FLAC, held in memory for the request and never
+  # stored; the server returns labelled spans, never embeddings.
+  # TWO tokens: the `auth:` bearer below satisfies the endpoint gateway,
+  # and MDX_DIAR_SERVER_TOKEN (worker setting, sent as X-MDX-Diar-Token)
+  # satisfies the container itself. On a bare server they are the same
+  # value and the bearer alone is enough.
+  dev_mac_diar:
+    kind: diar_http
+    base_url: ${DEV_MAC_DIAR_URL:-http://host.docker.internal:8081}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { diarization: "${DEV_MAC_DIAR_MODEL:-pyannote-community-1}" }
+    max_concurrency: 1
+    timeout_seconds: 1800
+    processor: { name: "Developer machine", region: "local" }
+
+  hf_eu_diar:
+    kind: diar_http
+    base_url: ${HF_DIAR_ENDPOINT_URL}
+    auth: bearer:${HF_TOKEN}
+    enabled_in_envs: [staging, prod]
+    models: { diarization: "${HF_DIAR_MODEL_PIN}" }
+    max_concurrency: 2
+    cold_start_seconds: 240
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
   # ── our own EU GPU host (vLLM) — registered, disabled until gate H0 ────
   hosted_eu:
     kind: openai_compat
@@ -95,5 +124,5 @@ routing:
 
 # Per-environment override of an operation *kind*, applied before routing.
 env_overrides:
-  dev:  { chat: dev_mac,  asr: dev_mac_asr }
+  dev:  { chat: dev_mac,  asr: dev_mac_asr, diarization: dev_mac_diar }
   test: { chat: recorded, asr: inproc_cpu_asr }

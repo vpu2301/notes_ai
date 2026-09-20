@@ -148,6 +148,15 @@ class Registry:
         for kind, name in self._config.env_overrides.get(self._env, {}).items():
             self.backend(name, expect_kind=kind)  # type: ignore[arg-type]
 
+    def override_for(self, kind: OperationKind) -> str | None:
+        """The backend this env pins for an operation kind, if any.
+
+        Used by callers that are not routed by tier (the diarizer names
+        its backend directly), so dev still lands on the Mac without
+        every service repeating the mapping.
+        """
+        return self._config.env_overrides.get(self._env, {}).get(kind)
+
     # ── lookups ─────────────────────────────────────────────────────────
     def backend(self, name: str, *, expect_kind: OperationKind | None = None) -> ResolvedBackend:
         """Direct lookup by backend name (eval scripts, ``ASR_BACKEND``). Enforces env rules."""
@@ -181,7 +190,7 @@ class Registry:
             "asr_inproc": "in-process",
             "recorded": "recorded",
         }.get(cfg.kind, "")
-        if cfg.kind in ("openai_compat", "asr_http") and not model_id:
+        if cfg.kind in ("openai_compat", "asr_http", "diar_http") and not model_id:
             raise ConfigError("invalid_config", f"backend {name!r} declares no models.{op_kind}")
         return ResolvedBackend(
             name=name,

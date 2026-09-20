@@ -49,7 +49,14 @@ def _chat_spec() -> dict[str, Any]:
 
 def test_committed_specs_validate_and_are_pinned() -> None:
     specs = hf.load_specs("staging")
-    assert {s["name"] for s in specs} == {"notes-chat-staging", "notes-asr-staging"}
+    assert {s["name"] for s in specs} == {
+        "notes-chat-staging",
+        "notes-asr-staging",
+        # Diarization on a GPU endpoint (ADR-0052 shape B). Its weights
+        # are baked into our own image rather than served from the repo,
+        # but the revision is still pinned and the rules below still hold.
+        "notes-diar-staging",
+    }
     for s in specs:
         assert hf._COMMIT.match(s["model"]["revision"]), (
             f"{s['_file']} is not pinned to an immutable commit"

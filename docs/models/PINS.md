@@ -14,6 +14,7 @@ Pins resolved from the Hugging Face API on **2026-06-10**.
 | asr-worker, dictation-service (CPU dev) | `Systran/faster-whisper-tiny` | `d90ca5fe260221311c53c58e660288d3deb8d356` | `model.bin` | `dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1` | `/opt/models/whisper-tiny` |
 | nlp-service | `oliverguhr/fullstop-punctuation-multilang-large` | `345e80adc07e761d3a35feafd20f2f44a151f453` | `model.safetensors` | `270f27d7398a5fdad43bdf9953ea532fbe62c5f5227ed5f5316e9bd64a9255e1` | `/opt/models/punctuation` |
 | dictation-service (conversation mode, sprint 14, ADR-0034) | `speechbrain/spkrec-ecapa-voxceleb` | `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` | `embedding_model.ckpt` | `0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2` | `/opt/models/ecapa` |
+| asr-worker (Diarizer v2, Sprint 29; `MDX_DIAR_ENGINE=pyannote`) — licence **CC-BY-4.0** (gated; attribution in `docs/legal/third-party-notices.md`) | `pyannote/speaker-diarization-community-1` | `3533c8cf8e369892e6b79ff1bf80f7b0286a54ee` | `segmentation/pytorch_model.bin`, `embedding/pytorch_model.bin`, `plda/plda.npz`, `plda/xvec_transform.npz` | segmentation `7ad24338d844fb95985486eb1a464e32d229f6d7a03c9abe60f978bacf3f816e` · embedding `6f10ff60898a1d185fa22e1d11e0bfa8a92efec811f11bca48cb8cafebefd929` · plda `9b77bcd840692710dd3496f62ecfeed8d8e5f002fd991b785079b244eab7d255` · xvec_transform `325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f` (resolved 2026-09-19) | `/opt/models/pyannote-community-1` (dev: `~/.cache/mdx-models/speaker-diarization-community-1`) |
 | generation-service (Layer C inline completion, sprint 15, ADR-0036) | `ollama.com/library/gemma3:1b` (Gemma 3 1B instruct, Q4_K_M GGUF) | tag digest `8648f39daa8f` | GGUF blob | `7cd4618c1faf8b7233c6c906dac1694b6a47684b37b8895d470ac688520b9c01` | dev: `~/.ollama/models/blobs/` (served by `llama-server`); prod bake pending GPU rig |
 | libs/models `dev_mac_asr` (DEP-S0, ADR-0046; dev Mac only) | `ggerganov/whisper.cpp` → `ggml-large-v3-turbo.bin` | main (content-addressed by digest) | GGML | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69` | `~/.cache/whisper-cpp/` (served by `whisper-server`, fetched by `make dev-model`) |
 | libs/models `dev_mac` (DEP-S0, ADR-0046; dev Mac only) | `ollama.com/library/gemma3:4b` (Gemma 3 4B instruct, Q4_K_M GGUF) | tag digest `a2af6cc3eb7f` | GGUF blob | `a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a` (Ollama digest) | `~/.ollama/models/blobs/`; served as `notes-chat` via `infra/models/dev-mac/Modelfile` (num_ctx 32768) |
@@ -28,6 +29,38 @@ gap, recorded deliberately: **Silero VAD weights ship inside the `silero-vad`
 PyPI wheel** (uv.lock-pinned, MIT) rather than through this table's
 fetch+checksum flow — acceptable for the pilot because the wheel hash is
 locked, but a future sprint should hoist the JIT file into a pinned artifact.
+
+The same pinned directory is baked into TWO images: the asr-worker (shape A,
+`MDX_DIAR_ENGINE=pyannote`) and `deploy/diar-server` (shape B, the GPU
+endpoint that ships — ADR-0052). Both run the identical assembly script, so
+the digests below are the only definition of what either one loads.
+
+pyannote community-1 row (Sprint 29 B-7): assembled by
+`scripts/models/prepare_pyannote.py` (`make prepare-pyannote`; the worker
+Dockerfile's `pyannote-fetch` stage runs the same script, so image and dev
+dir are byte-identical). The revision is real — the repo's `main` commit on
+2026-09-19, read from the public HF model API. The four weight digests were resolved on 2026-09-19 with
+`--resolve-pins` (token with the model terms accepted) and are committed to
+`PINNED` in the script, the `MDX_DIAR_V2_PINS` default in
+`services/asr-worker/Dockerfile` and the table above; the install verifies
+them fail-closed. Public metadata
+the script already checks: file sizes (segmentation 5,906,507 B; embedding
+26,646,242 B; plda 133,852 B; xvec_transform 134,376 B) and the git blob ids
+of upstream `config.yaml` (`4022db43960736338378fdb6b5a85cfdae198910`) and
+`README.md` (`8356d6634d7b1074581dd36e2225887ec809326e`).
+
+The pipeline config is repo-owned (`infra/models/pyannote-community-1/config.yaml`,
+sha256 `7790f3cf805252b01622524f53c5eb390fb65ccbfd0ccd4b320a5addc887a873`):
+every sub-model is `$model/<subfolder>`, which pyannote.audio resolves to the
+local directory it was loaded from — never a hub id. The script refuses to
+install if upstream's config (verified by git blob id) differs from ours in
+anything but `dependencies`. `config.yaml` is part of `MDX_DIAR_V2_PINS`, so
+the worker re-verifies it with the weights at load. The baked dir also
+carries `MODEL_CARD.md` (upstream README, for CC-BY attribution) and
+`MANIFEST.json` (repo, revision, every digest). Runtime: `HF_HUB_OFFLINE=1`
+and `PYANNOTE_METRICS_ENABLED=false` (pyannote.audio 4.x ships usage
+telemetry to `otel.pyannote.ai` ON by default); the in-process engine adds
+no egress host.
 
 Layer C (sprint 15) row: the Gemma 3 1B GGUF is fetched via `ollama pull
 gemma3:1b` (content-addressed — the blob file IS its sha256) and served in dev
@@ -87,7 +120,10 @@ follow-up (todo.md).
 
 `HF_TOKEN` is consumed only as a BuildKit `--secret` (`--mount=type=secret,id=hf_token`)
 and never lands in any layer, env, or log. The public Systran/oliverguhr
-repos do not require it; a private in-perimeter mirror does.
+repos do not require it; a private in-perimeter mirror does, and so does the
+gated pyannote community-1 repo (the `pyannote-fetch` stage reads the secret
+file directly via `--token-file`, so it never enters even the build shell's
+environment).
 
 ## Re-pinning
 

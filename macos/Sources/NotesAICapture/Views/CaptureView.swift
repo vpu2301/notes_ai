@@ -38,8 +38,16 @@ struct ActiveCaptureCard: View {
                     .font(.dsMono(compact ? 15 : 17, .medium))
                     .foregroundStyle(DS.text1)
                     .monospacedDigit()
-                LevelMeter(level: capture.recorder.level, active: true,
-                           segments: compact ? 14 : 20, height: 10)
+                if capture.recorder.captureMode.recordsSystemAudio {
+                    // Sprint 31: one meter per channel.
+                    VStack(alignment: .leading, spacing: 3) {
+                        labelledMeter("You", level: capture.recorder.level)
+                        labelledMeter("Call audio", level: capture.recorder.systemLevel)
+                    }
+                } else {
+                    LevelMeter(level: capture.recorder.level, active: true,
+                               segments: compact ? 14 : 20, height: 10)
+                }
                 Spacer(minLength: 8)
                 Button {
                     capture.toggleRecording()
@@ -54,14 +62,84 @@ struct ActiveCaptureCard: View {
                 .textFieldStyle(.plain)
                 .font(.dsDisplay(compact ? 17 : 20, .medium))
                 .foregroundStyle(DS.text1)
+            if let invited = capture.context.inviteLine {
+                // Sprint 30: a capture from a calendar event says what the
+                // invitation will be used for — quietly.
+                Text(invited)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+            }
+            HStack(spacing: 10) {
+                Text("People")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                PeoplePicker(height: 26)
+                    .frame(maxWidth: compact ? .infinity : 300)
+            }
             if let warning = capture.limitWarning {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
             } else {
-                Text("Recording this Mac's microphone. Stop when the meeting ends — the note is drafted for you.")
+                captureStateLine
+            }
+        }
+    }
+
+    private func labelledMeter(_ title: String, level: Double) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .frame(width: 58, alignment: .leading)
+            LevelMeter(level: level, active: true, segments: compact ? 12 : 18, height: 7)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) level")
+    }
+
+    /// Sprint 31: what this recording captures, and a way to fix it when
+    /// the call audio was wanted but could not be recorded.
+    @ViewBuilder
+    private var captureStateLine: some View {
+        let recorder = capture.recorder
+        switch CaptureStateLine(mode: recorder.captureMode, systemAudioLost: recorder.systemAudioLost) {
+        case .micAndCall:
+            Text("Recording your microphone and call audio")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+        case .callAudioLost:
+            DSNotice(tone: .warn, symbol: "speaker.slash.fill",
+                     text: "Call audio stopped — the rest is recorded from your microphone only.")
+        case .micOnlyPermissionOff:
+            HStack(spacing: 6) {
+                Text("Recording your microphone only — call audio permission is off")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Button("Fix") { NSWorkspace.shared.open(CallAudioConsent.privacySettingsURL) }
+                    .buttonStyle(.plain)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.accentText)
+                    .help("Open Privacy & Security → Screen & System Audio Recording")
+                    .accessibilityLabel("Fix call audio permission")
+                    .accessibilityHint("Opens Privacy & Security, Screen & System Audio Recording")
             }
+        case .micOnlyConsentNeeded:
+            HStack(spacing: 6) {
+                Text("Recording your microphone only — the call audio notice changed")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Review") { capture.callAudioConsentPresented = true }
+                    .accessibilityLabel("Review the call audio notice")
+                    .buttonStyle(.plain)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.accentText)
+            }
+        case .micOnly:
+            Text("Recording this Mac's microphone. Stop when the meeting ends — the note is drafted for you.")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -139,6 +217,33 @@ struct ActiveCaptureCard: View {
                     .buttonStyle(DSButtonStyle(kind: .secondary, height: 28))
             }
         }
+    }
+}
+
+/// "People": how many speakers the meeting has, sent with the upload so
+/// the speaker separation looks for that many. Auto and 6+ leave the count
+/// to it. Can be set while recording — it is read when the upload goes (or
+/// kept with the recording if that has to wait). Off with "Separate
+/// speakers", which it only refines.
+struct PeoplePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var height: CGFloat = 30
+
+    var body: some View {
+        DSSegmentedPill(
+            options: PeopleCount.allCases.map {
+                .init($0, label: $0.label,
+                      help: $0.speakersExpected == nil ? "Let the recording decide" : nil)
+            },
+            selection: $capture.people,
+            height: height)
+            .disabled(!capture.diarize)
+            .opacity(capture.diarize ? 1 : 0.45)
+            .help(capture.diarize ? "How many people are in the meeting"
+                                  : "Turn on Separate speakers in Settings to use this")
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("People in the meeting")
+            .accessibilityHint(capture.diarize ? "" : "Turn on Separate speakers in Settings to use this")
     }
 }
 

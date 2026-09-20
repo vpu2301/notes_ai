@@ -81,6 +81,11 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "transcription",
         "note",
         "note_body",
+        # Speaker names are content (Sprint 30: calendar invitee picklist)
+        "speaker_names",
+        "name_candidates",
+        "speaker_name_candidates",
+        "local_speaker_name",
         # Generic body / payload
         "body",
         "payload",

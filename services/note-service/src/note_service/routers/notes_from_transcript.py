@@ -90,7 +90,13 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
     url = f"{settings.asr_service_base_url.rstrip('/')}/asr/jobs/{job_id}/result"
     try:
         async with httpx.AsyncClient(timeout=_ASR_TIMEOUT) as client:
-            resp = await client.get(url, headers={"Authorization": auth_header})
+            # Building the note is not a person opening the transcript:
+            # asr-service must not count it in the speaker-correction
+            # denominator (Sprint 30 learn loop).
+            resp = await client.get(
+                url,
+                headers={"Authorization": auth_header, "X-MDX-Read-Purpose": "note_build"},
+            )
     except httpx.HTTPError as exc:
         logger.warning("from_transcript.asr_unreachable: %s", exc.__class__.__name__)
         raise HTTPException(

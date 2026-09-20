@@ -157,7 +157,6 @@ class TestIssuer:
     def mint(self, **kwargs: Any) -> str:
         return self.mint_raw(self.claims(**kwargs))
 
-
     def config(self, *, issuer: str | None = None, audience: str | None = None) -> IssuerConfig:
         """This key's :class:`IssuerConfig`, optionally renamed.
 

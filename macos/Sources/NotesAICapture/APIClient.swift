@@ -889,30 +889,171 @@ actor APIClient {
     /// Name the diarized speakers of a job (the complete label → name map;
     /// a label left out goes back to its "Speaker N" default). Stored on the
     /// job, so the web app and the note built from it show the same names.
-    func setSpeakerNames(jobId: String, names: [String: String]) async throws -> [String: String] {
-        let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names))
+    /// `sources` (Sprint 30, a metric only) says per label whether the name
+    /// was picked from `name_candidates` or typed.
+    func setSpeakerNames(jobId: String, names: [String: String],
+                         sources: [String: SpeakerNameSource]? = nil) async throws -> [String: String] {
+        let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names, sources: sources))
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers", method: "PUT",
                                   jsonBody: body, authorized: true)
         return try decode(SpeakerNamesResponse.self, from: data).speakerNames
     }
 
+    /// Sprint 32: "✕" on a name suggestion. 204, idempotent; that
+    /// label/name pair never comes back for this job.
+    func dismissNameSuggestion(jobId: String, label: String, name: String) async throws {
+        let body = try JSONEncoder().encode(NameSuggestionDismissRequest(label: label, name: name))
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/suggestions/dismiss",
+                               method: "POST", jsonBody: body, authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Merge one diarized speaker into another (a reversible overlay on the job).
+    func mergeSpeakers(jobId: String, from: String, into: String) async throws -> SpeakerEditResult {
+        let body = try JSONEncoder().encode(SpeakerMergeRequest(from: from, into: into))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/merge",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(SpeakerEditResult.self, from: data)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Move turns to another speaker (Sprint 30). `segmentIndices` are the
+    /// selected turns' `segment_indices`, concatenated as they came — one
+    /// call however many turns. `resultRev` is the result they were read
+    /// from; a newer one on the server is `SpeakerEditError.staleResultRev`.
+    func reassignTurns(jobId: String, resultRev: Int, segmentIndices: [Int],
+                       to target: ReassignTarget) async throws -> SpeakerReassignResult {
+        let body = try JSONEncoder().encode(SpeakerReassignRequest(resultRev: resultRev,
+                                                                   segmentIndices: segmentIndices,
+                                                                   to: target))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/reassign",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(SpeakerReassignResult.self, from: data)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Undo every live speaker edit (merges and moved turns) of the current
+    /// result. Idempotent; 204.
+    func resetSpeakerEdits(jobId: String) async throws {
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/edits/reset",
+                               method: "POST", authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Undo the job's latest speaker edit.
+    func undoSpeakerEdit(jobId: String, editId: String) async throws {
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/edits/\(editId)",
+                               method: "DELETE", authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
     func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool,
+                   speakersExpected: Int? = nil,
+                   context: CaptureContext? = nil,
+                   channelLayout: String? = nil,
+                   localSpeakerName: String? = nil,
                    tenant: String? = nil) async throws -> TranscriptionJob {
         let audioData = try Data(contentsOf: fileURL)
-        let boundary = "NotesAICapture-\(UUID().uuidString)"
-        let body = Self.multipartBody(
-            boundary: boundary,
-            fields: [("language", language), ("diarize", diarize ? "true" : "false")],
-            fileField: "audio",
-            fileName: fileURL.lastPathComponent,
-            contentType: contentType,
-            fileData: audioData
-        )
-        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs", method: "POST",
-                                  body: body,
-                                  contentType: "multipart/form-data; boundary=\(boundary)",
-                                  authorized: true, tenant: tenant)
-        return try decode(TranscriptionJob.self, from: data)
+        func post(_ context: CaptureContext?, channelLayout: String? = channelLayout) async throws -> TranscriptionJob {
+            let boundary = "NotesAICapture-\(UUID().uuidString)"
+            let body = Self.multipartBody(
+                boundary: boundary,
+                fields: Self.jobFields(language: language, diarize: diarize,
+                                       speakersExpected: speakersExpected, context: context,
+                                       channelLayout: channelLayout,
+                                       localSpeakerName: localSpeakerName),
+                fileField: "audio",
+                fileName: fileURL.lastPathComponent,
+                contentType: contentType,
+                fileData: audioData
+            )
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs", method: "POST",
+                                      body: body,
+                                      contentType: "multipart/form-data; boundary=\(boundary)",
+                                      authorized: true, tenant: tenant)
+            return try decode(TranscriptionJob.self, from: data)
+        }
+        do {
+            return try await post(context)
+        } catch where Self.refusedNames(error) && !(context?.nameCandidates.isEmpty ?? true) {
+            return try await post(context?.withoutNames)
+        } catch where Self.refusedLayout(error) && channelLayout != nil {
+            // The file is not what the layout said: the recording is worth
+            // more than the channel split — send it as mono.
+            return try await post(context, channelLayout: nil)
+        }
+    }
+
+    /// The server says the file does not have the declared channel layout.
+    static func refusedLayout(_ error: Error) -> Bool {
+        guard case APIError.http(_, let problem) = error else { return false }
+        return problem?.code == "channel_layout_mismatch"
+    }
+
+    /// The form fields of `POST /asr/jobs`. `speakers_expected` goes only
+    /// when the person picked an exact number: "Auto" and "6+" send nothing
+    /// and leave the count to the diarizer.
+    /// Sprint 30: the capture context adds `speakers_max`, `name_candidates`
+    /// and `capture_source` (see `CaptureContext.formFields`).
+    /// Sprint 31: `channel_layout` (only `mic_system`, only for a 2-channel
+    /// file — the caller decides from the file) and `local_speaker_name`
+    /// (omitted when empty; never logged).
+    static func jobFields(language: String, diarize: Bool,
+                          speakersExpected: Int?,
+                          context: CaptureContext? = nil,
+                          channelLayout: String? = nil,
+                          localSpeakerName: String? = nil) -> [(String, String)] {
+        var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
+        if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
+        if let context { fields += context.formFields(diarize: diarize) }
+        if let channelLayout { fields.append(("channel_layout", channelLayout)) }
+        if let name = LocalSpeakerName.normalized(localSpeakerName) { fields.append(("local_speaker_name", name)) }
+        return fields
+    }
+
+    /// The server refused the invitee names; the upload is worth more.
+    static func refusedNames(_ error: Error) -> Bool {
+        guard case APIError.http(_, let problem) = error else { return false }
+        return problem?.code == "name_candidates_invalid"
+    }
+
+    /// Re-label the job's speakers ("Wrong number of speakers?"). Returns
+    /// once the run is queued; poll `jobStatus` for `diarization_status`.
+    func rediarize(jobId: String, speakersExpected: Int?) async throws -> RediarizeResponse {
+        let body = try JSONEncoder().encode(RediarizeRequest(speakersExpected: speakersExpected))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/rediarize",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(RediarizeResponse.self, from: data)
+        } catch {
+            throw RediarizeError.from(error)
+        }
+    }
+
+    /// Put back the labelling the last re-run replaced (one step only).
+    func undoRediarize(jobId: String) async throws -> RediarizeResponse {
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/rediarize/undo",
+                                      method: "POST", authorized: true)
+            return try decode(RediarizeResponse.self, from: data)
+        } catch {
+            throw RediarizeError.from(error)
+        }
     }
 
     func asrLimits() async throws -> AsrLimits {

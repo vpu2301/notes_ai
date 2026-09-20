@@ -43,8 +43,13 @@ def verify_model_dir(
     pins: dict[str, str],
     repo: str = "",
     revision: str = "",
+    required_files: tuple[str, ...] = ("hyperparams.yaml",),
 ) -> dict[str, str]:
     """Verify each pinned artifact under ``model_dir``.
+
+    ``required_files`` are repo-owned configs that must exist (their
+    absence would send the loader to the network). ECAPA: ``hyperparams.yaml``
+    (the default); pyannote community-1: ``config.yaml``.
 
     ``pins`` maps artifact filename -> expected sha256. An entry with an
     empty digest is treated as UNPINNED: its presence is still required,
@@ -84,15 +89,16 @@ def verify_model_dir(
                 "Refusing to start (fail-closed, docs/models/PINS.md)."
             )
 
-    # hyperparams.yaml is repo-owned (infra/models/ecapa/) rather than
-    # fetched, so it carries no upstream digest — but its ABSENCE means the
-    # loader would try to resolve the model over the network, which is the
-    # exact offline-hostile behaviour ADR-0034 rejected pyannote for.
-    if not (root / "hyperparams.yaml").is_file():
-        raise ModelIntegrityError(
-            f"missing {root / 'hyperparams.yaml'} — without the repo-owned patched "
-            "copy, SpeechBrain re-resolves the model over the network (ADR-0034)."
-        )
+    # The repo-owned config (ECAPA: hyperparams.yaml, infra/models/ecapa/;
+    # community-1: config.yaml) points the loader at LOCAL files. Its
+    # ABSENCE means the loader would resolve the model over the network —
+    # the offline-hostile behaviour ADR-0034 and ADR-0052 rule out.
+    for required in required_files:
+        if not (root / required).is_file():
+            raise ModelIntegrityError(
+                f"missing {root / required} — without the repo-owned config the "
+                "loader re-resolves the model over the network (ADR-0034, ADR-0052)."
+            )
 
     elapsed_ms = (time.monotonic() - t0) * 1000
     if unpinned:

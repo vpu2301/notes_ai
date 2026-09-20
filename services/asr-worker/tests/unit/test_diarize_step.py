@@ -22,6 +22,7 @@ from asr_worker.processor import (
     _NonRetryableError,
     _RetryableError,
 )
+from diarization import DiarizationHints
 
 
 class _StubDiarization:
@@ -100,6 +101,13 @@ def test_diarization_failure_classification(kind: JobErrorKind, expected: type) 
 
 class _TimelineDiarization:
     """Answers attribute() from a speaker timeline (ms ranges)."""
+
+    # What every engine behind the Sprint 29 seam reports about itself.
+    engine = "legacy-ecapa-ahc"
+    engine_version = "test"
+    hints = DiarizationHints()
+    roster = None
+    overlap_ms: list[tuple[int, int]] = []
 
     def __init__(self, timeline: list[tuple[int, int, str]]) -> None:
         self._timeline = timeline
@@ -215,3 +223,76 @@ def test_roster_lists_only_speakers_that_reached_the_transcript() -> None:
     got = _apply_diarization(_output([seg]), diar)  # type: ignore[arg-type]
 
     assert got.speakers == ["SPEAKER_1"]
+
+
+# ── Sprint 28: DiarizationStats ─────────────────────────────────────────
+
+
+def test_diarization_stats_describe_the_roster_without_content() -> None:
+    from asr_worker.processor import _diarization_stats
+    from diarization import UNKNOWN, ClusterStats, SpeakerSegment
+
+    class _Diar(_TimelineDiarization):
+        stats = ClusterStats(chunks=4, clusters_raw=3, clusters_after_merge=3, clusters_dropped=1)
+        segments = [
+            SpeakerSegment(0, 1000, "SPEAKER_1", 0.9),
+            SpeakerSegment(1000, 2000, "SPEAKER_1", 0.9),
+            SpeakerSegment(2000, 3000, "SPEAKER_2", 0.9),
+            SpeakerSegment(3000, 4000, UNKNOWN, 0.0),
+        ]
+
+    seg = Segment(text="a b", start_ms=0, end_ms=3000, avg_confidence=0.9)
+    diar = _Diar([(0, 2000, "SPEAKER_1"), (2000, 3000, "SPEAKER_2")])
+    out = _apply_diarization(_output([seg]), diar)  # type: ignore[arg-type]
+
+    stats = _diarization_stats(out, diar, 1.23456)  # type: ignore[arg-type]
+
+    assert stats.engine == "legacy-ecapa-ahc"
+    assert (stats.chunks, stats.clusters_raw, stats.clusters_dropped) == (4, 3, 1)
+    assert stats.speakers == 1  # no word timings → whole segment to one speaker
+    assert stats.speech_seconds == 4.0
+    assert stats.unknown_share == 0.25
+    assert stats.seconds == 1.235
+    assert "SPEAKER" not in stats.model_dump_json()
+
+
+def test_stored_transcripts_without_diarization_stats_still_decode() -> None:
+    raw = _output([]).model_dump(mode="json")
+    raw["metadata"].pop("diarization")
+    assert TranscriptionOutput.model_validate(raw).metadata.diarization is None
+
+
+# ── Sprint 30: uncertainty marks and overlaps persist ──────────────────
+
+
+def test_smoothed_words_mark_their_piece_uncertain_and_overlap_is_kept() -> None:
+    seg = Segment(
+        text="one two three",
+        start_ms=0,
+        end_ms=3000,
+        words=_words([("one", 0, 1000), ("two", 1000, 2000), ("three", 2000, 3000)]),
+        avg_confidence=0.9,
+    )
+    # "two" falls in a gap → filled from its agreeing neighbours.
+    diar = _TimelineDiarization([(0, 1000, "SPEAKER_1"), (2000, 3000, "SPEAKER_1")])
+    diar.overlap_ms = [(500, 700)]
+
+    got = _apply_diarization(_output([seg]), diar)  # type: ignore[arg-type]
+
+    assert [(s.speaker, s.speaker_uncertain) for s in got.segments] == [("SPEAKER_1", True)]
+    assert got.overlap_ms == [(500, 700)]
+
+
+def test_cleanly_attributed_words_are_not_uncertain() -> None:
+    seg = Segment(
+        text="a b",
+        start_ms=0,
+        end_ms=2000,
+        words=_words([("a", 0, 1000), ("b", 1000, 2000)]),
+        avg_confidence=0.9,
+    )
+    diar = _TimelineDiarization([(0, 2000, "SPEAKER_1")])
+
+    got = _apply_diarization(_output([seg]), diar)  # type: ignore[arg-type]
+
+    assert got.segments[0].speaker_uncertain is False

@@ -36,6 +36,29 @@ final class CaptureViewModel: ObservableObject {
     @Published var diarize: Bool {
         didSet { UserDefaults.standard.set(diarize, forKey: "captureDiarize") }
     }
+    /// Sprint 31: "Record call audio (other participants)". Stored next to
+    /// `captureDiarize`; off until the call-audio notice is accepted — only
+    /// `acceptCallAudioConsent()` turns it on the first time.
+    @Published private(set) var captureSystemAudio: Bool {
+        didSet { UserDefaults.standard.set(captureSystemAudio, forKey: Self.captureSystemAudioKey) }
+    }
+    static let captureSystemAudioKey = "captureSystemAudio"
+    /// Show the (blocking) call-audio notice.
+    @Published var callAudioConsentPresented = false
+    /// True when the call audio will actually be recorded: the setting is
+    /// on and the current version of the notice was accepted.
+    var recordsCallAudio: Bool { captureSystemAudio && CallAudioConsent().isCurrent }
+    /// "People": how many speakers the person says are in the meeting.
+    @Published var people: PeopleCount {
+        didSet { UserDefaults.standard.set(people.rawValue, forKey: "capturePeople") }
+    }
+    /// The hint the upload carries: an exact number, and only when speakers
+    /// are being told apart at all.
+    var speakersExpected: Int? { diarize ? people.speakersExpected : nil }
+    /// Sprint 30: where the current capture started and what its calendar
+    /// event knew (invitee cap, names to offer). Manual unless a capture
+    /// was started from an upcoming event.
+    @Published private(set) var context: CaptureContext = .manual
     @Published private(set) var phase: Phase = .idle
     /// The ASR job of the capture being processed (or just finished), so the
     /// window can show the live card for that meeting and nothing else.
@@ -55,6 +78,13 @@ final class CaptureViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         self.language = defaults.string(forKey: "captureLanguage") ?? Self.autoLanguage
         self.diarize = defaults.object(forKey: "captureDiarize") as? Bool ?? true
+        self.people = defaults.string(forKey: "capturePeople").flatMap(PeopleCount.init(rawValue:)) ?? .auto
+        self.captureSystemAudio = defaults.object(forKey: Self.captureSystemAudioKey) as? Bool ?? false
+        // The notice changed since it was accepted: ask again before the
+        // next recording picks up anyone else's voice.
+        if captureSystemAudio && !CallAudioConsent().isCurrent {
+            callAudioConsentPresented = true
+        }
         // Re-publish the recorder's changes (level, elapsed) through this
         // object so views and the menu-bar label stay in sync.
         recorderSubscription = recorder.objectWillChange.sink { [weak self] _ in
@@ -65,6 +95,44 @@ final class CaptureViewModel: ObservableObject {
     }
 
     var isRecording: Bool { recorder.isRecording }
+
+    /// Sign-out (Sprint 32): a calendar event picked for the next capture —
+    /// its invitees' names — does not outlive the session. A recording in
+    /// progress keeps the context it was started with.
+    func forgetContext() {
+        guard !isRecording else { return }
+        context = .manual
+    }
+
+    // MARK: - Call audio (Sprint 31)
+
+    /// The Settings toggle. Turning it on the first time (or after the
+    /// notice changed) shows the notice instead; it goes on only when the
+    /// notice is accepted.
+    func setCallAudio(_ on: Bool) {
+        if !on {
+            captureSystemAudio = false
+        } else if CallAudioConsent().isCurrent {
+            captureSystemAudio = true
+        } else {
+            callAudioConsentPresented = true
+        }
+    }
+
+    func acceptCallAudioConsent() {
+        CallAudioConsent().accept()
+        captureSystemAudio = true
+        callAudioConsentPresented = false
+    }
+
+    /// "Not now": microphone only.
+    func declineCallAudioConsent() {
+        captureSystemAudio = false
+        callAudioConsentPresented = false
+    }
+
+    /// The name sent as `local_speaker_name`: the signed-in account's.
+    var localSpeakerName: String? { LocalSpeakerName.normalized(app.identity?.displayName) }
 
     func toggleRecording() {
         if recorder.isRecording {
@@ -81,14 +149,20 @@ final class CaptureViewModel: ObservableObject {
         activeJobId = nil
         limitWarning = nil
         stoppedAtLimit = false
+        context = .manual
     }
 
     /// The one-click path: clear any finished state and start recording now.
     /// A title (say, from a calendar event) can be handed in.
-    func startNew(title: String = "") {
+    ///
+    /// Sprint 30: a capture started from a calendar event hands in its
+    /// `context` (the invitees as a cap and as names to offer); everything
+    /// else is `.manual`.
+    func startNew(title: String = "", context: CaptureContext = .manual) {
         guard !recorder.isRecording, !phase.isBusy else { return }
         reset()
         self.title = title
+        self.context = context
         Task { await beginRecording() }
     }
 
@@ -141,7 +215,8 @@ final class CaptureViewModel: ObservableObject {
             recorder.limitSeconds = TimeInterval(limits.maxDurationSeconds)
         }
         do {
-            try await recorder.start()
+            try await recorder.start(captureSystemAudio: captureSystemAudio,
+                                     consentCurrent: CallAudioConsent().isCurrent)
             phase = .recording
         } catch RecorderError.permissionDenied {
             phase = .microphoneDenied
@@ -159,21 +234,29 @@ final class CaptureViewModel: ObservableObject {
         let meetingTitle = trimmed.isEmpty ? Self.defaultTitle() : trimmed
         // The card and the list should agree on the name while it processes.
         title = meetingTitle
-        pipelineTask = Task { await process(fileURL: fileURL, meetingTitle: meetingTitle) }
+        // The context belongs to this recording; the next one starts manual.
+        let context = self.context
+        self.context = .manual
+        pipelineTask = Task { await process(fileURL: fileURL, meetingTitle: meetingTitle, context: context) }
     }
 
-    private func process(fileURL: URL, meetingTitle: String) async {
+    private func process(fileURL: URL, meetingTitle: String, context: CaptureContext) async {
         // The recording is deleted only once the server has it. Every other
         // exit from this function — a failed upload, a lost session, the
         // app being quit mid-pipeline — moves it to `pending/` with a
         // sidecar instead. A meeting cannot be recorded twice (IDX-M1 F).
         var uploaded = false
         let recordedAt = Date()
+        // Sprint 31: the layout is read from the file itself — one it does
+        // not have would be refused. The name is the account's now.
+        let channelLayout = ChannelLayout.field(forFileAt: fileURL)
+        let speakerName = localSpeakerName
         defer {
             if uploaded {
                 try? FileManager.default.removeItem(at: fileURL)
             } else {
-                keep(fileURL, title: meetingTitle, recordedAt: recordedAt)
+                keep(fileURL, title: meetingTitle, recordedAt: recordedAt, context: context,
+                     channelLayout: channelLayout, localSpeakerName: speakerName)
             }
         }
         var jobId: String?
@@ -181,7 +264,11 @@ final class CaptureViewModel: ObservableObject {
             phase = .uploading
             let job = try await app.api.submitJob(fileURL: fileURL,
                                                   contentType: recorder.format.contentType,
-                                                  language: language, diarize: diarize)
+                                                  language: language, diarize: diarize,
+                                                  speakersExpected: speakersExpected,
+                                                  context: context,
+                                                  channelLayout: channelLayout,
+                                                  localSpeakerName: speakerName)
             uploaded = true
             jobId = job.id
             activeJobId = job.id
@@ -231,15 +318,21 @@ final class CaptureViewModel: ObservableObject {
     /// Put the recording somewhere it will still be tomorrow, and say in
     /// the banner where it went — a file the person is not told about is
     /// only technically not lost.
-    private func keep(_ fileURL: URL, title: String, recordedAt: Date) {
+    private func keep(_ fileURL: URL, title: String, recordedAt: Date, context: CaptureContext,
+                      channelLayout: String?, localSpeakerName: String?) {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        let kept = PendingCaptures.keep(fileURL, info: PendingCapture.Info(
+        var info = PendingCapture.Info(
             title: title,
             language: language,
             diarize: diarize,
             recordedAt: recordedAt,
             identityId: app.identityId,
-            tenantId: app.tenantId))
+            tenantId: app.tenantId,
+            speakersExpected: speakersExpected)
+        info.setCaptureContext(context)
+        info.channelLayout = channelLayout
+        info.localSpeakerName = localSpeakerName
+        let kept = PendingCaptures.keep(fileURL, info: info)
         guard kept != nil else { return }
         if case .failed(let message) = phase {
             phase = .failed(message + " The recording was kept on this Mac.")
@@ -252,4 +345,19 @@ final class CaptureViewModel: ObservableObject {
         formatter.timeStyle = .short
         return "Meeting \(formatter.string(from: Date()))"
     }
+}
+
+/// The capture screen's "People" choice (Sprint 29). Auto and 6+ send no
+/// hint — the diarizer counts; 1–5 is an exact number stated by a person.
+/// Kept as a choice rather than an `Int?` so "6+" is still shown as picked
+/// after a relaunch.
+enum PeopleCount: String, CaseIterable, Hashable, Sendable {
+    case auto
+    case one = "1", two = "2", three = "3", four = "4", five = "5"
+    case sixPlus = "6+"
+
+    var label: String { self == .auto ? "Auto" : rawValue }
+
+    /// `speakers_expected` for the upload, or nil for none.
+    var speakersExpected: Int? { Int(rawValue) }
 }

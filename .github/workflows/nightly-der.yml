@@ -1,0 +1,85 @@
+# Nightly speaker-count / DER regression on the full gold set (Sprint 29 B-10).
+#
+# Runs both diarization engines over eval/speakers/v1 (dev + test) with the
+# production code path and fails when count_exact on 2-speaker recordings
+# drops more than 5 points against the committed baseline report.
+#
+# Self-hosted on purpose: the gold-set audio is consent-gated and never
+# committed (check-no-eval-audio), and the pyannote model is gated — both
+# live on the eval Mac, fetched once by `fetch_speaker_corpus.py` and
+# `make prepare-pyannote`. The runner needs the label `mdx-eval`.
+name: nightly-der
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-der
+  cancel-in-progress: false
+
+env:
+  # Committed reports the nightly compares against. Update them (in a PR,
+  # with the report) when an engine change is MEANT to move the numbers.
+  # Production configuration: roster guard at the worker defaults
+  # (MDX_DIAR_MIN_SPEAKER_SPEECH_MS / _SHARE).
+  BASELINE_LEGACY: docs/eval/der-baseline-legacy-test.json
+  BASELINE_V2: docs/eval/der-baseline-pyannote_c1-test.json
+  MAX_DROP: "0.05"
+
+jobs:
+  der:
+    runs-on: [self-hosted, macOS, mdx-eval]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync
+        run: uv sync --all-packages
+
+      - name: Gold set present
+        # Idempotent: downloads only what is missing, verifies checksums.
+        run: uv run python scripts/eval/fetch_speaker_corpus.py
+
+      - name: Clusterer regression without audio
+        run: make sim-overcount
+
+      - name: Legacy engine — test split
+        run: >
+          uv run --with 'pyannote.metrics>=3.2,<4'
+          python scripts/eval/run_der.py --split test --label nightly-legacy
+          --engine 'legacy:{"guard_speech_ms": 8000, "guard_share": 0.03}'
+
+      - name: v2 engine (community-1) — test split
+        run: >
+          uv run --with 'pyannote.audio>=4.0,<4.1' --with 'pyannote.metrics>=4,<5'
+          python scripts/eval/run_der.py --split test --label nightly-v2
+          --engine 'pyannote_c1:{"guard_speech_ms": 8000, "guard_share": 0.03}'
+
+      - name: Compare against the committed baselines
+        run: |
+          set -euo pipefail
+          today="$(date -u +%Y-%m-%d)"
+          uv run python scripts/eval/compare_der.py --baseline "$BASELINE_LEGACY" \
+            --current "docs/eval/der-${today}-nightly-legacy-test.json" --max-drop "$MAX_DROP"
+          if [ -f "$BASELINE_V2" ]; then
+            uv run python scripts/eval/compare_der.py --baseline "$BASELINE_V2" \
+              --current "docs/eval/der-${today}-nightly-v2-test.json" --max-drop "$MAX_DROP"
+          else
+            echo "::warning::no committed v2 baseline ($BASELINE_V2) yet — v2 not gated"
+          fi
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: der-reports
+          path: docs/eval/der-*-nightly-*.json
+          retention-days: 30

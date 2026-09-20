@@ -27,6 +27,7 @@ dependencies = [
     "storage",
     "asr_models",
     "secret",
+    "ratelimit",
 ]
 
 [tool.uv.sources]
@@ -39,6 +40,7 @@ crypto = { workspace = true }
 storage = { workspace = true }
 asr_models = { workspace = true }
 secret = { workspace = true }
+ratelimit = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

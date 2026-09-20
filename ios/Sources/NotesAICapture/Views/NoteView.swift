@@ -11,9 +11,10 @@ struct NoteView: View {
     @State private var confirmDelete = false
     @State private var shareByEmail = false
     @State private var shareWithClient = false
-    /// Which speaker label is being renamed, and the text so far.
-    @State private var editingSpeaker: String?
-    @State private var speakerDraft = ""
+    /// Which speaker label is being renamed, and the name it starts from.
+    @State private var renaming: SpeakerRename?
+    /// Sprint 30: the turn whose avatar was tapped ("Move this turn to").
+    @State private var movingTurn: TranscriptTurn?
     @State private var copied = false
     /// Which section is open in its editor. A draft reads as a document
     /// until you tap into one, and only one is ever open at a time.
@@ -48,8 +49,22 @@ struct NoteView: View {
                 if model.busy {
                     ProgressView().controlSize(.small)
                 }
+                if model.tab == .transcript, model.canMoveTurns, model.online || model.selecting {
+                    // Sprint 30: pick several turns, then move them at once.
+                    Button(model.selecting ? "Done" : "Select") {
+                        if model.selecting { model.endSelection() } else { model.selecting = true }
+                    }
+                    .disabled(!model.selecting && !model.canEditSpeakers)
+                    .accessibilityHint(model.selecting ? "Ends picking turns" : "Pick several turns to move them together")
+                }
                 DSMenu(items: menuItems)
             }
+        }
+        .onChange(of: model.tab) { _, tab in
+            if tab != .transcript { model.endSelection() }
+        }
+        .onChange(of: model.online) { _, online in
+            if !online { model.endSelection() }
         }
         .task(id: model.noteId) { await model.load() }
         .task(id: model.noteId) { await model.loadSharing() }
@@ -85,23 +100,15 @@ struct NoteView: View {
                 },
                 onClose: { shareByEmail = false })
         }
-        .alert("Rename speaker", isPresented: Binding(
-            get: { editingSpeaker != nil },
-            set: { if !$0 { editingSpeaker = nil } }
-        )) {
-            TextField("Name", text: $speakerDraft)
-            Button("Save") {
-                if let label = editingSpeaker {
-                    let name = speakerDraft
-                    editingSpeaker = nil
-                    Task { await model.renameSpeaker(label: label, to: name) }
-                }
-            }
-            Button("Cancel", role: .cancel) { editingSpeaker = nil }
-        } message: {
-            Text(model.isDraft
-                 ? "The name is used in the transcript and at the start of each turn in the note."
-                 : "The name is used in the transcript; a cancelled note keeps its text.")
+        .sheet(item: $renaming) { rename in
+            SpeakerNameSheet(model: model, label: rename.label, initial: rename.initial)
+                .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog("Move this turn to", isPresented: Binding(
+            get: { movingTurn != nil },
+            set: { if !$0 { movingTurn = nil } }
+        ), titleVisibility: .visible, presenting: movingTurn) { turn in
+            moveButtons(for: [turn])
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { model.actionError != nil },
@@ -311,10 +318,17 @@ struct NoteView: View {
             .onChange(of: model.asking) { _, asking in
                 if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
             }
+            // Sprint 32: a suggestion's quote was tapped — show its turn.
+            .onChange(of: model.revealedTurn) { _, reveal in
+                guard let reveal else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(reveal.turnId, anchor: .center) }
+            }
         }
         // The composer sits over the document, under a short wash of the
         // page ground so a line of text never runs into it.
-        .safeAreaInset(edge: .bottom, spacing: 0) { askBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.selecting { moveBar } else { askBar }
+        }
     }
 
     // MARK: - Ask this note
@@ -528,8 +542,7 @@ struct NoteView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             if let speaker = turn.speaker {
                                 Button {
-                                    speakerDraft = speaker
-                                    editingSpeaker = speaker
+                                    renaming = SpeakerRename(label: speaker, initial: speaker)
                                 } label: {
                                     HStack(spacing: 4) {
                                         Text(speaker)
@@ -560,6 +573,11 @@ struct NoteView: View {
             } else if let error = model.transcriptError {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             } else if let turns = model.turns {
+                if model.diarized, !model.speakers.isEmpty {
+                    SpeakerRosterView(model: model) { label in
+                        renaming = SpeakerRename(label: label, initial: model.name(for: label))
+                    }
+                }
                 HStack {
                     Text(turns.isEmpty ? "Nothing was said." : speakerSummary)
                         .font(.dsMeta)
@@ -580,7 +598,7 @@ struct NoteView: View {
                 }
                 ForEach(turns) { turn in
                     HStack(alignment: .top, spacing: 12) {
-                    if model.diarized { SpeakerAvatar(name: model.displayName(for: turn)) }
+                    if model.diarized { turnAvatar(turn) }
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             if model.diarized {
@@ -600,6 +618,19 @@ struct NoteView: View {
                         }
                     }
                     }
+                    .padding(model.selecting || model.highlightedTurnId == turn.id ? 6 : 0)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                            .fill(turnTint(turn))
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if model.selecting { model.toggleSelection(turn) }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityAddTraits(model.selectedTurnIds.contains(turn.id) ? .isSelected : [])
+                    .animation(.easeOut(duration: 0.2), value: model.highlightedTurnId)
+                    .id(turn.id)
                 }
             } else {
                 DSSkeleton(height: 56)
@@ -610,13 +641,19 @@ struct NoteView: View {
         .task { await model.loadTranscript() }
     }
 
+    /// A picked turn, or the one a suggestion's quote pointed at (2 s).
+    private func turnTint(_ turn: TranscriptTurn) -> Color {
+        if model.selectedTurnIds.contains(turn.id) { return DS.accent.opacity(0.1) }
+        if model.highlightedTurnId == turn.id { return DS.accent.opacity(0.16) }
+        return .clear
+    }
+
     /// A turn's speaker name; a tap asks for a new one.
     @ViewBuilder
     private func speakerName(_ turn: TranscriptTurn) -> some View {
         if let label = turn.speaker {
             Button {
-                speakerDraft = model.displayName(for: turn)
-                editingSpeaker = label
+                renaming = SpeakerRename(label: label, initial: model.displayName(for: turn))
             } label: {
                 HStack(spacing: 4) {
                     Text(model.displayName(for: turn))
@@ -636,6 +673,89 @@ struct NoteView: View {
                 .italic()
                 .foregroundStyle(DS.muted)
         }
+    }
+
+    /// The turn's avatar: a tap offers to move the turn (Sprint 30); in
+    /// Select mode it is the turn's checkbox. A "?" marks a turn where
+    /// people talked over each other.
+    @ViewBuilder
+    private func turnAvatar(_ turn: TranscriptTurn) -> some View {
+        if model.selecting {
+            let picked = model.selectedTurnIds.contains(turn.id)
+            Button { model.toggleSelection(turn) } label: {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(picked ? DS.accent : DS.muted)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(!model.canMove(turn))
+            .accessibilityLabel("Turn at \(formatElapsed(ms: turn.startMs))")
+            .accessibilityValue(picked ? "Selected" : "Not selected")
+            .accessibilityAddTraits(picked ? .isSelected : [])
+            .accessibilityHint("Picks this turn to move with others")
+        } else if model.canMove(turn) {
+            Button { movingTurn = turn } label: {
+                SpeakerAvatar(name: model.displayName(for: turn))
+                    .overlay(alignment: .bottomTrailing) {
+                        if turn.isUncertain { UncertainMarker().accessibilityHidden(true) }
+                    }
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canEditSpeakers)
+            .accessibilityLabel("Move this turn to another speaker")
+            .accessibilityValue(turn.isUncertain ? UncertainMarker.explanation : "")
+        } else {
+            SpeakerAvatar(name: model.displayName(for: turn))
+                .overlay(alignment: .bottomTrailing) {
+                    if turn.isUncertain { UncertainMarker() }
+                }
+        }
+    }
+
+    /// Where turns can go: the other speakers, a new one, Unknown.
+    @ViewBuilder
+    private func moveButtons(for moving: [TranscriptTurn]) -> some View {
+        ForEach(model.moveTargets(for: moving), id: \.self) { label in
+            Button(model.name(for: label)) {
+                Task { await model.moveTurns(moving, to: .speaker(label)) }
+            }
+        }
+        if model.canAddSpeaker {
+            Button("New speaker") { Task { await model.moveTurns(moving, to: .new) } }
+        }
+        if model.canMoveToUnknown(moving) {
+            Button("Unknown") { Task { await model.moveTurns(moving, to: .unknown) } }
+        }
+    }
+
+    /// Select mode's action bar: "Move N turns to ▸".
+    private var moveBar: some View {
+        HStack(spacing: 10) {
+            Text(model.selectedTurnIds.isEmpty ? "Tap turns to select them" : "\(model.selectedTurnIds.count) selected")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Menu {
+                moveButtons(for: model.selectedTurns)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(model.moveSelectionTitle)
+                    Image(systemName: "chevron.right")
+                }
+                .font(.ds(14, .semibold))
+            }
+            .disabled(model.selectedTurnIds.isEmpty || !model.canEditSpeakers)
+            .accessibilityHint("Choose the speaker these turns belong to")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Selected turns")
+        .padding(.horizontal, DS.gutter)
+        .padding(.vertical, 12)
+        .background(DS.bg)
+        .overlay(alignment: .top) { DSDivider() }
     }
 
     private var speakerSummary: String {
@@ -790,4 +910,27 @@ struct SpeakerAvatar: View {
             .background(Circle().fill(tint.opacity(0.16)))
             .padding(.top, 1)
     }
+}
+
+/// Sprint 30: a small "?" on a turn's avatar — the attribution is a guess
+/// because people talked over each other.
+struct UncertainMarker: View {
+    static let explanation = "People talked over each other here."
+
+    var body: some View {
+        Text("?")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(DS.inkText)
+            .frame(width: 13, height: 13)
+            .background(Circle().fill(DS.warn))
+            .offset(x: 3, y: 3)
+            .accessibilityLabel(Self.explanation)
+    }
+}
+
+/// The speaker being renamed and the name the sheet starts from.
+struct SpeakerRename: Identifiable {
+    let label: String
+    let initial: String
+    var id: String { label }
 }

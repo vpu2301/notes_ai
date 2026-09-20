@@ -16,6 +16,7 @@ from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
 from messaging import RedisStreamsProducer
+from ratelimit import FixedWindowLimiter
 from storage import EncryptedObjectStore, S3Client
 
 from .config import settings
@@ -57,6 +58,9 @@ class ServiceState:
     transcript_store: EncryptedObjectStore
     envelope: Envelope
     nlp_client: NlpBatchClient
+    # Per-user cap on speaker re-labelling (Sprint 29); keys
+    # mdx:asr:rl:<scope>:<subject>:<window>.
+    limiter: FixedWindowLimiter
 
 
 async def build_state() -> ServiceState:
@@ -140,6 +144,7 @@ async def build_state() -> ServiceState:
         transcript_store=transcript_store,
         envelope=envelope,
         nlp_client=nlp_client,
+        limiter=FixedWindowLimiter(redis_client, prefix="mdx:asr:rl"),
     )
 
 

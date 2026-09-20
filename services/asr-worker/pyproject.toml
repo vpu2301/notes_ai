@@ -16,6 +16,12 @@ dependencies = [
     # mocking. Production worker images pin them via the Dockerfile.
     "faster-whisper>=1.0.0 ; platform_system != 'Darwin'",
     "silero-vad>=4.0.0 ; platform_system != 'Darwin'",
+    # Diarizer v2 (Sprint 29, MDX_DIAR_ENGINE=pyannote): community-1 runs
+    # in-process from the baked /opt/models/pyannote-community-1 dir. Same
+    # macOS exclusion as the speech deps above; imported lazily by
+    # diarization.pyannote_engine, so the legacy engine needs none of it.
+    # 4.1 is excluded until its telemetry/offline behaviour is re-checked.
+    "pyannote.audio>=4.0,<4.1 ; platform_system != 'Darwin'",
     "opentelemetry-sdk>=1.24.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
     "python-json-logger>=2.0.7",

@@ -1,0 +1,123 @@
+# Speaker diarization smell detector (Sprint 28). Instruments:
+# services/asr-worker/src/asr_worker/processor.py (mdx_asr_diarization_*).
+groups:
+  - name: speakers
+    interval: 1m
+    rules:
+      - alert: DiarizationSpeakerOvercount
+        # Most meetings have 2–4 people. When a quarter of diarized jobs
+        # come back with 5+ speakers, the clusterer is splitting voices.
+        # Needs ≥ 20 diarized jobs in the window so a quiet day cannot fire it.
+        expr: |
+          (
+            1 - sum(increase(mdx_asr_diarization_speakers_bucket{le=~"4(\\.0)?"}[24h]))
+              / sum(increase(mdx_asr_diarization_speakers_count[24h]))
+          ) > 0.25
+          and sum(increase(mdx_asr_diarization_speakers_count[24h])) >= 20
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of diarized jobs have 5+ speakers (24 h)"
+          description: |
+            Speaker over-count smell: check the Speakers row (speaker-count histogram, clusters dropped) and the per-job metadata.diarization of recent jobs.
+            Runbook: docs/runbooks/asr-worker.md#speaker-overcount
+
+      - alert: DiarizationSlowVsAudio
+        # Diarizer v2 acceptance (Sprint 29): diarization wall time ≤ 0.25 × audio.
+        # mdx_asr_diarization_audio_ratio is recorded per diarized job and per
+        # re-labelling run (primary engine). 0.25 is a bucket boundary, so
+        # "p95 > 0.25" means exactly "more than 5 % of runs took over a quarter
+        # of their audio" — no interpolation at the threshold.
+        # Needs ≥ 10 diarization runs per engine in the hour.
+        expr: |
+          histogram_quantile(0.95, sum by (le, engine) (rate(mdx_asr_diarization_audio_ratio_bucket[1h]))) > 0.25
+          and on(engine) sum by (engine) (increase(mdx_asr_diarization_audio_ratio_count[1h])) >= 10
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $labels.engine }}: p95 diarization time is {{ $value | humanizePercentage }} of the job's audio (target ≤ 25 %)"
+          description: |
+            More than 5 % of diarization runs in the last hour took over a quarter of their audio duration. Check the Speakers row (diarization/audio ratio, raw diarization vs audio seconds) and whether the worker fell back to CPU.
+            Runbook: docs/runbooks/asr-worker.md#diarization-slow
+
+      - alert: RediarizeFailureRateHigh
+        # Speaker re-labelling (task=rediarize) failing for more than 1 in 10
+        # runs over an hour. Needs ≥ 10 runs in the hour: re-labelling is
+        # user-triggered and rare, and one failed run out of one is not a page.
+        expr: |
+          sum(increase(mdx_asr_rediarize_total{outcome="failed"}[1h]))
+            / sum(increase(mdx_asr_rediarize_total[1h]))
+            > 0.10
+          and sum(increase(mdx_asr_rediarize_total[1h])) >= 10
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of speaker re-labelling runs failed (1 h)"
+          description: |
+            Re-labelling failures: check the Speakers row (re-labelling runs by outcome, request outcomes) and the error kind in transcription_jobs.diarization_error and the asr.rediarize_failed audit events.
+            Runbook: docs/runbooks/asr-worker.md#rediarize-failures
+
+      - alert: SpeakerCorrectionRateHigh
+        # Learn loop (Sprint 30): of the diarized results people opened in
+        # the last 7 days, more than 30 % got a correction (a first speaker
+        # edit or a first re-run). Both counters are +1 once per job, from
+        # asr-service. Needs ≥ 50 opened jobs in the window: a quiet week of
+        # a handful of meetings is not a signal.
+        expr: |
+          sum(increase(mdx_asr_speaker_corrected_jobs_total[7d]))
+            / sum(increase(mdx_asr_diarized_results_opened_total[7d]))
+            > 0.30
+          and sum(increase(mdx_asr_diarized_results_opened_total[7d])) >= 50
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of opened diarized results were corrected (7 d)"
+          description: |
+            People are fixing the speakers of more than 30 % of the transcripts they open. Check the Speakers row (correction rate, edit mix, re-labelling outcomes, speakers per job by engine) and the weekly speaker CSV by engine / hint / client (docs/product/speaker-metrics.md).
+            Runbook: docs/runbooks/asr-worker.md#speaker-correction-rate
+
+      - alert: DualChannelMonoFallbackHigh
+        # Sprint 31: a dual-channel (mic + call audio) capture whose channel
+        # analysis failed is diarized as mono instead — the user keeps their
+        # speakers but loses the channel guarantee. More than 5 % of such
+        # jobs over a day means a bug, not bad luck. Needs ≥ 20 dual jobs.
+        expr: |
+          sum(increase(mdx_asr_diarization_dual_jobs_total{outcome="mono_fallback"}[24h]))
+            / sum(increase(mdx_asr_diarization_dual_jobs_total[24h]))
+            > 0.05
+          and sum(increase(mdx_asr_diarization_dual_jobs_total[24h])) >= 20
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of dual-channel captures fell back to mono (24 h)"
+          description: |
+            The channel analysis is failing on dual-channel captures; they are diarized from the mixdown. Check `diarization.dual_fallback` log lines (error_class) and the Speakers row (dual-channel outcomes).
+            Runbook: docs/runbooks/asr-worker.md#dual-channel-fallback
+
+      - alert: DiarizationEngineUnavailable
+        # Sprint 32 GA gate: the diarization engine will not load (weights
+        # missing or failing their digest, telemetry/hub guard refusing,
+        # torch errors). Diarized jobs are retried and then fail
+        # `diarization_unavailable`. Three in 30 minutes is not one bad pod
+        # restart.
+        expr: |
+          sum by (engine) (increase(mdx_asr_diarization_unavailable_total[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "{{ $labels.engine }}: diarization engine failed to load {{ $value }} times in 30 min"
+          description: |
+            Diarized jobs cannot be labelled. Check the worker log `diarization.load_failed` / `diarization.v2_refused` (reason) and MDX_DIAR_ENGINE; rollback is MDX_DIAR_ENGINE=legacy.
+            Runbook: docs/runbooks/asr-worker.md#diarization-engine

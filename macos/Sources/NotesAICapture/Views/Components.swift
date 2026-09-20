@@ -143,6 +143,7 @@ struct DSNotice: View {
             Image(systemName: symbol)
                 .font(.ds(12, .semibold))
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
                 .padding(.top, 1)
             Text(text)
                 .font(.ds(12.5))

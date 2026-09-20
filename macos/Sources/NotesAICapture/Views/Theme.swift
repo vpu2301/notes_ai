@@ -441,6 +441,9 @@ struct DSToggleStyle: ToggleStyle {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Read as a switch with its state, not as a plain button.
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }
 
@@ -494,6 +497,11 @@ struct DSSegmentedPill<T: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .help(option.help ?? option.label ?? "")
+                // Sprint 32: a segment says its name, what it does, and
+                // whether it is the one chosen.
+                .accessibilityLabel(option.label ?? option.help ?? "")
+                .accessibilityHint(option.label == nil ? "" : (option.help ?? ""))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(3)

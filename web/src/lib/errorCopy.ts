@@ -93,6 +93,30 @@ const COPY: Record<string, string> = {
   sole_owner_with_members:
     "You are the only owner of a workspace other people are still using. Hand it over first.",
   confirm_required: "Type DELETE to confirm.",
+
+  // ── speaker count / re-labelling (Sprint 29) ──────────────────────
+  // The roster maps these with sharper, in-place wording (RELABEL_COPY in
+  // SpeakerRoster.tsx); these are the fallbacks any other surface gets.
+  speakers_hint_invalid: "The number of people cannot be larger than the maximum.",
+  job_not_complete: "The transcript is not finished yet. Try again when it is.",
+  rediarize_in_progress: "Speakers are already being re-labelled.",
+  audio_unavailable: "The recording is no longer kept, so speakers cannot be re-labelled.",
+  rediarize_limit: "This transcript has been re-labelled as often as it can be.",
+  enqueue_failed: "We could not start that just now. Nothing changed — try again in a moment.",
+  nothing_to_undo: "There is nothing to undo any more.",
+  // Sprint 31 dual-channel capture (sent by the macOS app only).
+  channel_layout_mismatch: "This recording could not be read as a call recording. Try uploading it again.",
+  local_speaker_name_invalid: "Your display name is too long to label your voice. Shorten it in your profile.",
+
+  // ── moving turns / capture context (Sprint 30) ────────────────────
+  // `stale_result_rev` is the one the transcript acts on: it reloads and
+  // says this, so the sentence has to hold after the reload too.
+  stale_result_rev: "Speakers were updated elsewhere.",
+  bad_segment_index: "That part of the transcript has changed. Reload and try again.",
+  too_many_segments: "That is too much to move at once. Move fewer turns at a time.",
+  too_many_speakers: "A transcript can have at most 8 speakers. Move these turns to someone already listed.",
+  unknown_label: "That speaker is no longer in this transcript. Reload and try again.",
+  name_candidates_invalid: "The invited people's names could not be used. Record without them, or try again.",
 };
 
 /** True when the code has a written message (what the coverage test asks). */

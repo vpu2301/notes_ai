@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from typing import Any
 
 import asyncpg
 import redis.asyncio as aioredis
@@ -10,13 +12,21 @@ import redis.asyncio as aioredis
 from audit import AuditWriter
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
-from diarization import DiarizationEngine
+from diarization import (
+    Diarizer,
+    HttpDiarizer,
+    LegacyEcapaDiarizer,
+    PyannoteDiarizer,
+    RosterGuardConfig,
+)
 from messaging import RedisStreamsConsumer, RedisStreamsProducer
 from models import ASRProvider, Registry, build_asr_provider
 from storage import EncryptedObjectStore, S3Client
 
 from .config import settings
 from .inference import WhisperEngine
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,10 +48,96 @@ class WorkerState:
     engine: ASRProvider
     # Ambient Capture v1: offline speaker diarization for diarize=true
     # jobs. NEVER warmed at startup — most jobs don't diarize, and a
-    # worker without the ECAPA weights must still transcribe. The first
+    # worker without the model weights must still transcribe. The first
     # diarize job pays ensure_loaded(); if that fails the job fails with
     # `diarization_unavailable` (retryable), the worker stays healthy.
-    diarizer: DiarizationEngine
+    # Sprint 29: the engine is chosen by MDX_DIAR_ENGINE behind the
+    # `Diarizer` seam; the processor never names one.
+    diarizer: Diarizer
+    # MDX_DIAR_SHADOW_ENGINE: runs after the primary, its labels are
+    # discarded — only counts and timing are logged. None = off.
+    shadow_diarizer: Diarizer | None = None
+    # Sprint 31: Silero VAD for the dual-channel analysis, built lazily on
+    # the first mic/system job (a mono-only worker never loads it).
+    channel_segmenter: Any = None
+
+
+DIARIZER_ENGINES = ("legacy", "pyannote", "http")
+
+
+def build_diarizer(name: str) -> Diarizer:
+    """Resolve an engine name from config. Unknown names fail at startup,
+    never on a job."""
+    roster = RosterGuardConfig(
+        min_speaker_speech_ms=settings.diar_min_speaker_speech_ms,
+        min_speaker_share=settings.diar_min_speaker_share,
+    )
+    if name == "legacy":
+        return LegacyEcapaDiarizer(
+            model_dir=settings.diar_model_dir,
+            device=settings.diar_device,
+            pins={
+                "embedding_model.ckpt": settings.diar_model_sha256,
+                "mean_var_norm_emb.ckpt": settings.diar_meanvar_sha256,
+            },
+            model_repo=settings.diar_model_repo,
+            model_revision=settings.diar_model_revision,
+            roster=roster,
+        )
+    if name == "pyannote":
+        return PyannoteDiarizer(
+            model_dir=settings.diar_v2_model_dir,
+            # The process environment config.py pinned (telemetry off, hub
+            # offline); the engine refuses to load if it no longer says so.
+            environ=settings.registry_environ(),
+            device=settings.diar_device,
+            pins=settings.diar_v2_pin_map(),
+            model_repo=settings.diar_v2_model_repo,
+            model_revision=settings.diar_v2_model_revision,
+            batch_size=settings.diar_v2_batch_size(),
+            roster=roster,
+        )
+    if name == "http":
+        return _build_http_diarizer(roster)
+    raise ValueError(f"MDX_DIAR_ENGINE={name!r} is not one of {', '.join(DIARIZER_ENGINES)}")
+
+
+def _build_http_diarizer(roster: RosterGuardConfig) -> Diarizer:
+    """Shape B (ADR-0052): the engine runs on a GPU endpoint.
+
+    The backend is resolved through the same registry as ASR, so its URL,
+    token, timeout and the processor shown on the Data page are declared
+    in ``config/models.yaml`` and validated at startup — a typo or a
+    missing secret fails here, never on a user's recording.
+    """
+    registry = Registry.load(
+        settings.models_config,
+        env=settings.registry_env(),
+        environ=settings.registry_environ(),
+        validate=False,
+    )
+    name = settings.diar_http_backend or registry.override_for("diarization")
+    if not name:
+        raise ValueError(
+            "MDX_DIAR_ENGINE=http needs MDX_DIAR_HTTP_BACKEND "
+            "(or a `diarization` env override in config/models.yaml)"
+        )
+    resolved = registry.backend(name, expect_kind="diarization")
+    return HttpDiarizer(
+        backend=resolved.name,
+        base_url=resolved.config.base_url or "",
+        model_id=resolved.model_id,
+        # Two tokens, two checks: the backend's bearer satisfies the
+        # endpoint's gateway, and the server's own token (sent in its own
+        # header) satisfies the container. On a bare server they are
+        # usually the same value; on a managed endpoint they are not.
+        auth_token=resolved.config.bearer_token(),
+        server_token=settings.diar_http_token or None,
+        cold_start_seconds=resolved.caps.cold_start_seconds,
+        timeout_seconds=resolved.caps.timeout_seconds,
+        seconds_per_audio_second=settings.diar_http_seconds_per_audio_second,
+        roster=roster,
+    )
 
 
 def build_asr(backend_name: str) -> ASRProvider:
@@ -122,15 +218,17 @@ async def build_state() -> WorkerState:
     engine = build_asr(settings.asr_backend)
     await engine.warm_up()
 
-    diarizer = DiarizationEngine(
-        model_dir=settings.diar_model_dir,
-        device=settings.diar_device,
-        pins={
-            "embedding_model.ckpt": settings.diar_model_sha256,
-            "mean_var_norm_emb.ckpt": settings.diar_meanvar_sha256,
+    diarizer = build_diarizer(settings.diar_engine)
+    shadow = settings.diar_shadow_engine.strip()
+    shadow_diarizer = build_diarizer(shadow) if shadow and shadow != settings.diar_engine else None
+    # The worker has no readiness endpoint; this line is how an operator
+    # confirms which engine a pod runs after flipping MDX_DIAR_ENGINE.
+    logger.info(
+        "diarization.engine_selected",
+        extra={
+            "engine": diarizer.engine,
+            "shadow_engine": shadow_diarizer.engine if shadow_diarizer else None,
         },
-        model_repo=settings.diar_model_repo,
-        model_revision=settings.diar_model_revision,
     )
 
     return WorkerState(
@@ -147,10 +245,14 @@ async def build_state() -> WorkerState:
         envelope=envelope,
         engine=engine,
         diarizer=diarizer,
+        shadow_diarizer=shadow_diarizer,
     )
 
 
 async def teardown_state(state: WorkerState) -> None:
+    closer = getattr(state.diarizer, "close", None)
+    if closer is not None:
+        closer()  # the remote engine holds a connection pool
     await state.producer.aclose()
     await state.redis.aclose()
     await state.app_pool.close()

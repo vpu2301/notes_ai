@@ -294,6 +294,7 @@ async def test_cross_tenant_probe_threshold(
 _ENTITY_TABLES: tuple[str, ...] = (
     "audio_files",  # asr_job (audio side)
     "transcription_jobs",  # asr_job
+    "transcription_speaker_edits",  # speaker edit overlay (0043)
     "dictation_sessions",  # dictation_session
     "abbreviation_dictionary",  # abbreviation
     "templates",  # template
@@ -338,14 +339,23 @@ async def test_every_entity_table_isolates_tenants(
                 b"\x00" * 32,
                 f"minio://mdx-audio/{a}/{audio_id}.enc",
             )
+            job_id = uuid4()
             await c.execute(
                 "INSERT INTO transcription_jobs (id, tenant_id, audio_id, requester_sub, "
                 "language) VALUES ($1,$2,$3,$4,$5)",
-                uuid4(),
+                job_id,
                 a,
                 audio_id,
                 author_a,
                 lang,
+            )
+            await c.execute(
+                "INSERT INTO transcription_speaker_edits (tenant_id, job_id, seq, kind, "
+                "from_label, to_label, actor_sub) "
+                "VALUES ($1,$2,1,'merge','SPEAKER_3','SPEAKER_1',$3)",
+                a,
+                job_id,
+                author_a,
             )
             await c.execute(
                 "INSERT INTO dictation_sessions (id, tenant_id, user_id, language) "

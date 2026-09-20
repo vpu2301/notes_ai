@@ -276,13 +276,36 @@ struct TranscriptionJob: Decodable, Sendable {
     let detectedLanguage: String?
     let errorMessage: String?
     let errorKind: String?
+    /// Sprint 29 — speaker re-labelling. All optional: an older server
+    /// sends none of them and the job still decodes.
+    /// Bumped by every re-label and undo.
+    var diarizationRev: Int? = nil
+    /// nil (never re-labelled) | "queued" | "running" | "complete" | "failed".
+    /// The job's `status` stays `complete` meanwhile: the transcript is
+    /// readable the whole time.
+    var diarizationStatus: String? = nil
+    var diarizationError: String? = nil
+    var diarizationRuns: Int? = nil
+    var canUndoRediarize: Bool? = nil
+    /// Submit response only: true = the speaker-count hint was used, false =
+    /// sent but ignored (diarize off), nil = none sent.
+    var hintsApplied: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status
         case detectedLanguage = "detected_language"
         case errorMessage = "error_message"
         case errorKind = "error_kind"
+        case diarizationRev = "diarization_rev"
+        case diarizationStatus = "diarization_status"
+        case diarizationError = "diarization_error"
+        case diarizationRuns = "diarization_runs"
+        case canUndoRediarize = "can_undo_rediarize"
+        case hintsApplied = "hints_applied"
     }
+
+    /// A speaker re-label is queued or running.
+    var isRelabelling: Bool { diarizationStatus == "queued" || diarizationStatus == "running" }
 
     /// Human-readable failure text (`error_message` is documented as safe to show).
     var failureText: String {
@@ -831,11 +854,15 @@ struct TranscriptSegment: Decodable, Sendable {
     let startMs: Int
     let endMs: Int
     let speaker: String?
+    /// Sprint 30: where this segment sits in the stored artifact — the
+    /// space `TranscriptTurn.segmentIndices` is in. Nil from older servers.
+    var artifactIndex: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case text, speaker
         case startMs = "start_ms"
         case endMs = "end_ms"
+        case artifactIndex = "artifact_index"
     }
 }
 
@@ -850,14 +877,26 @@ struct TranscriptTurn: Decodable, Identifiable, Equatable, Sendable {
     let startMs: Int
     let endMs: Int
     let paragraphs: [String]
+    /// Sprint 30: the turn's segments in ARTIFACT index space. Opaque —
+    /// sent back as-is to move the turn, never used to index `segments`.
+    /// Nil from servers that cannot move turns.
+    var segmentIndices: [Int]? = nil
+    /// Sprint 30: people talked over each other here, or the label was
+    /// smoothed — the attribution is a guess.
+    var uncertain: Bool? = nil
 
     /// Turns are chronological and non-overlapping, so the start is unique.
     var id: Int { startMs }
 
+    /// Whether this turn can be moved to another speaker.
+    var isMovable: Bool { !(segmentIndices ?? []).isEmpty }
+    var isUncertain: Bool { uncertain == true }
+
     enum CodingKeys: String, CodingKey {
-        case speaker, name, paragraphs
+        case speaker, name, paragraphs, uncertain
         case startMs = "start_ms"
         case endMs = "end_ms"
+        case segmentIndices = "segment_indices"
     }
 }
 
@@ -870,11 +909,333 @@ struct TranscriptResult: Decodable, Sendable {
     let speakerNames: [String: String]?
     /// The transcript as speaker turns — what the Transcript tab renders.
     let turns: [TranscriptTurn]?
+    /// Talk time per roster label, after speaker edits.
+    let speakerStats: [SpeakerStat]?
+    /// Diarization run the edits apply to.
+    let resultRev: Int?
+    /// Live speaker edits, application order (latest last).
+    let edits: [SpeakerEdit]?
+    /// "high" | "low" | nil (not diarized, or a pre-Sprint-29 result).
+    var countConfidence: String? = nil
+    /// The exact speaker count a person asked for on this labelling.
+    var speakersHint: Int? = nil
+    /// Sprint 30: names offered when renaming a speaker (calendar invitees).
+    var nameCandidates: [String]? = nil
+    /// Sprint 31: label → "local" (heard on the recording Mac's microphone)
+    /// or "remote" (came through the call audio). Empty for mono jobs;
+    /// absent from older servers.
+    var speakerSides: [String: String]? = nil
+    /// Sprint 31: label → how the name was given ("typed", "picklist",
+    /// "channel", "suggestion", "cleared"). "channel" = the server named
+    /// the only speaker on the microphone after the account owner.
+    var speakerNameSources: [String: String]? = nil
+    /// Sprint 32: names the server heard people give themselves ("Hi, this
+    /// is Anna"), offered with their evidence. Only sent while the server's
+    /// suggestion switch is on — absent is the normal case.
+    var nameSuggestions: [NameSuggestion]? = nil
+    /// Sprint 32: labelled by an older engine and the audio is still there,
+    /// so a re-label is worth offering. Absent from older servers.
+    var relabelAvailable: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
-        case segments, speakers, turns
+        case nameSuggestions = "name_suggestions"
+        case relabelAvailable = "relabel_available"
+        case segments, speakers, turns, edits
+        case speakerSides = "speaker_sides"
+        case speakerNameSources = "speaker_name_sources"
         case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+        case resultRev = "result_rev"
+        case countConfidence = "count_confidence"
+        case speakersHint = "speakers_hint"
+        case nameCandidates = "name_candidates"
+    }
+}
+
+struct SpeakerStat: Decodable, Sendable, Equatable {
+    let label: String
+    let speechMs: Int
+    let share: Double
+    let turns: Int
+
+    enum CodingKeys: String, CodingKey {
+        case label, share, turns
+        case speechMs = "speech_ms"
+    }
+
+    /// Probably someone else split off (or a cough): worth one question.
+    var isSmall: Bool { share < 0.05 || speechMs < 15_000 }
+}
+
+struct SpeakerEdit: Decodable, Sendable, Equatable {
+    let id: String
+    let kind: String
+    let fromLabel: String?
+    let toLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind
+        case fromLabel = "from_label"
+        case toLabel = "to_label"
+    }
+}
+
+/// Sprint 32 — one name suggestion: the name (calendar spelling) the
+/// server heard for `label`, and the words it heard it in, shown before
+/// anything is accepted. Everything but the pair is optional so a server
+/// that trims a field never costs the whole transcript.
+struct NameSuggestion: Decodable, Equatable, Hashable, Identifiable, Sendable {
+    let label: String
+    let name: String
+    var source: String? = nil
+    /// The evidence, at most 160 characters.
+    var quote: String? = nil
+    var startMs: Int? = nil
+    var endMs: Int? = nil
+    /// Artifact index space, like `TranscriptTurn.segmentIndices`.
+    var segmentIndices: [Int]? = nil
+
+    /// A pair is dismissed once and never comes back, so it is the identity.
+    var id: String { "\(label)|\(name)" }
+
+    enum CodingKeys: String, CodingKey {
+        case label, name, source, quote
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case segmentIndices = "segment_indices"
+    }
+}
+
+/// `POST /asr/jobs/{id}/speakers/suggestions/dismiss` body.
+struct NameSuggestionDismissRequest: Encodable, Sendable {
+    let label: String
+    let name: String
+}
+
+struct SpeakerMergeRequest: Encodable, Sendable {
+    let from: String
+    let into: String
+}
+
+/// `POST /asr/jobs/{id}/speakers/merge` response.
+struct SpeakerEditResult: Decodable, Sendable {
+    let editId: String
+    let speakers: [String]
+    let speakerNames: [String: String]
+    let speakerStats: [SpeakerStat]
+
+    enum CodingKeys: String, CodingKey {
+        case speakers
+        case editId = "edit_id"
+        case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+    }
+}
+
+/// Why a speaker merge or undo was refused, in words a person can act on.
+enum SpeakerEditError: LocalizedError {
+    case notComplete, unknownLabel, notLatest
+    /// Sprint 30: the result changed since it was read (another device,
+    /// the web app). The caller reloads and says so.
+    case staleResultRev
+    case badSegmentIndex, tooManySegments, tooManySpeakers
+    case relabelInProgress
+    /// 410: the transcript was erased.
+    case erased
+
+    var errorDescription: String? {
+        switch self {
+        case .notComplete: return "The transcript is not finished yet."
+        case .unknownLabel: return "That speaker is no longer in the transcript. Reload and try again."
+        case .notLatest: return "Only the last speaker change can be undone."
+        case .staleResultRev: return "Speakers were updated elsewhere."
+        case .badSegmentIndex: return "Those turns have changed. Reload and try again."
+        case .tooManySegments: return "Too many turns at once. Move fewer turns at a time."
+        case .tooManySpeakers: return "A transcript can have at most 8 speakers."
+        case .relabelInProgress: return "Speakers are being re-labelled. Try again when it has finished."
+        case .erased: return "This transcript was erased."
+        }
+    }
+
+    static func from(_ error: Error) -> Error {
+        guard case APIError.http(let status, let problem) = error else { return error }
+        switch problem?.code {
+        case "job_not_complete": return SpeakerEditError.notComplete
+        case "unknown_label", "same_label": return SpeakerEditError.unknownLabel
+        case "edit_not_latest": return SpeakerEditError.notLatest
+        case "stale_result_rev": return SpeakerEditError.staleResultRev
+        case "bad_segment_index": return SpeakerEditError.badSegmentIndex
+        case "too_many_segments": return SpeakerEditError.tooManySegments
+        case "too_many_speakers": return SpeakerEditError.tooManySpeakers
+        case "rediarize_in_progress": return SpeakerEditError.relabelInProgress
+        default: return status == 410 ? SpeakerEditError.erased : error
+        }
+    }
+}
+
+/// Where a moved turn goes: an existing speaker, a speaker the diarizer
+/// missed ("new"), or nobody ("Unknown", sent as JSON null).
+enum ReassignTarget: Equatable, Hashable, Sendable {
+    case speaker(String)
+    case new
+    case unknown
+}
+
+/// `POST /asr/jobs/{id}/speakers/reassign` body. `to` is always present:
+/// null is a meaning ("Unknown"), not an omission.
+struct SpeakerReassignRequest: Encodable, Sendable {
+    let resultRev: Int
+    let segmentIndices: [Int]
+    let to: ReassignTarget
+
+    enum CodingKeys: String, CodingKey {
+        case to
+        case resultRev = "result_rev"
+        case segmentIndices = "segment_indices"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(resultRev, forKey: .resultRev)
+        try container.encode(segmentIndices, forKey: .segmentIndices)
+        switch to {
+        case .speaker(let label): try container.encode(label, forKey: .to)
+        case .new: try container.encode("new", forKey: .to)
+        case .unknown: try container.encodeNil(forKey: .to)
+        }
+    }
+}
+
+/// The 200 of a reassign: the roster after the move, and the label made
+/// for "New speaker" (nil otherwise).
+struct SpeakerReassignResult: Decodable, Sendable {
+    let editId: String
+    let speakers: [String]
+    let speakerNames: [String: String]
+    let speakerStats: [SpeakerStat]
+    var createdLabel: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case speakers
+        case editId = "edit_id"
+        case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+        case createdLabel = "created_label"
+    }
+}
+
+/// Sprint 30 — how a speaker's new name was chosen (a metric only; the
+/// server does not store it).
+enum SpeakerNameSource: String, Encodable, Sendable {
+    case picklist, typed
+    /// Sprint 32: an accepted name suggestion.
+    case suggestion
+}
+
+/// Sprint 31: which side of a call a speaker was heard on.
+enum SpeakerSide: String, Sendable {
+    case local, remote
+
+    var symbol: String { self == .local ? "mic.fill" : "headphones" }
+    var accessibilityLabel: String { self == .local ? "On your microphone" : "On the call audio" }
+}
+
+/// Sprint 31 roster markers: the side glyph, and the "from your
+/// microphone" marker on a name the server gave from the channel split.
+enum SpeakerChannelMarkers {
+    static let channelSource = "channel"
+    static let fromMicrophone = "· from your microphone"
+    static let removeLabel = "Remove this name"
+    /// Sprint 32: the marker on a name that came from an accepted
+    /// suggestion, until the person edits it.
+    static let suggestionSource = "suggestion"
+    static let suggested = "suggested"
+
+    /// The side glyph for `label`; nil for mono jobs, unknown labels, or a
+    /// value this build does not know.
+    static func side(of label: String, in sides: [String: String]) -> SpeakerSide? {
+        sides[label].flatMap(SpeakerSide.init(rawValue:))
+    }
+
+    /// Whether `label`'s name came from the channel split (and so gets the
+    /// marker and the ✕ that clears it).
+    static func isChannelNamed(_ label: String, sources: [String: String]) -> Bool {
+        sources[label] == channelSource
+    }
+
+    /// Whether `label`'s name is an accepted suggestion (the "suggested" marker).
+    static func isSuggested(_ label: String, sources: [String: String]) -> Bool {
+        sources[label] == suggestionSource
+    }
+
+    /// `speaker_name_sources` after a successful rename of `label`: the
+    /// source sent, or "cleared" when the name was removed — so the marker
+    /// never outlives the name it described.
+    static func sources(_ sources: [String: String], afterRenaming label: String,
+                        sent: SpeakerNameSource?) -> [String: String] {
+        var updated = sources
+        updated[label] = sent?.rawValue ?? "cleared"
+        return updated
+    }
+}
+
+/// `POST /asr/jobs/{id}/rediarize` body. `speakers_expected` is always
+/// sent — `null` means "let the diarizer decide".
+struct RediarizeRequest: Encodable, Sendable {
+    let speakersExpected: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case speakersExpected = "speakers_expected"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(speakersExpected, forKey: .speakersExpected)
+    }
+}
+
+/// The 202 of a re-label and the 200 of its undo.
+struct RediarizeResponse: Decodable, Sendable {
+    let jobId: String
+    let diarizationStatus: String?
+    let diarizationRev: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case diarizationStatus = "diarization_status"
+        case diarizationRev = "diarization_rev"
+    }
+}
+
+/// Why a speaker re-label or its undo was refused.
+enum RediarizeError: LocalizedError, Equatable {
+    case notComplete, inProgress, audioUnavailable, limitReached, rateLimited, enqueueFailed, nothingToUndo
+
+    var errorDescription: String? {
+        switch self {
+        case .notComplete: return "The transcript is not finished yet."
+        case .inProgress: return "Speakers are already being re-labelled."
+        case .audioUnavailable: return "The recording is no longer stored, so speakers can't be re-labelled."
+        case .limitReached: return "Speakers can be re-labelled 5 times per recording, and that's been used up."
+        case .rateLimited: return "Too many re-labels in the last hour. Try again later."
+        case .enqueueFailed: return "Couldn't start re-labelling. Nothing changed — try again."
+        case .nothingToUndo: return "There is nothing to undo."
+        }
+    }
+
+    static func from(_ error: Error) -> Error {
+        guard case APIError.http(_, let problem) = error else { return error }
+        switch problem?.code {
+        case "job_not_complete": return RediarizeError.notComplete
+        case "rediarize_in_progress": return RediarizeError.inProgress
+        case "audio_unavailable": return RediarizeError.audioUnavailable
+        case "rediarize_limit": return RediarizeError.limitReached
+        case "rate_limited": return RediarizeError.rateLimited
+        case "enqueue_failed": return RediarizeError.enqueueFailed
+        case "nothing_to_undo": return RediarizeError.nothingToUndo
+        default: return error
+        }
     }
 }
 
@@ -917,6 +1278,8 @@ struct AskNoteResponse: Decodable, Sendable {
 
 struct SpeakerNamesRequest: Encodable, Sendable {
     let names: [String: String]
+    /// Label → how its name was chosen; omitted when nil.
+    var sources: [String: SpeakerNameSource]? = nil
 }
 
 struct SpeakerNamesResponse: Decodable, Sendable {

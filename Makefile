@@ -1,4 +1,4 @@
-.PHONY: smoke-ios test-egress check-no-vendor-import eval-smoke measure-turnaround dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa chaos-dictation chaos-asr load-dictation nightly-verify test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: smoke-ios test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -82,7 +82,7 @@ dev-model: ## Start/verify the model servers on this Mac: `make dev-model` (star
 eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
 	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
 
-test-egress: ## Prove the worker egress allowlist: example.com blocked, model endpoints reachable (needs staging/compose up)
+test-egress: ## Prove the worker egress allowlist: example.com/huggingface.co/otel.pyannote.ai blocked, model endpoints reachable, diarized job completes (needs staging/compose up)
 	RUN_EGRESS_TEST=1 uv run pytest tests/integration/test_worker_egress.py -v
 
 hf-endpoints: ## HF Inference Endpoints from deploy/hf/endpoints/*.yaml: `make hf-endpoints ARGS="plan --env staging"` (validate|plan|apply|status|pause|resume|delete)
@@ -91,6 +91,24 @@ hf-endpoints: ## HF Inference Endpoints from deploy/hf/endpoints/*.yaml: `make h
 secret-scan: ## Scan the repo history for committed secrets (gitleaks; CI runs the same config)
 	@command -v gitleaks >/dev/null || { echo "gitleaks not installed: brew install gitleaks"; exit 1; }
 	gitleaks git --config .gitleaks.toml --redact --no-banner .
+
+der-eval: ## Speaker count + DER on the gold set: `make der-eval ENGINE=legacy|pyannote_c1 SPLIT=test` → docs/eval/der-<date>-<engine>-<split>.json
+	@# pyannote.audio 4 requires pyannote.metrics 4 (the two cannot resolve
+	@# otherwise); scores match 3.2. Only a pyannote_c1 run pulls torch in.
+	@case '$(or $(ENGINE),legacy)' in \
+	  pyannote_c1*) extra="--with pyannote.audio>=4.0,<4.1" ;; \
+	  *) extra="" ;; \
+	esac; \
+	uv run --with 'pyannote.metrics>=4,<5' $$extra python scripts/eval/run_der.py --engine '$(or $(ENGINE),legacy)' --split $(or $(SPLIT),test)
+
+der-grid: ## B-4 guard-rail grid on dev + ship/no-ship verdict on test
+	uv run --with 'pyannote.metrics>=4,<5' python scripts/eval/grid_legacy.py
+
+sim-overcount: ## No-audio regression of the clusterer roster (S0/S1 must stay 100 %)
+	uv run python scripts/eval/sim_cluster_overcount.py --assert
+
+check-no-eval-audio: ## CI gate — no audio file tracked under eval/
+	@bash scripts/ci/check-no-eval-audio.sh
 
 measure-turnaround: ## ASR turnaround on a fixture: `make measure-turnaround FIXTURE=10min_de BACKEND=dev_mac_asr` → docs/eval/turnaround-<date>-<backend>-<fixture>.json
 	uv run --project libs/models python scripts/eval/measure_turnaround.py --fixture $(FIXTURE) --backend $(BACKEND)
@@ -306,6 +324,9 @@ check-metric-names: ## CI gate — exported metric names must match the declared
 prepare-ecapa: ## Fetch + checksum-verify the pinned ECAPA speaker-diarization model (ADR-0034)
 	uv run python scripts/models/prepare_ecapa.py
 
+prepare-pyannote: ## Fetch + checksum-verify the pinned pyannote community-1 diarizer (gated: needs HF_TOKEN with the model terms accepted)
+	uv run python scripts/models/prepare_pyannote.py
+
 chaos-dictation: ## Run dictation chaos scenarios (needs dev stack + token)
 	RUN_DICTATION_CHAOS=1 uv run --project services/dictation-service pytest tests/chaos/dictation_chaos.py -v
 
@@ -323,6 +344,9 @@ dev-up-gpu: ## Start base + dev + GPU overlay (requires NVIDIA toolkit)
 
 nightly-verify: ## Run the audit-chain nightly verifier once and emit Prom textfile
 	PROM_TEXTFILE=/tmp/audit_chain.prom uv run python scripts/jobs/nightly_verify.py
+
+weekly-speakers: ## Weekly speaker-quality CSV (reports/speakers-YYYY-WW.csv) as the read-only funnel_reader role
+	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_speakers.py
 
 test-integration-db: ## All integration tests against the live dev DB (needs migrate-up)
 	RUN_DB_INTEGRATION=1 uv run --project libs/db pytest libs/db/tests/integration/ -v

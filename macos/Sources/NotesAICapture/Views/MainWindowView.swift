@@ -71,6 +71,13 @@ struct MainWindowView: View {
         .sheet(item: $app.reauth) { prompt in
             ReauthSheet(prompt: prompt)
         }
+        // Sprint 31: the call-audio notice. Settings shows its own copy
+        // while it is open (a sheet cannot present over another here).
+        .sheet(isPresented: Binding(
+            get: { capture.callAudioConsentPresented && !app.settingsPresented },
+            set: { if !$0 { capture.callAudioConsentPresented = false } })) {
+            CallAudioConsentSheet()
+        }
         .alert("Recordings are still waiting", isPresented: $app.signOutPrompt) {
             Button("Keep for next sign-in") { Task { await app.signOut() } }
             Button("Cancel", role: .cancel) {}

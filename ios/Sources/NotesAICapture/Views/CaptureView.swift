@@ -61,6 +61,19 @@ struct ActiveCaptureCard: View {
                 .font(.dsDisplay(18, .medium))
                 .foregroundStyle(DS.text1)
                 .submitLabel(.done)
+            if let invited = capture.context.inviteLine {
+                // Sprint 30: a capture from a calendar event says what the
+                // invitation will be used for — quietly.
+                Text(invited)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+            }
+            HStack(spacing: 10) {
+                Text("People")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                PeoplePicker(height: 30)
+            }
             if let warning = capture.limitWarning {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
             } else {
@@ -147,6 +160,30 @@ struct ActiveCaptureCard: View {
                     .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 34))
             }
         }
+    }
+}
+
+/// "People": how many speakers the meeting has, sent with the upload so
+/// the speaker separation looks for that many. Auto and 6+ leave the count
+/// to it. Can be set while recording — it is read when the upload goes (or
+/// kept with the recording if that has to wait). Off with "Separate
+/// speakers", which it only refines.
+struct PeoplePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var height: CGFloat = 34
+
+    var body: some View {
+        DSSegmentedPill(
+            options: PeopleCount.allCases.map { .init($0, label: $0.label) },
+            selection: $capture.people,
+            height: height)
+            .disabled(!capture.diarize)
+            .opacity(capture.diarize ? 1 : 0.45)
+            // A container with its own name: a label on the bare stack
+            // would replace every segment's name with this one.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("People in the meeting")
+            .accessibilityHint(capture.diarize ? "" : "Turn on Separate speakers to use this")
     }
 }
 

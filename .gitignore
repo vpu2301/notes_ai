@@ -45,3 +45,6 @@ infra/edge/certs/
 # Sprint 21: terminology source snapshots are fetched, never committed —
 # provenance lives in infra/seeds/corpus/sources.lock (committed).
 infra/seeds/corpus/sources/
+
+# Speaker gold set: audio never enters git (Sprint 28)
+eval/speakers/*/audio/

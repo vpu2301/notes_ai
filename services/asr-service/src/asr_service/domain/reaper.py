@@ -149,6 +149,70 @@ async def reap_tenant(
                     "asr.job_reap_audit_failed",
                     extra={"job_id": str(row.id), "error": str(exc)},
                 )
+        reaped += await _reap_rediarize(
+            state,
+            conn,
+            tenant_id,
+            running_grace_seconds=running_grace_seconds,
+            queued_grace_seconds=queued_grace_seconds,
+        )
+    return reaped
+
+
+async def _reap_rediarize(
+    state: Any,
+    conn: Any,
+    tenant_id: UUID,
+    *,
+    running_grace_seconds: float,
+    queued_grace_seconds: float,
+) -> int:
+    """Stranded speaker re-runs (Sprint 29): a worker that died mid re-run,
+    or a lost message, leaves ``diarization_status`` spinning forever.
+
+    Only the RE-RUN fails (``stranded``); the job stays ``complete`` with
+    the labels it had. A re-run is a diarization pass, far shorter than the
+    Whisper pass the grace windows are sized for — reaping one is always
+    late, never early.
+    """
+    reaped = 0
+    for row in await repository.list_stale_rediarize(
+        conn,
+        running_grace_seconds=running_grace_seconds,
+        queued_grace_seconds=queued_grace_seconds,
+        limit=settings.job_reaper_batch_limit,
+    ):
+        grace = (
+            running_grace_seconds if row.diarization_status == "running" else queued_grace_seconds
+        )
+        if not await repository.fail_rediarize(
+            conn,
+            job_id=row.id,
+            error="stranded",
+            only_if_status=row.diarization_status,
+            older_than_seconds=grace,
+        ):
+            continue
+        reaped += 1
+        logger.warning(
+            "asr.rediarize_reaped",
+            extra={"job_id": str(row.id), "prior_status": row.diarization_status},
+        )
+        try:
+            await state.audit_writer.write_event(
+                tenant_id=tenant_id,
+                kind=audit_kinds.REDIARIZE_FAILED,
+                actor_sub=row.requester_sub,
+                target_kind="asr_job",
+                target_id=str(row.id),
+                payload={"error_kind": "stranded", "actor": "reaper"},
+                severity=Severity.WARN,
+            )
+        except Exception as exc:  # noqa: BLE001 — audit must not block the sweep
+            logger.warning(
+                "asr.job_reap_audit_failed",
+                extra={"job_id": str(row.id), "error": str(exc)},
+            )
     return reaped
 
 

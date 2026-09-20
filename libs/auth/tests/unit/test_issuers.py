@@ -47,12 +47,8 @@ THIRD = "https://evil.test.invalid"
 
 
 def test_legacy_env_vars_build_a_one_element_list() -> None:
-    issuers = issuers_from_env(
-        None, issuer=ISSUER, jwks_url="https://kc/certs", audience=AUDIENCE
-    )
-    assert issuers == [
-        IssuerConfig(issuer=ISSUER, jwks_url="https://kc/certs", audience=AUDIENCE)
-    ]
+    issuers = issuers_from_env(None, issuer=ISSUER, jwks_url="https://kc/certs", audience=AUDIENCE)
+    assert issuers == [IssuerConfig(issuer=ISSUER, jwks_url="https://kc/certs", audience=AUDIENCE)]
 
 
 def test_empty_issuers_json_falls_back_to_legacy_vars() -> None:
@@ -66,7 +62,11 @@ def test_issuers_json_wins_over_legacy_vars() -> None:
     raw = json.dumps(
         [
             {"issuer": KEYCLOAK, "jwks_url": f"{KEYCLOAK}/certs", "audience": "mdx-api"},
-            {"issuer": NATIVE, "jwks_url": f"{NATIVE}/.well-known/jwks.json", "audience": "mdx-api"},
+            {
+                "issuer": NATIVE,
+                "jwks_url": f"{NATIVE}/.well-known/jwks.json",
+                "audience": "mdx-api",
+            },
         ]
     )
     issuers = issuers_from_env(raw, issuer=ISSUER, jwks_url="ignored", audience="ignored")

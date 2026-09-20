@@ -21,9 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, f
 
 from .errors import ConfigError
 
-BackendKind = Literal["openai_compat", "asr_http", "asr_inproc", "anthropic", "recorded"]
+BackendKind = Literal[
+    "openai_compat", "asr_http", "asr_inproc", "diar_http", "anthropic", "recorded"
+]
 StructuredMode = Literal["json_schema", "json_object", "guided_json", "probe", "none"]
-OperationKind = Literal["chat", "asr", "embed"]
+OperationKind = Literal["chat", "asr", "embed", "diarization"]
 
 # operation -> kind. Adding an operation is a code change here and a routing
 # row in models.yaml; the registry refuses operations it does not know.
@@ -39,6 +41,11 @@ BACKEND_KIND_FOR: dict[BackendKind, OperationKind] = {
     "recorded": "chat",
     "asr_http": "asr",
     "asr_inproc": "asr",
+    # Sprint 29 B-9 (shape B, ADR-0052): speaker diarization on a GPU
+    # endpoint. It has no routing row — the worker names the backend
+    # directly (MDX_DIAR_HTTP_BACKEND) — but it lives here so every
+    # processor the platform talks to is declared in one file.
+    "diar_http": "diarization",
 }
 KNOWN_ENVS = ("dev", "test", "staging", "prod")
 LOCAL_ONLY_ENVS = frozenset({"dev", "test"})
@@ -130,7 +137,7 @@ class ModelsConfig(BaseModel):
             if env not in KNOWN_ENVS:
                 raise ValueError(f"env_overrides: unknown env {env!r}")
             for kind in by_kind:
-                if kind not in ("chat", "asr", "embed"):
+                if kind not in ("chat", "asr", "embed", "diarization"):
                     raise ValueError(f"env_overrides.{env}: unknown kind {kind!r}")
         return overrides
 
@@ -216,7 +223,7 @@ def _check_static_invariants(config: ModelsConfig, source: str) -> None:
         # A missing env var leaves base_url == "" — tolerated here, the
         # registry decides whether this backend matters in this env. A
         # *missing key* is a config bug regardless.
-        if backend.kind in ("openai_compat", "asr_http") and backend.base_url is None:
+        if backend.kind in ("openai_compat", "asr_http", "diar_http") and backend.base_url is None:
             raise ConfigError(
                 "invalid_config", f"{source}: backend {name!r} ({backend.kind}) needs base_url"
             )

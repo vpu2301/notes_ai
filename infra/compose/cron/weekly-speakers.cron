@@ -1,0 +1,8 @@
+# Weekly speaker-quality report (Sprint 30)
+#
+# Runs scripts/ops/speaker_quality.sql as the read-only funnel_reader role
+# (column-level grant, migration 0046) and writes
+# reports/speakers-YYYY-WW.csv — the input to the weekly speaker review
+# (docs/product/speaker-decisions.md). Counts only.
+CRON_TZ=UTC
+30 6 * * 1  cd /opt/notes-ai-backend && DATABASE_URL=postgresql://funnel_reader:funnel_reader@localhost:5432/notes /usr/bin/env uv run python scripts/jobs/weekly_speakers.py >> /var/log/mdx/weekly-speakers.log 2>&1

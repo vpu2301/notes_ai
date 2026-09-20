@@ -45,6 +45,15 @@ export function MicIcon({ size = 16 }: IconProps) {
   );
 }
 
+export function SpeakerIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M3.5 7.75h3l4-3.25v11l-4-3.25h-3z" />
+      <path d="M13.5 7.25a3.5 3.5 0 0 1 0 5.5M15.75 5a6.5 6.5 0 0 1 0 10" />
+    </svg>
+  );
+}
+
 export function WaveformIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>

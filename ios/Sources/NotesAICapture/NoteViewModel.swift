@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// One open note: the envelope, its template's sections, the editable
 /// content with debounced autosave, the
@@ -79,6 +80,69 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var speakerNames: [String: String] = [:]
     @Published private(set) var transcriptError: String?
     @Published private(set) var renamingSpeaker = false
+    /// Roster (after merges) and talk time per speaker.
+    @Published private(set) var speakers: [String] = []
+    @Published private(set) var speakerStats: [SpeakerStat] = []
+    /// The latest speaker edit, while it can be undone ("Merged into Anna ·
+    /// Undo", "Moved 3 turns to Tom · Undo").
+    @Published private(set) var lastEdit: LastSpeakerEdit?
+    /// Sprint 30: the result revision the turns were read from; every move
+    /// sends it back. Nil from servers that cannot move turns.
+    @Published private(set) var resultRev: Int?
+    /// Names offered when renaming (the calendar event's invitees).
+    @Published private(set) var nameCandidates: [String] = []
+    /// Sprint 31: label → "local"/"remote" (empty for mono jobs).
+    @Published private(set) var speakerSides: [String: String] = [:]
+    /// Sprint 31: label → how its name was given ("channel", "typed", …).
+    @Published private(set) var speakerNameSources: [String: String] = [:]
+    /// Sprint 32: names the server heard people give themselves, not yet
+    /// accepted or dismissed. Empty while the server's switch is off.
+    @Published private(set) var nameSuggestions: [NameSuggestion] = []
+    /// Sprint 32: an older engine labelled this transcript and its audio
+    /// is still there — the re-label banner offers a fresh run.
+    @Published private(set) var relabelAvailable = false
+    /// The re-label banner was closed in this view.
+    @Published private(set) var relabelBannerDismissed = false
+    /// Sprint 32: the turn a suggestion's quote points at — scrolled to and
+    /// highlighted for `highlightDuration`.
+    @Published private(set) var revealedTurn: TurnReveal?
+    /// Sprint 32: what assistive technology should say after a speaker
+    /// edit ("Merged", "Moved 3 turns", "Re-labelling finished"). The view
+    /// posts it; the model only decides the words.
+    @Published private(set) var announcement: Announcement?
+    /// Turns picked for a multi-turn move (ids = `TranscriptTurn.id`).
+    @Published var selectedTurnIds: Set<Int> = []
+    /// iOS "Select" mode: taps pick turns instead of opening menus.
+    @Published var selecting = false
+    /// "Speakers were updated elsewhere." after a refused stale move.
+    @Published var speakerNotice: String?
+    /// Small speakers the person said to keep (not merge) in this view.
+    @Published var keptSpeakers: Set<String> = []
+    /// Note text before/after the last merge rewrote it, for an exact undo.
+    private var mergeRewrite: (before: NoteContent, after: NoteContent)?
+    /// Speaker edits need the network; offline the controls are disabled.
+    @Published private(set) var online = true
+    /// Sprint 29 — "Wrong number of speakers?": the re-label in this view.
+    @Published private(set) var relabel: RelabelState = .idle
+    /// The server can put back the labelling the last re-run replaced.
+    @Published private(set) var canUndoRelabel = false
+    /// "high" | "low" | nil — how sure the diarizer is of the speaker count.
+    @Published private(set) var countConfidence: String?
+    /// The exact count a person asked for on the current labelling.
+    @Published private(set) var speakersHint: Int?
+    /// Live merges on the current labelling; a re-label replaces them.
+    @Published private(set) var mergeCount = 0
+    /// "Looks right" on the low-confidence banner, remembered per job.
+    @Published private(set) var countBannerDismissed = false
+    /// How often a running re-label is polled.
+    var relabelPollInterval: Duration = .seconds(3)
+    /// Told when a re-label starts following and when it stops (job id,
+    /// running) — the Mac's recents list says "Re-labelling speakers…".
+    var onRelabellingChange: (@MainActor (String, Bool) -> Void)?
+    /// The count the last re-label asked for, for "Try again".
+    private var lastRelabelRequest: Int?
+    private var relabelTask: Task<Void, Never>?
+    private let pathMonitor = NWPathMonitor()
 
     /// "Ask this note": the thread under the document. Lives here only —
     /// the server answers one question at a time and keeps nothing.
@@ -104,7 +168,14 @@ final class NoteViewModel: ObservableObject {
         self.noteId = noteId
         self.jobId = jobId
         self.api = api
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in self?.online = satisfied }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
     }
+
+    deinit { pathMonitor.cancel() }
 
     /// A note is a living document (ADR-0051): editable until cancelled.
     var isDraft: Bool {
@@ -163,12 +234,37 @@ final class NoteViewModel: ObservableObject {
     func loadTranscript() async {
         guard turns == nil, transcriptError == nil, let jobId else { return }
         do {
-            let result = try await api.transcript(jobId: jobId)
-            speakerNames = result.speakerNames ?? [:]
-            turns = result.turns ?? []
+            apply(try await api.transcript(jobId: jobId))
         } catch {
             transcriptError = error.localizedDescription
+            return
         }
+        countBannerDismissed = UserDefaults.standard.bool(forKey: Self.countBannerKey(jobId))
+        // A re-label started earlier (here, on the web, on another device)
+        // may still be running: follow it rather than offer a second one.
+        if let job = try? await api.jobStatus(id: jobId) {
+            canUndoRelabel = job.canUndoRediarize ?? false
+            if job.isRelabelling { followRelabel(jobId: jobId) }
+        }
+    }
+
+    private func apply(_ result: TranscriptResult) {
+        speakerNames = result.speakerNames ?? [:]
+        speakers = result.speakers ?? []
+        speakerStats = result.speakerStats ?? []
+        turns = result.turns ?? []
+        countConfidence = result.countConfidence
+        speakersHint = result.speakersHint
+        mergeCount = result.edits?.count ?? 0
+        resultRev = result.resultRev
+        nameCandidates = result.nameCandidates ?? []
+        speakerSides = result.speakerSides ?? [:]
+        speakerNameSources = result.speakerNameSources ?? [:]
+        nameSuggestions = result.nameSuggestions ?? []
+        relabelAvailable = result.relabelAvailable ?? false
+        // A selection is of the turns as they were; drop picks that are gone.
+        let ids = Set((result.turns ?? []).map(\.id))
+        selectedTurnIds.formIntersection(ids)
     }
 
     // MARK: - Speakers
@@ -187,7 +283,14 @@ final class NoteViewModel: ObservableObject {
     /// this transcript, and — while the note is live — in the note body,
     /// whose turn lines start with the name. A cancelled note is a record;
     /// its text stays and only the transcript shows the new name.
-    func renameSpeaker(label: String, to rawName: String) async {
+    ///
+    /// Sprint 30: `picked` says the name was chosen from the candidate
+    /// list (sent as `sources`, a metric only); nil works it out from the
+    /// candidates. Sprint 32: `source` overrides both (an accepted
+    /// suggestion). Returns whether a new name was saved.
+    @discardableResult
+    func renameSpeaker(label: String, to rawName: String, picked: Bool? = nil,
+                       source: SpeakerNameSource? = nil) async -> Bool {
         // Without a readable job the "label" is the name as it stands in
         // the note text; the rename rewrites the turn prefixes and the note
         // autosaves, so it is on the server either way.
@@ -195,27 +298,661 @@ final class NoteViewModel: ObservableObject {
         let from = textOnly ? label : (speakerNames[label] ?? defaultSpeakerName(label))
         let trimmed = rawName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let to = trimmed.isEmpty ? (textOnly ? from : defaultSpeakerName(label)) : String(trimmed.prefix(80))
-        guard to != from else { return }
+        guard to != from else { return false }
         guard let jobId, !textOnly else {
             renameSpeakerInNote(from: from, to: to)
-            return
+            return true
         }
 
         // Only the names people gave are stored; defaults are implied.
-        var custom = speakerNames.filter { $0.value != defaultSpeakerName($0.key) }
+        var custom = givenNames
         if to == defaultSpeakerName(label) { custom.removeValue(forKey: label) } else { custom[label] = to }
 
         renamingSpeaker = true
         defer { renamingSpeaker = false }
         do {
-            let stored = try await api.setSpeakerNames(jobId: jobId, names: custom)
-            var merged: [String: String] = [:]
-            for l in speakerNames.keys { merged[l] = stored[l] ?? defaultSpeakerName(l) }
-            speakerNames = merged
-            renameSpeakerInNote(from: from, to: merged[label] ?? to)
+            var sources: [String: SpeakerNameSource]?
+            if custom[label] != nil {
+                sources = [label: source ?? ((picked ?? nameCandidates.contains(to)) ? .picklist : .typed)]
+            }
+            let stored = try await api.setSpeakerNames(jobId: jobId, names: custom, sources: sources)
+            speakerNames = namesAfterSaving(stored)
+            speakerNameSources = SpeakerChannelMarkers.sources(speakerNameSources, afterRenaming: label,
+                                                               sent: sources?[label])
+            // A name given by hand settles what a suggestion was offering.
+            if custom[label] != nil { nameSuggestions.removeAll { $0.label == label } }
+            renameSpeakerInNote(from: from, to: speakerNames[label] ?? to)
+            return true
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// The names people gave; defaults ("Speaker 2") are implied, never stored.
+    private var givenNames: [String: String] {
+        speakerNames.filter { $0.value != defaultSpeakerName($0.key) }
+    }
+
+    /// Every roster label's display name after a PUT answered with `stored`.
+    private func namesAfterSaving(_ stored: [String: String]) -> [String: String] {
+        var merged: [String: String] = [:]
+        for l in speakerNames.keys { merged[l] = stored[l] ?? defaultSpeakerName(l) }
+        return merged
+    }
+
+    func name(for label: String) -> String { speakerNames[label] ?? defaultSpeakerName(label) }
+
+    // MARK: - Call sides (Sprint 31)
+
+    /// The side glyph for a roster chip; nil for mono jobs.
+    func side(for label: String) -> SpeakerSide? {
+        SpeakerChannelMarkers.side(of: label, in: speakerSides)
+    }
+
+    /// The name was given from the channel split — shown with
+    /// "· from your microphone" and an ✕.
+    func isChannelNamed(_ label: String) -> Bool {
+        SpeakerChannelMarkers.isChannelNamed(label, sources: speakerNameSources)
+    }
+
+    /// The ✕: remove the channel name. The PUT leaves the label out of
+    /// `names` (every other name kept); the server records "cleared" and
+    /// never applies the channel name again.
+    func clearChannelName(_ label: String) async {
+        await renameSpeaker(label: label, to: "")
+    }
+
+    /// The one small speaker worth asking about (largest first), if any.
+    var smallSpeakerPrompt: (speaker: SpeakerStat, targets: [String])? {
+        // The count question comes first: merging a small speaker is moot
+        // until the number of people is settled. Never both banners.
+        guard speakers.count > 1, !showsCountBanner, !showsRelabelBanner, relabel != .running else { return nil }
+        let largest = speakerStats.sorted { $0.speechMs > $1.speechMs }
+        guard let small = largest.first(where: {
+            $0.isSmall && !keptSpeakers.contains($0.label) && speakers.contains($0.label)
+        }) else { return nil }
+        return (small, largest.filter { $0.label != small.label }.prefix(2).map(\.label))
+    }
+
+    /// Merge `from` into `into` on the job; the transcript reloads and the
+    /// note's turn lines follow, as on a rename. Needs the network: an edit
+    /// replayed later against a changed roster would be wrong, so nothing queues.
+    func mergeSpeaker(from: String, into: String) async {
+        guard let jobId, online, !renamingSpeaker else { return }
+        let fromName = name(for: from)
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            let res = try await api.mergeSpeakers(jobId: jobId, from: from, into: into)
+            speakers = res.speakers
+            speakerStats = res.speakerStats
+            speakerNames = res.speakerNames
+            mergeRewrite = nil
+            if editable, let before = content {
+                renameSpeakerInNote(from: fromName, to: res.speakerNames[into] ?? defaultSpeakerName(into))
+                if let after = content, after != before { mergeRewrite = (before, after) }
+            }
+            apply(try await api.transcript(jobId: jobId))
+            offerUndo(LastSpeakerEdit(editId: res.editId,
+                                      summary: "Merged into \(res.speakerNames[into] ?? name(for: into))"))
+            announce("Merged")
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    /// Keep "… · Undo" up for ten seconds (Sprint 28's window).
+    private func offerUndo(_ edit: LastSpeakerEdit) {
+        lastEdit = edit
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            if self?.lastEdit?.editId == edit.editId { self?.lastEdit = nil }
+        }
+    }
+
+    func undoLastSpeakerEdit() async {
+        guard let jobId, online, let edit = lastEdit, !renamingSpeaker else { return }
+        if let restore = edit.restore {
+            await undoAccept(restore, jobId: jobId)
+            return
+        }
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            try await api.undoSpeakerEdit(jobId: jobId, editId: edit.editId)
+            lastEdit = nil
+            if let rewrite = mergeRewrite {
+                if content == rewrite.after { commit(rewrite.before) } else {
+                    actionError = "Note text was edited; speaker names in the note were not reverted."
+                }
+            }
+            mergeRewrite = nil
+            apply(try await api.transcript(jobId: jobId))
+            announce("Undone")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Turn-level correction (Sprint 30)
+
+    /// The latest speaker edit and what it did, for "… · Undo".
+    struct LastSpeakerEdit: Equatable {
+        let editId: String
+        let summary: String
+        /// Sprint 32: an accepted suggestion is undone by putting these
+        /// names back, not by the server's edit log.
+        var restore: NameRestore? = nil
+    }
+
+    /// The names before a suggestion was accepted.
+    struct NameRestore: Equatable {
+        let label: String
+        let names: [String: String]
+        let sources: [String: String]
+        let suggestion: NameSuggestion
+    }
+
+    /// The server takes at most this many segment indices per move.
+    nonisolated static let maxSegmentsPerMove = 500
+    /// …and at most this many live speakers.
+    nonisolated static let maxSpeakers = 8
+
+    /// Whether speakers can be changed right now: a readable job, online
+    /// (an edit replayed later against a changed roster would be wrong),
+    /// nothing else in flight, and no re-label running.
+    var canEditSpeakers: Bool {
+        jobId != nil && transcriptError == nil && online && !renamingSpeaker && relabel != .running
+    }
+
+    /// Whether this turn can be moved (the server sent its segments).
+    func canMove(_ turn: TranscriptTurn) -> Bool { resultRev != nil && turn.isMovable }
+
+    /// Whether any turn can be moved — "Select" is offered only then.
+    var canMoveTurns: Bool { resultRev != nil && (turns ?? []).contains(where: \.isMovable) }
+
+    /// "New speaker" is offered while there is room for one more.
+    var canAddSpeaker: Bool { speakers.count < Self.maxSpeakers }
+
+    /// Where the given turns can go: every roster speaker except the one
+    /// they all already belong to.
+    func moveTargets(for turns: [TranscriptTurn]) -> [String] {
+        let current = Set(turns.map(\.speaker))
+        return speakers.filter { !(current.count == 1 && current.contains($0)) }
+    }
+
+    /// Whether "Unknown" makes sense: some turn is attributed to someone.
+    func canMoveToUnknown(_ turns: [TranscriptTurn]) -> Bool { turns.contains { $0.speaker != nil } }
+
+    /// The picked turns, in transcript order.
+    var selectedTurns: [TranscriptTurn] { (turns ?? []).filter { selectedTurnIds.contains($0.id) } }
+
+    /// "Move 3 turns to"
+    var moveSelectionTitle: String {
+        let n = selectedTurnIds.count
+        return "Move \(n) \(n == 1 ? "turn" : "turns") to"
+    }
+
+    func toggleSelection(_ turn: TranscriptTurn) {
+        guard canMove(turn) else { return }
+        if selectedTurnIds.contains(turn.id) { selectedTurnIds.remove(turn.id) } else { selectedTurnIds.insert(turn.id) }
+    }
+
+    func endSelection() {
+        selecting = false
+        selectedTurnIds = []
+    }
+
+    /// One move's indices: the turns' own `segment_indices`, concatenated
+    /// as they came (opaque — artifact space, never an index into
+    /// `segments`), each index once.
+    nonisolated static func segmentIndices(of turns: [TranscriptTurn]) -> [Int] {
+        var seen = Set<Int>()
+        return turns.flatMap { $0.segmentIndices ?? [] }.filter { seen.insert($0).inserted }
+    }
+
+    /// The display name a move went to, for "Moved … to Tom".
+    private func targetName(_ target: ReassignTarget, created: String?, names: [String: String]) -> String {
+        switch target {
+        case .speaker(let label): return names[label] ?? name(for: label)
+        case .new: return created.map { names[$0] ?? defaultSpeakerName($0) } ?? "a new speaker"
+        case .unknown: return unknownSpeakerName
+        }
+    }
+
+    /// Move turns to another speaker, a new one, or Unknown — one call for
+    /// however many turns. A result changed elsewhere since it was read is
+    /// reloaded and the person told so; nothing is retried behind their back.
+    func moveTurns(_ moving: [TranscriptTurn], to target: ReassignTarget) async {
+        guard let jobId, let rev = resultRev, canEditSpeakers else { return }
+        let indices = Self.segmentIndices(of: moving.filter(canMove))
+        guard !indices.isEmpty else { return }
+        guard indices.count <= Self.maxSegmentsPerMove else {
+            actionError = SpeakerEditError.tooManySegments.localizedDescription
+            return
+        }
+        let count = moving.count
+        speakerNotice = nil
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            let res = try await api.reassignTurns(jobId: jobId, resultRev: rev,
+                                                  segmentIndices: indices, to: target)
+            speakers = res.speakers
+            speakerStats = res.speakerStats
+            speakerNames = res.speakerNames
+            mergeRewrite = nil
+            let to = targetName(target, created: res.createdLabel, names: res.speakerNames)
+            endSelection()
+            apply(try await api.transcript(jobId: jobId))
+            offerUndo(LastSpeakerEdit(editId: res.editId,
+                                      summary: "Moved \(count) \(count == 1 ? "turn" : "turns") to \(to)"))
+            announce(count == 1 ? "Moved 1 turn" : "Moved \(count) turns")
+        } catch SpeakerEditError.staleResultRev {
+            await reloadAfterConflict()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// The move was refused because the speakers changed elsewhere: show
+    /// the result as it is now, drop the picks made on the old one.
+    private func reloadAfterConflict() async {
+        guard let jobId else { return }
+        endSelection()
+        lastEdit = nil
+        if let fresh = try? await api.transcript(jobId: jobId) { apply(fresh) }
+        speakerNotice = "Speakers were updated elsewhere."
+    }
+
+    /// "Reset speaker edits": the confirm step's copy.
+    nonisolated static let resetConfirmTitle = "Reset speaker edits?"
+    nonisolated static let resetConfirmMessage =
+        "All merges and moved turns in this transcript will be undone."
+
+    /// Whether there is anything to reset.
+    var canResetSpeakerEdits: Bool { mergeCount > 0 }
+
+    /// Undo every live merge and move of this result (behind a confirm).
+    func resetSpeakerEdits() async {
+        guard let jobId, canEditSpeakers else { return }
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            try await api.resetSpeakerEdits(jobId: jobId)
+            lastEdit = nil
+            mergeRewrite = nil
+            keptSpeakers = []
+            speakerNotice = nil
+            endSelection()
+            apply(try await api.transcript(jobId: jobId))
+            announce("Speaker edits reset")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// Candidate names for renaming `label`: the offered ones not already
+    /// used on another speaker.
+    func nameSuggestions(for label: String) -> [String] {
+        Self.picklist(candidates: nameCandidates, names: speakerNames, renaming: label)
+    }
+
+    nonisolated static func picklist(candidates: [String], names: [String: String],
+                                     renaming label: String) -> [String] {
+        let used = Set(names.filter { $0.key != label }.map { $0.value.lowercased() })
+        return candidates.filter { !used.contains($0.lowercased()) }
+    }
+
+    /// The picklist as a completion list for what is typed so far: all of
+    /// it while the field still holds the current name (or nothing), else
+    /// the names containing the text.
+    func nameCompletions(for label: String, typed: String) -> [String] {
+        Self.completions(nameSuggestions(for: label), typed: typed, current: name(for: label))
+    }
+
+    nonisolated static func completions(_ suggestions: [String], typed: String, current: String) -> [String] {
+        let query = typed.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty, query != current else { return suggestions }
+        return suggestions.filter { $0.localizedCaseInsensitiveContains(query) && $0 != query }
+    }
+
+    // MARK: - Speaker count (Sprint 29)
+
+    enum RelabelState: Equatable {
+        case idle
+        /// Queued or running on the server; the transcript stays readable.
+        case running
+        /// Finished: "Now N speakers · Undo".
+        case done(speakers: Int)
+        /// "Couldn't re-label speakers — Try again"; the old labels stay.
+        case failed
+    }
+
+    /// "We're not sure how many people spoke." — the diarizer said so, the
+    /// person has not already answered (a count, or "Looks right"), and no
+    /// re-label is on its way.
+    var showsCountBanner: Bool {
+        !showsRelabelBanner
+            && Self.showsCountBanner(confidence: countConfidence, hint: speakersHint,
+                                     dismissed: countBannerDismissed, relabelling: relabel == .running)
+    }
+
+    nonisolated static func showsCountBanner(confidence: String?, hint: Int?, dismissed: Bool,
+                                 relabelling: Bool) -> Bool {
+        confidence == "low" && hint == nil && !dismissed && !relabelling
+    }
+
+    /// "Only 2 voices could be told apart." — the person asked for more
+    /// speakers than the recording holds; none are made up to match.
+    var hintShortfall: String? {
+        guard let hint = speakersHint, !speakers.isEmpty, speakers.count < hint else { return nil }
+        return "Only \(speakers.count) \(speakers.count == 1 ? "voice" : "voices") could be told apart."
+    }
+
+    /// The confirm step's warning when merges would be lost.
+    var relabelReplacesMerges: String? {
+        guard mergeCount > 0 else { return nil }
+        return mergeCount == 1
+            ? "Your 1 merge will be replaced by the new result."
+            : "Your \(mergeCount) merges will be replaced by the new result."
+    }
+
+    /// Where the picker starts: the count asked for last, else the roster's.
+    var suggestedSpeakerCount: Int { min(max(speakersHint ?? speakers.count, 1), 8) }
+
+    /// "Looks right": hide the banner for this job, on this device, for good.
+    func dismissCountBanner() {
+        guard let jobId else { return }
+        countBannerDismissed = true
+        UserDefaults.standard.set(true, forKey: Self.countBannerKey(jobId))
+    }
+
+    nonisolated static func countBannerKey(_ jobId: String) -> String { "speakerCountConfirmed.\(jobId)" }
+
+    /// Re-run speaker separation for `expected` people (nil: let the
+    /// diarizer count). Needs the network — nothing queues offline, for the
+    /// same reason a merge does not.
+    func relabelSpeakers(expected: Int?) async {
+        guard let jobId, online, relabel != .running, !renamingSpeaker else { return }
+        lastRelabelRequest = expected
+        renamingSpeaker = true
+        do {
+            _ = try await api.rediarize(jobId: jobId, speakersExpected: expected)
+        } catch RediarizeError.inProgress {
+            // One is already running (another device, the web app): follow it.
+        } catch {
+            renamingSpeaker = false
+            actionError = error.localizedDescription
+            return
+        }
+        renamingSpeaker = false
+        // The merges belong to the labelling being replaced.
+        lastEdit = nil
+        endSelection()
+        mergeRewrite = nil
+        keptSpeakers = []
+        followRelabel(jobId: jobId)
+    }
+
+    /// "Try again" after a failed re-label: the same count as before.
+    func retryRelabel() async {
+        relabel = .idle
+        await relabelSpeakers(expected: lastRelabelRequest)
+    }
+
+    /// Put back the labelling the re-run replaced (one step only).
+    func undoRelabel() async {
+        guard let jobId, online, case .done = relabel, !renamingSpeaker else { return }
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            _ = try await api.undoRediarize(jobId: jobId)
+            relabel = .idle
+            canUndoRelabel = false
+            lastEdit = nil
+            apply(try await api.transcript(jobId: jobId))
+        } catch RediarizeError.nothingToUndo {
+            relabel = .idle
+            canUndoRelabel = false
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// Clear "Now N speakers" or the failure line.
+    func dismissRelabelResult() {
+        if relabel != .running { relabel = .idle }
+    }
+
+    /// Poll the job every `relabelPollInterval` until the re-label settles.
+    ///
+    /// The task holds the client, not this model: a note closed mid-run
+    /// stops being updated, but whoever listens on `onRelabellingChange`
+    /// still hears when the run ends.
+    private func followRelabel(jobId: String) {
+        relabelTask?.cancel()
+        relabel = .running
+        let api = api
+        let interval = relabelPollInterval
+        let report = onRelabellingChange
+        report?(jobId, true)
+        relabelTask = Task { [weak self] in
+            var settled: TranscriptionJob?
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                if self == nil && report == nil { return }
+                // A failed poll is a blip, not a verdict: keep asking.
+                guard let job = try? await api.jobStatus(id: jobId) else { continue }
+                if !job.isRelabelling {
+                    settled = job
+                    break
+                }
+            }
+            // Cancelled: a newer follow took over and reports for itself.
+            if Task.isCancelled { return }
+            report?(jobId, false)
+            guard let settled, let self else { return }
+            await self.finishRelabel(settled, jobId: jobId)
+        }
+    }
+
+    private func finishRelabel(_ job: TranscriptionJob, jobId: String) async {
+        canUndoRelabel = job.canUndoRediarize ?? false
+        guard job.diarizationStatus != "failed" else {
+            relabel = .failed
+            announce("Couldn't re-label speakers")
+            return
+        }
+        do {
+            apply(try await api.transcript(jobId: jobId))
+            relabel = .done(speakers: speakers.count)
+            announce("Re-labelling finished")
+        } catch {
+            relabel = .failed
+            announce("Couldn't re-label speakers")
+        }
+    }
+
+    // MARK: - Name suggestions and the re-label banner (Sprint 32)
+
+    /// Something for assistive technology to say once. The token makes
+    /// the same words said twice two announcements.
+    struct Announcement: Equatable {
+        let text: String
+        var token = UUID()
+    }
+
+    /// A request to scroll to a turn and highlight it.
+    struct TurnReveal: Equatable {
+        let turnId: Int
+        var token = UUID()
+    }
+
+    /// How long a revealed turn stays highlighted.
+    var highlightDuration: Duration = .seconds(2)
+
+    private func announce(_ text: String) {
+        announcement = Announcement(text: text)
+    }
+
+    /// The suggestion shown under `label`'s chip, if any.
+    func suggestion(for label: String) -> NameSuggestion? {
+        Self.visibleSuggestions(nameSuggestions, speakers: speakers, names: speakerNames)
+            .first { $0.label == label }
+    }
+
+    /// The suggestions worth showing: one per speaker still on the roster,
+    /// and never the name that speaker already has.
+    nonisolated static func visibleSuggestions(_ all: [NameSuggestion], speakers: [String],
+                                               names: [String: String]) -> [NameSuggestion] {
+        var seen = Set<String>()
+        return all.filter { suggestion in
+            speakers.contains(suggestion.label)
+                && names[suggestion.label] != suggestion.name
+                && seen.insert(suggestion.label).inserted
+        }
+    }
+
+    /// What VoiceOver reads for a roster chip: the name, its share of the
+    /// talking, the side of the call, and where the name came from.
+    func speakerAccessibilityLabel(_ label: String) -> String {
+        var parts = [name(for: label)]
+        if let share = speakerStats.first(where: { $0.label == label })?.share {
+            parts.append("\(Int((share * 100).rounded())) percent of the talking")
+        }
+        if let side = side(for: label) { parts.append(side.accessibilityLabel) }
+        if isChannelNamed(label) {
+            parts.append("name from your microphone")
+        } else if isSuggestedName(label) {
+            parts.append("suggested name")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    /// The name came from an accepted suggestion ("suggested" marker).
+    func isSuggestedName(_ label: String) -> Bool {
+        SpeakerChannelMarkers.isSuggested(label, sources: speakerNameSources)
+    }
+
+    /// Accept: the same PUT as a rename — every other name kept, this
+    /// label's set, `sources[label] = "suggestion"`. Undo puts the names
+    /// back as they were.
+    func accept(_ suggestion: NameSuggestion) async {
+        guard jobId != nil, canEditSpeakers else { return }
+        let restore = NameRestore(label: suggestion.label, names: givenNames,
+                                  sources: speakerNameSources, suggestion: suggestion)
+        guard await renameSpeaker(label: suggestion.label, to: suggestion.name, source: .suggestion) else {
+            return
+        }
+        nameSuggestions.removeAll { $0.label == suggestion.label }
+        offerUndo(LastSpeakerEdit(editId: "suggestion-\(UUID().uuidString)",
+                                  summary: "Named \(suggestion.name)", restore: restore))
+        announce("Named \(suggestion.name)")
+    }
+
+    private func undoAccept(_ restore: NameRestore, jobId: String) async {
+        renamingSpeaker = true
+        defer { renamingSpeaker = false }
+        do {
+            let current = name(for: restore.label)
+            let stored = try await api.setSpeakerNames(jobId: jobId, names: restore.names)
+            speakerNames = namesAfterSaving(stored)
+            speakerNameSources = restore.sources
+            lastEdit = nil
+            if !nameSuggestions.contains(restore.suggestion) { nameSuggestions.append(restore.suggestion) }
+            renameSpeakerInNote(from: current, to: name(for: restore.label))
+            announce("Undone")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// ✕: never offer this name for this speaker again. Gone at once; put
+    /// back if the server could not be told.
+    func dismiss(_ suggestion: NameSuggestion) async {
+        guard let jobId, online else { return }
+        let before = nameSuggestions
+        nameSuggestions.removeAll { $0 == suggestion }
+        do {
+            try await api.dismissNameSuggestion(jobId: jobId, label: suggestion.label, name: suggestion.name)
+            announce("Suggestion dismissed")
+        } catch {
+            nameSuggestions = before
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// The turn holding the quote: the one whose segments include the
+    /// suggestion's first index, else the one it started in.
+    nonisolated static func turnId(for suggestion: NameSuggestion, in turns: [TranscriptTurn]) -> Int? {
+        if let first = suggestion.segmentIndices?.first,
+           let turn = turns.first(where: { ($0.segmentIndices ?? []).contains(first) }) {
+            return turn.id
+        }
+        guard let start = suggestion.startMs else { return nil }
+        return turns.last { $0.startMs <= start }?.id
+    }
+
+    /// Tap on the quote: scroll to its turn and highlight it for 2 s.
+    func revealTurn(for suggestion: NameSuggestion) {
+        guard let id = Self.turnId(for: suggestion, in: turns ?? []) else { return }
+        let reveal = TurnReveal(turnId: id)
+        revealedTurn = reveal
+        let duration = highlightDuration
+        Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            if self?.revealedTurn == reveal { self?.revealedTurn = nil }
+        }
+    }
+
+    /// The highlighted turn, if any.
+    var highlightedTurnId: Int? { revealedTurn?.turnId }
+
+    /// "00:14" — where in the recording the quote was said.
+    nonisolated static func suggestionTime(_ suggestion: NameSuggestion) -> String? {
+        suggestion.startMs.map { formatElapsed(ms: $0) }
+    }
+
+    /// What VoiceOver reads for the suggestion row.
+    func suggestionAccessibilityLabel(_ suggestion: NameSuggestion) -> String {
+        Self.suggestionAccessibilityLabel(suggestion, speaker: name(for: suggestion.label))
+    }
+
+    nonisolated static func suggestionAccessibilityLabel(_ suggestion: NameSuggestion, speaker: String) -> String {
+        var text = "\(speaker) is probably \(suggestion.name)."
+        if let quote = suggestion.quote, !quote.isEmpty {
+            text += " Heard: \(quote)"
+            if let time = suggestionTime(suggestion) { text += ", at \(time)" }
+            text += "."
+        }
+        return text
+    }
+
+    nonisolated static let relabelBannerText =
+        "Speakers were detected with an older method. Re-label? Your speaker names are kept where possible."
+
+    /// "Speakers were detected with an older method." — offered while
+    /// nothing else is happening to the speakers and the person has not
+    /// closed it here.
+    var showsRelabelBanner: Bool {
+        Self.showsRelabelBanner(available: relabelAvailable, dismissed: relabelBannerDismissed,
+                                relabel: relabel, hasJob: jobId != nil && transcriptError == nil)
+    }
+
+    nonisolated static func showsRelabelBanner(available: Bool, dismissed: Bool, relabel: RelabelState,
+                                               hasJob: Bool) -> Bool {
+        available && !dismissed && relabel == .idle && hasJob
+    }
+
+    /// The banner's "Re-label": the Sprint 29 flow, the diarizer counting.
+    func relabelFromBanner() async {
+        await relabelSpeakers(expected: nil)
+    }
+
+    func dismissRelabelBanner() {
+        relabelBannerDismissed = true
     }
 
     private func renameSpeakerInNote(from: String, to: String) {

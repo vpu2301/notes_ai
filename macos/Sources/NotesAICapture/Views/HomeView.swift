@@ -154,6 +154,8 @@ struct HomeView: View {
                 }
             }
         } else if notes.isEmpty {
+            // No card behind it: a home page with no notes keeps the same
+            // dotted ground as a home page with notes, only without rows.
             section("Notes") {
                 VStack(spacing: 6) {
                     Text(emptyTitle)
@@ -168,7 +170,6 @@ struct HomeView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 36)
-                .dsCard(padding: 0, radius: DS.radiusLg)
             }
         } else {
             ForEach(groups(notes), id: \.title) { group in
@@ -729,7 +730,7 @@ private struct ComingUpRow: View {
                 }
                 if !capture.isRecording, !capture.phase.isBusy {
                     Button {
-                        capture.startNew(title: item.title)
+                        capture.startNew(title: item.title, context: item.captureContext)
                     } label: {
                         Label("Start", systemImage: "mic.fill")
                     }

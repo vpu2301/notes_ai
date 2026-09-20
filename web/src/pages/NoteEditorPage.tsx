@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { getResult, listJobs, setSpeakerNames } from "../api/asr";
+import {
+  dismissNameSuggestion,
+  getResult,
+  listJobs,
+  mergeSpeakers,
+  reassignTurns,
+  setSpeakerNames,
+  undoSpeakerEdit,
+} from "../api/asr";
 import { ApiError, errorMessage } from "../api/http";
 import {
   deleteNote,
@@ -18,6 +26,8 @@ import {
 import type {
   FieldMetadata,
   ItemView,
+  NameSource,
+  NameSuggestion,
   ResponseView,
   NoteContent,
   NoteEnvelope,
@@ -25,6 +35,7 @@ import type {
   NoteVersionDetail,
   NoteVersionSummary,
   ReadPurpose,
+  SpeakerNameSource,
   TemplateSection,
   TranscriptResult,
   TranscriptTurn,
@@ -52,7 +63,11 @@ import {
 import { Menu, type MenuItem } from "../components/Menu";
 import { RichText } from "../components/RichText";
 import { isTranscript, parseRichText } from "../lib/richText";
-import { speakerInitials, speakerTint } from "../lib/speakers";
+import { messageFor } from "../lib/errorCopy";
+import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
+import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
+import { NameSuggestionChip } from "../components/NameSuggestionChip";
+import { copyText, movedAnnouncement } from "../i18n/speakers";
 import { ShareDialog } from "../components/ShareDialog";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
@@ -334,10 +349,41 @@ export function renameSpeakerInText(text: string, from: string, to: string): str
   return text.replace(new RegExp(`(^|\\n)${escaped}: `, "g"), `$1${to}: `);
 }
 
+/**
+ * The transcript as the from-transcript note writes it (note-service
+ * `_turns_text`): a turn per block, the name at the start of its first
+ * line. Used to tell whether the note's transcript section still says what
+ * the job said — i.e. nobody has edited it.
+ */
+export function turnsToNoteText(turns: TranscriptTurn[], names: Record<string, string>): string {
+  const diarized = turns.some((t) => t.speaker);
+  return turns
+    .flatMap((t) => {
+      const paragraphs = t.paragraphs.map((p) => p.trim()).filter(Boolean);
+      if (paragraphs.length === 0) return [];
+      if (diarized) paragraphs[0] = `${turnName(t, names)}: ${paragraphs[0]}`;
+      return [paragraphs.join("\n")];
+    })
+    .join("\n\n");
+}
+
+/** A speaker re-run (or its undo) landed: the transcript text before and after. */
+export interface SpeakersRelabelled {
+  kind: "rerun" | "undo";
+  before: string;
+  after: string;
+}
+
 interface TranscriptViewProps {
   jobId: string;
   /** A speaker was renamed on the job — the note body may want to follow. */
   onSpeakerRenamed?: (from: string, to: string) => void;
+  /** A speaker was merged into another (display names) — the note body follows. */
+  onSpeakersMerged?: (from: string, to: string) => void;
+  /** The last merge was undone — the note body goes back if it was not edited since. */
+  onSpeakerMergeUndone?: () => void;
+  /** Speakers were re-labelled or the re-run undone — the note may want to follow. */
+  onSpeakersRelabelled?: (change: SpeakersRelabelled) => void;
   /** Shown instead of the error when the job cannot be read (the note's own text). */
   fallback?: ReactNode;
 }
@@ -428,14 +474,333 @@ function TextTranscriptView({
   );
 }
 
-function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewProps) {
+/** "1 turn" / "3 turns". */
+function turnsLabel(n: number): string {
+  return n === 1 ? "1 turn" : `${n} turns`;
+}
+
+const UNCERTAIN_COPY = "People talked over each other here.";
+const STALE_COPY = "Speakers were updated elsewhere.";
+
+/** Where a turn can go: a roster label, a speaker the diarizer missed, or nobody. */
+type MoveTarget = string | "new" | null;
+
+/** How long a turn stays highlighted after a suggestion's quote is clicked. */
+const HIGHLIGHT_MS = 2000;
+
+/** The last speaker change that can still be undone. */
+type UndoableEdit =
+  | { editId: string; kind: "merge"; into: string }
+  | { editId: string; kind: "reassign"; message: string }
+  /** An accepted name suggestion: undo PUTs the names as they were. */
+  | {
+      kind: "names";
+      label: string;
+      prev: Record<string, string>;
+      prevSource: SpeakerNameSource | undefined;
+      from: string;
+      to: string;
+      message: string;
+    };
+
+function suggestionKey(s: NameSuggestion): string {
+  return `${s.label}\u0000${s.name}`;
+}
+
+/** The turn a suggestion's quote sits in (by its first segment), or -1. */
+export function turnOfSuggestion(turns: TranscriptTurn[], s: NameSuggestion): number {
+  const first = s.segment_indices[0];
+  if (first === undefined) return -1;
+  return turns.findIndex((t) => t.segment_indices?.includes(first) ?? false);
+}
+
+/**
+ * A polite live region for what just happened to the speakers ("Merged",
+ * "Moved 3 turns", "Re-labelling finished"). Each message is a fresh node,
+ * so saying the same thing twice is still announced.
+ */
+function useAnnouncer() {
+  const [message, setMessage] = useState<{ text: string; n: number } | null>(null);
+  const announce = useCallback((text: string) => setMessage((m) => ({ text, n: (m?.n ?? 0) + 1 })), []);
+  const region = (
+    <div className="sr-only" role="status" aria-live="polite" aria-label={copyText("announcementsRegion")}>
+      {message && <span key={message.n}>{message.text}</span>}
+    </div>
+  );
+  return { announce, region };
+}
+
+/**
+ * The rename field for a speaker, with the meeting's invitees under it —
+ * picking one saves straight away; typing still works.
+ */
+function SpeakerNameInput({
+  value,
+  options,
+  onChange,
+  onCommit,
+  onPick,
+  onCancel,
+}: {
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onPick: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const host = useRef<HTMLSpanElement>(null);
+  const focusOption = (i: number) => {
+    const opts = host.current?.querySelectorAll<HTMLButtonElement>(".speaker-pick");
+    if (!opts || opts.length === 0) return;
+    opts[Math.max(0, Math.min(i, opts.length - 1))]?.focus();
+  };
+  return (
+    <span
+      className="dropdown-host speaker-name-edit"
+      ref={host}
+      onBlur={(e) => {
+        // Moving into the list is not leaving the field.
+        if (!host.current?.contains(e.relatedTarget as Node | null)) onCommit();
+      }}
+    >
+      <input
+        className="input speaker-input"
+        aria-label="Speaker name"
+        autoFocus
+        value={value}
+        maxLength={80}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onCommit();
+          if (e.key === "Escape") onCancel();
+          if (e.key === "ArrowDown" && options.length > 0) {
+            e.preventDefault();
+            focusOption(0);
+          }
+        }}
+      />
+      {options.length > 0 && (
+        <div className="dropdown left speaker-picklist" role="group" aria-label="Invited people">
+          {options.map((name, i) => (
+            <button
+              key={name}
+              type="button"
+              className="anchored-menu-item speaker-pick"
+              tabIndex={-1}
+              // Keep the input focused: a pick is not a blur-to-commit.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onPick(name)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  focusOption(i + 1);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (i === 0) host.current?.querySelector<HTMLInputElement>("input")?.focus();
+                  else focusOption(i - 1);
+                } else if (e.key === "Escape") onCancel();
+              }}
+            >
+              <span className="speaker-avatar sm" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
+                {speakerInitials(name)}
+              </span>
+              <span className="anchored-menu-label">{name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+export function TranscriptView({
+  jobId,
+  onSpeakerRenamed,
+  onSpeakersMerged,
+  onSpeakerMergeUndone,
+  onSpeakersRelabelled,
+  fallback,
+}: TranscriptViewProps) {
   const toast = useToast();
+  const online = useOnline();
   const [result, setResult] = useState<TranscriptResult | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [editing, setEditing] = useState<{ label: string; value: string } | null>(null);
+  const [editing, setEditing] = useState<{ label: string; value: string; initial: string; turn: number } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [undo, setUndo] = useState<UndoableEdit | null>(null);
+  // Sprint 32: suggestions turned down in this view (the server forgets them too).
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  const [highlight, setHighlight] = useState<number | null>(null);
+  const { announce, region } = useAnnouncer();
+  // Sprint 30: turns picked for one "Move N turns to" action, by position.
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  const [focusTurn, setFocusTurn] = useState(0);
+  const [relabelRunning, setRelabelRunning] = useState(false);
+  const turnRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  useEffect(() => {
+    if (!undo) return;
+    const t = window.setTimeout(() => setUndo(null), 10_000);
+    return () => window.clearTimeout(t);
+  }, [undo]);
+
+  useEffect(() => {
+    if (highlight === null) return;
+    const t = window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
+    return () => window.clearTimeout(t);
+  }, [highlight]);
+
+  const load = (r: TranscriptResult) => {
+    setResult(r);
+    setNames(r.speaker_names ?? {});
+    // Positions mean other turns after a reload.
+    setSelected(new Set());
+  };
+
+  const reload = async () => {
+    load(await getResult(jobId));
+  };
+
+  // A re-run replaces the labelling (and the merges on it): reload, and
+  // hand the note both versions of the text so it can offer to follow.
+  const relabelled = async (kind: "rerun" | "undo") => {
+    const before = result ? turnsToNoteText(result.turns ?? [], names) : null;
+    const r = await getResult(jobId);
+    load(r);
+    setUndo(null);
+    if (before !== null) {
+      onSpeakersRelabelled?.({ kind, before, after: turnsToNoteText(r.turns ?? [], r.speaker_names ?? {}) });
+    }
+  };
+
+  const merge = async (from: string, into: string) => {
+    if (saving) return;
+    const fromName = names[from] ?? defaultSpeakerName(from);
+    setSaving(true);
+    try {
+      const res = await mergeSpeakers(jobId, from, into);
+      // Optimistic: roster and talk share from the response, turns on reload.
+      setResult((r) => (r ? { ...r, speakers: res.speakers, speaker_stats: res.speaker_stats } : r));
+      setNames(res.speaker_names);
+      setUndo({ editId: res.edit_id, kind: "merge", into });
+      announce(copyText("announceMerged"));
+      onSpeakersMerged?.(fromName, res.speaker_names[into] ?? defaultSpeakerName(into));
+      await reload();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * Move turns to another speaker — one call however many turns, their
+   * segment indices concatenated. The turns change on screen first; the
+   * reload after the call is the truth (a "new" speaker's label only
+   * exists once the server made it).
+   */
+  const move = async (positions: number[], to: MoveTarget) => {
+    if (!result || saving || typeof result.result_rev !== "number") return;
+    const all = result.turns ?? [];
+    const order = [...positions].sort((a, b) => a - b);
+    const picked = order.map((i) => all[i]).filter((t): t is TranscriptTurn => t !== undefined);
+    const segmentIndices = segmentIndicesOf(picked);
+    if (segmentIndices.length === 0) return;
+    const prev = result;
+    const prevNames = names;
+    const before = turnsToNoteText(all, names);
+    const moving = new Set(order);
+    if (to !== "new") {
+      setResult({
+        ...prev,
+        turns: all.map((t, i) =>
+          moving.has(i)
+            ? { ...t, speaker: to, name: to ? (names[to] ?? defaultSpeakerName(to)) : null, uncertain: false }
+            : t,
+        ),
+      });
+    }
+    setSelected(new Set());
+    setSaving(true);
+    try {
+      const res = await reassignTurns(jobId, { resultRev: prev.result_rev!, segmentIndices, to });
+      const label = to === "new" ? res.created_label : to;
+      const target = label ? (res.speaker_names[label] ?? defaultSpeakerName(label)) : UNKNOWN_SPEAKER;
+      setNames(res.speaker_names);
+      setUndo({ editId: res.edit_id, kind: "reassign", message: `Moved ${turnsLabel(picked.length)} to ${target}` });
+      announce(movedAnnouncement(picked.length));
+      try {
+        const r = await getResult(jobId);
+        load(r);
+        onSpeakersRelabelled?.({ kind: "rerun", before, after: turnsToNoteText(r.turns ?? [], r.speaker_names ?? {}) });
+      } catch (err) {
+        toast.error(errorMessage(err));
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "stale_result_rev") {
+        // Someone (or another device) edited the speakers since this
+        // view loaded: show theirs, and say so, rather than guess.
+        try {
+          await reload();
+        } catch {
+          setResult(prev);
+          setNames(prevNames);
+        }
+        toast.info(STALE_COPY);
+      } else {
+        setResult(prev);
+        setNames(prevNames);
+        toast.error(messageFor(err));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const undoEdit = async () => {
+    if (!undo || saving) return;
+    const edit = undo;
+    const before = result ? turnsToNoteText(result.turns ?? [], names) : null;
+    setSaving(true);
+    try {
+      if (edit.kind === "names") {
+        const res = await setSpeakerNames(jobId, edit.prev);
+        setUndo(null);
+        const merged: Record<string, string> = {};
+        for (const l of result?.speakers ?? []) merged[l] = res.speaker_names[l] ?? defaultSpeakerName(l);
+        setNames(merged);
+        setResult((r) => {
+          if (!r) return r;
+          const sources = { ...(r.speaker_name_sources ?? {}) };
+          if (edit.prevSource === undefined) delete sources[edit.label];
+          else sources[edit.label] = edit.prevSource;
+          return { ...r, speaker_name_sources: sources };
+        });
+        onSpeakerRenamed?.(edit.to, merged[edit.label] ?? edit.from);
+        announce(copyText("announceUndone"));
+        return;
+      }
+      await undoSpeakerEdit(jobId, edit.editId);
+      setUndo(null);
+      if (edit.kind === "merge") {
+        onSpeakerMergeUndone?.();
+        await reload();
+      } else {
+        const r = await getResult(jobId);
+        load(r);
+        if (before !== null) {
+          onSpeakersRelabelled?.({ kind: "undo", before, after: turnsToNoteText(r.turns ?? [], r.speaker_names ?? {}) });
+        }
+      }
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -454,6 +819,12 @@ function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewPro
   const turns = result?.turns ?? [];
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
+  const roster = result?.speakers ?? [];
+  // Moving turns needs the server's revision to guard against a stale
+  // view, a connection, and no re-label in flight (it replaces the labels).
+  const canMove =
+    diarized && roster.length > 0 && online && !relabelRunning && typeof result?.result_rev === "number";
+  const moveLocked = !canMove || saving;
 
   const copy = async () => {
     const text = turns
@@ -471,27 +842,171 @@ function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewPro
     }
   };
 
-  const commitRename = async () => {
+  const startRename = (label: string, turn: number) => {
+    const current = names[label] ?? defaultSpeakerName(label);
+    setEditing({ label, value: current, initial: current, turn });
+  };
+
+  const commitRename = async (picked?: string) => {
     if (!editing || saving) return;
-    const { label, value } = editing;
+    const { label } = editing;
+    const value = picked ?? editing.value;
     const from = names[label] ?? defaultSpeakerName(label);
     const to = value.trim() || defaultSpeakerName(label);
     setEditing(null);
     if (to === from) return;
     const next = customNames(names);
-    if (to === defaultSpeakerName(label)) delete next[label];
+    const cleared = to === defaultSpeakerName(label);
+    if (cleared) delete next[label];
     else next[label] = to;
+    const sources: Record<string, NameSource> | undefined = cleared
+      ? undefined
+      : { [label]: picked !== undefined ? "picklist" : "typed" };
     setSaving(true);
     try {
-      const res = await setSpeakerNames(jobId, next);
+      const res = await setSpeakerNames(jobId, next, sources);
       const merged: Record<string, string> = {};
       for (const l of result?.speakers ?? []) merged[l] = res.speaker_names[l] ?? defaultSpeakerName(l);
       setNames(merged);
+      // An edited name is the person's own now: the "suggested" marker goes.
+      const source: SpeakerNameSource = sources?.[label] ?? "cleared";
+      setResult((r) => (r ? { ...r, speaker_name_sources: { ...(r.speaker_name_sources ?? {}), [label]: source } } : r));
       onSpeakerRenamed?.(from, merged[label] ?? to);
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** A microphone-given name was removed from its roster chip (Sprint 31). */
+  const nameCleared = (label: string, speakerNames: Record<string, string>) => {
+    const from = names[label] ?? defaultSpeakerName(label);
+    const merged: Record<string, string> = {};
+    for (const l of result?.speakers ?? []) merged[l] = speakerNames[l] ?? defaultSpeakerName(l);
+    setNames(merged);
+    setResult((r) =>
+      r ? { ...r, speaker_name_sources: { ...(r.speaker_name_sources ?? {}), [label]: "cleared" } } : r,
+    );
+    onSpeakerRenamed?.(from, merged[label] ?? defaultSpeakerName(label));
+  };
+
+  // ── Sprint 32: name suggestions ──
+  /** Suggestions still worth asking about: a live label nobody has named, not turned down. */
+  const openSuggestions = (result?.name_suggestions ?? []).filter((sg) => {
+    if (!roster.includes(sg.label) || dismissed.has(suggestionKey(sg))) return false;
+    const current = names[sg.label];
+    return current === undefined || current === defaultSpeakerName(sg.label);
+  });
+
+  const acceptSuggestion = async (sg: NameSuggestion) => {
+    if (saving) return;
+    const label = sg.label;
+    const from = names[label] ?? defaultSpeakerName(label);
+    const prev = customNames(names);
+    const prevSource = result?.speaker_name_sources?.[label];
+    setSaving(true);
+    try {
+      const res = await setSpeakerNames(jobId, { ...prev, [label]: sg.name }, { [label]: "suggestion" });
+      const merged: Record<string, string> = {};
+      for (const l of result?.speakers ?? []) merged[l] = res.speaker_names[l] ?? defaultSpeakerName(l);
+      setNames(merged);
+      setResult((r) =>
+        r ? { ...r, speaker_name_sources: { ...(r.speaker_name_sources ?? {}), [label]: "suggestion" } } : r,
+      );
+      const to = merged[label] ?? sg.name;
+      setUndo({
+        kind: "names",
+        label,
+        prev,
+        prevSource,
+        from,
+        to,
+        message: copyText("acceptedUndo", { speaker: from, name: to }),
+      });
+      announce(copyText("announceNamed", { name: to }));
+      onSpeakerRenamed?.(from, to);
+    } catch (err) {
+      toast.error(copyText("acceptFailed", { speaker: from, reason: messageFor(err) }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dismissSuggestion = async (sg: NameSuggestion) => {
+    const key = suggestionKey(sg);
+    setDismissed((d) => new Set(d).add(key));
+    try {
+      await dismissNameSuggestion(jobId, sg.label, sg.name);
+    } catch (err) {
+      setDismissed((d) => {
+        const next = new Set(d);
+        next.delete(key);
+        return next;
+      });
+      toast.error(copyText("dismissFailed", { reason: messageFor(err) }));
+    }
+  };
+
+  /** Scroll to the turn a suggestion quotes, focus it, and light it up for a moment. */
+  const showSuggestion = (sg: NameSuggestion) => {
+    const i = turnOfSuggestion(turns, sg);
+    const el = i >= 0 ? turnRefs.current[i] : null;
+    if (!el) return;
+    setFocusTurn(i);
+    el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    el.focus({ preventScroll: true });
+    setHighlight(i);
+  };
+
+  /** The "move to" choices for turns currently spoken by `from`. */
+  const moveItems = (positions: number[], from: ReadonlySet<string | null>): MenuItem[] => {
+    const only = from.size === 1 ? [...from][0] : undefined;
+    const items: MenuItem[] = roster
+      .filter((l) => !(from.size === 1 && l === only))
+      .map((l) => {
+        const n = names[l] ?? defaultSpeakerName(l);
+        return {
+          label: n,
+          icon: (
+            <span className="speaker-avatar sm" style={{ "--tint": speakerTint(n) } as React.CSSProperties} aria-hidden="true">
+              {speakerInitials(n)}
+            </span>
+          ),
+          onClick: () => void move(positions, l),
+          disabled: moveLocked,
+        };
+      });
+    items.push({ label: "New speaker", onClick: () => void move(positions, "new"), disabled: moveLocked, sep: items.length > 0 });
+    if (!(from.size === 1 && only === null)) {
+      items.push({ label: "Unknown", onClick: () => void move(positions, null), disabled: moveLocked });
+    }
+    return items;
+  };
+
+  const toggle = (i: number) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
+  const onTurnKey = (e: React.KeyboardEvent<HTMLDivElement>, i: number) => {
+    if (e.target !== e.currentTarget) return; // typing a name, or inside a menu
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = Math.max(0, Math.min(turns.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+      setFocusTurn(next);
+      turnRefs.current[next]?.focus();
+    } else if (e.key === "Escape" && selected.size > 0) {
+      setSelected(new Set());
+    } else if (/^[1-8]$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      const label = roster[Number(e.key) - 1];
+      if (!label || moveLocked || label === turns[i]?.speaker) return;
+      e.preventDefault();
+      void move([i], label);
     }
   };
 
@@ -513,46 +1028,135 @@ function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewPro
       </div>
     );
   }
+  const selection = [...selected].sort((a, b) => a - b);
+  const hasRoster = diarized && (result.speakers?.length ?? 0) > 0;
+  const moveHelp = !online ? "Needs a connection" : relabelRunning ? "Wait for the re-label to finish" : undefined;
   return (
-    <div className="transcript">
+    <div className={`transcript ${selected.size > 0 ? "selecting" : ""}`}>
+      {region}
       <div className="transcript-bar">
-        <span className="help">
-          {turns.length === 0
-            ? "Nothing was said."
-            : !diarized
-              ? "Speakers were not told apart in this recording."
-              : `${speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`} · click a name to rename`}
-        </span>
+        {(hasRoster || result.relabel_available === true) && (
+          <SpeakerRoster
+            jobId={jobId}
+            speakers={diarized ? (result.speakers ?? []) : []}
+            names={names}
+            stats={result.speaker_stats ?? []}
+            busy={saving}
+            undo={
+              undo
+                ? undo.kind === "merge"
+                  ? { into: undo.into, onUndo: () => void undoEdit() }
+                  : { message: undo.message, onUndo: () => void undoEdit() }
+                : null
+            }
+            countConfidence={result.count_confidence ?? null}
+            speakersHint={result.speakers_hint ?? null}
+            mergeCount={result.edits?.length ?? 0}
+            sides={result.speaker_sides ?? {}}
+            nameSources={result.speaker_name_sources ?? {}}
+            suggestions={openSuggestions}
+            relabelAvailable={result.relabel_available === true}
+            onAcceptSuggestion={(sg) => void acceptSuggestion(sg)}
+            onDismissSuggestion={(sg) => void dismissSuggestion(sg)}
+            onShowSuggestion={showSuggestion}
+            onNameCleared={nameCleared}
+            onRename={(label) => startRename(label, turns.findIndex((t) => t.speaker === label))}
+            onMerge={(from, into) => void merge(from, into)}
+            onRelabelled={async (kind) => {
+              await relabelled(kind);
+              announce(copyText(kind === "rerun" ? "announceRelabelled" : "announceRelabelUndone"));
+            }}
+            onRelabelRunning={setRelabelRunning}
+            onReset={() => relabelled("rerun")}
+          />
+        )}
+        {!hasRoster && (
+          <span className="help">
+            {turns.length === 0
+              ? "Nothing was said."
+              : !diarized
+                ? "Speakers were not told apart in this recording."
+                : `${speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`} · click a name to rename`}
+          </span>
+        )}
         <span className="grow" />
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {selection.length > 0 && (
+        <div className="turn-actions" role="toolbar" aria-label="Selected turns">
+          <span className="grow">{turnsLabel(selection.length)} selected</span>
+          <Menu
+            anchored
+            label={`Move ${turnsLabel(selection.length)} to`}
+            triggerClassName="btn sm"
+            trigger={<>Move {turnsLabel(selection.length)} to ▸</>}
+            disabled={moveLocked}
+            items={moveItems(selection, new Set(selection.map((i) => turns[i]?.speaker ?? null)))}
+          />
+          <button className="btn ghost sm" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
       {turns.map((t, i) => {
         const name = turnName(t, names);
-        const isEditing = editing !== null && t.speaker !== null && editing.label === t.speaker;
+        const isEditing = editing !== null && t.speaker !== null && editing.label === t.speaker && editing.turn === i;
+        const isSelected = selected.has(i);
+        const here = openSuggestions.filter((sg) => turnOfSuggestion(turns, sg) === i);
         return (
-          <div key={i} className="turn">
+          <div
+            key={i}
+            ref={(el) => {
+              turnRefs.current[i] = el;
+            }}
+            data-turn-index={i}
+            className={`turn ${isSelected ? "selected" : ""} ${highlight === i ? "highlighted" : ""}`}
+            tabIndex={diarized ? (i === focusTurn ? 0 : -1) : undefined}
+            role={diarized ? "group" : undefined}
+            aria-label={diarized ? `${name}, ${formatElapsed(t.start_ms)}` : undefined}
+            onFocus={(e) => e.target === e.currentTarget && setFocusTurn(i)}
+            onKeyDown={diarized ? (e) => onTurnKey(e, i) : undefined}
+            onClickCapture={(e) => {
+              // Shift-click anywhere on a turn picks it for a group move.
+              if (!e.shiftKey || !canMove) return;
+              e.preventDefault();
+              e.stopPropagation();
+              toggle(i);
+            }}
+          >
             {diarized && (
-              <span className="speaker-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
-                {speakerInitials(name)}
+              <span className="turn-avatar-host" style={{ "--tint": speakerTint(name) } as React.CSSProperties}>
+                <Menu
+                  anchored
+                  label={`${name} — move this turn`}
+                  triggerClassName="speaker-avatar turn-avatar"
+                  disabled={moveLocked}
+                  items={moveItems([i], new Set([t.speaker]))}
+                  trigger={speakerInitials(name)}
+                />
+                {t.uncertain && (
+                  <span className="turn-uncertain" role="img" aria-label={UNCERTAIN_COPY} title={UNCERTAIN_COPY}>
+                    ?
+                  </span>
+                )}
               </span>
             )}
             <div className="turn-h">
               {diarized &&
                 (isEditing ? (
-                  <input
-                    className="input speaker-input"
-                    aria-label="Speaker name"
-                    autoFocus
+                  <SpeakerNameInput
                     value={editing.value}
-                    maxLength={80}
-                    onChange={(e) => setEditing({ label: editing.label, value: e.target.value })}
-                    onBlur={() => void commitRename()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void commitRename();
-                      if (e.key === "Escape") setEditing(null);
-                    }}
+                    options={pickableNames(result.name_candidates, names, editing.label).filter(
+                      (n) =>
+                        editing.value === editing.initial ||
+                        n.toLocaleLowerCase().includes(editing.value.trim().toLocaleLowerCase()),
+                    )}
+                    onChange={(value) => setEditing({ ...editing, value })}
+                    onCommit={() => void commitRename()}
+                    onPick={(n) => void commitRename(n)}
+                    onCancel={() => setEditing(null)}
                   />
                 ) : t.speaker ? (
                   <button
@@ -560,7 +1164,7 @@ function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewPro
                     className="turn-speaker"
                     title="Rename this speaker"
                     disabled={saving}
-                    onClick={() => setEditing({ label: t.speaker!, value: name })}
+                    onClick={() => startRename(t.speaker!, i)}
                   >
                     {name}
                   </button>
@@ -568,11 +1172,33 @@ function TranscriptView({ jobId, onSpeakerRenamed, fallback }: TranscriptViewPro
                   <span className="turn-speaker unknown">{UNKNOWN_SPEAKER}</span>
                 ))}
               <span className="turn-time mono">{formatElapsed(t.start_ms)}</span>
+              {diarized && (
+                <input
+                  type="checkbox"
+                  className="chk turn-select"
+                  aria-label={`Select turn at ${formatElapsed(t.start_ms)}`}
+                  title={moveHelp}
+                  checked={isSelected}
+                  disabled={!canMove}
+                  onChange={() => toggle(i)}
+                />
+              )}
             </div>
             {t.paragraphs.map((p, j) => (
               <p key={j} className="turn-text">
                 {p}
               </p>
+            ))}
+            {here.map((sg) => (
+              <NameSuggestionChip
+                key={suggestionKey(sg)}
+                inline
+                suggestion={sg}
+                speakerName={names[sg.label] ?? defaultSpeakerName(sg.label)}
+                disabled={saving || !online || relabelRunning}
+                onAccept={(x) => void acceptSuggestion(x)}
+                onDismiss={(x) => void dismissSuggestion(x)}
+              />
             ))}
           </div>
         );
@@ -893,6 +1519,71 @@ export function NoteEditorPage() {
     toast.success("Speaker renamed");
   };
 
+  // A merge rewrites the note's turn lines like a rename. Undo puts the
+  // text back only if nobody touched the note in between.
+  const mergeRewrite = useRef<{ before: NoteContent; after: NoteContent } | null>(null);
+  const onSpeakersMerged = (from: string, to: string) => {
+    mergeRewrite.current = null;
+    if (!content || !isDraft) return;
+    const next: NoteContent = {
+      ...content,
+      sections: content.sections?.map((s) =>
+        s.text ? { ...s, text: renameSpeakerInText(s.text, from, to) } : s,
+      ),
+    };
+    if (JSON.stringify(next) === JSON.stringify(content)) return;
+    mergeRewrite.current = { before: content, after: next };
+    onContentChange(next);
+  };
+  const onSpeakerMergeUndone = () => {
+    const rewrite = mergeRewrite.current;
+    mergeRewrite.current = null;
+    if (!rewrite) return;
+    if (JSON.stringify(content) === JSON.stringify(rewrite.after)) onContentChange(rewrite.before);
+    else toast.info("Note text was edited; speaker names in the note were not reverted.");
+  };
+
+  // A speaker re-run is bigger than a merge — turns can move between
+  // people — so the note is not rewritten on its own. It is offered, and
+  // done only while the transcript section still reads exactly as the old
+  // labelling did (nobody edited it); undoing the re-run puts the section
+  // back the way a merge undo does.
+  const [relabelOffer, setRelabelOffer] = useState<{ before: string; after: string } | null>(null);
+  const relabelRewrite = useRef<{ before: NoteContent; after: NoteContent } | null>(null);
+  const onSpeakersRelabelled = ({ kind, before, after }: SpeakersRelabelled) => {
+    setRelabelOffer(null);
+    const rewrite = relabelRewrite.current;
+    relabelRewrite.current = null;
+    if (kind === "undo") {
+      if (!rewrite) return;
+      if (JSON.stringify(content) === JSON.stringify(rewrite.after)) onContentChange(rewrite.before);
+      else toast.info("Note text was edited; speaker names in the note were not reverted.");
+      return;
+    }
+    if (content && isDraft && before !== after) setRelabelOffer({ before, after });
+  };
+  const applyRelabel = () => {
+    const offer = relabelOffer;
+    setRelabelOffer(null);
+    if (!offer || !content) return;
+    let hit = false;
+    const next: NoteContent = {
+      ...content,
+      sections: content.sections?.map((s) => {
+        if (s.text?.trim() !== offer.before.trim()) return s;
+        hit = true;
+        return { ...s, text: offer.after };
+      }),
+    };
+    if (!hit) {
+      toast.info("The note's transcript was edited, so it was left as it is. The Transcript tab shows the new speakers.");
+      return;
+    }
+    relabelRewrite.current = { before: content, after: next };
+    onContentChange(next);
+    toast.success("Speaker names updated in the note");
+  };
+
   // ── actions ─────────────────────────────────────────────────────────
 
   const fileBase = () => safeFilename(shownContent?.title ?? "", note?.code ?? "note");
@@ -1169,7 +1860,29 @@ export function NoteEditorPage() {
                   onRename={onSpeakerRenamed}
                 />
               ) : undefined;
-            return sourceJobId ? <TranscriptView jobId={sourceJobId} onSpeakerRenamed={onSpeakerRenamed} fallback={textView} /> : textView;
+            return sourceJobId ? (
+              <>
+                {relabelOffer && (
+                  <div className="banner banner-info note-relabel" role="note">
+                    <span className="grow">Update speaker names in the note?</span>
+                    <button className="btn sm" onClick={applyRelabel}>
+                      Update note
+                    </button>
+                    <button className="btn ghost sm" onClick={() => setRelabelOffer(null)}>
+                      Not now
+                    </button>
+                  </div>
+                )}
+                <TranscriptView
+                  jobId={sourceJobId}
+                  onSpeakerRenamed={onSpeakerRenamed}
+                  onSpeakersMerged={onSpeakersMerged}
+                  onSpeakerMergeUndone={onSpeakerMergeUndone}
+                  onSpeakersRelabelled={onSpeakersRelabelled}
+                  fallback={textView}
+                />
+              </>
+            ) : textView;
           })()
         ) : (
           <div className="doc-body">

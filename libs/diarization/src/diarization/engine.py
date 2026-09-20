@@ -1,4 +1,10 @@
-"""Per-process diarization engine (hoisted from dictation-service, ADR-0034).
+"""Per-process legacy diarization engine (hoisted from dictation-service, ADR-0034).
+
+Sprint 29: the batch half of this class is the ``legacy-ecapa-ahc``
+implementation of the :class:`~diarization.protocol.Diarizer` seam
+(:class:`LegacyEcapaDiarizer`). ``DiarizationEngine`` stays as an alias:
+dictation-service builds its streaming path on the same loaded pair and
+imports it by that name.
 
 One shared ECAPA embedder + Silero segmenter pair per process (the
 models are stateless between calls; ~90 MB resident once). Consumers
@@ -23,6 +29,15 @@ import numpy as np
 
 from .embedder import EcapaEmbedder
 from .integrity import verify_model_dir
+from .offline import (
+    ENGINE_ID,
+    ENGINE_VERSION,
+    OfflineDiarization,
+    OfflineDiarizationConfig,
+    diarize_offline,
+)
+from .protocol import DiarizationHints
+from .roster import RosterGuardConfig
 from .vad import SileroSegmenter
 
 logger = logging.getLogger(__name__)
@@ -32,7 +47,11 @@ class DiarizationUnavailableError(Exception):
     """Diarization was requested but the diarizer cannot load."""
 
 
-class DiarizationEngine:
+class LegacyEcapaDiarizer:
+    engine = ENGINE_ID
+    engine_version = ENGINE_VERSION
+    remote = False
+
     def __init__(
         self,
         *,
@@ -43,7 +62,11 @@ class DiarizationEngine:
         model_repo: str = "",
         model_revision: str = "",
         disabled_reason: str = "diarization disabled by configuration",
+        offline_config: OfflineDiarizationConfig | None = None,
+        roster: RosterGuardConfig | None = None,
     ) -> None:
+        self._offline_config = offline_config
+        self._roster = roster
         self._model_dir = model_dir
         self._device = device
         self._enabled = enabled
@@ -144,6 +167,20 @@ class DiarizationEngine:
                 extra={"model_dir": self._model_dir, "device": self._device},
             )
 
+    def diarize(
+        self, pcm: np.ndarray, sample_rate_hz: int, *, hints: DiarizationHints
+    ) -> OfflineDiarization:
+        """Whole-recording diarization (today's code path, plus hints/guard)."""
+        return diarize_offline(
+            pcm,
+            sample_rate_hz,
+            embedder=self.embedder,
+            segmenter=self.segmenter,
+            config=self._offline_config,
+            hints=hints,
+            roster=self._roster,
+        )
+
     async def warm_up(self) -> bool:
         """Startup warmup: load both models, but never block service start.
 
@@ -178,3 +215,7 @@ class DiarizationEngine:
             },
         )
         return True
+
+
+# dictation-service (streaming) imports the loaded pair under this name.
+DiarizationEngine = LegacyEcapaDiarizer

@@ -91,6 +91,72 @@ natively, in a window laid out like the Claude / Codex desktop apps
    close it. `open "Notes AI Capture.app" --args --window` launches straight
    into it.
 
+## Call audio (Sprint 31)
+
+With headphones on, the other people in an online call never reach the
+microphone, so a microphone-only recording has half the meeting. With
+**Settings › General › Record call audio (other participants)** on, the
+app also records what the Mac plays and uploads a **two-channel** file:
+ch0 = your microphone, ch1 = the call audio (16 kHz FLAC, WAV fallback),
+with `channel_layout=mic_system` and `local_speaker_name` (your account's
+display name) on `POST /asr/jobs`. The server uses the split to tell *you*
+from the other side; a speaker named from the channel shows
+"· from your microphone" and an ✕ that removes the name.
+
+**How it records** (`SystemAudioTap.swift`, macOS 14.2+): one Core Audio
+*process tap* of every process except this app
+(`CATapDescription(stereoGlobalTapButExcludeProcesses:)`, private,
+unmuted), placed in a **private aggregate device** together with the
+default input device, drift compensation on the tap. Microphone and call
+audio arrive in one IO callback on one clock, so the channels stay aligned
+for the whole meeting. When the default input or output device changes
+(AirPods connect) the aggregate device is rebuilt on the new one after a
+250 ms settle — a short gap on both channels. The aggregate device
+(`ai.notes.capture.aggregate.*`) and the tap are destroyed on Stop; a
+device a crashed run left behind is removed at the next launch. On macOS
+older than 14.2 the setting has no effect.
+
+**Consent posture.** The setting is **off** by default. Turning it on shows
+a blocking notice — what is recorded (other participants' audio from this
+Mac), that *you* are responsible for telling participants and getting their
+agreement where required, a sentence to say, and a help link
+(`CallAudioConsent.helpURL`, currently
+`https://notes.ai/help/recording-call-audio` — **that page must exist before
+release**). *Accept* turns the setting on; *Not now* keeps recordings
+microphone-only. The accepted version is stored on this Mac
+(`callAudioConsentVersion`); raising `CallAudioConsent.currentVersion` asks
+again, and until it is accepted recordings are microphone-only. While call
+audio is recorded, the menu-bar record dot carries a small headphones badge
+and the card shows two meters, **You** and **Call audio**.
+
+**Permission.** macOS asks once to allow *System Audio Recording* for Notes
+AI Capture (`NSAudioCaptureUsageDescription` in `Support/Info.plist`). It
+lives in System Settings › Privacy & Security › **Screen & System Audio
+Recording**; the card's **Fix** link opens that pane.
+
+**Troubleshooting.**
+- *"Recording your microphone only — call audio permission is off"*: the tap
+  could not be created. Click **Fix**, allow Notes AI Capture under System
+  Audio Recording, then start a new meeting. `tccutil reset AudioCapture
+  ai.notes.capture` should make macOS ask again (service name not yet
+  checked on a real machine).
+- *Call audio is silent although the card says it is recorded*: when the
+  permission is denied macOS may still create the tap and deliver silence —
+  the app cannot tell that apart from a quiet call. Check the permission.
+- *"Call audio stopped"*: the tap or the aggregate device went away
+  mid-meeting (a device change that could not be rebuilt). The recording
+  continues from the microphone; ch1 is silence from that point and the
+  file is still uploaded as two-channel.
+- As with the microphone, the grant is keyed to the code signature — use
+  `scripts/make-app.sh` (persistent identity), not ad-hoc signing.
+
+**Not verified on hardware yet** (the app is only built, never launched,
+in development by the assistant): that the tap works under App Sandbox
+(the XcodeGen build) — no extra entitlement is added, none is documented;
+the permission prompt; channel skew < 5 ms over 60 min; CPU < 3 %; the
+AirPods rebuild gap. ScreenCaptureKit (audio-only `SCStream`) is the
+fallback if the tap fails any of these; it is not built.
+
 ## Signing in (IDX-M1)
 
 The default way in is your address and a six-digit code from the mail —
@@ -264,6 +330,7 @@ open NotesAICapture.xcodeproj
 `project.yml` defines an app target that uses `Support/Info.plist`
 (`NSMicrophoneUsageDescription` for the mic prompt,
 `NSCalendarsFullAccessUsageDescription` for the home page's Upcoming list,
+`NSAudioCaptureUsageDescription` for the call-audio prompt,
 `CFBundleURLTypes` for the `notesai://` OAuth callback of MCP connectors,
 `LSUIElement` so the app is menu-bar-only with no Dock icon) and
 `Support/NotesAICapture.entitlements` (sandbox + network client +
@@ -292,7 +359,9 @@ macos/
     ├── AppURLRouter.swift           # notesai:// links from outside the app
     ├── AuthCopy.swift               # what each error code says to the person
     ├── PendingCaptures.swift        # recordings that never reached the server
-    ├── Recorder.swift               # AVAudioRecorder + metering
+    ├── Recorder.swift               # AVAudioEngine → FLAC/WAV, mono or mic+call (TapSink), metering
+    ├── SystemAudioTap.swift         # Core Audio process tap + private aggregate device (call audio)
+    ├── CallAudio.swift              # consent notice/version, channel_layout, local_speaker_name
     ├── AppState.swift               # auth/settings/recents/selection/template cache
     ├── CaptureViewModel.swift       # record → upload → poll → note pipeline
     ├── NoteViewModel.swift          # one open note: load, autosave, finalize, transcript, PDF
@@ -306,6 +375,7 @@ macos/
         ├── Dropdowns.swift          # styled ⋯ menus (DSMenu) and select fields (DSSelect)
         ├── Components.swift         # status chip, level meter, pipeline stepper, skeleton
         ├── CaptureView.swift        # ActiveCaptureCard + NewMeetingButton
+        ├── CallAudioConsentSheet.swift # the blocking call-audio notice
         ├── RecentsView.swift        # popover rows / list (grouped by day)
         ├── RootView.swift           # menu-bar popover
         ├── MainWindowView.swift     # window: sidebar + detail (note / status / home)
@@ -323,7 +393,7 @@ macos/
 
 ```sh
 cd macos
-swift test          # the session, the transport, workspaces, pending uploads
+swift test          # the session, the transport, workspaces, pending uploads, call audio
 ```
 
 They stub the network with a `URLProtocol` and the Keychain with an

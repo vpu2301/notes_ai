@@ -81,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `swift run` has no Info.plist (no LSUIElement), so enforce it here
         // too — this also keeps the Window scene from opening at launch.
         NSApp.setActivationPolicy(.accessory)
+        // Sprint 31: an aggregate device a crashed run left behind. Only
+        // lists devices — no permission is asked for.
+        if #available(macOS 14.2, *) {
+            DispatchQueue.global(qos: .utility).async { SystemAudioTap.removeOrphanAggregateDevices() }
+        }
         // `open "Notes AI Capture.app" --args --window` starts straight into
         // the full window.
         if CommandLine.arguments.contains("--window") {
@@ -147,13 +152,49 @@ struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(systemName: symbolName)
+        icon
             .onReceive(NotificationCenter.default.publisher(for: .openMainWindow)) { _ in
                 NSApp.setActivationPolicy(.regular)
                 openWindow(id: MainWindow.id)
                 NSApp.activate(ignoringOtherApps: true)
             }
     }
+
+    /// Sprint 31: while the call audio is recorded too, the record symbol
+    /// carries a small headphones badge — the one place the state is
+    /// visible whatever window is open.
+    @ViewBuilder
+    private var icon: some View {
+        if capture.isRecording, capture.recorder.captureMode.recordsSystemAudio,
+           let badged = Self.callAudioBadge {
+            Image(nsImage: badged)
+                .accessibilityLabel("Recording with call audio")
+        } else {
+            Image(systemName: symbolName)
+        }
+    }
+
+    /// "record.circle.fill" with "headphones" drawn small at its lower
+    /// right, as one template image (a status item shows a single image).
+    private static let callAudioBadge: NSImage? = {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        guard let base = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(config),
+              let badge = NSImage(systemSymbolName: "headphones", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .bold))
+        else { return nil }
+        let size = NSSize(width: base.size.width + 6, height: base.size.height)
+        let image = NSImage(size: size, flipped: false) { _ in
+            base.draw(in: NSRect(x: 0, y: size.height - base.size.height,
+                                 width: base.size.width, height: base.size.height))
+            badge.draw(in: NSRect(x: size.width - badge.size.width, y: 0,
+                                  width: badge.size.width, height: badge.size.height))
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Recording with call audio"
+        return image
+    }()
 
     private var symbolName: String {
         if capture.isRecording { return "record.circle.fill" }

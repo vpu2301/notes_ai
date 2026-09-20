@@ -123,6 +123,18 @@ class S3Client:
             with contextlib.suppress(ClientError):
                 await c.delete_object(Bucket=bucket, Key=key)
 
+    async def object_exists(self, *, bucket: str, key: str) -> bool:
+        """HEAD the object: True if it exists, False on 404. Other errors raise."""
+        async with self._client() as c:
+            try:
+                await c.head_object(Bucket=bucket, Key=key)
+            except ClientError as exc:
+                code = str(exc.response.get("Error", {}).get("Code", ""))
+                if code in {"404", "NoSuchKey", "NotFound"}:
+                    return False
+                raise
+        return True
+
     async def head_bucket(self, bucket: str) -> None:
         """Probe used by readiness checks."""
         async with self._client() as c:

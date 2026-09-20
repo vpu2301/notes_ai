@@ -82,6 +82,16 @@ struct SettingsView: View {
             DSDivider()
             Toggle("Separate speakers", isOn: $capture.diarize)
                 .toggleStyle(DSToggleStyle())
+            VStack(alignment: .leading, spacing: 8) {
+                Text("People")
+                    .font(.ds(15))
+                    .foregroundStyle(capture.diarize ? DS.text1 : DS.muted)
+                PeoplePicker()
+                Text("How many people usually speak. Auto and 6+ let each recording decide.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

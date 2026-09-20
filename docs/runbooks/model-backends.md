@@ -1,8 +1,8 @@
 # Runbook — model backends (`libs/models`, HF Inference Endpoints, job warming)
 
-Scope: the chat/ASR backends resolved from `config/models.yaml` (`hf_eu`,
-`hf_eu_asr` on staging/beta; `dev_mac*` on the founder's Mac; `hosted_eu`
-dormant), the `waiting_on_model` job state, the `model_usage` ledger and
+Scope: the chat/ASR/diarization backends resolved from `config/models.yaml`
+(`hf_eu`, `hf_eu_asr`, `hf_eu_diar` on staging/beta; `dev_mac*` on the
+founder's Mac; `hosted_eu` dormant), the `waiting_on_model` job state, the `model_usage` ledger and
 the HF token. Alerts: `infra/prometheus/rules/model-backends.yml`.
 Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 
@@ -12,7 +12,7 @@ Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 | Endpoint specs / apply | `deploy/hf/endpoints/*.yaml`, `make hf-endpoints ARGS="status --env staging"` |
 | Queue + warming | `libs/jobs/` (`jobs` table, migration 0022), `jobs_waiting_by_backend()` |
 | Usage ledger | `model_usage`, `model_usage_daily` (0023), rates `config/model_costs.yaml` |
-| Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
+| Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_DIAR_ENDPOINT_URL`, `MDX_DIAR_SERVER_TOKEN`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
 | Egress | `scripts/k8s/egress-allowlist.sh`, `workers-egress-allowlist` NetworkPolicy |
 | Dev Mac | `docs/dev/models-on-mac.md`, `make dev-model` |
 
@@ -158,9 +158,31 @@ leaves the cluster without the CIDR allowlist that protects the workers —
 tracked as an open decision (widen the policy for app-tier peers, or move
 the call into a `libs/jobs` worker).
 
+## diarization-endpoint
+
+`hf_eu_diar` is not a vendor model behind a handler — it is **our** image
+(`deploy/diar-server`) with pyannote community-1 baked in, chosen in
+ADR-0052 because community-1 needs 0.64–0.85 × audio on four CPU threads and
+the worker shape allows 0.25.
+
+- Spec `deploy/hf/endpoints/diar.yaml`; apply/status like the others
+  (`make hf-endpoints ARGS="status --env staging"`).
+- Build and push the image from the repo root with the gated-model
+  secret: `deploy/diar-server/README.md`.
+- The worker reaches it with `MDX_DIAR_ENGINE=http`; failure behaviour,
+  symptoms and rollback live in `docs/runbooks/asr-worker.md`
+  § diarization-endpoint (an outage costs speakers, never a transcript).
+- Upgrading the model is § diarization-model-upgrade in that same
+  runbook — the endpoint and the worker image are pinned to the same
+  revision and digests, so they move together.
+
 ## Pre-flight after deployment
 
 - `make hf-endpoints ARGS="plan --env staging"` → no drift.
 - `make eval-smoke ENV=staging BACKEND=hf_eu` → 5/5, hallucination 0.
-- `make test-egress` → example.com blocked, endpoints reachable.
+- `make test-egress` → example.com, `otel.pyannote.ai` and `huggingface.co`
+  blocked, endpoints reachable; with `MDX_DIAR_ENGINE=pyannote` a
+  `diarize=true` job completes on `pyannote-community-1` (Sprint 29 B-8).
+  The in-process diarizer adds **no** allowlist host: its weights are baked
+  and loaded offline and its telemetry is off (docs/models/PINS.md).
 - `SELECT * FROM model_usage_daily ORDER BY day DESC LIMIT 5;` shows rows for `hf_eu` / `hf_eu_asr`.

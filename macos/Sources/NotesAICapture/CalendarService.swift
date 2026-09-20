@@ -19,6 +19,19 @@ final class CalendarService: ObservableObject {
         let end: Date
         let isAllDay: Bool
         let calendarColor: CGColor?
+        /// Sprint 30: everyone invited (the current user included — they
+        /// talk too), and the others' names, at most twelve.
+        var attendeeCount: Int = 0
+        var attendeeNames: [String] = []
+    }
+
+    /// The invitee count and names of an event, the current user left out
+    /// of the names. EventKit gives no attendee list for an event without
+    /// guests, which is a count of 0 — no cap.
+    nonisolated static func attendees(of event: EKEvent) -> (count: Int, names: [String]) {
+        let people = event.attendees ?? []
+        let names = people.filter { !$0.isCurrentUser }.compactMap(\.name)
+        return (people.count, Array(names.prefix(12)))
     }
 
     /// One calendar as shown in the Connectors tab.
@@ -125,10 +138,12 @@ final class CalendarService: ObservableObject {
             .sorted { $0.startDate < $1.startDate }
             .prefix(12)
             .map {
-                Event(id: $0.eventIdentifier ?? UUID().uuidString,
-                      title: $0.title ?? "Untitled event",
-                      start: $0.startDate, end: $0.endDate, isAllDay: $0.isAllDay,
-                      calendarColor: $0.calendar?.cgColor)
+                let invited = Self.attendees(of: $0)
+                return Event(id: $0.eventIdentifier ?? UUID().uuidString,
+                             title: $0.title ?? "Untitled event",
+                             start: $0.startDate, end: $0.endDate, isAllDay: $0.isAllDay,
+                             calendarColor: $0.calendar?.cgColor,
+                             attendeeCount: invited.count, attendeeNames: invited.names)
             }
     }
 }

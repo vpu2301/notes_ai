@@ -33,7 +33,10 @@ class SileroSegmenter:
         *,
         min_speech_duration_ms: int = 150,
         min_silence_duration_ms: int = 150,
+        threshold: float | None = None,
     ) -> None:
+        # None = silero-vad's own default (0.5).
+        self._threshold = threshold
         self._min_speech_ms = min_speech_duration_ms
         self._min_silence_ms = min_silence_duration_ms
         self._model: Any = None
@@ -64,6 +67,7 @@ class SileroSegmenter:
             sampling_rate=SAMPLE_RATE_HZ,
             min_speech_duration_ms=self._min_speech_ms,
             min_silence_duration_ms=self._min_silence_ms,
+            **({"threshold": self._threshold} if self._threshold is not None else {}),
         )
         return [
             (

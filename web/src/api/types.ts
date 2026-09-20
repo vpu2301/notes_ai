@@ -729,6 +729,27 @@ export interface AsrJob {
   error_message: string | null;
   error_stage: string | null;
   error_retryable: boolean | null;
+  /** Bumped by every re-labelling of the speakers (and its undo). */
+  diarization_rev?: number;
+  /** A speaker re-run; null = never re-labelled (the first pass rides `status`). */
+  diarization_status?: DiarizationStatus | null;
+  /** Why the last re-run failed, e.g. "stranded", "audio_missing". */
+  diarization_error?: string | null;
+  /** Re-runs requested so far (the server allows 5). */
+  diarization_runs?: number;
+  /** A previous labelling can be restored. */
+  can_undo_rediarize?: boolean;
+  /** Submit response only: the speaker-count hint was used (true), ignored (false), or not sent (null). */
+  hints_applied?: boolean | null;
+}
+
+export type DiarizationStatus = "queued" | "running" | "complete" | "failed";
+
+/** `POST /asr/jobs/{id}/rediarize` (202) and its `/undo` (200). */
+export interface RediarizeAccepted {
+  job_id: string;
+  diarization_status: DiarizationStatus;
+  diarization_rev: number;
 }
 
 // ── notification-service ───────────────────────────────────────────────
@@ -770,6 +791,8 @@ export interface TranscriptSegment {
   end_ms: number;
   avg_confidence: number;
   speaker?: string | null;
+  /** Index of this segment in the stored artifact (the space `segment_indices` live in). */
+  artifact_index?: number;
 }
 
 /**
@@ -784,7 +807,13 @@ export interface TranscriptTurn {
   start_ms: number;
   end_ms: number;
   paragraphs: string[];
+  /**
+   * Artifact index space (Sprint 30) — opaque: send back as-is on a
+   * reassign, never use to index into `segments` (use `artifact_index`).
+   */
   segment_indices?: number[];
+  /** People talked over each other here, or the label was smoothed. */
+  uncertain?: boolean;
 }
 
 export interface TranscriptResult {
@@ -800,8 +829,91 @@ export interface TranscriptResult {
   speaker_names?: Record<string, string>;
   /** The transcript as speaker turns — what the UI renders. */
   turns?: TranscriptTurn[];
+  /** Talk time per roster label, after speaker edits. */
+  speaker_stats?: SpeakerStat[];
+  /** Diarization run the edits apply to. */
+  result_rev?: number;
+  /** Live speaker edits, application order (latest last). */
+  edits?: SpeakerEdit[];
+  /** How sure the diarizer is about the number of speakers; null = not diarized / older result. */
+  count_confidence?: "high" | "low" | null;
+  /** The exact speaker count a person asked for on this labelling. */
+  speakers_hint?: number | null;
+  /** Names offered for renaming speakers (calendar invitees), Sprint 30. */
+  name_candidates?: string[];
+  /**
+   * Which side of a two-channel capture each label was heard on (Sprint 31):
+   * `local` = this Mac's microphone, `remote` = the call audio. `{}` for mono jobs.
+   */
+  speaker_sides?: Record<string, SpeakerSide>;
+  /** How each label's name was chosen; `channel` = named after the owner from the microphone. */
+  speaker_name_sources?: Record<string, SpeakerNameSource>;
+  /**
+   * Who a speaker probably is, with the words that say so (Sprint 32).
+   * Absent unless the server turns suggestions on — render nothing then.
+   */
+  name_suggestions?: NameSuggestion[];
+  /**
+   * The labelling came from an older engine (or none) and the audio is still
+   * kept: offer a re-label. Absent on older servers.
+   */
+  relabel_available?: boolean;
   nlp_applied?: boolean;
 }
+
+/** "SPEAKER_2 is probably Anna Keller" — and the quote that says so. */
+export interface NameSuggestion {
+  label: string;
+  /** Calendar spelling. */
+  name: string;
+  /** Why, e.g. `self_introduction`. */
+  source: string;
+  /** ≤ 160 chars; shown before anyone accepts (the evidence). */
+  quote: string;
+  start_ms: number;
+  end_ms: number;
+  /** Artifact index space, like `TranscriptTurn.segment_indices`. */
+  segment_indices: number[];
+}
+
+export type SpeakerSide = "local" | "remote";
+export type SpeakerNameSource = "typed" | "picklist" | "channel" | "suggestion" | "cleared";
+
+export interface SpeakerStat {
+  label: string;
+  speech_ms: number;
+  share: number;
+  turns: number;
+}
+
+export interface SpeakerEdit {
+  id: string;
+  kind: "merge" | "reassign";
+  from_label: string | null;
+  to_label: string | null;
+  created_at: string;
+}
+
+/** `POST /asr/jobs/{id}/speakers/merge` response. */
+export interface SpeakerEditResult {
+  job_id: string;
+  edit_id: string;
+  speakers: string[];
+  speaker_names: Record<string, string>;
+  speaker_stats: SpeakerStat[];
+}
+
+/** `POST /asr/jobs/{id}/speakers/reassign` response. */
+export interface ReassignResult extends SpeakerEditResult {
+  /** The label a `to: "new"` reassign created; null otherwise. */
+  created_label: string | null;
+}
+
+/** Where a capture came from — a metric, sent with the upload. */
+export type CaptureSource = "calendar_event" | "manual" | "upload";
+
+/** `sources` on a rename: picked from `name_candidates`, typed, or an accepted suggestion. */
+export type NameSource = "picklist" | "typed" | "suggestion";
 
 /** `SPEAKER_2` → `Speaker 2`; anything else unchanged. */
 export function defaultSpeakerName(label: string): string {

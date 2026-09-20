@@ -35,6 +35,17 @@ final class CaptureViewModel: ObservableObject {
     @Published var diarize: Bool {
         didSet { UserDefaults.standard.set(diarize, forKey: "captureDiarize") }
     }
+    /// "People": how many speakers the person says are in the meeting.
+    @Published var people: PeopleCount {
+        didSet { UserDefaults.standard.set(people.rawValue, forKey: "capturePeople") }
+    }
+    /// The hint the upload carries: an exact number, and only when speakers
+    /// are being told apart at all.
+    var speakersExpected: Int? { diarize ? people.speakersExpected : nil }
+    /// Sprint 30: where the current capture started and what its calendar
+    /// event knew (invitee cap, names to offer). Manual unless a capture
+    /// was started from an upcoming event.
+    @Published private(set) var context: CaptureContext = .manual
     @Published private(set) var phase: Phase = .idle
     /// The ASR job of the capture being processed (or just finished), so the
     /// meeting page can show the live state for that meeting and nothing else.
@@ -54,6 +65,7 @@ final class CaptureViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         self.language = defaults.string(forKey: "captureLanguage") ?? Self.autoLanguage
         self.diarize = defaults.object(forKey: "captureDiarize") as? Bool ?? true
+        self.people = defaults.string(forKey: "capturePeople").flatMap(PeopleCount.init(rawValue:)) ?? .auto
         // Re-publish the recorder's changes (level, elapsed) through this
         // object so every view stays in sync.
         recorderSubscription = recorder.objectWillChange.sink { [weak self] _ in
@@ -64,6 +76,14 @@ final class CaptureViewModel: ObservableObject {
     }
 
     var isRecording: Bool { recorder.isRecording }
+
+    /// Sign-out (Sprint 32): a calendar event picked for the next capture —
+    /// its invitees' names — does not outlive the session. A recording in
+    /// progress keeps the context it was started with.
+    func forgetContext() {
+        guard !isRecording else { return }
+        context = .manual
+    }
 
     func toggleRecording() {
         if recorder.isRecording {
@@ -80,14 +100,20 @@ final class CaptureViewModel: ObservableObject {
         activeJobId = nil
         limitWarning = nil
         stoppedAtLimit = false
+        context = .manual
     }
 
     /// The one-tap path: clear any finished state and start recording now.
     /// A title (say, from a calendar event) can be handed in.
-    func startNew(title: String = "") {
+    ///
+    /// Sprint 30: a capture started from a calendar event hands in its
+    /// `context` (the invitees as a cap and as names to offer); everything
+    /// else is `.manual`.
+    func startNew(title: String = "", context: CaptureContext = .manual) {
         guard !recorder.isRecording, !phase.isBusy else { return }
         reset()
         self.title = title
+        self.context = context
         Task { await beginRecording() }
     }
 
@@ -158,8 +184,11 @@ final class CaptureViewModel: ObservableObject {
         // meeting must not re-file the meeting (IDX-I2 G).
         let tenantId = boundTenantId ?? app.tenantId
         boundTenantId = nil
+        // The context belongs to this recording; the next one starts manual.
+        let context = self.context
+        self.context = .manual
         pipelineTask = Task {
-            await process(fileURL: fileURL, meetingTitle: meetingTitle, tenantId: tenantId)
+            await process(fileURL: fileURL, meetingTitle: meetingTitle, tenantId: tenantId, context: context)
         }
     }
 
@@ -167,7 +196,8 @@ final class CaptureViewModel: ObservableObject {
     /// started.
     private var boundTenantId: String?
 
-    private func process(fileURL: URL, meetingTitle: String, tenantId: String?) async {
+    private func process(fileURL: URL, meetingTitle: String, tenantId: String?,
+                         context: CaptureContext) async {
         // The recording is deleted only once the server has it. Every other
         // exit from this function — a failed upload, a lost session, the
         // app being killed mid-pipeline — moves it to `pending/` with a
@@ -178,7 +208,8 @@ final class CaptureViewModel: ObservableObject {
             if uploaded {
                 try? FileManager.default.removeItem(at: fileURL)
             } else {
-                keep(fileURL, title: meetingTitle, recordedAt: recordedAt, tenantId: tenantId)
+                keep(fileURL, title: meetingTitle, recordedAt: recordedAt, tenantId: tenantId,
+                     context: context)
             }
         }
         do {
@@ -186,6 +217,8 @@ final class CaptureViewModel: ObservableObject {
             let job = try await app.api.submitJob(fileURL: fileURL,
                                                   contentType: recorder.format.contentType,
                                                   language: language, diarize: diarize,
+                                                  speakersExpected: speakersExpected,
+                                                  context: context,
                                                   tenantId: tenantId)
             uploaded = true
             activeJobId = job.id
@@ -255,15 +288,19 @@ final class CaptureViewModel: ObservableObject {
     /// Put the recording somewhere it will still be there tomorrow, and
     /// say in the banner where it went — a file the person is not told
     /// about is only technically not lost.
-    private func keep(_ fileURL: URL, title: String, recordedAt: Date, tenantId: String?) {
+    private func keep(_ fileURL: URL, title: String, recordedAt: Date, tenantId: String?,
+                      context: CaptureContext) {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        let kept = PendingCaptures.keep(fileURL, info: PendingCapture.Info(
+        var info = PendingCapture.Info(
             title: title,
             language: language,
             diarize: diarize,
             recordedAt: recordedAt,
             identityId: app.identityId,
-            tenantId: tenantId ?? app.tenantId))
+            tenantId: tenantId ?? app.tenantId,
+            speakersExpected: speakersExpected)
+        info.setCaptureContext(context)
+        let kept = PendingCaptures.keep(fileURL, info: info)
         guard kept != nil else { return }
         app.refreshPending()
         if case .failed(let message) = phase {
@@ -277,4 +314,19 @@ final class CaptureViewModel: ObservableObject {
         formatter.timeStyle = .short
         return "Meeting \(formatter.string(from: Date()))"
     }
+}
+
+/// The capture screen's "People" choice (Sprint 29). Auto and 6+ send no
+/// hint — the diarizer counts; 1–5 is an exact number stated by a person.
+/// Kept as a choice rather than an `Int?` so "6+" is still shown as picked
+/// after a relaunch.
+enum PeopleCount: String, CaseIterable, Hashable, Sendable {
+    case auto
+    case one = "1", two = "2", three = "3", four = "4", five = "5"
+    case sixPlus = "6+"
+
+    var label: String { self == .auto ? "Auto" : rawValue }
+
+    /// `speakers_expected` for the upload, or nil for none.
+    var speakersExpected: Int? { Int(rawValue) }
 }

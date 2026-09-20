@@ -160,6 +160,39 @@ password signup once `MDX_IDP_MODE=dual` is switched on fleet-wide
 (ADR-0047), and `use_password` / `legacy_session` above are that period's
 codes.
 
+## asr-service — speaker count and re-labelling (Sprint 29)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `speakers_hint_invalid` | 422 | `POST /asr/jobs` | **Retired in Sprint 30** — no longer raised. A person-stated `speakers_expected` now always wins and a `speakers_max` next to it is dropped (calendar hint policy). Kept so older clients' copy still resolves. Out-of-range values (outside 1–8) are a plain 422 validation body. |
+| `job_not_complete` | 409 | `POST /asr/jobs/{id}/rediarize`, `…/speakers/merge` | The transcript is not finished; speakers can be re-labelled (or merged) once it is. |
+| `rediarize_in_progress` | 409 | `POST …/rediarize`, `…/rediarize/undo`, `…/speakers/merge` | A re-labelling run is queued or running. Follow it (`GET /asr/jobs/{id}` → `diarization_status`) rather than starting another. |
+| `audio_unavailable` | 409 | `POST …/rediarize` | Retention or erasure removed the recording, so there is nothing to listen to again. The current labels stay. |
+| `rediarize_limit` | 429 | `POST …/rediarize` | This job has used its re-runs (`MD_ASR_REDIARIZE_MAX_RUNS`, 5). Not retryable; merge speakers instead. |
+| `rate_limited` | 429 | `POST …/rediarize` | The caller's hourly re-run budget (`MD_ASR_REDIARIZE_USER_HOURLY_LIMIT`, 10) is spent; `Retry-After` says when. Fails open if Redis is down (the per-job cap still holds). |
+| `enqueue_failed` | 503 | `POST …/rediarize` | The queue refused the run. **Nothing changed** — the row is back as it was and the run was not counted. Safe to retry. |
+| `nothing_to_undo` | 409 | `POST …/rediarize/undo` | No earlier labelling is kept: undo is one step, and a second undo (or an undo before any re-run) lands here. |
+
+## asr-service — moving turns and capture context (Sprint 30)
+
+`job_not_complete` and `rediarize_in_progress` (above) also answer `POST …/speakers/reassign`.
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `stale_result_rev` | 409 | `POST /asr/jobs/{id}/speakers/reassign` | The `result_rev` sent is not the current one (extra member `current_rev`): the speakers changed since the client loaded them. Reload the result and tell the person "Speakers were updated elsewhere."; do not retry blindly. |
+| `bad_segment_index` | 422 | `POST …/speakers/reassign` | A `segment_indices` entry is not a segment of this transcript. Indices are opaque (artifact space) — send back the turns' own, as the result gave them. |
+| `too_many_segments` | 422 | `POST …/speakers/reassign` | More than 500 indices in one call. |
+| `too_many_speakers` | 422 | `POST …/speakers/reassign` | `to: "new"` would make a ninth live speaker (8 max). Move the turns to an existing speaker instead. |
+| `unknown_label` | 422 | `POST …/speakers/reassign` | `to` names a label that is not on the current roster. Reload. |
+| `name_candidates_invalid` | 422 | `POST /asr/jobs` | `name_candidates` is not a JSON array of at most 12 names of 1–80 characters without control characters. |
+
+## asr-service — dual-channel capture (Sprint 31)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `channel_layout_mismatch` | 422 | `POST /asr/jobs` | `channel_layout=mic_system` was declared but the file does not have exactly 2 channels. A client bug (the macOS app sends the field only for its own 2-channel files); retry without the field to upload as an ordinary recording. |
+| `local_speaker_name_invalid` | 422 | `POST /asr/jobs` | `local_speaker_name` is longer than 80 characters after collapsing whitespace. Send a shorter display name, or omit it. |
+
 ## note-service — reading somebody else's note
 
 Note reads carry no `code`; the client branches on the problem `type`.

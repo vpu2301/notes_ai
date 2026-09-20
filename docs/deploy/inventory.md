@@ -88,3 +88,38 @@ differs from the SPA's; every other route keeps the credentialed
 allow-list. No Ingress objects exist in the chart yet; the public
 exposure of note-service's `/v1/shared/*` and the SPA's `/s/*` is an
 environment-level decision to record here when made.
+
+## Diarization endpoint (ADR-0052 shape B)
+
+| Thing | Where |
+|---|---|
+| Image | `deploy/diar-server` → `ghcr.io/notes-ai/diar-server:{tag}` (built with the gated-model BuildKit secret) |
+| Endpoint | `deploy/hf/endpoints/diar.yaml` — AWS `eu-west-1`, T4, `min_replica: 0` |
+| Backend | `hf_eu_diar` in `config/models.yaml` (dev: `dev_mac_diar` on the Mac) |
+| Secrets | `HF_DIAR_ENDPOINT_URL`, `HF_TOKEN` (worker side, k8s secret `mdx-hf-endpoints`); `MDX_DIAR_SERVER_TOKEN` — the SAME value on both sides: the worker sends it as `X-MDX-Diar-Token` and the server refuses to start without it. The HF bearer is separate and satisfies the gateway only |
+| Worker switch | `MDX_DIAR_ENGINE=http`, `MDX_DIAR_HTTP_BACKEND=hf_eu_diar`; rollback `legacy` |
+| Egress | one new destination, in `scripts/k8s/egress-allowlist.sh`; hub and pyannote telemetry stay blocked |
+| Processor disclosure | the backend's `processor:` entry (Hugging Face Inference Endpoints, EU) reaches the workspace Data page like ASR's |
+
+Cost, order of magnitude: a scale-to-zero T4 at ~$0.50–0.75 per GPU-hour
+and ~0.15 × audio is roughly **$0.07–0.11 per audio-hour** plus idle and
+cold starts. Measure it against the real bill before quoting it.
+
+## Diarization capacity (Sprint 32)
+
+Measured on an Apple M5 CPU (not a cluster node; re-measure on the worker
+shape): the legacy engine diarizes at **0.016–0.024 × audio**, so one worker
+replica's diarization step alone covers roughly **1,000–1,500 audio-hours per
+day** if it did nothing else. In practice Whisper dominates the job (the ASR
+pass, not diarization, sets throughput); diarization adds ~2 % wall time per
+diarized job and **~1.7 GB RSS on a 2-hour recording** (3.0 GB for a 2-hour
+dual-channel capture before the engine passes — size dual-channel workers for
+≥ 4 GiB). Re-runs (`task=rediarize`) cost one diarization pass, no ASR. Staging
+numbers: docs/testing/load/speakers-2026-09-19.md (scenarios 1/2/5 pending).
+
+**Diarizer v2 changes this picture** (measured 2026-09-20, same Mac):
+community-1 runs at **0.64–0.85 × audio on four CPU threads** and
+0.13–0.15 × on the Mac's GPU — which is why it runs on an endpoint (above) rather
+than inside the worker. A worker on `MDX_DIAR_ENGINE=http` spends its own
+time only on the upload and the wait, so worker sizing stays as measured
+for the legacy engine; the GPU capacity is the endpoint's `max_replica`.

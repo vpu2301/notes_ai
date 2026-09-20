@@ -272,7 +272,9 @@ struct DSButtonStyle: ButtonStyle {
             .font(.ds(size, .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, 14)
-            .frame(height: height)
+            // A minimum, not a height: at large Dynamic Type sizes the
+            // label grows and the button with it instead of clipping.
+            .frame(minHeight: height)
             .frame(maxWidth: fill ? .infinity : nil)
             .background(
                 RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
@@ -423,6 +425,9 @@ struct DSToggleStyle: ToggleStyle {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Read as a switch with its state, not as a plain button.
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }
 
@@ -463,7 +468,7 @@ struct DSSegmentedPill<T: Hashable>: View {
                     }
                     .foregroundStyle(on ? DS.text1 : DS.muted)
                     .padding(.horizontal, option.label == nil ? 9 : 12)
-                    .frame(height: height - 6)
+                    .frame(minHeight: height - 6)
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -476,7 +481,11 @@ struct DSSegmentedPill<T: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(option.help ?? option.label ?? "")
+                // Sprint 32: a segment says its name, what it does, and
+                // whether it is the one chosen.
+                .accessibilityLabel(option.label ?? option.help ?? "")
+                .accessibilityHint(option.label == nil ? "" : (option.help ?? ""))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(3)

@@ -232,8 +232,20 @@ struct ComingUpItem: Identifiable, Equatable {
     let meetingURL: URL?
     let detail: String?
     let source: Source
+    /// Sprint 30: everyone invited, and names to offer for speakers.
+    var attendeeCount: Int = 0
+    var attendeeNames: [String] = []
+    /// The Google account the event came from — the current user, whose
+    /// name is left out of the names offered.
+    var accountEmail: String? = nil
 
     var isLive: Bool { start <= Date() && end > Date() }
+
+    /// What a capture started from this event carries (Sprint 30).
+    var captureContext: CaptureContext {
+        .calendarEvent(attendeeCount: attendeeCount, names: attendeeNames,
+                       excluding: accountEmail.map { [$0] } ?? [])
+    }
 
     /// Both sources, merged and sorted; an event present in both (the
     /// same Google account added to the Mac) is kept once.
@@ -256,7 +268,9 @@ struct ComingUpItem: Identifiable, Equatable {
                 title: event.title, start: event.start, end: event.end, isAllDay: event.allDay,
                 color: Color(hexString: event.color),
                 meetingURL: event.meetingUrl.flatMap(URL.init(string:)),
-                detail: parts.joined(separator: " · "), source: .google))
+                detail: parts.joined(separator: " · "), source: .google,
+                attendeeCount: event.attendeeCount, attendeeNames: event.attendees,
+                accountEmail: event.accountEmail))
         }
         for event in mac {
             let k = key(event.title, event.start)
@@ -264,7 +278,8 @@ struct ComingUpItem: Identifiable, Equatable {
             out.append(ComingUpItem(
                 id: "mac:\(event.id)", title: event.title, start: event.start, end: event.end,
                 isAllDay: event.isAllDay, color: event.calendarColor.map { Color(cgColor: $0) },
-                meetingURL: nil, detail: nil, source: .mac))
+                meetingURL: nil, detail: nil, source: .mac,
+                attendeeCount: event.attendeeCount, attendeeNames: event.attendeeNames))
         }
         return out.sorted { ($0.start, $0.isAllDay ? 0 : 1) < ($1.start, $1.isAllDay ? 0 : 1) }
     }

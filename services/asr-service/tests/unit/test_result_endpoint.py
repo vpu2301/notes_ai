@@ -160,6 +160,42 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     monkeypatch.setattr(jobs, "tenant_connection", _fake_tenant_conn)
 
+    async def _no_edits(conn, *, job_id, result_rev):  # noqa: ANN001
+        return []
+
+    monkeypatch.setattr(jobs.repository, "list_speaker_edits", _no_edits)
+
+    async def _original_artifact(conn, *, job_id):  # noqa: ANN001
+        return None  # never re-labelled → the original key
+
+    monkeypatch.setattr(jobs.repository, "result_uri", _original_artifact)
+
+    async def _job_and_uri(conn, *, job_id):  # noqa: ANN001
+        # Delegates at call time to whichever get_job a test installed.
+        view = await jobs.repository.get_job(conn, job_id=job_id)
+        return None if view is None else (view, None)
+
+    monkeypatch.setattr(jobs.repository, "get_job_and_result_uri", _job_and_uri)
+
+    async def _no_candidates(conn, *, job_id):  # noqa: ANN001
+        return []
+
+    async def _first_read(conn, *, job_id):  # noqa: ANN001
+        return True
+
+    monkeypatch.setattr(jobs.repository, "name_candidates", _no_candidates)
+
+    async def _no_sources(conn, *, job_id):  # noqa: ANN001
+        return {}
+
+    monkeypatch.setattr(jobs.repository, "name_sources", _no_sources)
+
+    async def _sources(conn, *, job_id, names, sources):  # noqa: ANN001
+        return dict(sources)
+
+    monkeypatch.setattr(jobs.repository, "update_name_sources", _sources)
+    monkeypatch.setattr(jobs.repository, "mark_result_read", _first_read)
+
     app = create_app()
     app.dependency_overrides[deps.current_user] = _member_claims
     return SimpleNamespace(client=TestClient(app), store=store, audit=audit, nlp=nlp)
@@ -405,7 +441,13 @@ def test_result_keeps_speakers_through_nlp_enrichment(
         ("SPEAKER_1", "Speaker 1", ["Скарги на кашель."]),
         ("SPEAKER_2", "Olena", ["Так."]),
     ]
-    assert body["turns"][0]["segment_indices"] == [0]
+    # Artifact index space (Sprint 30): artifact segment 1 is punctuation
+    # only and NLP folded it into segment 0, so the first turn stands for
+    # artifact segments 0 AND 1 — moving that turn must move both.
+    assert body["turns"][0]["segment_indices"] == [0, 1]
+    assert body["turns"][1]["segment_indices"] == [2]
+    assert [s["artifact_indices"] for s in body["segments"]] == [[0, 1], [2]]
+    assert [s["artifact_index"] for s in body["segments"]] == [0, 2]
 
 
 def test_result_keeps_speakers_when_nlp_is_down(

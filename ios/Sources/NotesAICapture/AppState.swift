@@ -365,8 +365,13 @@ final class AppState: ObservableObject {
     }
 
     func signOut() async {
+        let signedOut = identityId
         await api.logout()
         clearSignedInState()
+        // Sprint 32: the names the account brought to kept recordings and
+        // the per-job answers go with it; the recordings stay.
+        SignOutCleanup.run(identityId: signedOut)
+        capture.forgetContext()
         gateOn = await api.isGateOn()
         signedOutNotice = nil
         authState = .signedOut
@@ -720,6 +725,8 @@ final class AppState: ObservableObject {
                 contentType: contentType(of: capture.audioURL),
                 language: capture.info.language,
                 diarize: capture.info.diarize,
+                speakersExpected: capture.info.speakersExpected,
+                context: capture.info.captureContext,
                 tenantId: capture.info.tenantId)
             // On the server now: the file may go.
             PendingCaptures.delete(capture)

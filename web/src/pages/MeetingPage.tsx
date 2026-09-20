@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { submitJob } from "../api/asr";
 import { errorMessage } from "../api/http";
-import { languageName, type AsrLanguage } from "../api/types";
+import { languageName, type AsrLanguage, type CaptureSource } from "../api/types";
 import { AlertIcon, MicIcon, StopIcon, UploadIcon } from "../components/icons";
 import { useToast } from "../components/Toaster";
+import { contextFields, readCaptureContext } from "../lib/captureContext";
 import { markMine, rememberTitle } from "../lib/captures";
 import { formatElapsed } from "../lib/time";
 import { useCaptures } from "../lib/useCaptures";
@@ -17,6 +18,19 @@ const LANGUAGES: ReadonlyArray<readonly [AsrLanguage, string]> = [
   ["en", "English"],
   ["uk", "Українська"],
   ["de", "Deutsch"],
+];
+
+// How many people spoke. Only an exact small number is a hint worth
+// sending; "Auto" and "6+" leave the count to the diarizer.
+type People = "auto" | 1 | 2 | 3 | 4 | 5 | "6+";
+const PEOPLE: ReadonlyArray<readonly [People, string]> = [
+  ["auto", "Auto"],
+  [1, "1"],
+  [2, "2"],
+  [3, "3"],
+  [4, "4"],
+  [5, "5"],
+  ["6+", "6+"],
 ];
 
 /**
@@ -34,6 +48,10 @@ export function MeetingPage() {
   // A calendar event's title arrives as ?title= from the home page's
   // "Start" button; otherwise the field starts empty.
   const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
+  // Sprint 30: its invitees wait in sessionStorage under ?event= (names
+  // never ride the URL). They bound the speaker count and are offered as
+  // names when renaming speakers.
+  const [eventCtx] = useState(() => readCaptureContext(params.get("event")));
   // Sprint 21: `/meeting/new?first_run=1` is where a new workspace lands.
   // Shown once per browser; a per-viewer convenience, so localStorage.
   const [firstRun, setFirstRun] = useState(() => {
@@ -56,6 +74,7 @@ export function MeetingPage() {
   // language the meeting was held in. Pinning is an option, not a step.
   const [language, setLanguage] = useState<AsrLanguage>("auto");
   const [diarize, setDiarize] = useState(true);
+  const [people, setPeople] = useState<People>("auto");
   const [hint, setHint] = useState("");
   const [showOptions, setShowOptions] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -70,11 +89,11 @@ export function MeetingPage() {
   });
 
   // Latest submit settings, readable from the recorder's onstop closure.
-  const settings = useRef({ title, language, diarize, hint });
-  settings.current = { title, language, diarize, hint };
+  const settings = useRef({ title, language, diarize, hint, people, eventCtx });
+  settings.current = { title, language, diarize, hint, people, eventCtx };
 
   const submit = useCallback(
-    async (audio: RecordedAudio) => {
+    async (audio: RecordedAudio, captureSource: CaptureSource) => {
       const s = settings.current;
       setPhase("uploading");
       try {
@@ -84,6 +103,10 @@ export function MeetingPage() {
           language: s.language,
           diarize: s.diarize,
           vocabularyHint: s.hint,
+          speakersExpected: s.diarize && typeof s.people === "number" ? s.people : undefined,
+          // Both go when set; a "People" number wins on the server.
+          ...(s.diarize ? contextFields(s.eventCtx) : {}),
+          captureSource,
         });
         rememberTitle(job.id, s.title);
         markMine(job.id);
@@ -99,7 +122,11 @@ export function MeetingPage() {
   );
 
   const onRecordError = useCallback((msg: string) => toast.error(msg), [toast]);
-  const rec = useRecorder(submit, onRecordError);
+  const submitRecording = useCallback(
+    (audio: RecordedAudio) => void submit(audio, settings.current.eventCtx ? "calendar_event" : "manual"),
+    [submit],
+  );
+  const rec = useRecorder(submitRecording, onRecordError);
 
   // Don't let a tab close eat a recording.
   useEffect(() => {
@@ -113,7 +140,7 @@ export function MeetingPage() {
 
   const onFile = (file: File | undefined | null) => {
     if (!file) return;
-    void submit({ blob: file, filename: file.name });
+    void submit({ blob: file, filename: file.name }, "upload");
   };
 
   const job = jobId ? captures?.find((c) => c.job.id === jobId)?.job ?? null : null;
@@ -243,6 +270,12 @@ export function MeetingPage() {
           onChange={(e) => setTitle(e.target.value)}
         />
       </div>
+      {eventCtx && eventCtx.attendee_count > 0 && (
+        <p className="help meeting-context">
+          {eventCtx.attendee_count} invited
+          {eventCtx.attendees.length > 0 && " · names will be offered for speakers"}
+        </p>
+      )}
 
       <div className={`meeting-stage ${rec.recording ? "live" : "idle"}`}>
         <div className={`level-meter ${rec.recording ? "live" : ""}`} aria-hidden="true">
@@ -322,6 +355,26 @@ export function MeetingPage() {
                 <input type="checkbox" className="chk" checked={diarize} onChange={(e) => setDiarize(e.target.checked)} />
                 Tell speakers apart
               </label>
+              <div className="field">
+                <span className="label">People</span>
+                <div className="seg" role="group" aria-label="People">
+                  {PEOPLE.map(([value, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="seg-opt"
+                      aria-pressed={people === value}
+                      disabled={!diarize}
+                      onClick={() => setPeople(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="help">
+                  {diarize ? "Auto counts the voices itself." : "Turn on “Tell speakers apart” to set this."}
+                </span>
+              </div>
               <div className="field">
                 <span className="label">Words to listen for</span>
                 <input

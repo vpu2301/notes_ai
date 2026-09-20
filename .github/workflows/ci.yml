@@ -96,6 +96,7 @@ jobs:
           make check-no-demo-envvars-in-prod
           make check-no-vendor-import
           make check-dev-keys
+          make check-no-eval-audio
 
   # ──────────────────────────────────────────────────────────────
   # S16 deployment: the Helm chart must render (staging + prod), the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from typing import Annotated
@@ -137,6 +138,61 @@ class Settings(BaseSettings):
     diar_model_sha256: str = Field(default="", alias="MDX_DIAR_MODEL_SHA256")
     diar_meanvar_sha256: str = Field(default="", alias="MDX_DIAR_MEANVAR_SHA256")
 
+    # ── Diarizer v2 + engine selection (Sprint 29) ──────────────────────
+    # `legacy` = ECAPA + agglomeration (above); `pyannote` = community-1,
+    # in-process, baked at diar_v2_model_dir. Rollback is flipping this.
+    # `http` = the same community-1 pipeline on a GPU endpoint
+    # (deploy/diar-server, ADR-0052 shape B), named by
+    # MDX_DIAR_HTTP_BACKEND in config/models.yaml.
+    diar_engine: str = Field(default="legacy", alias="MDX_DIAR_ENGINE")
+    # Run this engine as well, DISCARD its labels, log/emit only the speaker
+    # counts and its wall time. Empty = off.
+    diar_shadow_engine: str = Field(default="", alias="MDX_DIAR_SHADOW_ENGINE")
+    diar_v2_model_dir: str = Field(
+        default="/opt/models/pyannote-community-1", alias="MDX_DIAR_V2_MODEL_DIR"
+    )
+    diar_v2_model_repo: str = Field(
+        default="pyannote/speaker-diarization-community-1", alias="MDX_DIAR_V2_MODEL_REPO"
+    )
+    diar_v2_model_revision: str = Field(default="", alias="MDX_DIAR_V2_MODEL_REVISION")
+    # filename → sha256, JSON (docs/models/PINS.md). Verified at load, fail-closed.
+    diar_v2_pins: str = Field(default="", alias="MDX_DIAR_V2_PINS")
+    # Windows embedded at once — bounds memory on long recordings.
+    # 0 = 16 on CPU, 32 on GPU.
+    diar_v2_batch: int = Field(default=0, alias="MDX_DIAR_V2_BATCH")
+    # Roster guard, both engines (Sprint 28 grid: ≈ 8 s / 3 %). Both 0 =
+    # the guard grades the count but dissolves nothing. On by default as a
+    # recorded exception to the B-4 under-count rule — ADR-0052 has the
+    # per-file trade and the triggers for setting it back to 0.
+    diar_min_speaker_speech_ms: int = Field(default=8000, alias="MDX_DIAR_MIN_SPEAKER_SPEECH_MS")
+    diar_min_speaker_share: float = Field(default=0.03, alias="MDX_DIAR_MIN_SPEAKER_SHARE")
+    # MDX_DIAR_ENGINE=http: which backend in config/models.yaml to call.
+    # Empty = the env's `diarization` override (dev → dev_mac_diar).
+    diar_http_backend: str = Field(default="", alias="MDX_DIAR_HTTP_BACKEND")
+    # The diar-server's own token (header X-MDX-Diar-Token). A managed
+    # endpoint's gateway eats `Authorization`, so the container needs its
+    # own; empty = send the backend's bearer in both places.
+    diar_http_token: str = Field(default="", alias="MDX_DIAR_SERVER_TOKEN")
+    # Timeout slope: seconds of budget per second of audio. 0.5 suits a
+    # GPU endpoint (~0.15 x); a CPU-hosted one runs at 0.64-0.85 x and
+    # needs more, or every recording times out (ADR-0052).
+    diar_http_seconds_per_audio_second: float = Field(
+        default=0.5, alias="MDX_DIAR_HTTP_SECONDS_PER_AUDIO_SECOND"
+    )
+
+    def diar_v2_pin_map(self) -> dict[str, str]:
+        if not self.diar_v2_pins.strip():
+            return {}
+        raw = json.loads(self.diar_v2_pins)
+        if not isinstance(raw, dict):
+            raise ValueError("MDX_DIAR_V2_PINS must be a JSON object of filename → sha256")
+        return {str(k): str(v) for k, v in raw.items()}
+
+    def diar_v2_batch_size(self) -> int:
+        if self.diar_v2_batch > 0:
+            return self.diar_v2_batch
+        return 32 if self.diar_device.startswith("cuda") else 16
+
     # ── Database / queue / storage ──────────────────────────────────────
     db_app_role_dsn: str = Field(
         default="postgresql://app_role:app_role@postgres:5432/notes",
@@ -190,5 +246,17 @@ class Settings(BaseSettings):
 
     worker_consumer_name: str = Field(default="worker-1", alias="MD_ASR_WORKER_NAME")
 
+
+# pyannote.audio 4.x ships usage telemetry ON (posts to otel.pyannote.ai)
+# and its hub client would call huggingface.co. The worker only ever loads
+# a baked local model, so both are pinned off here — in the one module
+# allowed to touch the environment, at import, before anything can import
+# pyannote. Forced, not defaulted: an inherited "true" must not win. The
+# v2 engine re-checks these and refuses to load if they changed.
+PYANNOTE_PROCESS_ENV: Mapping[str, str] = {
+    "PYANNOTE_METRICS_ENABLED": "false",
+    "HF_HUB_OFFLINE": "1",
+}
+os.environ.update(PYANNOTE_PROCESS_ENV)
 
 settings = Settings()

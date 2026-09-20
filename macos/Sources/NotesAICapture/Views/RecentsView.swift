@@ -82,6 +82,9 @@ struct MeetingRow: View {
         switch capture.status {
         case .queued, .running:
             DSChip(text: "In progress", tint: DS.info, soft: DS.infoSoft, dot: true)
+        case .complete where app.relabelling.contains(capture.jobId):
+            // The transcript is readable meanwhile; only the speakers move.
+            DSChip(text: "Re-labelling speakers…", tint: DS.info, soft: DS.infoSoft, dot: true)
         case .failed:
             DSChip(text: "Failed", tint: DS.rec, soft: DS.recSoft)
         case .cancelled:

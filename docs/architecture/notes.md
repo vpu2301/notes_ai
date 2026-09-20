@@ -166,6 +166,12 @@ wants a copy marked provisional; cancelled notes are refused (409).
   `templates.category`.
 - **Idle-draft cleanup** (sprint-16, ADR-0041): in-process scheduler,
   `MDX_BACKGROUND_JOBS`.
+- **Speakers in a transcript-backed note** (Sprint 28–30): the result view
+  note-service fetches already has speaker edits folded in (merge +
+  reassign, `seq` order, one revision) — see `asr.md` § Speaker edits for
+  the fold order and the artifact index space. Anchor evidence by
+  `start_ms`/`end_ms` + artifact `segment_indices`, never by turn position;
+  `name_candidates` on that view are read-only here.
 
 ## `field_specific_metadata` — the normative key registry (sprint 13)
 

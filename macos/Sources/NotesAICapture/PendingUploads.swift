@@ -24,6 +24,13 @@ protocol PendingUploadsHost: AnyObject {
     func workspaceName(_ tenantId: String?) -> String
     func uploaded(job: TranscriptionJob, capture: PendingCapture) async
     func workspaceLost(_ loss: WorkspaceLoss, tenantId: String) async
+    /// The signed-in account's display name, for a two-channel recording
+    /// whose sidecar lost it at a sign-out (Sprint 32).
+    var uploadLocalSpeakerName: String? { get }
+}
+
+extension PendingUploadsHost {
+    var uploadLocalSpeakerName: String? { nil }
 }
 
 @MainActor
@@ -97,12 +104,21 @@ final class PendingUploads: ObservableObject {
         guard host.canSendUploads else { return }
         setState(.uploading, for: capture)
         let tenantId = capture.info.tenantId
+        let layout = capture.info.uploadChannelLayout(for: capture.audioURL)
+        // A sign-out dropped the name from the sidecar (Sprint 32); the
+        // same person signed in again gives it back.
+        let speakerName = capture.info.localSpeakerName
+            ?? (layout != nil && capture.info.identityId == host.uploadIdentityId ? host.uploadLocalSpeakerName : nil)
         do {
             let job = try await host.api.submitJob(
                 fileURL: capture.audioURL,
                 contentType: contentType(for: capture),
                 language: capture.info.language,
                 diarize: capture.info.diarize,
+                speakersExpected: capture.info.speakersExpected,
+                context: capture.info.captureContext,
+                channelLayout: layout,
+                localSpeakerName: speakerName,
                 tenant: tenantId)
             // The server has the audio now — and only now is the local copy
             // redundant.

@@ -111,6 +111,77 @@ Consumer (asr-worker):
 | Worker: storage put    | S3 put of transcript fails    | Mark failed; XACK; alert                |
 | Worker: ack            | Crashed before XACK           | XAUTOCLAIM reclaims → next consumer      |
 | Worker: ack            | Reclaimed > 3 times           | Move to DLQ; ops investigates           |
+| Worker: diarizer (in-process) | Engine cannot load     | Mark failed, `diarization_unavailable` (retryable) |
+| Worker: diarizer (endpoint)   | Endpoint down / refuses | **Transcript completes without speakers**; `diarization_status='failed'`; the clients offer a re-run (ADR-0052) |
+
+## Where diarization runs (ADR-0052)
+
+The worker calls one `Diarizer` (`libs/diarization/protocol.py`); which
+one is configuration, and the word-level attribution never knows:
+
+```
+asr-worker ── MDX_DIAR_ENGINE ──┬─ legacy    LegacyEcapaDiarizer  (in-process, CPU)
+                                ├─ pyannote  PyannoteDiarizer     (in-process; needs a GPU to fit the budget)
+                                └─ http      HttpDiarizer ──HTTP──▶ deploy/diar-server (GPU endpoint)
+                                                                     └─ the same PyannoteDiarizer
+```
+
+`http` is what ships: community-1 costs 0.64–0.85 × audio on four CPU threads
+against a 0.25 budget. Over that hop go the audio (lossless, in memory
+only), the speaker-count hints and the roster policy; back come labelled
+spans and counts. Never over it: tenant, job, user, filename, transcript
+text — or a speaker embedding, which has no field in the payload.
+
+Because the engine is now a remote dependency, its outage is handled
+like one: the transcript completes, the row says the labelling failed,
+and the user is offered a re-run. That asymmetry (loud in-process,
+forgiving remote) is deliberate — see the failure table above.
+
+## Speaker edits — fold order and index space (Sprint 28–30)
+
+The stored transcript artifact is never rewritten. Speaker corrections are
+rows in `transcription_speaker_edits`, folded onto the segments at every
+read (`asr_service/domain/speaker_edits.py`):
+
+- **Scope.** An edit belongs to one diarization revision (`result_rev` =
+  `transcription_jobs.diarization_rev`). A re-run or an undo of a re-run
+  bumps the revision and leaves older edits inert. `POST …/speakers/reassign`
+  takes the client's `result_rev` and answers 409 `stale_result_rev` when
+  it is not current — indices mean nothing across revisions.
+- **Order.** Live edits apply in `seq` order only, so the fold is
+  deterministic and independent of read time. A `merge` relabels every
+  segment currently carrying `from_label` — including segments an earlier
+  reassign moved there. A `reassign` relabels the segments it names to
+  `to_label` (`NULL` = unattributed); a later merge of that label carries
+  them along. The route resolves `to_label` through preceding merges, so a
+  reassign always targets a surviving label; `"new"` allocates
+  `SPEAKER_{max label ever seen + 1}` (`creates_label`), 8 live at most.
+- **Index space.** `segment_indices` are indices into the STORED
+  ARTIFACT's segments. The read path may fold a punctuation-only segment
+  into its predecessor (NLP enrichment), so a served segment carries
+  `artifact_indices` (all artifact segments it stands for) and a turn's
+  `segment_indices` is the union of its segments' artifact indices. A
+  reassign of a turn therefore moves exactly the artifact segments behind
+  it, punctuation included. Clients treat the indices as opaque.
+- **Roster.** Folded, then pruned: a label every segment was moved away
+  from leaves the roster, names and stats; a created label joins them.
+  A served segment is labelled by its HOST artifact segment
+  (`artifact_index`); punctuation NLP folded into it follows the host. A
+  segment moved to "Unknown" is `speaker_cleared` and never re-absorbed
+  into a neighbouring turn. Undoing a move to a new speaker drops that
+  label's name; allocation skips every label any edit ever used.
+- **Known gap.** Edit responses (and the 8-speaker check) are built from
+  the artifact without the NLP pass, so a label whose only remaining
+  speech is a voice-command-only segment (NLP renders it empty) still
+  counts there while the read view hides it. Rare; the next read is
+  authoritative.
+- **Uncertain turns.** `turn.uncertain` when a segment overlaps the
+  engine's `overlap_ms` (persisted on the artifact since Sprint 30), when
+  the worker smoothed a word's label, or when an unattributed segment was
+  absorbed into the turn.
+- **Anchors elsewhere** (note evidence, workflow-bridge): use
+  `start_ms`/`end_ms` + artifact `segment_indices`, never a turn's
+  position — reassigns reshape turns.
 
 ## Cross-references
 

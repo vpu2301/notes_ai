@@ -57,6 +57,9 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.bg)
         }
+        .sheet(isPresented: $capture.callAudioConsentPresented) {
+            CallAudioConsentSheet()
+        }
         .alert("Remove local data?",
                isPresented: Binding(get: { removingIdentity != nil },
                                     set: { if !$0 { removingIdentity = nil } })) {
@@ -148,9 +151,32 @@ struct SettingsView: View {
                         selection: $capture.language)
                 }
                 row("Separate speakers") {
-                    Toggle("", isOn: $capture.diarize)
+                    Toggle("Separate speakers", isOn: $capture.diarize)
                         .toggleStyle(DSToggleStyle())
                         .labelsHidden()
+                        .accessibilityLabel("Separate speakers")
+                }
+                row("People") {
+                    PeoplePicker()
+                        .frame(width: 300)
+                }
+                row("Record call audio (other participants)") {
+                    Toggle("Record call audio (other participants)",
+                           isOn: Binding(get: { capture.recordsCallAudio },
+                                         set: { capture.setCallAudio($0) }))
+                        .toggleStyle(DSToggleStyle())
+                        .labelsHidden()
+                        .accessibilityLabel("Record call audio (other participants)")
+                        .accessibilityHint("Also records what your Mac plays, so both sides of a call are in the note")
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("With headphones on, the other people in an online call never reach your microphone. This also records what your Mac plays during a recording, so both sides of the meeting are in the note. You are responsible for telling participants they are recorded.")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Link("About recording other participants", destination: CallAudioConsent.helpURL)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.accentText)
                 }
             }
 

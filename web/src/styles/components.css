@@ -547,14 +547,15 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .banner-info svg { color: var(--info); }
 
 /* ─── Empty states ──────────────────────────────────────────────────────── */
-/* A framed card with a display title and a muted hint, as on the Mac. */
+/* No frame and no fill: a page with nothing in it keeps the same ground as
+   the page with notes in it, so the app doesn't change appearance the moment
+   the list empties. Only the title and the hint sit on the paper. */
 .empty {
   text-align: center;
   padding: calc(36px * var(--density)) calc(24px * var(--density));
   color: var(--muted);
-  background: var(--surface);
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-lg);
+  background: transparent;
+  border: 0;
 }
 .empty-art {
   width: 44px; height: 44px;

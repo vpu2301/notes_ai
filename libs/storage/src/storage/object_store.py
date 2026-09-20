@@ -172,6 +172,10 @@ class EncryptedObjectStore:
             bucket=self.bucket, key=key, expires_in=expires_in
         )
 
+    async def exists(self, *, key: str) -> bool:
+        """Whether the (encrypted) object is still there — no decryption."""
+        return await self._s3.object_exists(bucket=self.bucket, key=key)
+
     async def delete(self, *, key: str) -> None:
         await self._s3.delete_object(bucket=self.bucket, key=key)
 

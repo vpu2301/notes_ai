@@ -37,12 +37,59 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         var recordedAt: Date
         var identityId: String
         var tenantId: String?
+        /// The "People" hint (Sprint 29), so a capture made offline still
+        /// uploads with it. Absent from sidecars written before, which
+        /// decode with nil — no hint, as they were recorded.
+        var speakersExpected: Int? = nil
+        /// Sprint 30 — the capture context (calendar invitees as a cap and
+        /// as names to offer, and where the capture started), so a meeting
+        /// kept for later still uploads with it. All absent from older
+        /// sidecars, which decode with nil. The source is kept as a string:
+        /// a value this build does not know must not make the recording
+        /// unreadable.
+        var speakersMax: Int? = nil
+        var nameCandidates: [String]? = nil
+        var captureSource: String? = nil
+        /// Sprint 31 — `channel_layout` ("mic_system" for a two-channel
+        /// recording) and `local_speaker_name` (the account's display name
+        /// when it was recorded), so a retry uploads what the first attempt
+        /// would have. Absent from older sidecars, which decode with nil.
+        var channelLayout: String? = nil
+        var localSpeakerName: String? = nil
 
         enum CodingKeys: String, CodingKey {
             case title, language, diarize
             case recordedAt = "recorded_at"
             case identityId = "identity_id"
             case tenantId = "tenant_id"
+            case speakersExpected = "speakers_expected"
+            case speakersMax = "speakers_max"
+            case nameCandidates = "name_candidates"
+            case captureSource = "capture_source"
+            case channelLayout = "channel_layout"
+            case localSpeakerName = "local_speaker_name"
+        }
+
+        /// The `channel_layout` a retry sends: the recorded one, and only
+        /// while the file on disk really has two channels (a declared
+        /// layout the file does not have is refused with a 422).
+        func uploadChannelLayout(for audioURL: URL) -> String? {
+            guard channelLayout != nil else { return nil }
+            return ChannelLayout.field(forFileAt: audioURL)
+        }
+
+        /// The context the upload carries; nil for a sidecar that has none.
+        var captureContext: CaptureContext? {
+            guard speakersMax != nil || nameCandidates != nil || captureSource != nil else { return nil }
+            return CaptureContext(speakersMax: speakersMax, nameCandidates: nameCandidates ?? [],
+                                  source: captureSource.flatMap(CaptureSource.init(rawValue:)) ?? .manual)
+        }
+
+        /// Write `context` into the sidecar fields.
+        mutating func setCaptureContext(_ context: CaptureContext?) {
+            speakersMax = context?.speakersMax
+            nameCandidates = context.map(\.nameCandidates).flatMap { $0.isEmpty ? nil : $0 }
+            captureSource = context?.source.rawValue
         }
     }
 }
