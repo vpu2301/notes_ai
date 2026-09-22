@@ -3,6 +3,14 @@
 ## Unreleased — A live meeting note writes itself too
 
 ### Added
+- **A meeting note names itself** (`note-service`, Mac, iPhone; ADR-0059, migration 0057): a
+  recording's placeholder title ("Meeting notes — 2026-09-22") is replaced, once, with a 3–8 word
+  title in the spoken language, taken from across the whole transcript by the `note.generate` job
+  before it writes the document. `notes.title_source` (`default` / `ai` / `user`) records where a
+  title came from; any rename from any client sets `user`, and only `default` is ever replaced,
+  checked again under the row lock at write time. Too little speech keeps the placeholder; a
+  failed call changes nothing. Older notes are left alone. The Mac and iPhone no longer send their
+  own "Meeting <date>" as a title, and pick up the server's title in their recents.
 - **Generate Summary** (Mac, iPhone, web; `note-service`, ADR-0058 §5): the Notes tab of a draft
   made from a recording that was never written up — older than the engine, or the run never
   started — now shows one sentence and a *Generate Summary* button instead of nothing. It calls
@@ -50,6 +58,16 @@
   context pass names must be one it was given.
 
 ### Fixed
+- **A recording no longer yields an empty note in silence** (`note-service` engine, all clients):
+  NOTE-2026-00040 ran the engine automatically, extracted ten facts and wrote nothing, and the
+  Notes tab showed neither a word nor a button. Three causes. The small model copies the turn
+  header ("[0] Speaker 1 (00:00): ") into every quote, and the verbatim check failed on all of
+  them — the header is now stripped from the quote before it is located, as it already was from
+  the text. The model also flagged the recording's only substantive turn as "background"; a turn
+  that is more than half the window's words is now never noise, because it is the recording. And
+  a finished run that wrote nothing looked, to the clients, like a run that had nothing to say:
+  `GET /v1/notes/{id}/generation` now carries `sections_written`, and web, Mac and iPhone show
+  "Nothing could be written from this recording" with *Try again* when it is zero.
 - **Meeting notes read as a business record, not a retelling** (`note-service` engine, prompt
   `2026-10-3`): a generated note showed raw fact ids in the Discussion bullets
   ("…(d96df9628cf97a1b)"), a Decisions section full of verbatim asides ("Man war sehr

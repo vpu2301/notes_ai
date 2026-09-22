@@ -95,6 +95,20 @@ describe("generate summary", () => {
 });
 
 describe("generation status", () => {
+  it("says so when a finished run wrote nothing, and offers another go", async () => {
+    server({ ...BASE, status: "complete", finished_at: "x", sections_written: 0 });
+    strip({ canRegenerate: true });
+    expect(await screen.findByText(/Nothing could be written/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("is silent about a finished run that wrote the note", async () => {
+    server({ ...BASE, status: "complete", finished_at: "x", sections_written: 4 });
+    strip({ canRegenerate: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/Nothing could be written/i)).not.toBeInTheDocument();
+  });
+
   it("says how much of the recording has been read", async () => {
     server(BASE);
     strip();

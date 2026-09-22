@@ -56,6 +56,8 @@ MIN_QUOTE_WORDS: Final = 3
 MAX_THEMES: Final = 7
 MAX_KEY_POINTS: Final = 6
 MAX_NOISE_PER_WINDOW: Final = 8
+# A flagged turn above this share of the window's words is the recording, not noise.
+MAX_NOISE_SHARE: Final = 0.5
 
 # How sure the speaker was. The text has to carry it ("was estimated at",
 # "was described as"); the field makes the model decide it explicitly,

@@ -318,6 +318,26 @@ def test_pressing_record_opens_a_note(rig: SimpleNamespace) -> None:
     assert content.sections[0].text == ""
 
 
+def test_a_typed_title_is_the_authors_and_a_placeholder_is_not(rig: SimpleNamespace) -> None:
+    """0057: only the server's placeholder may be renamed by the engine."""
+    assert _start(rig, title="Weekly sync").status_code == 201
+    assert rig.create_calls[-1]["title_source"] == "user"
+
+    rig.create_calls.clear()
+    assert _start(rig, client_capture_id=str(uuid4())).status_code == 201
+    (call,) = rig.create_calls
+    assert call["title_source"] == "default"
+    assert call["content"].title.startswith("meeting_notes — ")
+
+
+def test_a_calendar_title_is_never_replaced(rig: SimpleNamespace) -> None:
+    resp = _start(rig, calendar={"source": "google", "title": "Acme <> Us"})
+    assert resp.status_code == 201, resp.text
+    (call,) = rig.create_calls
+    assert call["content"].title == "Acme <> Us"
+    assert call["title_source"] == "user"
+
+
 def test_the_same_capture_id_returns_the_same_note(rig: SimpleNamespace) -> None:
     rig.store.by_capture = _meeting_row()
     resp = _start(rig)

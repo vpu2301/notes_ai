@@ -248,10 +248,17 @@ def _noise_turns(extracted: schema.ExtractOut, window: Window) -> list[tuple[int
     """``[(turn index, start_ms, reason)]`` for the turns the extractor
     flagged — only ones that are in this window, only known reasons."""
     by_index = {t.index: t for t in window.turns}
+    total_words = sum(len(t.text.split()) for t in window.turns) or 1
     out: list[tuple[int, int, str]] = []
     for flagged in extracted.noise:
         turn = by_index.get(flagged.turn)
         if turn is None or flagged.reason not in schema.NOISE_REASONS:
+            continue
+        # Noise is marginal by definition. A turn that is most of the
+        # window IS the recording — an advertisement someone recorded is
+        # still what they recorded — and a model that calls it background
+        # would empty the note.
+        if len(turn.text.split()) > total_words * schema.MAX_NOISE_SHARE:
             continue
         out.append((turn.index, turn.start_ms, flagged.reason))
     return out

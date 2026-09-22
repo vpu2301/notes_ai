@@ -607,8 +607,14 @@ struct GenerationView: Decodable, Sendable {
     let windowsDone: Int?
     /// Why it ended without a document, from a closed vocabulary.
     let errorKind: String?
+    /// How many sections the run wrote; 0 on a finished run means the
+    /// recording yielded nothing the verifier let through.
+    let sectionsWritten: Int?
 
     var isLive: Bool { status == "queued" || status == "running" }
+    var isFinished: Bool { status == "complete" || status == "partial" }
+    /// Finished, and nothing to show for it: say so, offer another go.
+    var wroteNothing: Bool { isFinished && sectionsWritten == 0 }
 
     var progressText: String {
         if let total = windowsTotal, total > 0 {
@@ -633,11 +639,15 @@ struct GenerationView: Decodable, Sendable {
         }
     }
 
+    static let nothingWrittenText =
+        "Nothing could be written from this recording: no statement in it could be verified against the words that were said."
+
     enum CodingKeys: String, CodingKey {
         case id, status
         case windowsTotal = "windows_total"
         case windowsDone = "windows_done"
         case errorKind = "error_kind"
+        case sectionsWritten = "sections_written"
     }
 }
 

@@ -446,6 +446,7 @@ async def create_note_from_transcript(
                 source_session_id=None,
                 content=content,
                 source_asr_job_id=body.asr_job_id,
+                title_source="user" if body.title.strip() else "default",
             )
         except asyncpg.UniqueViolationError:
             # Concurrent double-assign lost the race on the partial index.

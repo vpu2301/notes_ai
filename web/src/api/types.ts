@@ -1266,6 +1266,9 @@ export interface GenerationView {
   /** Sections the engine did NOT write because the author had already
    *  written there; their facts are offered instead of imposed. */
   suggested_sections: string[];
+  /** How many sections the run wrote; 0 on a finished run means the
+   *  recording yielded nothing the verifier let through. */
+  sections_written?: number | null;
 }
 
 export interface GeneratedItem {

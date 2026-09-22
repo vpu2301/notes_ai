@@ -30,7 +30,7 @@ from db import tenant_connection
 from note_models import NoteStatus
 
 from .. import generation_metrics
-from ..domain import carry_over
+from ..domain import carry_over, note_title
 from ..domain import generation_repository as gen_repo
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
@@ -121,6 +121,19 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     provider = await deps.provider_for(str(tenant_id))
     language = str(result.get("language") or "en")
     meeting_date = (note.created_at or datetime.now(UTC)).date()
+
+    # 0057: the note gets its name first — one short call, seconds rather
+    # than the minutes the document takes, and never able to stop it.
+    await _name_note(
+        deps,
+        tenant_id,
+        note_id=note_id,
+        generation_id=generation_id,
+        requested_by=generation.requested_by,
+        result=result,
+        provider=provider,
+        language=language,
+    )
 
     document = await pipeline.run(
         result,
@@ -259,6 +272,45 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         "sections_suggested": suggested,
         "facts": len(document.facts),
     }
+
+
+async def _name_note(
+    deps: GenerationDeps,
+    tenant_id: UUID,
+    *,
+    note_id: UUID,
+    generation_id: UUID,
+    requested_by: UUID,
+    result: dict[str, Any],
+    provider: Any,
+    language: str,
+) -> None:
+    """Replace the placeholder title with one taken from the meeting.
+
+    The source is read before the model is asked, so a note that already
+    has a person's title (or this job's, from an earlier attempt) costs no
+    call — and read again under the row lock inside `note_title.apply`,
+    so a rename made while the model was answering is the one that stays.
+    """
+    try:
+        async with tenant_connection(deps.app_pool, tenant_id) as conn:
+            if await note_title.source_of(conn, note_id=note_id) != note_title.DEFAULT:
+                return
+        title = await note_title.suggest(provider, result, language=language)
+        if title is None:
+            logger.info("note_generate.title_skipped")
+            return
+        async with tenant_connection(deps.app_pool, tenant_id) as conn:
+            written = await note_title.apply(
+                conn,
+                note_id=note_id,
+                title=title,
+                requested_by=requested_by,
+                generation_id=generation_id,
+            )
+        logger.info("note_generate.title_done", extra={"written": written})
+    except Exception:  # noqa: BLE001 — the note matters more than its name
+        logger.warning("note_generate.title_failed", exc_info=True)
 
 
 async def _store_items(

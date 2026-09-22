@@ -127,7 +127,10 @@ def locate_quote(quote: str, window: Window, cited_turn: int) -> Turn | None:
     the window: a model that cites turn 7 for words said in turn 8 is
     wrong about the number, not lying about the words.
     """
-    needle = normalise_quote(quote)
+    # A small model copies the turn header — "[0] Speaker 1 (00:00): " —
+    # into the quote as readily as into the text. The words after it are
+    # what was said; the header is ours.
+    needle = normalise_quote(strip_turn_header(quote))
     if len(needle.split()) < schema.MIN_QUOTE_WORDS:
         return None
     turn = window.turn(cited_turn)
@@ -272,7 +275,7 @@ def is_copied(text: str, quote: str) -> bool:
     it reads as somebody's aside ("Man war sehr zögerlich…") filed as an
     outcome.
     """
-    said, claim = normalise_quote(quote), normalise_quote(text)
+    said, claim = normalise_quote(strip_turn_header(quote)), normalise_quote(text)
     if not claim or not said:
         return False
     return claim == said or (claim in said and len(claim) >= 0.8 * len(said))

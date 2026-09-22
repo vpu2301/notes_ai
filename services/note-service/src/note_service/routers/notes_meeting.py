@@ -337,11 +337,8 @@ async def start_meeting(
             meeting_type=body.meeting_type,
             language=body.language,
         )
-        title = (
-            body.title.strip()
-            or str(context.get("title") or "").strip()
-            or f"{template_name} — {date.today().isoformat()}"
-        )[:512]
+        chosen_title = body.title.strip() or str(context.get("title") or "").strip()
+        title = (chosen_title or f"{template_name} — {date.today().isoformat()}")[:512]
         content = initial_content(
             definition=definition,
             template_id=template_id,
@@ -360,6 +357,9 @@ async def start_meeting(
             template_schema_version=schema_version,
             source_session_id=None,
             content=content,
+            # A title the author typed or their invite carried is theirs;
+            # only the placeholder is for the generation job to replace.
+            title_source="user" if chosen_title else "default",
         )
         try:
             await meetings.create(

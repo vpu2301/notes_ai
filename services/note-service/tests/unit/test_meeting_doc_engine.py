@@ -1456,3 +1456,37 @@ def test_a_template_section_the_engine_filled_last_time_is_emptied_when_not_writ
     assert text["gen:overview"] == "An interview."
     assert sorted(outcome.removed_sections) == ["attendees", "discussion"]
     assert outcome.changed
+
+
+def test_a_quote_with_an_echoed_turn_header_still_locates() -> None:
+    """NOTE-2026-00040: every quote began "[0] Speaker 1 (00:00): " and
+    all ten facts were dropped as unquoted. The header is ours."""
+    window = _window(_turn(0, "Anna", "the budget is twelve thousand euros this year"))
+    kept = verify.verify_facts(
+        [
+            _fact(
+                kind=schema.KEY_POINT,
+                text="The budget is twelve thousand euros this year.",
+                quote="[0] Anna (00:00): the budget is twelve thousand euros this year",
+            )
+        ],
+        window=window,
+        meeting_date=MEETING_DATE,
+    )
+    assert len(kept) == 1
+
+
+def test_most_of_the_window_cannot_be_noise() -> None:
+    from note_service.domain.meeting_doc import pipeline
+
+    window = _window(
+        _turn(0, "Anna", "the recording is an advertisement with many many words in it here"),
+        _turn(1, None, "hm", start_ms=3_000),
+    )
+    extracted = schema.ExtractOut(
+        noise=[
+            schema.NoiseTurn(turn=0, reason="background"),
+            schema.NoiseTurn(turn=1, reason="artifact"),
+        ]
+    )
+    assert pipeline._noise_turns(extracted, window) == [(1, 3_000, "artifact")]

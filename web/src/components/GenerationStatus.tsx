@@ -147,6 +147,22 @@ export function GenerationStatus({
     );
   }
 
+  if ((view.status === "complete" || view.status === "partial") && view.sections_written === 0) {
+    return (
+      <p className="banner banner-warn gen-status" role="status">
+        <span className="grow">
+          Nothing could be written from this recording: no statement in it could be verified
+          against the words that were said.
+        </span>
+        {canRegenerate && (
+          <button className="btn sm" disabled={busy} onClick={() => void again()}>
+            Try again
+          </button>
+        )}
+      </p>
+    );
+  }
+
   if (view.status === "partial") {
     const minutes = view.failed_ranges
       .map((range) => Math.round((range[0] ?? 0) / 60_000))

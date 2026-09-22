@@ -809,6 +809,10 @@ async def create_note_with_v1(
     source_session_id: UUID | None,
     content: NoteContent,
     source_asr_job_id: UUID | None = None,
+    # 0057 — "default" when the server made the title up and the
+    # generation job may name the note; None for a note that is never
+    # titled automatically.
+    title_source: str | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
 
@@ -828,9 +832,9 @@ async def create_note_with_v1(
         INSERT INTO notes (
             tenant_id, code, status, primary_author_id, co_author_ids,
             template_id, template_schema_version,
-            title, source_session_id, source_asr_job_id
+            title, source_session_id, source_asr_job_id, title_source
         )
-        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         """,
         tenant_id,
@@ -842,6 +846,7 @@ async def create_note_with_v1(
         content.title,
         source_session_id,
         source_asr_job_id,
+        title_source,
     )
 
     version_id: UUID = await conn.fetchval(
@@ -905,6 +910,10 @@ async def append_version(
     # hash, so History can say a version was written by the engine and
     # which run produced it. Never content.
     extra_metadata: dict[str, Any] | None = None,
+    # 0057 — set by the one writer that names a note on the user's
+    # behalf (`note_title`). Everyone else leaves it None, and a title
+    # that changes under None is a person renaming the note.
+    title_source: str | None = None,
 ) -> tuple[UUID, int]:
     """Append a new version row to ``note_id``.
 
@@ -967,6 +976,15 @@ async def append_version(
         """
         UPDATE notes
         SET current_version_id = $2,
+            title_source       = CASE
+                WHEN $4::text IS NOT NULL THEN $4::text
+                WHEN title IS DISTINCT FROM $3 THEN 'user'
+                ELSE title_source
+            END,
+            title_generated_at = CASE
+                WHEN $4::text = 'ai' THEN now()
+                ELSE title_generated_at
+            END,
             title              = $3,
             updated_at         = now()
         WHERE id = $1
@@ -974,6 +992,7 @@ async def append_version(
         note_id,
         new_version_id,
         new_content.title,
+        title_source,
     )
     return new_version_id, new_version_number
 

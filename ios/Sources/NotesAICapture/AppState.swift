@@ -1007,8 +1007,10 @@ final class AppState: ObservableObject {
         persistRecents()
     }
 
-    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil) {
+    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil,
+                      title: String? = nil) {
         guard let index = recents.firstIndex(where: { $0.jobId == jobId }) else { return }
+        if let title, !title.isEmpty { recents[index].title = title }
         if let status { recents[index].status = status }
         if let noteId { recents[index].noteId = noteId }
         if let errorMessage { recents[index].errorMessage = errorMessage }

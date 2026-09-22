@@ -68,6 +68,14 @@ struct NoteView: View {
         }
         .task(id: model.noteId) { await model.load() }
         .task(id: model.noteId) { await model.loadSharing() }
+        .onChange(of: model.note?.title) { old, title in
+            // The server's name for the note — the one a recording gets
+            // once it has been heard — replaces this device's placeholder
+            // in the recents and the notes list.
+            guard let title, !title.isEmpty else { return }
+            if let jobId = capture?.jobId { app.updateRecent(jobId: jobId, title: title) }
+            if old != nil, old != title { Task { await app.refreshNotes() } }
+        }
         .task(id: model.version) { await model.loadItems() }
         .onDisappear { Task { await model.flush() } }
         .onChange(of: model.deleted) { _, deleted in
@@ -479,10 +487,12 @@ struct NoteView: View {
                         .font(.dsBody)
                         .foregroundStyle(DS.muted)
                 }
-            } else if let generation = model.generation, generation.status == "failed", model.editable {
+            } else if let generation = model.generation, model.editable,
+                      generation.status == "failed" || generation.wroteNothing {
                 HStack(alignment: .center, spacing: 10) {
                     DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
-                             text: generation.failureText)
+                             text: generation.wroteNothing
+                                 ? GenerationView.nothingWrittenText : generation.failureText)
                     if generation.errorKind != "budget_exceeded" {
                         Button("Try again") { Task { await model.generateSummary() } }
                             .buttonStyle(DSButtonStyle(kind: .secondary, height: 36))

@@ -681,7 +681,10 @@ actor APIClient {
 
     func createNoteFromTranscript(asrJobId: String, templateId: String?, title: String,
                                   tenant: String? = nil) async throws -> FromTranscriptResponse {
-        let request = FromTranscriptRequest(asrJobId: asrJobId, templateId: templateId, title: title)
+        // The app's own "Meeting <date>" placeholder is not a title anyone
+        // chose: sent empty, the server names the note from what was said.
+        let request = FromTranscriptRequest(asrJobId: asrJobId, templateId: templateId,
+                                            title: CaptureViewModel.isPlaceholderTitle(title) ? "" : title)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/from-transcript", method: "POST",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true,
                                   tenant: tenant)

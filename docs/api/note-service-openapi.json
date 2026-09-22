@@ -1960,6 +1960,17 @@
             "title": "Prompt Version",
             "type": "string"
           },
+          "sections_written": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sections Written"
+          },
           "status": {
             "title": "Status",
             "type": "string"

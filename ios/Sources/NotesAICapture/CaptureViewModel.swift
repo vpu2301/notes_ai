@@ -624,10 +624,24 @@ final class CaptureViewModel: ObservableObject {
     }
 
     private static func defaultTitle() -> String {
+        "\(placeholderPrefix)\(placeholderFormatter().string(from: Date()))"
+    }
+
+    /// Whether `title` is the placeholder `defaultTitle()` made — today or
+    /// on the day a kept recording was made — rather than one a person typed.
+    nonisolated static func isPlaceholderTitle(_ title: String) -> Bool {
+        guard title.hasPrefix(placeholderPrefix) else { return false }
+        let rest = String(title.dropFirst(placeholderPrefix.count))
+        return placeholderFormatter().date(from: rest) != nil
+    }
+
+    private nonisolated static let placeholderPrefix = "Meeting "
+
+    private nonisolated static func placeholderFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return "Meeting \(formatter.string(from: Date()))"
+        return formatter
     }
 }
 

@@ -60,6 +60,11 @@ class GenerationView(BaseModel):
     """Sections the engine did NOT write because the author had already
     written there; their facts are offered instead of imposed."""
     suggested_sections: list[str]
+    """How many sections the run wrote (or found already exactly right).
+    Zero on a finished run means the recording yielded nothing the
+    verifier would let through — the client says so rather than showing
+    an empty tab with no way forward."""
+    sections_written: int | None = None
 
     @property
     def live(self) -> bool:
@@ -110,6 +115,11 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
         created_at=row.created_at,
         finished_at=row.finished_at,
         suggested_sections=list((row.stats or {}).get("suggested_sections", [])),
+        sections_written=(
+            len((row.stats or {}).get("section_hashes", {}))
+            if row.status in ("complete", "partial")
+            else None
+        ),
     )
 
 
