@@ -93,6 +93,9 @@ struct HomeView: View {
                     .foregroundStyle(DS.text1)
                 Spacer()
                 if case .idle = capture.phase {
+                    // Sprint 34: what kind of meeting the next one is,
+                    // beside the button that starts it.
+                    MeetingTypePicker(height: 26)
                     NewMeetingButton(height: 32)
                 }
             }
@@ -730,7 +733,8 @@ private struct ComingUpRow: View {
                 }
                 if !capture.isRecording, !capture.phase.isBusy {
                     Button {
-                        capture.startNew(title: item.title, context: item.captureContext)
+                        capture.startNew(title: item.title, context: item.captureContext,
+                                         calendar: item.meetingCalendar)
                     } label: {
                         Label("Start", systemImage: "mic.fill")
                     }

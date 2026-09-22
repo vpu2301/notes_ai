@@ -72,10 +72,14 @@ struct RootView: View {
                         .padding(.top, -12)
                 }
                 if case .idle = capture.phase {
+                    MeetingTypePicker(height: 24)
                     NewMeetingButton(fill: true, height: 38)
                 } else {
                     ActiveCaptureCard(compact: true)
                         .dsCard(padding: 12)
+                    // Sprint 34: mark a moment without opening the window —
+                    // the lowest-friction way there is to say "this bit".
+                    if capture.isRecording { QuickNoteField() }
                 }
                 if app.recents.isEmpty {
                     MeetingsEmptyState(compact: true)
@@ -99,5 +103,51 @@ struct RootView: View {
                 await app.refreshWorkspaces()
             }
         }
+    }
+}
+
+/// "Quick note…" in the menu-bar popover.
+///
+/// One line, Return, gone. It appends to the same `user_notes` the capture
+/// window is typing into and is stamped with the moment it was written, so
+/// a thought marked from the menu bar anchors to the same passage as one
+/// typed in the window. Nothing else in the app is this close to hand
+/// during a call, which is exactly when the note is worth the most.
+struct QuickNoteField: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    @State private var line = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Quick note…", text: $line)
+                .textFieldStyle(.plain)
+                .font(.ds(13))
+                .focused($focused)
+                .onSubmit(add)
+                .accessibilityLabel("Quick note")
+                .accessibilityHint("Adds a timed line to the meeting note")
+            Button(action: add) {
+                Image(systemName: "return")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(line.isEmpty ? DS.muted : DS.accentText)
+            .disabled(line.isEmpty)
+            .help("Add this line to the meeting note")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous).fill(DS.surface2)
+        )
+    }
+
+    private func add() {
+        let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        capture.appendQuickNote(text)
+        line = ""
+        focused = true
     }
 }

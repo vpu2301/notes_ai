@@ -106,12 +106,17 @@ def create_and_verify(auth: str, mailpit: str, timeout: float) -> tuple[str, str
         return None
     if r.status_code == 404:
         return None
-    if not check("POST /auth/signup accepted the account", r.status_code in (200, 201, 202), r.text):
+    if not check(
+        "POST /auth/signup accepted the account", r.status_code in (200, 201, 202), r.text
+    ):
         return None
 
     # Unconfirmed: `/auth/login` must refuse with the code the app reads.
     refused = httpx.post(
-        f"{auth}/auth/login", json={"email": email, "password": password}, headers=IOS, timeout=timeout
+        f"{auth}/auth/login",
+        json={"email": email, "password": password},
+        headers=IOS,
+        timeout=timeout,
     )
     check(
         "an unconfirmed account is refused with `email_not_verified`",
@@ -173,7 +178,10 @@ def confirmation_token(mailpit: str, email: str, timeout: float, wait: float = 2
 
 def sign_in(auth: str, email: str, password: str, timeout: float) -> str | None:
     r = httpx.post(
-        f"{auth}/auth/login", json={"email": email, "password": password}, headers=IOS, timeout=timeout
+        f"{auth}/auth/login",
+        json={"email": email, "password": password},
+        headers=IOS,
+        timeout=timeout,
     )
     if not check("POST /auth/login signed the account in", r.status_code == 200, r.text):
         return None
@@ -183,7 +191,11 @@ def sign_in(auth: str, email: str, password: str, timeout: float) -> str | None:
     # no jar for. If this ever flips, the phone signs in and is silently
     # signed out fifteen minutes later.
     check("the refresh token came in the body", bool(body.get("refresh_token")), str(body.keys()))
-    check("no refresh cookie was set for a native client", "set-cookie" not in r.headers, str(r.headers))
+    check(
+        "no refresh cookie was set for a native client",
+        "set-cookie" not in r.headers,
+        str(r.headers),
+    )
     return body.get("access_token")
 
 
@@ -199,7 +211,11 @@ def capture(asr: str, note: str, token: str, seconds: float, timeout: float) -> 
         data={"language": "en", "diarize": "false"},
         timeout=timeout,
     )
-    if not check(f"POST /asr/jobs accepted {seconds:g}s of audio", submitted.status_code < 300, submitted.text):
+    if not check(
+        f"POST /asr/jobs accepted {seconds:g}s of audio",
+        submitted.status_code < 300,
+        submitted.text,
+    ):
         return False
     job_id = submitted.json()["id"]
 
@@ -211,7 +227,9 @@ def capture(asr: str, note: str, token: str, seconds: float, timeout: float) -> 
         if status in {"complete", "completed", "failed", "error"}:
             break
         time.sleep(2)
-    if not check("the job reached a terminal state", status.startswith("complet"), f"status={status!r}"):
+    if not check(
+        "the job reached a terminal state", status.startswith("complet"), f"status={status!r}"
+    ):
         return False
 
     # What `AppState.draftNote` does once the job completes. The note that
@@ -222,20 +240,29 @@ def capture(asr: str, note: str, token: str, seconds: float, timeout: float) -> 
         json={"asr_job_id": job_id, "title": "iOS smoke"},
         timeout=timeout,
     )
-    if not check("POST /v1/notes/from-transcript made a note", drafted.status_code < 300, drafted.text):
+    if not check(
+        "POST /v1/notes/from-transcript made a note", drafted.status_code < 300, drafted.text
+    ):
         return False
     note_id = drafted.json()["id"]
     read_back = httpx.get(
-        f"{note}/v1/notes/{note_id}", headers=auth_header, params={"include_content": "true"}, timeout=timeout
+        f"{note}/v1/notes/{note_id}",
+        headers=auth_header,
+        params={"include_content": "true"},
+        timeout=timeout,
     )
-    return check("the note reads back for the same account", read_back.status_code == 200, read_back.text)
+    return check(
+        "the note reads back for the same account", read_back.status_code == 200, read_back.text
+    )
 
 
 # ── main ─────────────────────────────────────────────────────────────
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--auth", default="http://localhost:8000")
     p.add_argument("--asr", default="http://localhost:8001")
     p.add_argument("--note", default="http://localhost:8006")

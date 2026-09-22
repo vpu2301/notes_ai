@@ -39,7 +39,7 @@ final class AppState: ObservableObject {
     /// Which page the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable { case general, connectors, account }
+    enum SettingsTab: Hashable { case general, connectors, dataAI, account }
 
     /// Open Settings on the Connectors page (menus, the home page's prompt).
     func showConnectors() {
@@ -359,6 +359,9 @@ final class AppState: ObservableObject {
         if let rules = try? await api.sharingConstraints() { sharingRules = rules }
         await refreshWorkspaces(force: true)
         refreshPending()
+        // Sprint 34: anything typed while this device was offline goes up
+        // now. Idempotent on the capture id, so a repeat costs one request.
+        await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
         await googleCalendar.refresh(force: true)
@@ -835,6 +838,7 @@ final class AppState: ObservableObject {
 
     /// The note is gone (deleted here or from the note page): forget it.
     func noteDeleted(_ noteId: String) {
+        capture.forgetNote(noteId)
         notes.removeAll { $0.noteId == noteId }
         var list = spaces
         for index in list.indices { list[index].noteIds.removeAll { $0 == noteId } }
@@ -1102,6 +1106,15 @@ final class AppState: ObservableObject {
 
     func openWebApp() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces)) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Settings › Data & AI in the web app — where the tier and the
+    /// processor acknowledgement are actually changed.
+    func openWebSettingsData() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/data") {
             UIApplication.shared.open(url)
         }
     }

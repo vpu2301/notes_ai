@@ -688,7 +688,138 @@ actor APIClient {
         return try decode(FromTranscriptResponse.self, from: data)
     }
 
+
+    // MARK: - The live meeting note (Sprint 34, ADR-0055)
+
+    /// Open the note as Record is pressed. Idempotent on
+    /// `clientCaptureId`: a retry, a double tap and a second device that
+    /// resumed the same capture all get the same note.
+    ///
+    /// The caller must never let this block or stop a recording — a note
+    /// we failed to create is recoverable, a meeting we failed to record
+    /// is not.
+    func startMeeting(clientCaptureId: String, title: String, startedAt: Date,
+                      language: String?, meetingType: MeetingType,
+                      calendar: MeetingCalendarContext?) async throws -> StartMeetingResponse {
+        let request = StartMeetingRequest(
+            clientCaptureId: clientCaptureId,
+            title: title.isEmpty ? nil : title,
+            startedAt: ISO8601DateFormatter().string(from: startedAt),
+            language: language,
+            meetingType: meetingType.rawValue,
+            calendar: calendar)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/meeting", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+        return try decode(StartMeetingResponse.self, from: data)
+    }
+
+    /// When each typed line was first touched. First report per key wins,
+    /// so re-sending a queue that may already have landed is safe.
+    func putLineTimes(noteId: String, lines: [UserLineTime]) async throws {
+        guard !lines.isEmpty else { return }
+        let body = try JSONEncoder().encode(["lines": lines])
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/my-notes/timing",
+                           method: "PUT", jsonBody: body, authorized: true)
+    }
+
+    /// The recording reached asr-service: bind the job to the note.
+    @discardableResult
+    func attachMeetingJob(noteId: String, asrJobId: String) async throws -> MeetingInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["asr_job_id": asrJobId])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting/job",
+                                  method: "POST", jsonBody: body, authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+    /// The transcription finished: put it in the note. Safe from any
+    /// device of the author, and idempotent — which is what makes a
+    /// capture survive the app being killed mid-transcription.
+    @discardableResult
+    func attachTranscript(noteId: String) async throws -> AttachTranscriptResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/transcript",
+                                  method: "POST", authorized: true)
+        return try decode(AttachTranscriptResponse.self, from: data)
+    }
+
+    /// The recording was discarded or never happened. The note stays — it
+    /// holds what was typed, which is the part that cannot be redone.
+    @discardableResult
+    func markMeetingNoAudio(noteId: String) async throws -> MeetingInfo {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting/no-audio",
+                                  method: "POST", authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+    /// 404 when the note is not a live capture (an upload, or typed by hand).
+    func meeting(noteId: String) async throws -> MeetingInfo {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting",
+                                  method: "GET", authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+
+    // MARK: - The workspace glossary (Sprint 35)
+
+    func glossary() async throws -> [GlossaryTerm] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary", method: "GET",
+                                  authorized: true)
+        return try decode([GlossaryTerm].self, from: data)
+    }
+
+    /// Remember one term. Sending one the workspace already has merges the
+    /// new mishearing into it rather than failing as a duplicate.
+    @discardableResult
+    func rememberTerm(_ term: String, kind: GlossaryKind = .person,
+                      heardAs: [String] = []) async throws -> GlossaryTerm {
+        let request = RememberTermRequest(term: term, kind: kind.rawValue,
+                                          heardAs: heardAs.filter { !$0.isEmpty })
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+        return try decode(GlossaryTerm.self, from: data)
+    }
+
+    func forgetTerm(id: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/glossary/\(id)", method: "DELETE",
+                           authorized: true)
+    }
+
+    /// The workspace's terms as a `vocabulary_hint`, so the transcriber
+    /// has the spellings before it guesses.
+    func glossaryHint() async throws -> GlossaryHint {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary/hint", method: "GET",
+                                  authorized: true)
+        return try decode(GlossaryHint.self, from: data)
+    }
+
+    // MARK: - Model tiers and processors (Sprint 37)
+
+    /// Who processes this workspace's meetings. Every member may read it.
+    func aiSettings() async throws -> AISettings {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/ai/settings", method: "GET",
+                                  authorized: true)
+        return try decode(AISettings.self, from: data)
+    }
+
     // MARK: - Notes (note-service): open, edit, export
+
+    // MARK: - Generation (Sprint 33)
+
+    /// 404 when the note was never written up by the engine.
+    func generation(noteId: String) async throws -> GenerationView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
+                                  method: "GET", authorized: true)
+        return try decode(GenerationView.self, from: data)
+    }
+
+    /// Write the note from its recording — *Generate Summary*. 409 with
+    /// a code when the workspace has it off, is over budget, or the note
+    /// is already being written; 429 after ten runs in a day.
+    @discardableResult
+    func regenerate(noteId: String) async throws -> GenerationStarted {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
+                                  method: "POST", authorized: true)
+        return try decode(GenerationStarted.self, from: data)
+    }
 
     /// `purpose` is required when the note is not ours and was not shared
     /// with us; the server says so with `APIError.needsReadPurpose`.
@@ -965,6 +1096,7 @@ actor APIClient {
     func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool,
                    speakersExpected: Int? = nil,
                    context: CaptureContext? = nil,
+                   vocabularyHint: String? = nil,
                    channelLayout: String? = nil,
                    localSpeakerName: String? = nil,
                    tenant: String? = nil) async throws -> TranscriptionJob {
@@ -975,6 +1107,7 @@ actor APIClient {
                 boundary: boundary,
                 fields: Self.jobFields(language: language, diarize: diarize,
                                        speakersExpected: speakersExpected, context: context,
+                                       vocabularyHint: vocabularyHint,
                                        channelLayout: channelLayout,
                                        localSpeakerName: localSpeakerName),
                 fileField: "audio",
@@ -1016,11 +1149,17 @@ actor APIClient {
     static func jobFields(language: String, diarize: Bool,
                           speakersExpected: Int?,
                           context: CaptureContext? = nil,
+                          vocabularyHint: String? = nil,
                           channelLayout: String? = nil,
                           localSpeakerName: String? = nil) -> [(String, String)] {
         var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
         if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
         if let context { fields += context.formFields(diarize: diarize) }
+        // Sprint 35: the workspace's own names and terms, so the
+        // transcriber has the spellings before it guesses.
+        if let vocabularyHint, !vocabularyHint.isEmpty {
+            fields.append(("vocabulary_hint", String(vocabularyHint.prefix(2000))))
+        }
         if let channelLayout { fields.append(("channel_layout", channelLayout)) }
         if let name = LocalSpeakerName.normalized(localSpeakerName) { fields.append(("local_speaker_name", name)) }
         return fields

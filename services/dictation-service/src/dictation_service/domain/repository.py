@@ -185,13 +185,6 @@ async def abandon_if_still_stale(
     return str(result).endswith(" 1")
 
 
-async def touch_last_active(conn: asyncpg.Connection, *, session_id: UUID) -> None:
-    await conn.execute(
-        "UPDATE dictation_sessions SET last_active_at = now() WHERE id = $1",
-        session_id,
-    )
-
-
 async def write_finalized(
     conn: asyncpg.Connection,
     *,

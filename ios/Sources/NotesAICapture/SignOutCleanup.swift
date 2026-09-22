@@ -13,7 +13,11 @@ import Foundation
 ///   disconnected;
 /// - the per-job "Looks right" answers on the speaker-count banner
 ///   (`speakerCountConfirmed.<job>`, Sprint 29), which list the account's
-///   jobs.
+///   jobs;
+/// - the scratchpads waiting to sync (`PendingMeetingNotes`, Sprint 34).
+///   Unlike a recording, typed notes are not irreplaceable evidence of a
+///   meeting that cannot happen again — they are the person's words about
+///   their workspace, and they do not belong to whoever signs in next.
 ///
 /// The rest of a sidecar — title, language, the People hint, the invitee
 /// count cap, where the capture started, the channel layout — describes
@@ -24,9 +28,22 @@ enum SignOutCleanup {
     static let perJobKeyPrefixes = [NoteViewModel.countBannerKey("")]
 
     static func run(identityId: String, directory: URL = PendingCaptures.directory,
+                    meetingNotes: URL = PendingMeetingNotes.directory,
                     defaults: UserDefaults = .standard) {
         scrubPending(identityId: identityId, in: directory)
+        forgetMeetingNotes(identityId: identityId, in: meetingNotes)
         forgetPerJobAnswers(in: defaults)
+    }
+
+    /// Drop this identity's unsynced scratchpads. Another person's on a
+    /// shared device are left alone, the same rule as the recordings.
+    @discardableResult
+    static func forgetMeetingNotes(identityId: String,
+                                   in directory: URL = PendingMeetingNotes.directory) -> Int {
+        guard !identityId.isEmpty else { return 0 }
+        let mine = PendingMeetingNotes.all(identityId: identityId, in: directory)
+        for note in mine { PendingMeetingNotes.remove(note.clientCaptureId, in: directory) }
+        return mine.count
     }
 
     /// Drop the personal context from this identity's kept recordings.

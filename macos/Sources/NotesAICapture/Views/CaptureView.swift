@@ -76,6 +76,7 @@ struct ActiveCaptureCard: View {
                 PeoplePicker(height: 26)
                     .frame(maxWidth: compact ? .infinity : 300)
             }
+            MyNotesEditor(compact: compact)
             if let warning = capture.limitWarning {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
             } else {
@@ -155,6 +156,8 @@ struct ActiveCaptureCard: View {
                     .lineLimit(1)
             }
             PipelineSteps(phase: capture.phase)
+            // The typing does not disappear the moment the meeting ends.
+            MyNotesEditor(compact: compact)
             if capture.stoppedAtLimit {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark",
                          text: "Stopped at the \(formatLimit(capture.recorder.limitSeconds)) limit. The note is being drafted — start a new meeting to keep recording.")
@@ -244,6 +247,66 @@ struct PeoplePicker: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("People in the meeting")
             .accessibilityHint(capture.diarize ? "" : "Turn on Separate speakers in Settings to use this")
+    }
+}
+
+/// "My notes": what the author types while the meeting runs (Sprint 34).
+///
+/// It is the note's `user_notes` section, not a scratch buffer — autosaved
+/// as it is typed, on disk within half a second, and on every other device
+/// of the same person. Nothing downstream ever rewrites a character of it:
+/// the document is built AROUND these lines.
+struct MyNotesEditor: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                if capture.myNotes.isEmpty {
+                    Text("Type what matters. We'll fill in the rest.")
+                        .font(.ds(13))
+                        .foregroundStyle(DS.muted)
+                        .padding(.top, 7)
+                        .padding(.leading, 6)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $capture.myNotes)
+                    .font(.ds(13))
+                    .foregroundStyle(DS.text1)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: compact ? 84 : 150, maxHeight: compact ? 140 : 320)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .fill(DS.surface2)
+            )
+            .accessibilityLabel("My notes")
+            .accessibilityHint("Type what matters while the meeting runs")
+            Text(capture.notesUnsaved ? "Saving…" : "Saved — open on any device")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+        }
+    }
+}
+
+/// What kind of meeting the next one is: picks the template family the note
+/// is written into. "Auto" is the default and is always right enough, so
+/// this is a thing to notice rather than a step to complete.
+struct MeetingTypePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var height: CGFloat = 26
+
+    var body: some View {
+        DSSegmentedPill(
+            options: MeetingType.allCases.map { .init($0, label: $0.label) },
+            selection: $capture.meetingType,
+            height: height)
+            .disabled(capture.isRecording || capture.phase.isBusy)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Kind of meeting")
     }
 }
 

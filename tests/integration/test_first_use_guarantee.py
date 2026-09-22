@@ -152,9 +152,7 @@ def _serve_jwks_from(app, auth_app) -> None:
     if hasattr(state, "current_user_dep"):
         from auth import build_current_user, build_session_denylist  # noqa: F401
 
-        state.current_user_dep = build_current_user(
-            jwks_cache=state.jwks_cache, issuers=issuers
-        )
+        state.current_user_dep = build_current_user(jwks_cache=state.jwks_cache, issuers=issuers)
 
 
 @pytest_asyncio.fixture
@@ -333,11 +331,7 @@ async def test_a_brand_new_account_can_actually_use_the_product(
         assert templates.status_code == 200, templates.text
         visible = templates.json()
         assert visible, "a new workspace sees no templates at all"
-        meeting = [
-            t
-            for t in visible
-            if "meeting" in json.dumps(t).lower()
-        ]
+        meeting = [t for t in visible if "meeting" in json.dumps(t).lower()]
         assert meeting, (
             "the system meeting-notes template is not visible to a new "
             f"workspace; saw {[t.get('key') or t.get('name') for t in visible]}"

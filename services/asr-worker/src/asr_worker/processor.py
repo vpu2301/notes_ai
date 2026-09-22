@@ -54,7 +54,6 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -1557,8 +1556,3 @@ def _release_cuda_cache() -> None:
             torch.cuda.empty_cache()
     except Exception:
         pass
-
-
-# Re-export the timestamp helper for the worker tests.
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat()

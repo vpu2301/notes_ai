@@ -18,21 +18,26 @@ from .deps import install_state
 from .main_deps import build_state, teardown_state
 from .middleware import AnonymousCorsMiddleware, RequestIDMiddleware
 from .routers import (
+    ai_settings,
     audio_clips,
     calendar,
+    glossary,
     health,
     notes,
     notes_ask,
     notes_audio,
+    notes_corrections,
     notes_diff,
     notes_drafts,
     notes_from_transcript,
+    notes_generation,
     notes_items,
     notes_lifecycle,
+    notes_meeting,
     notes_pdf,
     notes_search,
+    notes_series,
     notes_sharing,
-    notes_synthesis,
     notes_versions,
     search_tips,
     shared_public,
@@ -86,6 +91,50 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 name="idle-draft-cleanup",
             )
         )
+
+        # Sprint 34: captures whose client never came back (a crashed tab,
+        # a killed app) stop claiming to be recording. Nothing is deleted.
+        from .jobs import meeting_state_sweeper
+
+        async def _meeting_sweep_iteration() -> dict[str, int]:
+            return await meeting_state_sweeper.run_for_all_tenants(
+                app_pool=state.app_pool,
+                audit_writer=state.audit_writer,
+                stale_hours=settings.meeting_stale_hours,
+            )
+
+        jobs.append(
+            asyncio.create_task(
+                run_periodic(
+                    job_name="meeting_state_sweeper",
+                    interval_seconds=settings.background_jobs_interval_s,
+                    fn=_meeting_sweep_iteration,
+                ),
+                name="meeting-state-sweeper",
+            )
+        )
+        # Sprint 37: transcript snapshots whose worker was killed before
+        # it could delete its own. Nothing older than a day survives.
+        from .jobs import snapshot_sweeper
+
+        async def _snapshot_sweep_iteration() -> dict[str, int]:
+            return await snapshot_sweeper.run_for_all_tenants(
+                app_pool=state.app_pool,
+                store=state.transcripts_store,
+                audit_writer=state.audit_writer,
+                stale_hours=settings.generation_snapshot_hours,
+            )
+
+        jobs.append(
+            asyncio.create_task(
+                run_periodic(
+                    job_name="snapshot_sweeper",
+                    interval_seconds=settings.background_jobs_interval_s,
+                    fn=_snapshot_sweep_iteration,
+                ),
+                name="snapshot-sweeper",
+            )
+        )
     logger.info(
         "note-service.started",
         extra={"service": settings.service_name, "env": settings.environment},
@@ -134,9 +183,18 @@ def create_app() -> FastAPI:
     # routes so ``/v1/notes/search`` matches the search handler rather than
     # ``GET /v1/notes/{note_id}``.
     app.include_router(notes_search.router)
-    # BEFORE notes.router: its literal paths (/from-transcript,
-    # /by-source-job) must win over notes' /{note_id} catch-all.
+    # BEFORE notes.router: their literal paths (/from-transcript,
+    # /by-source-job, /meeting) must win over notes' /{note_id} catch-all.
     app.include_router(notes_from_transcript.router)
+    # Sprint 34: the note is created at record start (ADR-0055).
+    app.include_router(notes_meeting.router)
+    # Sprint 35: dismiss / restore / fix a line's owner or date. Before
+    # notes.router for the same reason — literal segments first.
+    app.include_router(notes_corrections.router)
+    # Sprint 36: what is still open from last time, and the client version.
+    app.include_router(notes_series.router)
+    # Sprint 33: how the writing is going, and the facts behind it.
+    app.include_router(notes_generation.router)
     app.include_router(notes.router)
     app.include_router(notes_drafts.router)
     app.include_router(notes_lifecycle.router)
@@ -146,7 +204,6 @@ def create_app() -> FastAPI:
     app.include_router(notes_sharing.router)
     # Sprint 20: action items + recipient responses, author side.
     app.include_router(notes_items.router)
-    app.include_router(notes_synthesis.router)
     # "Ask this note" — a question over the note and its transcript.
     app.include_router(notes_ask.router)
     # Anonymous, token-addressed reads — no auth dependency at all.
@@ -164,6 +221,10 @@ def create_app() -> FastAPI:
     app.include_router(calendar.router)
     # 0021: spaces — personal note folders shared across devices.
     app.include_router(spaces.router)
+    # Sprint 35: the workspace glossary that feeds the vocabulary hint.
+    app.include_router(glossary.router)
+    # Sprint 37: who processes this workspace's meetings (ADR-0046 d.12).
+    app.include_router(ai_settings.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

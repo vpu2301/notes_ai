@@ -14,6 +14,61 @@
         "title": "Accepted",
         "type": "object"
       },
+      "AcknowledgedProcessor": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "title": "Name",
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 120,
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "region"
+        ],
+        "title": "AcknowledgedProcessor",
+        "type": "object"
+      },
+      "AddTermRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "heard_as": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Heard As",
+            "type": "array"
+          },
+          "kind": {
+            "default": "person",
+            "enum": [
+              "person",
+              "company",
+              "product",
+              "term"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "term": {
+            "maxLength": 160,
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term"
+        ],
+        "title": "AddTermRequest",
+        "type": "object"
+      },
       "AskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -84,6 +139,46 @@
           "text"
         ],
         "title": "AskTurn",
+        "type": "object"
+      },
+      "AttachJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asr_job_id": {
+            "format": "uuid",
+            "title": "Asr Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asr_job_id"
+        ],
+        "title": "AttachJobRequest",
+        "type": "object"
+      },
+      "AttachTranscriptResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "state"
+        ],
+        "title": "AttachTranscriptResponse",
         "type": "object"
       },
       "AudioSegmentOut": {
@@ -178,6 +273,72 @@
           "updated_at"
         ],
         "title": "BoundNote",
+        "type": "object"
+      },
+      "CalendarContextIn": {
+        "additionalProperties": false,
+        "description": "What the invite knew. ``description`` is read for its agenda and\nthen dropped \u2014 it is never stored and never returned.",
+        "properties": {
+          "agenda_lines": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Agenda Lines",
+            "type": "array"
+          },
+          "attendee_names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Attendee Names",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ical_uid": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ical Uid"
+          },
+          "source": {
+            "enum": [
+              "google",
+              "ics",
+              "eventkit"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CalendarContextIn",
         "type": "object"
       },
       "CalendarView": {
@@ -278,6 +439,174 @@
         "title": "CancelRequest",
         "type": "object"
       },
+      "CarriedItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "done_quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done Quote"
+          },
+          "done_speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done Speaker"
+          },
+          "due_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Text"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "text",
+          "owner_label",
+          "due_text",
+          "state"
+        ],
+        "title": "CarriedItemView",
+        "type": "object"
+      },
+      "CarriedStateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "enum": [
+              "open",
+              "done_marked",
+              "dropped"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "CarriedStateRequest",
+        "type": "object"
+      },
+      "CarriedView": {
+        "additionalProperties": false,
+        "properties": {
+          "from_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "from_note_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Note Code"
+          },
+          "from_note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Note Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CarriedItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "from_note_id",
+          "from_note_code",
+          "from_date"
+        ],
+        "title": "CarriedView",
+        "type": "object"
+      },
+      "ChecklistItem": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "count"
+        ],
+        "title": "ChecklistItem",
+        "type": "object"
+      },
       "ChoiceOption": {
         "additionalProperties": false,
         "description": "One selectable option of a ``choice``/``multi_choice`` section.\n\n``value`` is the stable identity persisted in note content\n(``field_specific_metadata``); renaming or removing a value is a\nSTRUCTURAL template edit because stored selections would dangle.\n``voice_aliases`` fuel the sprint-13 extractor and are normalized\nhere (NFC, lower-case, stripped) so the extractor never\nre-normalizes template data.",
@@ -307,6 +636,114 @@
           "label"
         ],
         "title": "ChoiceOption",
+        "type": "object"
+      },
+      "ClientSectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "section_key": {
+            "title": "Section Key",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_key",
+          "role",
+          "name",
+          "text"
+        ],
+        "title": "ClientSectionView",
+        "type": "object"
+      },
+      "ClientVersionCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "is_empty": {
+            "title": "Is Empty",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItem"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "warnings",
+          "is_empty"
+        ],
+        "title": "ClientVersionCheck",
+        "type": "object"
+      },
+      "ClientVersionView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "hidden_lines": {
+            "title": "Hidden Lines",
+            "type": "integer"
+          },
+          "hidden_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hidden Sections",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/ClientSectionView"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "title",
+          "sections",
+          "hidden_lines",
+          "hidden_sections"
+        ],
+        "title": "ClientVersionView",
         "type": "object"
       },
       "CloneRequest": {
@@ -534,6 +971,48 @@
           "verified_recipients_required"
         ],
         "title": "Constraints",
+        "type": "object"
+      },
+      "CorrectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "section_key": {
+            "title": "Section Key",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "item_key",
+          "section_key",
+          "version_number",
+          "line"
+        ],
+        "title": "CorrectionResponse",
         "type": "object"
       },
       "CreateClipRequest": {
@@ -883,12 +1362,48 @@
         "title": "DiffSegment",
         "type": "object"
       },
+      "DismissRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "not_said",
+              "not_a_decision",
+              "not_a_task",
+              "wrong_owner",
+              "wrong_date",
+              "duplicate",
+              "not_relevant"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "reason"
+        ],
+        "title": "DismissRequest",
+        "type": "object"
+      },
       "EventView": {
         "additionalProperties": false,
         "properties": {
           "account_email": {
             "title": "Account Email",
             "type": "string"
+          },
+          "agenda_lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Agenda Lines",
+            "type": "array"
           },
           "all_day": {
             "title": "All Day",
@@ -943,6 +1458,10 @@
               }
             ],
             "title": "Html Link"
+          },
+          "ical_uid": {
+            "title": "Ical Uid",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -1018,7 +1537,9 @@
           "attendee_count",
           "attendees",
           "organizer",
-          "response_status"
+          "response_status",
+          "ical_uid",
+          "agenda_lines"
         ],
         "title": "EventView",
         "type": "object"
@@ -1124,6 +1645,31 @@
             "title": "Code",
             "type": "string"
           },
+          "generation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GenerationStub"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation_blocked": {
+            "anyOf": [
+              {
+                "enum": [
+                  "generation_disabled",
+                  "budget_exceeded"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Blocked"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -1185,6 +1731,309 @@
         "title": "FromTranscriptResponse",
         "type": "object"
       },
+      "GeneratedItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "due_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Text"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "explicit": {
+            "title": "Explicit",
+            "type": "boolean"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "placement": {
+            "title": "Placement",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "section_key": {
+            "title": "Section Key",
+            "type": "string"
+          },
+          "speaker_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Label"
+          },
+          "speaker_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Name"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "kind",
+          "section_key",
+          "text",
+          "owner_label",
+          "due_text",
+          "due_date",
+          "explicit",
+          "confidence",
+          "flags",
+          "quote",
+          "start_ms",
+          "end_ms",
+          "speaker_label",
+          "speaker_name",
+          "placement"
+        ],
+        "title": "GeneratedItemView",
+        "type": "object"
+      },
+      "GenerationStarted": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "GenerationStarted",
+        "type": "object"
+      },
+      "GenerationStub": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "GenerationStub",
+        "type": "object"
+      },
+      "GenerationView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Kind"
+          },
+          "failed_ranges": {
+            "items": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "title": "Failed Ranges",
+            "type": "array"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "suggested_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Sections",
+            "type": "array"
+          },
+          "windows_done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windows Done"
+          },
+          "windows_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windows Failed"
+          },
+          "windows_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windows Total"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "step",
+          "windows_total",
+          "windows_done",
+          "windows_failed",
+          "failed_ranges",
+          "prompt_version",
+          "model_id",
+          "error_kind",
+          "created_at",
+          "finished_at",
+          "suggested_sections"
+        ],
+        "title": "GenerationView",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1209,6 +2058,25 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HintView": {
+        "additionalProperties": false,
+        "properties": {
+          "hint": {
+            "title": "Hint",
+            "type": "string"
+          },
+          "terms": {
+            "title": "Terms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hint",
+          "terms"
+        ],
+        "title": "HintView",
         "type": "object"
       },
       "ItemCounts": {
@@ -1396,6 +2264,46 @@
           "responses"
         ],
         "title": "ItemView",
+        "type": "object"
+      },
+      "LineTime": {
+        "additionalProperties": false,
+        "properties": {
+          "line_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Line Key",
+            "type": "string"
+          },
+          "offset_ms": {
+            "minimum": 0.0,
+            "title": "Offset Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line_key",
+          "offset_ms"
+        ],
+        "title": "LineTime",
+        "type": "object"
+      },
+      "LineTimesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LineTime"
+            },
+            "maxItems": 500,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "LineTimesRequest",
         "type": "object"
       },
       "LinkConnectRequest": {
@@ -1602,6 +2510,45 @@
           "en"
         ],
         "title": "LocalizedText",
+        "type": "object"
+      },
+      "MeetingView": {
+        "additionalProperties": false,
+        "description": "What a second device needs to show the right status and to finish\nthe job the first one started.",
+        "properties": {
+          "asr_job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asr Job Id"
+          },
+          "meeting_type": {
+            "title": "Meeting Type",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "asr_job_id",
+          "meeting_type",
+          "started_at"
+        ],
+        "title": "MeetingView",
         "type": "object"
       },
       "Member": {
@@ -1911,6 +2858,18 @@
             "title": "Text",
             "type": "string"
           },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
           "transcript_segment_ids": {
             "items": {
               "format": "uuid",
@@ -2079,6 +3038,70 @@
         "title": "NoteVersionSummary",
         "type": "object"
       },
+      "PatchItemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "clear_due": {
+            "default": false,
+            "title": "Clear Due",
+            "type": "boolean"
+          },
+          "clear_owner": {
+            "default": false,
+            "title": "Clear Owner",
+            "type": "boolean"
+          },
+          "due_text": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Text"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "PatchItemRequest",
+        "type": "object"
+      },
+      "PreviousNoteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "note_id": {
+            "format": "uuid",
+            "title": "Note Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id"
+        ],
+        "title": "PreviousNoteRequest",
+        "type": "object"
+      },
       "ProblemView": {
         "additionalProperties": false,
         "properties": {
@@ -2112,6 +3135,43 @@
           "needs_reauth"
         ],
         "title": "ProblemView",
+        "type": "object"
+      },
+      "ProcessorView": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledged": {
+            "title": "Acknowledged",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "tiers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tiers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "region",
+          "purpose",
+          "acknowledged"
+        ],
+        "title": "ProcessorView",
         "type": "object"
       },
       "PublicLinkRequest": {
@@ -2335,6 +3395,21 @@
           "cleared_at"
         ],
         "title": "ResponseView",
+        "type": "object"
+      },
+      "RestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "RestoreRequest",
         "type": "object"
       },
       "RevokeAllResult": {
@@ -2621,6 +3696,76 @@
           }
         },
         "title": "SendLinkRequest",
+        "type": "object"
+      },
+      "SettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "budget_cents": {
+            "title": "Budget Cents",
+            "type": "integer"
+          },
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "effective_provider": {
+            "title": "Effective Provider",
+            "type": "string"
+          },
+          "effective_tier": {
+            "title": "Effective Tier",
+            "type": "string"
+          },
+          "generation_enabled": {
+            "title": "Generation Enabled",
+            "type": "boolean"
+          },
+          "may_choose_premium": {
+            "title": "May Choose Premium",
+            "type": "boolean"
+          },
+          "month_to_date_cents": {
+            "title": "Month To Date Cents",
+            "type": "integer"
+          },
+          "needs_acknowledgement": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessorView"
+            },
+            "title": "Needs Acknowledgement",
+            "type": "array"
+          },
+          "processors": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessorView"
+            },
+            "title": "Processors",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "tier",
+          "generation_enabled",
+          "effective_provider",
+          "effective_tier",
+          "processors",
+          "needs_acknowledgement",
+          "month_to_date_cents",
+          "budget_cents",
+          "may_choose_premium",
+          "can_edit"
+        ],
+        "title": "SettingsView",
         "type": "object"
       },
       "ShareEmailOutcome": {
@@ -2937,6 +4082,11 @@
             },
             "title": "My Flags",
             "type": "array"
+          },
+          "preparing": {
+            "default": false,
+            "title": "Preparing",
+            "type": "boolean"
           },
           "product": {
             "$ref": "#/components/schemas/SharedProduct"
@@ -3371,6 +4521,115 @@
         "title": "SpacesResponse",
         "type": "object"
       },
+      "StartMeetingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalendarContextIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client_capture_id": {
+            "format": "uuid",
+            "title": "Client Capture Id",
+            "type": "string"
+          },
+          "language": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "en",
+              "de",
+              "uk"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "meeting_type": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "client",
+              "team",
+              "sales",
+              "one_on_one",
+              "interview"
+            ],
+            "title": "Meeting Type",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_capture_id",
+          "started_at"
+        ],
+        "title": "StartMeetingRequest",
+        "type": "object"
+      },
+      "StartMeetingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "template_id": {
+            "format": "uuid",
+            "title": "Template Id",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "version_number",
+          "template_id",
+          "state"
+        ],
+        "title": "StartMeetingResponse",
+        "type": "object"
+      },
       "StatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3460,113 +4719,6 @@
           "terms"
         ],
         "title": "SynonymGroupOut",
-        "type": "object"
-      },
-      "SynthesisJobResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "sections": {
-            "items": {
-              "$ref": "#/components/schemas/SynthesizedSection"
-            },
-            "title": "Sections",
-            "type": "array"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "sections"
-        ],
-        "title": "SynthesisJobResponse",
-        "type": "object"
-      },
-      "SynthesizeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "language": {
-            "enum": [
-              "uk",
-              "en",
-              "de"
-            ],
-            "title": "Language",
-            "type": "string"
-          },
-          "sections": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sections"
-          }
-        },
-        "required": [
-          "language"
-        ],
-        "title": "SynthesizeRequest",
-        "type": "object"
-      },
-      "SynthesizeResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "job_id": {
-            "format": "uuid",
-            "title": "Job Id",
-            "type": "string"
-          },
-          "sections": {
-            "items": {
-              "$ref": "#/components/schemas/SynthesizedSection"
-            },
-            "title": "Sections",
-            "type": "array"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id",
-          "status",
-          "sections"
-        ],
-        "title": "SynthesizeResponse",
-        "type": "object"
-      },
-      "SynthesizedSection": {
-        "additionalProperties": false,
-        "properties": {
-          "original": {
-            "title": "Original",
-            "type": "string"
-          },
-          "section_key": {
-            "title": "Section Key",
-            "type": "string"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "section_key",
-          "original",
-          "text"
-        ],
-        "title": "SynthesizedSection",
         "type": "object"
       },
       "TemplateDefinition": {
@@ -3802,6 +4954,33 @@
             "title": "Required",
             "type": "boolean"
           },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "summary",
+                  "attendees",
+                  "agenda",
+                  "topics",
+                  "decisions",
+                  "action_items",
+                  "open_questions",
+                  "risks",
+                  "next_meeting",
+                  "requests",
+                  "user_notes",
+                  "transcript",
+                  "judgement",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
           "synthesis_prompt": {
             "default": "",
             "maxLength": 2000,
@@ -3910,6 +5089,56 @@
           "updated_at"
         ],
         "title": "TemplateSummary",
+        "type": "object"
+      },
+      "TermView": {
+        "additionalProperties": false,
+        "properties": {
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "heard_as": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Heard As",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "company",
+              "product",
+              "term"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "term",
+          "kind",
+          "heard_as",
+          "created_at",
+          "can_delete"
+        ],
+        "title": "TermView",
         "type": "object"
       },
       "TopSender": {
@@ -4021,6 +5250,75 @@
           "kind"
         ],
         "title": "UpdateResponse",
+        "type": "object"
+      },
+      "UpdateSettingsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge": {
+            "items": {
+              "$ref": "#/components/schemas/AcknowledgedProcessor"
+            },
+            "maxItems": 50,
+            "title": "Acknowledge",
+            "type": "array"
+          },
+          "generation_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Enabled"
+          },
+          "monthly_budget_cents": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Budget Cents"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "platform",
+                  "anthropic",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "premium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          }
+        },
+        "title": "UpdateSettingsRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -4998,6 +6296,114 @@
         ]
       }
     },
+    "/v1/ai/settings": {
+      "get": {
+        "description": "Every member may see who processes their meetings.",
+        "operationId": "get_ai_settings_v1_ai_settings_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Settings",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Change the tier, the provider, the budget, or turn generation off.\n\nRefuses with 409 and the exact list when the change would route to a\nprocessor nobody has acknowledged. The list in the error is what the\nclient shows in the dialog \u2014 so what the admin reads and what the\nrouter will do come from one place.",
+        "operationId": "put_ai_settings_v1_ai_settings_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Ai Settings",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
     "/v1/audio-clips": {
       "post": {
         "operationId": "create_clip_v1_audio_clips_post",
@@ -5627,6 +7033,220 @@
         ]
       }
     },
+    "/v1/glossary": {
+      "get": {
+        "operationId": "list_glossary_v1_glossary_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TermView"
+                  },
+                  "title": "Response List Glossary V1 Glossary Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Glossary",
+        "tags": [
+          "glossary"
+        ]
+      },
+      "post": {
+        "description": "Remember one term.\n\nAdding a term the workspace already has is not an error: it merges the\nnew mishearing into the existing entry and answers 200. Saying\n\"remember John Mayer\" after two different mistakes should teach the\nsecond one, not fail as a duplicate.",
+        "operationId": "add_glossary_term_v1_glossary_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTermRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Glossary Term",
+        "tags": [
+          "glossary"
+        ]
+      }
+    },
+    "/v1/glossary/hint": {
+      "get": {
+        "description": "The workspace's terms as the capture form's ``vocabulary_hint``.\n\nThe clients fetch this and pre-fill the field, so the transcriber has\nthe spellings before it guesses. It stays editable: the hint is a\nsuggestion about this meeting, not a setting.",
+        "operationId": "glossary_hint_v1_glossary_hint_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HintView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Glossary Hint",
+        "tags": [
+          "glossary"
+        ]
+      }
+    },
+    "/v1/glossary/{term_id}": {
+      "delete": {
+        "description": "Forget a term. Its creator, or an admin \u2014 a vocabulary one person\ncan quietly change for everyone is a vocabulary nobody trusts.",
+        "operationId": "delete_glossary_term_v1_glossary__term_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Glossary Term",
+        "tags": [
+          "glossary"
+        ]
+      }
+    },
     "/v1/notes": {
       "post": {
         "operationId": "create_note_v1_notes_post",
@@ -5797,6 +7417,66 @@
           }
         },
         "summary": "Create Note From Transcript",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/meeting": {
+      "post": {
+        "description": "Open the note. Called as Record is pressed \u2014 the client must not\nwait for it and must not let it stop the recording.\n\nIdempotent on ``client_capture_id``: a retry, a double tap and a\nsecond device that resumed the same capture all get the same note\n(200 rather than 201).",
+        "operationId": "start_meeting_v1_notes_meeting_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartMeetingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartMeetingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Meeting",
         "tags": [
           "notes"
         ]
@@ -6332,6 +8012,297 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/carried": {
+      "get": {
+        "description": "What is still open from the previous meeting in this series.",
+        "operationId": "list_carried_v1_notes__note_id__carried_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarriedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Carried",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/carried/{item_key}": {
+      "post": {
+        "description": "Tick a carried item off, re-open it, or drop it.\n\nA tick by hand is `done_marked` and never `done_mentioned`: the\nlatter means the recording said so, with a quote, and only the\nengine may claim that.",
+        "operationId": "set_carried_state_v1_notes__note_id__carried__item_key__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CarriedStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarriedItemView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Carried State",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/client-version": {
+      "get": {
+        "description": "Exactly what an external surface would render.\n\nThe preview and the shared page call the same pure builder, so \"what\nI saw in the preview\" and \"what the client got\" cannot differ.",
+        "operationId": "client_version_v1_notes__note_id__client_version_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientVersionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Version",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/client-version/check": {
+      "get": {
+        "description": "What is worth a second look before this goes to a client.\n\nWarnings, not blockers. The author decides \u2014 a gate on sharing would\nre-introduce exactly the lifecycle ADR-0051 removed.",
+        "operationId": "client_version_check_v1_notes__note_id__client_version_check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientVersionCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Version Check",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/diff": {
       "get": {
         "operationId": "get_diff_v1_notes__note_id__diff_get",
@@ -6475,6 +8446,219 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/generated-items": {
+      "get": {
+        "description": "Every verified fact behind this note, with the words that prove it.\n\nSame audience as the transcript: these ARE transcript excerpts, so\nthe read goes through `require_view` and the oversight-read purpose\nrule. The shared page never calls this.",
+        "operationId": "generated_items_v1_notes__note_id__generated_items_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GeneratedItemView"
+                  },
+                  "title": "Response Generated Items V1 Notes  Note Id  Generated Items Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generated Items",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/generation": {
+      "get": {
+        "operationId": "get_generation_v1_notes__note_id__generation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Generation",
+        "tags": [
+          "notes"
+        ]
+      },
+      "post": {
+        "description": "Write the note again from the recording.\n\nSafe to press: the writer rewrites only sections nobody has edited\nsince the last run, so the author's own text survives a regenerate\nexactly as it survives the first pass.",
+        "operationId": "regenerate_v1_notes__note_id__generation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/items": {
       "get": {
         "operationId": "list_items_v1_notes__note_id__items_get",
@@ -6554,6 +8738,85 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/items/by-key/{item_key}": {
+      "patch": {
+        "description": "Fix a line's owner or its date, in place.\n\nThe body is not touched, so the key does not change and everything\nattached to it survives: the recipient's confirmation on the shared\npage, this note's correction history, and the evidence chip once there\nis one. That is the whole reason this route exists rather than telling\nthe author to edit the text.\n\nAddressed under ``/items/by-key/`` because ``PATCH /items/{item_id}``\nwas already taken by the Sprint 20 status route, which addresses items\nby their row UUID.",
+        "operationId": "patch_item_v1_notes__note_id__items_by_key__item_key__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Item",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/items/{item_id}": {
       "patch": {
         "operationId": "set_item_status_v1_notes__note_id__items__item_id__patch",
@@ -6628,6 +8891,164 @@
           }
         },
         "summary": "Set Item Status",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/items/{item_key}/dismiss": {
+      "post": {
+        "description": "Take a line out of the note, and say why.\n\nThe reason is the valuable part: it is a closed vocabulary, it carries\nno text, and it is what tells us next week which kinds of line we\nshould stop writing. Idempotent \u2014 dismissing a line that is already\ngone answers 200 rather than 404, because the author's intent has been\nhonoured either way.",
+        "operationId": "dismiss_item_v1_notes__note_id__items__item_key__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Item",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/items/{item_key}/restore": {
+      "post": {
+        "description": "Put a dismissed line back, exactly as it read.\n\nThe text comes from the version history rather than from a column: the\ncorrection log holds no note text on purpose, and the hash chain\nalready has every word. The line returns to the bottom of the section\nit came from \u2014 guessing its old position would be a second edit the\nauthor did not ask for.",
+        "operationId": "restore_item_v1_notes__note_id__items__item_key__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Item",
         "tags": [
           "notes"
         ]
@@ -6958,6 +9379,328 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/meeting": {
+      "get": {
+        "operationId": "get_meeting_v1_notes__note_id__meeting_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Meeting",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/meeting/job": {
+      "post": {
+        "description": "The recording reached asr-service: bind the job to the note.\n\nIdempotent for the same pair. A job another note already owns is a\n409 ``already_assigned`` \u2014 the partial unique index on\n``notes.source_asr_job_id`` is the single source of that truth,\nshared with ``from-transcript``.",
+        "operationId": "attach_job_v1_notes__note_id__meeting_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach Job",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/meeting/no-audio": {
+      "post": {
+        "description": "The recording was discarded or never happened. The note stays \u2014 it\nholds what the author typed, which is the part that cannot be redone.",
+        "operationId": "mark_no_audio_v1_notes__note_id__meeting_no_audio_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark No Audio",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/meeting/previous": {
+      "post": {
+        "description": "\"This continues\u2026\" \u2014 link this meeting to an earlier one by hand.\n\nRestricted to notes this author may view, like every other path into\nanother note's content.",
+        "operationId": "set_previous_note_v1_notes__note_id__meeting_previous_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviousNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarriedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Previous Note",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/my-notes/timing": {
+      "put": {
+        "description": "When each typed line was first touched, relative to the recording.\n\nFirst report wins: the line was typed once, and a later flush of the\nsame key is the same line being edited, not heard again.",
+        "operationId": "put_line_times_v1_notes__note_id__my_notes_timing_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineTimesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Line Times",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/pdf": {
       "get": {
         "operationId": "get_note_pdf_v1_notes__note_id__pdf_get",
@@ -6991,13 +9734,13 @@
             }
           },
           {
-            "description": "'clean' is only honoured for finalized/amended notes; drafts always render as draft.",
+            "description": "'draft' adds the DRAFT watermark + banner. Opt-in: exports are clean by default.",
             "in": "query",
             "name": "variant",
             "required": false,
             "schema": {
-              "default": "draft",
-              "description": "'clean' is only honoured for finalized/amended notes; drafts always render as draft.",
+              "default": "clean",
+              "description": "'draft' adds the DRAFT watermark + banner. Opt-in: exports are clean by default.",
               "enum": [
                 "draft",
                 "clean"
@@ -7785,9 +10528,10 @@
         ]
       }
     },
-    "/v1/notes/{note_id}/synthesize": {
+    "/v1/notes/{note_id}/transcript": {
       "post": {
-        "operationId": "synthesize_note_v1_notes__note_id__synthesize_post",
+        "description": "The transcription finished: put it in the note.\n\nCalled by ANY client of the author, on any device \u2014 which is how a\nmeeting survives the laptop being closed mid-transcription. The job's\nownership is proven the only way that is safe: by fetching the result\nwith the caller's own bearer, so asr-service applies its own tenant\nand permission checks.",
+        "operationId": "attach_transcript_v1_notes__note_id__transcript_post",
         "parameters": [
           {
             "in": "path",
@@ -7816,22 +10560,12 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SynthesizeRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SynthesizeResponse"
+                  "$ref": "#/components/schemas/AttachTranscriptResponse"
                 }
               }
             },
@@ -7848,76 +10582,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Synthesize Note",
-        "tags": [
-          "notes"
-        ]
-      }
-    },
-    "/v1/notes/{note_id}/synthesize/{job_id}": {
-      "get": {
-        "operationId": "get_synthesis_job_v1_notes__note_id__synthesize__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "note_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Note Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Job Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SynthesisJobResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Synthesis Job",
+        "summary": "Attach Transcript",
         "tags": [
           "notes"
         ]

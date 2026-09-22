@@ -42,7 +42,16 @@ import type {
 } from "../api/types";
 import { defaultSpeakerName } from "../api/types";
 import { AskNote } from "../components/AskNote";
+import { CarriedItems } from "../components/CarriedItems";
+import { GenerationStatus } from "../components/GenerationStatus";
+import { ClientVersionPanel } from "../components/ClientVersion";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  RememberTermPrompt,
+  heardAsOf,
+  isWorthRemembering,
+  type PendingTerm,
+} from "../components/RememberTermPrompt";
 import { ResponsesPanel } from "../components/ResponsesPanel";
 import {
   AlertIcon,
@@ -76,6 +85,7 @@ import { useAuth } from "../auth/AuthContext";
 import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
+import { defFor, noteBlocks } from "../lib/noteBlocks";
 import { useDismiss } from "../lib/useDismiss";
 import { useSpaces } from "../spaces/SpacesContext";
 
@@ -1310,7 +1320,8 @@ function SpacePill({ noteId }: { noteId: string }) {
 
 // ── the page ──────────────────────────────────────────────────────────
 
-type Tab = "notes" | "transcript" | "responses";
+// Sprint 36: "client" is what someone outside the workspace sees.
+type Tab = "notes" | "transcript" | "responses" | "client";
 
 export function NoteEditorPage() {
   const { noteId = "" } = useParams();
@@ -1504,7 +1515,17 @@ export function NoteEditorPage() {
   // A speaker renamed in the transcript is renamed in the note too — the
   // note's turn lines start with the name. A cancelled note is a record;
   // its text stays, and only the transcript shows the new name.
+  // Sprint 35: a name the author fixed is worth remembering — offered,
+  // never taken. One term, one question.
+  const [pendingTerm, setPendingTerm] = useState<PendingTerm | null>(null);
+  const offerToRemember = (from: string, to: string) => {
+    if (isWorthRemembering(from, to)) {
+      setPendingTerm({ term: to.trim(), heardAs: heardAsOf(from) });
+    }
+  };
+
   const onSpeakerRenamed = (from: string, to: string) => {
+    offerToRemember(from, to);
     if (!content || !isDraft) {
       toast.success(isDraft ? "Speaker renamed" : "Speaker renamed in the transcript");
       return;
@@ -1602,9 +1623,9 @@ export function NoteEditorPage() {
       title: shownContent.title ?? "",
       code: note?.code ?? "",
       updatedAt: note?.updated_at,
-      sections: sections.map((def) => ({
-        name: def.name,
-        text: sectionOf(shownContent, def.id).text ?? "",
+      sections: noteBlocks(shownContent, sections, { editable: false }).map((block) => ({
+        name: block.title ?? "",
+        text: block.section.text ?? "",
       })),
     });
     saveBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${fileBase()}.md`);
@@ -1656,8 +1677,10 @@ export function NoteEditorPage() {
   const transcriptDefs = (sections ?? []).filter(
     (def) => shownContent !== null && isTranscript(sectionOf(shownContent, def.id).text ?? ""),
   );
-  const noteDefs = (sections ?? []).filter((def) => !transcriptDefs.includes(def));
   const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
+  // What the content has, in its order. Structure follows content: no
+  // template section is drawn for being in the template.
+  const blocks = noteBlocks(shownContent, sections ?? [], { editable });
   const saveLabel = useMemo(() => {
     switch (saveState) {
       case "saving":
@@ -1813,7 +1836,7 @@ export function NoteEditorPage() {
           </div>
         )}
 
-        {(hasTranscript || hasResponsesTab) && (
+        {(hasTranscript || hasResponsesTab || isDraft) && (
           <div className="tabs doc-tabs" role="tablist">
             <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
               Notes
@@ -1838,15 +1861,29 @@ export function NoteEditorPage() {
                 Responses{responseCount > 0 && <span className="count">{responseCount}</span>}
               </button>
             )}
+            {/* Before sending anything, see what they will actually get. */}
+            <button
+              className={`tab ${tab === "client" ? "on" : ""}`}
+              role="tab"
+              aria-selected={tab === "client"}
+              onClick={() => setTab("client")}
+            >
+              Client version
+            </button>
           </div>
         )}
 
-        {tab === "responses" && hasResponsesTab ? (
+        {tab === "client" ? (
+          <ClientVersionPanel noteId={noteId} />
+        ) : tab === "responses" && hasResponsesTab ? (
           <ResponsesPanel
             noteId={noteId}
             items={items}
             responses={responses}
-            sections={sections}
+            sections={[
+              ...sections,
+              ...blocks.filter((b) => !b.def && b.title).map((b) => ({ id: b.key, name: b.title ?? "" })),
+            ]}
             onItems={setItems}
             onResponses={setResponses}
           />
@@ -1862,6 +1899,10 @@ export function NoteEditorPage() {
               ) : undefined;
             return sourceJobId ? (
               <>
+                <RememberTermPrompt
+                  pending={pendingTerm}
+                  onDone={() => setPendingTerm(null)}
+                />
                 {relabelOffer && (
                   <div className="banner banner-info note-relabel" role="note">
                     <span className="grow">Update speaker names in the note?</span>
@@ -1886,31 +1927,49 @@ export function NoteEditorPage() {
           })()
         ) : (
           <div className="doc-body">
-            {sections.length === 0 && <div className="section-ro empty-val">This note's template has no sections.</div>}
-            {noteDefs.length === 0 && sections.length > 0 && (
-              <div className="section-ro empty-val">No notes yet — the transcript is under the other tab.</div>
+            {/* Sprint 36: unfinished business from the last meeting in
+                this series, above what was agreed in this one. */}
+            {/* Sprint 33/37: what the engine is doing with this note, or
+                why it is not. Never blocks the page — the note is the
+                author's the whole time. */}
+            <GenerationStatus
+              noteId={noteId}
+              canGenerate={editable && sourceJobId !== null}
+              canRegenerate={editable}
+              onFinished={load}
+            />
+            <CarriedItems noteId={noteId} readOnly={!editable} />
+            {blocks.length === 0 && (
+              <div className="section-ro empty-val">
+                {transcriptDefs.length > 0 ? "No notes yet — the transcript is under the other tab." : "Nothing here yet."}
+              </div>
             )}
-            {noteDefs.map((def) => (
-              <section key={def.id} className="doc-section">
-                <div className="field">
-                  <span className="section-name">
-                    {def.name}
-                    {def.required && <span className="req-tag">required</span>}
-                    {(def.id === "action_items" || def.id === "next_steps") && responseCount > 0 && (
-                      <button type="button" className="chip version response-badge" onClick={() => setTab("responses")}>
-                        {responseCount} response{responseCount === 1 ? "" : "s"}
-                      </button>
+            {blocks.map((block) => {
+              const badge =
+                (block.key === "action_items" || block.key === "next_steps") && responseCount > 0 ? (
+                  <button type="button" className="chip version response-badge" onClick={() => setTab("responses")}>
+                    {responseCount} response{responseCount === 1 ? "" : "s"}
+                  </button>
+                ) : null;
+              return (
+                <section key={block.key} className={`doc-section${block.title ? "" : " untitled"}`}>
+                  <div className="field">
+                    {(block.title || badge) && (
+                      <span className="section-name">
+                        {block.title}
+                        {badge}
+                      </span>
                     )}
-                  </span>
-                  <SectionField
-                    def={def}
-                    section={sectionOf(shownContent, def.id)}
-                    readOnly={!editable}
-                    onChange={(next) => onContentChange(withSection(shownContent, next))}
-                  />
-                </div>
-              </section>
-            ))}
+                    <SectionField
+                      def={defFor(block)}
+                      section={sectionOf(shownContent, block.key)}
+                      readOnly={!editable}
+                      onChange={(next) => onContentChange(withSection(shownContent, next))}
+                    />
+                  </div>
+                </section>
+              );
+            })}
           </div>
         )}
 

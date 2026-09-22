@@ -188,16 +188,6 @@ class Settings(BaseSettings):
             "staging": "staging",
         }.get(self.environment, self.environment)
 
-    # ── Note synthesis (spec item 1) ──────────────────────────────────
-    # "mock" (default) is the deterministic offline engine — no external
-    # LLM, no note content leaving the box. "anthropic" wires the production stub
-    # (Claude Opus 4.x, model id below); enabling it requires implementing
-    # the real client AND a compliance sign-off.
-    synthesis_provider: Literal["mock", "anthropic"] = Field(
-        default="mock", alias="MDX_SYNTHESIS_PROVIDER"
-    )
-    synthesis_model: str = Field(default="claude-opus-4-8", alias="MDX_SYNTHESIS_MODEL")
-
     # ── Sprint 15: audio replay (ADR-0037) ──────────────────────────────
     # Clip creation decrypts session/batch audio, slices, re-encodes and
     # serves it from an authenticated stream — note-service therefore
@@ -246,9 +236,19 @@ class Settings(BaseSettings):
         default="6d64782d6465762d73686172652d6c696e6b2d6b65792d3030303030303030",
         alias="MDX_SHARE_LINK_HMAC_KEY_HEX",
     )
+    # Sprint 33 — the document engine. On in dev and staging; a
+    # deployment with no chat backend simply never starts a generation
+    # and the note is what it was before (transcript in a section).
+    note_generation_enabled: bool = Field(default=True, alias="MDX_NOTE_GENERATION_ENABLED")
+    # How many generations one tenant may have in flight at once.
+    note_generation_per_tenant: int = Field(default=3, alias="MDX_NOTE_GENERATION_PER_TENANT")
     clip_max_span_ms: int = Field(default=60_000, alias="MDX_CLIP_MAX_SPAN_MS")
     clip_pad_ms: int = Field(default=300, alias="MDX_CLIP_PAD_MS")
-    clips_per_user_per_hour: int = Field(default=30, alias="MDX_CLIPS_PER_USER_PER_HOUR")
+    # Sprint 35 raised this from 30: playing the seconds behind a cited
+    # line is a normal way to read a note, not the occasional spot-check
+    # replay was built for. Still far below anything useful for bulk
+    # extraction, which is what the cap is actually defending against.
+    clips_per_user_per_hour: int = Field(default=60, alias="MDX_CLIPS_PER_USER_PER_HOUR")
     ffmpeg_path: str = Field(default="ffmpeg", alias="MDX_FFMPEG_PATH")
 
     # ── In-process scheduler (sprint 16, ADR-0041) ──────────────────────
@@ -256,11 +256,30 @@ class Settings(BaseSettings):
     # need it); production flips MDX_BACKGROUND_JOBS. Interval default =
     # daily; the job is idempotent, so shorter intervals are safe.
     background_jobs_enabled: bool = Field(default=False, alias="MDX_BACKGROUND_JOBS")
+    # Sprint 37: how long a transcript snapshot may outlive the run it
+    # was made for. A generation takes minutes; a day is already generous.
+    generation_snapshot_hours: int = Field(
+        default=24, ge=1, alias="MDX_NOTE_GENERATION_SNAPSHOT_HOURS"
+    )
+    # Sprint 37 B-1: rehearse a routing flip. The named backend runs
+    # beside the real one on this percentage of generations and its
+    # output is counted and thrown away — never stored, never shown.
+    # Empty (the default) means no shadow runs at all.
+    note_generation_shadow_backend: str = Field(
+        default="", alias="MDX_NOTE_GENERATION_SHADOW_BACKEND"
+    )
+    note_generation_shadow_percent: int = Field(
+        default=5, ge=0, le=100, alias="MDX_NOTE_GENERATION_SHADOW_PERCENT"
+    )
     background_jobs_interval_s: float = Field(
         default=86400.0, alias="MDX_BACKGROUND_JOBS_INTERVAL_S"
     )
     # Draft-idleness threshold (spec §4.4 / docs/runbooks/notes.md: 30d).
     idle_draft_days: int = Field(default=30, alias="MDX_IDLE_DRAFT_DAYS")
+    # Sprint 34: how long a capture may claim to be recording/uploading
+    # before the sweeper calls it no_audio. Long enough for a meeting that
+    # ran over and an upload retried on the train home.
+    meeting_stale_hours: int = Field(default=12, alias="MDX_MEETING_STALE_HOURS")
 
     # ── Calendar connections (0019) ──────────────────────────────────────
     # Google OAuth client for the read-only calendar connection behind the

@@ -306,7 +306,7 @@ export function SharedNotePage() {
             <div className="doc-body">
               {prose.map((s) => (
                 <section key={s.section_key} className="doc-section">
-                  <h2 className="section-name">{s.name}</h2>
+                  {s.name && <h2 className="section-name">{s.name}</h2>}
                   <RichText text={s.text} />
                   {note.can_respond && (
                     <FlagControl
@@ -351,13 +351,17 @@ export function SharedNotePage() {
                   </section>
                 ))
               )}
-              {!hasNotes && <p className="help">{transcript.length > 0 ? t.noNotes : t.empty}</p>}
+              {!hasNotes && (
+                <p className="help" role={note.preparing ? "status" : undefined}>
+                  {note.preparing ? t.preparing : transcript.length > 0 ? t.noNotes : t.empty}
+                </p>
+              )}
               {other.length > 0 && (
                 <details className="shared-more" open={decisions.length === 0 && actions.length === 0}>
                   <summary>{t.more}</summary>
                   {other.map((s) => (
                     <section key={s.section_key} className="doc-section">
-                      <h2 className="section-name">{s.name}</h2>
+                      {s.name && <h2 className="section-name">{s.name}</h2>}
                       <RichText text={s.text} placeholder="Nothing entered." />
                       {note.can_respond && (
                         <FlagControl

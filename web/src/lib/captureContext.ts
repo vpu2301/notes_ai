@@ -3,7 +3,7 @@
 // event id does — so they travel through sessionStorage, keyed by that id,
 // and stay in this tab.
 
-import type { UpcomingEvent } from "../api/types";
+import type { MeetingCalendarContext, UpcomingEvent } from "../api/types";
 
 /** The server takes at most this many names, each up to 80 characters. */
 export const MAX_NAME_CANDIDATES = 12;
@@ -11,9 +11,18 @@ const MAX_NAME_LEN = 80;
 /** The diarizer's ceiling; an invitee count above it is sent as this. */
 export const MAX_SPEAKERS = 8;
 
+/** The most agenda points a note starts with (the server's own cap). */
+export const MAX_AGENDA_LINES = 20;
+const MAX_AGENDA_LINE_LEN = 160;
+
 export interface CaptureContext {
   attendee_count: number;
   attendees: string[];
+  /** Sprint 34: the agenda the server derived from the invite, and the
+   *  invite's own identity — both go on the note when the capture starts. */
+  agenda: string[];
+  title: string;
+  ical_uid: string;
 }
 
 function key(eventId: string): string {
@@ -54,6 +63,9 @@ export function saveCaptureContext(event: UpcomingEvent): void {
   const ctx: CaptureContext = {
     attendee_count: event.attendee_count,
     attendees: nameCandidates(event.attendees, [event.account_email]),
+    agenda: agendaLines(event.agenda_lines),
+    title: event.title,
+    ical_uid: event.ical_uid,
   };
   try {
     sessionStorage.setItem(key(event.id), JSON.stringify(ctx));
@@ -79,6 +91,9 @@ export function readCaptureContext(eventId: string | null | undefined): CaptureC
     return {
       attendee_count: Math.floor(count),
       attendees: nameCandidates(Array.isArray(parsed?.attendees) ? parsed.attendees : []),
+      agenda: agendaLines(parsed?.agenda),
+      title: typeof parsed?.title === "string" ? parsed.title : "",
+      ical_uid: typeof parsed?.ical_uid === "string" ? parsed.ical_uid : "",
     };
   } catch {
     return null;
@@ -95,5 +110,33 @@ export function contextFields(ctx: CaptureContext | null): { speakersMax?: numbe
   return {
     speakersMax: ctx.attendee_count >= 2 ? Math.min(ctx.attendee_count, MAX_SPEAKERS) : undefined,
     nameCandidates: ctx.attendees.length > 0 ? ctx.attendees : undefined,
+  };
+}
+
+/** Agenda lines as the note will take them: trimmed, 1–160 chars, ≤ 20. */
+function agendaLines(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((line): line is string => typeof line === "string")
+    .map((line) => line.trim().slice(0, MAX_AGENDA_LINE_LEN))
+    .filter(Boolean)
+    .slice(0, MAX_AGENDA_LINES);
+}
+
+/**
+ * What `POST /v1/notes/meeting` gets from the event the capture started
+ * from (Sprint 34): who was invited and what the invite said to talk
+ * about. `description` is never sent from the browser — the server already
+ * derived `agenda_lines` from it when it served the event.
+ */
+export function meetingCalendar(ctx: CaptureContext | null): MeetingCalendarContext | undefined {
+  if (!ctx) return undefined;
+  if (ctx.attendees.length === 0 && ctx.agenda.length === 0 && !ctx.title) return undefined;
+  return {
+    source: "google",
+    title: ctx.title || undefined,
+    ical_uid: ctx.ical_uid || undefined,
+    attendee_names: ctx.attendees.length > 0 ? ctx.attendees : undefined,
+    agenda_lines: ctx.agenda.length > 0 ? ctx.agenda : undefined,
   };
 }

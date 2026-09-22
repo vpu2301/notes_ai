@@ -96,6 +96,261 @@ Re-open within 90 days: the version chain is intact; INSERT a new
 draft version and UPDATE `status='draft', cancelled_at=NULL`. Audit
 this as `note.draft.updated` with payload `{manual_reopen: true}`.
 
+### Stuck meeting state (Sprint 34, ADR-0055)
+
+A meeting note is created when Record is pressed, so a crashed tab, a
+killed app or a phone that went flat can leave `note_meetings` claiming
+a capture is still `recording` or `uploading`. **Nothing is lost when
+that happens** — the note holds whatever the author typed — but the
+client shows a live capture that is not live.
+
+`meeting_state_sweeper` moves `recording|uploading` older than
+`MDX_MEETING_STALE_HOURS` (12 h) to `no_audio`. It runs in-process when
+`MDX_BACKGROUND_JOBS=true`, or on demand:
+`uv run --project services/note-service python -m note_service.jobs.meeting_state_sweeper`.
+It **never deletes a note or a recording**; each run audits
+`scheduler.job.completed` (global tenant) and counts
+`mdx_note_meeting_state_swept_total`.
+
+What each state means when triaging one note:
+
+| state          | what is true                                             | what to do |
+| -------------- | -------------------------------------------------------- | ---------- |
+| `recording`    | no job bound yet; the client should still be capturing    | wait, or let the sweeper reclaim it |
+| `uploading`    | the audio is on its way to asr-service                    | check the asr-service job list for the tenant |
+| `transcribing` | `asr_job_id` is bound; ASR has not finished or no client has attached the result | when the job is `complete`, any client of the author attaching it fixes it (`POST /v1/notes/{id}/transcript`) |
+| `ready`        | the transcript is in the note                             | nothing |
+| `no_audio`     | discarded, never recorded, or swept                       | nothing — the typed note stands on its own |
+| `failed`       | the transcription failed                                  | the asr-service runbook |
+
+A capture stuck in `transcribing` with a `complete` job is **debt D-1**:
+the server cannot chain transcription to generation by itself, so it waits
+for a client. To unstick one by hand, have the author open any client, or:
+
+```sql
+-- Which captures are waiting, and on what.
+SELECT note_id, state, asr_job_id, updated_at
+FROM note_meetings
+WHERE state IN ('recording','uploading','transcribing')
+  AND updated_at < now() - interval '1 hour'
+ORDER BY updated_at;
+```
+
+Do **not** hand-edit `state` to `ready`: the note would claim to hold a
+transcript it does not have. Set `no_audio` if the recording is genuinely
+gone.
+
+### A correction did not stick (Sprint 35)
+
+`dismiss`, `restore` and the owner/due `PATCH` all write an ordinary note
+version, so a failure looks like any other write conflict.
+
+| symptom | cause | what to do |
+| ------- | ----- | ---------- |
+| 409 `optimistic_lock_mismatch` | the note changed between load and correction (another device, or autosave) | the client reloads and retries; nothing was written |
+| 404 on a key the client just showed | the line's BODY was edited, so its key changed | expected — the line is the author's now; the client reloads |
+| 422 `key_would_change` | the owner/due change would rewrite the body | refuse is correct: it would orphan the recipient's responses |
+| 409 `already_present` on restore | the line is back already (two devices) | nothing |
+| 404 on restore | the line is older than the last 25 versions | the text is still in the chain; restore it by editing the note |
+
+Corrections are append-only by policy (`note_item_corrections` has no
+UPDATE or DELETE policy for `app_role`), so there is nothing to clean up
+after a bad one — the *next* correction is the record.
+
+```sql
+-- What this note's author has been fixing, and why. No text by design.
+SELECT item_key, kind, action, reason, created_at
+FROM note_item_corrections WHERE note_id = $1 ORDER BY created_at DESC;
+```
+
+### The glossary taught the wrong spelling
+
+A term is only ever added by an explicit yes to "Remember this?", so a
+wrong one means somebody accepted a wrong correction. It is visible under
+Workspace settings → Names and terms and deletable there by whoever added
+it, or by an admin — that is the intended fix, not a DB edit.
+
+A deleted term is soft-deleted, and the unique index only covers live
+rows, so the same spelling can be added again afterwards.
+
+```sql
+-- The live vocabulary of a workspace.
+SELECT term, kind, heard_as, created_at FROM workspace_glossary
+WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY lower(term);
+```
+
+Terms are content: they are never logged, never audited (the payload is
+the `kind` and a count) and never in the weekly CSV.
+
+### A client saw something they should not have (Sprint 36, ADR-0057)
+
+**Before Sprint 36 this was possible and is now fixed.** Every template
+gained a `user_notes` section in Sprint 34, and the shared page and PDF
+rendered every non-empty section — so recipient links created between
+those two sprints rendered the author's private in-meeting scratchpad.
+
+To find out whether a given link ever could have:
+
+```sql
+-- Notes with a live external link whose scratchpad is not empty.
+SELECT n.id, n.code, l.id AS link_id, l.created_at
+FROM notes n
+JOIN note_share_links l ON l.note_id = n.id AND l.revoked_at IS NULL
+JOIN note_versions v ON v.id = n.current_version_id
+WHERE jsonb_path_exists(
+        v.content_jsonb,
+        '$.sections[*] ? (@.section_key == "user_notes" && @.text <> "")')
+ORDER BY l.created_at DESC;
+```
+
+Those links are safe **now** — the page rebuilds from the client document
+on every request, so nothing further is needed. Revoke only if the author
+wants to, and tell them what was visible and for how long.
+
+What reaches a client today, and nothing else: sections whose ROLE is in
+`client_view.CLIENT_ROLES`, minus anything transcript-shaped, minus lines
+marked `(internal)`. Check any note with:
+
+    GET /v1/notes/{id}/client-version
+
+That endpoint is the same builder the shared page uses, so it is the
+authoritative answer to "what would they see".
+
+### Carry-over is missing or wrong
+
+| symptom | cause | what to do |
+| ------- | ----- | ---------- |
+| no "Still open" block | the meeting has no `series_key` — it did not start from a calendar event, or its title is generic | the author links it by hand ("This continues…", `POST /v1/notes/{id}/meeting/previous`) |
+| block missing on the 2nd meeting of a series | the previous note is not viewable by THIS author (ADR-0057) — often a private note | expected; the author cannot be shown items from a note they cannot read |
+| items carried from the wrong meeting | two series share a title and an attendee set | link by hand; calendar-based series are unaffected |
+| an item is ticked that nobody did | only the author can tick today (`done_marked`); `done_mentioned` needs the generation engine | check the audit log for `note.carried_item_updated` |
+
+```sql
+-- What this meeting is carrying, and where from.
+SELECT c.item_key, c.state, c.from_note_id, m.series_key, m.series_source
+FROM note_carried_items c
+JOIN note_meetings m ON m.note_id = c.note_id
+WHERE c.note_id = $1 ORDER BY c.position;
+```
+
+### A note was never written (Sprint 33)
+
+The engine runs in `note-worker`, a separate process of the same image.
+A note with no generated content is one of five things:
+
+| symptom | check | what it means |
+| ------- | ----- | ------------- |
+| no generation row at all | `MDX_NOTE_GENERATION_ENABLED`, and the object store | the enqueue never ran; the note is still a note |
+| `queued` and not moving | is `note-worker` up? `SELECT * FROM jobs WHERE kind='note.generate'` | nothing is draining the queue |
+| `waiting_on_model` on the job | the chat backend | scaling from zero; it retries by policy, no user action needed |
+| `partial` | `failed_ranges` | some windows failed; the document is written from the rest and the client names the minutes |
+| `complete` with empty sections | `stats.facts_dropped_quote` | nothing verified. Honest: no filler is written |
+
+```sql
+-- Where this note's generations got to.
+SELECT id, status, step, windows_total, windows_done, windows_failed,
+       error_kind, backend, model_id, created_at, finished_at
+FROM note_generations WHERE note_id = $1 ORDER BY created_at DESC;
+```
+
+**Never hand-edit a note's sections to "fix" a generation.** The writer
+decides what it may rewrite by comparing against
+`stats.section_hashes`; a section edited by hand becomes the author's and
+stops being rewritten — which is correct behaviour, and confusing if you
+did it yourself while debugging. Use `POST /v1/notes/{id}/generation`.
+
+Stuck live generation (worker killed between the lease expiring and the
+reaper running) — the unique index refuses a new one:
+
+```sql
+UPDATE note_generations SET status='failed', error_kind='manual_reset',
+       finished_at=now()
+WHERE note_id=$1 AND status IN ('queued','running');
+```
+
+## Model tiers, budgets and retention (Sprint 37)
+
+### generation-failures
+
+A fifth of generations failing in half an hour. Look at the backend
+first: `ModelBackendUnavailable` / `ModelBackendAuth` fire before this one
+when the cause is the endpoint, and `docs/runbooks/model-backends.md` has
+those. When the backend is healthy, the failures are per-note:
+
+```sql
+SELECT error_kind, count(*) FROM note_generations
+WHERE created_at > now() - interval '1 hour' AND status = 'failed'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+`snapshot_unreadable` in bulk means the object store, not the model —
+check `S3_ENDPOINT` and the bucket, not the endpoint.
+
+### generation-slow
+
+p95 over ten minutes. In order: queue depth
+(`SELECT status, count(*) FROM jobs WHERE kind='note.generate' GROUP BY 1`),
+worker replicas, then the backend's own latency. One worker replica draws
+two jobs at a time (`BATCH` in `worker.py`) and at most
+`MDX_NOTE_GENERATION_PER_TENANT` from any one workspace, so a backlog of
+one workspace's uploads does NOT explain a slow queue for everyone —
+that is the fair claim doing its job (migration 0055).
+
+### budget
+
+Not an incident. A workspace is over `monthly_budget_cents` (or its
+plan's `ai_cents_per_month`), so nothing is enqueued for it and its
+admins were told once for the month. Their notes still work; the missing
+part is the written-up document.
+
+```sql
+-- What this workspace has spent, and what it is allowed.
+SELECT * FROM model_usage_monthly WHERE tenant_id = $1 AND month = date_trunc('month', now());
+SELECT monthly_budget_cents, generation_enabled FROM workspace_model_settings WHERE tenant_id = $1;
+```
+
+Raising it is the admin's own action on **Settings → Data & AI**. Do it
+for them only on a written request, and record it.
+
+### snapshot-sweep
+
+Nothing swept in 48 hours while notes were being written. The transcript
+snapshot is a second copy of a whole meeting, kept only for the minutes a
+generation needs it, so this is a retention breach rather than untidiness.
+
+* is `MDX_BACKGROUND_JOBS` on for the API deployment (not only the worker)?
+* are the deletes failing? `snapshot_sweeper.delete_failed` in the logs.
+
+```sql
+-- What is still pointing at an object it should have released.
+SELECT count(*) FROM note_generations
+WHERE snapshot_key IS NOT NULL AND created_at < now() - interval '24 hours';
+```
+
+The sweep is idempotent; running it by hand is safe:
+
+    uv run --project services/note-service python -m note_service.jobs.snapshot_sweeper
+
+### writer-conflicts
+
+The writer never overwrites a person: it compares a section against
+`stats.section_hashes` and skips what changed. A sustained spike means it
+is losing every race — usually an autosave loop on a client, occasionally
+two generations for one note. Check for the second first:
+
+```sql
+SELECT note_id, count(*) FROM note_generations
+WHERE status IN ('queued','running') GROUP BY 1 HAVING count(*) > 1;
+```
+
+### Changing which model writes notes
+
+The routing table (`config/models.yaml`) is the only place, and the
+procedure is in `docs/runbooks/model-backends.md#tier-flip`: eval parity →
+shadow → flip → rollback. Nothing in note-service needs redeploying for a
+tier change; a workspace that has not acknowledged the new processor
+stays where it was.
+
 ## Operational tunables
 
 | envvar / setting                  | default | purpose                                       |
@@ -103,6 +358,13 @@ this as `note.draft.updated` with payload `{manual_reopen: true}`.
 | `MDX_IDLE_DRAFT_DAYS`             | 30      | idle-draft auto-archive horizon               |
 | `MDX_BACKGROUND_JOBS`             | false   | in-process scheduler (cleanup + reconciler)   |
 | `MDX_BACKGROUND_JOBS_INTERVAL_S`  | 86400   | scheduler interval                            |
+| `MDX_NOTE_GENERATION_ENABLED`     | true    | the document engine; off = notes are the transcript in a section, as before Sprint 33 |
+| `MDX_NOTE_GENERATION_PER_TENANT`  | 3       | concurrent generations per workspace (soft cap, enforced in the claim — migration 0055) |
+| `MDX_NOTE_GENERATION_SNAPSHOT_HOURS` | 24   | how long a transcript snapshot may outlive its generation before the sweep deletes it |
+| `MDX_NOTE_GENERATION_SHADOW_BACKEND` | ""   | run a candidate backend beside the real one and keep only counts; empty = no shadow runs |
+| `MDX_NOTE_GENERATION_SHADOW_PERCENT` | 5    | share of generations shadowed, sampled on the generation id |
+| `MDX_MEETING_STALE_HOURS`         | 12      | how long a capture may claim to be recording/uploading before the sweeper calls it `no_audio` |
+| `MDX_CLIPS_PER_USER_PER_HOUR`     | 60      | audio-replay clips per user (raised from 30 in Sprint 35: playing the seconds behind a cited line is ordinary reading, not a spot-check) |
 | `MDX_TEMPLATE_CACHE_MAXSIZE`      | 5000    | in-process template cache entries             |
 | `MDX_TEMPLATE_CACHE_TTL_SECONDS`  | 60      | template cache TTL                            |
 | `MDX_FFMPEG_PATH`                 | ffmpeg  | audio-clip pipeline binary (ADR-0037)         |

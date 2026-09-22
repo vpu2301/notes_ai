@@ -1,0 +1,71 @@
+rule_files:
+  - ../note-generation.yml
+evaluation_interval: 30s
+tests:
+  - interval: 1m
+    name: a few failures are normal, a fifth of them is not
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+9x40"
+      - series: 'mdx_note_generations_total{outcome="failed",backend="hf_eu"}'
+        values: "0+1x40"
+    alert_rule_test:
+      # 1 in 10 failing: the engine is working.
+      - eval_time: 35m
+        alertname: NoteGenerationFailureRate
+        exp_alerts: []
+
+  - interval: 1m
+    name: a fifth failing fires after fifteen minutes
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+2x60"
+      - series: 'mdx_note_generations_total{outcome="failed",backend="hf_eu"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NoteGenerationFailureRate
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: NoteGenerationFailureRate
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "More than a fifth of note generations failed in the last 30 min"
+              description: |
+                Generations are failing or coming back partial. Check note-worker logs for error_kind, and whether the chat backend is degraded (ModelBackend* alerts fire first when it is).
+                Runbook: docs/runbooks/notes.md#generation-failures
+
+  - interval: 1m
+    name: a sweep that stopped while notes kept being written
+    input_series:
+      - series: 'mdx_note_generation_snapshots_swept_total'
+        values: "100+0x200"
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+2x200"
+    alert_rule_test:
+      - eval_time: 180m
+        alertname: NoteSnapshotSweepStopped
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "No transcript snapshots swept in 48 h while notes were being written"
+              description: |
+                Either the sweeper is not running (MDX_BACKGROUND_JOBS on the API deployment) or every delete is failing. Snapshots older than a day are a retention breach, not untidiness.
+                Runbook: docs/runbooks/notes.md#snapshot-sweep
+
+  - interval: 1m
+    name: a budget block is an info, not a page
+    input_series:
+      - series: 'mdx_note_generation_budget_blocked_total{reason="budget_exceeded"}'
+        values: "0 0 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NoteGenerationBudgetBlocked
+        exp_alerts:
+          - exp_labels: {severity: info, team: notes, reason: budget_exceeded}
+            exp_annotations:
+              summary: "Generations blocked in the last hour (budget_exceeded)"
+              description: |
+                A workspace is over its monthly AI budget or has generation turned off. Its admins were notified once for the month; nothing to fix unless they ask.
+                Runbook: docs/runbooks/notes.md#budget

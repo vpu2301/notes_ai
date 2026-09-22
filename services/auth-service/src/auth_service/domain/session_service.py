@@ -82,6 +82,7 @@ def is_native_refresh_token(value: str) -> bool:
         return True
     return value.count(".") != 2
 
+
 # Enough of a user agent to recognise your own laptop in the sessions
 # list. Deliberately crude: this is a display label, never a check.
 _DEVICE_HINTS: tuple[tuple[str, str], ...] = (
@@ -223,9 +224,7 @@ class SessionService:
         if self._identities is None:
             return None
         try:
-            return await self._identities.ensure_personal_workspace(
-                identity.id, identity.email
-            )
+            return await self._identities.ensure_personal_workspace(identity.id, identity.email)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "auth.session.workspace_heal_failed",

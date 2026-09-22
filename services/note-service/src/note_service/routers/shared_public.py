@@ -54,11 +54,13 @@ from notification_events import Category
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state
-from ..domain import action_items, recipient_mail, sharing_policy
+from ..domain import action_items, client_view, recipient_mail, sharing_policy
 from ..domain import action_items_repository as items_repo
+from ..domain import generation_repository as gen_repo
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.diff_engine import compute_diff, section_diff_summary
+from ..domain.meeting_doc import types as meeting_types
 from ..domain.pdf import render_note_pdf
 from ..domain.share_tokens import hash_token, looks_like_token
 from ..notifications import emit_note_event
@@ -93,24 +95,12 @@ _SECTION_ROLES: dict[str, SectionRole] = {
     "attendees": "attendees",
 }
 
-# "Anna: we ship Friday" — the shape of a transcript turn (the same rule
-# the renderers use to typeset one).
-_TURN_RE = re.compile(r"^(?!https?:)[^\s*_`:][^*_`:]{0,39}?:\s+\S")
-
-
-def _is_transcript(text: str) -> bool:
-    """A section whose paragraphs are mostly speaker turns is the
-    transcript, whatever template slot it landed in: the page shows it
-    behind its own tab instead of as a wall under "Attendees"."""
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    if len(paragraphs) < 2:
-        return False
-    turns = sum(1 for p in paragraphs if _TURN_RE.match(p))
-    return turns * 10 >= len(paragraphs) * 6
-
 
 def _role_for(section_key: str, text: str) -> SectionRole:
-    if _is_transcript(text):
+    # One implementation of "is this a transcript", in client_view, so the
+    # page and the document that decides what reaches the page cannot
+    # disagree about it.
+    if client_view.looks_like_transcript(text):
         return "transcript"
     return _SECTION_ROLES.get(section_key, "other")
 
@@ -205,6 +195,10 @@ class SharedNoteView(BaseModel):
     # The page's language: the note's template, then the workspace.
     lang: str = "en"
     changes: SharedChanges | None = None
+    # True while the note's only content is the recording and the writer
+    # is still working on it: the page says "still being written" instead
+    # of "empty". The transcript itself never leaves the workspace.
+    preparing: bool = False
 
 
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
@@ -284,6 +278,44 @@ async def _load(conn: object, tenant_id: UUID, note_id: UUID, link_id: UUID) -> 
     if link is None:
         raise _not_found()
     return _Resolved(tenant_id=tenant_id, note_id=note_id, link=link)
+
+
+async def _template_code(conn: object, note_id: UUID) -> str | None:
+    """The note's template code, or None.
+
+    Fail-safe on purpose: the recipient's page must not 500 because a
+    template row is gone, and the client document is safe WITHOUT the
+    family — `user_notes` and the transcript are excluded for every
+    family, and the role list is an allow-list. A failed lookup costs
+    family-specific narrowing, never the safety property.
+    """
+    try:
+        return await repo.template_code_for(conn, note_id=note_id)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        logger.warning("shared.template_code_unavailable", extra={"note_id": str(note_id)})
+        return None
+
+
+async def _internal_keys(conn: object, note_id: UUID) -> frozenset[str]:
+    """Lines the engine marked internal by kind. Fail-safe like
+    `_template_code`: the allow-list already protects the page, and a
+    missing sidecar must not 500 a recipient's read."""
+    try:
+        from ..domain import generation_repository as gen_repo
+
+        return frozenset(await gen_repo.internal_item_keys(conn, note_id=note_id))  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return frozenset()
+
+
+async def _generation_live(conn: object, note_id: UUID) -> bool:
+    """Whether the writer is still working on this note. Fail-safe like
+    `_template_code`: a missing sidecar must not 500 a recipient's read."""
+    try:
+        latest = await gen_repo.latest_for_note(conn, note_id=note_id)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return False
+    return latest is not None and latest.status in gen_repo.LIVE_STATUSES
 
 
 async def _load_note(conn: object, note_id: UUID) -> tuple[repo.NoteRow, repo.VersionRow]:
@@ -412,6 +444,9 @@ async def _page(token: str) -> SharedNoteView:
             raise _not_found()
         note, version = await _load_note(conn, note_id)
         labels = await _resolve_section_labels(conn, content=version.content) or []
+        template_code = await _template_code(conn, note_id)
+        internal_keys = await _internal_keys(conn, note_id)
+        generation_live = await _generation_live(conn, note_id)
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
         policy, plan = await sharing_policy.load_policy(conn, tenant_id=tenant_id)
         lang = await _page_lang(conn, version, tenant_id)
@@ -423,10 +458,15 @@ async def _page(token: str) -> SharedNoteView:
         first_view = await repo.record_share_link_view(conn, link_id=link_id)
 
     names = {label.section_key: label.name.en or label.name.uk for label in labels}
-    order = [label.section_key for label in labels]
-    sections = sorted(
-        version.content.sections or [],
-        key=lambda s: order.index(s.section_key) if s.section_key in order else len(order),
+    # Sprint 36: an external surface renders the CLIENT DOCUMENT and
+    # nothing else — an allow-list by role, not the note minus a few
+    # things. This is what keeps `user_notes` (the author's private
+    # in-meeting scratchpad) and the transcript off the page.
+    document = client_view.build(
+        version.content,
+        family=meeting_types.family_for_template(template_code),
+        section_names=names,
+        internal_keys=internal_keys,
     )
     await _audit_view(
         tenant_id,
@@ -461,12 +501,11 @@ async def _page(token: str) -> SharedNoteView:
         sections=[
             SharedSection(
                 section_key=s.section_key,
-                name=names.get(s.section_key, s.section_key),
-                text=s.text or "",
-                role=_role_for(s.section_key, s.text or ""),
+                name=s.name,
+                text=s.text,
+                role=_role_for(s.section_key, s.text),
             )
-            for s in sections
-            if (s.text or "").strip()
+            for s in document.sections
         ],
         issuer_name=issuer,
         sender=SharedSender(
@@ -512,6 +551,9 @@ async def _page(token: str) -> SharedNoteView:
         requires_verification=_requires_verification(resolved.link, policy),
         lang=lang,
         changes=changes,
+        # Only when there is nothing to show: a note being rewritten still
+        # shows what it has.
+        preparing=document.is_empty and generation_live,
     )
 
 
@@ -523,6 +565,8 @@ async def read_shared_note_pdf(token: str) -> Response:
         resolved = await _load(conn, tenant_id, note_id, link_id)
         note, version = await _load_note(conn, note_id)
         section_names = await _resolve_section_names(conn, content=version.content)
+        template_code = await _template_code(conn, note_id)
+        internal_keys = await _internal_keys(conn, note_id)
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
         first_view = await repo.record_share_link_view(conn, link_id=link_id)
 
@@ -534,6 +578,12 @@ async def read_shared_note_pdf(token: str) -> Response:
         issuer_name=_issuer(branding),
         language=lang,
         section_names=section_names,
+        # The recipient's PDF is the client document, the same one the
+        # page shows. Before Sprint 36 this rendered every section the
+        # note had, transcript and scratchpad included.
+        variant="client",
+        template_code=template_code,
+        internal_keys=internal_keys,
     )
     await _audit_view(tenant_id, note_id, resolved.link, fmt="pdf", first_view=first_view)
     return Response(

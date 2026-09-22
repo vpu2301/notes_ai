@@ -134,14 +134,15 @@ def _envelope(
 async def _resolve_section_labels(
     conn: object, *, content: NoteContent
 ) -> list[SectionLabel] | None:
-    """Build localized section labels from the note's template.
+    """Localized section labels for what the note's content has.
 
-    Resolves the template by ``content.template_id`` (reusing the domain
-    ``get_template`` repository helper within the caller's RLS-scoped
-    connection) and emits one :class:`SectionLabel` per template section,
-    ordered by the section ``order``. Returns ``None`` — never raises — if
-    the template was deleted or cannot be parsed, so a missing template
-    degrades gracefully instead of 500-ing the read.
+    One label per content section that has a name: the template's name
+    for a template section, the section's own ``title`` for one the
+    engine made from the conversation. A section with neither (the
+    unheaded opening block, an unknown key) gets no label — the clients
+    draw it without a heading. Order is the content's. Returns ``None``
+    — never raises — when the template is gone and no section carries a
+    title, so a missing template degrades gracefully.
 
     Note: only the current template row is persisted per ``template_id``
     (cosmetic edits update in place), so we resolve against it; section
@@ -153,35 +154,42 @@ async def _resolve_section_labels(
 
     from ..domain.repository import get_template
 
+    template_names: dict[str, str] = {}
     try:
-        tmpl_row = await get_template(conn, template_id=content.template_id)  # type: ignore[arg-type]
-        if tmpl_row is None:
-            return None
-        raw = tmpl_row["schema_jsonb"]
-        if isinstance(raw, str):
-            raw = json.loads(raw)
-        definition = TemplateDefinition.model_validate(raw)
+        tmpl_row = await get_template(conn, template_id=content.template_id)
+        if tmpl_row is not None:
+            raw = tmpl_row["schema_jsonb"]
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            definition = TemplateDefinition.model_validate(raw)
+            template_names = {section.id: section.name for section in definition.sections}
     except Exception:
         logger.warning(
             "could not resolve template %s for section labels",
             content.template_id,
             exc_info=True,
         )
-        return None
 
-    return [
+    labels: list[SectionLabel] = []
+    for section in content.sections:
+        name = template_names.get(section.section_key) or section.title
+        if not name:
+            continue
         # Templates are per-language; mirror the single name into both
         # locales (matches the frontend's toStudioTemplate behaviour).
-        SectionLabel(section_key=section.id, name=LocalizedText(uk=section.name, en=section.name))
-        for section in sorted(definition.sections, key=lambda s: s.order)
-    ]
+        labels.append(
+            SectionLabel(section_key=section.section_key, name=LocalizedText(uk=name, en=name))
+        )
+    if not labels and not template_names:
+        return None
+    return labels
 
 
 async def _resolve_section_names(conn: object, *, content: NoteContent) -> dict[str, str]:
-    """``{section_key: heading}`` in template order, for the PDF renderer.
+    """``{section_key: heading}`` in content order, for the PDF renderer.
 
-    Empty when the template no longer resolves — the renderer then
-    humanizes the raw keys rather than printing ``action_items``."""
+    A section without a name is absent — the renderer prints it without
+    a heading; an unknown key is humanized rather than printed raw."""
     labels = await _resolve_section_labels(conn, content=content) or []
     return {
         label.section_key: name for label in labels if (name := (label.name.en or label.name.uk))

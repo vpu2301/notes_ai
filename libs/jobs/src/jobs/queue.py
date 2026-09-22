@@ -88,15 +88,39 @@ class JobQueue:
 
     # ── claim / lease ───────────────────────────────────────────────────
     async def claim(
-        self, kinds: list[str], *, worker: str, lease_seconds: int = 60, limit: int = 1
+        self,
+        kinds: list[str],
+        *,
+        worker: str,
+        lease_seconds: int = 60,
+        limit: int = 1,
+        per_tenant: int | None = None,
     ) -> list[Job]:
+        """Lease up to ``limit`` jobs.
+
+        With ``per_tenant`` the claim is fair (migration 0055): one job
+        per workspace per round, and a workspace already running that
+        many claims nothing more. Without it, plain FIFO by priority —
+        right for a queue whose tenants cannot crowd each other out.
+        """
         async with self._pool.acquire() as c:
-            rows = await c.fetch(
-                "SELECT * FROM jobs_claim($1::text[], $2, $3, $4)",
-                kinds,
-                worker,
-                lease_seconds,
-                limit,
+            rows = (
+                await c.fetch(
+                    "SELECT * FROM jobs_claim_fair($1::text[], $2, $3, $4, $5)",
+                    kinds,
+                    worker,
+                    lease_seconds,
+                    limit,
+                    per_tenant,
+                )
+                if per_tenant is not None
+                else await c.fetch(
+                    "SELECT * FROM jobs_claim($1::text[], $2, $3, $4)",
+                    kinds,
+                    worker,
+                    lease_seconds,
+                    limit,
+                )
             )
         jobs = [Job.from_row(r) for r in rows]
         now = utcnow()

@@ -1,0 +1,98 @@
+# Note-generation alerts (Sprint 37, GA checklist item 10).
+# Instruments: services/note-service/src/note_service/generation_metrics.py
+# and libs/jobs/src/jobs/metrics.py.
+#
+# Every rule here is about the engine failing QUIETLY. A generation that
+# fails loudly is already visible: the note says so and the author presses
+# Regenerate. What nobody notices is notes that stop being written for a
+# workspace, snapshots that stop being swept, or a writer that has started
+# losing races with its own author.
+groups:
+  - name: note-generation
+    interval: 30s
+    rules:
+      - alert: NoteGenerationFailureRate
+        # Individual failures are normal (a transcript that will not read,
+        # a backend blip). A fifth of them failing means the engine is
+        # broken for somebody, and they are watching a note that never
+        # arrives.
+        expr: |
+          (sum(increase(mdx_note_generations_total{outcome=~"failed|partial"}[30m])) or vector(0))
+          /
+          clamp_min(sum(increase(mdx_note_generations_total[30m])) or vector(0), 1)
+          > 0.2
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "More than a fifth of note generations failed in the last 30 min"
+          description: |
+            Generations are failing or coming back partial. Check note-worker logs for error_kind, and whether the chat backend is degraded (ModelBackend* alerts fire first when it is).
+            Runbook: docs/runbooks/notes.md#generation-failures
+
+      - alert: NoteGenerationSlow
+        # A 60-minute meeting is minutes of work. Ten minutes at p95 means
+        # the queue is behind or the backend is crawling, and the person
+        # who just stopped recording is still looking at a spinner.
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(mdx_note_generation_seconds_histogram_bucket[30m]))) > 600
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "p95 note generation is over 10 minutes"
+          description: |
+            Generations are taking far longer than a meeting's worth of work. Check queue depth, worker replicas and the backend's own latency.
+            Runbook: docs/runbooks/notes.md#generation-slow
+
+      - alert: NoteSnapshotSweepStopped
+        # A snapshot is a whole transcript. The sweep runs daily; if it
+        # stops, second copies of every meeting accumulate silently — a
+        # retention promise quietly broken.
+        expr: |
+          (sum(increase(mdx_note_generation_snapshots_swept_total[48h])) or vector(0)) == 0
+          and
+          (sum(increase(mdx_note_generations_total[48h])) or vector(0)) > 50
+        for: 2h
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "No transcript snapshots swept in 48 h while notes were being written"
+          description: |
+            Either the sweeper is not running (MDX_BACKGROUND_JOBS on the API deployment) or every delete is failing. Snapshots older than a day are a retention breach, not untidiness.
+            Runbook: docs/runbooks/notes.md#snapshot-sweep
+
+      - alert: NoteGenerationBudgetBlocked
+        # Not an outage: a workspace decided, or its plan did. It is on
+        # here because "notes stopped and nobody said why" is exactly the
+        # support ticket this alert answers in one look.
+        expr: |
+          (sum by (reason) (increase(mdx_note_generation_budget_blocked_total[1h])) or vector(0)) > 0
+        for: 0m
+        labels:
+          severity: info
+          team: notes
+        annotations:
+          summary: "Generations blocked in the last hour ({{ $labels.reason }})"
+          description: |
+            A workspace is over its monthly AI budget or has generation turned off. Its admins were notified once for the month; nothing to fix unless they ask.
+            Runbook: docs/runbooks/notes.md#budget
+
+      - alert: NoteWriterConflicts
+        # The writer never overwrites an author. A spike means it is
+        # losing races constantly — the note is safe, the engine's output
+        # is not landing.
+        expr: |
+          (sum(increase(mdx_notes_autosave_conflicts_total[30m])) or vector(0)) > 20
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "Writer conflicts spiking (over 20 in 30 min)"
+          description: |
+            Generated sections are repeatedly failing to land because the note changed underneath them. Expected in bursts while people edit; sustained means the writer's compare-and-set is fighting an autosave loop.
+            Runbook: docs/runbooks/notes.md#writer-conflicts

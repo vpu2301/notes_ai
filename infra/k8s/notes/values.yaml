@@ -273,6 +273,39 @@ apps:
     # policy for app-tier peers or moving the call into a worker (open).
     masterKey: true
 
+  # ── note-worker — the process that writes notes (ADR-0058) ────────
+  # note-service's image, note-service's wiring, a different process: a
+  # generation is minutes of model calls, so it does not belong on the
+  # API's request loop. It is the only consumer of the `note.generate`
+  # queue — with no replica, `POST /v1/notes/{id}/generate` enqueues a
+  # job that nothing drains and the note stays `queued` forever.
+  #
+  # env mirrors note-service because the worker calls the API's own
+  # build_state() (pool, envelope crypto, object store). Keep the two
+  # blocks in step; drift here is a generation that fails only in the
+  # worker.
+  note-worker:
+    image: notes-ai-note-service:latest
+    command: ["python", "-m", "note_service.worker"]
+    replicas: 1
+    service: false             # queue consumer — no HTTP surface
+    probes: false
+    resources:
+      requests: {cpu: 200m, memory: 384Mi}
+      limits: {cpu: "2", memory: 1Gi}
+    env:
+      ASR_SERVICE_BASE_URL: http://asr-service:8000
+      REDIS_URL: redis://redis:6379/0
+      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
+      S3_ENDPOINT: ""
+      MDX_MASTER_KEY_PATH: /etc/mdx/master.key
+      ENV: staging
+      MODELS_CONFIG: /app/config/models.yaml
+    secretEnv: [mdx-hf-endpoints]
+    masterKey: true
+    podLabels:
+      mdx-egress: models   # the chat backend it calls (workers-egress-allowlist)
+
   autocomplete-service:
     image: notes-ai-autocomplete-service:latest
     replicas: 1
@@ -339,6 +372,12 @@ cronJobs:
   shareRetention:
     schedule: "30 2 * * *"
     databaseUrl: postgresql://app_role:app_role@postgres:5432/notes
+  # Sprint 37: the AI path's row retention — terminal `jobs` after 30
+  # days, `model_usage` after 400 (its migration always said so). Runs as
+  # tenant_writer: app_role cannot delete from either, by policy.
+  aiRetention:
+    schedule: "45 2 * * *"
+    databaseUrl: postgresql://tenant_writer:tenant_writer@postgres:5432/notes
   # Sprint 30: the weekly speaker-quality CSV, as the read-only role
   # (column-level grant, migration 0046).
   weeklySpeakers:

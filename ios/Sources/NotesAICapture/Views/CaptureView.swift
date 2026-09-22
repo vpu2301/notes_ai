@@ -74,12 +74,13 @@ struct ActiveCaptureCard: View {
                     .foregroundStyle(DS.muted)
                 PeoplePicker(height: 30)
             }
+            MyNotesEditor()
             if let warning = capture.limitWarning {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
             } else {
                 Text(capture.recorder.interrupted
                      ? "Paused for a call. Recording resumes when it ends."
-                     : "Recording this phone's microphone. Stop when the meeting ends — the note is drafted for you.")
+                     : "Everything you type is already in the note. Stop when the meeting ends — the rest is filled in for you.")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,6 +104,9 @@ struct ActiveCaptureCard: View {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark",
                          text: "Stopped at the \(formatLimit(capture.recorder.limitSeconds)) limit. The note is being drafted — start a new meeting to keep recording.")
             }
+            // The typing does not disappear the moment the meeting ends:
+            // the most useful minute to add a line is often the one after.
+            MyNotesEditor()
             Text("Keep the app open until the upload finishes; the rest happens on the server.")
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
@@ -187,6 +191,71 @@ struct PeoplePicker: View {
     }
 }
 
+/// "My notes": what the author types while the meeting runs (Sprint 34).
+///
+/// It is the note's `user_notes` section, not a scratch buffer — autosaved
+/// as it is typed, on disk within half a second, and on every other device
+/// of the same person. Nothing downstream ever rewrites a character of it:
+/// the document is built AROUND these lines.
+struct MyNotesEditor: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                if capture.myNotes.isEmpty {
+                    Text("Type what matters. We'll fill in the rest.")
+                        .font(.ds(15))
+                        .foregroundStyle(DS.muted)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $capture.myNotes)
+                    .font(.ds(15))
+                    .foregroundStyle(DS.text1)
+                    .scrollContentBackground(.hidden)
+                    .focused($focused)
+                    // Tall enough to feel like a page, short enough to leave
+                    // the timer and Stop in reach of a thumb.
+                    .frame(minHeight: 120, maxHeight: 220)
+            }
+            .padding(.horizontal, 5)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .fill(DS.surface2)
+            )
+            .accessibilityLabel("My notes")
+            .accessibilityHint("Type what matters while the meeting runs")
+            Text(capture.notesUnsaved ? "Saving…" : "Saved — open on any device")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .accessibilityHidden(capture.notesUnsaved == false)
+        }
+    }
+}
+
+/// What kind of meeting the next one is: picks the template family the note
+/// is written into. "Auto" is the default and is always right enough, so
+/// this is a thing to notice rather than a step to complete.
+struct MeetingTypePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            DSSegmentedPill(
+                options: MeetingType.allCases.map { .init($0, label: $0.label) },
+                selection: $capture.meetingType,
+                height: 30)
+                .padding(.horizontal, 1)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Kind of meeting")
+    }
+}
+
 /// The one button. Dark, like the web's create button.
 struct NewMeetingButton: View {
     @EnvironmentObject private var capture: CaptureViewModel
@@ -224,7 +293,10 @@ struct CaptureBar: View {
         Group {
             if case .idle = capture.phase {
                 if !keyboardShown {
-                    NewMeetingButton(fill: true, height: 50)
+                    VStack(spacing: 8) {
+                        MeetingTypePicker()
+                        NewMeetingButton(fill: true, height: 50)
+                    }
                 }
             } else {
                 card

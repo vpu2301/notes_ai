@@ -16,6 +16,7 @@ from .schema import (
     ChoiceOption,
     EditKind,
     FieldType,
+    SectionRole,
     TemplateDefinition,
     TemplateMetadata,
     TemplateSection,
@@ -23,6 +24,7 @@ from .schema import (
 )
 
 __all__ = [
+    "SectionRole",
     "ASR_PROMPT_MAX_TOKENS",
     "CHOICE_FIELD_TYPES",
     "ChoiceOption",

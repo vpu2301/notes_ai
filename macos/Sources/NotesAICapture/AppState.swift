@@ -69,7 +69,9 @@ final class AppState: ObservableObject {
     /// Which tab the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable, CaseIterable { case general, connectors, account, advanced }
+    enum SettingsTab: Hashable, CaseIterable {
+        case general, vocabulary, connectors, dataAI, account, advanced
+    }
 
     /// Open Settings on the Connectors tab (menus, the home page's prompt).
     func showConnectors() {
@@ -643,6 +645,7 @@ final class AppState: ObservableObject {
 
     /// The note is gone (deleted here or from the note view): forget it.
     func noteDeleted(_ noteId: String) {
+        capture.forgetNote(noteId)
         notes.removeAll { $0.noteId == noteId }
         var list = spaces
         for index in list.indices { list[index].noteIds.removeAll { $0 == noteId } }
@@ -964,6 +967,15 @@ final class AppState: ObservableObject {
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
     }
 
+    /// Settings › Data & AI in the web app — where the tier and the
+    /// processor acknowledgement are actually changed.
+    func openWebSettingsData() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/data") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     func openWebApp() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces)) {
             NSWorkspace.shared.open(url)
@@ -1105,6 +1117,9 @@ extension AppState {
 
     func loadWorkspaceData() async {
         if let rules = try? await api.sharingConstraints() { sharingRules = rules }
+        // Sprint 34: anything typed while this device was offline goes up
+        // now. Idempotent on the capture id, so a repeat costs one request.
+        await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
         await googleCalendar.refresh(force: true)

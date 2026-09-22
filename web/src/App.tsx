@@ -11,6 +11,7 @@ import { SignupPage } from "./pages/auth/SignupPage";
 import { WelcomePage } from "./pages/auth/WelcomePage";
 import { ReauthDialog } from "./components/ReauthDialog";
 import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
+import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
 import { SecuritySettingsPage } from "./pages/settings/SecuritySettingsPage";
 import { SettingsLayout } from "./pages/settings/SettingsLayout";
@@ -115,6 +116,9 @@ export function App() {
                 <Route path="devices" element={<DevicesSettingsPage />} />
                 {/* Sprint 23: branding + external sharing policy (admins). */}
                 <Route path="workspace" element={<WorkspaceSettingsPage />} />
+                {/* Sprint 37: who processes this workspace's meetings.
+                    Every member may read it (ADR-0046 decision 12). */}
+                <Route path="data" element={<DataSettingsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

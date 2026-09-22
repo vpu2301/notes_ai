@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { submitJob } from "../api/asr";
+import { glossaryHint } from "../api/glossary";
 import { errorMessage } from "../api/http";
-import { languageName, type AsrLanguage, type CaptureSource } from "../api/types";
-import { AlertIcon, MicIcon, StopIcon, UploadIcon } from "../components/icons";
+import {
+  languageName,
+  type AsrLanguage,
+  type CaptureSource,
+  type MeetingType,
+} from "../api/types";
+import { MicIcon, StopIcon, UploadIcon } from "../components/icons";
 import { useToast } from "../components/Toaster";
-import { contextFields, readCaptureContext } from "../lib/captureContext";
+import { contextFields, meetingCalendar, readCaptureContext } from "../lib/captureContext";
 import { markMine, rememberTitle } from "../lib/captures";
 import { formatElapsed } from "../lib/time";
 import { useCaptures } from "../lib/useCaptures";
+import { useMeetingNote } from "../lib/useMeetingNote";
 import { useRecorder, type RecordedAudio } from "../lib/useRecorder";
 
 type Phase = "idle" | "uploading" | "processing";
@@ -33,10 +40,24 @@ const PEOPLE: ReadonlyArray<readonly [People, string]> = [
   ["6+", "6+"],
 ];
 
+// What kind of meeting this is — picks the template family the note is
+// written into. "Auto" is the default and is always right enough.
+const MEETING_TYPES: ReadonlyArray<readonly [MeetingType, string]> = [
+  ["auto", "Auto"],
+  ["client", "Client"],
+  ["team", "Team"],
+  ["sales", "Sales"],
+  ["one_on_one", "1:1"],
+  ["interview", "Interview"],
+];
+
 /**
  * One screen, one button. Type a title (optional), press Record, press Stop.
- * The recording uploads itself, transcribes, becomes a note, and the note
- * opens — no "transcribe" step, no "create note" step.
+ *
+ * Sprint 34: pressing Record also OPENS THE NOTE. What the author types
+ * while the meeting runs is the highest-value signal there is about what
+ * matters, so there is now somewhere to type it — and it is the note
+ * itself, autosaved, on every device, kept verbatim.
  */
 const FIRST_RUN_KEY = "klarnote.first_run_seen";
 
@@ -50,7 +71,8 @@ export function MeetingPage() {
   const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
   // Sprint 30: its invitees wait in sessionStorage under ?event= (names
   // never ride the URL). They bound the speaker count and are offered as
-  // names when renaming speakers.
+  // names when renaming speakers. Sprint 34: they also go on the note,
+  // together with the invite's agenda.
   const [eventCtx] = useState(() => readCaptureContext(params.get("event")));
   // Sprint 21: `/meeting/new?first_run=1` is where a new workspace lands.
   // Shown once per browser; a per-viewer convenience, so localStorage.
@@ -73,16 +95,47 @@ export function MeetingPage() {
   // Auto by default: the transcript and the note come out in whatever
   // language the meeting was held in. Pinning is an option, not a step.
   const [language, setLanguage] = useState<AsrLanguage>("auto");
+  const [meetingType, setMeetingType] = useState<MeetingType>("auto");
   const [diarize, setDiarize] = useState(true);
   const [people, setPeople] = useState<People>("auto");
   const [hint, setHint] = useState("");
+  /** The author edited the vocabulary: stop overwriting it with the
+   *  workspace's. The hint is a suggestion about THIS meeting. */
+  const hintTouched = useRef(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [jobId, setJobId] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const scratch = useRef<HTMLTextAreaElement>(null);
+
+  // The workspace's own names and terms, so the transcriber has the
+  // spellings before it guesses (Sprint 35). Pre-filled, never forced.
+  useEffect(() => {
+    let cancelled = false;
+    void glossaryHint()
+      .then(({ hint: text }) => {
+        if (!cancelled && text && !hintTouched.current) setHint(text);
+      })
+      .catch(() => {
+        /* no glossary yet, or the service is down: the field stays empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const startedAt = useRef(0);
+  const elapsedMs = useCallback(
+    () => (startedAt.current ? Date.now() - startedAt.current : 0),
+    [],
+  );
+  const note = useMeetingNote(elapsedMs);
 
   const { captures, noteErrors, createNote, cancel, refresh } = useCaptures({
+    // A job bound to a live meeting note finishes into THAT note.
+    meetingNotes: note.noteId && jobId ? { [jobId]: note.noteId } : undefined,
     onNoteReady: (jid, noteId) => {
       if (jid === jobId) navigate(`/notes/${noteId}`, { replace: true });
     },
@@ -112,134 +165,228 @@ export function MeetingPage() {
         markMine(job.id);
         setJobId(job.id);
         setPhase("processing");
+        // Bind the recording to the note the author has been typing in.
+        // Also creates the note when `start` could not (offline at Record).
+        await note.attachJob(job.id);
         void refresh();
       } catch (err) {
         toast.error(errorMessage(err));
         setPhase("idle");
       }
     },
-    [refresh, toast],
+    [refresh, toast, note],
   );
 
   const onRecordError = useCallback((msg: string) => toast.error(msg), [toast]);
   const submitRecording = useCallback(
-    (audio: RecordedAudio) => void submit(audio, settings.current.eventCtx ? "calendar_event" : "manual"),
+    (audio: RecordedAudio) =>
+      void submit(audio, settings.current.eventCtx ? "calendar_event" : "manual"),
     [submit],
   );
   const rec = useRecorder(submitRecording, onRecordError);
 
-  // Don't let a tab close eat a recording.
+  /**
+   * Record. The recorder starts FIRST and the note is opened beside it:
+   * a note we failed to create is recoverable at Stop, a meeting we failed
+   * to record is not.
+   */
+  const onRecord = async () => {
+    startedAt.current = Date.now();
+    await rec.start();
+    void note.start({
+      title: settings.current.title,
+      language,
+      meetingType,
+      calendar: meetingCalendar(eventCtx),
+    });
+    // The scratchpad is where the value is: put the caret there.
+    window.setTimeout(() => scratch.current?.focus(), 0);
+  };
+
+  const onStop = () => {
+    void note.save();
+    rec.stop();
+  };
+
+  // Don't let a tab close eat a recording — or unsaved scratch text.
   useEffect(() => {
-    if (!rec.recording && phase !== "uploading") return;
+    if (!rec.recording && phase !== "uploading" && !note.hasUnsaved()) return;
     const onUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
     };
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [rec.recording, phase]);
+  }, [rec.recording, phase, note]);
 
   const onFile = (file: File | undefined | null) => {
     if (!file) return;
     void submit({ blob: file, filename: file.name }, "upload");
   };
 
-  const job = jobId ? captures?.find((c) => c.job.id === jobId)?.job ?? null : null;
+  const job = jobId ? (captures?.find((c) => c.job.id === jobId)?.job ?? null) : null;
   const uploadFirst = params.get("mode") === "upload";
+  const live = rec.recording || phase !== "idle";
 
-  // ── processing view ─────────────────────────────────────────────────
+  // ── the scratchpad ──────────────────────────────────────────────────
 
-  if (phase !== "idle") {
+  const scratchpad = (
+    <div className="scratchpad">
+      <input
+        className="title-input"
+        placeholder="Untitled meeting"
+        aria-label="Meeting title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <textarea
+        ref={scratch}
+        className="textarea seamless scratch-area"
+        aria-label="My notes"
+        placeholder="Type what matters. We'll fill in the rest."
+        value={note.myNotes}
+        onChange={(e) => note.onType(e.target.value)}
+      />
+      <p className="help scratch-status" role="status" aria-live="polite">
+        {note.saving
+          ? "Saving…"
+          : note.noteId
+            ? "Saved to this note — open on any device."
+            : "Kept in this tab until the note opens."}
+      </p>
+      {eventCtx && (eventCtx.attendees.length > 0 || eventCtx.agenda.length > 0) && (
+        <div className="scratch-context">
+          <button
+            className="disclosure"
+            aria-expanded={showContext}
+            onClick={() => setShowContext((v) => !v)}
+          >
+            From the invite
+          </button>
+          {showContext && (
+            <div className="scratch-context-body">
+              {eventCtx.attendees.length > 0 && (
+                <p className="help">{eventCtx.attendees.join(", ")}</p>
+              )}
+              {eventCtx.agenda.length > 0 && (
+                <ul className="help">
+                  {eventCtx.agenda.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // ── live: recording, uploading, transcribing ────────────────────────
+
+  if (live) {
     const detected = languageName(job?.detected_language);
     const failed = job?.status === "failed";
     const cancelled = job?.status === "cancelled";
     const noteError = job && job.status === "complete" ? noteErrors[job.id] : undefined;
+    const status = rec.recording
+      ? "Recording — type anything worth remembering."
+      : phase === "uploading"
+        ? "Uploading the recording…"
+        : job?.status === "complete"
+          ? `Writing your notes${detected ? ` in ${detected}` : ""}…`
+          : job?.status === "running"
+            ? "Transcribing… this takes about as long as the recording"
+            : "Waiting for a transcription slot…";
+
     return (
-      <div className="meeting">
-        <div className="meeting-stage">
-          {job && noteError ? (
+      <div className="meeting meeting-live">
+        <div className="recorder-bar" role="group" aria-label="Recording">
+          <div className={`level-meter sm ${rec.recording ? "live" : ""}`} aria-hidden="true">
+            {rec.levels.map((lvl, i) => (
+              <span
+                key={i}
+                className="bar"
+                style={{
+                  height: rec.recording ? Math.max(3, Math.round(lvl * 24)) : 3 + ((i * 7) % 7),
+                }}
+              />
+            ))}
+          </div>
+          {rec.recording ? (
             <>
-              <span className="stage-ico rec">
-                <AlertIcon size={20} />
+              <div className="rec-timer sm">
+                <span className="rec-pulse" aria-hidden="true" />
+                <span aria-live="off">{formatElapsed(rec.elapsedMs)}</span>
+              </div>
+              <button className="btn rec" onClick={onStop}>
+                <StopIcon size={13} /> Stop
+              </button>
+            </>
+          ) : (
+            <>
+              {!failed && !cancelled && !noteError && (
+                <span className="stage-pulse sm" aria-hidden="true" />
+              )}
+              <span className="rec-status" role="status" aria-live="polite">
+                {failed || cancelled
+                  ? (job?.error_message ??
+                    (cancelled ? "Transcription cancelled" : "Transcription failed"))
+                  : (noteError ?? status)}
               </span>
-              <h2>Couldn't write the note</h2>
-              <p className="help">{noteError}</p>
-              <div className="stage-actions">
+              {job && (job.status === "queued" || job.status === "running") && (
                 <button
-                  className="btn primary"
-                  onClick={() => void createNote(job).catch((err) => toast.error(errorMessage(err)))}
+                  className="btn ghost sm"
+                  onClick={() => void cancel(job).catch((err) => toast.error(errorMessage(err)))}
+                >
+                  Cancel
+                </button>
+              )}
+              {noteError && job && (
+                <button
+                  className="btn primary sm"
+                  onClick={() =>
+                    void createNote(job).catch((err) => toast.error(errorMessage(err)))
+                  }
                 >
                   Try again
                 </button>
-                <Link to="/" className="btn ghost">
-                  Back to notes
-                </Link>
-              </div>
-            </>
-          ) : failed || cancelled ? (
-            <>
-              <span className="stage-ico rec">
-                <AlertIcon size={20} />
-              </span>
-              <h2>{cancelled ? "Transcription cancelled" : "Transcription failed"}</h2>
-              <p className="help">{job?.error_message ?? "Something went wrong on the way to a note."}</p>
-              <div className="stage-actions">
+              )}
+              {(failed || cancelled) && (
                 <button
-                  className="btn primary"
+                  className="btn sm"
                   onClick={() => {
                     setJobId(null);
                     setPhase("idle");
+                    note.reset();
                   }}
                 >
                   Try again
                 </button>
-                <Link to="/" className="btn ghost">
-                  Back to notes
-                </Link>
-              </div>
-            </>
-          ) : (
-            <>
-              <span className="stage-ico live" aria-hidden="true">
-                <span className="stage-pulse" />
-              </span>
-              <h2>{title.trim() || "Untitled meeting"}</h2>
-              <p className="stage-status" role="status" aria-live="polite">
-                {phase === "uploading"
-                  ? "Uploading the recording…"
-                  : job?.status === "complete"
-                    ? `Writing your note${detected ? ` in ${detected}` : ""}…`
-                    : job?.status === "running"
-                      ? "Transcribing… this takes about as long as the recording"
-                      : "Waiting for a transcription slot…"}
-              </p>
-              <p className="help">You can leave — the note will show up in your list when it's ready.</p>
-              <div className="stage-actions">
-                <Link to="/" className="btn">
-                  Back to notes
-                </Link>
-                {job && (job.status === "queued" || job.status === "running") && (
-                  <button
-                    className="btn ghost"
-                    onClick={() => void cancel(job).catch((err) => toast.error(errorMessage(err)))}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
+              )}
             </>
           )}
+          <span className="grow" />
+          <Link to="/" className="btn ghost sm">
+            Notes
+          </Link>
         </div>
+        {scratchpad}
+        {rec.recording && (
+          <p className="help meeting-foot">
+            Everything you type is in the note already. Stopping uploads the recording and fills
+            in the rest.
+          </p>
+        )}
       </div>
     );
   }
 
-  // ── idle / recording view ───────────────────────────────────────────
+  // ── idle ────────────────────────────────────────────────────────────
 
   return (
     <div
       className={`meeting ${drag ? "drag" : ""}`}
       onDragOver={(e) => {
-        if (rec.recording) return;
         e.preventDefault();
         setDrag(true);
       }}
@@ -247,7 +394,7 @@ export function MeetingPage() {
       onDrop={(e) => {
         e.preventDefault();
         setDrag(false);
-        if (!rec.recording) onFile(e.dataTransfer.files?.[0]);
+        onFile(e.dataTransfer.files?.[0]);
       }}
     >
       {firstRun && (
@@ -274,121 +421,131 @@ export function MeetingPage() {
         <p className="help meeting-context">
           {eventCtx.attendee_count} invited
           {eventCtx.attendees.length > 0 && " · names will be offered for speakers"}
+          {eventCtx.agenda.length > 0 && ` · ${eventCtx.agenda.length} agenda points`}
         </p>
       )}
 
-      <div className={`meeting-stage ${rec.recording ? "live" : "idle"}`}>
-        <div className={`level-meter ${rec.recording ? "live" : ""}`} aria-hidden="true">
-          {rec.levels.map((lvl, i) => (
-            <span
-              key={i}
-              className="bar"
-              style={{ height: rec.recording ? Math.max(3, Math.round(lvl * 44)) : 3 + ((i * 7) % 9) }}
-            />
-          ))}
-        </div>
-
-        {rec.recording ? (
-          <>
-            <div className="rec-timer">
-              <span className="rec-pulse" aria-hidden="true" />
-              <span aria-live="polite">{formatElapsed(rec.elapsedMs)}</span>
-            </div>
-            <button className="btn rec lg" onClick={rec.stop}>
-              <StopIcon size={14} /> Stop
-            </button>
-            <p className="help">Stopping uploads and transcribes the meeting straight away.</p>
-          </>
-        ) : (
-          <>
-            <button className="btn accent lg rec-start" onClick={() => void rec.start()} autoFocus={uploadFirst}>
-              <MicIcon size={16} /> Record
-            </button>
-            <p className="help">
-              Or{" "}
-              <button className="link" onClick={() => fileInput.current?.click()}>
-                upload a recording
-              </button>{" "}
-              — drop a file anywhere on this page.
-            </p>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="audio/*,.m4a,.webm,.ogg"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                onFile(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-          </>
-        )}
+      <div className="seg chips" role="group" aria-label="Meeting type">
+        {MEETING_TYPES.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className="seg-opt"
+            aria-pressed={meetingType === value}
+            onClick={() => setMeetingType(value)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {!rec.recording && (
-        <div className="meeting-options">
-          <button className="disclosure" aria-expanded={showOptions} onClick={() => setShowOptions((v) => !v)}>
-            Options
-          </button>
-          {showOptions && (
-            <div className="meeting-options-body">
-              <div className="field">
-                <span className="label">Language</span>
-                <div className="seg" role="group" aria-label="Language">
-                  {LANGUAGES.map(([code, label]) => (
-                    <button
-                      key={code}
-                      type="button"
-                      className="seg-opt"
-                      aria-pressed={language === code}
-                      onClick={() => setLanguage(code)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <span className="help">
-                  Detect listens to the recording and writes the transcript and note in that language.
-                </span>
-              </div>
-              <label className="chk-row">
-                <input type="checkbox" className="chk" checked={diarize} onChange={(e) => setDiarize(e.target.checked)} />
-                Tell speakers apart
-              </label>
-              <div className="field">
-                <span className="label">People</span>
-                <div className="seg" role="group" aria-label="People">
-                  {PEOPLE.map(([value, label]) => (
-                    <button
-                      key={label}
-                      type="button"
-                      className="seg-opt"
-                      aria-pressed={people === value}
-                      disabled={!diarize}
-                      onClick={() => setPeople(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <span className="help">
-                  {diarize ? "Auto counts the voices itself." : "Turn on “Tell speakers apart” to set this."}
-                </span>
-              </div>
-              <div className="field">
-                <span className="label">Words to listen for</span>
-                <input
-                  className="input"
-                  placeholder="Names, product terms, acronyms…"
-                  maxLength={2000}
-                  value={hint}
-                  onChange={(e) => setHint(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
+      <div className="meeting-stage idle">
+        <div className="level-meter" aria-hidden="true">
+          {rec.levels.map((_lvl, i) => (
+            <span key={i} className="bar" style={{ height: 3 + ((i * 7) % 9) }} />
+          ))}
         </div>
-      )}
+        <button className="btn accent lg rec-start" onClick={() => void onRecord()} autoFocus={uploadFirst}>
+          <MicIcon size={16} /> Record
+        </button>
+        <p className="help">
+          The note opens as you press Record — type in it while the meeting runs. Or{" "}
+          <button className="link" onClick={() => fileInput.current?.click()}>
+            upload a recording
+          </button>{" "}
+          — drop a file anywhere on this page.
+        </p>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="audio/*,.m4a,.webm,.ogg"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            onFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      <div className="meeting-options">
+        <button
+          className="disclosure"
+          aria-expanded={showOptions}
+          onClick={() => setShowOptions((v) => !v)}
+        >
+          Options
+        </button>
+        {showOptions && (
+          <div className="meeting-options-body">
+            <div className="field">
+              <span className="label">Language</span>
+              <div className="seg" role="group" aria-label="Language">
+                {LANGUAGES.map(([code, label]) => (
+                  <button
+                    key={code}
+                    type="button"
+                    className="seg-opt"
+                    aria-pressed={language === code}
+                    onClick={() => setLanguage(code)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="help">
+                Detect listens to the recording and writes the transcript and note in that
+                language.
+              </span>
+            </div>
+            <label className="chk-row">
+              <input
+                type="checkbox"
+                className="chk"
+                checked={diarize}
+                onChange={(e) => setDiarize(e.target.checked)}
+              />
+              Tell speakers apart
+            </label>
+            <div className="field">
+              <span className="label">People</span>
+              <div className="seg" role="group" aria-label="People in the meeting">
+                {PEOPLE.map(([value, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="seg-opt"
+                    aria-pressed={people === value}
+                    disabled={!diarize}
+                    onClick={() => setPeople(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="help">
+                {diarize ? "Auto counts the voices itself." : "Turn on “Tell speakers apart” to set this."}
+              </span>
+            </div>
+            <div className="field">
+              <span className="label">Words to listen for</span>
+              <input
+                className="input"
+                placeholder="Names, product terms, acronyms…"
+                maxLength={2000}
+                value={hint}
+                onChange={(e) => {
+                  hintTouched.current = true;
+                  setHint(e.target.value);
+                }}
+              />
+              <span className="help">
+                Pre-filled from your workspace&apos;s names and terms. Editing it changes this
+                meeting only.
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
 
       {drag && (
         <div className="meeting-drop" aria-hidden="true">

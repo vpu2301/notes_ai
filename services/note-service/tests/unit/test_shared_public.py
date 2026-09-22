@@ -98,6 +98,9 @@ def _version(note: repo.NoteRow) -> repo.VersionRow:
             NoteSection(section_key="attendees", text="Anna, Tom"),
             NoteSection(section_key="decisions", text="Go with option B."),
             NoteSection(section_key="agenda", text=""),
+            # Sprint 34 gave every template a scratchpad; Sprint 36 keeps
+            # it off every external surface. Both are asserted below.
+            NoteSection(section_key="user_notes", text="TOMISSTALLING ask about budget"),
         ],
     )
     return repo.VersionRow(
@@ -412,11 +415,15 @@ def test_page_carries_sender_product_and_section_roles(client: TestClient) -> No
     }
     assert "is_draft" not in body
     assert body["expires_at"] is not None
+    # Sprint 36: an external surface renders the CLIENT DOCUMENT — an
+    # allow-list of roles in a fixed reading order, not the note's own
+    # section order. `user_notes` and anything transcript-shaped are gone
+    # before they reach here.
     assert [(s["section_key"], s["role"]) for s in body["sections"]] == [
-        ("discussion", "other"),
-        ("action_items", "action_items"),
         ("attendees", "attendees"),
         ("decisions", "decisions"),
+        ("discussion", "other"),
+        ("action_items", "action_items"),
     ]
     assert "tom@client.com" not in r.text
 
@@ -771,11 +778,94 @@ def test_external_sharing_flag_off_darkens_recipient_links(
     assert client.get(f"/v1/shared/{TOKEN}").status_code == 404
 
 
+def test_the_page_never_shows_the_authors_scratchpad(client: TestClient) -> None:
+    """A disclosure regression test. `user_notes` is where the author
+    writes "Tom is stalling" during the meeting; a recipient link must
+    never render a character of it."""
+    r = client.get(f"/v1/shared/{TOKEN}")
+    assert r.status_code == 200
+    assert "TOMISSTALLING" not in r.text
+    assert "user_notes" not in [s["section_key"] for s in r.json()["sections"]]
+
+
+def test_the_shared_pdf_never_shows_the_authors_scratchpad() -> None:
+    """The recipient's PDF renders the client document too. Asserted on
+    the render input rather than the compressed bytes."""
+    from note_service.domain.pdf import build_render_input
+
+    note = _note()
+    payload = build_render_input(
+        note=note,
+        version=_version(note),
+        issuer_name="Acme",
+        variant="client",
+        template_code="meeting_notes",
+    )
+    assert all("TOMISSTALLING" not in str(s.get("text", "")) for s in payload.sections)
+    assert "user_notes" not in [s.get("section_key") for s in payload.sections]
+    # …and the AUTHOR's own PDF is unchanged: they may read their notes.
+    full = build_render_input(note=note, version=_version(note), issuer_name="Acme")
+    assert "user_notes" in [s.get("section_key") for s in full.sections]
+
+
 def test_a_dialogue_section_is_the_transcript(client: TestClient) -> None:
-    from note_service.routers.shared_public import _is_transcript
+    # Sprint 36 moved the rule into `client_view`, so the page and the
+    # document that decides what reaches the page share one copy.
+    from note_service.domain.client_view import looks_like_transcript as _is_transcript
 
     assert _is_transcript("Anna: we ship Friday.\n\nTom: fine by me.\n\nAnna: done.")
     assert _is_transcript("Speaker 1: eins\n\nUnknown speaker: zwei\n\nNote to self")
     assert not _is_transcript("Anna, Tom")
     assert not _is_transcript("Decision: ship it.\n\nWe discussed the roadmap at length.")
     assert not _is_transcript("https://x.test: a\n\nhttps://y.test: b")
+
+
+def test_a_transcript_only_note_says_preparing_while_the_writer_works(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Right after a recording the note holds nothing but the transcript,
+    which never leaves the workspace. While the generation is live the
+    page says so instead of "empty"; once it is over, it is empty."""
+    from note_service.domain import generation_repository as gen_repo
+
+    note = client.world["note"]
+    version = _version(note)
+    version.content = NoteContent(
+        template_id=version.content.template_id,
+        template_schema_version=1,
+        title="Gregor Gysi interview",
+        sections=[
+            NoteSection(section_key="user_notes", text=""),
+            NoteSection(section_key="attendees", text=""),
+            NoteSection(section_key="agenda", text=""),
+            NoteSection(
+                section_key="discussion",
+                text="Moderator: Guten Tag.\n\nGysi: Guten Tag.\n\nModerator: Fangen wir an.",
+            ),
+            NoteSection(section_key="decisions", text=""),
+            NoteSection(section_key="action_items", text=""),
+        ],
+    )
+    client.world["version"] = version
+    generation = {"status": gen_repo.QUEUED}
+
+    async def _latest(conn, *, note_id):  # noqa: ANN001
+        return SimpleNamespace(status=generation["status"])
+
+    monkeypatch.setattr(gen_repo, "latest_for_note", _latest)
+
+    body = client.get(f"/v1/shared/{TOKEN}").json()
+    assert body["sections"] == []
+    assert body["preparing"] is True
+    assert "Guten Tag" not in str(body)
+
+    generation["status"] = gen_repo.FAILED
+    body = client.get(f"/v1/shared/{TOKEN}").json()
+    assert body["sections"] == []
+    assert body["preparing"] is False
+
+    # A note with content is never "preparing", even mid-rewrite.
+    generation["status"] = gen_repo.RUNNING
+    client.world["version"] = _version(note)
+    body = client.get(f"/v1/shared/{TOKEN}").json()
+    assert body["sections"] and body["preparing"] is False

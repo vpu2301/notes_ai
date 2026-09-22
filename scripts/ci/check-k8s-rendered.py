@@ -41,6 +41,7 @@ DRIFT_PAIRS = [
     ("files/jobs/weekly_funnel.py", "scripts/jobs/weekly_funnel.py"),
     ("files/jobs/loop_funnel.sql", "scripts/ops/loop_funnel.sql"),
     ("files/jobs/share_retention.py", "scripts/jobs/share_retention.py"),
+    ("files/jobs/ai_retention.py", "scripts/jobs/ai_retention.py"),
     ("files/jobs/weekly_speakers.py", "scripts/jobs/weekly_speakers.py"),
     ("files/jobs/speaker_quality.sql", "scripts/ops/speaker_quality.sql"),
     ("files/postgres-init.sql", "infra/postgres/init.sql"),

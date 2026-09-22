@@ -330,6 +330,10 @@ export interface NoteSection {
   text?: string;
   field_specific_metadata?: FieldMetadata;
   transcript_segment_ids?: string[];
+  /** The heading of a section the template does not name (one the engine
+   *  made from the conversation). Absent or null: no heading — the block
+   *  is read as the note itself. */
+  title?: string | null;
 }
 
 export interface NoteContent {
@@ -547,6 +551,8 @@ export interface SharedNoteView {
   expires_at: string | null;
   /** Sprint 23: prove the mailbox before acting; reading is still allowed. */
   requires_verification?: boolean;
+  /** The note has nothing shareable yet because the writer is still working on it. */
+  preparing?: boolean;
   lang?: "en" | "de" | "uk";
   changes?: {
     since_version: number;
@@ -685,6 +691,167 @@ export interface FromTranscriptResponse {
   template_name: string;
   template_selection: "explicit" | "auto" | "fallback";
   template_score?: number | null;
+  /** Sprint 33: present when the engine is writing this note. */
+  generation?: { id: string; status: string } | null;
+  /** Sprint 37: why there is no generation, when there is none. */
+  generation_blocked?: "generation_disabled" | "budget_exceeded" | null;
+}
+
+// ── series, carry-over and the client version (Sprint 36) ─────────────
+
+/** An item brought forward from the previous meeting in this series. */
+export interface CarriedItem {
+  item_key: string;
+  text: string;
+  owner_label: string | null;
+  due_text: string | null;
+  /** `done_mentioned` is the recording saying so, with a quote;
+   *  `done_marked` is the author ticking it. Only the engine may claim
+   *  the first. */
+  state: "open" | "done_mentioned" | "done_marked" | "dropped";
+  done_quote?: string | null;
+  done_speaker?: string | null;
+}
+
+export interface CarriedView {
+  items: CarriedItem[];
+  from_note_id: string | null;
+  from_note_code: string | null;
+  from_date: string | null;
+}
+
+export interface ClientSection {
+  section_key: string;
+  role: string;
+  name: string;
+  text: string;
+}
+
+/** Exactly what an external surface renders — the preview and the shared
+ *  page call the same builder, so they cannot differ. */
+export interface ClientVersion {
+  available: boolean;
+  reason: string | null;
+  title: string;
+  sections: ClientSection[];
+  hidden_lines: number;
+  hidden_sections: string[];
+}
+
+export interface ChecklistItem {
+  code: string;
+  detail: string;
+  count: number;
+}
+
+export interface ClientVersionCheck {
+  available: boolean;
+  /** Warnings, never blockers: the author decides. */
+  warnings: ChecklistItem[];
+  is_empty: boolean;
+}
+
+// ── the workspace glossary + corrections (Sprint 35) ──────────────────
+
+export type GlossaryKind = "person" | "company" | "product" | "term";
+
+export interface GlossaryTerm {
+  id: string;
+  term: string;
+  kind: GlossaryKind;
+  /** How it has been misheard or misspelled before. */
+  heard_as: string[];
+  created_at: string;
+  /** Whether this viewer may remove it (its creator, or an admin). */
+  can_delete: boolean;
+}
+
+export interface GlossaryHint {
+  hint: string;
+  terms: number;
+}
+
+/** Why a generated line was taken out. A closed vocabulary: the reason is
+ *  the signal that tells us what to stop writing, so it is never free text. */
+export type DismissReason =
+  | "not_said"
+  | "not_a_decision"
+  | "not_a_task"
+  | "wrong_owner"
+  | "wrong_date"
+  | "duplicate"
+  | "not_relevant";
+
+export interface CorrectionResponse {
+  id: string;
+  item_key: string;
+  section_key: string;
+  version_number: number;
+  /** The line as it now reads, or null when it was removed. */
+  line: string | null;
+}
+
+// ── the live meeting note (Sprint 34) ─────────────────────────────────
+
+/** What a capture is doing right now. Lives on `note_meetings`, not on the
+ *  note's status — a note is a draft until it is cancelled (ADR-0051). */
+export type MeetingState =
+  | "recording"
+  | "uploading"
+  | "transcribing"
+  | "generating"
+  | "ready"
+  | "no_audio"
+  | "failed";
+
+export type MeetingType = "auto" | "client" | "team" | "sales" | "one_on_one" | "interview";
+
+/** What the invite knew. `description` is read for its agenda on the
+ *  server and then dropped — it is never stored. */
+export interface MeetingCalendarContext {
+  source: "google" | "ics" | "eventkit";
+  title?: string;
+  ical_uid?: string;
+  attendee_names?: string[];
+  agenda_lines?: string[];
+  description?: string;
+}
+
+export interface StartMeetingRequest {
+  client_capture_id: string;
+  title?: string;
+  started_at: string;
+  language?: AsrLanguage;
+  meeting_type?: MeetingType;
+  template_id?: string;
+  calendar?: MeetingCalendarContext;
+}
+
+export interface StartMeetingResponse {
+  id: string;
+  code: string;
+  version_number: number;
+  template_id: string;
+  state: MeetingState;
+}
+
+export interface MeetingView {
+  state: MeetingState;
+  asr_job_id: string | null;
+  meeting_type: MeetingType;
+  started_at: string;
+}
+
+export interface AttachTranscriptResponse {
+  id: string;
+  version_number: number;
+  state: MeetingState;
+}
+
+/** When a typed line was first touched, relative to the recording's t=0. */
+export interface LineTime {
+  line_key: string;
+  offset_ms: number;
 }
 
 // ── asr-service ────────────────────────────────────────────────────────
@@ -982,6 +1149,11 @@ export interface UpcomingEvent {
   attendees: string[];
   organizer: string | null;
   response_status: string | null;
+  /** Stable across the copies an invite makes in several calendars. */
+  ical_uid: string;
+  /** The agenda the server derived from the invite's description (Sprint
+   *  34). The description itself never leaves the server. */
+  agenda_lines: string[];
 }
 
 export interface CalendarProblem {
@@ -1034,4 +1206,83 @@ export interface AskResponse {
   answer: string;
   backend: string;
   model_id: string;
+}
+
+// ── Sprint 37: model tiers, processors, budget ─────────────────────
+
+/** One company in the data path, as the registry itself reports it. */
+export interface AiProcessor {
+  name: string;
+  region: string;
+  /** What it does with the data — "writing your meeting notes", … */
+  purpose: string;
+  /** Which tiers route to it. */
+  tiers: string[];
+  acknowledged: boolean;
+}
+
+export interface AiSettings {
+  provider: string;
+  tier: string;
+  generation_enabled: boolean;
+  /** What the workspace ACTUALLY resolves to. Differs from `tier` when
+   *  routing gained a processor nobody has acknowledged yet. */
+  effective_provider: string;
+  effective_tier: string;
+  processors: AiProcessor[];
+  needs_acknowledgement: AiProcessor[];
+  month_to_date_cents: number;
+  budget_cents: number;
+  may_choose_premium: boolean;
+  can_edit: boolean;
+}
+
+export interface AiSettingsUpdate {
+  provider?: string;
+  tier?: string;
+  generation_enabled?: boolean;
+  monthly_budget_cents?: number;
+  acknowledge?: { name: string; region: string }[];
+}
+
+// ── The document engine (Sprint 33), as the client sees it ─────────
+
+export interface GenerationView {
+  id: string;
+  status: "queued" | "running" | "partial" | "complete" | "failed" | "superseded";
+  step: string | null;
+  windows_total: number | null;
+  windows_done: number | null;
+  windows_failed: number | null;
+  /** `[[start_ms, end_ms]]` — which minutes are missing, so the note can
+   *  name them instead of apologising in general. */
+  failed_ranges: number[][];
+  prompt_version: string;
+  model_id: string | null;
+  /** Closed vocabulary; the client turns it into a sentence. */
+  error_kind: string | null;
+  created_at: string;
+  finished_at: string | null;
+  /** Sections the engine did NOT write because the author had already
+   *  written there; their facts are offered instead of imposed. */
+  suggested_sections: string[];
+}
+
+export interface GeneratedItem {
+  item_key: string;
+  kind: string;
+  section_key: string;
+  text: string;
+  owner_label: string | null;
+  due_text: string | null;
+  due_date: string | null;
+  explicit: boolean;
+  confidence: number;
+  flags: string[];
+  quote: string;
+  start_ms: number;
+  end_ms: number;
+  speaker_label: string | null;
+  speaker_name: string | null;
+  placement: string;
 }

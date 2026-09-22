@@ -98,13 +98,6 @@ class AbbreviationSnapshot:
     entries: tuple[AbbreviationEntry, ...]
     fingerprint: str
 
-    def for_language(self, language: str) -> list[AbbreviationEntry]:
-        # Tenant overrides FIRST, so the matcher's first-match wins.
-        return sorted(
-            self.entries,
-            key=lambda e: 0 if e.is_tenant_override else 1,
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class ChoiceOption:

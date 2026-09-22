@@ -5,6 +5,7 @@ import { getTenant, patchTenant, uploadLogo } from "../../api/tenants";
 import type { SharingPolicy, TenantProfile } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { GlossarySection } from "../../components/GlossarySection";
 import { useToast } from "../../components/Toaster";
 
 const PAID = new Set(["pro", "enterprise"]);
@@ -195,6 +196,8 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
           </div>
         </form>
       )}
+
+      <GlossarySection />
 
       {confirmRevoke && (
         <ConfirmDialog

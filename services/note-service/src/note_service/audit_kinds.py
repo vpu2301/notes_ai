@@ -51,9 +51,6 @@ NOTE_RECIPIENT_VERIFICATION_REQUESTED: Final = "note.recipient_verification_requ
 NOTE_RECIPIENT_VERIFIED: Final = "note.recipient_verified"  # link_id
 NOTE_LINK_REPORTED: Final = "note.link_reported"  # link_id, reason
 
-# Spec item 1: note synthesis (raw dictation → clean prose).
-NOTE_SYNTHESIS_STARTED: Final = "note.synthesis_started"
-NOTE_SYNTHESIS_COMPLETED: Final = "note.synthesis_completed"
 
 # Sprint-13: typed fields. Both are the extractor-quality
 # feedback loop (step 08's override-rate dashboard).
@@ -103,3 +100,43 @@ SCHEDULER_JOB_FAILED: Final = "scheduler.job.failed"
 
 # "Ask this note": a question answered by the model over the note + transcript.
 NOTE_ASKED: Final = "note.asked"  # payload: backend, model_id, question_chars — never the text
+
+# ── Sprint 34: the note exists from the first second (ADR-0055) ─────
+# Counts only. `note.meeting_started` carries the meeting type and
+# whether a calendar supplied context — NEVER the event title, the
+# attendees or the agenda, which are content (pii_filter).
+NOTE_MEETING_STARTED: Final = "note.meeting_started"
+NOTE_MEETING_TRANSCRIPT_ATTACHED: Final = "note.meeting_transcript_attached"
+
+# ── Sprint 35: corrections and the workspace glossary ───────────────
+# What the author fixed, never what it said. Payloads carry the line's
+# item_key (a hash), the item kind and a closed-vocabulary reason or
+# field name — no line text, no owner name, no date.
+NOTE_ITEM_DISMISSED: Final = "note.item_dismissed"  # item_key, kind, reason
+NOTE_ITEM_RESTORED: Final = "note.item_restored"  # item_key, kind
+NOTE_ITEM_EDITED: Final = "note.item_edited"  # item_key, kind, field
+# The glossary is names and business terms: the payload is the closed
+# `kind` vocabulary and counts ONLY — never the term itself.
+GLOSSARY_TERM_ADDED: Final = "glossary.term_added"
+GLOSSARY_TERM_DELETED: Final = "glossary.term_deleted"
+
+# ── Sprint 36: series, carry-over, the client version ───────────────
+# Counts and closed vocabularies only — never an item's text, never the
+# title of the meeting it was carried from.
+NOTE_SERIES_LINKED: Final = "note.series_linked"  # source, carried count
+NOTE_CARRIED_ITEM_UPDATED: Final = "note.carried_item_updated"  # item_key, state
+NOTE_MEETING_TYPE_CHANGED: Final = "note.meeting_type_changed"  # from, to, detected
+
+# ── Sprint 33: the document engine (ADR-0058) ───────────────────────
+# Ids and counts only. A generation's payload never carries a quote, an
+# item's text, an owner's name or anything else that was said.
+NOTE_GENERATION_REQUESTED: Final = "note.generation_requested"  # reason
+NOTE_GENERATION_COMPLETED: Final = "note.generation_completed"  # windows, failed, counts
+NOTE_GENERATION_FAILED: Final = "note.generation_failed"  # error_kind
+
+# ── Sprint 37: model tiers and processors ───────────────────────────
+# Closed vocabulary and counts. Never a processor's commercial terms,
+# never the name of the person who acknowledged it (the actor is already
+# on the audit row).
+AI_SETTINGS_CHANGED: Final = "ai.settings_changed"  # tier, provider, generation_enabled
+AI_BUDGET_REACHED: Final = "ai.budget_reached"  # cents, budget_cents

@@ -897,7 +897,8 @@ private struct ComingUpRow: View {
             }
             if !capture.isRecording, !capture.phase.isBusy {
                 Button {
-                    capture.startNew(title: item.title, context: item.captureContext)
+                    capture.startNew(title: item.title, context: item.captureContext,
+                                     calendar: item.meetingCalendar)
                 } label: {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 13, weight: .semibold))

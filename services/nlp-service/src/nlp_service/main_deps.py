@@ -46,6 +46,7 @@ def auth_issuers() -> list[IssuerConfig]:
         audience=settings.auth_audience,
     )
 
+
 @dataclass
 class RedisCacheAdapter:
     """Implements ``CacheProtocol`` over the shared aioredis client."""

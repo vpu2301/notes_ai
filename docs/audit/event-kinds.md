@@ -137,6 +137,21 @@ typos at import.
 | `note.recipient_verification_requested` | info | note-service POST /v1/shared/{token}/verify/request | Sprint 23 — a code was mailed to the link's recipient. Payload: link_id. |
 | `note.recipient_verified`         | info     | note-service POST /v1/shared/{token}/verify | Sprint 23 — the recipient proved the mailbox; the link may now respond. Payload: link_id. |
 | `note.link_reported`              | sec      | note-service POST /v1/shared/{token}/report | Sprint 23 — a recipient reported the shared page. Payload: link_id, reason (closed vocab), auto_disabled (the abuse guard switched product mail off). |
+| `note.item_dismissed`             | info     | note-service POST /v1/notes/{id}/items/{key}/dismiss | Sprint 35 — the author took a generated line out of the note. Payload: item_key (a hash), kind, reason (closed vocab). NEVER the line's text. |
+| `note.item_restored`              | info     | note-service POST /v1/notes/{id}/items/{key}/restore | Sprint 35 — the author put a dismissed line back. Payload: item_key, kind. |
+| `note.item_edited`                | info     | note-service PATCH /v1/notes/{id}/items/by-key/{key} | Sprint 35 — the author fixed a line's owner or due date in place; the item_key is unchanged by design. Payload: item_key, kind, field (`owner` \| `due`). Never the owner's name or the date. |
+| `glossary.term_added`             | info     | note-service POST /v1/glossary | Sprint 35 — the workspace remembered a name, company, product or term. Payload: kind (closed vocab), heard_as_count. **Never the term** — the glossary is names of real people and companies. |
+| `glossary.term_deleted`           | info     | note-service DELETE /v1/glossary/{id} | Sprint 35 — a term was forgotten. Payload: kind. Never the term. |
+| `note.generation_requested`       | info     | note-service POST /v1/notes/from-transcript, POST /v1/notes/{id}/generation | Sprint 33 — a note is being written from its recording. Payload: reason (`auto` \| `regenerate` \| `transcript_changed`). |
+| `note.generation_completed`       | info     | note-worker | Sprint 33 — the engine finished. Payload: windows, windows_failed, items_written, items_suggested, seconds. **Never** a quote, an item's text or a speaker's name. |
+| `note.generation_failed`          | info     | note-worker | Sprint 33 — the run ended without a document. Payload: error_kind (closed vocabulary; `jobs.last_error` is scrubbed to the same). |
+| `ai.settings_changed`             | info     | note-service PUT /v1/ai/settings | Sprint 37 — an admin changed how this workspace's meetings are processed. Payload: tier, provider, generation_enabled, acknowledged (a count). Never a processor's commercial terms, never who is on the plan. |
+| `ai.budget_reached`               | warning  | note-service POST /v1/notes/from-transcript, POST /v1/notes/{id}/generation | Sprint 37 — the workspace spent its monthly AI budget and generation stopped. Payload: spent_cents, budget_cents. Once per workspace per month. |
+| `note.series_linked`              | info     | note-service POST /v1/notes/{id}/meeting/previous | Sprint 36 — this meeting was linked to an earlier one in the same series. Payload: source (`manual` \| `calendar_uid` \| `title_attendees`) and how many items were carried. Never the other meeting's title. |
+| `note.carried_item_updated`       | info     | note-service POST /v1/notes/{id}/carried/{key} | Sprint 36 — the author ticked, re-opened or dropped an item carried from last time. Payload: item_key (a hash), state. Never the item's text. |
+| `note.meeting_type_changed`       | info     | note-service POST /v1/notes/{id}/meeting/type | Sprint 36 — the author changed the kind of meeting, so the note was rebound to that family's template. Payload: from, to, detected — all closed vocabulary. |
+| `note.meeting_started`            | info     | note-service POST /v1/notes/meeting | Sprint 34 — the author pressed Record and the note was opened before a word was transcribed. Payload: code, meeting_type (closed vocab), has_calendar (bool), template_id. NEVER the event title, the attendees or the agenda — all three are content. |
+| `note.meeting_transcript_attached`| info     | note-service POST /v1/notes/{id}/transcript | Sprint 34 — a client of the author attached the finished transcription to its meeting note. Payload: asr_job_id, device_same (whether the device that recorded is the one that attached — the size of debt D-1). |
 | `calendar.connected`              | info     | note-service GET /v1/calendar/google/callback, POST /v1/calendar/ics/connect | 0019/0020 — a calendar was connected (or re-connected) for the actor: a Google account (`provider: google`) or a calendar link (`provider: ics`). Payload: provider. The account's e-mail / the feed URL is on the row (the URL sealed), never in the payload. |
 | `calendar.disconnected`           | info     | note-service DELETE /v1/calendar/connections/{id} | 0019/0020 — the actor disconnected a calendar; a Google token is revoked at Google best-effort, a link is simply forgotten; the row is stamped revoked. Payload: provider. |
 | `space.created`                   | info     | note-service POST /v1/spaces | 0021 — the actor made a space (a personal note folder, the same on every device). Payload: space_id. Never the name. |
@@ -151,8 +166,7 @@ typos at import.
 ## Autocomplete (sprint 10 — autocomplete-service)
 
 Tenant-scoped, hash-chained. Constants in
-`services/autocomplete-service/src/autocomplete_service/audit_kinds.py`
-(also listed in `docs/audit/audit-kinds-sprint-10.md`).
+`services/autocomplete-service/src/autocomplete_service/audit_kinds.py`.
 
 | kind                                      | severity | emitter         | meaning                                              |
 | ----------------------------------------- | -------- | --------------- | ---------------------------------------------------- |

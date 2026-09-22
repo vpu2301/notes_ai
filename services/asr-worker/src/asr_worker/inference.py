@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -193,6 +194,26 @@ class WhisperEngine:
         t_start = time.monotonic()
         speech = detect_speech(audio_pcm)
         vad_seconds_speech = sum((s.end_ms - s.start_ms) / 1000.0 for s in speech)
+
+        # Nothing to decode: say so with an empty transcript (the processor
+        # files it as `no_speech`) instead of asking the language detector
+        # and the decoder about audio VAD heard nothing in — that is the
+        # path that turns a silent recording into a hallucinated one.
+        if not speech:
+            return TranscriptionOutput(
+                language=language if language != AUTO_LANGUAGE else _LANGUAGE_ID_FALLBACK,
+                language_detected=False,
+                language_probability=None,
+                segments=[],
+                metadata=TranscriptionMetadata(
+                    model=settings.asr_model,
+                    vad_seconds_speech=0.0,
+                    infer_seconds=time.monotonic() - t_start,
+                    gpu_seconds=0.0,
+                    peak_gpu_mem_mb=_peak_gpu_mem_mb(),
+                    beam_size=settings.asr_beam_size,
+                ),
+            )
 
         loop = asyncio.get_running_loop()
 
@@ -393,6 +414,21 @@ class WhisperEngine:
         )
         out: list[Segment] = []
         for seg in result_segs:
+            # Whisper's known failure with a prompt over non-speech (a
+            # breath, a hum, room tone that passed VAD) is to write the
+            # prompt back. A segment made only of the prompt's words that
+            # the model itself rates as probably-not-speech is that, not
+            # something anyone said; the same words with a low
+            # no_speech_prob are speech and stay.
+            if _is_prompt_echo(seg.text, prompt, float(getattr(seg, "no_speech_prob", 0.0))):
+                logger.info(
+                    "whisper.prompt_echo_dropped",
+                    extra={
+                        "start_ms": int(seg.start * 1000) + offset_ms,
+                        "no_speech_prob": round(float(seg.no_speech_prob), 3),
+                    },
+                )
+                continue
             words: list[WordTiming] = []
             if getattr(seg, "words", None):
                 for w in seg.words:
@@ -420,11 +456,6 @@ class WhisperEngine:
                 )
             )
         return out
-
-
-@dataclass(slots=True)
-class _GpuInfo:
-    peak_mb: int
 
 
 def _peak_gpu_mem_mb() -> int:
@@ -467,6 +498,25 @@ def _speech_sample(
     return np.concatenate(parts)
 
 
+# Above this the decoder itself says the window was probably not speech;
+# faster-whisper's own gate (no_speech_threshold=0.6) does not fire when a
+# prompt makes the echoed text high-probability, which is exactly this case.
+_PROMPT_ECHO_NO_SPEECH_PROB = 0.5
+
+
+def _prompt_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[^\W_]+", text.lower()) if w}
+
+
+def _is_prompt_echo(text: str, prompt: str | None, no_speech_prob: float) -> bool:
+    """True when ``text`` is nothing but words from ``prompt`` and the
+    decoder rated the window as probably-not-speech."""
+    if not prompt or no_speech_prob < _PROMPT_ECHO_NO_SPEECH_PROB:
+        return False
+    words = _prompt_words(text)
+    return bool(words) and words <= _prompt_words(prompt)
+
+
 def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:
     """Join the vocabulary-hint prompt with the last-finalized text.
 
@@ -474,8 +524,6 @@ def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:
     caller is responsible for truncating prev_text to a token budget;
     here we just concatenate.
     """
-    import re
-
     parts: list[str] = []
     if base:
         parts.append(re.sub(r"<\|[^|]+\|>", "", base).strip())

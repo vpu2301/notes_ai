@@ -19,7 +19,9 @@ struct SettingsView: View {
                     general
                     appearance
                     if app.authState == .signedIn {
+                        vocabulary
                         connectorsRow
+                        dataRow
                         account
                         advanced
                     }
@@ -41,6 +43,8 @@ struct SettingsView: View {
                 switch tab {
                 case .connectors:
                     ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
+                case .dataAI:
+                    DataAndAIView()
                 case .account:
                     AccountView()
                 case .general:
@@ -105,6 +109,12 @@ struct SettingsView: View {
         }
     }
 
+    private var vocabulary: some View {
+        group("Names and terms") {
+            GlossaryView()
+        }
+    }
+
     private var connectorsRow: some View {
         NavigationLink(value: AppState.SettingsTab.connectors) {
             HStack(spacing: 12) {
@@ -118,6 +128,35 @@ struct SettingsView: View {
                         .font(.ds(15, .medium))
                         .foregroundStyle(DS.text1)
                     Text("Calendars, HubSpot, Notion and other MCP servers")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .dsCard(padding: 14)
+    }
+
+    /// Who processes this workspace's meetings (Sprint 37). Read-only
+    /// here; the change — and the acknowledgement it needs — is on the web.
+    private var dataRow: some View {
+        NavigationLink(value: AppState.SettingsTab.dataAI) {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DS.accentText)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(DS.accentSoft))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Data & AI")
+                        .font(.ds(15, .medium))
+                        .foregroundStyle(DS.text1)
+                    Text("Who processes your meetings, and what it costs")
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                 }
