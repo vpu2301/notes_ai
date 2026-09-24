@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getGeneration, regenerate } from "../api/generation";
 import { ApiError, errorMessage } from "../api/http";
 import type { GenerationView } from "../api/types";
+import { MAX_SHOWN_RANGES, excludedItems } from "../lib/generation";
 import { useToast } from "./Toaster";
 
 const POLL_MS = 2_000;
@@ -32,6 +33,11 @@ const REASONS: Record<string, string> = {
  * engine, or the run never started) shows *Generate Summary* in place
  * of nothing: the one place the button lives. Once a run exists the
  * status line takes over.
+ *
+ * `onSeek` — a finished run names what it left out ("Not included:
+ * 00:45–00:52 (background speech)"); each range opens the transcript at
+ * that moment. `onView` hands the latest run to the page (its recording
+ * type labels the note).
  */
 export function GenerationStatus({
   noteId,
@@ -39,12 +45,16 @@ export function GenerationStatus({
   canGenerate,
   canRegenerate,
   onFinished,
+  onSeek,
+  onView,
 }: {
   noteId: string;
   blocked?: "generation_disabled" | "budget_exceeded" | null;
   canGenerate?: boolean;
   canRegenerate?: boolean;
   onFinished?: () => void;
+  onSeek?: (ms: number) => void;
+  onView?: (view: GenerationView | null) => void;
 }) {
   const toast = useToast();
   const [view, setView] = useState<GenerationView | null>(null);
@@ -58,6 +68,7 @@ export function GenerationStatus({
     try {
       const latest = await getGeneration(noteId);
       setView(latest);
+      onView?.(latest);
       // A latest run that is `superseded` was reset by an operator: as
       // far as the reader is concerned there is none.
       setNever(latest.status === "superseded");
@@ -67,6 +78,9 @@ export function GenerationStatus({
       if (err instanceof ApiError && err.status === 404) setNever(true);
       else setView(null);
     }
+    // onView is a notification, not an input: a new function identity
+    // from the parent must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
   useEffect(() => {
@@ -163,6 +177,8 @@ export function GenerationStatus({
     );
   }
 
+  const excluded = <NotIncluded view={view} onSeek={onSeek} />;
+
   if (view.status === "partial") {
     const minutes = view.failed_ranges
       .map((range) => Math.round((range[0] ?? 0) / 60_000))
@@ -179,9 +195,44 @@ export function GenerationStatus({
             Write it again
           </button>
         )}
+        {excluded}
       </p>
     );
   }
 
-  return null;
+  return view.status === "complete" ? excluded : null;
+}
+
+/** "Not included: 00:45–00:52 (background speech), …" — the passages the
+ *  engine left out, confirmed by code (Q2), each a link into the
+ *  transcript. Nothing at all when nothing was left out. */
+function NotIncluded({
+  view,
+  onSeek,
+}: {
+  view: GenerationView;
+  onSeek?: (ms: number) => void;
+}) {
+  const items = excludedItems(view.excluded_ranges ?? [], view.language);
+  if (items.length === 0) return null;
+  const shown = items.slice(0, MAX_SHOWN_RANGES);
+  const more = items.length - shown.length;
+  return (
+    <span className="gen-excluded muted" role="note">
+      Not included:{" "}
+      {shown.map((item, i) => (
+        <span key={`${item.startMs}-${i}`}>
+          {i > 0 && ", "}
+          {onSeek ? (
+            <button type="button" className="link-btn" onClick={() => onSeek(item.startMs)}>
+              {item.text}
+            </button>
+          ) : (
+            item.text
+          )}
+        </span>
+      ))}
+      {more > 0 && ` +${more} more`}
+    </span>
+  );
 }

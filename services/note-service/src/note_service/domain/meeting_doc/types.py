@@ -71,6 +71,10 @@ class Family:
     a person, and a workspace-visible one is a disclosure nobody chose."""
     client_version: bool = True
     """Whether a client version and a follow-up draft may be built at all."""
+    excluded_kinds: frozenset[str] = frozenset()
+    """Generic kinds this family does NOT offer (Summary Engine v2, Q3). A
+    broadcast has no decisions and no tasks: the enum the model answers
+    with does not contain them, so no prompt can talk it into them."""
 
 
 # Kinds every family extracts. The engine (Sprint 33) owns their meaning;
@@ -157,7 +161,53 @@ FAMILIES: Final[tuple[Family, ...]] = (
         default_visibility="private",
         client_version=False,
     ),
+    # Q3 — recordings that are not meetings. No template of their own: the
+    # note keeps the one it was made with; only the kinds offered change.
+    Family(
+        meeting_type="broadcast",
+        template_prefix="broadcast",
+        excluded_kinds=frozenset({"decision", "action", "agenda_item", "completion"}),
+        client_version=False,
+    ),
+    Family(
+        meeting_type="memo",
+        template_prefix="voice_memo",
+        excluded_kinds=frozenset({"agenda_item", "completion"}),
+        default_visibility="private",
+        client_version=False,
+    ),
 )
+
+# What a recording IS (Q3): decided before extraction, by the author's
+# choice or by `classify`, and mapped onto the family that extracts it.
+RECORDING_TYPES: Final[tuple[str, ...]] = (
+    "meeting",
+    "client_call",
+    "sales_call",
+    "interview",
+    "one_on_one",
+    "podcast_broadcast",
+    "lecture_webinar",
+    "voice_memo",
+)
+_FAMILY_OF_RECORDING: Final[dict[str, str]] = {
+    "meeting": "auto",
+    "client_call": "client",
+    "sales_call": "sales",
+    "interview": "interview",
+    "one_on_one": "one_on_one",
+    "podcast_broadcast": "broadcast",
+    "lecture_webinar": "broadcast",
+    "voice_memo": "memo",
+}
+_RECORDING_OF_MEETING: Final[dict[str, str]] = {
+    "auto": "meeting",
+    "team": "meeting",
+    "client": "client_call",
+    "sales": "sales_call",
+    "one_on_one": "one_on_one",
+    "interview": "interview",
+}
 
 _BY_TYPE: Final[dict[str, Family]] = {f.meeting_type: f for f in FAMILIES}
 FALLBACK: Final[Family] = _BY_TYPE["auto"]
@@ -181,8 +231,31 @@ def family_for_template(template_code: str | None) -> Family:
 
 
 def fact_kinds(family: Family) -> dict[str, Role]:
-    """Every kind this family's extractor may return, and its role."""
-    return {**GENERIC_KINDS, **family.extra_kinds}
+    """Every kind this family's extractor may return, and its role:
+    the generic kinds it does not exclude, plus its own."""
+    generic = {k: r for k, r in GENERIC_KINDS.items() if k not in family.excluded_kinds}
+    return {**generic, **family.extra_kinds}
+
+
+def family_for_recording_type(recording_type: str | None) -> Family:
+    """The family that extracts a recording of this type."""
+    return _BY_TYPE.get(_FAMILY_OF_RECORDING.get(recording_type or "", "auto"), FALLBACK)
+
+
+def recording_type_for_meeting_type(meeting_type: str | None) -> str:
+    """The author's meeting type as a recording type (`team` is a meeting)."""
+    return _RECORDING_OF_MEETING.get(meeting_type or "auto", "meeting")
+
+
+def detected_value(recording_type: str) -> str:
+    """What `note_meetings.meeting_type_detected` stores for a recording
+    type: the meeting-type word for the six meeting kinds (the column's
+    vocabulary since 0051), the recording type itself for the three 0058
+    added."""
+    family = _FAMILY_OF_RECORDING.get(recording_type, "auto")
+    if family in ("broadcast", "memo"):
+        return recording_type
+    return family
 
 
 def is_internal_kind(family: Family, kind: str) -> bool:

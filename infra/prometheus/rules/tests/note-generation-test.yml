@@ -69,3 +69,67 @@ tests:
               description: |
                 A workspace is over its monthly AI budget or has generation turned off. Its admins were notified once for the month; nothing to fix unless they ask.
                 Runbook: docs/runbooks/notes.md#budget
+
+  # ── Summary Engine v2, Q2 ─────────────────────────────────────────
+
+  - interval: 1m
+    name: an occasional override is normal
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+10x90"
+      - series: 'mdx_note_generation_noise_total{outcome="overridden"}'
+        values: "0+0.5x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationNoiseOverridden
+        exp_alerts: []
+
+  - interval: 1m
+    name: overrides in a fifth of generations fire
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+10x90"
+      - series: 'mdx_note_generation_noise_total{outcome="overridden"}'
+        values: "0+2x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationNoiseOverridden
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "Noise exclusions overridden in more than 1 of 10 generations (1 h)"
+              description: |
+                The extractor is flagging real speech as noise and the cap is stepping in. Notes are still complete, but the model is drifting: check PROMPT_VERSION and the summarize backend, and the excluded share (mdx_note_generation_excluded_share) on the notes dashboard.
+                Runbook: docs/runbooks/notes.md#noise-overridden
+
+  - interval: 1m
+    name: a few unsupported lines are normal
+    input_series:
+      - series: 'mdx_note_generation_lines_total{outcome="kept"}'
+        values: "0+20x90"
+      - series: 'mdx_note_generation_lines_total{outcome="unsupported"}'
+        values: "0+2x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationUnsupportedLines
+        exp_alerts: []
+
+  - interval: 1m
+    name: a third of lines failing the gate fires
+    input_series:
+      - series: 'mdx_note_generation_lines_total{outcome="kept"}'
+        values: "0+10x90"
+      - series: 'mdx_note_generation_lines_total{outcome="name"}'
+        values: "0+3x90"
+      - series: 'mdx_note_generation_lines_total{outcome="unsupported"}'
+        values: "0+2x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationUnsupportedLines
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "More than a fifth of composed note lines failed the support gate (1 h)"
+              description: |
+                The model is drifting; check PROMPT_VERSION and the backend. Paraphrase drops on extraction (mdx_note_generation_facts_total{outcome="dropped_paraphrase"}) usually rise with it.
+                Runbook: docs/runbooks/notes.md#unsupported-lines

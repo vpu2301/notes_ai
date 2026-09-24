@@ -46,6 +46,7 @@
   }
  ],
  "meeting_type": "team",
+ "recording_type": "meeting",
  "gold": {
   "key_facts": [
    "The new onboarding flow cut drop-off on step two from 31% to 19%",

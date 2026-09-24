@@ -27,6 +27,7 @@ from .routers import (
     notes_ask,
     notes_audio,
     notes_corrections,
+    notes_dates,
     notes_diff,
     notes_drafts,
     notes_from_transcript,
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_series.router)
     # Sprint 33: how the writing is going, and the facts behind it.
     app.include_router(notes_generation.router)
+    app.include_router(notes_dates.router)
     app.include_router(notes.router)
     app.include_router(notes_drafts.router)
     app.include_router(notes_lifecycle.router)

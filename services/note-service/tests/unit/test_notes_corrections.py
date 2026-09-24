@@ -511,3 +511,89 @@ def test_only_the_creator_or_an_admin_forgets_a_term(rig: SimpleNamespace) -> No
 
 def test_forgetting_a_term_that_is_not_there_is_a_404(rig: SimpleNamespace) -> None:
     assert rig.client.delete(f"/v1/glossary/{uuid4()}").status_code == 404
+
+
+# ── Summary Engine v2, Q5: a respelled name, accepted or rejected ────
+
+NAMED = "- Laut Fabian Reinbold wird die Mehrheit knapp\n- Tom: book the room"
+
+
+def _named_rig(rig: SimpleNamespace) -> str:
+    rig.store.versions[1] = _content(discussion=NAMED)
+    return _key("Laut Fabian Reinbold wird die Mehrheit knapp")
+
+
+def test_rejecting_a_correction_puts_back_what_was_heard(rig: SimpleNamespace) -> None:
+    key = _named_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{key}",
+        json={
+            "expected_version": 1,
+            "action": "correction_rejected",
+            "reason": "wrong_name",
+            "surface": "Fabian Reinbolt",
+            "canonical": "Fabian Reinbold",
+            "source": "candidate",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["line"] == "- Laut Fabian Reinbolt wird die Mehrheit knapp"
+    # The line changed, so its key did: the response says which it is now.
+    assert body["item_key"] == _key("Laut Fabian Reinbolt wird die Mehrheit knapp")
+    assert "Fabian Reinbolt" in rig.store.versions[2].sections[0].text
+    (correction,) = rig.store.corrections
+    assert (correction["action"], correction["reason"]) == ("correction_rejected", "wrong_name")
+    (event,) = [e for e in rig.audit_calls if e["kind"] == "note.correction_rejected"]
+    # Never the name in the audit trail.
+    assert "Reinbold" not in str(event["payload"]) and event["payload"]["source"] == "candidate"
+
+
+def test_accepting_a_correction_changes_nothing_in_the_note(rig: SimpleNamespace) -> None:
+    key = _named_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{key}",
+        json={
+            "expected_version": 1,
+            "action": "correction_accepted",
+            "surface": "Fabian Reinbolt",
+            "canonical": "Fabian Reinbold",
+            "source": "model",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["item_key"] == key
+    assert 2 not in rig.store.versions  # no new version
+    assert rig.store.corrections[0]["action"] == "correction_accepted"
+
+
+def test_the_accepted_name_becomes_a_glossary_term_and_merges_next_time(
+    rig: SimpleNamespace,
+) -> None:
+    first = rig.client.post(
+        "/v1/glossary",
+        json={"term": "Fabian Reinbold", "kind": "person", "heard_as": ["Fabian Reinbolt"]},
+    )
+    assert first.status_code in (200, 201)
+    second = rig.client.post(
+        "/v1/glossary",
+        json={"term": "Fabian Reinbold", "kind": "person", "heard_as": ["Fabian Rainbold"]},
+    )
+    assert second.status_code in (200, 201)
+    (term,) = rig.store.terms
+    assert set(term.heard_as) == {"Fabian Reinbolt", "Fabian Rainbold"}
+
+
+def test_rejecting_a_name_the_line_does_not_have_is_refused(rig: SimpleNamespace) -> None:
+    key = _named_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{key}",
+        json={
+            "expected_version": 1,
+            "action": "correction_rejected",
+            "surface": "Olaf",
+            "canonical": "Olaf Scholz",
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "correction_not_in_line"

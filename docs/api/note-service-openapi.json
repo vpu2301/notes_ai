@@ -1015,6 +1015,34 @@
         "title": "CorrectionResponse",
         "type": "object"
       },
+      "Coverage": {
+        "additionalProperties": false,
+        "description": "How the facts spread over the recording, and how much speech was\nset aside. Counts and milliseconds only.",
+        "properties": {
+          "excluded_ms": {
+            "title": "Excluded Ms",
+            "type": "integer"
+          },
+          "facts_by_third": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Facts By Third",
+            "type": "array"
+          },
+          "speech_ms": {
+            "title": "Speech Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "facts_by_third",
+          "speech_ms",
+          "excluded_ms"
+        ],
+        "title": "Coverage",
+        "type": "object"
+      },
       "CreateClipRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1584,6 +1612,31 @@
         "title": "EventsResponse",
         "type": "object"
       },
+      "ExcludedRange": {
+        "additionalProperties": false,
+        "description": "A stretch of the recording left out of the notes, confirmed by code\n(Summary Engine v2, Q2). ``reason`` is a closed vocabulary \u2014 background,\nother_language, artifact, duplicate, unrelated \u2014 for the client to\nturn into words; never text from the recording.",
+        "properties": {
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "reason"
+        ],
+        "title": "ExcludedRange",
+        "type": "object"
+      },
       "FieldType": {
         "description": "Sprint-06 shipped the first kinds; sprint-13 adds the two choice\nkinds. Adding enum members is additive to the *model*; changing an\nexisting section's ``field_type`` remains a STRUCTURAL edit\n(ADR-0016).",
         "enum": [
@@ -1734,9 +1787,50 @@
       "GeneratedItemView": {
         "additionalProperties": false,
         "properties": {
+          "attributed_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attributed To"
+          },
+          "certainty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certainty"
+          },
+          "cites": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cites",
+            "type": "array"
+          },
           "confidence": {
             "title": "Confidence",
             "type": "number"
+          },
+          "corrections": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Corrections",
+            "type": "array"
           },
           "due_date": {
             "anyOf": [
@@ -1783,6 +1877,24 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "mentions": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Mentions",
+            "type": "array"
           },
           "owner_label": {
             "anyOf": [
@@ -1902,6 +2014,16 @@
       "GenerationView": {
         "additionalProperties": false,
         "properties": {
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1917,6 +2039,14 @@
               }
             ],
             "title": "Error Kind"
+          },
+          "excluded_ranges": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ExcludedRange"
+            },
+            "title": "Excluded Ranges",
+            "type": "array"
           },
           "failed_ranges": {
             "items": {
@@ -1945,6 +2075,17 @@
             "title": "Id",
             "type": "string"
           },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
           "model_id": {
             "anyOf": [
               {
@@ -1959,6 +2100,28 @@
           "prompt_version": {
             "title": "Prompt Version",
             "type": "string"
+          },
+          "recording_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Type"
+          },
+          "recording_type_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Type Source"
           },
           "sections_written": {
             "anyOf": [
@@ -3052,6 +3215,34 @@
       "PatchItemRequest": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "enum": [
+                  "correction_accepted",
+                  "correction_rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "canonical": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical"
+          },
           "clear_due": {
             "default": false,
             "title": "Clear Due",
@@ -3090,6 +3281,47 @@
               }
             ],
             "title": "Owner Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "const": "wrong_name",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "glossary",
+                  "candidate",
+                  "model"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
           }
         },
         "required": [
@@ -8314,6 +8546,88 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/dates/{item_key}.ics": {
+      "get": {
+        "operationId": "date_ics_v1_notes__note_id__dates__item_key__ics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "title": "Item Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Date Ics",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/diff": {
       "get": {
         "operationId": "get_diff_v1_notes__note_id__diff_get",
@@ -8486,6 +8800,20 @@
                 }
               ],
               "title": "Purpose"
+            }
+          },
+          {
+            "in": "query",
+            "name": "generation",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "current",
+                "all"
+              ],
+              "title": "Generation",
+              "type": "string"
             }
           },
           {

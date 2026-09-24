@@ -150,3 +150,66 @@ describe("generation status", () => {
     expect(container.querySelector(".gen-status")).toBeNull();
   });
 });
+
+// ── Summary Engine v2, Q3: exclusions are a line, not a paragraph ────
+
+describe("not included", () => {
+  const DONE = {
+    ...BASE,
+    status: "complete",
+    step: null,
+    windows_done: 8,
+    finished_at: "2026-09-22T10:05:00Z",
+    sections_written: 3,
+    language: "de",
+  };
+
+  it("names each left-out range in the note's language and opens the transcript there", async () => {
+    server({
+      ...DONE,
+      excluded_ranges: [
+        { start_ms: 250_000, end_ms: 254_000, reason: "other_language" },
+        { start_ms: 45_000, end_ms: 52_000, reason: "background" },
+      ],
+    });
+    const seeks: number[] = [];
+    strip({ onSeek: (ms: number) => seeks.push(ms) });
+    const first = await screen.findByRole("button", { name: "00:45–00:52 (Hintergrundgespräch)" });
+    expect(
+      screen.getByRole("button", { name: "04:10–04:14 (eine Passage in einer anderen Sprache)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Not included:/)).toBeInTheDocument();
+    first.click();
+    expect(seeks).toEqual([45_000]);
+  });
+
+  it("shows four ranges and counts the rest", async () => {
+    server({
+      ...DONE,
+      language: "en",
+      excluded_ranges: [0, 1, 2, 3, 4, 5].map((n) => ({
+        start_ms: n * 60_000,
+        end_ms: n * 60_000 + 3_000,
+        reason: "artifact",
+      })),
+    });
+    strip({ onSeek: () => {} });
+    expect(await screen.findByText(/\+2 more/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /a transcription artifact/ })).toHaveLength(4);
+  });
+
+  it("says nothing when nothing was left out", async () => {
+    server({ ...DONE, excluded_ranges: [] });
+    strip({ onSeek: () => {} });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/Not included/)).not.toBeInTheDocument();
+  });
+
+  it("hands the run to the page", async () => {
+    server({ ...DONE, recording_type: "podcast_broadcast" });
+    const seen: unknown[] = [];
+    strip({ onView: (v: unknown) => seen.push(v) });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toEqual([expect.objectContaining({ recording_type: "podcast_broadcast" })]);
+  });
+});

@@ -293,14 +293,83 @@ async def put_items(
     return written
 
 
-async def items_for_note(conn: asyncpg.Connection, *, note_id: UUID) -> list[asyncpg.Record]:
+async def put_lines(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    note_id: UUID,
+    generation_id: UUID,
+    rows: list[dict[str, Any]],
+) -> int:
+    """One row per written LINE (Summary Engine v2, Q5): the line's text and
+    kind, what it cites, and the evidence of the first cited fact.
+
+    Idempotent on ``(note_id, generation_id, item_key)`` like ``put_items``;
+    ``corrections`` and ``mentions`` are JSON lists of plain values."""
+    written = 0
+    for row in rows:
+        result = await conn.execute(
+            """
+            INSERT INTO note_generated_items (
+                tenant_id, note_id, generation_id, item_key, kind, section_key,
+                text, owner_label, due_text, due_date, explicit, confidence,
+                flags, quote, start_ms, end_ms, speaker_label, speaker_name,
+                placement, audience, cites, certainty, attributed_to, corrections, mentions
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,
+                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb)
+            ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
+            """,
+            tenant_id,
+            note_id,
+            generation_id,
+            row["item_key"],
+            row["kind"],
+            row["section_key"],
+            row["text"],
+            row.get("owner_label"),
+            row.get("due_text"),
+            row.get("due_date"),
+            bool(row.get("explicit", False)),
+            float(row.get("confidence", 0.7)),
+            list(row.get("flags") or []),
+            row["quote"],
+            int(row["start_ms"]),
+            int(row["end_ms"]),
+            row.get("speaker_label"),
+            row.get("speaker_name"),
+            row["placement"],
+            row.get("audience", "all"),
+            list(row.get("cites") or [])[:16],
+            row.get("certainty"),
+            row.get("attributed_to"),
+            json.dumps(list(row.get("corrections") or [])[:8]),
+            json.dumps(list(row.get("mentions") or [])[:8]),
+        )
+        if result.endswith(" 1"):
+            written += 1
+    return written
+
+
+async def items_for_note(
+    conn: asyncpg.Connection, *, note_id: UUID, current_only: bool = False
+) -> list[asyncpg.Record]:
+    """The note's generated rows. ``current_only``: the latest run that
+    wrote (complete or partial) — what the reader is looking at."""
+    current = (
+        "AND generation_id = (SELECT id FROM note_generations WHERE note_id = $1 "
+        "AND status IN ('complete','partial') ORDER BY created_at DESC LIMIT 1)"
+        if current_only
+        else ""
+    )
     return await conn.fetch(
-        """
+        f"""
         SELECT item_key, kind, section_key, text, owner_label, due_text, due_date,
                explicit, confidence, flags, quote, start_ms, end_ms,
-               speaker_label, speaker_name, placement, audience
+               speaker_label, speaker_name, placement, audience,
+               cites, certainty, attributed_to, corrections, mentions
         FROM note_generated_items
-        WHERE note_id = $1 AND placement IN ('written', 'suggested')
+        WHERE note_id = $1 AND placement IN ('written', 'suggested') {current}
         ORDER BY start_ms
         """,
         note_id,

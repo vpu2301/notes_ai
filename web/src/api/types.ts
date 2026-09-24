@@ -1269,6 +1269,36 @@ export interface GenerationView {
   /** How many sections the run wrote; 0 on a finished run means the
    *  recording yielded nothing the verifier let through. */
   sections_written?: number | null;
+  /** Summary Engine v2 (Q2): stretches left out of the notes, confirmed by
+   *  code. `reason` is a closed vocabulary; empty for older generations. */
+  excluded_ranges?: ExcludedRange[];
+  /** How the facts spread over the recording; null for older generations. */
+  coverage?: GenerationCoverage | null;
+  /** Q3: what the recording was taken to be, and who decided. */
+  recording_type?: string | null;
+  recording_type_source?: "user" | "classifier" | "rule" | "template" | null;
+  /** Q3: the spoken language the run wrote in. */
+  language?: string | null;
+}
+
+export type ExcludedReason =
+  | "background"
+  | "other_language"
+  | "artifact"
+  | "duplicate"
+  | "unrelated";
+
+export interface ExcludedRange {
+  start_ms: number;
+  end_ms: number;
+  reason: ExcludedReason | string;
+}
+
+export interface GenerationCoverage {
+  /** Facts found in the first, middle and last third of the recording. */
+  facts_by_third: number[];
+  speech_ms: number;
+  excluded_ms: number;
 }
 
 export interface GeneratedItem {
@@ -1288,4 +1318,13 @@ export interface GeneratedItem {
   speaker_label: string | null;
   speaker_name: string | null;
   placement: string;
+  /** Q5: the facts this line rests on (their item keys). */
+  cites?: string[];
+  certainty?: "fact" | "estimate" | "prediction" | "opinion" | "proposal" | "allegation" | null;
+  /** Q5: whose position it is. */
+  attributed_to?: string | null;
+  /** Q5: names the engine respelled in this line — the quote keeps what was heard. */
+  corrections?: { surface: string; canonical: string; source: string }[];
+  /** Q5: dates the line names, resolved against the recording day. */
+  mentions?: { text: string; date: string; time: string | null; direction: string }[];
 }

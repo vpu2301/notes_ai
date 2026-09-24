@@ -11,7 +11,7 @@ used three ways:
 * in the generation prompt, so the model writes it the way the workspace
   writes it (blocked on the engine — Sprint 33);
 * to canonicalise an owner label that came back as a known mishearing
-  (:func:`canonical_owner`).
+  (``meeting_doc.entities``, Summary Engine v2 Q4).
 
 Quotes are never touched by any of it. A quote is what was said.
 
@@ -132,26 +132,6 @@ def hint_text(terms: list[Term], *, limit: int = MAX_HINT_CHARS) -> str:
         out.append(entry.term)
         length += addition
     return ", ".join(out)
-
-
-def canonical_owner(owner: str | None, terms: list[Term]) -> str | None:
-    """An owner label that is a known mishearing, spelled the right way.
-
-    Only `person` terms, and only a whole-label match: "Jon" inside
-    "Jonathan Pryce" is not a mishearing, it is a different person.
-    """
-    if not owner:
-        return owner
-    label = " ".join(owner.split())
-    folded = label.casefold()
-    for entry in terms:
-        if entry.kind != "person":
-            continue
-        if folded == entry.term.casefold():
-            return entry.term
-        if any(folded == heard.casefold() for heard in entry.heard_as):
-            return entry.term
-    return label
 
 
 def terms_in(text: str, terms: list[Term], *, limit: int = MAX_PROMPT_TERMS) -> list[Term]:

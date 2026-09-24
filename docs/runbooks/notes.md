@@ -343,6 +343,66 @@ SELECT note_id, count(*) FROM note_generations
 WHERE status IN ('queued','running') GROUP BY 1 HAVING count(*) > 1;
 ```
 
+### noise-overridden
+
+Summary Engine v2 (Q2). The extractor flags lines as noise; code confirms
+each flag (`verify.confirm_noise`: short and empty, provably another
+language, or a duplicate) and a cap overrides everything but language and
+duplicate exclusions when a run would leave out more than 2 % of the
+speech. This alert means overrides happen in more than one generation in
+ten — the model is calling real speech background, the failure the
+2026-09-22 audit found ("a whole story nicht berücksichtigt"). Notes are
+still complete; the model is drifting.
+
+1. Did `PROMPT_VERSION` or the `summarize` route change? Per generation:
+   ```sql
+   SELECT prompt_version, backend, count(*),
+          avg((stats->>'noise_overridden')::int) AS overridden,
+          avg((stats->>'excluded_ms')::float / NULLIF((stats->>'speech_ms')::float, 0)) AS excluded_share
+   FROM note_generations WHERE created_at > now() - interval '6 hours'
+   GROUP BY 1, 2 ORDER BY 3 DESC;
+   ```
+2. Run the eval on the same backend: `make eval-notes BACKEND=<backend>` —
+   `excluded_speech` and the r01/m06 checklists show it without real data.
+
+### unsupported-lines
+
+Summary Engine v2 (Q2). Every summary sentence, topic bullet and framing
+sentence passes a support gate against the facts it cites (`meeting_doc/
+support.py`); a failing line is dropped, and a summary where more than
+30 % fail is retried once strictly, then replaced by key-fact bullets
+(`stats.summary_fallback = "key_facts"`). A fifth of lines failing means
+notes are getting thinner, not wrong. Break it down by reason:
+
+```sql
+SELECT prompt_version, backend,
+       sum((stats->'lines_unsupported'->>'name')::int) AS name,
+       sum((stats->'lines_unsupported'->>'number')::int) AS number,
+       sum((stats->'lines_unsupported'->>'unsupported')::int) AS unsupported,
+       sum((stats->'lines_unsupported'->>'example')::int) AS example,
+       count(*) FILTER (WHERE stats->>'summary_fallback' = 'key_facts') AS fallbacks
+FROM note_generations WHERE created_at > now() - interval '6 hours'
+GROUP BY 1, 2;
+```
+
+`example` above zero is a prompt example copied into a note — see
+`docs/security/2026-09-22-november-sentence.md`. Anything else: compare the
+backend against the committed eval baseline (`docs/eval/notes-baseline-*.md`).
+
+### Deploying the engine (Summary Engine v2)
+
+**Migrate first, then the workers.** Migration 0058 widens
+`note_meetings.meeting_type_detected`; 0059 adds the line columns to
+`note_generated_items` (`cites`, `certainty`, `attributed_to`, `corrections`,
+`mentions`) and a kind vocabulary. A worker from Q5 on writes those columns:
+started against a database without 0059, every generation fails at its item
+insert. Order: `make migrate-up` (or the migration job) → API → note-worker.
+Rolling back: workers first, then `migrate-down` 0059 (it deletes the line
+rows it added; fact rows stay).
+
+`MDX_NOTE_ENTITY_MODEL_TIER` stays `false` unless an eval report for that
+backend shows `model_tier_precision ≥ 0.9`.
+
 ### Changing which model writes notes
 
 The routing table (`config/models.yaml`) is the only place, and the

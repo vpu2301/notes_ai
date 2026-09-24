@@ -23,6 +23,7 @@ from ``note_generated_items``, which is Sprint 33.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -34,7 +35,7 @@ from auth import Claims
 from db import tenant_connection
 from note_models import NoteContent, NoteStatus
 
-from .. import audit_kinds
+from .. import audit_kinds, generation_metrics
 from ..deps import get_state, requires
 from ..domain import access, lines
 from ..domain import glossary_repository as glossary_repo
@@ -83,6 +84,14 @@ class PatchItemRequest(BaseModel):
     due_text: str | None = Field(default=None, max_length=120)
     clear_owner: bool = False
     clear_due: bool = False
+    # Summary Engine v2, Q5 — a name the engine respelled. `accepted` keeps
+    # the line and records it (the client adds the glossary term);
+    # `rejected` puts back what was heard: `canonical` → `surface`.
+    action: Literal["correction_accepted", "correction_rejected"] | None = None
+    reason: Literal["wrong_name"] | None = None
+    surface: str | None = Field(default=None, min_length=1, max_length=80)
+    canonical: str | None = Field(default=None, min_length=1, max_length=80)
+    source: Literal["glossary", "candidate", "model"] | None = None
 
 
 class CorrectionResponse(BaseModel):
@@ -382,6 +391,8 @@ async def patch_item(
     was already taken by the Sprint 20 status route, which addresses items
     by their row UUID.
     """
+    if body.action is not None:
+        return await _name_correction(note_id, item_key, body, claims)
     if not any((body.owner_label, body.due_text, body.clear_owner, body.clear_due)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -468,4 +479,82 @@ async def patch_item(
         section_key=section.section_key,
         version_number=version_number,
         line=rewritten,
+    )
+
+
+async def _name_correction(
+    note_id: UUID, item_key: str, body: PatchItemRequest, claims: Claims
+) -> CorrectionResponse:
+    """Accept or reject a name the engine respelled (Q5).
+
+    Rejecting rewrites the line — the name the recording heard goes back —
+    so, unlike an owner or date fix, the line's key changes; the response
+    carries the new one. Accepting changes nothing in the note: the name
+    stays, and the client adds it to the workspace glossary so the next
+    generation spells it that way without asking.
+    """
+    if not body.surface or not body.canonical:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "correction_incomplete", "detail": "send surface and canonical"},
+        )
+    rejected = body.action == "correction_rejected"
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = await _editable(conn, note_id=note_id, claims=claims)
+        version = await repo.fetch_version(conn, version_id=note.current_version_id)  # type: ignore[attr-defined]
+        if version is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note has no version")
+        located = _locate(version.content, item_key)
+        if located is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="line not found")
+        index, line = located
+        section = version.content.sections[index]
+        version_number = note.current_version_number  # type: ignore[attr-defined]
+        written_line = line.raw
+        new_key = item_key
+        if rejected:
+            pattern = re.compile(rf"(?<!\w){re.escape(body.canonical)}(?!\w)")
+            if not pattern.search(line.raw):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={"code": "correction_not_in_line", "detail": "the name is not there"},
+                )
+            written_line = pattern.sub(body.surface, line.raw)
+            text = lines.replace_line(section.text, item_key, written_line)
+            if text is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="line not found")
+            version_number = await _write(
+                conn,
+                note_id=note_id,
+                expected_version=body.expected_version,
+                content=_with_section(version.content, index, text),
+                claims=claims,
+            )
+            new_key = lines.key_of(lines.strip_marker(written_line)[1])
+        await glossary_repo.record_correction(
+            conn,
+            tenant_id=claims.tid,
+            note_id=note_id,
+            item_key=item_key,
+            kind=_kind_of(section.section_key),
+            action=body.action,
+            reason="wrong_name" if rejected else None,
+            flags_at_time=["entity_corrected"],
+            actor_sub=claims.sub,
+        )
+    outcome = "rejected" if rejected else "accepted"
+    await _audit(
+        claims,
+        audit_kinds.NOTE_CORRECTION_REJECTED if rejected else audit_kinds.NOTE_CORRECTION_ACCEPTED,
+        note_id,
+        {"item_key": item_key, "source": body.source or "unknown"},
+    )
+    generation_metrics.corrections_counter.add(1, {"action": outcome})
+    return CorrectionResponse(
+        id=note_id,
+        item_key=new_key,
+        section_key=section.section_key,
+        version_number=version_number,
+        line=written_line,
     )

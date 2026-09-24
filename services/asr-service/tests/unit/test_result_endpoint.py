@@ -549,3 +549,97 @@ def test_limits_say_what_one_upload_may_be(
     resp = rig.client.get("/asr/limits")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"max_duration_seconds": 5400, "max_upload_mb": 250}
+
+
+# ── Sprint G0 / Summary Engine v2 Q3: a conversation stays verbatim ─
+
+
+def _serve(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, diarized: bool) -> None:
+    from asr_service.routers import jobs
+
+    if diarized:
+        rig.store.body = _diarized_output().model_dump_json().encode("utf-8")
+        rig.nlp.response["segments"].append({"text": "Так.", "confidence_spans": []})
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+
+
+def test_a_diarized_result_skips_every_rewriting_stage(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(rig, monkeypatch, diarized=True)
+    assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+    (call,) = rig.nlp.calls
+    assert call["stages_disabled"] == sorted(
+        [
+            "voice_commands",
+            "punctuation",
+            "number_norm",
+            "date_norm",
+            "abbreviation",
+            "field_extraction",
+        ]
+    )
+
+
+def test_a_dictation_result_keeps_its_stages(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(rig, monkeypatch, diarized=False)
+    assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+    (call,) = rig.nlp.calls
+    assert call["stages_disabled"] is None
+
+
+def test_relative_dates_are_anchored_on_the_recording_day(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not the reader's today: "heute" in a recording from 2026-05-20
+    means 2026-05-20 on every later read."""
+    from datetime import date
+
+    for diarized in (True, False):
+        rig.nlp.calls.clear()
+        _serve(rig, monkeypatch, diarized=diarized)
+        assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+        (call,) = rig.nlp.calls
+        assert call["reference_date"] == date(2026, 5, 20)
+
+
+def test_the_batch_client_posts_stages_sorted_and_only_when_set() -> None:
+    import asyncio
+    from datetime import date
+
+    import httpx
+
+    from asr_service.integrations.nlp_client import NlpBatchClient
+
+    sent: list[dict] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"segments": []})
+
+    client = NlpBatchClient.__new__(NlpBatchClient)
+    client._client = httpx.AsyncClient(  # type: ignore[attr-defined]
+        base_url="http://nlp", transport=httpx.MockTransport(_handler)
+    )
+    asyncio.run(
+        client.process_segments(
+            tenant_id=uuid4(),
+            segments=[],
+            language="de",
+            reference_date=date(2026, 9, 22),
+            stages_disabled=["date_norm", "punctuation", "date_norm"],
+        )
+    )
+    asyncio.run(client.process_segments(tenant_id=uuid4(), segments=[], language="de"))
+    assert sent[0]["stages_disabled"] == ["date_norm", "punctuation"]
+    assert sent[0]["reference_date"] == "2026-09-22"
+    assert "stages_disabled" not in sent[1]

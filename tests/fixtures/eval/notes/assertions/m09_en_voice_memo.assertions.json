@@ -1,0 +1,35 @@
+{
+ "id": "m09_en_voice_memo",
+ "recording_type": "voice_memo",
+ "must_not_contain": [
+  "Quillhaven",
+  "Ferrytale",
+  "Decisions"
+ ],
+ "must_contain_any": [
+  [
+   "shelving"
+  ],
+  [
+   "lease"
+  ],
+  [
+   "inventory",
+   "forklift"
+  ]
+ ],
+ "dates": [
+  {
+   "text": "by Friday",
+   "resolved": "2026-09-25"
+  }
+ ],
+ "every_line_cited": true,
+ "sprint": {
+  "recording_type": "Q3",
+  "dates": "Q3",
+  "must_contain_any": "Q2",
+  "must_not_contain": "Q3",
+  "every_line_cited": "Q5"
+ }
+}

@@ -115,6 +115,11 @@ NOTE_MEETING_TRANSCRIPT_ATTACHED: Final = "note.meeting_transcript_attached"
 NOTE_ITEM_DISMISSED: Final = "note.item_dismissed"  # item_key, kind, reason
 NOTE_ITEM_RESTORED: Final = "note.item_restored"  # item_key, kind
 NOTE_ITEM_EDITED: Final = "note.item_edited"  # item_key, kind, field
+# Summary Engine v2, Q5 — a key date downloaded as .ics, and a name the
+# engine respelled that the author accepted (glossary) or rejected.
+NOTE_DATE_EXPORTED: Final = "note.date_exported"  # item_key, timed
+NOTE_CORRECTION_ACCEPTED: Final = "note.correction_accepted"  # item_key, source
+NOTE_CORRECTION_REJECTED: Final = "note.correction_rejected"  # item_key, source
 # The glossary is names and business terms: the payload is the closed
 # `kind` vocabulary and counts ONLY — never the term itself.
 GLOSSARY_TERM_ADDED: Final = "glossary.term_added"

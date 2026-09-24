@@ -148,17 +148,30 @@ def test_the_hint_is_truncated_at_a_term_boundary() -> None:
     assert not hint.endswith(",")
 
 
+# Owner and name correction moved to `meeting_doc.entities` (Summary Engine
+# v2 Q4), which applies the glossary to every name in a line, not only to
+# owners — `canonical_owner` was never called by the engine.
+
+
 def test_an_owner_that_is_a_known_mishearing_is_canonicalised() -> None:
-    assert rules.canonical_owner("Jon Meyer", _terms()) == "John Mayer"
-    assert rules.canonical_owner("  john mayer ", _terms()) == "John Mayer"
+    from note_service.domain.meeting_doc import entities
+
+    fixed, applied, _ = entities.correct("Jon Meyer", glossary=tuple(_terms()))
+    assert fixed == "John Mayer"
+    assert [c.source for c in applied] == ["glossary"]
+    assert entities.correct("John Mayer", glossary=tuple(_terms()))[0] == "John Mayer"
 
 
 def test_a_partial_match_is_a_different_person_not_a_mishearing() -> None:
-    assert rules.canonical_owner("Jonathan Pryce", _terms()) == "Jonathan Pryce"
+    from note_service.domain.meeting_doc import entities
+
+    assert entities.correct("Jonathan Pryce", glossary=tuple(_terms()))[0] == "Jonathan Pryce"
 
 
-def test_only_people_canonicalise_owners() -> None:
-    assert rules.canonical_owner("Con Tozo", _terms()) == "Con Tozo"
+def test_a_company_heard_as_is_spelled_the_workspaces_way_too() -> None:
+    from note_service.domain.meeting_doc import entities
+
+    assert entities.correct("Con Tozo ships it", glossary=tuple(_terms()))[0] == "Contoso ships it"
 
 
 def test_the_prompt_carries_only_the_terms_that_were_spoken() -> None:

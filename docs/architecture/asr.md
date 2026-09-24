@@ -183,6 +183,28 @@ read (`asr_service/domain/speaker_edits.py`):
   `start_ms`/`end_ms` + artifact `segment_indices`, never a turn's
   position — reassigns reshape turns.
 
+## A conversation is served verbatim (Sprint G0 / Summary Engine v2 Q3)
+
+`GET /asr/jobs/{id}/result` runs the transcript through nlp-service on every
+read. For dictation that is the point — "Punkt" is punctuation, "heute" in a
+note should be a date. For a **conversation** it rewrote what people said:
+`DateNormStage` turned "heute" into the server's date and "am Montag …
+gewesen" into the NEXT Monday, and the quotes in a generated note no longer
+matched their own timestamps.
+
+A diarized output (`metadata.diarization` set, or a speaker roster) is now
+sent with `stages_disabled = ["abbreviation", "date_norm",
+"field_extraction", "number_norm", "punctuation", "voice_commands"]` — only
+the confidence spans still run. Every read, diarized or not, passes
+`reference_date = job.queued_at.date()`, so a relative word resolves against
+the day of the recording rather than the day it is read. Dates in a
+conversation are resolved by the note engine as an annotation on a fact
+(`meeting_doc.verify.date_mentions`), never by rewriting the words.
+
+Notes generated before this keep their text; a regenerate reads a fresh
+snapshot and quotes the spoken words. nlp-service down → the raw transcript
+is served, as before.
+
 ## Cross-references
 
 - **ADR-0009** — inference engine choice.

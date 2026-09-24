@@ -96,3 +96,49 @@ groups:
           description: |
             Generated sections are repeatedly failing to land because the note changed underneath them. Expected in bursts while people edit; sustained means the writer's compare-and-set is fighting an autosave loop.
             Runbook: docs/runbooks/notes.md#writer-conflicts
+
+      # ── Summary Engine v2, Q2: what the engine left out and refused ──
+      # Instruments: generation_metrics.lines / noise / facts /
+      # excluded_share. Counts and closed vocabularies only.
+
+      - alert: NoteGenerationNoiseOverridden
+        # The model flags passages as noise; code confirms the claim and a
+        # cap overrides a run that would silence more than 2 % of the
+        # speech. Overrides at more than one per ten generations mean the
+        # model has started calling real speech background — the audit's
+        # failure (a whole story "nicht berücksichtigt").
+        expr: |
+          (sum(increase(mdx_note_generation_noise_total{outcome="overridden"}[1h])) or vector(0))
+          /
+          clamp_min(sum(increase(mdx_note_generations_total[1h])) or vector(0), 1)
+          > 0.1
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "Noise exclusions overridden in more than 1 of 10 generations (1 h)"
+          description: |
+            The extractor is flagging real speech as noise and the cap is stepping in. Notes are still complete, but the model is drifting: check PROMPT_VERSION and the summarize backend, and the excluded share (mdx_note_generation_excluded_share) on the notes dashboard.
+            Runbook: docs/runbooks/notes.md#noise-overridden
+
+      - alert: NoteGenerationUnsupportedLines
+        # Every summary sentence, topic bullet and framing sentence passes
+        # a support gate against the facts it cites. A fifth of them
+        # failing means the model is writing from somewhere other than the
+        # facts — the notes stay honest (failing lines are dropped), but
+        # they get thinner.
+        expr: |
+          (sum(increase(mdx_note_generation_lines_total{outcome!="kept"}[1h])) or vector(0))
+          /
+          clamp_min(sum(increase(mdx_note_generation_lines_total[1h])) or vector(0), 1)
+          > 0.2
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "More than a fifth of composed note lines failed the support gate (1 h)"
+          description: |
+            The model is drifting; check PROMPT_VERSION and the backend. Paraphrase drops on extraction (mdx_note_generation_facts_total{outcome="dropped_paraphrase"}) usually rise with it.
+            Runbook: docs/runbooks/notes.md#unsupported-lines

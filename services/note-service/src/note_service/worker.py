@@ -173,6 +173,7 @@ async def run() -> None:
         transcripts_store=transcripts,
         provider_for=providers.get,
         shadow_provider_for=providers.shadow,
+        entity_model_tier=settings.note_entity_model_tier,
         shadow_percent=(
             settings.note_generation_shadow_percent
             if settings.note_generation_shadow_backend

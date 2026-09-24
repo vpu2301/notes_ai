@@ -18,8 +18,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime
-from typing import Annotated, Literal
+from datetime import date, datetime
+from typing import Annotated, Final, Literal
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -639,6 +639,7 @@ async def get_job_result(
         job_id=job_id,
         output=output,
         authorization=request.headers.get("authorization"),
+        reference_date=view.queued_at.date() if view.queued_at else None,
         speaker_names=view.speaker_names,
         edits=edits,
         result_rev=view.diarization_rev,
@@ -769,12 +770,35 @@ NLP_LANGUAGES = frozenset({"uk", "en", "de"})
 _PUNCT_ONLY = frozenset(".,:;!?…—–-()[]{}«»“”‘’'\"/\\*#№%&@+−=_|")
 
 
+# A recording of a conversation is kept VERBATIM (Sprint G0, Summary
+# Engine v2 Q3): the rewriting stages exist for dictation, where "Punkt"
+# is punctuation and "heute" in a note should be a date. In a conversation
+# "heute" is what someone said — rewriting it to a date anchored on the
+# server's clock put 22.09.2026 into quotes that say "heute", and "am Montag
+# … gewesen" became the NEXT Monday. The engine resolves dates itself, as an
+# annotation, never as a rewrite. Only confidence spans still run.
+CONVERSATION_STAGES_DISABLED: Final[tuple[str, ...]] = (
+    "voice_commands",
+    "punctuation",
+    "number_norm",
+    "date_norm",
+    "abbreviation",
+    "field_extraction",
+)
+
+
+def _is_conversation(output: TranscriptionOutput) -> bool:
+    """A diarized result — a recording of people talking, not dictation."""
+    return output.metadata.diarization is not None or bool(output.speakers)
+
+
 async def _enriched_result_view(
     state: object,
     *,
     job_id: UUID,
     output: TranscriptionOutput,
     authorization: str | None,
+    reference_date: date | None = None,
     speaker_names: dict[str, str] | None = None,
     edits: list[SpeakerEdit] | None = None,
     result_rev: int = 1,
@@ -838,6 +862,10 @@ async def _enriched_result_view(
         segments=payload,
         language=output.language,
         authorization=authorization,
+        # Relative words resolve against the day it was recorded, never
+        # the day somebody happens to read it.
+        reference_date=reference_date,
+        stages_disabled=sorted(CONVERSATION_STAGES_DISABLED) if _is_conversation(output) else None,
     )
     if resp is None or len(resp.get("segments", [])) != len(output.segments):
         return _structured(

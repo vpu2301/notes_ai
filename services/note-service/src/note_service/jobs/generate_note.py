@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from db import tenant_connection
@@ -34,7 +34,7 @@ from ..domain import carry_over, note_title
 from ..domain import generation_repository as gen_repo
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
-from ..domain.meeting_doc import pipeline, prompts, roles, types, writer
+from ..domain.meeting_doc import classify, pipeline, prompts, roles, types, windows, writer
 from ..domain.meeting_doc.render import RenderedSection
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class GenerationDeps:
         audit_writer: Any = None,
         shadow_provider_for: Any = None,
         shadow_percent: int = 0,
+        entity_model_tier: bool = False,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
@@ -74,6 +75,8 @@ class GenerationDeps:
         # what a routing flip is rehearsed with.
         self.shadow_provider_for = shadow_provider_for
         self.shadow_percent = shadow_percent
+        # Q4: whether the engine may ask the model to respell unknown names.
+        self.entity_model_tier = entity_model_tier
 
 
 async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dict) -> dict:
@@ -96,7 +99,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         previous = await gen_repo.last_written(conn, note_id=note_id, before=generation_id)
         previous_hashes = (previous.stats or {}).get("section_hashes", {}) if previous else {}
         template_roles, template_code = await _role_map(conn, note_id=note_id)
-        family = types.family_for_template(template_code)
+        template_family = types.family_for_template(template_code)
         # Sprint 36: the items still open from the previous meeting, so
         # the extractor can say which of them this recording finishes.
         carried = await _carried(conn, note_id=note_id)
@@ -120,7 +123,10 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
 
     provider = await deps.provider_for(str(tenant_id))
     language = str(result.get("language") or "en")
-    meeting_date = (note.created_at or datetime.now(UTC)).date()
+    # Relative dates resolve against the day it was RECORDED (Q3): a note
+    # made from an upload days later is not "today" in its own words.
+    started = getattr(meeting, "started_at", None) if meeting else None
+    meeting_date = (started or note.created_at or datetime.now(UTC)).date()
 
     # 0057: the note gets its name first — one short call, seconds rather
     # than the minutes the document takes, and never able to stop it.
@@ -135,6 +141,25 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         language=language,
     )
 
+    # Q3: what the recording IS decides which kinds are extracted — before
+    # extraction, so a podcast is never offered "decision" or "action".
+    turns = windows.turns_from_result(result)
+    built = windows.build_windows(turns)
+    recording_type, recording_source = await _recording_type(
+        provider,
+        meeting=meeting,
+        template_family=template_family,
+        built=built,
+        turns=turns,
+        language=language,
+    )
+    family = types.family_for_recording_type(recording_type)
+    await _store_detected_type(
+        deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
+    )
+    # Q4: every name this recording may mean, and the workspace's glossary.
+    known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
+
     document = await pipeline.run(
         result,
         provider=provider,
@@ -144,6 +169,12 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         family=family,
         carried=carried,
         counterpart=counterpart,
+        built=built,
+        recording_type=recording_type,
+        recording_type_source=recording_source,
+        name_candidates=known_people,
+        glossary=glossary,
+        entity_model_tier=deps.entity_model_tier,
     )
 
     # ── Write #1: what the reader came for ──────────────────────────
@@ -180,6 +211,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             sections=items_sections,
             outcome=first,
             family=family,
+            facts=document.facts,
         )
 
     # ── Write #2: the summary and the topics ────────────────────────
@@ -203,6 +235,16 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             sections=doc_sections,
             outcome=second,
             family=family,
+            facts=document.facts,
+        )
+        # Q5: the verified facts no line cites — what the reader's
+        # "Detailed" view lists under each topic, without another model call.
+        await gen_repo.put_lines(
+            conn,
+            tenant_id=tenant_id,
+            note_id=note_id,
+            generation_id=generation_id,
+            rows=uncited_rows(document, family=family),
         )
 
         # Sprint 36: what the recording says was finished, and what it
@@ -256,6 +298,12 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
 
     written = len(first.written_sections) + len(second.written_sections)
     suggested = len(first.suggested_sections) + len(second.suggested_sections)
+    backend = document.backend or "unknown"
+    generation_metrics.generations.add(
+        1, {"outcome": "partial" if document.partial else "complete", "backend": backend}
+    )
+    generation_metrics.record_document(document.stats, backend=backend)
+    unsupported = document.stats.get("lines_unsupported") or {}
     logger.info(
         "note_generate.done",
         extra={
@@ -263,6 +311,16 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "failed": document.windows_failed,
             "sections_written": written,
             "sections_suggested": suggested,
+            # Q2 — counts only; never a line, a fact or a quote.
+            "facts_kept": document.stats.get("facts_kept", 0),
+            "facts_dropped_paraphrase": document.stats.get("facts_dropped_paraphrase", 0),
+            "lines_kept": document.stats.get("lines_kept", 0),
+            "lines_unsupported": sum(int(n) for n in unsupported.values()),
+            "excluded_ms": document.stats.get("excluded_ms", 0),
+            "speech_ms": document.stats.get("speech_ms", 0),
+            "noise_overridden": document.stats.get("noise_overridden", 0),
+            "summary_fallback": document.stats.get("summary_fallback"),
+            "prompt_version": document.stats.get("prompt_version"),
         },
     )
     return {
@@ -322,10 +380,16 @@ async def _store_items(
     sections: list[RenderedSection],
     outcome: writer.WriteOutcome,
     family: Any = None,
+    facts: list[Any] | None = None,
 ) -> None:
-    """A fact's placement follows what happened to its section: written
-    when we wrote it, suggested when the author had been in there."""
-    rows = []
+    """Every written LINE is a row (Summary Engine v2, Q5): its text, what
+    it cites, and the evidence of the first fact it cites. A line's
+    placement follows what happened to its section: written when we wrote
+    it, suggested when the author had been in there."""
+    by_id = {f.item_key: f for section in sections for f in section.facts}
+    for fact in facts or []:
+        by_id.setdefault(fact.item_key, fact)
+    rows: list[dict[str, Any]] = []
     for section in sections:
         placement = (
             writer.WRITTEN
@@ -333,20 +397,208 @@ async def _store_items(
             or section.section_key in outcome.section_hashes
             else writer.SUGGESTED
         )
-        rows.extend((fact, section.section_key, placement) for fact in section.facts)
+        for line in section.lines:
+            row = line_row(line, section.section_key, placement, by_id, family=family)
+            if row is not None:
+                rows.append(row)
     if rows:
-        await gen_repo.put_items(
-            conn,
-            tenant_id=tenant_id,
-            note_id=note_id,
-            generation_id=generation_id,
-            facts=rows,
-            audience_of=lambda f: (
-                "internal"
-                if family is not None and types.is_internal_kind(family, f.kind)
-                else "all"
-            ),
+        stored = await gen_repo.put_lines(
+            conn, tenant_id=tenant_id, note_id=note_id, generation_id=generation_id, rows=rows
         )
+        for row in rows:
+            generation_metrics.lines_stored.add(1, {"kind": row["kind"]})
+        logger.info("note_generate.lines_stored", extra={"rows": stored})
+
+
+# Line kinds as rows. A line written from one fact keeps that fact's kind,
+# so the recipient page and the corrections routes read it as before.
+_ROW_KIND: Final[dict[str, str]] = {
+    "summary": "summary_sentence",
+    "framing": "framing",
+    "bullet": "topic_bullet",
+    "date": "date",
+}
+# Least sure last: a line resting on several facts is as sure as its
+# weakest one.
+_CERTAINTY_RANK: Final[dict[str, int]] = {
+    "fact": 0,
+    "estimate": 1,
+    "prediction": 2,
+    "opinion": 3,
+    "proposal": 4,
+    "allegation": 5,
+}
+
+
+def line_row(
+    line: Any, section_key: str, placement: str, by_id: dict[str, Any], *, family: Any = None
+) -> dict[str, Any] | None:
+    """The row for one written line, or None for a line with no evidence
+    (a heading). Pure — the tests build rows without a database."""
+    from ..domain import lines as line_rules
+
+    cited = [by_id[i] for i in line.fact_ids if i in by_id]
+    if not cited or line.kind == "heading":
+        return None
+    first = cited[0]
+    content = line_rules.strip_marker(line.text)[1]
+    certainties = [f.certainty for f in cited if f.certainty]
+    holders = {f.attributed_to for f in cited}
+    corrections = list(
+        dict.fromkeys(
+            (c.surface, c.canonical, c.source) for f in cited for c in getattr(f, "corrections", ())
+        )
+    )
+    internal = family is not None and any(types.is_internal_kind(family, f.kind) for f in cited)
+    return {
+        # The corrections routes' own key rule: owner and due stripped.
+        "item_key": line_rules.key_of(content),
+        "kind": _ROW_KIND.get(line.kind, first.kind),
+        "section_key": section_key,
+        "text": content[:500],
+        "owner_label": first.owner_label,
+        "due_text": first.due_text,
+        "due_date": first.due_date,
+        "explicit": first.explicit,
+        "confidence": first.confidence,
+        "flags": list(first.flags),
+        "quote": first.quote,
+        "start_ms": first.start_ms,
+        "end_ms": first.end_ms,
+        "speaker_label": first.speaker_label,
+        "speaker_name": first.speaker_name,
+        "placement": placement,
+        "audience": "internal" if internal else "all",
+        "cites": [f.item_key for f in cited],
+        "certainty": max(certainties, key=lambda c: _CERTAINTY_RANK.get(c, 0))
+        if certainties
+        else None,
+        "attributed_to": next(iter(holders)) if len(holders) == 1 else None,
+        "corrections": [{"surface": s, "canonical": c, "source": src} for s, c, src in corrections],
+        "mentions": [
+            {
+                "text": m.text,
+                "date": m.resolved.isoformat(),
+                "time": m.time.strftime("%H:%M") if m.time else None,
+                "direction": m.direction,
+            }
+            for m in line.dates
+        ],
+    }
+
+
+def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
+    """Rows for the verified facts no written line cites, each placed under
+    the topic nearest to it in time (else the overview) as ``suggested``.
+    Pure."""
+    from ..domain.meeting_doc import render as render_rules
+    from ..domain.meeting_doc import roles as role_rules
+
+    cited = {i for s in document.sections for line in s.lines for i in line.fact_ids}
+    topics = [s for s in document.sections if s.role == role_rules.TOPICS and s.facts]
+    out: list[dict[str, Any]] = []
+    for fact in document.facts:
+        if fact.item_key in cited or fact.kind in ("completion", "judgement"):
+            continue
+        home = min(
+            topics,
+            key=lambda s, f=fact: min(abs(x.start_ms - f.start_ms) for x in s.facts),
+            default=None,
+        )
+        line = render_rules.Line(fact.text, fact.kind, (fact.item_key,), fact.mentions)
+        section_key = home.section_key if home else role_rules.OVERVIEW_KEY
+        row = line_row(line, section_key, writer.SUGGESTED, {fact.item_key: fact}, family=family)
+        if row is not None:
+            out.append(row)
+    return out
+
+
+async def _recording_type(
+    provider: Any,
+    *,
+    meeting: Any,
+    template_family: types.Family,
+    built: list[Any],
+    turns: list[Any],
+    language: str,
+) -> tuple[str, str]:
+    """``(recording_type, source)``. The author's choice wins: a meeting
+    type they set, or a specific template they picked (a client-call
+    template is a client call). Only an `auto` note on the generic
+    template is classified."""
+    chosen = getattr(meeting, "meeting_type", None) or "auto"
+    if chosen != "auto":
+        outcome = (types.recording_type_for_meeting_type(chosen), classify.SOURCE_USER)
+    elif template_family.meeting_type != "auto":
+        # A template the author picked is their choice too.
+        outcome = (
+            types.recording_type_for_meeting_type(template_family.meeting_type),
+            classify.SOURCE_USER,
+        )
+    else:
+        context = (getattr(meeting, "calendar_context", None) or {}) if meeting else {}
+        span = (turns[-1].end_ms - turns[0].start_ms) if turns else 0
+        outcome = await classify.classify(
+            provider,
+            head="\n".join(w.render() for w in built[:2]),
+            language=language,
+            speakers=len({t.speaker_label for t in turns if t.speaker_label}) or 1,
+            minutes=span / 60_000,
+            calendar_title=str(context.get("title") or "") or None,
+            attendees=len(context.get("attendee_names") or []),
+        )
+    # `template` means the classifier could not answer: the meeting family.
+    metric = "failed" if outcome[1] == classify.SOURCE_TEMPLATE else outcome[1]
+    generation_metrics.classify.add(1, {"outcome": metric})
+    return outcome
+
+
+async def _known_names(
+    deps: GenerationDeps, tenant_id: UUID, *, result: dict, meeting: Any
+) -> tuple[frozenset[str], tuple[Any, ...]]:
+    """``(known people, glossary terms)`` for one generation (Q4).
+
+    People: the ASR's name candidates (calendar invitees sent at capture),
+    the roster's names, the calendar event's attendees, and the glossary's
+    persons. The glossary is read inside THIS tenant's connection — another
+    workspace's spellings are never applied. A glossary that cannot be read
+    costs the glossary tier, not the note."""
+    from ..domain import glossary_repository
+
+    people = {str(n) for n in result.get("name_candidates") or [] if n}
+    people |= {
+        str(n)
+        for n in (result.get("speaker_names") or {}).values()
+        if n and not str(n).startswith("Speaker ")
+    }
+    context = (getattr(meeting, "calendar_context", None) or {}) if meeting else {}
+    people |= {str(n) for n in context.get("attendee_names") or [] if n}
+    terms: tuple[Any, ...] = ()
+    try:
+        async with tenant_connection(deps.app_pool, tenant_id) as conn:
+            terms = tuple(await glossary_repository.terms_for_matching(conn))
+    except Exception:  # noqa: BLE001
+        logger.warning("note_generate.glossary_unavailable", exc_info=True)
+    people |= {t.term for t in terms if t.kind == "person"}
+    return frozenset(people), terms
+
+
+async def _store_detected_type(
+    deps: GenerationDeps, tenant_id: UUID, *, note_id: UUID, recording_type: str, source: str
+) -> None:
+    """Record it on the note's meeting row. Never stops a generation: the
+    generation's own stats are what the view reads."""
+    detected_by = "user" if source == classify.SOURCE_USER else "model"
+    try:
+        async with tenant_connection(deps.app_pool, tenant_id) as conn:
+            await meetings.set_detected_type(
+                conn,
+                note_id=note_id,
+                detected=types.detected_value(recording_type),
+                detected_by=detected_by,
+            )
+    except Exception:  # noqa: BLE001 — e.g. 0058 not applied yet
+        logger.warning("note_generate.recording_type_not_stored", exc_info=True)
 
 
 def _counterpart(meeting: Any) -> str:
@@ -513,6 +765,7 @@ async def _fail(
             error_kind=error_kind,
             finished=True,
         )
+    generation_metrics.generations.add(1, {"outcome": "failed", "backend": "unknown"})
     await _discard_snapshot(deps, tenant_id, generation_id)
     return {"error_kind": error_kind}
 

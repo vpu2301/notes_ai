@@ -20,10 +20,9 @@ Pure.
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Final
 
+from . import support
 from .verify import CONF_EXPLICIT, VerifiedFact
 
 # Above this, two texts are the same statement in different words.
@@ -31,69 +30,11 @@ from .verify import CONF_EXPLICIT, VerifiedFact
 # is worse than listing a near-duplicate.
 SAME_FACT_JACCARD: Final = 0.8
 
-_WORD = re.compile(r"[^\W_]+", re.UNICODE)
-# Words that carry no topic and would inflate the overlap between two
-# unrelated short tasks ("send the deck" vs "send the contract").
-_STOP: Final[frozenset[str]] = frozenset(
-    # fmt: off
-    [
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "by",
-        "for",
-        "from",
-        "has",
-        "have",
-        "in",
-        "is",
-        "it",
-        "of",
-        "on",
-        "or",
-        "that",
-        "the",
-        "to",
-        "we",
-        "will",
-        "with",
-        "der",
-        "die",
-        "das",
-        "und",
-        "den",
-        "dem",
-        "ein",
-        "eine",
-        "ist",
-        "im",
-        "zu",
-        "von",
-        "mit",
-        "auf",
-        "für",
-        "і",
-        "та",
-        "в",
-        "на",
-        "з",
-        "до",
-        "що",
-        "це",
-        "як",
-        "для",
-    ]
-    # fmt: on
-)
-
-
-def _tokens(text: str) -> frozenset[str]:
-    folded = unicodedata.normalize("NFKC", text).casefold()
-    return frozenset(w for w in _WORD.findall(folded) if len(w) > 1 and w not in _STOP)
+# The tokeniser and stop list live in :mod:`support` (Q2), the one place
+# the engine and the eval define words. Unchanged: which facts count as
+# the same fact depends on them.
+_STOP: Final[frozenset[str]] = support.MERGE_STOP
+_tokens = support.merge_tokens
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
@@ -158,6 +99,14 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
                 confidence=max(fact.confidence, existing.confidence),
                 flags=existing.flags,
                 window_index=existing.window_index,
+                refers_to_key=existing.refers_to_key,
+                judgement_field=existing.judgement_field,
+                side=existing.side,
+                certainty=existing.certainty or fact.certainty,
+                line=existing.line,
+                mentions=existing.mentions,
+                attributed_to=existing.attributed_to or fact.attributed_to,
+                corrections=existing.corrections,
             )
         else:
             merged.owner_label = merged.owner_label or fact.owner_label

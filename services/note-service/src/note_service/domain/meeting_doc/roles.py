@@ -38,6 +38,8 @@ USER_NOTES: Final[Role] = "user_notes"
 TRANSCRIPT: Final[Role] = "transcript"
 JUDGEMENT: Final[Role] = "judgement"
 CUSTOM: Final[Role] = "custom"
+# Summary Engine v2, Q5 — the dates and deadlines a recording named.
+KEY_DATES: Final[Role] = "key_dates"
 
 ROLES: Final[tuple[Role, ...]] = (
     SUMMARY,
@@ -54,6 +56,7 @@ ROLES: Final[tuple[Role, ...]] = (
     TRANSCRIPT,
     JUDGEMENT,
     CUSTOM,
+    KEY_DATES,
 )
 
 # Section ids of every template written before roles existed. A key that

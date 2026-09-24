@@ -308,3 +308,43 @@ Not done, on purpose: `NoteContent` still names a template, the item
 projection still reads `action_items` / `next_steps` by key, and the
 carry-over block still lands in `action_items`. Those are homes, not
 headings, and a template stays the way a family declares its fields.
+
+## 7. Every line traceable; labels are data (Summary Engine v2, 2026-09-24)
+
+**Context.** An audit of a generated note (a German news podcast,
+2026-09-22) found it carried 3 of 24 facts, one sentence copied from the
+prompt's own example, a whole story dropped as "noise", a podcast labelled
+a team meeting, and relative dates rewritten to the wrong day. Every cause
+was in the pipeline, not in the prose (`docs/sprints/summary-engine-v2/`).
+
+**Decisions (Q1–Q5).**
+
+1. **Measure first.** The eval harness feeds the engine the result view the
+   worker snapshots; until then it had only ever scored an empty transcript.
+   Every audit metric has a scorer; the one-prompt arm is the baseline.
+2. **Nothing is dropped on the model's word, nothing written without
+   support.** Noise is confirmed by code and capped at 2 % of speech; a fact
+   whose text does not mean what its quote says is dropped or flagged;
+   every composed line passes one support rule (`meeting_doc/support.py`),
+   shared by the engine and the eval.
+3. **The document fits the recording.** The recording type is decided
+   before extraction (the author's choice, a specific template, or a
+   classifier); a broadcast is never offered decisions or tasks. A fact is
+   written once. Dates are resolved as annotations; conversation
+   transcripts are served verbatim.
+4. **Names and holders.** Known names are respelled in the line, never in
+   the quote; every opinion or forecast names its holder and keeps its
+   hedge, in code. The model tier for unknown names is off until it clears
+   precision 0.9.
+5. **Lines are rows; labels are data** (migration 0059).
+   `note_generated_items` holds one row per written line — summary
+   sentences, framing, topic bullets and key dates included — keyed like
+   the corrections routes key a line, with what it cites, its certainty,
+   its holder, its name corrections and its dates as columns. The note's
+   text stays prose; chips, evidence and the calendar file are drawn by the
+   client. Short / Standard / Detailed is a client view over the same rows.
+
+**Consequences.** Deploy order: migrate (0058, 0059) before the workers —
+a Q5 worker inserting into a table without the 0059 columns fails the run.
+The shared page, the client version and the PDF still carry no quote and
+no audio link.

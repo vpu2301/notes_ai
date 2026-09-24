@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -35,6 +35,31 @@ from .notes_from_transcript import _fetch_transcript
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
+
+
+class ExcludedRange(BaseModel):
+    """A stretch of the recording left out of the notes, confirmed by code
+    (Summary Engine v2, Q2). ``reason`` is a closed vocabulary — background,
+    other_language, artifact, duplicate, unrelated — for the client to
+    turn into words; never text from the recording."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_ms: int
+    end_ms: int
+    reason: str
+
+
+class Coverage(BaseModel):
+    """How the facts spread over the recording, and how much speech was
+    set aside. Counts and milliseconds only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    """Facts found in the first, middle and last third of the recording."""
+    facts_by_third: list[int]
+    speech_ms: int
+    excluded_ms: int
 
 
 class GenerationView(BaseModel):
@@ -65,6 +90,19 @@ class GenerationView(BaseModel):
     verifier would let through — the client says so rather than showing
     an empty tab with no way forward."""
     sections_written: int | None = None
+    """Q2 — what was left out, and how the facts cover the recording.
+    Empty / null for generations made before Q2."""
+    excluded_ranges: list[ExcludedRange] = []
+    coverage: Coverage | None = None
+    """Q3 — what the recording was taken to be (``meeting``, ``podcast_broadcast``,
+    ``lecture_webinar``, ``voice_memo``, …) and who decided: ``user`` (a
+    meeting type or template the author chose), ``classifier``, ``rule`` or
+    ``template`` (the classifier could not answer). Null before Q3."""
+    recording_type: str | None = None
+    recording_type_source: str | None = None
+    """The spoken language the run wrote in (``en``/``de``/``uk``), so the
+    client labels exclusions in it. Null before Q3."""
+    language: str | None = None
 
     @property
     def live(self) -> bool:
@@ -98,9 +136,40 @@ class GeneratedItemView(BaseModel):
     speaker_label: str | None
     speaker_name: str | None
     placement: str
+    """Q5 — the line's facts (item keys), how sure it is, whose position it
+    is, the names respelled in it (``[{surface, canonical, source}]``) and
+    the dates it names (``[{text, date, time, direction}]``). Empty for
+    rows written before Q5."""
+    cites: list[str] = []
+    certainty: str | None = None
+    attributed_to: str | None = None
+    corrections: list[dict[str, str]] = []
+    mentions: list[dict[str, str | None]] = []
+
+
+def _excluded(stats: dict) -> list[ExcludedRange]:
+    out: list[ExcludedRange] = []
+    for entry in stats.get("excluded_ranges") or []:
+        if isinstance(entry, (list, tuple)) and len(entry) == 3:
+            out.append(
+                ExcludedRange(start_ms=int(entry[0]), end_ms=int(entry[1]), reason=str(entry[2]))
+            )
+    return out
+
+
+def _coverage(stats: dict) -> Coverage | None:
+    thirds = stats.get("facts_by_third")
+    if not isinstance(thirds, list) or len(thirds) != 3:
+        return None
+    return Coverage(
+        facts_by_third=[int(n) for n in thirds],
+        speech_ms=int(stats.get("speech_ms") or 0),
+        excluded_ms=int(stats.get("excluded_ms") or 0),
+    )
 
 
 def _view(row: gen_repo.GenerationRow) -> GenerationView:
+    stats = row.stats or {}
     return GenerationView(
         id=row.id,
         status=row.status,
@@ -120,6 +189,11 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
             if row.status in ("complete", "partial")
             else None
         ),
+        excluded_ranges=_excluded(stats),
+        coverage=_coverage(stats),
+        recording_type=stats.get("recording_type"),
+        recording_type_source=stats.get("recording_type_source"),
+        language=stats.get("language"),
     )
 
 
@@ -259,6 +333,7 @@ async def generated_items(
     note_id: UUID,
     claims: Annotated[Claims, Depends(requires("note.read", "note"))],
     purpose: ReadPurpose | None = None,
+    generation: Literal["current", "all"] = "all",
 ) -> list[GeneratedItemView]:
     """Every verified fact behind this note, with the words that prove it.
 
@@ -270,7 +345,9 @@ async def generated_items(
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         access.require_read_purpose(note, claims, purpose)
-        rows = await gen_repo.items_for_note(conn, note_id=note_id)
+        rows = await gen_repo.items_for_note(
+            conn, note_id=note_id, current_only=generation == "current"
+        )
     return [
         GeneratedItemView(
             item_key=str(r["item_key"]),
@@ -289,6 +366,30 @@ async def generated_items(
             speaker_label=r["speaker_label"],
             speaker_name=r["speaker_name"],
             placement=str(r["placement"]),
+            cites=list(_get(r, "cites") or []),
+            certainty=_get(r, "certainty"),
+            attributed_to=_get(r, "attributed_to"),
+            corrections=_json_list(_get(r, "corrections")),
+            mentions=_json_list(_get(r, "mentions")),
         )
         for r in rows
     ]
+
+
+def _get(row: object, key: str) -> object:
+    """A column that may be absent (a row read before 0059, a test fake)."""
+    try:
+        return row[key]  # type: ignore[index]
+    except (KeyError, IndexError):
+        return None
+
+
+def _json_list(value: object) -> list:
+    """asyncpg returns JSONB as text unless a codec is set; both are fine."""
+    import json
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = json.loads(value)
+    return list(value) if isinstance(value, list) else []

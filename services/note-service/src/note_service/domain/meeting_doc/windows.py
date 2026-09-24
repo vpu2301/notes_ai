@@ -18,8 +18,11 @@ Three rules make the cut safe:
   (hypothesis E2) means something.
 
 Lines are numbered — ``[7] Anna (12:04): …`` — because a fact cites its
-turn by that number, and :mod:`verify` uses the number to find the words
-again.
+line by that number, and :mod:`verify` uses the number to find the words
+again. A LINE is one piece of a turn: a monologue cut into three pieces
+is three lines with three numbers, so a flag or a citation on one piece
+never reaches the others (Summary Engine v2, Q2 — until then the pieces
+shared their turn's number, and one "noise" flag silenced a whole story).
 
 Pure: turns in, windows out.
 """
@@ -27,7 +30,7 @@ Pure: turns in, windows out.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 # Roughly 1.5–2.7 k tokens depending on the language — Ukrainian and
@@ -35,7 +38,9 @@ from typing import Any, Final
 # characters and deliberately conservative.
 MAX_WINDOW_CHARS: Final = 6_000
 # A single turn past this is a monologue; it is split at sentence ends.
-MAX_TURN_CHARS: Final = 4_000
+# Small enough that a window holds at least two pieces, so the overlap
+# carries real context rather than a window of one piece and nothing else.
+MAX_TURN_CHARS: Final = 2_500
 OVERLAP_TURNS: Final = 1
 
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+|(?<=[.!?…])$")
@@ -52,6 +57,19 @@ class Turn:
     text: str
     start_ms: int
     end_ms: int
+    """This piece's number in the transcript, unique across it; assigned by
+    :func:`build_windows`. ``None`` for a turn nobody numbered (a test's
+    hand-built window), which then answers to its turn index."""
+    line: int | None = None
+    """Q4 — a sound bite: someone quoted in the recording rather than taking
+    part in it (see :func:`mark_clips`). Their opinions have no holder
+    among the participants."""
+    clip: bool = False
+
+    @property
+    def number(self) -> int:
+        """What the model sees in brackets and cites."""
+        return self.index if self.line is None else self.line
 
     @property
     def display_name(self) -> str:
@@ -73,15 +91,17 @@ class Window:
 
     @property
     def turn_numbers(self) -> frozenset[int]:
-        return frozenset(t.index for t in self.turns)
+        """The line numbers in this window."""
+        return frozenset(t.number for t in self.turns)
 
-    def turn(self, index: int) -> Turn | None:
-        return next((t for t in self.turns if t.index == index), None)
+    def turn(self, number: int) -> Turn | None:
+        """The piece with this line number."""
+        return next((t for t in self.turns if t.number == number), None)
 
     def render(self) -> str:
         """The window as the model sees it: numbered, named, timed."""
         return "\n".join(
-            f"[{t.index}] {t.display_name} ({_mmss(t.start_ms)}): {t.text}" for t in self.turns
+            f"[{t.number}] {t.display_name} ({_mmss(t.start_ms)}): {t.text}" for t in self.turns
         )
 
     @property
@@ -158,9 +178,9 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
 def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
     """A monologue, cut at sentence ends.
 
-    The pieces keep the ORIGINAL turn's number: a fact citing turn 7 must
-    resolve whether or not turn 7 had to be split, and the quote check
-    searches the whole turn anyway.
+    The pieces keep the ORIGINAL turn's ``index`` (what the sidecar and the
+    speaker roster key on); :func:`build_windows` gives each its own
+    ``line``.
     """
     if len(turn.text) <= cap:
         return [turn]
@@ -201,15 +221,61 @@ def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
     return out
 
 
+# What a presenter says just before playing a clip.
+_CLIP_CUE: Final = re.compile(
+    r"\b(?:o-ton|sagte|sagt|erklärte|erklärt|hören wir|geäußert|äußerte|"
+    r"said|says|listen to|here is|here's|"
+    r"сказав|сказала|каже|послухаймо)\b",
+    re.IGNORECASE,
+)
+CLIP_MAX_SHARE: Final = 0.08
+CLIP_MAX_TURNS: Final = 2
+CLIP_CUE_WITHIN_MS: Final = 15_000
+
+
+def mark_clips(turns: list[Turn]) -> list[Turn]:
+    """Mark the turns of a speaker who is played rather than present.
+
+    A Hypothesis (Q4): a speaker with under 8 % of the speech, at most two
+    turns, whose first turn follows a cue ("O-Ton", "sagte", "here is")
+    in the previous speaker's words within 15 seconds. Measured against
+    the ``speakers`` gold on broadcast recordings."""
+    total = sum(max(0, t.end_ms - t.start_ms) for t in turns) or 1
+    by_label: dict[str, list[Turn]] = {}
+    for turn in turns:
+        if turn.speaker_label:
+            by_label.setdefault(turn.speaker_label, []).append(turn)
+    clips: set[str] = set()
+    for label, own in by_label.items():
+        speech = sum(max(0, t.end_ms - t.start_ms) for t in own)
+        if speech / total >= CLIP_MAX_SHARE or len(own) > CLIP_MAX_TURNS:
+            continue
+        first = own[0]
+        before = [
+            t
+            for t in turns
+            if t.speaker_label not in (None, label)
+            and t.end_ms <= first.start_ms
+            and first.start_ms - t.end_ms <= CLIP_CUE_WITHIN_MS
+        ]
+        if before and _CLIP_CUE.search(before[-1].text):
+            clips.add(label)
+    if not clips:
+        return turns
+    return [replace(t, clip=True) if t.speaker_label in clips else t for t in turns]
+
+
 def build_windows(
     turns: list[Turn], *, max_chars: int = MAX_WINDOW_CHARS, overlap: int = OVERLAP_TURNS
 ) -> list[Window]:
     """The transcript as windows, in order."""
     pieces: list[Turn] = []
-    for turn in turns:
+    for turn in mark_clips(turns):
         pieces.extend(split_long_turn(turn))
     if not pieces:
         return []
+    # One number per piece, across the whole transcript.
+    pieces = [replace(piece, line=n) for n, piece in enumerate(pieces)]
 
     windows: list[Window] = []
     current: list[Turn] = []

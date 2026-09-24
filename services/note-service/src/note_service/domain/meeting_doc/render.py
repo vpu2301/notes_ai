@@ -20,12 +20,13 @@ asking a model to "write it up":
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date, time
 from typing import Final
 
 from .. import lines as line_rules
-from . import roles, schema
-from .verify import VerifiedFact
+from . import roles, schema, support
+from .verify import DateMention, VerifiedFact
 
 _ECHOED_FACT: Final = re.compile(
     r"^\s*(?:\[\]\s*)?(?P<id>[0-9a-f]{16})\s*\([a-z_]+,\s*\d{1,2}:\d{2}\):\s*"
@@ -69,6 +70,7 @@ FALLBACK_KEYS: Final[dict[str, str]] = {
     roles.OPEN_QUESTIONS: "open_questions",
     roles.RISKS: "risks",
     roles.NEXT_MEETING: "next_meeting",
+    roles.KEY_DATES: "key_dates",
 }
 ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
@@ -77,6 +79,7 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.OPEN_QUESTIONS: "Open questions",
         roles.RISKS: "Risks",
         roles.NEXT_MEETING: "Next meeting",
+        roles.KEY_DATES: "Key dates",
     },
     "de": {
         roles.DECISIONS: "Entscheidungen",
@@ -84,6 +87,7 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.OPEN_QUESTIONS: "Offene Fragen",
         roles.RISKS: "Risiken",
         roles.NEXT_MEETING: "Nächstes Treffen",
+        roles.KEY_DATES: "Termine & Fristen",
     },
     "uk": {
         roles.DECISIONS: "Рішення",
@@ -91,56 +95,9 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.OPEN_QUESTIONS: "Відкриті питання",
         roles.RISKS: "Ризики",
         roles.NEXT_MEETING: "Наступна зустріч",
+        roles.KEY_DATES: "Дати та терміни",
     },
 }
-
-# The transcript note is rendered from a closed vocabulary, never from
-# model prose: what the model may say about a turn is one of these words.
-NOISE_LABELS: Final[dict[str, dict[str, str]]] = {
-    "en": {
-        "background": "background speech",
-        "other_language": "a passage in another language",
-        "artifact": "a transcription artifact",
-        "duplicate": "a duplicated passage",
-        "unrelated": "an unrelated fragment",
-    },
-    "de": {
-        "background": "Hintergrundgespräch",
-        "other_language": "eine Passage in einer anderen Sprache",
-        "artifact": "ein Transkriptionsartefakt",
-        "duplicate": "eine doppelte Passage",
-        "unrelated": "ein unzusammenhängendes Fragment",
-    },
-    "uk": {
-        "background": "фонова мова",
-        "other_language": "уривок іншою мовою",
-        "artifact": "артефакт транскрипції",
-        "duplicate": "повторений уривок",
-        "unrelated": "непов'язаний фрагмент",
-    },
-}
-_NOTE_TEMPLATE: Final[dict[str, str]] = {
-    "en": "Transcript note: {what} at {when} was left out of these notes.",
-    "de": "Hinweis zum Transkript: {what} bei {when} wurde nicht berücksichtigt.",
-    "uk": "Примітка до стенограми: {what} о {when} не враховано.",
-}
-_AND: Final[dict[str, str]] = {"en": " and ", "de": " und ", "uk": " та "}
-MAX_NOTED_PASSAGES: Final = 4
-
-
-def transcript_note(noise: list[tuple[int, str]], *, language: str = "en") -> str:
-    """One sentence naming the passages the extractor set aside, so the
-    reader knows they are missing on purpose. Empty when nothing was."""
-    if not noise:
-        return ""
-    lang = language if language in _NOTE_TEMPLATE else "en"
-    labels = NOISE_LABELS[lang]
-    passages = sorted({(ms, labels.get(reason, labels["unrelated"])) for ms, reason in noise})
-    passages = passages[:MAX_NOTED_PASSAGES]
-    what = ", ".join(dict.fromkeys(label for _, label in passages))
-    times = [mmss(ms) for ms, _ in passages]
-    when = _AND[lang].join([", ".join(times[:-1]), times[-1]]) if len(times) > 1 else times[0]
-    return _NOTE_TEMPLATE[lang].format(what=what, when=when)
 
 
 def strip_inline_ids(text: str) -> tuple[str, list[str]]:
@@ -184,6 +141,51 @@ SIDE_HEADINGS: Final[dict[str, dict[str, str]]] = {
 }
 
 
+# What a written line is. The eval scores lines by kind, and Q5 hangs a
+# citation off every one of them.
+LINE_KINDS: Final[frozenset[str]] = frozenset(
+    {
+        "framing",
+        "summary",
+        "key_point",
+        "bullet",
+        "decision",
+        "action",
+        "question",
+        "risk",
+        "next_meeting",
+        "agenda",
+        "note",
+        "heading",
+    }
+)
+_LINE_KIND_OF_FACT: Final[dict[str, str]] = {
+    schema.DECISION: "decision",
+    schema.ACTION: "action",
+    "commitment_ours": "action",
+    "commitment_theirs": "action",
+    schema.OPEN_QUESTION: "question",
+    schema.RISK: "risk",
+    schema.NEXT_MEETING: "next_meeting",
+    schema.AGENDA_ITEM: "agenda",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    """One written line and the facts it rests on.
+
+    ``text`` is exactly a line of the section's text — never a second
+    rendering of it — so what the eval scores is what the reader sees.
+    """
+
+    text: str
+    kind: str
+    fact_ids: tuple[str, ...] = ()
+    """Q3 — the dates its facts' quotes mention, resolved with their tense."""
+    dates: tuple[DateMention, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class RenderedSection:
     section_key: str
@@ -195,6 +197,20 @@ class RenderedSection:
     template section (named by the template) and for the unheaded
     opening block."""
     title: str | None = None
+    """Every non-blank line of ``text``, in order, with its kind and the
+    fact ids behind it."""
+    lines: tuple[Line, ...] = field(default=())
+
+
+def fact_line(fact: VerifiedFact, text: str) -> Line:
+    """A line written from one fact."""
+    return Line(
+        text=text, kind=_LINE_KIND_OF_FACT.get(fact.kind, "key_point"), fact_ids=(fact.item_key,)
+    )
+
+
+def _ids(facts: list[VerifiedFact]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(f.item_key for f in facts))
 
 
 def mmss(ms: int) -> str:
@@ -213,32 +229,61 @@ def action_line(fact: VerifiedFact) -> str:
     )
 
 
-def decision_line(fact: VerifiedFact) -> str:
-    return f"- {editorial(fact.text)}"
+def decision_line(fact: VerifiedFact, language: str = "en") -> str:
+    return f"- {patch_claim(editorial(fact.text), [fact], language)}"
 
 
-def plain_line(fact: VerifiedFact) -> str:
-    return f"- {editorial(fact.text)}"
+def plain_line(fact: VerifiedFact, language: str = "en") -> str:
+    return f"- {patch_claim(editorial(fact.text), [fact], language)}"
+
+
+def patch_claim(text: str, facts: list[VerifiedFact], language: str = "en") -> str:
+    """A record of an opinion, forecast, estimate, proposal or allegation
+    says whose it is and that it is one (Q4) — in code, from the fact's own
+    fields, never in words a model chose.
+
+    * ``… — laut Reinbold`` / ``… (Vorschlag: Söder)`` when the holder is
+      known and the line does not already name them;
+    * ``Voraussichtlich: …`` when the line still carries no marker of its
+      certainty (a holder's "laut" is one).
+    """
+    unsure = [f for f in facts if f.certainty in support.UNSURE_CERTAINTIES]
+    if not unsure:
+        return text
+    fact = unsure[0]
+    lang = language if language in support.CERTAINTY_PHRASES else "en"
+    phrases = support.CERTAINTY_PHRASES[lang]
+    actor = fact.attributed_to
+    if actor and not support.names_actor(text, actor):
+        last = actor.split()[-1]
+        if fact.certainty == "proposal":
+            text = f"{text} ({phrases['proposal']}: {last})"
+        else:
+            text = f"{text} — {support.ACCORDING_TO[lang]} {last}"
+    if not support.has_marker(text, lang):
+        text = f"{phrases[fact.certainty]}: {text}"
+    return text
 
 
 def render_sections(
     facts: list[VerifiedFact],
     *,
     role_by_key: dict[str, str],
-    topics: list[tuple[str, list[str], list[str]]] | None = None,
-    summary: list[str] | None = None,
+    topics: list[tuple[str, list[str] | list[tuple[str, list[str]]], list[str]]] | None = None,
+    summary: list[str] | list[tuple[str, list[str]]] | None = None,
     kind_roles: dict[str, str] | None = None,
     language: str = "en",
     counterpart: str = "",
     framing: str = "",
     key_fact_ids: list[str] | None = None,
-    noise: list[tuple[int, str]] | None = None,
+    counters: dict[str, int] | None = None,
+    meeting_date: date | None = None,
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
     Structure follows content, not the template. The opening block
-    (``gen:overview``, no heading) carries the framing sentence, the
-    summary, the key points and the transcript note. Each topic the
+    (``gen:overview``, no heading) carries the framing sentence and the
+    summary — and, when there are no topics, the facts as one list. Each topic the
     reduce step found is a section of its own, ``gen:<slug>``, headed by
     the topic's title. Decisions, actions, open questions, risks and the
     next meeting go to the template's section for that role when it has
@@ -247,11 +292,13 @@ def render_sections(
     emitted for an empty text, and nobody is listed as an attendee:
     the roster is the transcript's.
 
-    ``topics`` is ``[(title, bullet texts, fact ids)]``; ``summary`` its
-    sentences; ``framing`` the context pass's opening sentence;
-    ``key_fact_ids`` the facts a reader must know first; ``noise``
-    ``[(start_ms, reason)]`` for the passages set aside. A meeting with
-    one coherent subject gets no topic headings at all.
+    ``topics`` is ``[(title, [(bullet text, its fact ids)], fact ids)]``
+    (a bare bullet string is still accepted); ``summary`` its sentences,
+    each ``(sentence, fact ids)`` or a bare string; ``framing`` the context pass's opening sentence;
+    ``key_fact_ids`` the facts a reader must know first; ``counters``
+    receives ``redundant_lines``. A meeting with one coherent subject gets
+    no topic headings at all. What was left out of the notes is not written
+    here: it is ``excluded_ranges`` on the generation, for the client.
     """
     keys_by_role: dict[str, list[str]] = {}
     for key, role in role_by_key.items():
@@ -260,7 +307,7 @@ def render_sections(
 
     out: list[RenderedSection] = []
 
-    def emit(role: str, text: str, used: list[VerifiedFact]) -> None:
+    def emit(role: str, text: str, used: list[VerifiedFact], lines: list[Line]) -> None:
         """Into the template's section for the role, or a section of its
         own when the template has none and the role has a home."""
         if not text.strip():
@@ -273,7 +320,14 @@ def render_sections(
                 return
             title = labels.get(role)
         out.append(
-            RenderedSection(section_key=key, role=role, text=text, facts=tuple(used), title=title)
+            RenderedSection(
+                section_key=key,
+                role=role,
+                text=text,
+                facts=tuple(used),
+                title=title,
+                lines=tuple(lines),
+            )
         )
 
     grouped: dict[str, list[VerifiedFact]] = {}
@@ -296,12 +350,22 @@ def render_sections(
         f for f in grouped.get(schema.AGENDA_ITEM, []) if f.window_index < AGENDA_FROM_FIRST_WINDOWS
     ]
     if agenda:
-        emit(roles.AGENDA, "\n".join(plain_line(f) for f in agenda), agenda)
+        emit(
+            roles.AGENDA,
+            "\n".join(plain_line(f, language) for f in agenda),
+            agenda,
+            [fact_line(f, plain_line(f, language)) for f in agenda],
+        )
 
     # ── Decisions ───────────────────────────────────────────────────
     decisions = grouped.get(schema.DECISION, [])
     if decisions:
-        emit(roles.DECISIONS, "\n".join(decision_line(f) for f in decisions), decisions)
+        emit(
+            roles.DECISIONS,
+            "\n".join(decision_line(f, language) for f in decisions),
+            decisions,
+            [fact_line(f, decision_line(f, language)) for f in decisions],
+        )
 
     # ── Actions, in the grammar the rest of the product reads ───────
     actions = [
@@ -314,31 +378,68 @@ def render_sections(
             roles.ACTION_ITEMS,
             action_text(actions, language=language, counterpart=counterpart),
             actions,
+            action_lines(actions, language=language, counterpart=counterpart),
         )
 
     # ── Open questions ──────────────────────────────────────────────
     questions = grouped.get(schema.OPEN_QUESTION, [])
     if questions:
-        emit(roles.OPEN_QUESTIONS, "\n".join(plain_line(f) for f in questions), questions)
+        emit(
+            roles.OPEN_QUESTIONS,
+            "\n".join(plain_line(f, language) for f in questions),
+            questions,
+            [fact_line(f, plain_line(f, language)) for f in questions],
+        )
 
     # ── Risks ───────────────────────────────────────────────────────
     risks = grouped.get(schema.RISK, [])
     if risks:
-        emit(roles.RISKS, "\n".join(plain_line(f) for f in risks), risks)
+        emit(
+            roles.RISKS,
+            "\n".join(plain_line(f, language) for f in risks),
+            risks,
+            [fact_line(f, plain_line(f, language)) for f in risks],
+        )
 
     # ── Next meeting ────────────────────────────────────────────────
     nexts = grouped.get(schema.NEXT_MEETING, [])
     if nexts:
-        emit(roles.NEXT_MEETING, "\n".join(plain_line(f) for f in nexts), nexts)
+        emit(
+            roles.NEXT_MEETING,
+            "\n".join(plain_line(f, language) for f in nexts),
+            nexts,
+            [fact_line(f, plain_line(f, language)) for f in nexts],
+        )
+
+    # ── Key dates (Q5): what the recording scheduled or set a deadline
+    #    for, from the dates its facts' quotes named. ──────────────────
+    dated = key_dates(facts, meeting_date=meeting_date)
+    if dated:
+        date_lines = [
+            Line(
+                f"- {format_when(when, clock, language)} — {editorial(fact.text)}",
+                "date",
+                (fact.item_key,),
+                (mention,) if mention else (),
+            )
+            for when, clock, fact, mention in dated
+        ]
+        emit(
+            roles.KEY_DATES,
+            "\n".join(line.text for line in date_lines),
+            [fact for _w, _c, fact, _m in dated],
+            date_lines,
+        )
 
     # ── The family's own sections ───────────────────────────────────
     for role, owned in by_extra_role.items():
         if role in (roles.ACTION_ITEMS, roles.JUDGEMENT):
             continue  # actions are grouped above; judgements are never written
         existing = next((s for s in out if s.role == role), None)
-        text = "\n".join(plain_line(f) for f in owned)
+        text = "\n".join(plain_line(f, language) for f in owned)
+        owned_lines = [fact_line(f, plain_line(f, language)) for f in owned]
         if existing is None:
-            emit(role, text, owned)
+            emit(role, text, owned, owned_lines)
         else:
             # A generic kind already wrote here (a family that maps an
             # extra kind onto `risks` alongside `risk`). Append rather
@@ -349,80 +450,239 @@ def render_sections(
                 text=f"{existing.text}\n{text}",
                 facts=(*existing.facts, *owned),
                 title=existing.title,
+                lines=(*existing.lines, *owned_lines),
             )
 
     # ── Topics: one section each, headed by what the conversation
     #    was about there. None for a single-subject conversation. ────
     key_facts = [by_id[i] for i in dict.fromkeys(key_fact_ids or []) if i in by_id]
     key_facts = [f for f in key_facts if f.kind not in (schema.COMPLETION, schema.JUDGEMENT)]
+
+    # The summary sentences, as written, with what they cite — a bullet
+    # that says what a sentence already says is not written again (Q3).
+    sentences: list[tuple[str, list[str]]] = []
+    for entry in summary or []:
+        sentence, cited_ids = (entry, []) if isinstance(entry, str) else entry
+        written = editorial(strip_inline_ids(sentence)[0])
+        own = list(dict.fromkeys([*cited_ids, *strip_inline_ids(sentence)[1]]))
+        if written.strip():
+            sentences.append((written, own))
+
+    # One fact, once (Q3): what a decision, task or question section
+    # already carries, and what an earlier topic already said, is not a
+    # bullet again.
+    rendered: set[str] = {f.item_key for section in out for f in section.facts}
+    redundant = 0
+    drafts: list[tuple[str, list[Line], list[VerifiedFact], int]] = []
+    for title, bullets, fact_ids in topics or []:
+        if not title.strip():
+            continue
+        cited = [by_id[i] for i in fact_ids if i in by_id]
+        topic_lines: list[Line] = []
+        for entry in bullets:
+            # A bullet is ``(text, its fact ids)``; a bare string is the
+            # older shape and cites the topic's facts.
+            bullet, own_ids = (entry, list(fact_ids)) if isinstance(entry, str) else entry
+            own = [by_id[i] for i in own_ids if i in by_id]
+            bullet = editorial(bullet)
+            # The reduce prompt lists facts as "id (kind, mm:ss): text" and
+            # a small model may echo the whole line as a bullet. The id is
+            # ours: swap in that fact's text and cite it.
+            echoed = _ECHOED_FACT.match(bullet)
+            if echoed is not None:
+                fact = by_id.get(echoed.group("id"))
+                bullet = fact.text if fact is not None else bullet[echoed.end() :]
+                if fact is not None and fact not in own:
+                    own.append(fact)
+            bullet, inline = strip_inline_ids(bullet)
+            for fact_id in inline:
+                hit = by_id.get(fact_id)
+                if hit is not None and hit not in own:
+                    own.append(hit)
+            if not bullet.strip():
+                continue
+            ids = set(_ids(own))
+            if ids and (ids <= rendered or _said_by(bullet, ids, sentences, language)):
+                redundant += 1
+                continue
+            rendered |= ids
+            for fact in own:
+                if fact not in cited:
+                    cited.append(fact)
+            bullet = patch_claim(bullet.strip(), own, language)
+            topic_lines.append(Line(f"- {bullet}", "bullet", _ids(own)))
+        first = min((f.start_ms for f in cited), default=10**12)
+        drafts.append((title.strip(), topic_lines, cited, first))
+
+    # A recording is read in its order (Q3), and a topic is two points or
+    # more: a lone bullet joins the topic before it.
+    drafts.sort(key=lambda d: d[3])
+    kept_topics: list[tuple[str, list[Line], list[VerifiedFact]]] = []
+    orphans: list[Line] = []
+    for title, topic_lines, cited, _first in drafts:
+        if len(topic_lines) >= MIN_BULLETS_PER_TOPIC:
+            kept_topics.append((title, [*orphans, *topic_lines], cited))
+            orphans = []
+        elif topic_lines and kept_topics:
+            prev_title, prev_lines, prev_cited = kept_topics[-1]
+            kept_topics[-1] = (prev_title, [*prev_lines, *topic_lines], [*prev_cited, *cited])
+        else:
+            orphans.extend(topic_lines)
+    if len(kept_topics) < 2:
+        # One subject is no subject heading: everything reads as one list.
+        orphans = [*orphans, *(line for _t, lines_, _c in kept_topics for line in lines_)]
+        kept_topics = []
+    elif orphans:
+        title, lines_, cited = kept_topics[-1]
+        kept_topics[-1] = (title, [*lines_, *orphans], cited)
+        orphans = []
+
     topic_sections: list[RenderedSection] = []
     taken: set[str] = set(role_by_key)
-    if topics:
-        for title, bullets, fact_ids in topics:
-            cited = [by_id[i] for i in fact_ids if i in by_id]
-            lines: list[str] = []
-            for bullet in bullets:
-                bullet = editorial(bullet)
-                # The reduce prompt lists facts as "id (kind, mm:ss): text"
-                # and a small model may echo the whole line as a bullet.
-                # The id is ours: swap in that fact's text and cite it.
-                echoed = _ECHOED_FACT.match(bullet)
-                if echoed is not None:
-                    fact = by_id.get(echoed.group("id"))
-                    bullet = fact.text if fact is not None else bullet[echoed.end() :]
-                    if fact is not None and fact not in cited:
-                        cited.append(fact)
-                bullet, inline = strip_inline_ids(bullet)
-                for fact_id in inline:
-                    hit = by_id.get(fact_id)
-                    if hit is not None and hit not in cited:
-                        cited.append(hit)
-                if bullet.strip():
-                    lines.append(f"- {bullet.strip()}")
-            if not lines or not title.strip():
-                continue
-            key = roles.generated_key(title, taken)
-            taken.add(key)
-            topic_sections.append(
-                RenderedSection(
-                    section_key=key,
-                    role=roles.TOPICS,
-                    text="\n".join(lines),
-                    facts=tuple(cited),
-                    title=title.strip(),
-                )
+    for title, topic_lines, cited in kept_topics:
+        key = roles.generated_key(title, taken)
+        taken.add(key)
+        topic_sections.append(
+            RenderedSection(
+                section_key=key,
+                role=roles.TOPICS,
+                text="\n".join(line.text for line in topic_lines),
+                facts=tuple({f.item_key: f for f in cited}.values()),
+                title=title,
+                lines=tuple(topic_lines),
             )
+        )
 
     # ── The opening block: no heading. It is the note. ──────────────
-    overview: list[str] = []
+    # Framing and summary. The facts themselves live in their topics; with
+    # no topics they are one list here — key facts first. Nothing else:
+    # what was left out of the notes is data for the client (Q3), never a
+    # paragraph a renderer could mistake for somebody speaking.
+    overview: list[tuple[str, list[Line]]] = []
     if framing.strip():
-        overview.append(editorial(strip_inline_ids(framing)[0]))
-    if summary:
-        overview.extend(editorial(strip_inline_ids(s)[0]) for s in summary)
+        framed = editorial(strip_inline_ids(framing)[0])
+        # The framing is written about the conversation, from the facts
+        # the context pass named as the ones to know first.
+        overview.append((framed, [Line(framed, "framing", _ids(key_facts) or _ids(facts))]))
+    for written, own in sentences:
+        overview.append((written, [Line(written, "summary", tuple(own))]))
     used: list[VerifiedFact] = []
-    if key_facts:
-        overview.append("\n".join(plain_line(f) for f in key_facts))
-        used.extend(key_facts)
     if not topic_sections:
-        # Nothing to head: what the reduce step could not cluster (too
-        # few facts, one subject, a failed call) reads as one list.
-        rest = [f for f in grouped.get(schema.KEY_POINT, []) if f not in key_facts]
-        if rest:
-            overview.append("\n".join(plain_line(f) for f in rest))
-            used.extend(rest)
-    note = transcript_note(noise or [], language=language)
-    if note and (overview or facts):
-        overview.append(note)
-    text = "\n\n".join(s for s in overview if s and s.strip())
+        listed = [*key_facts]
+        listed += [f for f in grouped.get(schema.KEY_POINT, []) if f not in listed]
+        in_sections = {f.item_key for section in out for f in section.facts}
+        listed = [f for f in listed if f.item_key not in in_sections]
+        list_lines = [Line(plain_line(f, language), "key_point", (f.item_key,)) for f in listed]
+        # A bullet left over from a dissolved topic says a listed fact again
+        # when every fact it cites is already on the list: once is enough.
+        # A listed fact a summary sentence already says (same fact, mostly
+        # the same words) is not listed again — rule 2, applied to the list.
+        said = [
+            line
+            for line in list_lines
+            if _said_by(line.text, set(line.fact_ids), sentences, language)
+        ]
+        redundant += len(said)
+        list_lines = [line for line in list_lines if line not in said]
+        listed_ids = {f.item_key for f in listed} | in_sections
+        for line in orphans:
+            if line.fact_ids and set(line.fact_ids) <= listed_ids:
+                redundant += 1
+                continue
+            list_lines.append(line)
+        if list_lines:
+            overview.append(("\n".join(line.text for line in list_lines), list_lines))
+            used.extend(listed)
+    if counters is not None:
+        counters["redundant_lines"] = counters.get("redundant_lines", 0) + redundant
+    kept = [(block, block_lines) for block, block_lines in overview if block and block.strip()]
+    text = "\n\n".join(block for block, _ in kept)
     if text:
         out.insert(
             0,
             RenderedSection(
-                section_key=roles.OVERVIEW_KEY, role=roles.SUMMARY, text=text, facts=tuple(used)
+                section_key=roles.OVERVIEW_KEY,
+                role=roles.SUMMARY,
+                text=text,
+                facts=tuple(used),
+                lines=tuple(line for _, block_lines in kept for line in block_lines),
             ),
         )
     out.extend(topic_sections)
-    return out
+    return [_with_dates(section, by_id) for section in out]
+
+
+# A bullet restating a summary sentence: same facts, mostly same words.
+SAID_BY_SENTENCE_JACCARD: Final = 0.6
+MIN_BULLETS_PER_TOPIC: Final = 2
+
+
+def _said_by(
+    bullet: str, ids: set[str], sentences: list[tuple[str, list[str]]], language: str
+) -> bool:
+    """Whether a summary sentence already says this bullet: it cites every
+    fact the bullet does, and shares most of its words."""
+    mine = set(support.content_tokens(bullet, language))
+    for sentence, cited in sentences:
+        if not ids <= set(cited):
+            continue
+        theirs = set(support.content_tokens(sentence, language))
+        union = mine | theirs
+        if union and len(mine & theirs) / len(union) >= SAID_BY_SENTENCE_JACCARD:
+            return True
+    return False
+
+
+def key_dates(
+    facts: list[VerifiedFact], *, meeting_date: date | None = None
+) -> list[tuple[date, time | None, VerifiedFact, DateMention | None]]:
+    """``[(date, time, fact, mention)]``, one per distinct date and time, in
+    order — what the recording scheduled or set a deadline for.
+
+    From the dates the facts' QUOTES named (Q3) and from resolved due
+    dates. Not the recording day itself (every "heute" would be a key date)
+    and not a past event ("am Montag … gewesen"): a reader looks here for
+    what is coming. An unparsed phrase ("Ende des Jahres") is not a date."""
+    seen: dict[tuple[date, time | None], tuple[VerifiedFact, DateMention | None]] = {}
+    for fact in sorted(facts, key=lambda f: f.start_ms):
+        found: list[tuple[date, time | None, DateMention | None]] = [
+            (m.resolved, m.time, m) for m in fact.mentions if m.direction != "past"
+        ]
+        if fact.due_date and not any(d == fact.due_date for d, _t, _m in found):
+            found.append((fact.due_date, None, None))
+        for when, clock, mention in found:
+            if meeting_date is not None and when == meeting_date and clock is None:
+                continue
+            if meeting_date is not None and when < meeting_date:
+                continue
+            seen.setdefault((when, clock), (fact, mention))
+    return [
+        (when, clock, fact, mention)
+        for (when, clock), (fact, mention) in sorted(
+            seen.items(), key=lambda item: (item[0][0], item[0][1] or time(0, 0))
+        )
+    ]
+
+
+def format_when(when: date, clock: time | None, language: str) -> str:
+    """``23.09.2026 00:00`` (de, uk) / ``2026-09-23 00:00`` (en)."""
+    day = when.isoformat() if language == "en" else when.strftime("%d.%m.%Y")
+    return f"{day} {clock:%H:%M}" if clock else day
+
+
+def _with_dates(section: RenderedSection, by_id: dict[str, VerifiedFact]) -> RenderedSection:
+    """Every line carries the dates its facts mention (Q3). The text is
+    not touched: a date is an annotation, never a rewrite."""
+    lines = tuple(
+        replace(
+            line,
+            dates=tuple(
+                dict.fromkeys(m for i in line.fact_ids if i in by_id for m in by_id[i].mentions)
+            ),
+        )
+        for line in section.lines
+    )
+    return replace(section, lines=lines)
 
 
 def action_text(actions: list[VerifiedFact], *, language: str = "en", counterpart: str = "") -> str:
@@ -454,6 +714,33 @@ def action_text(actions: list[VerifiedFact], *, language: str = "en", counterpar
         if owned
     ]
     return "\n\n".join(blocks)
+
+
+def action_lines(
+    actions: list[VerifiedFact], *, language: str = "en", counterpart: str = ""
+) -> list[Line]:
+    """:func:`action_text`, line by line — the same grouping, the same
+    headings, in the same order."""
+    sided = [f for f in actions if f.side]
+    if not sided:
+        return [fact_line(f, action_line(f)) for f in actions]
+    headings = SIDE_HEADINGS.get(language, SIDE_HEADINGS["en"])
+    other = counterpart or ("the client" if language == "en" else "")
+    groups = [
+        (headings["ours"], [f for f in actions if f.side == "ours"]),
+        (
+            headings["theirs"].format(other=other).strip() or headings["unknown"],
+            [f for f in actions if f.side == "theirs"],
+        ),
+        (headings["unknown"], [f for f in actions if not f.side]),
+    ]
+    out: list[Line] = []
+    for title, owned in groups:
+        if not owned:
+            continue
+        out.append(Line(f"### {title}", "heading", _ids(owned)))
+        out.extend(fact_line(f, action_line(f)) for f in owned)
+    return out
 
 
 def attendees_from(facts: list[VerifiedFact]) -> list[str]:

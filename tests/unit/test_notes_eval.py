@@ -156,18 +156,127 @@ def test_speed_is_reported_per_meeting_hour_not_per_meeting() -> None:
     assert summary["seconds_per_meeting_hour"] == 1800.0
 
 
-def test_the_committed_corpus_is_the_shape_the_harness_reads() -> None:
+def _corpus() -> list[dict[str, Any]]:
     import json
 
     files = sorted((REPO / "tests" / "fixtures" / "eval" / "notes").glob("*.json"))
-    assert len(files) == 5
-    for path in files:
-        meeting = json.loads(path.read_text("utf-8"))
-        assert meeting["gold"]["key_facts"], path.name
+    return [json.loads(p.read_text("utf-8")) for p in files]
+
+
+def test_the_committed_corpus_is_the_shape_the_harness_reads() -> None:
+    meetings = _corpus()
+    assert len(meetings) == 10
+    for meeting in meetings:
+        name = meeting["id"]
+        assert meeting["gold"]["key_facts"], name
         assert meeting["meeting_type"]
         # Every gold action names what it is and who has it.
         for action in meeting["gold"]["actions"]:
-            assert action["text"] and action["owner"], path.name
-        # The ASR shape the engine reads must come out of it.
+            assert action["text"] and action["owner"], name
+        # The result-view shape the worker snapshots must come out of it.
         turns = notes_eval.as_asr_result(meeting)["turns"]
-        assert turns and all(t["text"] and t["end_ms"] > 0 for t in turns)
+        assert turns and all(t["paragraphs"] and t["end_ms"] > 0 for t in turns), name
+
+
+# ── Q1 T1: the harness feeds the engine what the worker feeds it ────
+
+
+def _engine() -> Any:
+    sys.path.insert(0, str(REPO / "services" / "note-service" / "src"))
+    from note_service.domain.meeting_doc import windows
+
+    return windows
+
+
+def test_the_engine_reads_every_turn_the_harness_emits() -> None:
+    """Until Q1 this was 0: the harness wrote `text`, the engine reads
+    `paragraphs`, and the pipeline arm scored an empty transcript."""
+    windows = _engine()
+    for meeting in _corpus():
+        turns = windows.turns_from_result(notes_eval.as_asr_result(meeting))
+        assert len(turns) == len(meeting["transcript"]), meeting["id"]
+        assert [t.text for t in turns] == [t["text"] for t in meeting["transcript"]]
+
+
+def test_speaker_names_are_applied_from_gold_or_defaulted() -> None:
+    windows = _engine()
+    by_id = {m["id"]: m for m in _corpus()}
+    named = windows.turns_from_result(notes_eval.as_asr_result(by_id["m06_de_news_podcast"]))
+    assert named[0].speaker_name == "Lena Hartwig"
+    assert {t.speaker_name for t in named} == {"Lena Hartwig", "Jonas Pfeffer", "Karla Sommerfeld"}
+    unnamed = notes_eval.as_asr_result(by_id["m02_de_kundenprojekt"])
+    assert unnamed["speaker_names"]["SPEAKER_1"] == "Speaker 1"
+    assert unnamed["name_candidates"] == []
+    assert notes_eval.as_asr_result(by_id["m06_de_news_podcast"])["recorded_on"] == "2026-09-22"
+
+
+def test_the_pipeline_lands_in_the_templates_sections() -> None:
+    windows = _engine()
+    assert windows  # engine importable
+    from note_service.domain.meeting_doc import types
+
+    family = types.family_for_type("auto")
+    assert notes_eval.template_code(family, "de") == "meeting_notes_de"
+    assert notes_eval.template_code(family, "en") == "meeting_notes"
+    roles = notes_eval.role_map("meeting_notes_de")
+    assert roles["decisions"] == "decisions" and roles["action_items"] == "action_items"
+
+
+class _NoopProvider:
+    backend = "fake"
+    model_id = "fake"
+
+    async def complete(self, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a blind engine must not call the model")
+
+    async def aclose(self) -> None:
+        return None
+
+
+def test_a_blind_engine_exits_2(tmp_path: Path, monkeypatch: Any, capsys: Any) -> None:
+    """The old shape reaches the engine as zero windows: the harness must
+    say so and stop, not score an empty document."""
+    import asyncio
+    import json
+
+    import models
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "m.json").write_text(json.dumps({**MEETING, "meeting_type": "auto"}), "utf-8")
+
+    def old_shape(meeting: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "language": "en",
+            "turns": [{"speaker": "S", "text": t["text"]} for t in meeting["transcript"]],
+        }
+
+    class _Registry:
+        def backend(self, name: str, expect_kind: str) -> Any:
+            return type("R", (), {"name": name, "model_id": "fake", "processor": None})()
+
+    monkeypatch.setattr(notes_eval, "as_asr_result", old_shape)
+    monkeypatch.setattr(notes_eval, "load_registry", lambda: _Registry())
+    monkeypatch.setattr(models, "build_chat_provider", lambda resolved: _NoopProvider())
+    code = asyncio.run(notes_eval.main("pipeline", "fake", corpus, 1))
+    assert code == notes_eval.EXIT_BLIND == 2
+    assert "engine saw no transcript" in capsys.readouterr().err
+
+
+def test_a_missing_corpus_exits_3(tmp_path: Path) -> None:
+    import asyncio
+
+    assert asyncio.run(notes_eval.main("pipeline", "fake", tmp_path / "nope", 1)) == 3
+
+
+def test_a_real_quote_with_different_punctuation_or_an_echoed_header_is_a_citation() -> None:
+    """Found on the first real run (Q2): the harness compared raw text while
+    the engine normalises, and flagged verified quotes as hallucinated."""
+    totals = notes_eval.Totals()
+    row = notes_eval.score(
+        MEETING,
+        _produced(quotes=[("[1] Speaker 2 (00:30): Yes; I'll have the release note", 1)]),
+        totals,
+    )
+    assert "hallucinated_quote" not in row
+    assert totals.citations.rate == 1.0

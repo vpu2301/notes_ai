@@ -242,6 +242,13 @@ class Settings(BaseSettings):
     note_generation_enabled: bool = Field(default=True, alias="MDX_NOTE_GENERATION_ENABLED")
     # How many generations one tenant may have in flight at once.
     note_generation_per_tenant: int = Field(default=3, alias="MDX_NOTE_GENERATION_PER_TENANT")
+    # Summary Engine v2 Q4, entity tier (b): one bounded model call per
+    # generation to respell names nobody in the workspace knows. OFF: on the
+    # stack model (Gemma 3 4B) its precision was 0/8 on the eval — it
+    # respelled German nouns, not names — and the gate to enable it is 0.9
+    # (docs/eval/notes-baseline-2026-09.md). Turn on per environment only
+    # with an eval report that clears the gate for that backend.
+    note_entity_model_tier: bool = Field(default=False, alias="MDX_NOTE_ENTITY_MODEL_TIER")
     clip_max_span_ms: int = Field(default=60_000, alias="MDX_CLIP_MAX_SPAN_MS")
     clip_pad_ms: int = Field(default=300, alias="MDX_CLIP_PAD_MS")
     # Sprint 35 raised this from 30: playing the seconds behind a cited

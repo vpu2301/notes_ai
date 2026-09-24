@@ -42,6 +42,8 @@ FACT_KINDS: Final[tuple[str, ...]] = (
     COMPLETION,
 )
 
+# The default per-window fact cap; the pipeline sizes each window's own
+# cap from its length (Q2: 8–24), so this is a default, not a ceiling.
 MAX_FACTS_PER_WINDOW: Final = 12
 MAX_FACT_CHARS: Final = 240
 MAX_TOPIC_TITLE_CHARS: Final = 80
@@ -97,7 +99,7 @@ class Fact(BaseModel):
     """Verbatim words from the transcript. The whole design rests on
     this: a fact whose quote cannot be found is dropped, not shown."""
     quote: str = ""
-    """Which numbered turn the quote came from."""
+    """Which numbered line (the number in brackets) the quote came from."""
     turn: int = -1
     """Sprint 36 — for `completion`: WHICH carried item this finishes, as
     its number in the list the prompt was given. Never a free-text
@@ -108,10 +110,14 @@ class Fact(BaseModel):
     field: str | None = None
     """How sure the speaker was; see ``CERTAINTIES``."""
     certainty: str | None = None
+    """Q4 — who holds this position: a speaker, or a person or organisation
+    the speaker reports. Verified like an owner; null for a plain fact."""
+    attributed_to: str | None = None
 
 
 class NoiseTurn(BaseModel):
-    """A turn that is not part of the conversation, and why."""
+    """A line that is not part of the conversation, and why. ``turn`` is
+    the number in brackets — a line, not a whole turn (Q2)."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -185,6 +191,7 @@ def extract_schema(
     *,
     judgement_fields: tuple[str, ...] = (),
     carried_items: int = 0,
+    max_facts: int = MAX_FACTS_PER_WINDOW,
 ) -> dict[str, Any]:
     """The extraction schema for ONE family.
 
@@ -203,6 +210,7 @@ def extract_schema(
         "quote": {"type": "string", "maxLength": 400},
         "turn": {"type": "integer"},
         "certainty": {"type": ["string", "null"], "enum": [*CERTAINTIES, None]},
+        "attributed_to": {"type": ["string", "null"], "maxLength": 60},
     }
     if carried_items:
         # A completion may only point at an item we already had, by its
@@ -225,7 +233,7 @@ def extract_schema(
             "topic_title": {"type": "string", "maxLength": MAX_TOPIC_TITLE_CHARS},
             "facts": {
                 "type": "array",
-                "maxItems": MAX_FACTS_PER_WINDOW,
+                "maxItems": max_facts,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -329,5 +337,29 @@ REDUCE_CONTEXT_SCHEMA: Final[dict[str, Any]] = {
             "maxItems": MAX_KEY_POINTS,
             "items": {"type": "string"},
         },
+    },
+}
+
+
+# Q4, entity tier (b): one call per generation, names in, spellings out.
+MAX_ENTITY_SPANS: Final = 40
+ENTITY_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["corrections"],
+    "properties": {
+        "corrections": {
+            "type": "array",
+            "maxItems": MAX_ENTITY_SPANS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["surface", "canonical"],
+                "properties": {
+                    "surface": {"type": "string", "maxLength": 80},
+                    "canonical": {"type": "string", "maxLength": 80},
+                },
+            },
+        }
     },
 }

@@ -1,0 +1,302 @@
+{
+  "kind": "notes-single_pass",
+  "backend": "dev_mac",
+  "date": "2026-09-23",
+  "generated_at": "2026-09-23T20:14:49+00:00",
+  "git": "d8cc445+engine-v2/Q2 working tree (uncommitted)",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "arm": "single_pass",
+  "model_id": "notes-chat",
+  "processor": {
+    "name": "Developer machine",
+    "region": "local"
+  },
+  "judge_model_id": null,
+  "corpus": "tests/fixtures/eval/notes",
+  "meetings": 8,
+  "runs": [
+    {
+      "run": 1,
+      "summary": {
+        "key_fact_recall": 0.14285714285714285,
+        "action_recall": 0.6666666666666666,
+        "action_precision": 0.5714285714285714,
+        "action_f1": 0.6153846153846153,
+        "decision_recall": 0.0,
+        "decision_precision": 0.0,
+        "owner_accuracy": 0.5,
+        "citation_precision": null,
+        "window_failure_rate": 0.0,
+        "seconds_per_meeting_hour": 391.9,
+        "input_tokens": 1212,
+        "output_tokens": 746,
+        "unsupported_rate": 0.7142857142857143,
+        "invented_claims": 5,
+        "example_echo": 0,
+        "coverage_ratio": 0.0,
+        "recall_by_third": {
+          "1": 0.2857142857142857,
+          "2": 0.0,
+          "3": 0.0
+        },
+        "recall_by_type": {
+          "interview": 0.0,
+          "lecture_webinar": 0.0,
+          "one_on_one": 0.4
+        },
+        "excluded_speech": 0.0,
+        "recording_type_acc": 0.0,
+        "redundancy": 0.0,
+        "entity_accuracy": 1.0,
+        "entity_accuracy_knowable": 1.0,
+        "hedge_preservation": null,
+        "attribution_rate": null,
+        "date_resolution": null,
+        "meetings_scored": 3,
+        "meetings_failed": 5
+      },
+      "meetings": [
+        {
+          "meeting": "m01_en_product_sync",
+          "failed": true,
+          "error_kind": "schema_invalid"
+        },
+        {
+          "meeting": "m02_de_kundenprojekt",
+          "failed": true,
+          "error_kind": "schema_invalid"
+        },
+        {
+          "meeting": "m03_uk_planning",
+          "failed": true,
+          "error_kind": "schema_invalid"
+        },
+        {
+          "meeting": "m04_en_hiring",
+          "language": "en",
+          "key_facts_missed": [
+            0,
+            1,
+            2
+          ],
+          "actions": 3,
+          "decisions": 2,
+          "seconds": 12.7,
+          "unsupported": [
+            1,
+            2
+          ],
+          "invented_claims": 2,
+          "example_echo": 0,
+          "key_fact_recall": [
+            0,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              0,
+              2
+            ],
+            "2": [
+              0,
+              1
+            ],
+            "3": [
+              0,
+              0
+            ]
+          },
+          "excluded_ms": [
+            0,
+            56000
+          ],
+          "redundancy": [
+            0,
+            7
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 7,
+          "stats": {}
+        },
+        {
+          "meeting": "m05_en_incident_review",
+          "failed": true,
+          "error_kind": "context_exceeded"
+        },
+        {
+          "meeting": "m06_de_news_podcast",
+          "failed": true,
+          "error_kind": "schema_invalid"
+        },
+        {
+          "meeting": "m07_uk_lecture",
+          "language": "uk",
+          "key_facts_missed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "actions": 1,
+          "decisions": 2,
+          "seconds": 18.5,
+          "unsupported": [
+            2,
+            2
+          ],
+          "invented_claims": 1,
+          "example_echo": 0,
+          "key_fact_recall": [
+            0,
+            6
+          ],
+          "recall_by_third": {
+            "1": [
+              0,
+              3
+            ],
+            "2": [
+              0,
+              2
+            ],
+            "3": [
+              0,
+              1
+            ]
+          },
+          "excluded_ms": [
+            0,
+            262000
+          ],
+          "recording_type": [
+            0,
+            1
+          ],
+          "redundancy": [
+            0,
+            5
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 5,
+          "stats": {}
+        },
+        {
+          "meeting": "m08_en_one_on_one",
+          "language": "en",
+          "key_facts_missed": [
+            2,
+            3,
+            4
+          ],
+          "actions": 3,
+          "decisions": 3,
+          "seconds": 18.2,
+          "unsupported": [
+            2,
+            3
+          ],
+          "invented_claims": 2,
+          "example_echo": 0,
+          "key_fact_recall": [
+            2,
+            5
+          ],
+          "recall_by_third": {
+            "1": [
+              2,
+              2
+            ],
+            "2": [
+              0,
+              2
+            ],
+            "3": [
+              0,
+              1
+            ]
+          },
+          "excluded_ms": [
+            0,
+            136000
+          ],
+          "recording_type": [
+            0,
+            1
+          ],
+          "redundancy": [
+            0,
+            9
+          ],
+          "entity_accuracy": [
+            1,
+            1
+          ],
+          "entity_accuracy_knowable": [
+            1,
+            1
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 9,
+          "stats": {}
+        }
+      ]
+    }
+  ],
+  "label": "summary-engine-v2 Q2"
+}

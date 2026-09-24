@@ -40,6 +40,7 @@
   }
  ],
  "meeting_type": "client",
+ "recording_type": "client_call",
  "gold": {
   "key_facts": [
    "Der Prototyp ist fertig, aber die Schnittstelle zum Lagersystem fehlt",

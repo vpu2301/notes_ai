@@ -1217,6 +1217,14 @@ ol.rt-list > li::before {
   .data-table td { color: var(--muted); }
 }
 .gen-status { margin: 0 0 calc(10px * var(--density)); }
+/* Q3: what the engine left out, as data under the status — never a
+   paragraph in the note. */
+.gen-excluded {
+  display: block;
+  margin: 0 0 calc(10px * var(--density));
+  font-size: calc(12.5px * var(--fs));
+}
+.banner .gen-excluded { flex-basis: 100%; margin: 4px 0 0; }
 /* The Notes tab before a summary exists: one sentence and the button. */
 .gen-empty {
   display: flex;
@@ -1230,3 +1238,38 @@ ol.rt-list > li::before {
   background: var(--surface-2);
 }
 .gen-empty p { margin: 0; flex: 1 1 240px; color: var(--text-2); }
+
+/* ── Summary Engine v2, Q5: evidence on every generated line ──────────
+   Labels are data drawn beside the words, never words in the note: a
+   chip for how sure a line is and whose position it is, a respelled name
+   that shows what was heard, and a quiet quote mark that opens the words
+   and the audio behind the line. */
+.line-evidence { position: relative; display: inline-flex; align-items: baseline; gap: 4px; margin-left: 6px; }
+.certainty-chip, .name-chip {
+  font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .02em;
+  padding: 0 6px; border-radius: var(--radius-xs);
+  background: var(--surface-2); color: var(--text-2);
+  border: var(--hairline) solid var(--line);
+}
+.name-chip { font-weight: 500; border-style: dashed; cursor: help; }
+.line-evidence .icon-btn {
+  background: none; border: 0; padding: 0 2px; cursor: pointer;
+  color: var(--muted); font-size: calc(12px * var(--fs)); line-height: 1;
+}
+.line-evidence .icon-btn:hover, .line-evidence .icon-btn:focus-visible { color: var(--accent-text); }
+.evidence-popover {
+  position: absolute; z-index: 20; top: 1.6em; left: 0; width: min(420px, 80vw);
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--surface); border: var(--hairline) solid var(--line);
+  box-shadow: var(--shadow-2, 0 6px 24px rgba(0, 0, 0, .12));
+}
+.evidence-quote { font-style: italic; color: var(--text-1); }
+.evidence-meta { font-family: var(--mono); font-size: calc(11.5px * var(--fs)); }
+.evidence-problem { color: var(--danger); font-size: calc(12px * var(--fs)); }
+.evidence-more ul { margin: 4px 0 0 16px; padding: 0; font-size: calc(12.5px * var(--fs)); }
+.detail-toggle { margin: 0 0 calc(10px * var(--density)); }
+.also-said { margin-top: 6px; font-size: calc(13px * var(--fs)); }
+.corrections-panel { margin: 0 0 calc(12px * var(--density)); }
+.corrections-panel ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.corrections-panel li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); }

@@ -44,6 +44,7 @@ import { defaultSpeakerName } from "../api/types";
 import { AskNote } from "../components/AskNote";
 import { CarriedItems } from "../components/CarriedItems";
 import { GenerationStatus } from "../components/GenerationStatus";
+import { DocTypePill } from "../components/DocTypePill";
 import { ClientVersionPanel } from "../components/ClientVersion";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
@@ -65,12 +66,16 @@ import {
   FolderPlusIcon,
   HistoryIcon,
   ShareIcon,
-  SparkleIcon,
   TrashIcon,
   UserIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
-import { RichText } from "../components/RichText";
+import { RichText, type LineExtra } from "../components/RichText";
+import { LineEvidence } from "../components/EvidencePopover";
+import { CorrectionsPanel } from "../components/CorrectionsPanel";
+import { useGeneratedLines } from "../lib/useGeneratedLines";
+import { lineKey } from "../lib/itemKey";
+import type { GeneratedItem } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
 import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
@@ -128,6 +133,8 @@ interface FieldProps {
   section: NoteSection;
   readOnly: boolean;
   onChange: (next: NoteSection) => void;
+  /** Q5: the evidence of a generated line, drawn at its end. */
+  lineExtra?: LineExtra;
 }
 
 /**
@@ -141,7 +148,7 @@ interface FieldProps {
  * with nothing in it skips straight to the editor — there is no document
  * to read yet, only a prompt to write one.
  */
-function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
+function FreeTextField({ def, section, readOnly, onChange, lineExtra }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const text = section.text ?? "";
@@ -161,7 +168,7 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
     e.target.setSelectionRange(end, end);
   };
 
-  if (readOnly) return <RichText text={text} />;
+  if (readOnly) return <RichText text={text} lineExtra={lineExtra} />;
 
   if (!editing && text.trim() !== "") {
     return (
@@ -178,7 +185,7 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
           }
         }}
       >
-        <RichText text={text} placeholder={placeholder} />
+        <RichText text={text} placeholder={placeholder} lineExtra={lineExtra} />
       </div>
     );
   }
@@ -396,6 +403,10 @@ interface TranscriptViewProps {
   onSpeakersRelabelled?: (change: SpeakersRelabelled) => void;
   /** Shown instead of the error when the job cannot be read (the note's own text). */
   fallback?: ReactNode;
+  /** Q3: open at this moment (ms) — a "Not included" range was clicked.
+   *  `seekKey` changes on every click, so the same range can be opened twice. */
+  seekMs?: number | null;
+  seekKey?: number;
 }
 
 /**
@@ -631,6 +642,8 @@ export function TranscriptView({
   onSpeakerMergeUndone,
   onSpeakersRelabelled,
   fallback,
+  seekMs,
+  seekKey,
 }: TranscriptViewProps) {
   const toast = useToast();
   const online = useOnline();
@@ -957,6 +970,21 @@ export function TranscriptView({
       toast.error(copyText("dismissFailed", { reason: messageFor(err) }));
     }
   };
+
+  // Q3: a "Not included" range was clicked on the Notes tab — scroll to
+  // the turn that holds that moment and light it up, as for a suggestion.
+  useEffect(() => {
+    if (seekMs == null || turns.length === 0) return;
+    let i = turns.findIndex((t) => t.start_ms <= seekMs && seekMs < t.end_ms);
+    if (i < 0) i = turns.reduce((best, t, k) => (t.start_ms <= seekMs ? k : best), 0);
+    const el = turnRefs.current[i];
+    if (!el) return;
+    setFocusTurn(i);
+    el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    setHighlight(i);
+    // Re-run on every click (seekKey), and once the turns have loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekMs, seekKey, turns.length]);
 
   /** Scroll to the turn a suggestion quotes, focus it, and light it up for a moment. */
   const showSuggestion = (sg: NameSuggestion) => {
@@ -1335,7 +1363,16 @@ export function NoteEditorPage() {
   const [content, setContent] = useState<NoteContent | null>(null);
   /** The template's display name, for the meta row; null when it could not be read. */
   const [templateName, setTemplateName] = useState<string | null>(null);
+  /** Q3: what the latest generation took the recording to be. */
+  const [recordingType, setRecordingType] = useState<string | null>(null);
+  /** Q3: a moment to open the transcript at ("Not included" link). */
+  const [seek, setSeek] = useState<{ ms: number; key: number } | null>(null);
+
   const [version, setVersion] = useState(0);
+  /** Q5: the evidence rows behind the generated lines, by line key. */
+  const { rows: genRows, byKey: genByKey } = useGeneratedLines(noteId, version);
+  /** Q5: how much of a generated note to show. A view, never an edit. */
+  const [detail, setDetail] = useState<DetailLevel>(() => readDetail(noteId));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1680,7 +1717,18 @@ export function NoteEditorPage() {
   const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
   // What the content has, in its order. Structure follows content: no
   // template section is drawn for being in the template.
-  const blocks = noteBlocks(shownContent, sections ?? [], { editable });
+  const allBlocks = noteBlocks(shownContent, sections ?? [], { editable });
+  // Q5: evidence and the detail toggle only for the note as it stands,
+  // and only when the engine wrote it (it has rows).
+  const generated = !viewing && genRows.length > 0;
+  const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
+  const lineExtra: LineExtra | undefined = generated
+    ? (raw) => {
+        const row = genByKey.get(lineKey(raw));
+        return row ? <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} /> : null;
+      }
+    : undefined;
+  const alsoSaid = generated && detail === "detailed" ? uncitedBySection(genRows, shownContent) : null;
   const saveLabel = useMemo(() => {
     switch (saveState) {
       case "saving":
@@ -1814,12 +1862,7 @@ export function NoteEditorPage() {
             <UserIcon size={13} />
             {readPurpose ? authorName : "Me"}
           </span>
-          {templateName && (
-            <span className="doc-pill tpl" title="The template this note was written from">
-              <SparkleIcon size={13} />
-              {templateName}
-            </span>
-          )}
+          <DocTypePill templateName={templateName} recordingType={recordingType} />
           <SpacePill noteId={noteId} />
           <span className="doc-pill mono" title="This note's code">
             {note.code}
@@ -1921,6 +1964,8 @@ export function NoteEditorPage() {
                   onSpeakerMergeUndone={onSpeakerMergeUndone}
                   onSpeakersRelabelled={onSpeakersRelabelled}
                   fallback={textView}
+                  seekMs={seek?.ms ?? null}
+                  seekKey={seek?.key}
                 />
               </>
             ) : textView;
@@ -1937,7 +1982,28 @@ export function NoteEditorPage() {
               canGenerate={editable && sourceJobId !== null}
               canRegenerate={editable}
               onFinished={load}
+              onView={(view) => setRecordingType(view?.recording_type ?? null)}
+              onSeek={
+                sourceJobId
+                  ? (ms) => {
+                      setSeek({ ms, key: Date.now() });
+                      setTab("transcript");
+                    }
+                  : undefined
+              }
             />
+            {generated && (
+              <DetailToggle
+                value={detail}
+                onChange={(next) => {
+                  setDetail(next);
+                  writeDetail(noteId, next);
+                }}
+              />
+            )}
+            {generated && editable && (
+              <CorrectionsPanel noteId={noteId} rows={genRows} version={version} onChanged={load} />
+            )}
             <CarriedItems noteId={noteId} readOnly={!editable} />
             {blocks.length === 0 && (
               <div className="section-ro empty-val">
@@ -1965,7 +2031,23 @@ export function NoteEditorPage() {
                       section={sectionOf(shownContent, block.key)}
                       readOnly={!editable}
                       onChange={(next) => onContentChange(withSection(shownContent, next))}
+                      lineExtra={lineExtra}
                     />
+                    {alsoSaid && (alsoSaid.get(block.key)?.length ?? 0) > 0 && (
+                      <div className="also-said">
+                        <span className="muted">Also said</span>
+                        <ul className="rt-list">
+                          {(alsoSaid.get(block.key) ?? []).map((row) => (
+                            <li key={row.item_key}>
+                              <span>
+                                {row.text}
+                                <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} />
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </section>
               );
@@ -2041,4 +2123,75 @@ export function NoteEditorPage() {
       )}
     </div>
   );
+}
+
+
+// ── Q5: Short / Standard / Detailed ─────────────────────────────────
+
+export type DetailLevel = "short" | "standard" | "detailed";
+const DETAIL_KEY = "note-detail:";
+
+function readDetail(noteId: string): DetailLevel {
+  try {
+    const value = window.localStorage.getItem(DETAIL_KEY + noteId);
+    return value === "short" || value === "detailed" ? value : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+function writeDetail(noteId: string, value: DetailLevel): void {
+  try {
+    window.localStorage.setItem(DETAIL_KEY + noteId, value);
+  } catch {
+    // A convenience; a browser that will not store it shows Standard next time.
+  }
+}
+
+/** Short: the overview. Standard: the note as written. Detailed: plus the
+ *  verified facts no line used, under their topic. A view — never an edit,
+ *  never a model call. */
+export function DetailToggle({ value, onChange }: { value: DetailLevel; onChange: (v: DetailLevel) => void }) {
+  const options: [DetailLevel, string][] = [
+    ["short", "Short"],
+    ["standard", "Standard"],
+    ["detailed", "Detailed"],
+  ];
+  return (
+    <div className="seg detail-toggle" role="radiogroup" aria-label="How much to show">
+      {options.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="radio"
+          aria-checked={value === key}
+          className={`seg-opt${value === key ? " on" : ""}`}
+          onClick={() => onChange(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The fact rows no displayed line is, grouped by the section they belong
+ *  under — what "Detailed" adds. */
+export function uncitedBySection(
+  rows: GeneratedItem[],
+  content: { sections?: { section_key: string; text?: string | null }[] } | null,
+): Map<string, GeneratedItem[]> {
+  const shown = new Set<string>();
+  for (const section of content?.sections ?? []) {
+    for (const line of (section.text ?? "").split("\n")) if (line.trim()) shown.add(lineKey(line));
+  }
+  const cited = new Set(rows.flatMap((r) => r.cites ?? []).filter((k) => shown.has(k)));
+  const out = new Map<string, GeneratedItem[]>();
+  for (const row of rows) {
+    if (row.placement !== "suggested" || shown.has(row.item_key) || cited.has(row.item_key)) continue;
+    const list = out.get(row.section_key) ?? [];
+    list.push(row);
+    out.set(row.section_key, list);
+  }
+  return out;
 }

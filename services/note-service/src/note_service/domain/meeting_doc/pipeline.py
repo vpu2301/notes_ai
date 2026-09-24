@@ -26,10 +26,10 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
+from . import entities, prompts, render, roles, schema, support, types, verify, windows
 from . import merge as merge_rules
-from . import prompts, render, roles, schema, types, verify, windows
 from .verify import VerifiedFact
 from .windows import Window
 
@@ -90,10 +90,23 @@ class DocumentResult:
     brief: dict[str, Any] = field(default_factory=dict)
     """``[(start_ms, reason)]`` — passages the extractor set aside."""
     noise: list[tuple[int, str]] = field(default_factory=list)
+    """``[(start_ms, end_ms, reason)]`` — the same passages with their
+    end, so the eval can say how much SPEECH was set aside, not how many
+    passages."""
+    noise_ranges: list[tuple[int, int, str]] = field(default_factory=list)
+    """Q2 — the lines left out, CONFIRMED by code (``verify.confirm_noise``)
+    and within the cap. ``noise`` and ``noise_ranges`` are derived from it."""
+    excluded: list[verify.Exclusion] = field(default_factory=list)
 
     @property
     def partial(self) -> bool:
         return self.windows_failed > 0
+
+    @property
+    def lines(self) -> list[tuple[str, render.Line]]:
+        """``[(section_key, line)]`` — every written line of the document,
+        in the order the sections are written."""
+        return [(s.section_key, line) for s in self.sections for line in s.lines]
 
 
 async def run(
@@ -109,6 +122,11 @@ async def run(
     carried: list[tuple[str, str]] | None = None,
     our_side: frozenset[str] = frozenset(),
     counterpart: str = "",
+    built: list[Window] | None = None,
+    recording_type: str | None = None,
+    recording_type_source: str | None = None,
+    glossary: tuple[Any, ...] = (),
+    entity_model_tier: bool = False,
 ) -> DocumentResult:
     """Build a document from an ASR result.
 
@@ -126,7 +144,9 @@ async def run(
     carried = carried or []
     carried_keys = tuple(key for key, _ in carried)
     turns = windows.turns_from_result(result)
-    built = windows.build_windows(turns)
+    # The worker builds the windows once, to classify the recording from
+    # the first of them before extraction (Q3), and hands them in.
+    built = built if built is not None else windows.build_windows(turns)
     meeting_date = meeting_date or date.today()
     out = DocumentResult(
         windows_total=len(built), backend=provider.backend, model_id=provider.model_id
@@ -137,29 +157,67 @@ async def run(
 
     stats = verify.VerifyStats()
     verified: list[VerifiedFact] = []
-    flagged: list[tuple[int, int, str]] = []
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
 
-    extract_schema = schema.extract_schema(
-        offered,
-        judgement_fields=family.judgement_fields,
-        carried_items=len(carried),
-    )
-
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
+        budget = fact_budget(window)
+        window_schema = schema.extract_schema(
+            offered,
+            judgement_fields=family.judgement_fields,
+            carried_items=len(carried),
+            max_facts=budget,
+        )
         async with semaphore:
             return window, await _extract(
-                provider, window, language, extract_schema, carried=carried
+                provider,
+                window,
+                language,
+                window_schema,
+                carried=carried,
+                max_facts=budget,
+                max_tokens=extract_tokens(budget),
             )
 
-    for window, extracted in await asyncio.gather(*(one(w) for w in built)):
+    extracted_windows = await asyncio.gather(*(one(w) for w in built))
+
+    # Noise first, across the whole recording: the model's flags are
+    # checked by code, and the cap needs every window's exclusions.
+    flagged = advisory = 0
+    confirmed: dict[int, verify.Exclusion] = {}
+    previous: Window | None = None
+    for window, extracted in extracted_windows:
+        if extracted is None:
+            previous = window
+            continue
+        flags = _noise_lines(extracted, window)
+        flagged += len(flags)
+        own = window.turn_numbers
+        seen = tuple(t.text for t in previous.turns if t.number not in own) if previous else ()
+        ok, not_ok = verify.confirm_noise(
+            [(line, reason) for line, _s, _e, reason in flags],
+            window=window,
+            language=language,
+            seen_pieces=seen,
+        )
+        advisory += len(not_ok)
+        for exclusion in ok:
+            confirmed.setdefault(exclusion.line, exclusion)
+        previous = window
+    speech_ms = sum(max(0, t.end_ms - t.start_ms) for t in turns)
+    excluded, overridden = verify.cap_exclusions(
+        sorted(confirmed.values(), key=lambda e: e.start_ms), speech_ms=speech_ms
+    )
+    noise_lines = frozenset(e.line for e in excluded)
+    out.excluded = excluded
+    out.noise = sorted({(e.start_ms, e.reason) for e in excluded})
+    out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
+
+    for window, extracted in extracted_windows:
         if extracted is None:
             out.windows_failed += 1
             out.failed_ranges.append([window.start_ms, window.end_ms])
             continue
         out.windows_done += 1
-        noise_turns = _noise_turns(extracted, window)
-        flagged.extend(noise_turns)
         verified.extend(
             verify.verify_facts(
                 extracted.facts,
@@ -171,10 +229,11 @@ async def run(
                 judgement_fields=frozenset(family.judgement_fields),
                 carried_keys=carried_keys,
                 our_side=our_side,
-                noise_turns=frozenset(index for index, _ms, _reason in noise_turns),
+                noise_lines=noise_lines,
+                language=language,
+                glossary=tuple(glossary),
             )
         )
-    out.noise = sorted({(ms, reason) for _index, ms, reason in flagged})
 
     facts = merge_rules.merge_facts(verified)
     out.facts = facts
@@ -184,16 +243,37 @@ async def run(
     out.completions = [f for f in facts if f.kind == schema.COMPLETION]
     out.judgements = [f for f in facts if f.kind == schema.JUDGEMENT]
 
-    topics: list[tuple[str, list[str], list[str]]] | None = None
-    summary: list[str] | None = None
+    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]] | None = None
+    summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
+    entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
+    gate = _Gate(
+        language=language,
+        known=frozenset({t.speaker_name for t in turns if t.speaker_name} | set(name_candidates)),
+    )
     if document_facts:
         # Understand the conversation first; then write topics and the
         # summary about it, side by side.
-        brief = await _context(provider, document_facts, language)
+        brief = await _context(provider, document_facts, language, gate=gate)
+        # Q4, tier (b): names nobody in the workspace knows, asked of the
+        # model once — before anything is written from the facts.
+        people = gate.known | {g.term for g in glossary if getattr(g, "kind", "") == "person"}
+        renamed = await _model_names(
+            provider,
+            document_facts,
+            brief,
+            people=frozenset(people),
+            entity=entity_stats,
+            enabled=entity_model_tier,
+        )
+        if renamed and brief is not None:
+            brief.key_fact_ids = [renamed.get(i, i) for i in brief.key_fact_ids]
+        gate.known = frozenset(
+            gate.known | {c.canonical for f in document_facts for c in f.corrections}
+        )
         topics, summary = await asyncio.gather(
-            _topics(provider, document_facts, language, brief=brief),
-            _summary(provider, document_facts, language, brief=brief),
+            _topics(provider, document_facts, language, brief=brief, gate=gate),
+            _summary(provider, document_facts, language, brief=brief, gate=gate),
         )
     if brief is not None:
         out.brief = {
@@ -203,6 +283,16 @@ async def run(
             "key_fact_ids": brief.key_fact_ids,
         }
 
+    # Neither summary nor topics survived the gate: the document is the
+    # facts themselves, written by code — still a document, never filler.
+    key_fact_ids = brief.key_fact_ids if brief else None
+    fallback: str | None = None
+    if document_facts and summary is None and topics is None:
+        fallback = "key_facts"
+        if not key_fact_ids:
+            key_fact_ids = _earliest_per_window(document_facts)
+
+    render_counts: dict[str, int] = {}
     out.sections = render.render_sections(
         document_facts,
         role_by_key=role_by_key,
@@ -212,14 +302,38 @@ async def run(
         language=language,
         counterpart=counterpart,
         framing=brief.framing if brief else "",
-        key_fact_ids=brief.key_fact_ids if brief else None,
-        noise=out.noise,
+        key_fact_ids=key_fact_ids,
+        counters=render_counts,
+        meeting_date=meeting_date,
     )
+    thirds = windows.thirds(built)
+    by_third = [0, 0, 0]
+    for fact in document_facts:
+        by_third[thirds.get(fact.window_index, 1) - 1] += 1
+    excluded_ms = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
     out.stats = {
         "facts_kept": stats.kept,
         "facts_dropped_quote": stats.dropped_quote,
         "facts_dropped_noise": stats.dropped_noise,
+        "facts_dropped_example": stats.dropped_example,
+        "facts_dropped_paraphrase": stats.dropped_paraphrase,
+        "facts_flagged_paraphrase": stats.flagged_paraphrase,
+        "example_echo_dropped": gate.counts["example"],
+        "lines_kept": gate.counts["kept"],
+        "lines_unsupported": {
+            reason: gate.counts[reason] for reason in ("unsupported", "number", "name", "example")
+        },
+        "summary_retries": gate.retries,
+        "summary_fallback": fallback,
         "noise_passages": len(out.noise),
+        "noise_flagged": flagged,
+        "noise_confirmed": len(confirmed),
+        "noise_advisory": advisory,
+        "noise_overridden": overridden,
+        "excluded_ms": excluded_ms,
+        "speech_ms": speech_ms,
+        "excluded_ranges": [[e.start_ms, e.end_ms, e.reason] for e in excluded],
+        "facts_by_third": by_third,
         "key_points": len(brief.key_fact_ids) if brief else 0,
         "facts_dropped_owner": stats.dropped_owner,
         "facts_downgraded": stats.downgraded,
@@ -228,8 +342,166 @@ async def run(
         "facts_after_merge": len(facts),
         "prompt_version": prompts.PROMPT_VERSION,
         "section_hashes": section_hashes(out.sections),
+        "redundant_lines": render_counts.get("redundant_lines", 0),
+        "entities_seen": entity_stats["seen"],
+        "entities_corrected": {
+            "glossary": stats.corrected.get("glossary", 0),
+            "candidate": stats.corrected.get("candidate", 0),
+            "model": entity_stats["model"],
+        },
+        "entities_marked": stats.marked + entity_stats["marked"],
+        "entities_model_failed": entity_stats["model_failed"],
+        "attribution_set": {"model": stats.attribution_model, "speaker": stats.attribution_speaker},
+        "attribution_missing": stats.attribution_missing,
+        "salient_appended": gate.salient_appended,
+        "topics_merged": gate.topics_merged,
+        "lines_by_third": _lines_by_third(out.sections, document_facts, thirds),
+        "lines_total": sum(len(s.lines) for s in out.sections),
+        "language": language,
+        "recording_type": recording_type,
+        "recording_type_source": recording_type_source,
     }
     return out
+
+
+def fact_budget(window: Window) -> int:
+    """How many facts a window may carry: one per ~250 characters, between
+    8 and 24. A dense news passage holds far more than twelve points, and
+    a cap below that is how the audit's note lost most of a story."""
+    return min(MAX_FACTS_BUDGET, max(MIN_FACTS_BUDGET, len(window.text) // 250))
+
+
+def extract_tokens(max_facts: int) -> int:
+    """Output budget for that many facts, each up to a sentence and a
+    quote. Unused budget costs nothing; a cut-off answer costs the window."""
+    return 250 * max_facts + 500
+
+
+async def _model_names(
+    provider: ChatLike,
+    facts: list[VerifiedFact],
+    brief: Brief | None,
+    *,
+    people: frozenset[str],
+    entity: dict[str, int],
+    enabled: bool,
+) -> dict[str, str]:
+    """Tier (b): the names in the facts nobody in the workspace knows, asked
+    of the model once. Returns ``{old item_key: new item_key}`` for the
+    facts whose text changed (a fact's key is its text).
+
+    A proposal is applied only when it is close to what was heard
+    (similarity ≥ ``entities.MODEL_THRESHOLD``) and is not a person already
+    in the recording — the model may respell a name, never swap one
+    participant for another. A proposal far from what was heard is not
+    applied; the spelling stays and is marked "(?)"."""
+    if not enabled or not facts:
+        return {}
+    known = {p.casefold() for p in people} | {t.casefold() for p in people for t in p.split()}
+    stops = frozenset().union(*support.STOP_WORDS.values())
+    spans: list[str] = []
+    for fact in facts:
+        fixed = {c.canonical for c in fact.corrections}
+        for span in entities.candidates_in(fact.text):
+            parts = span.split()
+            if (
+                span in fixed
+                or len(span) < entities.MIN_TOKEN_CHARS
+                or span.casefold() in known
+                or any(p.casefold() in known or p.casefold() in stops for p in parts)
+            ):
+                continue
+            spans.append(span)
+    spans = list(dict.fromkeys(spans))[: schema.MAX_ENTITY_SPANS]
+    entity["seen"] = len(spans)
+    if not spans:
+        return {}
+    try:
+        answer = await provider.complete(
+            prompts.entity_prompt(
+                spans,
+                subject=brief.subject if brief else "",
+                themes=list(brief.themes) if brief else [],
+            ),
+            schema.ENTITY_SCHEMA,
+            max_tokens=60 * len(spans) + 100,
+            temperature=0.0,
+            system=prompts.entity_system("en"),
+        )
+        import json
+
+        payload = json.loads(_json_of(answer))
+        proposals = payload.get("corrections", []) if isinstance(payload, dict) else []
+    except Exception:  # noqa: BLE001 — no corrections is a note, not a failure
+        logger.warning("meeting_doc.entities_failed", exc_info=True)
+        entity["model_failed"] += 1
+        return {}
+
+    table: dict[str, entities.Correction] = {}
+    doubted: set[str] = set()
+    for item in proposals:
+        surface = str(item.get("surface", "")).strip() if isinstance(item, dict) else ""
+        canonical = (
+            " ".join(str(item.get("canonical", "")).split()) if isinstance(item, dict) else ""
+        )
+        if surface not in spans or not canonical or canonical == surface:
+            continue
+        if canonical.casefold() in known or prompts.echoes_example(canonical):
+            continue  # another participant, or a copied example: rejected
+        if entities.similarity(surface, canonical) >= entities.MODEL_THRESHOLD:
+            table[surface] = entities.Correction(surface, canonical, entities.SOURCE_MODEL)
+        else:
+            doubted.add(surface)
+
+    renamed: dict[str, str] = {}
+    for fact in facts:
+        before = fact.item_key
+        mine = {s: c for s, c in table.items() if _mentions(fact.text, s)}
+        doubt = {s for s in doubted if _mentions(fact.text, s)}
+        if not mine and not doubt:
+            continue
+        fact.text = entities.apply(fact.text, mine, doubt)
+        if fact.owner_label:
+            fact.owner_label = entities.apply(fact.owner_label, mine)
+        if fact.attributed_to:
+            fact.attributed_to = entities.apply(fact.attributed_to, mine)
+        if mine:
+            fact.corrections = (*fact.corrections, *mine.values())
+            if verify.ENTITY_CORRECTED not in fact.flags:
+                fact.flags.append(verify.ENTITY_CORRECTED)
+        entity["model"] += len(mine)
+        entity["marked"] += len(doubt)
+        if fact.item_key != before:
+            renamed[before] = fact.item_key
+    return renamed
+
+
+def _mentions(text: str, surface: str) -> bool:
+    import re
+
+    return re.search(rf"(?<!\w){re.escape(surface)}(?!\w)", text) is not None
+
+
+def _lines_by_third(
+    sections: list[render.RenderedSection], facts: list[VerifiedFact], thirds: dict[int, int]
+) -> list[int]:
+    """Written lines per third of the recording, by their first cited fact."""
+    by_id = {f.item_key: f for f in facts}
+    out = [0, 0, 0]
+    for section in sections:
+        for line in section.lines:
+            cited = [by_id[i] for i in line.fact_ids if i in by_id]
+            if cited:
+                out[thirds.get(cited[0].window_index, 1) - 1] += 1
+    return out
+
+
+def _earliest_per_window(facts: list[VerifiedFact]) -> list[str]:
+    """The first fact said in each window, for a code-only overview."""
+    seen: dict[int, VerifiedFact] = {}
+    for fact in sorted(facts, key=lambda f: f.start_ms):
+        seen.setdefault(fact.window_index, fact)
+    return [f.item_key for f in seen.values()][: schema.MAX_KEY_POINTS]
 
 
 def section_hashes(sections: list[render.RenderedSection]) -> dict[str, str]:
@@ -244,24 +516,104 @@ def section_hashes(sections: list[render.RenderedSection]) -> dict[str, str]:
     return {s.section_key: hashlib.sha256(s.text.encode("utf-8")).hexdigest() for s in sections}
 
 
-def _noise_turns(extracted: schema.ExtractOut, window: Window) -> list[tuple[int, int, str]]:
-    """``[(turn index, start_ms, reason)]`` for the turns the extractor
-    flagged — only ones that are in this window, only known reasons."""
-    by_index = {t.index: t for t in window.turns}
+def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int, int, int, str]]:
+    """``[(line, start_ms, end_ms, reason)]`` for the lines the extractor
+    flagged — only ones in this window, only known reasons. These are
+    CANDIDATES: :func:`verify.confirm_noise` decides."""
     total_words = sum(len(t.text.split()) for t in window.turns) or 1
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, int, int, str]] = []
     for flagged in extracted.noise:
-        turn = by_index.get(flagged.turn)
-        if turn is None or flagged.reason not in schema.NOISE_REASONS:
+        piece = window.turn(flagged.turn)
+        if piece is None or flagged.reason not in schema.NOISE_REASONS:
             continue
-        # Noise is marginal by definition. A turn that is most of the
+        # Noise is marginal by definition. A line that is most of the
         # window IS the recording — an advertisement someone recorded is
         # still what they recorded — and a model that calls it background
         # would empty the note.
-        if len(turn.text.split()) > total_words * schema.MAX_NOISE_SHARE:
+        if len(piece.text.split()) > total_words * schema.MAX_NOISE_SHARE:
             continue
-        out.append((turn.index, turn.start_ms, flagged.reason))
+        out.append((piece.number, piece.start_ms, piece.end_ms, flagged.reason))
     return out
+
+
+# A composed line must carry at least this share of its content from the
+# facts it cites (Q2). Half: a sentence may connect and condense, it may
+# not add.
+MIN_LINE_SUPPORT: Final = 0.5
+# More than this share of a summary failing the gate means the model is
+# writing from somewhere other than the facts: ask once more, strictly.
+SUMMARY_FAIL_SHARE: Final = 0.3
+MAX_FACTS_BUDGET: Final = 24
+MIN_FACTS_BUDGET: Final = 8
+MIN_BULLETS_PER_TOPIC: Final = 2
+
+
+@dataclass(slots=True)
+class _Gate:
+    """The support gate on every line a model composes — summary
+    sentences, topic bullets, the framing sentence — and its tallies.
+
+    A line passes when it repeats no prompt example, every number in it is
+    in a fact it cites, it names nobody those facts (or the roster) do not,
+    and at least half its content is theirs. Counts only; never text."""
+
+    language: str = "en"
+    known: frozenset[str] = frozenset()
+    counts: dict[str, int] = field(
+        default_factory=lambda: dict.fromkeys(
+            ("kept", "unsupported", "number", "name", "example", "attribution", "hedge"), 0
+        )
+    )
+    retries: int = 0
+    salient_appended: int = 0
+    topics_merged: int = 0
+
+    @property
+    def dropped(self) -> int:
+        """Q1's name for the example count."""
+        return self.counts["example"]
+
+    def echo(self, text: str) -> bool:
+        if prompts.echoes_example(text):
+            self.counts["example"] += 1
+            return True
+        return False
+
+    def reason(self, text: str, cited: list[VerifiedFact], *, claims: bool = False) -> str | None:
+        """Why this line may not be written, or None when it may.
+
+        ``claims`` (summary sentences, Q4): a sentence resting on somebody's
+        opinion or forecast must name them and keep its hedge. A sentence
+        is prose and is dropped, not patched; a bullet is a record and is
+        patched by render."""
+        plain = render.strip_inline_ids(text)[0]
+        if prompts.echoes_example(plain):
+            return "example"
+        if not cited:
+            return "unsupported"
+        if not _numbers_supported(plain, cited):
+            return "number"
+        evidence = " ".join(f"{f.text} {f.quote}" for f in cited)
+        owners = {f.owner_label for f in cited if f.owner_label}
+        owners |= {f.attributed_to for f in cited if f.attributed_to}
+        if support.new_names(plain, evidence, self.known | owners):
+            return "name"
+        if support.support_ratio(plain, evidence, self.language) < MIN_LINE_SUPPORT:
+            return "unsupported"
+        if claims:
+            unsure = [f for f in cited if f.certainty in support.UNSURE_CERTAINTIES]
+            if any(
+                f.attributed_to and not support.names_actor(plain, f.attributed_to) for f in unsure
+            ):
+                return "attribution"
+            if unsure and not support.has_marker(plain, self.language):
+                return "hedge"
+        return None
+
+    def ok(self, text: str, cited: list[VerifiedFact], *, claims: bool = False) -> bool:
+        why = self.reason(text, cited, claims=claims)
+        self.counts[why or "kept"] += 1
+        return why is None
 
 
 @dataclass(slots=True)
@@ -294,20 +646,28 @@ async def _extract(
     extract_schema: dict[str, Any] | None = None,
     *,
     carried: list[tuple[str, str]] | None = None,
+    max_facts: int | None = None,
+    max_tokens: int = EXTRACT_MAX_TOKENS,
 ) -> schema.ExtractOut | None:
     """One window. ``None`` when the model could not answer in shape."""
-    prompt = prompts.extract_prompt(window.render(), language, carried=carried)
+    prompt = prompts.extract_prompt(window.render(), language, carried=carried, max_facts=max_facts)
     system = prompts.extract_system(language)
     for attempt in range(EXTRACT_ATTEMPTS):
         try:
             answer = await provider.complete(
                 prompt,
                 extract_schema or schema.EXTRACT_SCHEMA,
-                max_tokens=EXTRACT_MAX_TOKENS,
+                max_tokens=max_tokens,
                 temperature=0.0,
                 system=system,
             )
-            return schema.ExtractOut.model_validate_json(_json_of(answer))
+            extracted = schema.ExtractOut.model_validate_json(_json_of(answer))
+            if _unquoted(extracted) and attempt + 1 < EXTRACT_ATTEMPTS:
+                # Facts, and not one real quote among them: the model gave
+                # line numbers where the words belong. Once more, reminded.
+                prompt = f"{prompt}\n\n{prompts.quote_reminder(language)}"
+                continue
+            return extracted
         except Exception:  # noqa: BLE001 — one window must not stop a meeting
             if attempt + 1 >= EXTRACT_ATTEMPTS:
                 logger.warning(
@@ -319,13 +679,17 @@ async def _extract(
     return None
 
 
-async def _context(provider: ChatLike, facts: list[VerifiedFact], language: str) -> Brief | None:
+async def _context(
+    provider: ChatLike, facts: list[VerifiedFact], language: str, *, gate: _Gate | None = None
+) -> Brief | None:
     """Read the facts as one conversation. Never sees the transcript.
 
     The framing sentence is the one line of the document that is written
-    about the meeting rather than from a single fact, so it is checked the
-    way a summary sentence is: every number in it must be in a fact.
+    about the meeting rather than from a single fact, so it passes the
+    same gate a summary sentence does, against the key facts it names
+    (all facts when it names none).
     """
+    gate = gate or _Gate(language=language)
     if len(facts) < 3:
         return None
     block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
@@ -341,18 +705,19 @@ async def _context(provider: ChatLike, facts: list[VerifiedFact], language: str)
     except Exception:  # noqa: BLE001
         logger.warning("meeting_doc.context_failed", exc_info=True)
         return None
-    known = {f.item_key for f in facts}
+    by_id = {f.item_key: f for f in facts}
+    key_fact_ids = [i for i in dict.fromkeys(parsed.key_fact_ids) if i in by_id][
+        : schema.MAX_KEY_POINTS
+    ]
     framing = parsed.framing.strip()
-    if framing and not _numbers_supported(framing, facts):
+    if framing and not gate.ok(framing, [by_id[i] for i in key_fact_ids] or facts):
         framing = ""
     return Brief(
         conversation_type=parsed.conversation_type.strip(),
         subject=parsed.subject.strip(),
         themes=[t.strip() for t in parsed.themes if t.strip()][: schema.MAX_THEMES],
         framing=framing,
-        key_fact_ids=[i for i in dict.fromkeys(parsed.key_fact_ids) if i in known][
-            : schema.MAX_KEY_POINTS
-        ],
+        key_fact_ids=key_fact_ids,
     )
 
 
@@ -367,8 +732,16 @@ async def _topics(
     language: str,
     *,
     brief: Brief | None = None,
-) -> list[tuple[str, list[str], list[str]]] | None:
-    """Cluster facts into topics. Never sees the transcript."""
+    gate: _Gate | None = None,
+) -> list[tuple[str, list[tuple[str, list[str]]], list[str]]] | None:
+    """Cluster facts into topics. Never sees the transcript.
+
+    ``[(title, [(bullet, its fact ids)], the topic's fact ids)]`` — each
+    bullet keeps what it cites, so every written line can say where it
+    came from. A bullet that fails the gate is dropped; a topic left with
+    fewer than two bullets is not a topic; fewer than two topics is one
+    list, written by render."""
+    gate = gate or _Gate(language=language)
     if len(facts) < schema.MIN_FACTS_FOR_TOPICS:
         # Too little to head: `render` writes one list, which is honest,
         # rather than inventing topics for a short conversation.
@@ -387,23 +760,90 @@ async def _topics(
         logger.warning("meeting_doc.topics_failed", exc_info=True)
         return None
 
-    known = {f.item_key for f in facts}
-    out: list[tuple[str, list[str], list[str]]] = []
+    by_id = {f.item_key: f for f in facts}
+    out: list[tuple[str, list[tuple[str, list[str]]], list[str]]] = []
     for topic in parsed.topics:
-        bullets = [
-            b.text.strip()
-            for b in topic.bullets
-            # A bullet citing nothing we verified is a bullet the model
-            # wrote from memory.
-            if b.text.strip() and any(i in known for i in b.fact_ids)
-        ]
-        cited = [i for b in topic.bullets for i in b.fact_ids if i in known]
-        cited += [i for i in topic.fact_ids if i in known]
-        if topic.title.strip() and bullets:
-            out.append((topic.title.strip(), bullets, list(dict.fromkeys(cited))))
+        if not topic.title.strip() or gate.echo(topic.title):
+            continue
+        bullets: list[tuple[str, list[str]]] = []
+        for bullet in topic.bullets:
+            text = bullet.text.strip()
+            ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
+            # A bullet citing nothing we verified was written from memory;
+            # one the cited facts do not carry says more than they do.
+            if text and gate.ok(text, [by_id[i] for i in ids]):
+                bullets.append((text, ids))
+        if len(bullets) < MIN_BULLETS_PER_TOPIC:
+            continue
+        cited = [i for _t, ids in bullets for i in ids]
+        cited += [i for i in topic.fact_ids if i in by_id]
+        out.append((topic.title.strip(), bullets, list(dict.fromkeys(cited))))
+    out = _merge_overlapping(out, by_id, gate)
+    _append_salient(out, facts, gate)
     if len(out) < 2:
         return None
     return out[: schema.MAX_TOPICS]
+
+
+def _span(ids: list[str], by_id: dict[str, VerifiedFact]) -> tuple[int, int]:
+    times = [by_id[i].start_ms for i in ids if i in by_id]
+    return (min(times), max(times)) if times else (0, 0)
+
+
+def _merge_overlapping(
+    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]],
+    by_id: dict[str, VerifiedFact],
+    gate: _Gate,
+) -> list[tuple[str, list[tuple[str, list[str]]], list[str]]]:
+    """Two topics, next to each other in time, whose stretches of the
+    recording overlap by more than half of the shorter one are one subject
+    the model split (Q4)."""
+    ordered = sorted(topics, key=lambda t: _span(t[2], by_id)[0])
+    out: list[tuple[str, list[tuple[str, list[str]]], list[str]]] = []
+    for topic in ordered:
+        if out:
+            (a0, a1), (b0, b1) = _span(out[-1][2], by_id), _span(topic[2], by_id)
+            shorter = min(a1 - a0, b1 - b0)
+            overlap = min(a1, b1) - max(a0, b0)
+            if shorter > 0 and overlap > shorter / 2:
+                title, bullets, ids = out[-1]
+                out[-1] = (title, [*bullets, *topic[1]], list(dict.fromkeys([*ids, *topic[2]])))
+                gate.topics_merged += 1
+                continue
+        out.append(topic)
+    return out
+
+
+def _distance(
+    topic: tuple[str, list[tuple[str, list[str]]], list[str]],
+    fact: VerifiedFact,
+    by_id: dict[str, VerifiedFact],
+) -> int:
+    start, end = _span(topic[2], by_id)
+    return abs((start + end) // 2 - fact.start_ms)
+
+
+def _append_salient(
+    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]],
+    facts: list[VerifiedFact],
+    gate: _Gate,
+) -> None:
+    """A key point with a number, a date or a person in it is kept even
+    when no bullet wrote about it (Q4): it joins the topic nearest to it in
+    time. Coverage is a budget, not a hope."""
+    if not topics:
+        return
+    by_id = {f.item_key: f for f in facts}
+    written = {i for _t, bullets, _ids in topics for _b, ids in bullets for i in ids}
+    for fact in facts:
+        if fact.kind != schema.KEY_POINT or not fact.salient or fact.item_key in written:
+            continue
+
+        index = min(range(len(topics)), key=lambda k, f=fact: _distance(topics[k], f, by_id))
+        title, bullets, ids = topics[index]
+        topics[index] = (title, [*bullets, (fact.text, [fact.item_key])], [*ids, fact.item_key])
+        written.add(fact.item_key)
+        gate.salient_appended += 1
 
 
 async def _summary(
@@ -412,34 +852,62 @@ async def _summary(
     language: str,
     *,
     brief: Brief | None = None,
-) -> list[str] | None:
-    block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
-    try:
-        answer = await provider.complete(
-            _with_brief(block, brief, language),
-            schema.REDUCE_SUMMARY_SCHEMA,
-            max_tokens=REDUCE_MAX_TOKENS,
-            temperature=0.0,
-            system=prompts.summary_system(language),
-        )
-        parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
-    except Exception:  # noqa: BLE001
-        logger.warning("meeting_doc.summary_failed", exc_info=True)
-        return None
+    gate: _Gate | None = None,
+) -> list[tuple[str, list[str]]] | None:
+    """``[(sentence, the fact ids it rests on)]``, or None.
 
+    Every sentence passes the gate or is dropped. When more than
+    ``SUMMARY_FAIL_SHARE`` of an answer fails, the model is asked once
+    more with the strict suffix ("use the wording of the facts"); failing
+    that too, there is no summary and the overview is written by code."""
+    gate = gate or _Gate(language=language)
+    block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     by_id = {f.item_key: f for f in facts}
-    out: list[str] = []
-    for line in parsed.summary:
-        sentence = line.sentence.strip()
-        cited = [by_id[i] for i in line.fact_ids if i in by_id]
-        if not sentence or not cited:
-            # A sentence resting on nothing is the classic unsupported
-            # summary line. Dropped, not softened.
-            continue
-        if not _numbers_supported(sentence, cited):
-            continue
-        out.append(sentence)
-    return out[: schema.MAX_SUMMARY_SENTENCES] or None
+    system = prompts.summary_system(language)
+    for attempt in range(2):
+        try:
+            answer = await provider.complete(
+                _with_brief(block, brief, language),
+                schema.REDUCE_SUMMARY_SCHEMA,
+                max_tokens=REDUCE_MAX_TOKENS,
+                temperature=0.0,
+                system=system,
+            )
+            parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
+        except Exception:  # noqa: BLE001
+            logger.warning("meeting_doc.summary_failed", exc_info=True)
+            return None
+
+        out: list[tuple[str, list[str]]] = []
+        answered = 0
+        for line in parsed.summary:
+            sentence = line.sentence.strip()
+            if not sentence:
+                continue
+            answered += 1
+            cited = [by_id[i] for i in dict.fromkeys(line.fact_ids) if i in by_id]
+            # "Der Start im November bleibt das Ziel": the 2026-09-22
+            # audit's invented sentence was the prompt's own example and
+            # cited a real fact. A cited id is not support.
+            if gate.ok(sentence, cited, claims=True):
+                out.append((sentence, [f.item_key for f in cited]))
+        failed = answered - len(out)
+        if answered and failed / answered > SUMMARY_FAIL_SHARE:
+            if attempt == 0:
+                gate.retries += 1
+                system = f"{system}\n\n{prompts.strict_suffix(language)}"
+                continue
+            return None
+        return out[: schema.MAX_SUMMARY_SENTENCES] or None
+    return None
+
+
+def _unquoted(extracted: schema.ExtractOut) -> bool:
+    """Every fact's quote is too short to be words someone said."""
+    return bool(extracted.facts) and all(
+        len(verify.strip_turn_header(f.quote).split()) < schema.MIN_QUOTE_WORDS
+        for f in extracted.facts
+    )
 
 
 def _numbers_supported(sentence: str, cited: list[VerifiedFact]) -> bool:

@@ -397,16 +397,19 @@ def test_agreeing_with_nobody_having_proposed_anything_is_not_a_decision() -> No
 
 
 def test_an_explicit_formula_is_a_decision_on_its_own() -> None:
-    for spoken in (
-        "we decided to go with option B",
-        "wir haben beschlossen das zu tun",
-        "ми вирішили це зробити",
+    # Each text restates its own quote: since Q2 a decision whose text
+    # does not mean what was said is dropped, whatever its formula.
+    for spoken, text, language in (
+        ("we decided to go with option B", "Going with option B", "en"),
+        ("wir haben beschlossen das zu tun", "Beschlossen, das zu tun", "de"),
+        ("ми вирішили це зробити", "Вирішено це зробити", "uk"),
     ):
         window = _window(_turn(0, "Anna", spoken))
         kept = verify.verify_facts(
-            [_fact(kind=schema.DECISION, text="go with option B", quote=spoken)],
+            [_fact(kind=schema.DECISION, text=text, quote=spoken)],
             window=window,
             meeting_date=MEETING_DATE,
+            language=language,
         )
         assert kept[0].kind == schema.DECISION, spoken
 
@@ -629,17 +632,27 @@ def test_agenda_items_are_only_believed_from_the_top_of_the_meeting() -> None:
 def test_a_topic_is_a_section_of_its_own_headed_by_its_title() -> None:
     """No "Discussion" wrapper and no `###` inside a section: each topic
     the conversation had is a section with a key made from its title."""
-    point = _verified("we talked about pricing", start_ms=754_000, kind=schema.KEY_POINT)
+    price = _verified("the price is fixed for a year", start_ms=754_000, kind=schema.KEY_POINT)
+    terms = _verified("payment is due in thirty days", start_ms=760_000, kind=schema.KEY_POINT)
+    team = _verified("two engineers join in March", start_ms=900_000, kind=schema.KEY_POINT)
+    lead = _verified("Mira leads the rollout", start_ms=910_000, kind=schema.KEY_POINT)
     written = render.render_sections(
-        [point],
+        [price, terms, team, lead],
         role_by_key=ROLE_MAP,
-        topics=[("Pricing & terms", ["we talked about pricing"], [point.item_key])],
+        topics=[
+            (
+                "Pricing & terms",
+                [(price.text, [price.item_key]), (terms.text, [terms.item_key])],
+                [],
+            ),
+            ("Team", [(team.text, [team.item_key]), (lead.text, [lead.item_key])], []),
+        ],
     )
-    (topic,) = [s for s in written if s.role == roles.TOPICS]
+    topic = next(s for s in written if s.role == roles.TOPICS)
     assert (topic.section_key, topic.title, topic.text) == (
         "gen:pricing-terms",
         "Pricing & terms",
-        "- we talked about pricing",
+        "- the price is fixed for a year\n- payment is due in thirty days",
     )
     # Not in the template's role map: the writer adds it to the note.
     assert "gen:pricing-terms" not in ROLE_MAP
@@ -660,8 +673,12 @@ def test_a_bullet_that_echoes_the_fact_listing_becomes_the_fact() -> None:
     to the reader. The id is ours — the bullet becomes that fact's text."""
     point = _verified("we talked about pricing", start_ms=754_000, kind=schema.KEY_POINT)
     other = _verified("and about the timeline", start_ms=800_000, kind=schema.KEY_POINT)
+    later = [
+        _verified("the pilot starts in May", start_ms=900_000, kind=schema.KEY_POINT),
+        _verified("two sites take part", start_ms=910_000, kind=schema.KEY_POINT),
+    ]
     written = render.render_sections(
-        [point, other],
+        [point, other, *later],
         role_by_key=ROLE_MAP,
         topics=[
             (
@@ -672,14 +689,15 @@ def test_a_bullet_that_echoes_the_fact_listing_becomes_the_fact() -> None:
                     "0123456789abcdef (key_point, 00:01): an id we never issued",
                 ],
                 [point.item_key],
-            )
+            ),
+            ("Pilot", [(f.text, [f.item_key]) for f in later], []),
         ],
     )
-    (topics,) = [s for s in written if s.role == roles.TOPICS]
+    topics = next(s for s in written if s.role == roles.TOPICS)
     assert topics.title == "Pricing"
-    assert topics.text == (
-        "- we talked about pricing\n- and about the timeline\n- an id we never issued"
-    )
+    # The unknown id cites nothing but the topic's fact, which the first
+    # bullet already wrote: one fact, once (Q3).
+    assert topics.text == "- we talked about pricing\n- and about the timeline"
     assert [f.item_key for f in topics.facts] == [point.item_key, other.item_key]
 
 
@@ -1152,8 +1170,12 @@ def test_ids_the_model_wrote_into_a_bullet_are_removed_and_still_cited() -> None
         "the economy has been weak for some time", start_ms=1_000, kind=schema.KEY_POINT
     )
     other = _verified("state spending is inefficient", start_ms=18_000, kind=schema.KEY_POINT)
+    later = [
+        _verified("sanctions take years to bite", start_ms=90_000, kind=schema.KEY_POINT),
+        _verified("enforcement has gaps", start_ms=95_000, kind=schema.KEY_POINT),
+    ]
     written = render.render_sections(
-        [point, other],
+        [point, other, *later],
         role_by_key=ROLE_MAP,
         topics=[
             (
@@ -1163,11 +1185,12 @@ def test_ids_the_model_wrote_into_a_bullet_are_removed_and_still_cited() -> None
                     f"Spending is inefficient ({point.item_key}, {other.item_key}) and rising.",
                 ],
                 [],
-            )
+            ),
+            ("Sanctions", [(f.text, [f.item_key]) for f in later], []),
         ],
         summary=[f"The discussion focused on the economy ({point.item_key})."],
     )
-    (topics,) = [s for s in written if s.role == roles.TOPICS]
+    topics = next(s for s in written if s.role == roles.TOPICS)
     assert topics.text == (
         "- The economy has been weak for some time.\n- Spending is inefficient and rising."
     )
@@ -1234,7 +1257,9 @@ def test_a_flat_passive_opener_is_dropped_but_an_estimate_keeps_its_hedge() -> N
     assert render.editorial(estimate) == estimate
 
 
-def test_the_overview_opens_with_the_framing_and_closes_with_the_transcript_note() -> None:
+def test_the_overview_opens_with_the_framing_and_writes_no_transcript_note() -> None:
+    """Q3: what was left out is `excluded_ranges` for the client, never a
+    "Transcript note: …" paragraph a renderer takes for a speaker."""
     point = _verified(
         "the economy has been weak for some time", start_ms=1_000, kind=schema.KEY_POINT
     )
@@ -1243,7 +1268,6 @@ def test_the_overview_opens_with_the_framing_and_closes_with_the_transcript_note
         role_by_key=ROLE_MAP,
         summary=["It was noted that sanctions remain limited by enforcement gaps."],
         framing="Interview with a defence expert on the war in Ukraine.",
-        noise=[(12_000, "background"), (220_000, "other_language")],
         language="en",
     )
     overview = next(s for s in written if s.role == roles.SUMMARY)
@@ -1251,50 +1275,52 @@ def test_the_overview_opens_with_the_framing_and_closes_with_the_transcript_note
     assert overview.text == (
         "Interview with a defence expert on the war in Ukraine.\n\n"
         "Sanctions remain limited by enforcement gaps.\n\n"
-        "- the economy has been weak for some time\n\n"
-        "Transcript note: background speech, a passage in another language at 00:12 "
-        "and 03:40 was left out of these notes."
+        "- the economy has been weak for some time"
     )
+    assert not hasattr(render, "transcript_note")
 
 
-def test_the_transcript_note_speaks_the_notes_language() -> None:
-    assert render.transcript_note([(5_000, "artifact")], language="de") == (
-        "Hinweis zum Transkript: ein Transkriptionsartefakt bei 00:05 wurde nicht berücksichtigt."
-    )
-    assert render.transcript_note([], language="uk") == ""
-
-
-def test_key_points_head_the_topics_and_are_cited() -> None:
+def test_key_facts_live_in_their_topics_not_above_them() -> None:
+    """Q3, one fact once: with topics, the overview is framing and summary;
+    a key fact is written in the topic that covers it."""
     main = _verified(
         "a full US withdrawal was considered unlikely", start_ms=9_000, kind=schema.KEY_POINT
     )
     detail = _verified("sanctions take years to bite", start_ms=40_000, kind=schema.KEY_POINT)
+    gaps = _verified("enforcement has gaps", start_ms=45_000, kind=schema.KEY_POINT)
+    allies = _verified("the allies stay united", start_ms=12_000, kind=schema.KEY_POINT)
     written = render.render_sections(
-        [main, detail],
+        [main, detail, gaps, allies],
         role_by_key=ROLE_MAP,
-        topics=[("Sanctions", ["Sanctions take years to bite."], [detail.item_key])],
+        topics=[
+            ("Sanctions", [(detail.text, [detail.item_key]), (gaps.text, [gaps.item_key])], []),
+            ("US role", [(main.text, [main.item_key]), (allies.text, [allies.item_key])], []),
+        ],
+        summary=[("Western strategy was the main theme.", [main.item_key])],
         key_fact_ids=[main.item_key, "0123456789abcdef", main.item_key],
         language="en",
     )
+    # Topics in the order of the recording, not the order the model gave.
     assert [(s.section_key, s.title) for s in written] == [
         ("gen:overview", None),
+        ("gen:us-role", "US role"),
         ("gen:sanctions", "Sanctions"),
     ]
-    assert written[0].text == "- a full US withdrawal was considered unlikely"
-    assert [f.item_key for f in written[0].facts] == [main.item_key]
-    assert written[1].text == "- Sanctions take years to bite."
+    assert written[0].text == "Western strategy was the main theme."
+    assert main.item_key in {f.item_key for f in written[1].facts}
 
 
 def test_a_conversation_with_one_subject_is_one_unheaded_block() -> None:
-    """Test B / Test D of the spec: nothing to divide, nothing divided."""
+    """Test B / Test D of the spec: nothing to divide, nothing divided —
+    key facts first, then the rest, as ONE list."""
     main = _verified("the timeline is the main risk", start_ms=9_000, kind=schema.KEY_POINT)
     other = _verified("the budget is fixed", start_ms=20_000, kind=schema.KEY_POINT)
     written = render.render_sections(
-        [main, other], role_by_key=ROLE_MAP, key_fact_ids=[main.item_key], language="de"
+        [other, main], role_by_key=ROLE_MAP, key_fact_ids=[main.item_key], language="de"
     )
     (block,) = written
     assert (block.section_key, block.title) == ("gen:overview", None)
-    assert block.text == "- the timeline is the main risk\n\n- the budget is fixed"
+    assert block.text == "- the timeline is the main risk\n- the budget is fixed"
 
 
 def test_nobody_is_listed_as_an_attendee_automatically() -> None:
@@ -1368,7 +1394,8 @@ def test_a_fact_quoted_from_a_turn_flagged_as_noise_is_dropped() -> None:
         window=window,
         meeting_date=MEETING_DATE,
         stats=stats,
-        noise_turns=frozenset({1}),
+        # Since Q2 verify receives only CONFIRMED lines (confirm_noise).
+        noise_lines=frozenset({1}),
     )
     assert [f.text for f in kept] == ["The budget is twelve thousand"]
     assert stats.dropped_noise == 1
@@ -1385,7 +1412,8 @@ def test_the_extractor_may_only_flag_turns_in_its_own_window() -> None:
             schema.NoiseTurn(turn=0, reason="not-a-reason"),
         ]
     )
-    assert pipeline._noise_turns(extracted, window) == [(1, 3_000, "background")]
+    # Candidates only, as (line, start, end, reason); confirm_noise decides.
+    assert pipeline._noise_lines(extracted, window) == [(1, 3_000, 8_000, "background")]
 
 
 def test_the_context_pass_keeps_only_ids_it_was_given_and_a_framing_it_can_support() -> None:
@@ -1426,7 +1454,7 @@ def test_the_context_pass_keeps_only_ids_it_was_given_and_a_framing_it_can_suppo
     # The brief the reduce steps see, without the framing.
     assert brief.block("en") == (
         "Context: interview — the war in Ukraine\nThemes: Western strategy; sanctions\n"
-        f"Key points, already shown above the topics: {facts[2].item_key}"
+        f"Key points: {facts[2].item_key}"
     )
 
 
@@ -1489,4 +1517,4 @@ def test_most_of_the_window_cannot_be_noise() -> None:
             schema.NoiseTurn(turn=1, reason="artifact"),
         ]
     )
-    assert pipeline._noise_turns(extracted, window) == [(1, 3_000, "artifact")]
+    assert pipeline._noise_lines(extracted, window) == [(1, 3_000, 8_000, "artifact")]

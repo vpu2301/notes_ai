@@ -40,6 +40,7 @@
   }
  ],
  "meeting_type": "interview",
+ "recording_type": "interview",
  "gold": {
   "key_facts": [
    "Candidate B was the strongest on the system design round",

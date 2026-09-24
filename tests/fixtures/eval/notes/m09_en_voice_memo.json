@@ -1,0 +1,69 @@
+{
+ "id": "m09_en_voice_memo",
+ "language": "en",
+ "meeting_type": "auto",
+ "recording_type": "voice_memo",
+ "recorded_on": "2026-09-22",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 48000,
+   "text": "Quick note to self before I forget. The supplier call went fine, they can deliver the new shelving units on the fourteenth of October, but only if we confirm the order by Friday. I need to send them the signed purchase order by Friday at the latest."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 48000,
+   "t_end_ms": 102000,
+   "text": "Second thing. The warehouse lease renewal is up in December, and the landlord mentioned a rent increase of about eight percent. I should ask finance whether that fits the budget before I reply to him. Probably worth getting a second quote from the industrial park on the east side too."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 102000,
+   "t_end_ms": 150000,
+   "text": "And last, remind Ravi that the inventory count moves from Monday to Wednesday next week, because the forklift is in for repair on Monday. That's it for now."
+  }
+ ],
+ "gold": {
+  "key_facts": [
+   "The supplier can deliver the new shelving units on 14 October if the order is confirmed by Friday",
+   "The warehouse lease renewal is due in December with a rent increase of about eight percent",
+   "The inventory count moves from Monday to Wednesday because the forklift is in for repair"
+  ],
+  "actions": [
+   {
+    "text": "Send the signed purchase order to the supplier by Friday",
+    "owner": "Nadia",
+    "due": "2026-09-25"
+   }
+  ],
+  "decisions": [],
+  "open_questions": [
+   "Whether the rent increase fits the budget"
+  ],
+  "hedged": [
+   {
+    "fact": "the landlord mentioned a rent increase of about eight percent",
+    "modality": "estimate"
+   }
+  ],
+  "dates": [
+   {
+    "text": "by Friday",
+    "resolved": "2026-09-25",
+    "tense": "future"
+   }
+  ],
+  "speakers": {
+   "SPEAKER_1": "Nadia"
+  },
+  "name_candidates": [
+   "Nadia",
+   "Ravi"
+  ],
+  "must_not_contain": [
+   "Quillhaven",
+   "Ferrytale"
+  ]
+ }
+}
