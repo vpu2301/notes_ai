@@ -500,6 +500,9 @@ struct NoteView: View {
                     }
                 }
             }
+            if let generation = model.generation, !generation.isLive {
+                generationFacts(generation)
+            }
             if let error = model.generationError {
                 DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
             }
@@ -581,6 +584,62 @@ struct NoteView: View {
                 }
             }
         }
+    }
+
+    // MARK: - What the engine made of the recording (Q3)
+
+    /// Under the status line, quietly: what the recording was taken to be
+    /// (nothing for a meeting), and the passages left out of the note —
+    /// "Not included: 00:45–00:52 (background speech)". Each range opens
+    /// the transcript at that moment when there is a timed one to open.
+    @ViewBuilder
+    private func generationFacts(_ generation: GenerationView) -> some View {
+        let label = generation.recordingTypeLabel
+        let excluded = generation.isFinished && !generation.wroteNothing
+            ? generation.shownExcluded : (items: [], more: 0)
+        if label != nil || !excluded.items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                if let label {
+                    Text(label)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                if !excluded.items.isEmpty {
+                    Text(notIncludedText(excluded.items, more: excluded.more,
+                                         linked: model.canSeekTranscript))
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                        .tint(DS.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard url.scheme == Self.seekScheme,
+                                  let ms = Int(url.absoluteString.dropFirst(Self.seekScheme.count + 1))
+                            else { return .systemAction }
+                            Task { await model.seekTranscript(to: ms) }
+                            return .handled
+                        })
+                }
+            }
+        }
+    }
+
+    /// Links in the "Not included" line are these, handled in place.
+    private static let seekScheme = "notesai-seek"
+
+    private func notIncludedText(_ items: [GenerationView.ExcludedItem], more: Int,
+                                 linked: Bool) -> AttributedString {
+        var line = AttributedString("Not included: ")
+        for (index, item) in items.enumerated() {
+            if index > 0 { line += AttributedString(", ") }
+            var part = AttributedString(item.text)
+            if linked, let url = URL(string: "\(Self.seekScheme):\(item.startMs)") {
+                part.link = url
+                part.underlineStyle = .single
+            }
+            line += part
+        }
+        if more > 0 { line += AttributedString(" +\(more) more") }
+        return line
     }
 
     // MARK: - Transcript

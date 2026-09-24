@@ -824,6 +824,17 @@ struct GenerationView: Decodable, Sendable {
     /// How many sections the run wrote; 0 on a finished run means the
     /// recording yielded nothing the verifier let through.
     let sectionsWritten: Int?
+    /// Q3 — what the recording was taken to be (`meeting`, `interview`,
+    /// `podcast_broadcast`, …) and who decided (`user`, `classifier`,
+    /// `rule`, `template`). Nil before Q3.
+    let recordingType: String?
+    let recordingTypeSource: String?
+    /// Q2 — the passages the engine left out of the note. Nil or empty
+    /// when nothing was, and on runs made before Q2.
+    let excludedRanges: [ExcludedRange]?
+    /// The spoken language the run wrote in (`en`/`de`/`uk`), so the
+    /// exclusions are named in it. Nil before Q3.
+    let language: String?
 
     var isLive: Bool { status == "queued" || status == "running" }
     var isFinished: Bool { status == "complete" || status == "partial" }
@@ -862,6 +873,119 @@ struct GenerationView: Decodable, Sendable {
         case windowsDone = "windows_done"
         case errorKind = "error_kind"
         case sectionsWritten = "sections_written"
+        case recordingType = "recording_type"
+        case recordingTypeSource = "recording_type_source"
+        case excludedRanges = "excluded_ranges"
+        case language
+    }
+}
+
+/// One passage the engine left out of a note (Summary Engine v2, Q2):
+/// background speech, another language, a duplicate. `reason` comes from a
+/// closed vocabulary, but is kept a string so a reason this build does not
+/// know yet still decodes — it is then called "a passage".
+struct ExcludedRange: Decodable, Equatable, Sendable {
+    let startMs: Int
+    let endMs: Int
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+    }
+}
+
+/// The words for what the engine did with a recording (Q3), as the web
+/// client says them (`web/src/lib/generation.ts`). Pure, so the tests can
+/// pin the wording.
+extension GenerationView {
+    /// What the recording was taken to be. `meeting` (and anything this
+    /// build does not know) has no label: the template name says enough.
+    static let recordingTypeLabels: [String: String] = [
+        "client_call": "Client call",
+        "sales_call": "Sales call",
+        "interview": "Interview",
+        "one_on_one": "One-on-one",
+        "podcast_broadcast": "Podcast / broadcast",
+        "lecture_webinar": "Lecture / webinar",
+        "voice_memo": "Voice memo",
+    ]
+
+    static func recordingTypeLabel(_ recordingType: String?) -> String? {
+        guard let recordingType, recordingType != "meeting" else { return nil }
+        return recordingTypeLabels[recordingType]
+    }
+
+    var recordingTypeLabel: String? { Self.recordingTypeLabel(recordingType) }
+
+    /// Why a passage was left out, in the language that was spoken. The
+    /// API never sends prose; `passage` is the word for a reason this
+    /// build does not know.
+    static let noiseLabels: [String: [String: String]] = [
+        "en": [
+            "background": "background speech",
+            "other_language": "a passage in another language",
+            "artifact": "a transcription artifact",
+            "duplicate": "a duplicated passage",
+            "unrelated": "an unrelated fragment",
+            "passage": "a passage",
+        ],
+        "de": [
+            "background": "Hintergrundgespräch",
+            "other_language": "eine Passage in einer anderen Sprache",
+            "artifact": "ein Transkriptionsartefakt",
+            "duplicate": "eine doppelte Passage",
+            "unrelated": "ein unzusammenhängendes Fragment",
+            "passage": "eine Passage",
+        ],
+        "uk": [
+            "background": "фонова мова",
+            "other_language": "уривок іншою мовою",
+            "artifact": "артефакт транскрипції",
+            "duplicate": "повторений уривок",
+            "unrelated": "непов'язаний фрагмент",
+            "passage": "уривок",
+        ],
+    ]
+
+    static func noiseLabel(_ reason: String, language: String?) -> String {
+        let labels = noiseLabels[language ?? ""] ?? noiseLabels["en"] ?? [:]
+        return labels[reason] ?? labels["passage"] ?? "a passage"
+    }
+
+    /// Ranges shown before "+N more".
+    static let maxShownRanges = 4
+
+    /// "00:45" — minutes are not wrapped into hours, as on the web.
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    struct ExcludedItem: Equatable, Sendable {
+        let startMs: Int
+        /// "00:45–00:52 (background speech)"
+        let text: String
+    }
+
+    /// Every excluded passage, in time order, in the note's language.
+    var excludedItems: [ExcludedItem] {
+        (excludedRanges ?? [])
+            .sorted { $0.startMs < $1.startMs }
+            .map { range in
+                ExcludedItem(
+                    startMs: range.startMs,
+                    text: "\(Self.mmss(range.startMs))–\(Self.mmss(range.endMs)) (\(Self.noiseLabel(range.reason, language: language)))"
+                )
+            }
+    }
+
+    /// The items the line shows, and how many more there are.
+    var shownExcluded: (items: [ExcludedItem], more: Int) {
+        let all = excludedItems
+        let shown = Array(all.prefix(Self.maxShownRanges))
+        return (shown, all.count - shown.count)
     }
 }
 

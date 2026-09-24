@@ -1022,6 +1022,33 @@ final class NoteViewModel: ObservableObject {
     /// Tap on the quote: scroll to its turn and highlight it for 2 s.
     func revealTurn(for suggestion: NameSuggestion) {
         guard let id = Self.turnId(for: suggestion, in: turns ?? []) else { return }
+        reveal(turnId: id)
+    }
+
+    /// Q3: whether a moment in the recording can be shown — only a
+    /// transcript read from the job has timed turns to scroll to.
+    var canSeekTranscript: Bool { jobId != nil && transcriptError == nil }
+
+    /// The turn a moment of the recording falls in (the first turn for a
+    /// moment before anyone spoke).
+    nonisolated static func turnId(at ms: Int, in turns: [TranscriptTurn]) -> Int? {
+        (turns.last { $0.startMs <= ms } ?? turns.first)?.id
+    }
+
+    /// "Not included: 00:45–00:52 …" was tapped: open the transcript at
+    /// that moment and highlight the turn, as a suggestion's quote does.
+    func seekTranscript(to ms: Int) async {
+        guard canSeekTranscript else { return }
+        tab = .transcript
+        await loadTranscript()
+        // One turn of the run loop so the transcript is laid out before
+        // the scroll view is asked to reach into it.
+        await Task.yield()
+        guard let id = Self.turnId(at: ms, in: turns ?? []) else { return }
+        reveal(turnId: id)
+    }
+
+    private func reveal(turnId id: Int) {
         let reveal = TurnReveal(turnId: id)
         revealedTurn = reveal
         let duration = highlightDuration
