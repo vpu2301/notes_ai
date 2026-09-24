@@ -257,3 +257,9 @@ def test_pairs_never_leave_the_local_folder(tmp_path: Path) -> None:
 def test_wilson_interval() -> None:
     low, high = notes_pairs.wilson(50, 100)
     assert round(low, 3) == 0.404 and round(high, 3) == 0.596
+
+
+def test_the_scripted_run_gates_only_what_the_engine_guarantees() -> None:
+    assert notes_assert.family("must_not_contain[3]") == "must_not_contain"
+    assert notes_assert.family("every_line_cited") == "every_line_cited"
+    assert {"speakers", "must_not_contain", "every_line_cited"} == notes_assert.ENGINE_CHECKS

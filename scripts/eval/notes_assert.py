@@ -123,6 +123,29 @@ def check(checklist: dict[str, Any], produced: dict[str, Any]) -> list[tuple[str
     return out
 
 
+# `--backend scripted`: the engine tests' deterministic stand-in for the
+# model (no network, same answers every run) — what CI's notes-engine job
+# runs, so a checklist check that passes there fails only when the ENGINE
+# changed, never the model.
+SCRIPTED = "scripted"
+# What the engine guarantees whatever a model says: no label or default name
+# for a named speaker, none of the audit's strings, every line cited. The
+# other checks measure what a model extracted and are shown, not gated.
+ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited"})
+
+
+def family(name: str) -> str:
+    return name.split("[", 1)[0]
+
+
+def _scripted_provider() -> Any:
+    tests = REPO / "services" / "note-service" / "tests" / "unit"
+    sys.path.insert(0, str(tests))
+    from meeting_doc_fakes import ScriptedProvider
+
+    return ScriptedProvider()
+
+
 async def main(backend_name: str, corpus: Path) -> int:
     from notes_eval import EngineBlindError, run_pipeline
 
@@ -141,8 +164,11 @@ async def main(backend_name: str, corpus: Path) -> int:
         print(f"no checklists for the meetings in {corpus}", file=sys.stderr)
         return 3
 
-    resolved = load_registry().backend(backend_name, expect_kind="chat")
-    provider = build_chat_provider(resolved)
+    if backend_name == SCRIPTED:
+        provider = _scripted_provider()
+    else:
+        resolved = load_registry().backend(backend_name, expect_kind="chat")
+        provider = build_chat_provider(resolved)
     failures = 0
     try:
         for path, checklist in cases:
@@ -156,15 +182,21 @@ async def main(backend_name: str, corpus: Path) -> int:
                 print(f"{meeting['id']}: RUN FAILED ({type(exc).__name__})")
                 failures += 1
                 continue
-            results = check(checklist, produced)
+            shown = results = check(checklist, produced)
+            if backend_name == SCRIPTED:
+                results = [r for r in results if family(r[0]) in ENGINE_CHECKS]
             passed = sum(1 for _n, ok, _s in results if ok)
             print(f"{meeting['id']}: {passed}/{len(results)} checks pass")
-            for name, ok, sprint in results:
+            gated = {name for name, _ok, _s in results}
+            for name, ok, sprint in shown:
                 owner = f"  ({sprint})" if sprint else ""
-                print(f"  {'PASS' if ok else 'FAIL'}  {name}{owner}")
+                verdict = ("PASS" if ok else "FAIL") if name in gated else "----"
+                note = "" if name in gated else "  (needs a model)"
+                print(f"  {verdict}  {name}{owner}{note}")
             failures += len(results) - passed
     finally:
-        await provider.aclose()
+        if hasattr(provider, "aclose"):
+            await provider.aclose()
     return 1 if failures else 0
 
 
