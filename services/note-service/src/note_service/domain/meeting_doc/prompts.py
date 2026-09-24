@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-11"
+PROMPT_VERSION: Final = "2026-10-12"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -819,6 +819,18 @@ def echoes_example(text: str) -> bool:
     return any(f" {phrase} " in padded for phrase in EXAMPLE_PHRASES)
 
 
+def _title_prompt() -> str:
+    from ..note_title import _SYSTEM  # note_title imports this module
+
+    return _SYSTEM
+
+
+def _title_prompt_schema() -> dict:
+    from ..note_title import SCHEMA
+
+    return SCHEMA
+
+
 def _classify_schema() -> dict:
     from .classify import CLASSIFY_SCHEMA  # classify imports this module
 
@@ -855,6 +867,9 @@ def fingerprint() -> str:
         "classify": CLASSIFY_SYSTEM,
         "entity": ENTITY_SYSTEM,
         "brief": _BRIEF_LABELS,
+        # ADR-0059's title call changes what the note says, so it is pinned
+        # with the rest (Q6).
+        "title": _title_prompt(),
         "schemas": {
             "extract": schema.EXTRACT_SCHEMA,
             "topics": schema.REDUCE_TOPICS_SCHEMA,
@@ -862,6 +877,7 @@ def fingerprint() -> str:
             "context": schema.REDUCE_CONTEXT_SCHEMA,
             "classify": _classify_schema(),
             "entity": schema.ENTITY_SCHEMA,
+            "title": _title_prompt_schema(),
         },
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")

@@ -34,7 +34,7 @@ from uuid import UUID
 from note_models import NoteStatus
 
 from . import notes_repository as repo
-from .meeting_doc import prompts, windows
+from .meeting_doc import prompts, support, windows
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,39 @@ async def suggest(provider: Any, result: dict[str, Any], *, language: str) -> st
     except Exception:  # noqa: BLE001 — a title is never worth a failed note
         logger.warning("note_title.model_failed", exc_info=True)
         return None
-    return clean(_answer_text(answer)) or None
+    title = clean(_answer_text(answer))
+    if not title:
+        return None
+    reason = unsupported(title, result)
+    if reason is not None:
+        logger.info("note_title.skipped", extra={"reason": reason})
+        return None
+    return title
+
+
+# A title word counts as said when a transcript word shares this many
+# first letters with it: English titles are title-cased, so "Planning"
+# over a transcript that says "plan" is a topic word, not a new name.
+_NAME_PREFIX: Final = 4
+
+
+def unsupported(title: str, result: dict[str, Any]) -> str | None:
+    """Why this title may not be written, or None (Summary Engine v2, Q6).
+
+    ``example`` — it repeats a prompt example: the model copied its
+    instructions. ``unsupported`` — it names someone or something the
+    transcript never says. Same rules as the document's lines."""
+    if prompts.echoes_example(title):
+        return "example"
+    said = " ".join(_spoken(result))
+    heads = {w[:_NAME_PREFIX] for w in _WORD.findall(said.casefold()) if len(w) >= _NAME_PREFIX}
+    # `new_names` never counts a sentence's first word; a title's first
+    # word is often the name, so the title is read as a clause.
+    for name in support.new_names(f"re {title}", said):
+        words = [w for w in _WORD.findall(name.casefold()) if len(w) >= _NAME_PREFIX]
+        if any(w[:_NAME_PREFIX] not in heads for w in words):
+            return "unsupported"
+    return None
 
 
 async def source_of(conn: Any, *, note_id: UUID) -> str | None:

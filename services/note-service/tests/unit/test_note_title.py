@@ -192,10 +192,12 @@ async def test_the_model_saying_there_is_no_topic_keeps_the_placeholder(store: _
 @pytest.mark.anyio
 async def test_a_short_recording_is_named_from_what_there_is(store: _Store) -> None:
     short = "We should move the Pincer telephony platform to the new SIP provider before March."
-    provider = _Provider('{"title": "Pincer Telephony Migration"}')
+    # Words the recording says: a title naming what was never said is not
+    # written (Q6), so "Migration" over "move" would keep the placeholder.
+    provider = _Provider('{"title": "Pincer Telephony Platform Move"}')
     await _name(provider, _result(short))
     assert len(provider.calls) == 1
-    assert store.title == "Pincer Telephony Migration"
+    assert store.title == "Pincer Telephony Platform Move"
 
 
 @pytest.mark.anyio
@@ -327,3 +329,42 @@ def test_a_long_meeting_is_sampled_across_its_whole_length() -> None:
 def test_filler_does_not_count_as_content() -> None:
     assert note_title.meaningful_word_count(_result("Hi, hello, can you hear me? Yeah. Okay.")) == 0
     assert note_title.meaningful_word_count(_result(ROADMAP)) >= note_title.MIN_MEANINGFUL_WORDS
+
+
+# ── Summary Engine v2 guards (Q6): same rules as the document's lines ──
+
+
+@pytest.mark.anyio
+async def test_a_title_copied_from_a_prompt_example_is_not_written(store: _Store) -> None:
+    await _name(_Provider('{"title": "Lantern edition won\'t be ready"}'), _result(ROADMAP))
+    assert store.title == PLACEHOLDER
+    assert store.source == note_title.DEFAULT
+
+
+@pytest.mark.anyio
+async def test_a_title_naming_what_was_never_said_is_not_written(store: _Store) -> None:
+    await _name(_Provider('{"title": "Berlin Roadmap Review"}'), _result(ROADMAP))
+    assert store.title == PLACEHOLDER
+    assert store.source == note_title.DEFAULT
+
+
+@pytest.mark.anyio
+async def test_a_good_title_still_lands_as_ai(store: _Store) -> None:
+    await _name(_Provider('{"title": "HubSpot Integration Roadmap"}'), _result(ROADMAP))
+    assert store.title == "HubSpot Integration Roadmap"
+    assert store.source == note_title.AI
+
+
+@pytest.mark.parametrize(
+    ("title", "reason"),
+    [
+        ("Q4 Product Roadmap", None),
+        # A title-cased topic word is not a name when the transcript says its stem.
+        ("Enterprise Pricing Changes", None),
+        ("HubSpot Integration", None),
+        ("Walzmann Interview", "unsupported"),  # first word checked too
+        ("Lantern edition won't be ready", "example"),
+    ],
+)
+def test_unsupported(title: str, reason: str | None) -> None:
+    assert note_title.unsupported(title, _result(ROADMAP)) == reason

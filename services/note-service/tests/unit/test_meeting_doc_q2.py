@@ -127,7 +127,13 @@ UKRAINIAN = (
 
 
 def _confirm(piece: Turn, reason: str, language: str = "de") -> tuple[list, list]:
-    window = Window(index=0, turns=(_piece(0, "Guten Morgen, das ist die Lage.", 0, 5_000), piece))
+    # The window around the flag is mostly the German conversation: noise
+    # is never most of a window (ADR-0059's rule, now one of confirm_noise's).
+    opening = (
+        "Guten Morgen, das ist die Lage am Montag. Wir sprechen heute über die Häfen, "
+        "den Streik und die Rente, und danach über das Wetter und die Bahn in der Stadt."
+    )
+    window = Window(index=0, turns=(_piece(0, opening, 0, 5_000), piece))
     return verify.confirm_noise([(piece.line or 0, reason)], window=window, language=language)
 
 

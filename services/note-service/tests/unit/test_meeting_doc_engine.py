@@ -1505,7 +1505,9 @@ def test_a_quote_with_an_echoed_turn_header_still_locates() -> None:
 
 
 def test_most_of_the_window_cannot_be_noise() -> None:
-    from note_service.domain.meeting_doc import pipeline
+    """ADR-0059's guard, now one of confirm_noise's rules (Q6): the flag is
+    advisory, the line stays in the note."""
+    from note_service.domain.meeting_doc import pipeline, verify
 
     window = _window(
         _turn(0, "Anna", "the recording is an advertisement with many many words in it here"),
@@ -1517,4 +1519,15 @@ def test_most_of_the_window_cannot_be_noise() -> None:
             schema.NoiseTurn(turn=1, reason="artifact"),
         ]
     )
-    assert pipeline._noise_lines(extracted, window) == [(1, 3_000, 8_000, "artifact")]
+    flags = pipeline._noise_lines(extracted, window)
+    assert [(line, reason) for line, _s, _e, reason in flags] == [
+        (0, "background"),
+        (1, "artifact"),
+    ]
+    confirmed, advisory = verify.confirm_noise(
+        [(line, reason) for line, _s, _e, reason in flags], window=window, language="en"
+    )
+    assert [(e.line, e.start_ms, e.end_ms, e.reason) for e in confirmed] == [
+        (1, 3_000, 8_000, "artifact")
+    ]
+    assert advisory == ["background"]

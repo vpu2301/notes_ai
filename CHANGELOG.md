@@ -73,6 +73,14 @@
   becomes a glossary term, so the next generation spells it that way) or reject it (the line goes
   back to what was heard). `GET …/generated-items?generation=current` and the new row fields are
   additive. Nothing of this reaches the shared page, the client version or the PDF.
+- **Summary Engine v2 — Q6, reconciled with note titles** (`note-service`): one title mechanism
+  (ADR-0059's `title_source`; the engine never writes a title) with the engine's two guards — a
+  suggested title that copies a prompt example or names something the transcript never says is
+  not written (`note_title.skipped`, reason `example` / `unsupported`); one noise policy
+  (ADR-0059's "never most of the window" is now a `confirm_noise` rule, counted as advisory);
+  the job classifies, then names, then extracts; the title prompt joins the pinned prompt
+  fingerprint. `PROMPT_VERSION` is `2026-10-12`. Migrations stay 0057 (title source), 0058
+  (recording types), 0059 (generated lines); the next free number is 0060.
 - **A meeting note names itself** (`note-service`, Mac, iPhone; ADR-0059, migration 0057): a
   recording's placeholder title ("Meeting notes — 2026-09-22") is replaced, once, with a 3–8 word
   title in the spoken language, taken from across the whole transcript by the `note.generate` job

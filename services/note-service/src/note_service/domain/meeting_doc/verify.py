@@ -916,13 +916,19 @@ def confirm_noise(
     confirmed: list[Exclusion] = []
     advisory: list[str] = []
     order = [t.number for t in window.turns]
+    total_words = sum(len(t.text.split()) for t in window.turns) or 1
     done: set[int] = set()
     for number, reason in flags:
         piece = window.turn(number)
         if piece is None or reason not in schema.NOISE_REASONS or number in done:
             continue
         done.add(number)
-        if reason == "other_language":
+        if len(piece.text.split()) > total_words * schema.MAX_NOISE_SHARE:
+            # Noise is marginal by definition (ADR-0059's rule, Q6). A line
+            # that is most of the window IS the recording — an advertisement
+            # someone recorded is still what they recorded.
+            ok = False
+        elif reason == "other_language":
             ok = _is_other_language(piece.text, language)
         elif reason == "duplicate":
             earlier = [t.text for t in window.turns if order.index(t.number) < order.index(number)]

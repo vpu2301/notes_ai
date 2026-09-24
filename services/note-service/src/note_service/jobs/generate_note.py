@@ -128,19 +128,6 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     started = getattr(meeting, "started_at", None) if meeting else None
     meeting_date = (started or note.created_at or datetime.now(UTC)).date()
 
-    # 0057: the note gets its name first — one short call, seconds rather
-    # than the minutes the document takes, and never able to stop it.
-    await _name_note(
-        deps,
-        tenant_id,
-        note_id=note_id,
-        generation_id=generation_id,
-        requested_by=generation.requested_by,
-        result=result,
-        provider=provider,
-        language=language,
-    )
-
     # Q3: what the recording IS decides which kinds are extracted — before
     # extraction, so a podcast is never offered "decision" or "action".
     turns = windows.turns_from_result(result)
@@ -157,6 +144,19 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     await _store_detected_type(
         deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
     )
+    # 0057: the note gets its name before the long pass (Q6 order:
+    # classify → name → extract) — one short call, never able to stop it.
+    await _name_note(
+        deps,
+        tenant_id,
+        note_id=note_id,
+        generation_id=generation_id,
+        requested_by=generation.requested_by,
+        result=result,
+        provider=provider,
+        language=language,
+    )
+
     # Q4: every name this recording may mean, and the workspace's glossary.
     known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
 

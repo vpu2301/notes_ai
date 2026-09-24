@@ -520,17 +520,10 @@ def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int
     """``[(line, start_ms, end_ms, reason)]`` for the lines the extractor
     flagged — only ones in this window, only known reasons. These are
     CANDIDATES: :func:`verify.confirm_noise` decides."""
-    total_words = sum(len(t.text.split()) for t in window.turns) or 1
     out: list[tuple[int, int, int, str]] = []
     for flagged in extracted.noise:
         piece = window.turn(flagged.turn)
         if piece is None or flagged.reason not in schema.NOISE_REASONS:
-            continue
-        # Noise is marginal by definition. A line that is most of the
-        # window IS the recording — an advertisement someone recorded is
-        # still what they recorded — and a model that calls it background
-        # would empty the note.
-        if len(piece.text.split()) > total_words * schema.MAX_NOISE_SHARE:
             continue
         out.append((piece.number, piece.start_ms, piece.end_ms, flagged.reason))
     return out

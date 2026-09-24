@@ -36,6 +36,7 @@ PINNED: dict[str, str] = {
     "2026-10-9": "7c4ac09f26e9ca193775855634075d063f612f32f9ed36cbdfb35912aa5f7aaf",
     "2026-10-10": "4790f2eccc17f5b6079420cac2db8c5d2566d080dd180895ae14250f64bd6a21",
     "2026-10-11": "8bde8a1ffe8c52f52c854db56259bab8368b8d0753f4e5099c2fcf1efcade7b5",
+    "2026-10-12": "1acfc550bc80b3253c1465b50211cd14800c82dd4423150cb3080fa1390999ee",
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")
