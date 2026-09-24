@@ -1,4 +1,4 @@
-.PHONY: smoke-ios eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: smoke-ios eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -359,6 +359,9 @@ nightly-verify: ## Run the audit-chain nightly verifier once and emit Prom textf
 
 weekly-speakers: ## Weekly speaker-quality CSV (reports/speakers-YYYY-WW.csv) as the read-only funnel_reader role
 	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_speakers.py
+
+weekly-notes: ## Weekly notes-quality CSV (reports/notes-quality-YYYY-WW.csv) with kill thresholds, as funnel_reader
+	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_notes_quality.py
 
 test-integration-db: ## All integration tests against the live dev DB (needs migrate-up)
 	RUN_DB_INTEGRATION=1 uv run --project libs/db pytest libs/db/tests/integration/ -v

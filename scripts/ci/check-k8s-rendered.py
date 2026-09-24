@@ -44,6 +44,8 @@ DRIFT_PAIRS = [
     ("files/jobs/ai_retention.py", "scripts/jobs/ai_retention.py"),
     ("files/jobs/weekly_speakers.py", "scripts/jobs/weekly_speakers.py"),
     ("files/jobs/speaker_quality.sql", "scripts/ops/speaker_quality.sql"),
+    ("files/jobs/weekly_notes_quality.py", "scripts/jobs/weekly_notes_quality.py"),
+    ("files/jobs/notes_quality.sql", "scripts/ops/notes_quality.sql"),
     ("files/postgres-init.sql", "infra/postgres/init.sql"),
 ]
 

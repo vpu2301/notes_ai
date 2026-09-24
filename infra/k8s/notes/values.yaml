@@ -383,3 +383,7 @@ cronJobs:
   weeklySpeakers:
     schedule: "30 6 * * 1"
     databaseUrl: postgresql://funnel_reader:funnel_reader@postgres:5432/notes
+  # Summary Engine v2 Q6 T8 — kept-line / dismiss / regenerate / share rates.
+  weeklyNotes:
+    schedule: "45 6 * * 1"
+    databaseUrl: postgresql://funnel_reader:funnel_reader@postgres:5432/notes
