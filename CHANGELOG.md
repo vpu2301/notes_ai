@@ -3,6 +3,17 @@
 ## Unreleased — A live meeting note writes itself too
 
 ### Added
+- **Isolation audit (Sprint I1)** (`docs/security/2026-09-25-isolation-audit.md`): the names that
+  appeared in the 2026-09-25 transcript came from the same workspace's own glossary (7 terms, 7
+  audit events, the transcript's echo in the hint's exact order); no path was found by which one
+  workspace's words, audio, prompts, caches or jobs reach another's (no P0). A permanent
+  two-workspace suite, `make test-isolation` (in `make ci-with-db`), runs auth, note and asr
+  in process plus the worker with an engine that echoes its prompt, and proves B's hint, job,
+  transcript, search, id routes (every note/job route of the OpenAPI dumps), Redis keys, object
+  keys, logs and eval report carry nothing of A's. Twelve P1 findings for I2 — among them the
+  plaintext hint kept in the `asr:jobs` stream, `jobs_claim_fair` executable by every database
+  role, `funnel_reader` reading note titles and comments, model output in exception logs, and two
+  native paths that file one workspace's recording or offline note into another.
 - **Summary Engine v2 — Q1, measure first** (`note-service`, `scripts/eval`): the notes eval
   finally measures the engine. Until now the harness sent `turns[].text` and the engine reads
   `turns[].paragraphs`, so the pipeline arm only ever scored an empty transcript; it now sends the
