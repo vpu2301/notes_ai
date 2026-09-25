@@ -260,6 +260,7 @@ the mixdown, and diarizes each side through the engine seam
 (`diarization.dual_channel.diarize_dual`): a remote voice can never carry a
 local label. `metadata.diarization.channel_layout` says what happened:
 `mic_system` (per side), `mono_fallback` (see below) or `mono`.
+The web app sends the same layout when "Also record this tab's audio (Me / Them)" is on (Sprint I3); iPhone recordings stay single-channel — iOS never declares `channel_layout`.
 
 - Deploy order: asr-worker before asr-service. An old worker ignores the
   new payload fields and downmixes — safe, just without sides.

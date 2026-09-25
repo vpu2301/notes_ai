@@ -1,8 +1,9 @@
-import { api } from "./http";
+import { ApiError, api } from "./http";
 import type {
   AsrJob,
   AsrLanguage,
   CaptureSource,
+  ChannelLayout,
   NameSource,
   ReassignResult,
   RediarizeAccepted,
@@ -10,7 +11,7 @@ import type {
   TranscriptResult,
 } from "./types";
 
-export function submitJob(params: {
+export interface SubmitJobParams {
   audio: Blob;
   filename: string;
   /** "auto" (default) lets the recording decide; "en"/"uk"/"de" pin the decoder. */
@@ -27,7 +28,16 @@ export function submitJob(params: {
   /** Names to offer when renaming speakers (≤ 12, sent as one JSON string field). */
   nameCandidates?: string[] | null;
   captureSource?: CaptureSource;
-}): Promise<AsrJob> {
+  /**
+   * Sprint I3: `mic_system` declares a 2-channel file (L = microphone,
+   * R = tab/system audio). Only sent when set to that; mono is the default.
+   */
+  channelLayout?: ChannelLayout;
+  /** The author's name for their own channel's speaker (≤ 400 chars; the server trims). */
+  localSpeakerName?: string;
+}
+
+export function submitJob(params: SubmitJobParams): Promise<AsrJob> {
   const form = new FormData();
   form.append("audio", params.audio, params.filename);
   form.append("language", params.language);
@@ -47,7 +57,38 @@ export function submitJob(params: {
   if (params.captureSource) {
     form.append("capture_source", params.captureSource);
   }
+  if (params.channelLayout === "mic_system") {
+    form.append("channel_layout", "mic_system");
+  }
+  if (params.localSpeakerName && params.localSpeakerName.trim()) {
+    form.append("local_speaker_name", params.localSpeakerName.trim().slice(0, 400));
+  }
   return api<AsrJob>("asr", "/asr/jobs", { method: "POST", form });
+}
+
+/** The server says the file does not have the channel layout the upload declared. */
+export function refusedLayout(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "channel_layout_mismatch";
+}
+
+/**
+ * Submit, and if a `mic_system` upload is refused as `channel_layout_mismatch`
+ * (the browser wrote one channel after all), post the same file once more as
+ * mono: the recording is worth more than the channel split. Mirrors the
+ * macOS app's fallback. `send` is injectable so a page can hand in its own
+ * (mocked) `submitJob`.
+ */
+export async function submitWithLayoutFallback(
+  send: (params: SubmitJobParams) => Promise<AsrJob>,
+  params: SubmitJobParams,
+): Promise<{ job: AsrJob; fellBackToMono: boolean }> {
+  try {
+    return { job: await send(params), fellBackToMono: false };
+  } catch (err) {
+    if (params.channelLayout !== "mic_system" || !refusedLayout(err)) throw err;
+    const { channelLayout: _layout, localSpeakerName: _name, ...mono } = params;
+    return { job: await send(mono), fellBackToMono: true };
+  }
 }
 
 export function listJobs(): Promise<AsrJob[]> {

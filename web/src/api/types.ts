@@ -1112,6 +1112,13 @@ export interface ReassignResult extends SpeakerEditResult {
 /** Where a capture came from — a metric, sent with the upload. */
 export type CaptureSource = "calendar_event" | "manual" | "upload";
 
+/**
+ * How the channels of an upload are laid out. `mic_system` is a 2-channel
+ * file — left = the author's microphone, right = the tab/system audio — so
+ * the author's voice comes back as its own speaker ("Me" / "Them").
+ */
+export type ChannelLayout = "mono" | "mic_system";
+
 /** `sources` on a rename: picked from `name_candidates`, typed, or an accepted suggestion. */
 export type NameSource = "picklist" | "typed" | "suggestion";
 

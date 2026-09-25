@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { submitJob } from "../api/asr";
+import { submitJob, submitWithLayoutFallback } from "../api/asr";
 import { glossaryHint } from "../api/glossary";
 import { errorMessage } from "../api/http";
 import {
@@ -9,6 +9,7 @@ import {
   type CaptureSource,
   type MeetingType,
 } from "../api/types";
+import { useAuthOptional } from "../auth/AuthContext";
 import { MicIcon, StopIcon, UploadIcon } from "../components/icons";
 import { useToast } from "../components/Toaster";
 import { contextFields, meetingCalendar, readCaptureContext } from "../lib/captureContext";
@@ -60,11 +61,15 @@ const MEETING_TYPES: ReadonlyArray<readonly [MeetingType, string]> = [
  * itself, autosaved, on every device, kept verbatim.
  */
 const FIRST_RUN_KEY = "klarnote.first_run_seen";
+/** Sprint I3: "also record this tab's audio" — a per-browser preference. */
+const SYSTEM_AUDIO_KEY = "notesai.capture.systemAudio";
 
 export function MeetingPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [params] = useSearchParams();
+  // The author's own name labels their microphone's speaker ("Me").
+  const displayName = useAuthOptional()?.displayName;
 
   // A calendar event's title arrives as ?title= from the home page's
   // "Start" button; otherwise the field starts empty.
@@ -97,6 +102,23 @@ export function MeetingPage() {
   const [language, setLanguage] = useState<AsrLanguage>("auto");
   const [meetingType, setMeetingType] = useState<MeetingType>("auto");
   const [diarize, setDiarize] = useState(true);
+  // Me / Them: the tab audio as a second channel. Off until asked for,
+  // then remembered in this browser.
+  const [systemAudio, setSystemAudioState] = useState(() => {
+    try {
+      return window.localStorage.getItem(SYSTEM_AUDIO_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setSystemAudio = (on: boolean) => {
+    setSystemAudioState(on);
+    try {
+      window.localStorage.setItem(SYSTEM_AUDIO_KEY, on ? "1" : "0");
+    } catch {
+      /* private mode */
+    }
+  };
   const [people, setPeople] = useState<People>("auto");
   const [hint, setHint] = useState("");
   /** The author edited the vocabulary: stop overwriting it with the
@@ -142,15 +164,18 @@ export function MeetingPage() {
   });
 
   // Latest submit settings, readable from the recorder's onstop closure.
-  const settings = useRef({ title, language, diarize, hint, people, eventCtx });
-  settings.current = { title, language, diarize, hint, people, eventCtx };
+  const settings = useRef({ title, language, diarize, hint, people, eventCtx, displayName });
+  settings.current = { title, language, diarize, hint, people, eventCtx, displayName };
 
   const submit = useCallback(
     async (audio: RecordedAudio, captureSource: CaptureSource) => {
       const s = settings.current;
+      const twoChannel = audio.channelLayout === "mic_system";
       setPhase("uploading");
       try {
-        const job = await submitJob({
+        // A 2-channel capture the server cannot read as one is re-posted
+        // once as mono — the recording matters more than the split.
+        const { job, fellBackToMono } = await submitWithLayoutFallback(submitJob, {
           audio: audio.blob,
           filename: audio.filename,
           language: s.language,
@@ -160,7 +185,13 @@ export function MeetingPage() {
           // Both go when set; a "People" number wins on the server.
           ...(s.diarize ? contextFields(s.eventCtx) : {}),
           captureSource,
+          ...(twoChannel
+            ? { channelLayout: "mic_system" as const, localSpeakerName: s.displayName }
+            : {}),
         });
+        if (fellBackToMono) {
+          toast.info("Recorded as a single channel — the tab audio could not be separated.");
+        }
         rememberTitle(job.id, s.title);
         markMine(job.id);
         setJobId(job.id);
@@ -183,7 +214,14 @@ export function MeetingPage() {
       void submit(audio, settings.current.eventCtx ? "calendar_event" : "manual"),
     [submit],
   );
-  const rec = useRecorder(submitRecording, onRecordError);
+  const onSystemAudioUnavailable = useCallback(
+    () => toast.info("Recording the microphone only — the browser offered no tab audio."),
+    [toast],
+  );
+  const rec = useRecorder(submitRecording, onRecordError, {
+    systemAudio,
+    onSystemAudioUnavailable,
+  });
 
   /**
    * Record. The recorder starts FIRST and the note is opened beside it:
@@ -220,7 +258,8 @@ export function MeetingPage() {
 
   const onFile = (file: File | undefined | null) => {
     if (!file) return;
-    void submit({ blob: file, filename: file.name }, "upload");
+    // An uploaded file is always sent as it is: no channel layout is declared.
+    void submit({ blob: file, filename: file.name, channelLayout: "mono" }, "upload");
   };
 
   const job = jobId ? (captures?.find((c) => c.job.id === jobId)?.job ?? null) : null;
@@ -505,6 +544,15 @@ export function MeetingPage() {
                 onChange={(e) => setDiarize(e.target.checked)}
               />
               Tell speakers apart
+            </label>
+            <label className="chk-row">
+              <input
+                type="checkbox"
+                className="chk"
+                checked={systemAudio}
+                onChange={(e) => setSystemAudio(e.target.checked)}
+              />
+              Also record this tab&apos;s audio (Me / Them)
             </label>
             <div className="field">
               <span className="label">People</span>
