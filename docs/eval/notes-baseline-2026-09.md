@@ -1,5 +1,7 @@
 # Notes eval baseline — 2026-09 (Summary Engine v2, Q1 → Q5)
 
+> Q6 (closure, 3 runs, prompt `2026-10-12`): `notes-v2-closure-2026-09.md` — the Q6 pipeline report is now `notes-baseline-pipeline.json`.
+
 Stack model `dev_mac` = `notes-chat` (Gemma 3 4B, Q4_K_M, Ollama) on the dev Mac. Corpus: the
 committed synthetic set `tests/fixtures/eval/notes` (8 recordings for Q1/Q2; 10 for Q3, which
 adds m09 voice memo and m10 interview). One run per arm.

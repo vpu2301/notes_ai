@@ -301,6 +301,10 @@ apps:
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       ENV: staging
       MODELS_CONFIG: /app/config/models.yaml
+      # ADR-0060: the model entity tier runs in staging only, to measure
+      # its precision on real recordings; prod stays off (values-prod.yaml)
+      # until model_tier_precision >= 0.9 on eval/notes/v2.
+      MDX_NOTE_ENTITY_MODEL_TIER: "true"
     secretEnv: [mdx-hf-endpoints]
     masterKey: true
     podLabels:
