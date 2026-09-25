@@ -65,8 +65,15 @@ _LANGUAGE_ID_FALLBACK = "en"
 # other one AND nearly excludes the recording's — a stray English word in a
 # Ukrainian meeting must not flip the decoder chunk by chunk.
 _CHUNK_LID_MIN_MS = 2_000
-_OTHER_LANGUAGE_MIN_PROB = 0.8
+# "Sure which": 0.6, not 0.8 — Ukrainian shares probability with Russian
+# (measured 0.75 / 0.18 on clean Ukrainian speech, T7), and the second bar
+# is what keeps a stray word from flipping. "Not the recording's": ≤ 0.2.
+_OTHER_LANGUAGE_MIN_PROB = 0.6
 _RECORDING_LANGUAGE_MAX_PROB = 0.2
+# Only a language the product transcribes is decoded as "another language".
+# Whisper's detector calls accented English "Welsh" now and then (T7,
+# VoxConverse); decoding that as Welsh would replace speech with noise.
+OTHER_LANGUAGES = frozenset({"en", "de", "uk"})
 
 _lid_meter = metrics.get_meter("mdx.asr.worker.lid")
 _other_language_chunks = _lid_meter.create_counter(
@@ -89,7 +96,9 @@ class LanguageGuess:
 def other_language(guess: LanguageGuess, *, recording: str) -> str | None:
     """The language a chunk should be decoded in when it clearly is not the
     recording's — else None (decision 4 of Sprint I2)."""
-    if guess.language == recording or guess.probability < _OTHER_LANGUAGE_MIN_PROB:
+    if guess.language == recording or guess.language not in OTHER_LANGUAGES:
+        return None
+    if guess.probability < _OTHER_LANGUAGE_MIN_PROB:
         return None
     if guess.probabilities.get(recording, 0.0) > _RECORDING_LANGUAGE_MAX_PROB:
         return None

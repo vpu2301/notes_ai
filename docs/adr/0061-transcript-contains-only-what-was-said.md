@@ -32,7 +32,12 @@ whole-segment echoes over non-speech.
    hosted backends are HTTP services that never execute engine code, and the incident's own dev
    stack transcribes through one.
 4. **A chunk is decoded in its own language when it clearly is not the recording's.** Per VAD
-   chunk ≥ 2 s: language ID; another language only at p ≥ 0.8 with the recording's ≤ 0.2. The
+   chunk ≥ 2 s: language ID; another language only when it is one the product transcribes
+   (en, de, uk), at p ≥ 0.6, with the recording's ≤ 0.2. **Deviation from the sprint's 0.8:**
+   T7 measured clean Ukrainian at uk 0.75 / ru 0.18 (related languages share the mass) with
+   en 0.002 — the second bar is what stops a stray word from flipping, the first only has to
+   say which. The supported-language gate is new: Whisper's detector called accented English
+   "Welsh" on VoxConverse and decoding that as Welsh would replace speech with noise. The
    segment carries `language`; `task` is always `transcribe`. In-process engine only; HTTP
    backends leave the field unset and the note engine keeps its script heuristic for those.
 5. **`condition_on_previous_text=False` for batch chunks** (`MDX_ASR_CONDITION_PREV`, default

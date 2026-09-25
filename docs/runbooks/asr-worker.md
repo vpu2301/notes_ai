@@ -346,7 +346,7 @@ in `mdx_asr_prompt_echo_words_total`. The old whole-segment rule
 ### § other-language (Sprint I2)
 
 A VAD chunk ≥ 2 s whose language identification is sure of another
-language (p ≥ 0.8, and ≤ 0.2 for the recording's) is decoded in that
+supported language (en/de/uk; p ≥ 0.6, and ≤ 0.2 for the recording's) is decoded in that
 language, labelled `segment.language`, never translated (`task` is always
 `transcribe`); counted in `mdx_asr_other_language_chunks_total`. In-process
 engine only — an HTTP backend gives no per-chunk language, and the note

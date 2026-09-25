@@ -106,10 +106,18 @@ async def _incident_audio(job_id: UUID) -> bytes:
     main_deps.build_asr = lambda _name: _NullEngine()  # type: ignore[assignment]
     state = await main_deps.build_state()
     try:
-        async with state.app_pool.acquire() as conn:
-            row = await conn.fetchrow(
+        # The job row is behind RLS; the dev superuser reads it (this script
+        # runs on the dev stack only). The audio is still decrypted through
+        # the worker's own store, tenant-bound.
+        import asyncpg
+
+        su = await asyncpg.connect("postgresql://postgres:postgres@localhost:5432/notes")
+        try:
+            row = await su.fetchrow(
                 "SELECT tenant_id, audio_id FROM transcription_jobs WHERE id = $1", job_id
             )
+        finally:
+            await su.close()
         if row is None:
             raise SystemExit(f"job {job_id} not found")
         key = f"{row['tenant_id']}/{row['audio_id']}.enc"

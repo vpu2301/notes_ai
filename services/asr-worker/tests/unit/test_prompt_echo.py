@@ -192,8 +192,14 @@ def test_a_chunk_is_decoded_in_another_language_only_when_the_detector_is_sure()
     assert inference.other_language(sure, recording="en") == "uk"
     same = inference.LanguageGuess("en", 0.99, {"en": 0.99})
     assert inference.other_language(same, recording="en") is None
-    unsure = inference.LanguageGuess("uk", 0.6, {"uk": 0.6, "en": 0.35})
+    # Ukrainian shares probability with Russian: 0.75 is a sure Ukrainian.
+    related = inference.LanguageGuess("uk", 0.75, {"uk": 0.75, "ru": 0.18, "en": 0.002})
+    assert inference.other_language(related, recording="en") == "uk"
+    unsure = inference.LanguageGuess("uk", 0.5, {"uk": 0.5, "ru": 0.3, "en": 0.15})
     assert inference.other_language(unsure, recording="en") is None
+    # The detector's "Welsh" on accented English is never decoded as Welsh.
+    welsh = inference.LanguageGuess("cy", 0.95, {"cy": 0.95, "en": 0.03})
+    assert inference.other_language(welsh, recording="en") is None
     # A stray English word in a Ukrainian meeting: the recording language
     # keeps enough probability to hold.
     stray = inference.LanguageGuess("en", 0.85, {"en": 0.85, "uk": 0.3})
