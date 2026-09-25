@@ -183,6 +183,26 @@ read (`asr_service/domain/speaker_edits.py`):
   `start_ms`/`end_ms` + artifact `segment_indices`, never a turn's
   position — reassigns reshape turns.
 
+## A conversation reads clean without a word being touched (Sprint I3 T3)
+
+On top of G0's verbatim serving, nlp-service runs one more stage for a
+conversation (`conversation=true` on the batch request, sent for every
+diarized result): `disfluency` hides non-lexical fillers ("uh", "um", "äh",
+"е"; table in `tests/fixtures/nlp/fillers.json`) and the first copy of an
+immediate repeat ("this is this is"), and capitalises the first visible word
+of each segment. Hidden words stay in `words` with `hidden: true` and their
+timings; `text` is rebuilt from the visible ones; `raw_text` is the decoder's
+own text. The note engine's `normalise_quote` drops the same fillers, so a
+quote taken from the displayed text verifies against the raw one and back.
+Dictation is untouched — there a filler may be the person's own word.
+
+`GET /asr/jobs/{id}/result` also says how much the post-processor shaped the
+view — `enrichment: full | partial | raw` (Sprint I3 T2): `partial` means a
+stage failed on some segment, which then shows its raw text (before I3 that
+segment silently looked un-punctuated); `raw` means nlp-service was down, the
+language has no rules, or the transcript is empty. Counted in
+`mdx_asr_result_enrichment_total{state}`.
+
 ## A conversation is served verbatim (Sprint G0 / Summary Engine v2 Q3)
 
 `GET /asr/jobs/{id}/result` runs the transcript through nlp-service on every

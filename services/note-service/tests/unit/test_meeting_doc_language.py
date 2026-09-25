@@ -123,3 +123,24 @@ def test_split_pieces_keep_the_turns_language() -> None:
     )
     pieces = windows.split_long_turn(long)
     assert len(pieces) > 1 and all(p.language == "uk" for p in pieces)
+
+
+# ── Sprint I3 T3: quotes verify against the displayed and the raw text ──
+
+
+def test_normalise_quote_drops_the_fillers_the_display_hides() -> None:
+    import json
+    from pathlib import Path
+
+    from note_service.domain.meeting_doc.verify import FILLERS, normalise_quote
+
+    fixture = json.loads(
+        (
+            Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "nlp" / "fillers.json"
+        ).read_text("utf-8")
+    )
+    assert frozenset().union(*(set(v) for v in fixture["fillers"].values())) == FILLERS
+    raw = "uh so this is, um, the swim platform. Uh-huh."
+    shown = "So this is, the swim platform."
+    assert normalise_quote(raw) == normalise_quote(shown) == "so this is the swim platform"
+    assert normalise_quote("I'll er go") == "i'll go"

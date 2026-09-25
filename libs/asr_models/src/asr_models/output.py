@@ -312,6 +312,11 @@ class TranscriptResultView(BaseModel):
     relabel_available: bool = False
     nlp_applied: bool = False
     nlp_pipeline_version: str | None = None
+    # Sprint I3 T2: how much of this view the post-processor shaped —
+    # ``full`` (every segment), ``partial`` (a stage failed on some segment,
+    # which then shows its raw text) or ``raw`` (nlp-service down, a
+    # language it has no rules for, or an empty transcript).
+    enrichment: Literal["full", "partial", "raw"] = "raw"
     # Sprint I2: what the guards removed or labelled (timestamps and counts).
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
     schema_version: int = 1

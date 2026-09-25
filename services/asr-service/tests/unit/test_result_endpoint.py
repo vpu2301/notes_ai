@@ -690,3 +690,53 @@ def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
         "prompt_echo_segments_dropped": 0,
         "other_language_chunks": 1,
     }
+
+
+# ── Sprint I3 T2: the view says how much the post-processor shaped it ──
+
+
+def test_enrichment_is_full_partial_or_raw(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    full = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert full.json()["enrichment"] == "full"
+
+    # One segment's stage failed: that segment shows its raw text, the view says partial.
+    rig.nlp.response["segments"][0]["warnings"] = [
+        {"code": "stage_failed", "detail": "x", "stage": "punctuation"}
+    ]
+    partial = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    body = partial.json()
+    assert body["enrichment"] == "partial" and body["nlp_applied"] is True
+    # Raw text (the fake's "." segment still merges its period into it).
+    assert body["segments"][0]["text"].rstrip(".") == body["segments"][0]["raw_text"]
+
+    rig.nlp.response = None
+    raw = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert raw.json()["enrichment"] == "raw" and raw.json()["nlp_applied"] is False
+
+
+def test_a_diarized_result_tells_nlp_it_is_a_conversation(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    output = _output().model_copy(update={"speakers": ["SPEAKER_1"]})
+    rig.store.body = output.model_dump_json().encode("utf-8")
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    (call,) = rig.nlp.calls
+    assert call["conversation"] is True and "punctuation" in call["stages_disabled"]

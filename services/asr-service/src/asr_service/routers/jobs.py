@@ -19,7 +19,7 @@ import json
 import logging
 import time
 from datetime import date, datetime
-from typing import Annotated, Final, Literal
+from typing import Annotated, Any, Final, Literal
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -90,6 +90,11 @@ _uploads_counter = _meter.create_counter(
 _validation_rejects_counter = _meter.create_counter(
     "mdx_asr_validation_failures_total",
     description="Validation rejections by code",
+    unit="1",
+)
+_enrichment_counter = _meter.create_counter(
+    "mdx_asr_result_enrichment_total",
+    description="Transcript reads by how much nlp-service shaped them (full | partial | raw), Sprint I3",
     unit="1",
 )
 _jobs_counter = _meter.create_counter(
@@ -846,13 +851,13 @@ async def _enriched_result_view(
     )
     overlap = list(output.overlap_ms)
     if not settings.nlp_enrich_enabled or not output.segments:
-        return _structured(view, speaker_names, edits, overlap)
+        return _raw(view, speaker_names, edits, overlap)
     # The post-processor has per-language rules (dictated punctuation,
     # number words). A language it has no rules for gets the raw Whisper
     # text — which is already punctuated — rather than a 422 from
     # nlp-service that we would then swallow.
     if output.language not in NLP_LANGUAGES:
-        return _structured(view, speaker_names, edits, overlap)
+        return _raw(view, speaker_names, edits, overlap)
 
     payload = [
         {
@@ -878,11 +883,15 @@ async def _enriched_result_view(
         # the day somebody happens to read it.
         reference_date=reference_date,
         stages_disabled=sorted(CONVERSATION_STAGES_DISABLED) if _is_conversation(output) else None,
+        conversation=_is_conversation(output),
     )
     if resp is None or len(resp.get("segments", [])) != len(output.segments):
-        return _structured(
-            view, speaker_names, edits, overlap
-        )  # NLP down/mismatched — raw transcript
+        return _raw(view, speaker_names, edits, overlap)  # NLP down/mismatched — raw transcript
+    # Sprint I3 T2: a segment whose stage failed shows its raw text; the
+    # view says so instead of looking half-punctuated for no reason.
+    failed = sum(1 for seg in resp["segments"] if _stage_failed(seg))
+    enrichment = "partial" if failed else "full"
+    _enrichment_counter.add(1, {"state": enrichment})
 
     enriched: list[EnrichedSegment] = []
     for index, (raw_seg, nlp_seg) in enumerate(zip(output.segments, resp["segments"], strict=True)):
@@ -890,6 +899,9 @@ async def _enriched_result_view(
         if raw_seg.language and raw_seg.language != output.language:
             # Sprint I2 T4: the post-processor has the RECORDING's rules; a
             # passage in another language keeps its raw decoding.
+            enriched.append(_served_segment(raw_seg, index))
+            continue
+        if _stage_failed(nlp_seg):
             enriched.append(_served_segment(raw_seg, index))
             continue
         spans = [
@@ -948,12 +960,28 @@ async def _enriched_result_view(
                 "segments": enriched,
                 "nlp_applied": True,
                 "nlp_pipeline_version": resp.get("pipeline_version"),
+                "enrichment": enrichment,
             }
         ),
         speaker_names,
         edits,
         overlap,
     )
+
+
+def _stage_failed(nlp_seg: dict[str, Any]) -> bool:
+    return any(w.get("code") == "stage_failed" for w in nlp_seg.get("warnings") or [])
+
+
+def _raw(
+    view: TranscriptResultView,
+    names: dict[str, str] | None,
+    edits: list[SpeakerEdit] | None,
+    overlap_ms: list[tuple[int, int]],
+) -> TranscriptResultView:
+    """The view without the post-processor, and counted as such."""
+    _enrichment_counter.add(1, {"state": "raw"})
+    return _structured(view.model_copy(update={"enrichment": "raw"}), names, edits, overlap_ms)
 
 
 def _served_segments(output: TranscriptionOutput) -> list[EnrichedSegment]:

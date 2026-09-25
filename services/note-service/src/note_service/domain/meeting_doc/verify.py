@@ -158,16 +158,53 @@ _PUNCT = re.compile(r"[^\w\s']", re.UNICODE)
 _SPACE = re.compile(r"\s+")
 
 
+# Sprint I3 T3: the fillers nlp-service hides from a conversation's displayed
+# text (tests/fixtures/nlp/fillers.json). Dropped here too, so a quote taken
+# from the displayed text still matches the raw one and vice versa.
+FILLERS: Final[frozenset[str]] = frozenset(
+    {
+        "uh",
+        "um",
+        "erm",
+        "er",
+        "hmm",
+        "hm",
+        "mm",
+        "mhm",
+        "ah",
+        "eh",
+        "uh-huh",
+        "äh",
+        "ähm",
+        "öh",
+        "öhm",
+        "mh",
+        "е",
+        "ем",
+        "мм",
+        "ммм",
+        "хм",
+        "е-е",
+        "а-а",
+    }
+)
+_QUOTE_EDGE = "'\"“”„«».,;:!?"
+
+
 def normalise_quote(text: str) -> str:
     """The comparison form: NFKC, case-folded, punctuation dropped
-    (apostrophes kept — "I'll" is not "Ill"), whitespace collapsed.
+    (apostrophes kept — "I'll" is not "Ill"), fillers dropped, whitespace
+    collapsed.
 
     Mirrors ``scripts/eval/smoke_eval._quote`` so the harness and the
     pipeline agree about what counts as a match.
     """
     folded = unicodedata.normalize("NFKC", text).casefold()
     folded = folded.replace("’", "'").replace("‘", "'")
-    return _SPACE.sub(" ", _PUNCT.sub(" ", folded)).strip()
+    # Hyphenated fillers ("uh-huh") are matched before punctuation goes.
+    kept = [tok for tok in _SPACE.split(folded) if tok.strip(_QUOTE_EDGE) not in FILLERS]
+    tokens = _PUNCT.sub(" ", " ".join(kept)).split()
+    return " ".join(tok for tok in tokens if tok not in FILLERS)
 
 
 def locate_quote(quote: str, window: Window, cited_line: int) -> Turn | None:

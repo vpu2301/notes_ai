@@ -3,6 +3,15 @@
 ## Unreleased — A live meeting note writes itself too
 
 ### Added
+- **Transcript parity items (Sprint I3 T2–T4)** (nlp-service, asr-service, note-service, web): a
+  conversation's displayed transcript hides fillers and immediate repeats and capitalises each
+  segment's first word, with every word and its timing kept (`words[].hidden`, `raw_text`
+  untouched) and quotes verifying against both texts; the result view says how much the
+  post-processor shaped it (`enrichment: full | partial | raw`, `mdx_asr_result_enrichment_total`)
+  and a segment whose stage failed shows its raw text; a web recording can carry the microphone
+  and the tab's audio as two channels (`channel_layout=mic_system`, `local_speaker_name`), so the
+  author's voice is a separate speaker, with a mono fallback when the browser offers no tab audio
+  or the server refuses the layout.
 - **Nothing enters a transcript that was not said (Sprint I2)** (asr-worker, asr-service,
   note-service, Mac, iPhone, web; migrations 0061 + 0062, ADR-0061): a glossary term is
   vocabulary only if it is a name or a term — a role label ("Moderator II", "speaker

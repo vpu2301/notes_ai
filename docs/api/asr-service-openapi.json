@@ -956,6 +956,16 @@
             "title": "Edits",
             "type": "array"
           },
+          "enrichment": {
+            "default": "raw",
+            "enum": [
+              "full",
+              "partial",
+              "raw"
+            ],
+            "title": "Enrichment",
+            "type": "string"
+          },
           "job_id": {
             "format": "uuid",
             "title": "Job Id",

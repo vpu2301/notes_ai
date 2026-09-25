@@ -54,6 +54,7 @@ class NlpBatchClient:
         reference_date: date | None = None,
         authorization: str | None = None,
         stages_disabled: list[str] | None = None,
+        conversation: bool = False,
     ) -> dict[str, Any] | None:
         # ``authorization``: forward the end-user's bearer so nlp-service
         # authorizes + tenant-scopes the call itself (no service creds).
@@ -67,6 +68,9 @@ class NlpBatchClient:
         if stages_disabled:
             # Sorted, deduplicated — the same shape dictation-service sends.
             body["stages_disabled"] = sorted(set(stages_disabled))
+        if conversation:
+            # Sprint I3: fillers and repeats hidden from the displayed text.
+            body["conversation"] = True
         try:
             resp = await self._client.post("/nlp/process/batch", json=body, headers=headers)
         except httpx.HTTPError as exc:
