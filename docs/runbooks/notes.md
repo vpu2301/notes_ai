@@ -391,17 +391,66 @@ backend against the committed eval baseline (`docs/eval/notes-baseline-*.md`).
 
 ### Deploying the engine (Summary Engine v2)
 
-**Migrate first, then the workers.** Migration 0058 widens
-`note_meetings.meeting_type_detected`; 0059 adds the line columns to
-`note_generated_items` (`cites`, `certainty`, `attributed_to`, `corrections`,
-`mentions`) and a kind vocabulary. A worker from Q5 on writes those columns:
-started against a database without 0059, every generation fails at its item
-insert. Order: `make migrate-up` (or the migration job) → API → note-worker.
-Rolling back: workers first, then `migrate-down` 0059 (it deletes the line
-rows it added; fact rows stay).
+**Migrate first, then the workers.** Order (Q6 T5):
 
-`MDX_NOTE_ENTITY_MODEL_TIER` stays `false` unless an eval report for that
-backend shows `model_tier_precision ≥ 0.9`.
+1. Migrations **0058** (recording types), **0059** (generated lines),
+   **0060** (weekly notes-quality reader) — `make migrate-up` or the
+   migration job. 0057 (note titles, ADR-0059) must already be applied.
+   Before deploying to a database that has ever run an engine branch,
+   check `SELECT version FROM schema_migrations ORDER BY 1 DESC LIMIT 5`:
+   the migrations were never numbered differently in this repository, but
+   an applied migration is never renamed — a mismatch gets a corrective
+   migration.
+2. note-service (API).
+3. note-worker.
+4. web.
+
+0058 widens `note_meetings.meeting_type_detected`; 0059 adds the line
+columns to `note_generated_items` (`cites`, `certainty`, `attributed_to`,
+`corrections`, `mentions`) and a kind vocabulary. A worker from Q5 on writes
+those columns: started against a database without 0059, every generation
+fails at its item insert. Rolling back: workers first, then `migrate-down`
+0060 → 0059 (it deletes the line rows it added; fact rows stay) → 0058.
+
+Config: `MDX_NOTE_ENTITY_MODEL_TIER` is `true` in staging (to measure it on
+real recordings) and `false` in production (`values-prod.yaml`) until an
+eval report shows `model_tier_precision ≥ 0.9` on `eval/notes/v2`
+(ADR-0060). `MDX_NOTE_GENERATION_PER_TENANT` is unchanged.
+
+### Drills (Q6 T5)
+
+Run on staging with a fixture tenant, never a customer recording. One line
+per run: date, outcome, who.
+
+| Drill | Expected | Runs |
+|---|---|---|
+| Chat backend paused 10 min during generations | jobs `waiting_on_model`, no failed notes; resume completes them; classify/name fall back and the document still writes | **not run** — no staging deployment yet |
+| nlp-service down | transcripts served raw (`_structured`), generation runs, dates unresolved (no wrong dates) | **not run** |
+| Migration 0059 rolled back with a Q5 worker running | worker `error_kind = schema_mismatch`, alert fires, note untouched; roll forward fixes | **not run** |
+| Model flags every line as noise (fixture tenant / shadow config) | `NoteGenerationNoiseOverridden` fires; note still has content | **not run** |
+
+### Weekly notes quality (Q6 T8)
+
+`make weekly-notes` (host cron `infra/compose/cron/weekly-notes.cron`, chart
+CronJob `mdx-weekly-notes`, Mondays 06:45 UTC) runs
+`scripts/ops/notes_quality.sql` as `funnel_reader` and writes
+`notes-quality-YYYY-WW.csv`: per week, by recording type and language, across
+all workspaces — kept-line rate (7 d), dismiss rate by kind with the reason
+histogram, regenerate rate, share-without-edit, minutes to first share,
+corrections accepted, type and title changed. Counts only: the role reads
+metadata columns, and the two text comparisons are 0060's SECURITY DEFINER
+functions that return ids and integers.
+
+The job prints the last complete week next to the meeting-document
+concept's thresholds: **kept-line < 50 % or regenerate > 40 % after four
+pilot weeks → the document is not trusted; share-without-edit not above the
+baseline week → not send-ready.** The first production run is the baseline
+week; the four-week read is a calendar entry.
+
+Approximations: a kept line is its text, word for word, still in the note
+7 days later (an edited owner or date counts as not kept — a lower bound);
+`type_changed` loses a note once a regeneration records the author's type.
+Evidence opened per line is not reported: no evidence-opened event exists.
 
 ### Changing which model writes notes
 

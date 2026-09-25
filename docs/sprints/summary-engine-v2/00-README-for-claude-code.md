@@ -1,5 +1,7 @@
 # Summary Engine v2 — build sprints for Claude Code
 
+**Status (2026-09-25): stopped at Q6 T2 — not closed.** Q1–Q5 and the Q6 reconciliation, CI job, native labels and weekly report are built on `engine-v2/Q1`; gates in `docs/eval/notes-v2-closure-2026-09.md` (synthetic set: the faithfulness gates pass; recall, coverage, recording type, hedges, attribution, blind pairwise and staging latency do not). Decisions in ADR-0060. Open: the same table on `eval/notes/v2` with r01 and the blind rounds; merge to `dev`; staging drills and load; the production read (weekly notes-quality report, four weeks).
+
 **What this is:** five work orders that take the document engine in `services/note-service/src/note_service/domain/meeting_doc/` from the output audited on 2026-09-22 (ZEIT "Was jetzt?" episode: 3 of 24 facts, one invented sentence, four distortions, wrong recording type, a rendering bug) to a document that beats a one-prompt baseline in blind review and never contains a claim the transcript does not support.
 
 **Repo baseline (checked 2026-09-22): branch `summaries` @ `fbba745` ("Notes summaries (very unstable now").** The engine, the worker, `note_generations` / `note_generated_items` (migration `0052`), `POST/GET /v1/notes/{id}/generation`, `GET /v1/notes/{id}/generated-items`, the eval harness `scripts/eval/notes_eval.py` and the web status line all exist there. `dev` (`1427d7b`, 2026-09-16) has none of it. Branch from `summaries`.

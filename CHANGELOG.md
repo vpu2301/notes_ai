@@ -81,6 +81,19 @@
   the job classifies, then names, then extracts; the title prompt joins the pinned prompt
   fingerprint. `PROMPT_VERSION` is `2026-10-12`. Migrations stay 0057 (title source), 0058
   (recording types), 0059 (generated lines); the next free number is 0060.
+- **Summary Engine v2 — Q6, closure** (Mac, iPhone, CI, ops; migration 0060, ADR-0060): the Mac
+  and iPhone show what the API already returns — the recording type under the generation status
+  ("Podcast / broadcast", none for a meeting) and "Not included: 00:45–00:52 (background speech)"
+  for up to four passages, each seeking the transcript. A `notes-engine` CI job runs the engine,
+  the eval scorers, the gold-format validator and the m06/m09/m10 checklists against the scripted
+  provider on PRs that touch the engine (`notes_assert.py --backend scripted` gates only what the
+  engine guarantees without a model). A weekly notes-quality report (`make weekly-notes`,
+  CronJob `mdx-weekly-notes`) prints kept-line, dismiss, regenerate and share-without-edit rates
+  next to the concept's kill thresholds, as `funnel_reader`: migration 0060 grants it metadata
+  columns only and three count-only functions for the two text comparisons. The model entity
+  tier is on in staging and off in production (ADR-0060). Closure gates on the synthetic set
+  (`docs/eval/notes-v2-closure-2026-09.md`): faithfulness passes, recall/coverage/recording type/
+  hedges do not, so per the stop rule nothing is deployed until `eval/notes/v2` passes.
 - **A meeting note names itself** (`note-service`, Mac, iPhone; ADR-0059, migration 0057): a
   recording's placeholder title ("Meeting notes — 2026-09-22") is replaced, once, with a 3–8 word
   title in the spoken language, taken from across the whole transcript by the `note.generate` job
