@@ -152,6 +152,32 @@
         "title": "ConfidenceSpanView",
         "type": "object"
       },
+      "Diagnostics": {
+        "description": "What the guards did to this transcript. Counts and timestamps only;\nlives in the stored artifact, not in a table.",
+        "properties": {
+          "other_language_chunks": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Other Language Chunks",
+            "type": "integer"
+          },
+          "prompt_echo": {
+            "items": {
+              "$ref": "#/components/schemas/EchoSpan"
+            },
+            "title": "Prompt Echo",
+            "type": "array"
+          },
+          "prompt_echo_segments_dropped": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Prompt Echo Segments Dropped",
+            "type": "integer"
+          }
+        },
+        "title": "Diagnostics",
+        "type": "object"
+      },
       "DiarizationStats": {
         "description": "Why a diarized job produced N speakers (Sprint 28). Numbers only:\nno labels-to-names mapping, no text, no embeddings.",
         "properties": {
@@ -364,6 +390,33 @@
         "title": "DismissSuggestionRequest",
         "type": "object"
       },
+      "EchoSpan": {
+        "description": "Words removed as prompt echo (Sprint I2 T3): where and how many,\nnever which.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "words": {
+            "minimum": 0.0,
+            "title": "Words",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "words"
+        ],
+        "title": "EchoSpan",
+        "type": "object"
+      },
       "EnrichedSegment": {
         "description": "One segment as served by ``GET /asr/jobs/{id}/result``.\n\n``text`` is the NLP post-processed rendering (dictated punctuation\napplied, numbers/dates normalized) when the view's ``nlp_applied``\nis true; otherwise it equals ``raw_text``. ``words`` always carry\nthe raw Whisper timings.",
         "properties": {
@@ -402,6 +455,17 @@
             "minimum": 0.0,
             "title": "End Ms",
             "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
           },
           "raw_text": {
             "title": "Raw Text",
@@ -882,6 +946,9 @@
             ],
             "title": "Count Confidence"
           },
+          "diagnostics": {
+            "$ref": "#/components/schemas/Diagnostics"
+          },
           "edits": {
             "items": {
               "$ref": "#/components/schemas/SpeakerEditView"
@@ -1051,6 +1118,17 @@
             "minimum": 0.0,
             "title": "End Ms",
             "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
           },
           "name": {
             "anyOf": [
@@ -1328,6 +1406,17 @@
             "format": "uuid",
             "title": "Tenant Id",
             "type": "string"
+          },
+          "vocabulary_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vocabulary Hint"
           }
         },
         "required": [

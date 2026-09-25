@@ -599,6 +599,11 @@ ol.rt-list > li::before {
 .turn-time { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .turn-text { grid-column: 2; margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
 .turn-text + .turn-text { margin-top: calc(6px * var(--density)); }
+/* Sprint I2: a turn in another language than the recording. Neutral — a
+   fact about the passage, not something to act on. */
+.turn-lang { color: var(--text-3); background: var(--surface-2); align-self: center; }
+.transcript-include-langs { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.transcript-diagnostic { margin: calc(-8px * var(--density)) 0 calc(12px * var(--density)); color: var(--text-3); }
 
 /* ─── New meeting ───────────────────────────────────────────────────────── */
 /* ActiveCaptureCard: the stage is a framed card with the xl radius. */
@@ -776,6 +781,41 @@ ol.rt-list > li::before {
   text-transform: lowercase;
 }
 .glossary-heard { min-width: 0; overflow-wrap: anywhere; }
+.glossary-meta { white-space: nowrap; }
+.glossary-meta a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.glossary-add-error { margin: calc(6px * var(--density)) 0 0; }
+.glossary-not-sent { margin-top: calc(12px * var(--density)); }
+/* Sprint I2: a stored role label the server no longer sends. Dimmed, tagged,
+   still removable — the list shows what the transcriber gets, so a line it
+   does not get must look like one. */
+.glossary-list li.not-sent .glossary-term,
+.glossary-list li.not-sent .glossary-kind,
+.glossary-list li.not-sent .glossary-heard { color: var(--text-3); }
+.glossary-list li.not-sent .glossary-term { font-weight: 400; text-decoration: line-through; text-decoration-color: var(--line-hover); }
+.glossary-tag {
+  font-size: calc(10.5px * var(--fs)); font-weight: 500;
+  text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-3); background: var(--surface-2);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-xs);
+  padding: 0 5px; white-space: nowrap; align-self: center;
+}
+/* The prompt, word for word. A neutral frame: this is a fact, not a warning. */
+.glossary-hint {
+  margin-top: calc(16px * var(--density));
+  padding: calc(10px * var(--density)) calc(12px * var(--density));
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.glossary-hint-h {
+  display: flex; align-items: baseline; gap: calc(8px * var(--density));
+  font-size: calc(12px * var(--fs)); color: var(--text-2); font-weight: 500;
+}
+.glossary-hint-h .count { margin-left: auto; font-family: var(--mono); font-weight: 400; color: var(--muted); font-size: calc(11.5px * var(--fs)); }
+.glossary-hint-text {
+  margin: calc(6px * var(--density)) 0 0; padding: 0;
+  font-family: var(--mono); font-size: calc(12px * var(--fs)); line-height: 1.5;
+  color: var(--text-1); white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .remember-term { align-items: center; }
 
 /* ─── Still open from last time (Sprint 36) ────────────────────────────── */

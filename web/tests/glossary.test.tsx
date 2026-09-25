@@ -2,11 +2,13 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GlossarySection } from "../src/components/GlossarySection";
+import { ApiError } from "../src/api/http";
+import { GlossarySection, NOT_VOCABULARY } from "../src/components/GlossarySection";
 import {
   RememberTermPrompt,
   heardAsOf,
   isWorthRemembering,
+  type PendingTerm,
 } from "../src/components/RememberTermPrompt";
 import { ToasterProvider } from "../src/components/Toaster";
 import { MeetingPage } from "../src/pages/MeetingPage";
@@ -57,10 +59,21 @@ function term(over: Partial<Record<string, unknown>> = {}) {
 
 function renderSection() {
   return render(
+    <MemoryRouter>
+      <ToasterProvider>
+        <GlossarySection />
+      </ToasterProvider>
+    </MemoryRouter>,
+  );
+}
+
+function renderPrompt(pending: PendingTerm, onDone = vi.fn()) {
+  render(
     <ToasterProvider>
-      <GlossarySection />
+      <RememberTermPrompt pending={pending} onDone={onDone} />
     </ToasterProvider>,
   );
+  return onDone;
 }
 
 beforeEach(() => {
@@ -200,5 +213,148 @@ describe("the capture form knows the workspace's names", () => {
     fireEvent.click(screen.getByRole("button", { name: "Options" }));
     await waitFor(() => expect(glossary.glossaryHint).toHaveBeenCalled());
     expect(screen.getByPlaceholderText(/Names, product terms/)).toHaveValue("");
+  });
+});
+
+// ── Sprint I2: a role label is not a name ─────────────────────────────
+
+describe("a role label never gets into the vocabulary (Sprint I2)", () => {
+  it("is refused inline before anything is sent", async () => {
+    renderSection();
+    await screen.findByText(/Nothing yet/i);
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "Moderator II" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(NOT_VOCABULARY);
+    expect(glossary.rememberTerm).not.toHaveBeenCalled();
+    // Typing again clears the message.
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "Moderator III" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows the same sentence when the server is the one that refuses", async () => {
+    glossary.rememberTerm.mockRejectedValue(
+      new ApiError(422, { status: 422, code: "term_not_vocabulary", detail: "server wording" }),
+    );
+    renderSection();
+    await screen.findByText(/Nothing yet/i);
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "Gregor Gysi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(NOT_VOCABULARY);
+    expect(screen.queryByText("server wording")).toBeNull();
+  });
+
+  it("flags stored labels the server no longer sends, dimmed and still removable", async () => {
+    glossary.listGlossary.mockResolvedValue([
+      term(),
+      term({ id: "t-2", term: "Moderator II", heard_as: [], in_hint: false }),
+      term({ id: "t-3", term: "moderatorin", heard_as: [], in_hint: false }),
+    ]);
+    renderSection();
+    await screen.findByText("Moderator II");
+    // (The toaster is a status region too; the banner is found by its class.)
+    expect(document.querySelector(".glossary-not-sent")).toHaveTextContent(
+      "2 entries are role labels, not names — they are no longer sent to the transcriber; remove them",
+    );
+    const row = screen.getByText("Moderator II").closest("li")!;
+    expect(row).toHaveClass("not-sent");
+    expect(row).toHaveTextContent("not sent");
+    expect(screen.getByText("John Mayer").closest("li")).not.toHaveClass("not-sent");
+    expect(screen.getAllByText("not sent")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Forget Moderator II" })).toBeInTheDocument();
+  });
+
+  it("speaks in the singular for one", async () => {
+    glossary.listGlossary.mockResolvedValue([term({ term: "Narrator", in_hint: false })]);
+    renderSection();
+    await screen.findByText("Narrator");
+    expect(document.querySelector(".glossary-not-sent")).toHaveTextContent(
+      "1 entry is a role label, not a name — it is no longer sent to the transcriber; remove it",
+    );
+  });
+
+  it("shows no banner when everything is sent", async () => {
+    glossary.listGlossary.mockResolvedValue([term({ in_hint: true }), term({ id: "t-2", term: "Contoso" })]);
+    renderSection();
+    await screen.findByText("Contoso");
+    expect(document.querySelector(".glossary-not-sent")).toBeNull();
+  });
+});
+
+describe("the prompt is shown as it will be sent (Sprint I2)", () => {
+  it("prints the exact hint with its term count", async () => {
+    glossary.listGlossary.mockResolvedValue([term(), term({ id: "t-2", term: "Contoso" })]);
+    glossary.glossaryHint.mockResolvedValue({ hint: "John Mayer, Contoso", terms: 2 });
+    renderSection();
+    const block = await screen.findByLabelText("What the transcriber is told");
+    expect(block).toHaveTextContent("What the transcriber is told for the next recording");
+    expect(block).toHaveTextContent("2 terms");
+    expect(block.querySelector(".glossary-hint-text")).toHaveTextContent("John Mayer, Contoso");
+  });
+
+  it("refetches the hint after a term is added and after one is forgotten", async () => {
+    glossary.listGlossary.mockResolvedValue([term()]);
+    glossary.glossaryHint.mockResolvedValue({ hint: "John Mayer", terms: 1 });
+    renderSection();
+    await screen.findByRole("button", { name: "Forget John Mayer" });
+    expect(glossary.glossaryHint).toHaveBeenCalledTimes(1);
+
+    glossary.glossaryHint.mockResolvedValue({ hint: "John Mayer, Contoso", terms: 2 });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "Contoso" } });
+    fireEvent.click(screen.getByRole("button", { name: "Company" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(glossary.glossaryHint).toHaveBeenCalledTimes(2));
+    await screen.findByText("2 terms");
+
+    glossary.glossaryHint.mockResolvedValue({ hint: "", terms: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Forget John Mayer" }));
+    await waitFor(() => expect(glossary.glossaryHint).toHaveBeenCalledTimes(3));
+    await screen.findByText("0 terms");
+    expect(screen.getByText(/the transcriber gets no names/i)).toBeInTheDocument();
+  });
+
+  it("says where a term came from, and when", async () => {
+    glossary.listGlossary.mockResolvedValue([
+      term({ source_note_id: "note-77" }),
+      term({ id: "t-2", term: "Contoso", source_note_id: null }),
+    ]);
+    renderSection();
+    await screen.findByText("Contoso");
+    const link = screen.getByRole("link", { name: "from a note" });
+    expect(link).toHaveAttribute("href", "/notes/note-77");
+    expect(screen.getAllByRole("link", { name: "from a note" })).toHaveLength(1);
+    expect(screen.getAllByText(/^added /)).toHaveLength(2);
+  });
+});
+
+describe("the offer to remember (Sprint I2 wording)", () => {
+  it("says what remembering means", () => {
+    renderPrompt({ term: "John Mayer", heardAs: "Jon Meyer" });
+    expect(document.querySelector(".remember-term")).toHaveTextContent(
+      'Send "John Mayer" to the transcriber for every recording in this workspace?',
+    );
+    expect(screen.getByRole("button", { name: "Not now" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remember" })).toBeInTheDocument();
+  });
+
+  it.each(["Moderator II", "moderatorin", "speaker background", "Ведучий"])(
+    "is not made at all for the role label %j",
+    (label) => {
+      renderPrompt({ term: label, heardAs: "Speaker 2" });
+      expect(document.querySelector(".remember-term")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Remember" })).toBeNull();
+    },
+  );
+
+  it("tells the server which note the rename happened in", async () => {
+    renderPrompt({ term: "John Mayer", heardAs: "Jon Meyer", noteId: "note-77" });
+    fireEvent.click(screen.getByRole("button", { name: "Remember" }));
+    await waitFor(() =>
+      expect(glossary.rememberTerm).toHaveBeenCalledWith({
+        term: "John Mayer",
+        kind: "person",
+        heard_as: ["Jon Meyer"],
+        note_id: "note-77",
+      }),
+    );
   });
 });

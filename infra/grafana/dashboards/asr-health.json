@@ -684,6 +684,98 @@
           "datasource": null
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt-echo words per audio hour (24 h, alert > 20) — Sprint I2",
+      "id": 28,
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Share of dual-channel captures diarized from the mixdown because the channel analysis failed. Alert DualChannelMonoFallbackHigh at > 5 % with ≥ 20 dual jobs a day.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_prompt_echo_words_total[24h])) / (sum(increase(mdx_asr_audio_duration_seconds_sum[24h])) / 3600)",
+          "legendFormat": "echo words / audio h",
+          "refId": "A",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Other-language chunks and echo-dropped segments (24 h) — Sprint I2",
+      "id": 41,
+      "gridPos": {
+        "x": 12,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Share of dual-channel captures diarized from the mixdown because the channel analysis failed. Alert DualChannelMonoFallbackHigh at > 5 % with ≥ 20 dual jobs a day.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_other_language_chunks_total[24h]))",
+          "legendFormat": "other-language chunks",
+          "refId": "A",
+          "datasource": null
+        },
+        {
+          "expr": "sum(increase(mdx_asr_prompt_echo_segments_dropped_total[24h]))",
+          "legendFormat": "echo segments dropped",
+          "refId": "B",
+          "datasource": null
+        }
+      ]
     }
   ],
   "uid": "asr-health"

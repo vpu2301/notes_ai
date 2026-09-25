@@ -643,3 +643,50 @@ def test_the_batch_client_posts_stages_sorted_and_only_when_set() -> None:
     assert sent[0]["stages_disabled"] == ["date_norm", "punctuation"]
     assert sent[0]["reference_date"] == "2026-09-22"
     assert "stages_disabled" not in sent[1]
+
+
+# ── Sprint I2 T4: a passage in another language is labelled, not enriched ──
+
+
+def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_models import Diagnostics, EchoSpan
+    from asr_service.routers import jobs
+
+    output = _output()
+    # The second segment was decoded as Ukrainian inside an English recording.
+    output = output.model_copy(
+        update={
+            "language": "en",
+            "segments": [
+                output.segments[0].model_copy(update={"text": "we looked at the flybridge"}),
+                output.segments[1].model_copy(update={"text": "Що це таке?", "language": "uk"}),
+            ],
+            "diagnostics": Diagnostics(
+                prompt_echo=[EchoSpan(start_ms=0, end_ms=900, words=3)], other_language_chunks=1
+            ),
+        }
+    )
+    rig.store.body = output.model_dump_json().encode("utf-8")
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    resp = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["nlp_applied"] is True
+    # The fake NLP answers its fixed rendering for the first segment and
+    # "." for the second; the Ukrainian segment is served raw instead and
+    # never merged into the English one.
+    assert [s["text"] for s in body["segments"]] == ["Скарги на кашель.", "Що це таке?"]
+    assert [s["language"] for s in body["segments"]] == [None, "uk"]
+    assert [t["language"] for t in body["turns"]] == [None, "uk"]
+    assert body["diagnostics"] == {
+        "prompt_echo": [{"start_ms": 0, "end_ms": 900, "words": 3}],
+        "prompt_echo_segments_dropped": 0,
+        "other_language_chunks": 1,
+    }

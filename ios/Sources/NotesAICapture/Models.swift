@@ -2285,12 +2285,33 @@ struct GlossaryTerm: Decodable, Identifiable, Equatable, Sendable {
     let createdAt: Date
     /// Whether this person may remove it: its creator, or an admin.
     let canDelete: Bool
+    /// Sprint I2 — whether the server still sends it to the transcriber.
+    /// False for a role label ("Moderator II") that got in before the
+    /// rule existed: kept so it can be seen and removed, never sent.
+    let inHint: Bool
+    /// The note it was remembered from, when it came from a correction.
+    let sourceNoteId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, term, kind
         case heardAs = "heard_as"
         case createdAt = "created_at"
         case canDelete = "can_delete"
+        case inHint = "in_hint"
+        case sourceNoteId = "source_note_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        term = try c.decode(String.self, forKey: .term)
+        kind = try c.decode(GlossaryKind.self, forKey: .kind)
+        heardAs = try c.decodeIfPresent([String].self, forKey: .heardAs) ?? []
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        canDelete = try c.decode(Bool.self, forKey: .canDelete)
+        // An older server does not say; everything it stores is sent.
+        inHint = try c.decodeIfPresent(Bool.self, forKey: .inHint) ?? true
+        sourceNoteId = try c.decodeIfPresent(String.self, forKey: .sourceNoteId)
     }
 }
 
@@ -2318,10 +2339,13 @@ struct RememberTermRequest: Encodable, Sendable {
     let term: String
     let kind: String
     let heardAs: [String]
+    /// The note the correction was made in, when there is one (Sprint I2).
+    var noteId: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case term, kind
         case heardAs = "heard_as"
+        case noteId = "note_id"
     }
 }
 
@@ -2360,10 +2384,57 @@ enum RememberableName {
         return !rest.isEmpty && rest.allSatisfy(\.isNumber)
     }
 
+    // MARK: Role labels are not vocabulary (Sprint I2)
+
+    /// Words a person uses to label a voice rather than name it, in the
+    /// three languages the apps speak. The one list every client and the
+    /// server share: `tests/fixtures/glossary/role_words.json`, and the
+    /// test asserts this set equals it. A term made only of these (and
+    /// ordinals) is "Moderator II", not a name — and once it reached the
+    /// glossary it was read to the transcriber before every recording,
+    /// which echoed it into a transcript (the 2026-09-25 incident).
+    static let roleWords: Set<String> = [
+        // en
+        "speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee",
+        "presenter", "caller", "background", "unknown", "voice", "participant", "translator",
+        "announcer",
+        // de
+        "sprecher", "sprecherin", "moderatorin", "gast", "gastgeber", "erzähler", "erzählerin",
+        "hintergrund", "unbekannt", "stimme", "teilnehmer", "teilnehmerin", "übersetzer",
+        // uk
+        "спікер", "ведучий", "ведуча", "гість", "гостя", "оповідач", "фон", "невідомий", "голос",
+        "учасник", "учасниця", "перекладач",
+    ]
+
+    static let ordinals: Set<String> = [
+        "i", "ii", "iii", "iv", "v", "1", "2", "3", "4", "5", "one", "two", "three", "eins", "zwei",
+        "drei", "один", "два", "три", "first", "second", "erste", "zweite", "перший", "другий",
+    ]
+
+    /// Whether a term belongs in the transcriber's vocabulary — the same
+    /// rule as the server's `is_vocabulary`.
+    ///
+    /// No: every token is a role word or an ordinal; a person with no
+    /// capital letter anywhere ("moderatorin"). Yes: anything else — the
+    /// rule only has to keep labels out, not judge names.
+    static func isVocabulary(_ term: String, kind: GlossaryKind) -> Bool {
+        let tokens = term.split { !($0.isLetter || $0.isNumber) }.map { $0.lowercased() }
+        guard !tokens.isEmpty else { return false }
+        if tokens.allSatisfy({ roleWords.contains($0) || ordinals.contains($0) }) { return false }
+        if kind == .person {
+            let anyCapital = term.split(whereSeparator: \.isWhitespace).contains { part in
+                part.unicodeScalars.first?.properties.isUppercase == true
+            }
+            if !anyCapital { return false }
+        }
+        return true
+    }
+
     static func worthRemembering(from: String, to: String) -> Bool {
         let term = normalised(to)
         guard term.count >= 2, term.count <= 80, !isPlaceholder(term) else { return false }
         guard normalised(from).lowercased() != term.lowercased() else { return false }
+        guard isVocabulary(term, kind: .person) else { return false }
         return !term.unicodeScalars.contains { scalar in
             forbidden.contains { $0.contains(scalar.value) }
         }

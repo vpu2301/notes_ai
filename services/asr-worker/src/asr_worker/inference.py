@@ -18,13 +18,15 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from opentelemetry import metrics
 
 from asr_models import (
     AUTO_LANGUAGE,
+    Diagnostics,
     Segment,
     TranscriptionMetadata,
     TranscriptionOutput,
@@ -58,6 +60,20 @@ _LANGUAGE_ID_WINDOWS = 3
 # language, so an undecidable recording is more likely to be usable there
 # than under a guess.
 _LANGUAGE_ID_FALLBACK = "en"
+# Sprint I2 T4: a VAD chunk at least this long gets its own language check;
+# it is decoded in another language only when the detector is sure of the
+# other one AND nearly excludes the recording's — a stray English word in a
+# Ukrainian meeting must not flip the decoder chunk by chunk.
+_CHUNK_LID_MIN_MS = 2_000
+_OTHER_LANGUAGE_MIN_PROB = 0.8
+_RECORDING_LANGUAGE_MAX_PROB = 0.2
+
+_lid_meter = metrics.get_meter("mdx.asr.worker.lid")
+_other_language_chunks = _lid_meter.create_counter(
+    "mdx_asr_other_language_chunks_total",
+    description="VAD chunks decoded in another language than the recording (Sprint I2)",
+    unit="1",
+)
 
 
 @dataclass(slots=True)
@@ -66,6 +82,18 @@ class LanguageGuess:
 
     language: str
     probability: float
+    # Every language's probability from the same pass (empty on fallback).
+    probabilities: dict[str, float] = field(default_factory=dict)
+
+
+def other_language(guess: LanguageGuess, *, recording: str) -> str | None:
+    """The language a chunk should be decoded in when it clearly is not the
+    recording's — else None (decision 4 of Sprint I2)."""
+    if guess.language == recording or guess.probability < _OTHER_LANGUAGE_MIN_PROB:
+        return None
+    if guess.probabilities.get(recording, 0.0) > _RECORDING_LANGUAGE_MAX_PROB:
+        return None
+    return guess.language
 
 
 @dataclass(slots=True)
@@ -230,6 +258,7 @@ class WhisperEngine:
             language_detected = True
 
         segments_out: list[Segment] = []
+        other_language_chunks = 0
         for s in speech:
             chunk = audio_pcm[
                 int(s.start_ms * 16) : int(s.end_ms * 16)
@@ -241,14 +270,34 @@ class WhisperEngine:
             # would leave the model half-fed.
             if should_cancel is not None and await should_cancel():
                 raise TranscriptionCancelledError
+            # Sprint I2 T4: a passage in another language is decoded in that
+            # language and labelled — never translated into the recording's.
+            chunk_language = language
+            if settings.asr_chunk_language_id and chunk.size >= _CHUNK_LID_MIN_MS * 16:
+                guess = await loop.run_in_executor(None, self._detect_chunk_language, chunk)
+                other = other_language(guess, recording=language)
+                if other is not None:
+                    chunk_language = other
+                    other_language_chunks += 1
+                    _other_language_chunks.add(1)
+                    logger.info(
+                        "whisper.other_language_chunk",
+                        extra={
+                            "start_ms": s.start_ms,
+                            "language": other,
+                            "probability": round(guess.probability, 3),
+                        },
+                    )
             segs = await loop.run_in_executor(
                 None,
                 self._run_chunk,
                 chunk,
-                language,
+                chunk_language,
                 prompt,
                 s.start_ms,
             )
+            if chunk_language != language:
+                segs = [seg.model_copy(update={"language": chunk_language}) for seg in segs]
             segments_out.extend(segs)
 
         infer_seconds = time.monotonic() - t_start
@@ -266,9 +315,18 @@ class WhisperEngine:
             language_probability=language_probability,
             segments=segments_out,
             metadata=meta,
+            diagnostics=Diagnostics(other_language_chunks=other_language_chunks),
         )
 
-    def detect_language(self, pcm: np.ndarray) -> LanguageGuess:
+    def _detect_chunk_language(self, pcm: np.ndarray) -> LanguageGuess:
+        """Language identification on one chunk: one 30 s window, and an
+        undecidable chunk answers with the recording's own language (an
+        empty guess is never "another language")."""
+        return self.detect_language(pcm, windows=1)
+
+    def detect_language(
+        self, pcm: np.ndarray, *, windows: int = _LANGUAGE_ID_WINDOWS
+    ) -> LanguageGuess:
         """Identify the spoken language of ``pcm`` (mono 16 kHz float32).
 
         Blocking; call from an executor. Never raises: a detector that
@@ -280,8 +338,8 @@ class WhisperEngine:
         if pcm.size == 0:
             return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
         try:
-            code, probability, _all = self._model.detect_language(
-                pcm, language_detection_segments=_LANGUAGE_ID_WINDOWS
+            code, probability, all_probs = self._model.detect_language(
+                pcm, language_detection_segments=windows
             )
         except Exception as exc:  # noqa: BLE001 — never let LID kill the job
             logger.warning(
@@ -293,7 +351,13 @@ class WhisperEngine:
         if not (2 <= len(code) <= 3 and code.isalpha()):
             logger.warning("whisper.language_id_unusable", extra={"code": code})
             return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
-        guess = LanguageGuess(language=code, probability=max(0.0, min(1.0, float(probability))))
+        guess = LanguageGuess(
+            language=code,
+            probability=max(0.0, min(1.0, float(probability))),
+            probabilities=_probability_table(all_probs),
+        )
+        if windows != _LANGUAGE_ID_WINDOWS:
+            return guess
         logger.info(
             "whisper.language_id",
             extra={"language": guess.language, "probability": round(guess.probability, 3)},
@@ -407,10 +471,12 @@ class WhisperEngine:
         result_segs, _info = self._model.transcribe(
             chunk,
             language=language,
-            initial_prompt=prompt,
             word_timestamps=True,
             beam_size=settings.asr_beam_size,
-            condition_on_previous_text=True,
+            # `task` is never "translate": a passage in another language is
+            # decoded in that language (Sprint I2 T4), not rendered in this one.
+            task="transcribe",
+            **chunk_decode_options(prompt),
         )
         out: list[Segment] = []
         for seg in result_segs:
@@ -456,6 +522,33 @@ class WhisperEngine:
                 )
             )
         return out
+
+
+def chunk_decode_options(prompt: str | None) -> dict[str, Any]:
+    """The vocabulary and context arguments of one batch-chunk decode
+    (Sprint I2 T5/T7): the vocabulary as `initial_prompt` or as `hotwords`
+    per `MDX_ASR_VOCABULARY_MODE`; `condition_on_previous_text` per
+    `MDX_ASR_CONDITION_PREV` (off by default — once the decoder echoes its
+    prompt, the echo would become the next chunk's context)."""
+    options: dict[str, Any] = {"condition_on_previous_text": bool(settings.asr_condition_prev)}
+    if settings.asr_vocabulary_mode == "hotwords":
+        options["hotwords"] = prompt
+        options["initial_prompt"] = None
+    else:
+        options["initial_prompt"] = prompt
+    return options
+
+
+def _probability_table(all_probs: object) -> dict[str, float]:
+    """faster-whisper's ``[(code, prob), …]`` → ``{code: prob}``; anything
+    else (an older API, a stub) is an empty table."""
+    out: dict[str, float] = {}
+    try:
+        for code, prob in all_probs or ():  # type: ignore[union-attr]
+            out[str(code).strip().lower()] = max(0.0, min(1.0, float(prob)))
+    except (TypeError, ValueError):
+        return {}
+    return out
 
 
 def _peak_gpu_mem_mb() -> int:

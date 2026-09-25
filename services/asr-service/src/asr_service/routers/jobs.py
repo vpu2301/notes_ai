@@ -46,6 +46,7 @@ from asr_models import (
     JobErrorKind,
     JobStatus,
     NameSuggestionView,
+    Segment,
     SpeakerEditView,
     SpeakerStatView,
     TranscriptionJobView,
@@ -319,6 +320,8 @@ async def submit_job(
             model="large-v3",
             name_candidates=candidates,
             capture_context=capture_context,
+            # Sprint I2 T2: the exact string the transcriber is told.
+            vocabulary_hint=vocabulary_hint or None,
         )
 
     # Audit the upload + job creation.
@@ -416,6 +419,8 @@ async def submit_job(
             # How many names were offered — never the names (Sprint 30).
             "name_candidates": len(candidates),
             "channel_layout": channel_layout,
+            # How many vocabulary terms — never the terms (Sprint I2).
+            "hint_terms": _hint_terms(vocabulary_hint),
         },
         severity=Severity.INFO,
     )
@@ -434,7 +439,13 @@ async def submit_job(
         queued_at=datetime.fromtimestamp(time.time()),
         diarize=diarize,
         hints_applied=hints_applied,
+        vocabulary_hint=vocabulary_hint or None,
     )
+
+
+def _hint_terms(hint: str | None) -> int:
+    """How many comma-separated terms a hint carries (an audit count)."""
+    return sum(1 for part in (hint or "").split(",") if part.strip())
 
 
 # A service reading a result on a person's behalf (not the person opening
@@ -831,6 +842,7 @@ async def _enriched_result_view(
         name_candidates=list(name_candidates or []),
         speaker_sides=dict(output.speaker_sides),
         speaker_name_sources=dict(name_sources or {}),
+        diagnostics=output.diagnostics,
     )
     overlap = list(output.overlap_ms)
     if not settings.nlp_enrich_enabled or not output.segments:
@@ -875,6 +887,11 @@ async def _enriched_result_view(
     enriched: list[EnrichedSegment] = []
     for index, (raw_seg, nlp_seg) in enumerate(zip(output.segments, resp["segments"], strict=True)):
         text = str(nlp_seg.get("text", "")).strip()
+        if raw_seg.language and raw_seg.language != output.language:
+            # Sprint I2 T4: the post-processor has the RECORDING's rules; a
+            # passage in another language keeps its raw decoding.
+            enriched.append(_served_segment(raw_seg, index))
+            continue
         spans = [
             ConfidenceSpanView(
                 start_char=sp["start_char"],
@@ -922,6 +939,7 @@ async def _enriched_result_view(
                 artifact_index=index,
                 artifact_indices=[index],
                 speaker_uncertain=raw_seg.speaker_uncertain,
+                language=raw_seg.language,
             )
         )
     return _structured(
@@ -940,21 +958,23 @@ async def _enriched_result_view(
 
 def _served_segments(output: TranscriptionOutput) -> list[EnrichedSegment]:
     """The stored segments as served, each knowing its artifact index."""
-    return [
-        EnrichedSegment(
-            text=s.text,
-            raw_text=s.text,
-            start_ms=s.start_ms,
-            end_ms=s.end_ms,
-            words=s.words,
-            avg_confidence=s.avg_confidence,
-            speaker=s.speaker,
-            artifact_index=i,
-            artifact_indices=[i],
-            speaker_uncertain=s.speaker_uncertain,
-        )
-        for i, s in enumerate(output.segments)
-    ]
+    return [_served_segment(s, i) for i, s in enumerate(output.segments)]
+
+
+def _served_segment(s: Segment, index: int) -> EnrichedSegment:
+    return EnrichedSegment(
+        text=s.text,
+        raw_text=s.text,
+        start_ms=s.start_ms,
+        end_ms=s.end_ms,
+        words=s.words,
+        avg_confidence=s.avg_confidence,
+        speaker=s.speaker,
+        artifact_index=index,
+        artifact_indices=[index],
+        speaker_uncertain=s.speaker_uncertain,
+        language=s.language,
+    )
 
 
 def _structured(

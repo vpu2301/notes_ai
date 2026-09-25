@@ -429,6 +429,20 @@ per run: date, outcome, who.
 | Migration 0059 rolled back with a Q5 worker running | worker `error_kind = schema_mismatch`, alert fires, note untouched; roll forward fixes | **not run** |
 | Model flags every line as noise (fixture tenant / shadow config) | `NoteGenerationNoiseOverridden` fires; note still has content | **not run** |
 
+### Glossary hygiene (Sprint I2)
+
+The workspace glossary is the transcriber's prompt on every recording.
+Since I2 only vocabulary goes: a term whose words are all role words or
+ordinals ("Moderator II", "speaker background") is refused on `POST
+/v1/glossary` (`term_not_vocabulary`) and, if stored before the rule, is
+left out of `GET /v1/glossary/hint` and shown on the glossary page as "not
+sent" with a banner. `scripts/admin/glossary_audit.py` lists the affected
+workspaces (counts; `--show-terms` prints the terms to the terminal for one
+support case). The tables are `tests/fixtures/glossary/role_words.json`;
+add a language there and in `domain/glossary.py`, `RememberableName`
+(macOS/iOS) and `web/src/lib/glossaryRule.ts` — each has a test against
+the fixture.
+
 ### Weekly notes quality (Q6 T8)
 
 `make weekly-notes` (host cron `infra/compose/cron/weekly-notes.cron`, chart

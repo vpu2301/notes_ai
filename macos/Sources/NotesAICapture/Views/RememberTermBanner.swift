@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// "Remember John Mayer for this workspace?" — offered once, after the
-/// author fixes a speaker's name (Sprint 35).
+/// "Send "John Mayer" to the transcriber for every recording in this
+/// workspace?" — offered once, after the author fixes a speaker's name
+/// (Sprint 35; Sprint I2 made the question say what "remember" does).
 ///
 /// The offer is the design. A vocabulary that learned silently would, the
 /// first time it learned something wrong, quietly misspell a customer's
@@ -17,7 +18,7 @@ struct RememberTermBanner: View {
                     Image(systemName: "character.book.closed")
                         .font(.ds(14))
                         .foregroundStyle(DS.accentText)
-                    Text("Remember **\(offer.term)** for this workspace? We'll give the spelling to the transcriber before your next recording.")
+                    Text("Send **\"\(offer.term)\"** to the transcriber for every recording in this workspace?")
                         .font(.dsMeta)
                         .foregroundStyle(DS.text2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -36,7 +37,7 @@ struct RememberTermBanner: View {
                     .fill(DS.accentSoft)
             )
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Remember \(offer.term) for this workspace")
+            .accessibilityLabel("Send \(offer.term) to the transcriber for every recording in this workspace")
         }
     }
 }

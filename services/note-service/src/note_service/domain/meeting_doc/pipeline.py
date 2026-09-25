@@ -189,7 +189,7 @@ async def run(
         if extracted is None:
             previous = window
             continue
-        flags = _noise_lines(extracted, window)
+        flags = _noise_lines(extracted, window) + _language_lines(window, language)
         flagged += len(flags)
         own = window.turn_numbers
         seen = tuple(t.text for t in previous.turns if t.number not in own) if previous else ()
@@ -514,6 +514,17 @@ def section_hashes(sections: list[render.RenderedSection]) -> dict[str, str]:
     import hashlib
 
     return {s.section_key: hashlib.sha256(s.text.encode("utf-8")).hexdigest() for s in sections}
+
+
+def _language_lines(window: Window, language: str) -> list[tuple[int, int, int, str]]:
+    """Sprint I2: lines the ASR decoded in another language are flagged by
+    CODE, whether or not the extractor noticed; ``confirm_noise`` confirms
+    them from the same field."""
+    return [
+        (t.number, t.start_ms, t.end_ms, "other_language")
+        for t in window.turns
+        if t.language and t.language != language
+    ]
 
 
 def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int, int, int, str]]:

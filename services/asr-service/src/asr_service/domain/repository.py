@@ -7,6 +7,7 @@ it. Every query is tenant-scoped via :func:`db.tenant_connection`.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -51,6 +52,29 @@ async def insert_audio_row(
     )
 
 
+# Sprint I2 T2: whether `transcription_jobs.vocabulary_hint` (migration
+# 0061) exists on this database. Probed once at startup; a service running
+# ahead of the migration keeps accepting jobs and stores no hint (with a
+# warning), never fails one.
+HINT_COLUMN_PRESENT: bool = True
+
+
+async def probe_hint_column(pool: asyncpg.Pool) -> bool:
+    global HINT_COLUMN_PRESENT  # noqa: PLW0603 — a startup fact, read by every insert
+    async with pool.acquire() as conn:
+        present = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+            " WHERE table_name = 'transcription_jobs' AND column_name = 'vocabulary_hint')"
+        )
+    HINT_COLUMN_PRESENT = bool(present)
+    if not HINT_COLUMN_PRESENT:
+        logging.getLogger(__name__).warning(
+            "asr.vocabulary_hint_column_missing",
+            extra={"migration": "0061_transcription_vocabulary_hint"},
+        )
+    return HINT_COLUMN_PRESENT
+
+
 async def insert_job_row(
     conn: asyncpg.Connection,
     *,
@@ -62,7 +86,27 @@ async def insert_job_row(
     model: str,
     name_candidates: list[str] | None = None,
     capture_context: dict[str, str] | None = None,
+    vocabulary_hint: str | None = None,
 ) -> None:
+    if HINT_COLUMN_PRESENT:
+        await conn.execute(
+            """
+            INSERT INTO transcription_jobs
+                (id, tenant_id, audio_id, requester_sub, language, model,
+                 speaker_name_candidates, capture_context, vocabulary_hint)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
+            """,
+            job_id,
+            tenant_id,
+            audio_id,
+            requester_sub,
+            language,
+            model,
+            json.dumps(name_candidates or []),
+            json.dumps(capture_context or {}),
+            vocabulary_hint,
+        )
+        return
     await conn.execute(
         """
         INSERT INTO transcription_jobs
@@ -868,6 +912,7 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
         diarization_error=row.get("diarization_error"),
         diarization_runs=int(row.get("diarization_runs") or 0),
         can_undo_rediarize=row.get("previous_result_storage_uri") is not None,
+        vocabulary_hint=row.get("vocabulary_hint"),
     )
 
 

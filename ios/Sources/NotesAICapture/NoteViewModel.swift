@@ -1136,11 +1136,14 @@ final class NoteViewModel: ObservableObject {
 
     /// "Remember" was tapped. Failure is not worth a banner: the name in
     /// this note is already fixed, and the glossary is next time's help.
+    /// That includes the server's 422 `term_not_vocabulary` — a role label
+    /// the app should not have offered; the offer is already gone.
     func acceptRememberOffer() async {
         guard let offer = rememberOffer else { return }
         rememberOffer = nil
         _ = try? await api.rememberTerm(offer.term, kind: .person,
-                                        heardAs: offer.heardAs.isEmpty ? [] : [offer.heardAs])
+                                        heardAs: offer.heardAs.isEmpty ? [] : [offer.heardAs],
+                                        noteId: noteId)
     }
 
     func dismissRememberOffer() {

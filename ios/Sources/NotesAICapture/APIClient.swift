@@ -769,12 +769,16 @@ actor APIClient {
     }
 
     /// Remember one term. Sending one the workspace already has merges the
-    /// new mishearing into it rather than failing as a duplicate.
+    /// new mishearing into it rather than failing as a duplicate. `noteId`
+    /// is the note the correction was made in (Sprint I2), so the glossary
+    /// page can say where a term came from. 422 `term_not_vocabulary`: a
+    /// role label, refused.
     @discardableResult
     func rememberTerm(_ term: String, kind: GlossaryKind = .person,
-                      heardAs: [String] = []) async throws -> GlossaryTerm {
+                      heardAs: [String] = [], noteId: String? = nil) async throws -> GlossaryTerm {
         let request = RememberTermRequest(term: term, kind: kind.rawValue,
-                                          heardAs: heardAs.filter { !$0.isEmpty })
+                                          heardAs: heardAs.filter { !$0.isEmpty },
+                                          noteId: noteId)
         let data = try await send(base: \.noteBaseURL, path: "/v1/glossary", method: "POST",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true)
         return try decode(GlossaryTerm.self, from: data)

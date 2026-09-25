@@ -21,6 +21,8 @@ export function rememberTerm(params: {
   term: string;
   kind?: GlossaryKind;
   heard_as?: string[];
+  /** The note the rename happened in, so the entry can say where it came from. */
+  note_id?: string;
 }): Promise<GlossaryTerm> {
   return api<GlossaryTerm>("note", "/v1/glossary", { method: "POST", json: params });
 }

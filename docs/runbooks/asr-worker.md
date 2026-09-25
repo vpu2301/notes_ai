@@ -313,6 +313,47 @@ for the weekly speaker review.
    Recordings that show a new failure pattern can join the eval set only
    with consent: `docs/runbooks/speakers-eval.md`.
 
+### § prompt-echo (Sprint I2)
+
+**Symptom.** A transcript contains names or role labels nobody said —
+"Gysi, Moderator II, moderatorin, narrator, speaker background …" — at the
+start of a passage, or for minutes on end; `AsrPromptEchoRate` fires.
+
+**Cause.** Whisper is given the workspace glossary as its prompt. Over
+audio it cannot decode (silence past the VAD, a breath, speech in another
+language) it writes the prompt back, sometimes with real speech glued on.
+
+**What the worker does now.** `asr_worker/echo.py` removes runs of ≥ 3
+consecutive prompt words at a segment start or after a 1.5 s pause,
+whatever backend decoded them; a segment left empty is dropped; the spans
+are in the job's `diagnostics.prompt_echo` (timestamps and counts) and
+in `mdx_asr_prompt_echo_words_total`. The old whole-segment rule
+(`_is_prompt_echo`, needs `no_speech_prob ≥ 0.5`) still applies.
+
+**If it fires.**
+1. `scripts/admin/glossary_audit.py` — which workspaces still hold role
+   labels (they are no longer sent since I2, but a large hint of real names
+   echoes too on a bad recording).
+2. `MDX_ASR_CONDITION_PREV` must be `false` (the default): conditioning on
+   previous text turns one echo into a cascade.
+3. A backend change (`ASR_BACKEND`, model) — compare the counter per backend.
+4. A person disputing a removal: `GET /asr/jobs/{id}` has the exact
+   `vocabulary_hint` (migration 0061) and the result's `diagnostics` say
+   where; the Transcript tab shows "n words removed as prompt echo at
+   mm:ss". Re-running the job without a hint is the undo (rediarize
+   pattern; a dedicated route is I3's).
+
+### § other-language (Sprint I2)
+
+A VAD chunk ≥ 2 s whose language identification is sure of another
+language (p ≥ 0.8, and ≤ 0.2 for the recording's) is decoded in that
+language, labelled `segment.language`, never translated (`task` is always
+`transcribe`); counted in `mdx_asr_other_language_chunks_total`. In-process
+engine only — an HTTP backend gives no per-chunk language, and the note
+engine then falls back to its script heuristic. Turn it off with
+`MDX_ASR_CHUNK_LANGUAGE_ID=false` if a bilingual workspace complains about
+flips; report the chunk count first.
+
 ## Pre-flight after deployment
 
 - Confirm `mdx_asr_model_loaded == 1` on every replica.

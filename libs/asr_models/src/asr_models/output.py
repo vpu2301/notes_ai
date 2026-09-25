@@ -52,6 +52,28 @@ class Segment(BaseModel):
     # the diarizer could not place took its neighbours' speaker, or a
     # one-word island was folded). Turns built on it are marked uncertain.
     speaker_uncertain: bool = False
+    # Sprint I2: the language THIS segment was decoded in when it is not the
+    # recording's (a Ukrainian aside in an English recording is decoded as
+    # Ukrainian and labelled, never translated). None = the recording's.
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+
+
+class EchoSpan(BaseModel):
+    """Words removed as prompt echo (Sprint I2 T3): where and how many,
+    never which."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    words: NonNegativeInt
+
+
+class Diagnostics(BaseModel):
+    """What the guards did to this transcript. Counts and timestamps only;
+    lives in the stored artifact, not in a table."""
+
+    prompt_echo: list[EchoSpan] = Field(default_factory=list)
+    prompt_echo_segments_dropped: NonNegativeInt = 0
+    other_language_chunks: NonNegativeInt = 0
 
 
 class DiarizationStats(BaseModel):
@@ -121,6 +143,9 @@ class TranscriptionOutput(BaseModel):
     # Sprint 31: label → "local" (this Mac's microphone) | "remote" (the
     # call audio). Empty for mono captures.
     speaker_sides: dict[str, Literal["local", "remote"]] = Field(default_factory=dict)
+    # Sprint I2: prompt-echo spans and other-language chunk count. Older
+    # artifacts decode with the empty default.
+    diagnostics: Diagnostics = Field(default_factory=Diagnostics)
     schema_version: int = 1
 
 
@@ -165,6 +190,9 @@ class EnrichedSegment(BaseModel):
     # A person moved this segment to "Unknown": turn building must not fold
     # it back into the neighbouring speaker.
     speaker_cleared: bool = False
+    # Sprint I2: set when this segment is in another language than the
+    # recording (ISO 639-1); None = the recording's language.
+    language: str | None = None
 
 
 class TranscriptTurnView(BaseModel):
@@ -193,6 +221,9 @@ class TranscriptTurnView(BaseModel):
     # People talked over each other here, or the label was smoothed across
     # speech the diarizer could not place — where corrections are likeliest.
     uncertain: bool = False
+    # Sprint I2: a turn in another language than the recording (a turn is
+    # never mixed: the structure breaks where the language changes).
+    language: str | None = None
 
 
 class SpeakerStatView(BaseModel):
@@ -281,4 +312,6 @@ class TranscriptResultView(BaseModel):
     relabel_available: bool = False
     nlp_applied: bool = False
     nlp_pipeline_version: str | None = None
+    # Sprint I2: what the guards removed or labelled (timestamps and counts).
+    diagnostics: Diagnostics = Field(default_factory=Diagnostics)
     schema_version: int = 1

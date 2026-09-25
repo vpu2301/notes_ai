@@ -23,6 +23,8 @@ class GlossaryRow:
     heard_as: list[str]
     created_by: UUID
     created_at: datetime
+    # Sprint I2 T6: the note whose speaker rename added this term (0062).
+    source_note_id: UUID | None = None
 
 
 def _row(record: asyncpg.Record) -> GlossaryRow:
@@ -33,6 +35,7 @@ def _row(record: asyncpg.Record) -> GlossaryRow:
         heard_as=list(record["heard_as"] or []),
         created_by=record["created_by"],
         created_at=record["created_at"],
+        source_note_id=record.get("source_note_id"),
     )
 
 
@@ -41,7 +44,7 @@ async def list_terms(conn: asyncpg.Connection) -> list[GlossaryRow]:
     alphabetically — a list a person reads, not a dump."""
     rows = await conn.fetch(
         """
-        SELECT id, term, kind, heard_as, created_by, created_at
+        SELECT id, term, kind, heard_as, created_by, created_at, source_note_id
         FROM workspace_glossary
         WHERE deleted_at IS NULL
         ORDER BY (kind <> 'person'), lower(term)
@@ -85,20 +88,28 @@ async def add_term(
     kind: str,
     heard_as: list[str],
     created_by: UUID,
+    source_note_id: UUID | None = None,
 ) -> GlossaryRow:
     record = await conn.fetchrow(
         """
-        INSERT INTO workspace_glossary (tenant_id, term, kind, heard_as, created_by)
-        VALUES ($1, $2, $3, $4::text[], $5)
-        RETURNING id, term, kind, heard_as, created_by, created_at
+        INSERT INTO workspace_glossary
+            (tenant_id, term, kind, heard_as, created_by, source_note_id)
+        VALUES ($1, $2, $3, $4::text[], $5, $6)
+        RETURNING id, term, kind, heard_as, created_by, created_at, source_note_id
         """,
         tenant_id,
         term,
         kind,
         heard_as,
         created_by,
+        source_note_id,
     )
     return _row(record)
+
+
+async def note_exists(conn: asyncpg.Connection, *, note_id: UUID) -> bool:
+    """Under the tenant's RLS: a note of another workspace does not exist."""
+    return bool(await conn.fetchval("SELECT EXISTS (SELECT 1 FROM notes WHERE id = $1)", note_id))
 
 
 async def merge_heard_as(

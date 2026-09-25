@@ -77,6 +77,7 @@ import { useGeneratedLines } from "../lib/useGeneratedLines";
 import { lineKey } from "../lib/itemKey";
 import type { GeneratedItem } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
+import { isOtherLanguage, promptEchoLine, transcriptCopyText } from "../lib/transcriptText";
 import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
@@ -840,6 +841,11 @@ export function TranscriptView({
   }, [jobId]);
 
   const turns = result?.turns ?? [];
+  // Sprint I2: a copy leaves out turns in another language than the
+  // recording unless asked; the choice lives with this view only.
+  const [includeOtherLanguages, setIncludeOtherLanguages] = useState(false);
+  const hasOtherLanguages = useMemo(() => turns.some(isOtherLanguage), [turns]);
+  const echoLine = promptEchoLine(result?.diagnostics);
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
   const roster = result?.speakers ?? [];
@@ -850,12 +856,10 @@ export function TranscriptView({
   const moveLocked = !canMove || saving;
 
   const copy = async () => {
-    const text = turns
-      .map((t) => {
-        const body = t.paragraphs.join("\n");
-        return diarized ? `${turnName(t, names)}: ${body}` : body;
-      })
-      .join("\n\n");
+    const text = transcriptCopyText(turns, (t) => turnName(t, names), {
+      diarized,
+      includeOtherLanguages,
+    });
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -1118,10 +1122,22 @@ export function TranscriptView({
           </span>
         )}
         <span className="grow" />
+        {hasOtherLanguages && (
+          <label className="help transcript-include-langs">
+            <input
+              type="checkbox"
+              className="chk"
+              checked={includeOtherLanguages}
+              onChange={(e) => setIncludeOtherLanguages(e.target.checked)}
+            />
+            Include other languages
+          </label>
+        )}
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {echoLine && <p className="help transcript-diagnostic">{echoLine}</p>}
       {selection.length > 0 && (
         <div className="turn-actions" role="toolbar" aria-label="Selected turns">
           <span className="grow">{turnsLabel(selection.length)} selected</span>
@@ -1210,6 +1226,11 @@ export function TranscriptView({
                   <span className="turn-speaker unknown">{UNKNOWN_SPEAKER}</span>
                 ))}
               <span className="turn-time mono">{formatElapsed(t.start_ms)}</span>
+              {isOtherLanguage(t) && (
+                <span className="lang-tag turn-lang" title="Spoken in another language than the recording">
+                  {t.language}
+                </span>
+              )}
               {diarized && (
                 <input
                   type="checkbox"
@@ -1557,7 +1578,7 @@ export function NoteEditorPage() {
   const [pendingTerm, setPendingTerm] = useState<PendingTerm | null>(null);
   const offerToRemember = (from: string, to: string) => {
     if (isWorthRemembering(from, to)) {
-      setPendingTerm({ term: to.trim(), heardAs: heardAsOf(from) });
+      setPendingTerm({ term: to.trim(), heardAs: heardAsOf(from), noteId });
     }
   };
 

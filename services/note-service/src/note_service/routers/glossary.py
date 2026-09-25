@@ -25,6 +25,7 @@ from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from opentelemetry import metrics
 from pydantic import BaseModel, ConfigDict, Field
 
 from audit import Severity
@@ -40,6 +41,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/glossary", tags=["glossary"])
 
+_terms_rejected = metrics.get_meter("mdx.note.glossary").create_counter(
+    "mdx_glossary_terms_rejected_total",
+    description="Glossary terms refused by the vocabulary rule, by reason (Sprint I2)",
+    unit="1",
+)
+
 _ADMIN_ROLES = frozenset({"tenant_admin"})
 
 
@@ -53,6 +60,11 @@ class TermView(BaseModel):
     created_at: datetime
     """Whether the caller may delete this one (its creator, or an admin)."""
     can_delete: bool
+    # Sprint I2: whether the transcriber is told this term (a stored role
+    # label from before the rule is kept but no longer sent).
+    in_hint: bool = True
+    # The note whose speaker rename added it, when it came from one.
+    source_note_id: UUID | None = None
 
 
 class AddTermRequest(BaseModel):
@@ -62,6 +74,8 @@ class AddTermRequest(BaseModel):
     kind: Literal["person", "company", "product", "term"] = "person"
     # What it was heard or spelled as before the author fixed it.
     heard_as: list[str] = Field(default_factory=list, max_length=16)
+    # Sprint I2 T6: the note the term was renamed in ("Remember this?").
+    note_id: UUID | None = None
 
 
 class HintView(BaseModel):
@@ -79,6 +93,8 @@ def _view(row: glossary_repo.GlossaryRow, claims: Claims) -> TermView:
         heard_as=row.heard_as,
         created_at=row.created_at,
         can_delete=row.created_by == claims.sub or bool(_ADMIN_ROLES & set(claims.roles)),
+        in_hint=rules.is_vocabulary(row.term, row.kind),
+        source_note_id=row.source_note_id,
     )
 
 
@@ -127,9 +143,26 @@ async def add_glossary_term(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": exc.code, "detail": exc.detail},
         ) from None
+    if not rules.is_vocabulary(term, body.kind):
+        # Sprint I2 T1: a role label is not vocabulary. Refused here whatever
+        # the client asked, so the transcriber is never told "Moderator II".
+        _terms_rejected.add(1, {"reason": "role_label"})
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "term_not_vocabulary",
+                "detail": "a role label ('Moderator II', 'speaker background') is not a "
+                "name or a term the transcriber should learn",
+            },
+        )
 
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
+        source_note = body.note_id
+        if source_note is not None and not await glossary_repo.note_exists(
+            conn, note_id=source_note
+        ):
+            source_note = None  # not this workspace's note: no provenance, no error
         existing = await glossary_repo.find_term(conn, term=term)
         if existing is not None:
             merged = await glossary_repo.merge_heard_as(conn, row=existing, heard_as=heard_as)
@@ -152,6 +185,7 @@ async def add_glossary_term(
                 kind=body.kind,
                 heard_as=heard_as,
                 created_by=claims.sub,
+                source_note_id=source_note,
             )
         except asyncpg.UniqueViolationError:
             # Added concurrently by another device; theirs is as good.
@@ -161,11 +195,10 @@ async def add_glossary_term(
             response.status_code = status.HTTP_200_OK
             return _view(again, claims)
 
-    await _audit(
-        claims,
-        audit_kinds.GLOSSARY_TERM_ADDED,
-        {"kind": body.kind, "heard_as_count": len(heard_as)},
-    )
+    payload: dict[str, object] = {"kind": body.kind, "heard_as_count": len(heard_as)}
+    if source_note is not None:
+        payload["note_id"] = str(source_note)
+    await _audit(claims, audit_kinds.GLOSSARY_TERM_ADDED, payload)
     return _view(row, claims)
 
 

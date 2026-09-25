@@ -37,6 +37,119 @@ MAX_PROMPT_TERMS: Final = 60
 
 KINDS: Final = ("person", "company", "product", "term")
 
+# Sprint I2 T1 — vocabulary is a whitelist of things worth spelling, not a
+# log of renames. A term whose tokens are ALL role words or ordinals is a
+# label a person gave a voice ("Moderator II", "speaker background"), not a
+# name: the 2026-09-25 transcript was these labels, echoed by the
+# transcriber. The same tables live in the native apps and the web; every
+# copy is asserted against tests/fixtures/glossary/role_words.json.
+ROLE_WORDS: Final[dict[str, frozenset[str]]] = {
+    "en": frozenset(
+        {
+            "speaker",
+            "moderator",
+            "host",
+            "narrator",
+            "guest",
+            "interviewer",
+            "interviewee",
+            "presenter",
+            "caller",
+            "background",
+            "unknown",
+            "voice",
+            "participant",
+            "translator",
+            "announcer",
+        }
+    ),
+    "de": frozenset(
+        {
+            "sprecher",
+            "sprecherin",
+            "moderator",
+            "moderatorin",
+            "gast",
+            "gastgeber",
+            "erzähler",
+            "erzählerin",
+            "hintergrund",
+            "unbekannt",
+            "stimme",
+            "teilnehmer",
+            "teilnehmerin",
+            "übersetzer",
+        }
+    ),
+    "uk": frozenset(
+        {
+            "спікер",
+            "ведучий",
+            "ведуча",
+            "гість",
+            "гостя",
+            "оповідач",
+            "фон",
+            "невідомий",
+            "голос",
+            "учасник",
+            "учасниця",
+            "перекладач",
+        }
+    ),
+}
+ROLE_WORDS_ALL: Final[frozenset[str]] = frozenset().union(*ROLE_WORDS.values())
+ORDINALS: Final[frozenset[str]] = frozenset(
+    {
+        "i",
+        "ii",
+        "iii",
+        "iv",
+        "v",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "one",
+        "two",
+        "three",
+        "eins",
+        "zwei",
+        "drei",
+        "один",
+        "два",
+        "три",
+        "first",
+        "second",
+        "erste",
+        "zweite",
+        "перший",
+        "другий",
+    }
+)
+_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def is_vocabulary(term: str, kind: str) -> bool:
+    """Whether a term belongs in the transcriber's vocabulary.
+
+    No: every token is a role word or an ordinal; a person with no
+    capital letter anywhere ("moderatorin"). Yes: anything else — the rule
+    only has to keep labels out, not judge names.
+    """
+    tokens = [tok.casefold() for tok in _WORD.findall(term)]
+    if not tokens:
+        return False
+    if all(tok in ROLE_WORDS_ALL or tok in ORDINALS for tok in tokens):
+        return False
+    # A person is capitalised somewhere; "moderatorin" is not a person.
+    return kind != "person" or any(part[:1].isupper() for part in term.split())
+
+
+# What the hint sends first: the kinds the transcriber mishears most.
+_HINT_ORDER: Final = {"person": 0, "company": 1, "product": 2, "term": 3}
+
 # Characters a term may not contain. Written as code-point RANGES rather
 # than as a literal character class on purpose: half of these are
 # invisible, and a source file that contains a bidi override in order to
@@ -125,13 +238,22 @@ def hint_text(terms: list[Term], *, limit: int = MAX_HINT_CHARS) -> str:
     """
     out: list[str] = []
     length = 0
-    for entry in terms:
+    for entry in hint_terms(terms):
         addition = len(entry.term) + (2 if out else 0)
         if length + addition > limit:
             break
         out.append(entry.term)
         length += addition
     return ", ".join(out)
+
+
+def hint_terms(terms: list[Term]) -> list[Term]:
+    """The terms that go to the transcriber, in the order they go: only
+    vocabulary (:func:`is_vocabulary` — a stored role label from before
+    the rule is skipped, no data migration needed), people and companies
+    first. Stable within a kind."""
+    kept = [entry for entry in terms if is_vocabulary(entry.term, entry.kind)]
+    return sorted(kept, key=lambda entry: _HINT_ORDER.get(entry.kind, 9))
 
 
 def terms_in(text: str, terms: list[Term], *, limit: int = MAX_PROMPT_TERMS) -> list[Term]:

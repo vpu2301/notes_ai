@@ -929,7 +929,13 @@ def confirm_noise(
             # someone recorded is still what they recorded.
             ok = False
         elif reason == "other_language":
-            ok = _is_other_language(piece.text, language)
+            # Sprint I2: the ASR's own per-segment language is the rule; the
+            # script/stop-word heuristic stays for older artifacts without it.
+            ok = (
+                piece.language != language
+                if piece.language
+                else _is_other_language(piece.text, language)
+            )
         elif reason == "duplicate":
             earlier = [t.text for t in window.turns if order.index(t.number) < order.index(number)]
             mine = support.merge_tokens(piece.text)

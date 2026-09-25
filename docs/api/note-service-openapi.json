@@ -57,6 +57,18 @@
             "title": "Kind",
             "type": "string"
           },
+          "note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
+          },
           "term": {
             "maxLength": 160,
             "title": "Term",
@@ -5358,6 +5370,11 @@
             "title": "Id",
             "type": "string"
           },
+          "in_hint": {
+            "default": true,
+            "title": "In Hint",
+            "type": "boolean"
+          },
           "kind": {
             "enum": [
               "person",
@@ -5367,6 +5384,18 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "source_note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Note Id"
           },
           "term": {
             "title": "Term",

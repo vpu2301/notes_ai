@@ -45,6 +45,74 @@ final class GlossaryTests: XCTestCase {
         XCTAssertTrue(RememberableName.worthRemembering(from: "Speaker 1", to: "Олена Ковальчук"))
     }
 
+    // MARK: - Role labels are not vocabulary (Sprint I2)
+
+    /// The fixture every client and the server read. Found by walking up
+    /// from this file to the repository root, so the test runs against
+    /// the checked-out copy and not a snapshot that could drift.
+    private struct RoleWordsFixture: Decodable {
+        let roleWords: [String: [String]]
+        let ordinals: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case roleWords = "role_words"
+            case ordinals
+        }
+    }
+
+    private func roleWordsFixture() throws -> RoleWordsFixture {
+        let relative = "tests/fixtures/glossary/role_words.json"
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while dir.path != "/" {
+            let candidate = dir.appendingPathComponent(relative)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return try JSONDecoder().decode(RoleWordsFixture.self, from: Data(contentsOf: candidate))
+            }
+            dir.deleteLastPathComponent()
+        }
+        // A skip would let the lists drift unnoticed; this is a failure.
+        struct FixtureNotFound: Error, CustomStringConvertible {
+            let description: String
+        }
+        throw FixtureNotFound(description: "\(relative) not reachable from \(#filePath)")
+    }
+
+    func testTheRoleWordListsMatchTheSharedFixture() throws {
+        let fixture = try roleWordsFixture()
+        XCTAssertEqual(Set(fixture.roleWords.keys), ["en", "de", "uk"])
+        XCTAssertEqual(RememberableName.roleWords, Set(fixture.roleWords.values.joined()))
+        XCTAssertEqual(RememberableName.ordinals, Set(fixture.ordinals))
+    }
+
+    /// What a person calls a voice is not a name, and the transcriber
+    /// must never be told it — "Moderator II" read into every recording
+    /// was the 2026-09-25 incident.
+    func testARoleLabelIsNotVocabularyAndIsNeverOffered() {
+        for label in ["Moderator II", "moderatorin", "Narrator", "speaker background",
+                      "Sprecher 2", "Ведучий"] {
+            XCTAssertFalse(RememberableName.isVocabulary(label, kind: .person), label)
+            XCTAssertFalse(RememberableName.worthRemembering(from: "Speaker 2", to: label), label)
+        }
+    }
+
+    func testNamesCompaniesAndProductsAreVocabulary() {
+        XCTAssertTrue(RememberableName.isVocabulary("Gregor Gysi", kind: .person))
+        XCTAssertTrue(RememberableName.worthRemembering(from: "Speaker 2", to: "Gregor Gysi"))
+        XCTAssertTrue(RememberableName.isVocabulary("Springbrook Marine Group", kind: .company))
+        XCTAssertTrue(RememberableName.isVocabulary("Pardo", kind: .company))
+        XCTAssertTrue(RememberableName.isVocabulary("Williams Jet Tender", kind: .product))
+        XCTAssertTrue(RememberableName.isVocabulary("IPS 1350", kind: .product))
+    }
+
+    func testAPersonNeedsACapitalLetterButAProductDoesNot() {
+        // "gregor gysi" is what a role label typed in lower case looks
+        // like; a product code is spelled however the maker spells it.
+        XCTAssertFalse(RememberableName.isVocabulary("gregor gysi", kind: .person))
+        XCTAssertTrue(RememberableName.isVocabulary("iphone", kind: .product))
+        XCTAssertFalse(RememberableName.isVocabulary("  ", kind: .term))
+        XCTAssertFalse(RememberableName.isVocabulary("- -", kind: .term))
+    }
+
     // MARK: - What the old spelling is recorded as
 
     func testAPreviousNameIsRecordedAsAMishearing() {
@@ -119,6 +187,20 @@ final class GlossaryTests: XCTestCase {
         XCTAssertEqual(term.kind, .person)
         XCTAssertEqual(term.heardAs, ["Jon Meyer"])
         XCTAssertTrue(term.canDelete)
+        // An older server says nothing about the hint: everything is sent.
+        XCTAssertTrue(term.inHint)
+        XCTAssertNil(term.sourceNoteId)
+    }
+
+    func testATermTheServerNoLongerSendsDecodesAsSuch() throws {
+        let json = """
+        {"id":"t-2","term":"Moderator II","kind":"person","heard_as":[],
+         "created_at":"2026-09-25T09:00:00Z","can_delete":true,
+         "in_hint":false,"source_note_id":"NOTE-2026-00033"}
+        """
+        let term = try decoder().decode(GlossaryTerm.self, from: Data(json.utf8))
+        XCTAssertFalse(term.inHint)
+        XCTAssertEqual(term.sourceNoteId, "NOTE-2026-00033")
     }
 
     func testTheRequestUsesTheServersFieldNames() throws {
@@ -126,5 +208,13 @@ final class GlossaryTests: XCTestCase {
         let json = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
         XCTAssertTrue(json.contains("\"heard_as\""))
         XCTAssertFalse(json.contains("heardAs"))
+        XCTAssertFalse(json.contains("note_id"), "no note, no field")
+    }
+
+    func testTheRequestCarriesTheNoteTheCorrectionWasMadeIn() throws {
+        let body = RememberTermRequest(term: "John Mayer", kind: "person", heardAs: [],
+                                       noteId: "NOTE-2026-00033")
+        let json = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"note_id\":\"NOTE-2026-00033\""))
     }
 }

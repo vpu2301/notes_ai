@@ -65,6 +65,11 @@ class Turn:
     part in it (see :func:`mark_clips`). Their opinions have no holder
     among the participants."""
     clip: bool = False
+    """Sprint I2 — the language this turn was decoded in when the ASR says it
+    is not the recording's (ISO 639-1); None = the recording's. Code
+    confirms an ``other_language`` exclusion from this, not from a script
+    heuristic."""
+    language: str | None = None
 
     @property
     def number(self) -> int:
@@ -101,13 +106,20 @@ class Window:
     def render(self) -> str:
         """The window as the model sees it: numbered, named, timed."""
         return "\n".join(
-            f"[{t.number}] {t.display_name} ({_mmss(t.start_ms)}): {t.text}" for t in self.turns
+            f"[{t.number}] {t.display_name} ({_mmss(t.start_ms)}):{_language_tag(t)} {t.text}"
+            for t in self.turns
         )
 
     @property
     def text(self) -> str:
         """Just the words, for substring checks."""
         return "\n".join(t.text for t in self.turns)
+
+
+def _language_tag(turn: Turn) -> str:
+    """ " [uk]" before a line in another language, so the extractor sees
+    that it is one (Sprint I2); nothing for the recording's own."""
+    return f" [{turn.language}]" if turn.language else ""
 
 
 def _mmss(ms: int) -> str:
@@ -135,6 +147,7 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
                 text=text,
                 start_ms=int(raw.get("start_ms") or 0),
                 end_ms=int(raw.get("end_ms") or raw.get("start_ms") or 0),
+                language=_language_of(raw, result),
             )
         )
     if out:
@@ -148,7 +161,8 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
         label = seg.get("speaker")
         start = int(seg.get("start_ms") or round(float(seg.get("start") or 0) * 1000))
         end = int(seg.get("end_ms") or round(float(seg.get("end") or 0) * 1000)) or start
-        if out and out[-1].speaker_label == label:
+        language = _language_of(seg, result)
+        if out and out[-1].speaker_label == label and out[-1].language == language:
             # Merge consecutive segments from one speaker into a turn.
             previous = out.pop()
             out.append(
@@ -159,6 +173,7 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
                     text=f"{previous.text} {text}",
                     start_ms=previous.start_ms,
                     end_ms=max(previous.end_ms, end),
+                    language=previous.language,
                 )
             )
             continue
@@ -170,9 +185,20 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
                 text=text,
                 start_ms=start,
                 end_ms=end,
+                language=language,
             )
         )
     return out
+
+
+def _language_of(raw: dict[str, Any], result: dict[str, Any]) -> str | None:
+    """A turn's or segment's ``language`` when the ASR marked it as not the
+    recording's (Sprint I2); None otherwise — including an older result
+    view without the field."""
+    language = raw.get("language")
+    if not language or language == result.get("language"):
+        return None
+    return str(language)
 
 
 def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
@@ -215,6 +241,7 @@ def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
                 text=piece,
                 start_ms=turn.start_ms + elapsed,
                 end_ms=turn.start_ms + elapsed + share,
+                language=turn.language,
             )
         )
         elapsed += share

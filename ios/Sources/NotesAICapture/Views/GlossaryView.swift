@@ -7,14 +7,24 @@ import SwiftUI
 /// vocabulary that learns without showing you what it learned is one you
 /// cannot trust. So: everything visible, everything removable by whoever
 /// added it, nothing learned silently.
+///
+/// Sprint I2 added the other half of "visible": the exact line the
+/// transcriber is given before the next recording, and a flag on any
+/// entry the server no longer sends because it is a role label, not a
+/// name. The one time this list learned something wrong ("Moderator II"),
+/// nobody could see it being read into every recording.
 struct GlossaryView: View {
     @EnvironmentObject private var app: AppState
     @State private var terms: [GlossaryTerm] = []
+    @State private var hint: GlossaryHint?
     @State private var loading = true
     @State private var draft = ""
     @State private var kind: GlossaryKind = .person
     @State private var busy = false
     @State private var error: String?
+
+    /// Entries the server keeps but no longer sends (role labels).
+    private var notSent: Int { terms.filter { !$0.inHint }.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -46,6 +56,12 @@ struct GlossaryView: View {
             if let error {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             }
+            if notSent > 0 {
+                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
+                         text: notSent == 1
+                            ? "1 entry is a role label, not a name — it is no longer sent to the transcriber; remove it"
+                            : "\(notSent) entries are role labels, not names — they are no longer sent to the transcriber; remove them")
+            }
             if loading {
                 ProgressView().controlSize(.small)
             } else if terms.isEmpty {
@@ -61,8 +77,33 @@ struct GlossaryView: View {
                     }
                 }
             }
+            if !loading {
+                transcriberBlock
+            }
         }
         .task { await load() }
+    }
+
+    /// Read-only: what the next upload's `vocabulary_hint` will be, word
+    /// for word, straight from the server. Not a rendering of the list
+    /// above — the server decides what is sent, and this shows its answer.
+    private var transcriberBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("What the transcriber is told for the next recording")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+            Text(hint.map { $0.hint.isEmpty ? "Nothing — the transcriber gets no hint." : $0.hint }
+                 ?? "Could not load the hint.")
+                .font(.dsMono(12))
+                .foregroundStyle(hint?.hint.isEmpty == false ? DS.text1 : DS.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                    .fill(DS.surface2))
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func row(_ term: GlossaryTerm) -> some View {
@@ -70,15 +111,30 @@ struct GlossaryView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(term.term)
                     .font(.ds(15, .medium))
-                    .foregroundStyle(DS.text1)
+                    .foregroundStyle(term.inHint ? DS.text1 : DS.muted)
+                    .strikethrough(!term.inHint)
                 if !term.heardAs.isEmpty {
                     Text("heard as \(term.heardAs.joined(separator: ", "))")
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                HStack(spacing: 6) {
+                    Text(term.inHint
+                         ? "added \(term.createdAt.formatted(date: .abbreviated, time: .omitted))"
+                         : "not sent · added \(term.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                    if let noteId = term.sourceNoteId {
+                        Text("·")
+                        Button("from a note") { openSourceNote(noteId) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DS.accentText)
+                            .accessibilityLabel("Open the note \(term.term) was remembered from")
+                    }
+                }
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
             }
-            Text(term.kind.rawValue)
+            Text(term.kind.label)
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
             Spacer(minLength: 8)
@@ -90,6 +146,13 @@ struct GlossaryView: View {
             }
         }
         .padding(.vertical, 8)
+        .opacity(term.inHint ? 1 : 0.7)
+    }
+
+    /// Settings is a sheet over the note pages; the note opens behind it.
+    private func openSourceNote(_ noteId: String) {
+        app.settingsPresented = false
+        app.openNote(noteId)
     }
 
     private func load() async {
@@ -101,6 +164,13 @@ struct GlossaryView: View {
         } catch {
             self.error = error.localizedDescription
         }
+        await refreshHint()
+    }
+
+    /// The hint is the server's, so it is re-read after every change
+    /// rather than guessed from the list.
+    private func refreshHint() async {
+        hint = try? await app.api.glossaryHint()
     }
 
     private func add() async {
@@ -123,6 +193,7 @@ struct GlossaryView: View {
         do {
             try await app.api.forgetTerm(id: term.id)
             terms.removeAll { $0.id == term.id }
+            await refreshHint()
         } catch {
             self.error = error.localizedDescription
         }

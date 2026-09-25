@@ -764,6 +764,14 @@ export interface GlossaryTerm {
   created_at: string;
   /** Whether this viewer may remove it (its creator, or an admin). */
   can_delete: boolean;
+  /**
+   * Whether it is still sent to the transcriber (Sprint I2). False = a
+   * stored role label ("Moderator II") the server no longer puts in the
+   * prompt; absent on older servers.
+   */
+  in_hint?: boolean;
+  /** The note the rename that added it happened in, when known. */
+  source_note_id?: string | null;
 }
 
 export interface GlossaryHint {
@@ -960,6 +968,8 @@ export interface TranscriptSegment {
   speaker?: string | null;
   /** Index of this segment in the stored artifact (the space `segment_indices` live in). */
   artifact_index?: number;
+  /** Set only when this passage is in ANOTHER language than the recording (Sprint I2). */
+  language?: string | null;
 }
 
 /**
@@ -981,6 +991,11 @@ export interface TranscriptTurn {
   segment_indices?: number[];
   /** People talked over each other here, or the label was smoothed. */
   uncertain?: boolean;
+  /**
+   * Set only when the turn is in ANOTHER language than the recording, e.g.
+   * "uk" in an English one (Sprint I2). A turn is never mixed.
+   */
+  language?: string | null;
 }
 
 export interface TranscriptResult {
@@ -1026,6 +1041,24 @@ export interface TranscriptResult {
    */
   relabel_available?: boolean;
   nlp_applied?: boolean;
+  /**
+   * What the worker took out or set apart (Sprint I2): passages where the
+   * transcriber echoed its own prompt over silence, and how many chunks
+   * were in another language than the recording. Absent on older results.
+   */
+  diagnostics?: TranscriptDiagnostics;
+}
+
+export interface PromptEcho {
+  start_ms: number;
+  end_ms: number;
+  words: number;
+}
+
+export interface TranscriptDiagnostics {
+  prompt_echo: PromptEcho[];
+  prompt_echo_segments_dropped: number;
+  other_language_chunks: number;
 }
 
 /** "SPEAKER_2 is probably Anna Keller" — and the quote that says so. */

@@ -3,6 +3,20 @@
 ## Unreleased — A live meeting note writes itself too
 
 ### Added
+- **Nothing enters a transcript that was not said (Sprint I2)** (asr-worker, asr-service,
+  note-service, Mac, iPhone, web; migrations 0061 + 0062, ADR-0061): a glossary term is
+  vocabulary only if it is a name or a term — a role label ("Moderator II", "speaker
+  background") is refused with `term_not_vocabulary`, a stored one is no longer sent and the
+  glossary page says so; the exact hint a job was given is stored on the job and served to its
+  workspace (`GET /asr/jobs/{id}.vocabulary_hint`); words the decoder copied from its prompt are
+  removed by a lexical guard on every backend (runs of ≥ 3 prompt words at a segment start or
+  after a pause), recorded in the result's `diagnostics.prompt_echo` and counted
+  (`AsrPromptEchoRate` alert); a passage in another language is decoded in that language,
+  labelled `language` on its segment and turn, never translated, kept raw by the post-processor,
+  and excluded by the note engine as confirmed `other_language` (the Transcript tab tags it and
+  leaves it out of "copy as text" by default); batch chunks no longer condition on previous text
+  (`MDX_ASR_CONDITION_PREV`, default off). The "Remember this?" offer names the consequence and
+  never fires for a role label; the glossary page shows what the transcriber is told.
 - **Isolation audit (Sprint I1)** (`docs/security/2026-09-25-isolation-audit.md`): the names that
   appeared in the 2026-09-25 transcript came from the same workspace's own glossary (7 terms, 7
   audit events, the transcript's echo in the hint's exact order); no path was found by which one

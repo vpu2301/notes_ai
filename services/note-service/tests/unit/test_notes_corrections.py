@@ -168,7 +168,9 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     async def _count_terms(conn):  # noqa: ANN001
         return store.term_count or len(store.terms)
 
-    async def _add_term(conn, *, tenant_id, term, kind, heard_as, created_by):  # noqa: ANN001
+    async def _add_term(  # noqa: ANN001
+        conn, *, tenant_id, term, kind, heard_as, created_by, source_note_id=None
+    ):
         from note_service.domain.glossary_repository import GlossaryRow
 
         row = GlossaryRow(
@@ -178,6 +180,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             heard_as=list(heard_as),
             created_by=created_by,
             created_at=datetime(2026, 9, 20, tzinfo=UTC),
+            source_note_id=source_note_id,
         )
         store.terms.append(row)
         return row
@@ -469,7 +472,8 @@ def test_remembering_the_same_term_again_teaches_the_new_mishearing(
     rig: SimpleNamespace,
 ) -> None:
     rig.client.post("/v1/glossary", json={"term": "John Mayer", "heard_as": ["Jon Meyer"]})
-    resp = rig.client.post("/v1/glossary", json={"term": "john mayer", "heard_as": ["John Meyer"]})
+    # A case variant (a person still needs a capital somewhere — Sprint I2).
+    resp = rig.client.post("/v1/glossary", json={"term": "John mayer", "heard_as": ["John Meyer"]})
     assert resp.status_code == 200  # merged, not a duplicate error
     assert resp.json()["heard_as"] == ["Jon Meyer", "John Meyer"]
     assert len(rig.store.terms) == 1
@@ -597,3 +601,61 @@ def test_rejecting_a_name_the_line_does_not_have_is_refused(rig: SimpleNamespace
     )
     assert resp.status_code == 422
     assert resp.json()["code"] == "correction_not_in_line"
+
+
+# ── Sprint I2: only names and terms become vocabulary ──────────────
+
+
+def test_a_role_label_is_refused_with_its_own_code(rig: SimpleNamespace) -> None:
+    for term in ("Moderator II", "speaker background", "moderatorin", "Narrator"):
+        resp = rig.client.post("/v1/glossary", json={"term": term, "kind": "person"})
+        assert resp.status_code == 422, (term, resp.text)
+        assert resp.json()["code"] == "term_not_vocabulary"
+    assert rig.store.terms == [] and rig.audit_calls == []
+
+
+def test_a_stored_role_label_is_shown_as_not_sent_and_left_out_of_the_hint(
+    rig: SimpleNamespace,
+) -> None:
+    from note_service.domain.glossary_repository import GlossaryRow
+
+    rig.store.terms.append(
+        GlossaryRow(
+            id=uuid4(),
+            term="Moderator II",
+            kind="person",
+            heard_as=[],
+            created_by=AUTHOR,
+            created_at=datetime(2026, 9, 22, tzinfo=UTC),
+        )
+    )
+    rig.client.post("/v1/glossary", json={"term": "Gregor Gysi", "kind": "person"})
+    listed = {t["term"]: t for t in rig.client.get("/v1/glossary").json()}
+    assert listed["Moderator II"]["in_hint"] is False
+    assert listed["Gregor Gysi"]["in_hint"] is True
+    assert rig.client.get("/v1/glossary/hint").json() == {"hint": "Gregor Gysi", "terms": 2}
+
+
+def test_a_term_remembered_from_a_note_records_where_it_came_from(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from note_service.routers import glossary as rg
+
+    async def _note_exists(conn, *, note_id):  # noqa: ANN001
+        return note_id == NOTE_ID
+
+    monkeypatch.setattr(rg.glossary_repo, "note_exists", _note_exists)
+    resp = rig.client.post(
+        "/v1/glossary", json={"term": "Gregor Gysi", "kind": "person", "note_id": str(NOTE_ID)}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["source_note_id"] == str(NOTE_ID)
+    (event,) = rig.audit_calls
+    assert event["payload"] == {"kind": "person", "heard_as_count": 0, "note_id": str(NOTE_ID)}
+    assert "Gysi" not in repr(event)
+
+    # A note of another workspace (or none): the term is kept, the provenance is not.
+    other = rig.client.post(
+        "/v1/glossary", json={"term": "Pardo", "kind": "product", "note_id": str(uuid4())}
+    )
+    assert other.status_code == 201 and other.json()["source_note_id"] is None

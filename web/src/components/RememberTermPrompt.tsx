@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { rememberTerm } from "../api/glossary";
 import { errorMessage } from "../api/http";
+import { isVocabulary } from "../lib/glossaryRule";
 import { useToast } from "./Toaster";
 
 export interface PendingTerm {
@@ -8,6 +9,8 @@ export interface PendingTerm {
   term: string;
   /** What it had been heard as; empty when there was no previous name. */
   heardAs: string;
+  /** The note the rename happened in, when the caller knows it. */
+  noteId?: string;
 }
 
 /**
@@ -29,6 +32,9 @@ export function RememberTermPrompt({
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   if (!pending) return null;
+  // Sprint I2: a role label ("Moderator II") is not a name. The server
+  // would refuse it; not asking at all is the honest version.
+  if (!isVocabulary(pending.term, "person")) return null;
 
   const remember = async () => {
     setBusy(true);
@@ -37,6 +43,7 @@ export function RememberTermPrompt({
         term: pending.term,
         kind: "person",
         heard_as: pending.heardAs ? [pending.heardAs] : [],
+        ...(pending.noteId ? { note_id: pending.noteId } : {}),
       });
       toast.success(`We'll spell "${pending.term}" that way from now on`);
       onDone();
@@ -50,8 +57,8 @@ export function RememberTermPrompt({
   return (
     <div className="banner banner-info remember-term" role="status">
       <span className="grow">
-        Remember <strong>{pending.term}</strong> for this workspace? We&apos;ll give the
-        spelling to the transcriber before your next recording.
+        Send &quot;<strong>{pending.term}</strong>&quot; to the transcriber for every recording in
+        this workspace?
       </span>
       <button className="btn ghost sm" disabled={busy} onClick={onDone}>
         Not now
