@@ -691,7 +691,9 @@ _FIRST_PERSON_START: Final = re.compile(
     r"Ich|Wir|Я|Ми)\b",
 )
 _FIRST_PERSON_ANY: Final = re.compile(
-    r"(?:\bI'll\b|\bI’ll\b|\bwe'll\b|\bwe’ll\b|\byou guys\b)", re.IGNORECASE
+    r"(?:\bI'll\b|\bI’ll\b|\bwe'll\b|\bwe’ll\b|\byou guys\b|\bI am\b|\bI'm\b|\bI’m\b|"
+    r"\bmy name\b|\bмене звати\b)",
+    re.IGNORECASE,
 )
 # Openers that only keep talk going. Dropping one is the only rewrite code
 # makes of a model's line.

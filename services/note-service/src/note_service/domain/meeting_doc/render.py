@@ -108,9 +108,18 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
 }
 
 
+# The schema's field name written into a sentence ("… fifty-eight feet
+# fact_ids:.") — a small model's echo of the answer shape, never words.
+_FIELD_LABEL: Final = re.compile(r"\s*[(\[]?\s*\bfact_?ids\b\s*[:=]?\s*[)\]]?", re.IGNORECASE)
+
+
 def strip_inline_ids(text: str) -> tuple[str, list[str]]:
     """The text without any fact ids the model wrote into it, and those
     ids — they are ours, so they still count as citations."""
+    if _FIELD_LABEL.search(text):
+        text = _FIELD_LABEL.sub(" ", text)
+        text = " ".join(re.sub(r"\s+([.,;:!?])", r"\1", text).split())
+        text = re.sub(r"([.,;:!?])\1+", r"\1", text)
     found: list[str] = []
     for match in _INLINE_IDS.finditer(text):
         found.extend(i.strip() for i in match.group("ids").split(","))
@@ -630,6 +639,14 @@ def render_sections(
             placed.setdefault(by_title[home], []).append(group)
         else:
             homeless.append(group)
+    # A topic with too few figures for a table of its own lends them to one
+    # Specifications table when, together, they are enough for one.
+    small = {i: g for i, g in placed.items() if len(g) < MIN_TABLE_FIGURES}
+    pooled = [g for groups in small.values() for g in groups] + homeless
+    if len(pooled) >= MIN_TABLE_FIGURES and small:
+        for i in small:
+            del placed[i]
+        homeless = sorted(pooled, key=lambda g: g.facts[0].start_ms)
     for index, groups in placed.items():
         section = topic_sections[index]
         text, figure_lines = _figure_block(groups, language)
@@ -660,6 +677,9 @@ def render_sections(
         for line in _presenter_lines(grouped.get(schema.INTRODUCTION, []), language):
             overview.append((line.text, [line]))
     for written, own in sentences:
+        if own and all(i in figure_ids for i in own):
+            redundant += 1  # the figures are written from their fields, with a source
+            continue
         overview.append((written, [Line(written, "summary", tuple(own))]))
     used: list[VerifiedFact] = []
     if not topic_sections:
@@ -848,8 +868,9 @@ def presenter_text(person: Person, language: str = "en") -> str:
     org = person.organisation.strip()
     what = f"{role} {joiner} {org}" if role and org else (role or org)
     text = person.name + (f", {what}" if what else "")
-    if person.qualifier:
-        text += f" ({person.qualifier})"
+    qualifier = _ARTICLE.sub("", person.qualifier).strip()
+    if qualifier:
+        text += f" ({qualifier})"
     return f"{label_self if person.self_introduction else label_other}: {text}"
 
 

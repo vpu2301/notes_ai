@@ -61,6 +61,38 @@ words.
   bucket transcript. The synthetic twin `m11_en_boat_walkthrough` carries all eight kinds of
   check.
 
+## After the first run on the stack model (Gemma 3 4B, 2026-09-26)
+
+The engine as first built wrote no figure, presenter or Contact line on `m11` or on the Pardo
+recording. What the small model does, and what now handles it — every step keeps "the model
+proposes, code verifies":
+
+- **It leaves optional fields empty.** A figure or introduction without its fields gets one
+  follow-up call whose schema REQUIRES them (one line per call, ≤ 16 per window — asked about a
+  dozen lines at once it answers the first few). A call to action no fact states gets one call
+  for a single third-person sentence, verified like any fact.
+- **It files numbers as key points and stops early.** A fact whose words carry a number, and a
+  line with a number no fact covers, are asked about as figures; code picks the line, the model
+  names the quantity, verification decides. A verified figure replaces the key point it came
+  from.
+- **It quotes the number words only, or the whole line with its header.** Name and qualifier
+  are checked against the spoken line (and the same speaker's previous line for the name — "the
+  water tank holds / just under 300 gallons"); the qualifier must sit directly before its own
+  value, and when the model gives none, code reads a closed-list qualifier said right there. The
+  line header ("[8] Speaker 1 (00:33):") is stripped first — it names the speaker on every line
+  and would vouch for any introduction. A self-introduction is checked with the same speaker's
+  next sentence ("We are the … dealer for all of the Great Lakes"), and keeps the transcript's
+  casing.
+- **It calls names and designations figures.** "Pardo 65 GT", "IPS 1200s", "a 52 gt" and a bare
+  year are not quantities; a unit is not a quantity's name; a product in a welcome is not an
+  introduction (an introduction cue is required).
+- **The one-voice rule called a short walkthrough a voice memo.** The classifier's
+  `presentation_demo` now survives it (Q3's podcast rule is unchanged).
+- **F2's restate replaced figures** whose text copied the line; payload facts are exempt.
+
+Result on the stack model, one run each (model output varies run to run):
+`docs/eval/i3-stack-model-2026-09-26.md`.
+
 ## Consequences
 
 - A walkthrough's note leads with who presented and carries its specifications with a source per

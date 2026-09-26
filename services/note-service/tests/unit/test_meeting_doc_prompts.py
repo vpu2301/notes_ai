@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import date
 
 from note_service.domain.meeting_doc import pipeline, prompts, roles, schema, verify, windows
@@ -39,6 +40,10 @@ PINNED: dict[str, str] = {
     "2026-10-12": "1acfc550bc80b3253c1465b50211cd14800c82dd4423150cb3080fa1390999ee",
     "2026-10-13": "fdeefa1c1d2906fae6f2280798c0b01e92ddde5c0bfcdd4e776a9e26e856d5c3",  # F2: restate suffix, small-talk shot, sub-points
     "2026-10-14": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: figure/introduction/next_step rules, intro hint, presentation_demo
+    "2026-10-15": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: figure-details follow-up
+    "2026-10-16": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: person-details follow-up
+    "2026-10-17": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action line hint
+    "2026-10-18": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action follow-up
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")
@@ -201,7 +206,17 @@ def test_prompts_carry_only_this_recording() -> None:
     produced = {f.item_key: f.text for f in document_a.facts}
     b_grams = _transcript_grams(b) - shared
 
+    a_lines = {t["text"] for t in a["transcript"]}
     for step, prompt, system in provider_a.calls:
+        if step in ("figures", "people", "steps"):
+            # F3 details: this window's own lines, nothing else.
+            for body in data_blocks(prompt):
+                for line in body.splitlines():
+                    listed = re.match(r"^\s*\d+\.\s*(?:line:\s*)?(?P<said>.+)$", line)
+                    if listed:
+                        said = listed["said"].strip()
+                        assert any(said in t or t in said for t in a_lines), step
+            continue
         if step == "extract":
             # The data block is exactly one of A's windows, as rendered.
             blocks = data_blocks(prompt)

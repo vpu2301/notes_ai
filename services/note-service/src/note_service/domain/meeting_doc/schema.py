@@ -436,3 +436,134 @@ ENTITY_SCHEMA: Final[dict[str, Any]] = {
         }
     },
 }
+
+
+# ── F3: the details of figures a window's answer left without them ───
+#
+# A small model answering the extraction schema leaves optional fields
+# empty. For a figure they are the point, so the ones that came back bare
+# are asked about once more with every field REQUIRED — a constrained
+# decoder then has to fill them. Verification is unchanged.
+
+
+class FigureDetail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    index: int
+    name: str = Field(default="", max_length=MAX_FIGURE_NAME_CHARS)
+    value: str = Field(default="", max_length=60)
+    unit: str = Field(default="", max_length=MAX_UNIT_CHARS)
+    qualifier: str = Field(default="", max_length=MAX_PERSON_FIELD_CHARS)
+
+
+class FigureDetailsOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    figures: list[FigureDetail] = Field(default_factory=list)
+
+
+def figure_details_schema(count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["figures"],
+        "properties": {
+            "figures": {
+                "type": "array",
+                # A line may give several figures ("cruising twenty six knots,
+                # top speed up to thirty two"): an index may repeat.
+                "maxItems": count * 3,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["index", "name", "value", "unit", "qualifier"],
+                    "properties": {
+                        "index": {"type": "integer", "minimum": 1, "maximum": count},
+                        "name": {"type": "string", "maxLength": MAX_FIGURE_NAME_CHARS},
+                        "value": {"type": "string", "maxLength": 60},
+                        "unit": {"type": "string", "maxLength": MAX_UNIT_CHARS},
+                        "qualifier": {"type": "string", "maxLength": MAX_PERSON_FIELD_CHARS},
+                    },
+                },
+            }
+        },
+    }
+
+
+class PersonDetail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    index: int
+    name: str = Field(default="", max_length=MAX_PERSON_FIELD_CHARS)
+    role: str = Field(default="", max_length=MAX_PERSON_FIELD_CHARS)
+    organisation: str = Field(default="", max_length=MAX_PERSON_FIELD_CHARS)
+    qualifier: str = Field(default="", max_length=MAX_PERSON_FIELD_CHARS)
+
+
+class PersonDetailsOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    people: list[PersonDetail] = Field(default_factory=list)
+
+
+def person_details_schema(count: int) -> dict[str, Any]:
+    text = {"type": "string", "maxLength": MAX_PERSON_FIELD_CHARS}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["people"],
+        "properties": {
+            "people": {
+                "type": "array",
+                "maxItems": count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["index", "name", "role", "organisation", "qualifier"],
+                    "properties": {
+                        "index": {"type": "integer", "minimum": 1, "maximum": count},
+                        "name": text,
+                        "role": text,
+                        "organisation": text,
+                        "qualifier": text,
+                    },
+                },
+            }
+        },
+    }
+
+
+class ContactDetail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    index: int
+    text: str = Field(default="", max_length=MAX_FACT_CHARS)
+
+
+class ContactDetailsOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    steps: list[ContactDetail] = Field(default_factory=list)
+
+
+def contact_details_schema(count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["steps"],
+        "properties": {
+            "steps": {
+                "type": "array",
+                "maxItems": count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["index", "text"],
+                    "properties": {
+                        "index": {"type": "integer", "minimum": 1, "maximum": count},
+                        "text": {"type": "string", "maxLength": MAX_FACT_CHARS},
+                    },
+                },
+            }
+        },
+    }

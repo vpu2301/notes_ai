@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final, Protocol
 
-from . import entities, prompts, render, roles, schema, support, types, verify, windows
+from . import entities, numbers, prompts, render, roles, schema, support, types, verify, windows
 from . import merge as merge_rules
 from .verify import VerifiedFact
 from .windows import Window
@@ -188,6 +188,11 @@ async def run(
             return None
         return introduction_lines(window, suggested_quotes) or None
 
+    def contact_hints(window: Window) -> list[int] | None:
+        if schema.NEXT_STEP not in offered:
+            return None
+        return [t.number for t in window.turns if verify.calls_to_action(t.text, language)] or None
+
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
         budget = fact_budget(window)
         window_schema = schema.extract_schema(
@@ -206,6 +211,7 @@ async def run(
                 max_facts=budget,
                 max_tokens=extract_tokens(budget),
                 introduction_lines=hints(window),
+                contact_lines=contact_hints(window),
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
@@ -261,14 +267,27 @@ async def run(
         )
 
     restate = {"improved": 0, "unchanged": 0}
+    details_asked = 0
     for window, extracted in extracted_windows:
         if extracted is None:
             out.windows_failed += 1
             out.failed_ranges.append([window.start_ms, window.end_ms])
             continue
         out.windows_done += 1
-        kept = check(extracted.facts, window, stats)
-        copies = sum(1 for f in kept if f.copied)
+        asked, twins = await _figure_details(
+            provider, window, extracted, language, promote=schema.FIGURE in offered
+        )
+        details_asked += asked
+        if schema.NEXT_STEP in offered:
+            twins += _contact_twins(extracted, language)
+            twins += await _contact_details(
+                provider, window, [*extracted.facts, *twins], language, contact_hints(window)
+            )
+        await _person_details(provider, window, extracted, language)
+        kept = _without_figure_twins(check([*extracted.facts, *twins], window, stats))
+        # A figure or introduction is written from its payload: its text
+        # being a copy is no reason to ask again, nor to replace it.
+        copies = sum(1 for f in kept if f.copied and f.figure is None and f.person is None)
         if copies and len(kept) >= RESTATE_MIN_FACTS and copies / len(kept) > RESTATE_COPY_SHARE:
             # F2, decision 2: once per window, told the rule it broke, with
             # no more facts than it gave the first time.
@@ -392,6 +411,7 @@ async def run(
         "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
         "children_restated": gate.children_restated,
         # F3 — figures, introductions, calls to action.
+        "figure_details_asked": details_asked,
         "figures_kept": stats.figures_kept,
         "figures_dropped_value": stats.figures_dropped_value,
         "figures_dropped_unit": stats.figures_dropped_unit,
@@ -494,7 +514,8 @@ def restated(
     out: list[VerifiedFact] = []
     replaced = 0
     for fact in first:
-        candidates = spare.get(fact.line) if fact.copied else None
+        payload = fact.figure is not None or fact.person is not None
+        candidates = spare.get(fact.line) if fact.copied and not payload else None
         if candidates:
             out.append(candidates.pop(0))
             replaced += 1
@@ -827,6 +848,7 @@ async def _extract(
     max_tokens: int = EXTRACT_MAX_TOKENS,
     system_suffix: str | None = None,
     introduction_lines: list[int] | None = None,
+    contact_lines: list[int] | None = None,
 ) -> schema.ExtractOut | None:
     """One window. ``None`` when the model could not answer in shape.
     ``system_suffix`` (F2) is the rule the last answer broke;
@@ -837,6 +859,7 @@ async def _extract(
         carried=carried,
         max_facts=max_facts,
         introduction_lines=introduction_lines,
+        contact_lines=contact_lines,
     )
     system = prompts.extract_system(language)
     if system_suffix:
@@ -866,6 +889,203 @@ async def _extract(
                 )
                 return None
     return None
+
+
+FIGURE_DETAILS_MAX_TOKENS: Final = 600
+FIGURE_DETAILS_MAX_LINES: Final = 16
+
+
+async def _figure_details(
+    provider: ChatLike,
+    window: Window,
+    extracted: schema.ExtractOut,
+    language: str,
+    *,
+    promote: bool = False,
+) -> tuple[int, list[schema.Fact]]:
+    """F3: fill the fields of figures the extraction left bare, with one
+    call per window whose schema REQUIRES them. Fields the model already
+    gave are kept; everything is still verified against the words. Returns
+    ``(how many figures were asked about, the promoted twins)`` — the twins
+    are NOT added to the model's answer (its size is the restate budget).
+
+    ``promote``: a fact of another kind whose quote says a number is asked
+    about too, as a figure next to it (a small model files "the beam is
+    sixteen and a half feet" as a key point). The key point stays unless
+    its figure verifies (:func:`_without_figure_twins`)."""
+    bare = [f for f in extracted.facts if f.kind == schema.FIGURE and not (f.value and f.name)]
+    twins: list[schema.Fact] = []
+    if promote:
+        figured = {(f.turn, f.quote) for f in extracted.facts if f.kind == schema.FIGURE}
+        for fact in list(extracted.facts):
+            if (
+                fact.kind not in (schema.FIGURE, schema.INTRODUCTION, schema.JUDGEMENT)
+                and (fact.turn, fact.quote) not in figured
+                # The words, not the "[4] Speaker 1 (00:23):" header the
+                # window shows: its digits are not anything anyone said.
+                and numbers.numbers_in(verify.strip_turn_header(fact.quote), language)
+            ):
+                twin = fact.model_copy(update={"kind": schema.FIGURE})
+                twins.append(twin)
+                bare.append(twin)
+        # A line that says a number and that no fact covers at all: a small
+        # model extracting a long window stops early, and "length overall,
+        # sixty six feet" two minutes in is exactly what it skips. Code only
+        # picks the line; the model names the quantity; code verifies it.
+        covered = {
+            verify.normalise_quote(verify.strip_turn_header(f.quote)) for f in extracted.facts
+        }
+        for turn in window.turns:
+            said = verify.normalise_quote(turn.text)
+            if not numbers.numbers_in(turn.text, language):
+                continue
+            if any(q and (q in said or said in q) for q in covered):
+                continue
+            twin = schema.Fact(
+                kind=schema.FIGURE, text=turn.text[:240], quote=turn.text, turn=turn.number
+            )
+            twins.append(twin)
+            bare.append(twin)
+    if not bare:
+        return 0, twins
+    # One line per call: asked about a dozen lines at once, a small model
+    # answers the first few and skips the rest. Bounded per window.
+    bare = bare[:FIGURE_DETAILS_MAX_LINES]
+    for fact in bare:
+        located = verify.locate_quote(fact.quote, window, fact.turn)
+        line = located.text if located is not None else verify.strip_turn_header(fact.quote)
+        try:
+            answer = await provider.complete(
+                prompts.figure_details_prompt([(line, verify.strip_turn_header(fact.quote))]),
+                schema.figure_details_schema(1),
+                max_tokens=FIGURE_DETAILS_MAX_TOKENS,
+                temperature=0.0,
+                system=prompts.figure_details_system(language),
+            )
+            parsed = schema.FigureDetailsOut.model_validate_json(_json_of(answer))
+        except Exception:  # noqa: BLE001 — this figure is dropped by verification instead
+            logger.warning("meeting_doc.figure_details_failed", exc_info=True)
+            continue
+        for n, detail in enumerate(parsed.figures):
+            target = fact
+            if n:
+                # A second figure from the same line: its own fact, same words.
+                target = fact.model_copy(
+                    update={"name": None, "value": None, "unit": None, "qualifier": None}
+                )
+                twins.append(target)
+            target.name = target.name or detail.name.strip() or None
+            target.value = target.value or detail.value.strip() or None
+            target.unit = target.unit or detail.unit.strip() or None
+            target.qualifier = target.qualifier or detail.qualifier.strip() or None
+    return len(bare), twins
+
+
+def _contact_twins(extracted: schema.ExtractOut, language: str) -> list[schema.Fact]:
+    """F3: a fact of another kind whose quote asks the listener to act
+    ("email me or leave a comment") gets a `next_step` twin — a small model
+    files the call to action as a key point. Verification still decides."""
+    have = {(f.turn, f.quote) for f in extracted.facts if f.kind == schema.NEXT_STEP}
+    return [
+        f.model_copy(update={"kind": schema.NEXT_STEP})
+        for f in extracted.facts
+        if f.kind not in (schema.NEXT_STEP, schema.FIGURE, schema.INTRODUCTION)
+        and (f.turn, f.quote) not in have
+        and verify.calls_to_action(f.quote, language)
+    ]
+
+
+async def _contact_details(
+    provider: ChatLike,
+    window: Window,
+    facts: list[schema.Fact],
+    language: str,
+    hinted: list[int] | None,
+) -> list[schema.Fact]:
+    """F3: a line that asks the listener to act and that no fact states as a
+    `next_step` is stated once, by one call whose schema requires the
+    sentence. The sentence is a fact like any other: its quote is the line,
+    and verification checks it (a copy of the line is evidence only)."""
+    if not hinted:
+        return []
+    stated = {f.turn for f in facts if f.kind == schema.NEXT_STEP}
+    turns = [t for t in window.turns if t.number in hinted and t.number not in stated]
+    if not turns:
+        return []
+    try:
+        answer = await provider.complete(
+            prompts.lines_prompt([t.text for t in turns]),
+            schema.contact_details_schema(len(turns)),
+            max_tokens=FIGURE_DETAILS_MAX_TOKENS,
+            temperature=0.0,
+            system=prompts.contact_details_system(language),
+        )
+        parsed = schema.ContactDetailsOut.model_validate_json(_json_of(answer))
+    except Exception:  # noqa: BLE001 — no Contact line is better than a guess
+        logger.warning("meeting_doc.contact_details_failed", exc_info=True)
+        return []
+    out: list[schema.Fact] = []
+    for detail in parsed.steps:
+        if 1 <= detail.index <= len(turns) and detail.text.strip():
+            turn = turns[detail.index - 1]
+            out.append(
+                schema.Fact(
+                    kind=schema.NEXT_STEP,
+                    text=detail.text.strip(),
+                    quote=turn.text,
+                    turn=turn.number,
+                )
+            )
+    return out
+
+
+def _without_figure_twins(facts: list[VerifiedFact]) -> list[VerifiedFact]:
+    """A promoted figure or call to action that verified replaces the fact
+    it was made from (same line, same quote): one statement, written once."""
+    typed = {(f.line, f.quote) for f in facts if f.figure is not None or f.kind == schema.NEXT_STEP}
+    return [
+        f
+        for f in facts
+        if f.figure is not None or f.kind == schema.NEXT_STEP or (f.line, f.quote) not in typed
+    ]
+
+
+async def _person_details(
+    provider: ChatLike, window: Window, extracted: schema.ExtractOut, language: str
+) -> None:
+    """F3: the same one follow-up for introductions without a name."""
+    bare = [f for f in extracted.facts if f.kind == schema.INTRODUCTION and not f.name]
+    if not bare:
+        return
+    lines = []
+    for fact in bare:
+        turn = verify.locate_quote(fact.quote, window, fact.turn)
+        if turn is None:
+            lines.append(verify.strip_turn_header(fact.quote))
+            continue
+        # The sentence after an introduction often says the rest ("We are
+        # the … dealer for the Great Lakes") — verification reads it too.
+        following = verify._next_line_same_speaker(window, turn)
+        lines.append(f"{turn.text} {following}".strip())
+    try:
+        answer = await provider.complete(
+            prompts.lines_prompt(lines),
+            schema.person_details_schema(len(lines)),
+            max_tokens=FIGURE_DETAILS_MAX_TOKENS,
+            temperature=0.0,
+            system=prompts.person_details_system(language),
+        )
+        parsed = schema.PersonDetailsOut.model_validate_json(_json_of(answer))
+    except Exception:  # noqa: BLE001 — verification drops them instead
+        logger.warning("meeting_doc.person_details_failed", exc_info=True)
+        return
+    for detail in parsed.people:
+        if 1 <= detail.index <= len(bare):
+            fact = bare[detail.index - 1]
+            fact.name = detail.name.strip() or None
+            fact.role = fact.role or detail.role.strip() or None
+            fact.organisation = fact.organisation or detail.organisation.strip() or None
+            fact.qualifier = fact.qualifier or detail.qualifier.strip() or None
 
 
 async def _context(

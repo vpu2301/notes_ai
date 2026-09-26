@@ -49,7 +49,17 @@ def as_result(meeting: dict[str, Any]) -> dict[str, Any]:
 
 def step_of(schema: dict[str, Any] | None) -> str:
     props = (schema or {}).get("properties", {})
-    for key in ("facts", "conversation_type", "topics", "summary", "corrections", "recording_type"):
+    for key in (
+        "facts",
+        "conversation_type",
+        "topics",
+        "summary",
+        "corrections",
+        "recording_type",
+        "figures",
+        "people",
+        "steps",
+    ):
         if key in props:
             return {
                 "facts": "extract",
@@ -166,6 +176,15 @@ class ScriptedProvider:
                 if group
             ]
         }
+
+    def _figures(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
+        return {"figures": []}
+
+    def _people(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
+        return {"people": []}
+
+    def _steps(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
+        return {"steps": []}
 
     def _entities(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
         return {"corrections": []}

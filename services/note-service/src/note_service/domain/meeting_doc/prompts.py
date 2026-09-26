@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-14"
+PROMPT_VERSION: Final = "2026-10-18"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -690,6 +690,13 @@ _INTRODUCTION_HINT: Final[dict[str, str]] = {
 }
 
 
+_CONTACT_HINT: Final[dict[str, str]] = {
+    "en": "Line(s) {lines} ask the listener to act; return each as a `next_step`.",
+    "de": "Zeile(n) {lines} fordern die Zuhörer zum Handeln auf; gib jede als `next_step` zurück.",
+    "uk": "Рядок(и) {lines} закликають слухачів діяти; поверни кожен як `next_step`.",
+}
+
+
 def extract_prompt(
     window_text: str,
     language: str,
@@ -697,6 +704,7 @@ def extract_prompt(
     carried: list[tuple[str, str]] | None = None,
     max_facts: int | None = None,
     introduction_lines: list[int] | None = None,
+    contact_lines: list[int] | None = None,
 ) -> str:
     """The window, and — for a meeting in a series — what is still open
     from last time, as a NUMBERED list.
@@ -716,6 +724,10 @@ def extract_prompt(
                 lines=", ".join(f"[{n}]" for n in introduction_lines)
             )
         )
+    if contact_lines:
+        parts.append(
+            _pick(_CONTACT_HINT, language).format(lines=", ".join(f"[{n}]" for n in contact_lines))
+        )
     if carried:
         listing = "\n".join(f"{i}. {text}" for i, (_key, text) in enumerate(carried, 1))
         parts.append(f"{_pick(_CARRIED_HEADING, language)}\n{listing}")
@@ -729,6 +741,104 @@ def topics_system(language: str) -> str:
 
 def summary_system(language: str) -> str:
     return f"{_pick(REDUCE_SUMMARY_SYSTEM, language)}\n\n{guard(language)}"
+
+
+# F3 — the one follow-up for figures that came back without their fields.
+FIGURE_DETAILS_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "Each numbered item is a line from a recording and the words in it that give a "
+        "number. For each item give: `name` — the quantity the number measures, in words "
+        "from the line; `value` — the number exactly as said; `unit` — as said, or empty; "
+        "`qualifier` — the speaker's own hedge right before the number ('just under', "
+        "'about', 'up to', 'a little over') or empty. Never compute, round or convert."
+    ),
+    "de": (
+        "Jeder nummerierte Eintrag ist eine Zeile aus einer Aufnahme und die Wörter darin, die "
+        "eine Zahl nennen. Gib für jeden Eintrag an: `name` — die Größe, die die Zahl misst, "
+        "in Worten aus der Zeile; `value` — die Zahl genau wie gesagt; `unit` — wie gesagt oder "
+        "leer; `qualifier` — die eigene Einschränkung direkt vor der Zahl („knapp“, „etwa“, "
+        "„bis zu“) oder leer. Nie rechnen, runden oder umrechnen."
+    ),
+    "uk": (
+        "Кожен нумерований пункт — рядок із запису та слова в ньому, що називають число. Для "
+        "кожного пункту дай: `name` — величину, яку вимірює число, словами з рядка; `value` — "
+        "число точно як сказано; `unit` — як сказано або порожньо; `qualifier` — власне "
+        "застереження мовця перед числом («трохи менше», «приблизно», «до») або порожньо. "
+        "Ніколи не рахуй, не округлюй і не переводь."
+    ),
+}
+
+
+PERSON_DETAILS_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "Each numbered item is a line from a recording in which somebody is introduced. "
+        "For each give, in the words of the line only: `name` — the person; `role` — what "
+        "they do; `organisation` — who they are with; `qualifier` — anything the line adds "
+        "about that organisation. Leave a field empty when the line does not say it."
+    ),
+    "de": (
+        "Jeder nummerierte Eintrag ist eine Zeile aus einer Aufnahme, in der jemand vorgestellt "
+        "wird. Gib für jeden nur mit Worten der Zeile an: `name` — die Person; `role` — was "
+        "sie tut; `organisation` — für wen; `qualifier` — was die Zeile über diese "
+        "Organisation ergänzt. Lass ein Feld leer, wenn die Zeile es nicht sagt."
+    ),
+    "uk": (
+        "Кожен нумерований пункт — рядок із запису, де когось представляють. Для кожного "
+        "дай лише словами рядка: `name` — людина; `role` — чим займається; `organisation` — "
+        "де працює; `qualifier` — що рядок додає про цю організацію. Залиш поле порожнім, "
+        "якщо рядок цього не каже."
+    ),
+}
+
+
+def person_details_system(language: str) -> str:
+    return f"{_pick(PERSON_DETAILS_SYSTEM, language)}\n\n{guard(language)}"
+
+
+def figure_details_system(language: str) -> str:
+    return f"{_pick(FIGURE_DETAILS_SYSTEM, language)}\n\n{guard(language)}"
+
+
+def figure_details_prompt(items: list[tuple[str, str]]) -> str:
+    """``items`` = ``[(line text, quote)]``, numbered from 1."""
+    listing = "\n".join(
+        f"{n}. line: {line}\n   number words: {quote}" for n, (line, quote) in enumerate(items, 1)
+    )
+    return f"{DATA_OPEN}\n{listing}\n{DATA_CLOSE}"
+
+
+def lines_prompt(lines: list[str]) -> str:
+    """Numbered lines from the recording, from 1 — for the F3 follow-ups."""
+    listing = "\n".join(f"{n}. {line}" for n, line in enumerate(lines, 1))
+    return f"{DATA_OPEN}\n{listing}\n{DATA_CLOSE}"
+
+
+# F3 — a line that asks the listener to act, stated once in the record's voice.
+CONTACT_DETAILS_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "Each numbered item is a line in which the speaker asks the listener to do "
+        "something. For each item write `text`: ONE sentence in the third person saying what "
+        "listeners are asked to do and how, using the line's own words for the channel "
+        "(email, comment, phone, website). Never copy the line; never add anything it "
+        "does not say."
+    ),
+    "de": (
+        "Jeder nummerierte Eintrag ist eine Zeile, in der die sprechende Person die Zuhörer "
+        "zu etwas auffordert. Schreibe für jeden `text`: EINEN Satz in der dritten Person, "
+        "wozu und wie die Zuhörer aufgefordert werden, mit den Worten der Zeile für den Weg "
+        "(E-Mail, Kommentar, Telefon, Website). Kopiere nie die Zeile; füge nichts hinzu."
+    ),
+    "uk": (
+        "Кожен нумерований пункт — рядок, де мовець закликає слухачів щось зробити. Для "
+        "кожного напиши `text`: ОДНЕ речення у третій особі — що і як пропонують зробити "
+        "слухачам, словами рядка для каналу (пошта, коментар, телефон, сайт). Ніколи не "
+        "копіюй рядок і нічого не додавай."
+    ),
+}
+
+
+def contact_details_system(language: str) -> str:
+    return f"{_pick(CONTACT_DETAILS_SYSTEM, language)}\n\n{guard(language)}"
 
 
 def context_system(language: str) -> str:

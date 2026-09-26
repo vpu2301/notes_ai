@@ -95,7 +95,15 @@ async def classify(
 
     # One voice, a few minutes, nothing in the calendar: somebody talking
     # to their phone, whatever the model heard.
-    if speakers <= 1 and minutes < VOICE_MEMO_MAX_MINUTES and not calendar_title:
+    # F3: one voice demonstrating something to an audience is one voice
+    # too — the model's presentation answer stands (a short walkthrough is
+    # exactly this shape; Q3's podcast rule is unchanged).
+    if (
+        speakers <= 1
+        and minutes < VOICE_MEMO_MAX_MINUTES
+        and not calendar_title
+        and said != "presentation_demo"
+    ):
         return "voice_memo", SOURCE_RULE
     # One voice for longer is a talk — unless the model heard a broadcast.
     if (
