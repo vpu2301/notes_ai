@@ -72,6 +72,22 @@ def test_a_real_name_said_mid_sentence_is_speech() -> None:
     assert kept == words and spans == []
 
 
+def test_one_multi_word_term_said_once_at_a_segment_start_is_speech() -> None:
+    """T7, the incident recording: the presenter names the product."""
+    words = _words("of Williams Jet Tender that you can have in this boat")
+    kept, spans = echo.strip_prompt_echo(words, "Gregor Gysi, Williams Jet Tender, Pardo")
+    assert kept == words and spans == []
+    # The same three tokens repeated, or next to another term, are an echo.
+    kept, spans = echo.strip_prompt_echo(
+        _words("Williams Jet Tender Williams Jet Tender that"), "Williams Jet Tender"
+    )
+    assert _text(kept) == "that"
+    kept, spans = echo.strip_prompt_echo(
+        _words("Pardo Williams Jet Tender that"), "Williams Jet Tender, Pardo"
+    )
+    assert _text(kept) == "that"
+
+
 def test_a_two_word_term_at_a_segment_start_is_below_the_run_length() -> None:
     words = _words("Springbrook Marine builds the hull in Poole")
     kept, spans = echo.strip_prompt_echo(words, "Springbrook Marine, Mitchell")
@@ -272,11 +288,13 @@ def test_conditioning_and_vocabulary_mode_follow_the_settings(
     }
 
 
-def test_the_defaults_are_no_conditioning_and_the_prompt() -> None:
+def test_the_defaults_are_conditioning_and_the_prompt() -> None:
     from asr_worker.config import Settings
 
     fresh = Settings(_env_file=None)  # type: ignore[call-arg]
-    assert fresh.asr_condition_prev is False
+    # T7: off makes conversation chunks lower-case run-ons; the guard
+    # contains the cascade instead.
+    assert fresh.asr_condition_prev is True
     assert fresh.asr_vocabulary_mode == "prompt"
     assert fresh.asr_chunk_language_id is True
 

@@ -44,10 +44,13 @@ class Settings(BaseSettings):
     asr_model: str = Field(default="large-v3", alias="MD_ASR_MODEL")
     asr_compute_type: str = Field(default="float16", alias="MD_ASR_COMPUTE_TYPE")
     asr_beam_size: int = Field(default=5, alias="MD_ASR_BEAM_SIZE")
-    # Sprint I2 T5: conditioning each batch chunk on the text decoded before
-    # it is the second amplifier of prompt-echo cascades (once the decoder
-    # echoes, the echo becomes context). Off; T7 measured the WER cost.
-    asr_condition_prev: bool = Field(default=False, alias="MDX_ASR_CONDITION_PREV")
+    # Sprint I2 T5/T7: conditioning each batch chunk on the text decoded
+    # before it is the second amplifier of prompt-echo cascades — but T7
+    # measured the cost of turning it off: conversation chunks (no
+    # punctuation model, G0) come back as lower-case run-ons. With the
+    # vocabulary rule and the word-level guard the cascade is contained, so
+    # it stays ON; the switch remains for a workspace that echoes anyway.
+    asr_condition_prev: bool = Field(default=True, alias="MDX_ASR_CONDITION_PREV")
     # Sprint I2 T7: how the vocabulary reaches the decoder — as
     # `initial_prompt` (today) or as faster-whisper `hotwords` (a variant
     # measured in T7, not bet on).

@@ -40,8 +40,17 @@ whole-segment echoes over non-speech.
    "Welsh" on VoxConverse and decoding that as Welsh would replace speech with noise. The
    segment carries `language`; `task` is always `transcribe`. In-process engine only; HTTP
    backends leave the field unset and the note engine keeps its script heuristic for those.
-5. **`condition_on_previous_text=False` for batch chunks** (`MDX_ASR_CONDITION_PREV`, default
-   off); `hotwords` is a measured variant (`MDX_ASR_VOCABULARY_MODE`), not the default.
+5. **`condition_on_previous_text` stays on for batch chunks** (`MDX_ASR_CONDITION_PREV`, default
+   on). **Deviation from the sprint's "off":** T7 ran both on the incident recording — with
+   conditioning off, conversation chunks (which get no punctuation model, G0) came back as
+   lower-case run-ons ("boat for those that don't know my name is Mitchell I'm a broker…"), the
+   very symptom I3 §1 lists; with it on, the sentences hold. The cascade conditioning amplifies
+   is contained by decisions 1 and 3, and the switch remains for a workspace that echoes anyway.
+   `hotwords` is a measured variant (`MDX_ASR_VOCABULARY_MODE`), not the default.
+3b. **The echo rule is term-aware.** A run of ≥ 3 prompt tokens is removed only when it spans two
+   or more prompt *terms* (repeats included) or writes a word twice; one multi-word term said once
+   at a segment start ("of Williams Jet Tender that you can have in this boat", the incident
+   recording) is the presenter naming the product and stays — T7 caught the guard removing it.
 6. **Per-segment language is a first-class field** through the result view (segment, turn,
    `diagnostics`) to the note engine, which flags and confirms `other_language` from it by code,
    and to the Transcript tab, which tags the passage instead of hiding it.

@@ -50,6 +50,38 @@ def prompt_tokens(prompt: str | None) -> frozenset[str]:
     return frozenset(t.casefold() for t in _TOKEN.findall(prompt))
 
 
+def prompt_terms(prompt: str | None) -> list[tuple[str, ...]]:
+    """The prompt's comma-separated terms as token tuples ("Williams Jet
+    Tender" is one term of three tokens)."""
+    if not prompt:
+        return []
+    out: list[tuple[str, ...]] = []
+    for part in prompt.split(","):
+        tokens = tuple(t.casefold() for t in _TOKEN.findall(part))
+        if tokens and tokens not in out:
+            out.append(tokens)
+    return out
+
+
+def _is_echo(run_tokens: list[str], terms: list[tuple[str, ...]]) -> bool:
+    """A run of prompt tokens is an echo when it spans two or more distinct
+    prompt terms, or repeats a token straight away. One multi-word term said
+    once — "of Williams Jet Tender that you can have" (T7, the incident
+    recording) — is the presenter naming the product, not the decoder
+    copying its prompt."""
+    if len(set(run_tokens)) < len(run_tokens):
+        return True  # a word the decoder wrote twice: "Gysi, Moderator. Gysi, Moderator."
+    occurrences = 0
+    for term in terms:
+        n = len(term)
+        occurrences += sum(
+            1 for k in range(len(run_tokens) - n + 1) if tuple(run_tokens[k : k + n]) == term
+        )
+        if occurrences >= 2:
+            return True
+    return False
+
+
 def _token(text: str) -> str:
     found = _TOKEN.findall(text)
     return found[0].casefold() if found else ""
@@ -62,7 +94,9 @@ class _Run:
     prompt_words: int
 
 
-def _runs(words: list[WordTiming], tokens: frozenset[str]) -> list[_Run]:
+def _runs(
+    words: list[WordTiming], tokens: frozenset[str], terms: list[tuple[str, ...]]
+) -> list[_Run]:
     """Every removable run, non-overlapping, left to right."""
     out: list[_Run] = []
     i = 0
@@ -91,7 +125,8 @@ def _runs(words: list[WordTiming], tokens: frozenset[str]) -> list[_Run]:
                 continue
             break
         end = last_prompt + 1
-        if count >= MIN_ECHO_RUN:
+        run_tokens = [_token(w.text) for w in words[i:end] if _token(w.text) in tokens]
+        if count >= MIN_ECHO_RUN and _is_echo(run_tokens, terms):
             out.append(_Run(start=i, end=end, prompt_words=count))
             i = end
         else:
@@ -106,7 +141,7 @@ def strip_prompt_echo(
     tokens = prompt_tokens(prompt)
     if not tokens or not words:
         return list(words), []
-    runs = _runs(words, tokens)
+    runs = _runs(words, tokens, prompt_terms(prompt))
     if not runs:
         return list(words), []
     removed: set[int] = set()

@@ -335,8 +335,9 @@ in `mdx_asr_prompt_echo_words_total`. The old whole-segment rule
 1. `scripts/admin/glossary_audit.py` — which workspaces still hold role
    labels (they are no longer sent since I2, but a large hint of real names
    echoes too on a bad recording).
-2. `MDX_ASR_CONDITION_PREV` must be `false` (the default): conditioning on
-   previous text turns one echo into a cascade.
+2. `MDX_ASR_CONDITION_PREV` is `true` by default (off makes conversation
+   chunks lower-case run-ons — T7); for a workspace that echoes anyway,
+   `false` stops one echo becoming the next chunk's context.
 3. A backend change (`ASR_BACKEND`, model) — compare the counter per backend.
 4. A person disputing a removal: `GET /asr/jobs/{id}` has the exact
    `vocabulary_hint` (migration 0061) and the result's `diagnostics` say
