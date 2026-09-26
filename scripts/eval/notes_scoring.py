@@ -480,6 +480,19 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
         in_block = {v for ln in lines if ln.get("kind") == "date" for v in ln.get("dates") or []}
         row["key_dates_recall"] = [sum(1 for d in wanted if d["resolved"] in in_block), len(wanted)]
 
+    # F2: statements, not quotes. A line that is (nearly) a transcript
+    # sentence, a line that informs nobody, a line in the speaker's voice.
+    sentences = transcript_sentences(meeting)
+    row["copied_lines"] = sum(1 for ln in content if copies_transcript(ln["text"], sentences))
+    row["no_information_lines"] = sum(
+        1 for ln in content if not informs(ln["text"], ln.get("kind"), language)
+    )
+    row["first_person_lines"] = sum(
+        1
+        for ln in content
+        if ln.get("kind") not in _TASK_LINE_KINDS and support_rules.first_person(_body(ln["text"]))
+    )
+
     # Checklists, by index.
     row["must_contain_failed"] = [
         i for i, s in enumerate(gold.get("must_contain", [])) if not _contains(everything, s)
@@ -488,6 +501,55 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
         i for i, s in enumerate(gold.get("must_not_contain", [])) if _contains(everything, s)
     ]
     return row
+
+
+# ── F2: statements, not quotes ──────────────────────────────────────
+
+# Lines that are a task or an outcome: short by nature, phrased as said.
+_TASK_LINE_KINDS = frozenset({"action", "commitment_ours", "commitment_theirs", "decision"})
+_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+
+def transcript_sentences(meeting: dict[str, Any]) -> list[str]:
+    """Every turn, and every sentence of every turn."""
+    out: list[str] = []
+    for turn in meeting.get("transcript", []):
+        text = turn.get("text", "")
+        out.append(text)
+        out.extend(part for part in _SENTENCE_END.split(text) if part.strip())
+    return out
+
+
+def copies_transcript(line: str, sentences: list[str]) -> bool:
+    """The line is a transcript sentence, or nearly all of one — the
+    engine's own ``is_copied`` rule against every sentence said."""
+    body = _body(line)
+    return any(verify.is_copied(body, sentence) for sentence in sentences)
+
+
+def informs(line: str, kind: str | None, language: str = "en") -> bool:
+    """The engine's ``no_information`` rule (``support.carries_information``)."""
+    body = _body(line)
+    return support_rules.carries_information(
+        body,
+        language,
+        short_ok=kind in _TASK_LINE_KINDS,
+        has_date=verify._has_date_word(body),
+    )
+
+
+def f2_gates(summary: dict[str, Any], *, baseline_recall: float | None) -> dict[str, bool]:
+    """F2 acceptance on a corpus: no copied, chatter or first-person line,
+    and key-fact recall no more than one point under the pre-F2 baseline."""
+    gates = {
+        "copied_lines == 0": summary.get("copied_lines") == 0,
+        "no_information_lines == 0": summary.get("no_information_lines") == 0,
+        "first_person_lines == 0": summary.get("first_person_lines") == 0,
+    }
+    recall = summary.get("key_fact_recall")
+    if baseline_recall is not None and recall is not None:
+        gates["key_fact_recall >= baseline - 0.01"] = recall >= baseline_recall - 0.01
+    return gates
 
 
 def date_resolution(gold: dict[str, Any], produced: dict[str, Any]) -> list[int] | None:
@@ -542,6 +604,7 @@ def aggregate(
     thirds = {k: [0, 0] for k in ("1", "2", "3")}
     excluded = [0, 0]
     invented = echo = 0
+    f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     by_type: dict[str, list[int]] = {}
     for n, row in enumerate(rows):
         for key in _PAIRS:
@@ -557,6 +620,8 @@ def aggregate(
             excluded[1] += row["excluded_ms"][1]
         invented += int(row.get("invented_claims") or 0)
         echo += int(row.get("example_echo") or 0)
+        for key in f2:
+            f2[key] += int(row.get(key) or 0)
         kind = (types or [None] * len(rows))[n] or "unlabelled"
         bucket = by_type.setdefault(kind, [0, 0])
         pair = row.get("key_fact_recall") or [0, 0]
@@ -584,6 +649,7 @@ def aggregate(
         "key_dates_recall": _rate(sums["key_dates_recall"]),
         "entity_sources": _sum_sources(rows),
         "date_resolution": _rate(sums["date_resolution"]),
+        **f2,
     }
 
 

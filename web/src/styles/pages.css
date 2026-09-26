@@ -1294,6 +1294,12 @@ ol.rt-list > li::before {
   border: var(--hairline) solid var(--line);
 }
 .name-chip { font-weight: 500; border-style: dashed; cursor: help; }
+/* F2 — the affordances are not text: a selection across the note never
+   copies a chip or the quote mark into what the reader pastes. */
+.line-evidence > .icon-btn, .line-evidence > .certainty-chip, .line-evidence > .name-chip {
+  user-select: none; -webkit-user-select: none;
+}
+.line-evidence .evidence-toggle::before { content: "❝"; }
 .line-evidence .icon-btn {
   background: none; border: 0; padding: 0 2px; cursor: pointer;
   color: var(--muted); font-size: calc(12px * var(--fs)); line-height: 1;

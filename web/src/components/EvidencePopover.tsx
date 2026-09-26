@@ -114,7 +114,8 @@ export function LineEvidence({
           if (e.key === "Escape") setOpen(false);
         }}
       >
-        ❝
+        {/* F2: the mark is drawn by CSS, so it is never part of the note's text —
+            selecting and copying a line never carries it along. */}
       </button>
       {open && (
         <span

@@ -129,7 +129,7 @@ groups:
         # facts — the notes stay honest (failing lines are dropped), but
         # they get thinner.
         expr: |
-          (sum(increase(mdx_note_generation_lines_total{outcome!="kept"}[1h])) or vector(0))
+          (sum(increase(mdx_note_generation_lines_total{outcome=~"unsupported|number|name|example"}[1h])) or vector(0))
           /
           clamp_min(sum(increase(mdx_note_generation_lines_total[1h])) or vector(0), 1)
           > 0.2
@@ -142,3 +142,23 @@ groups:
           description: |
             The model is drifting; check PROMPT_VERSION and the backend. Paraphrase drops on extraction (mdx_note_generation_facts_total{outcome="dropped_paraphrase"}) usually rise with it.
             Runbook: docs/runbooks/notes.md#unsupported-lines
+
+      - alert: NoteGenerationCopiedFacts
+        # Sprint F2: a fact whose text is its quote is kept as evidence and
+        # never written as a line; a window full of them is asked once more
+        # to restate. When a third of the facts are still copies after that,
+        # notes go thin — the model is transcribing, not stating.
+        expr: |
+          (sum(increase(mdx_note_generation_facts_total{outcome="copied"}[1h])) or vector(0))
+          /
+          clamp_min(sum(increase(mdx_note_generation_facts_total{outcome="kept"}[1h])) or vector(0), 1)
+          > 0.3
+        for: 30m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "More than a third of extracted facts copy the transcript (1 h)"
+          description: |
+            Copies stay evidence and never reach the note, so notes get thinner. Check PROMPT_VERSION, the summarize backend and mdx_note_generation_restate_total{outcome="unchanged"}.
+            Runbook: docs/runbooks/notes.md#copied-facts

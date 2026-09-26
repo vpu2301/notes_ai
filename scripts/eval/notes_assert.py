@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -31,7 +32,12 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import REPO, load_registry  # noqa: E402
-from notes_scoring import recording_type_of  # noqa: E402
+from notes_scoring import (  # noqa: E402
+    copies_transcript,
+    informs,
+    recording_type_of,
+    transcript_sentences,
+)
 
 ASSERTIONS = REPO / "tests" / "fixtures" / "eval" / "notes" / "assertions"
 _CONTENT_KINDS_EXCLUDED = frozenset({"heading", "note"})
@@ -56,8 +62,14 @@ def checklist_for(meeting_file: Path) -> dict[str, Any] | None:
     return None
 
 
-def check(checklist: dict[str, Any], produced: dict[str, Any]) -> list[tuple[str, bool, str]]:
-    """``[(check name, passed, owning sprint)]`` for one produced document."""
+_MARKS = re.compile(r"❝|\[↗\]|\b[0-9a-f]{16}\b")
+
+
+def check(
+    checklist: dict[str, Any], produced: dict[str, Any], meeting: dict[str, Any] | None = None
+) -> list[tuple[str, bool, str]]:
+    """``[(check name, passed, owning sprint)]`` for one produced document.
+    ``meeting`` (its transcript) is needed only by ``no_copied_lines``."""
     owners: dict[str, str] = checklist.get("sprint") or {}
     lines = [ln for ln in produced.get("lines", []) if ln.get("text", "").strip()]
     content = [ln for ln in lines if ln.get("kind") not in _CONTENT_KINDS_EXCLUDED]
@@ -120,6 +132,39 @@ def check(checklist: dict[str, Any], produced: dict[str, Any]) -> list[tuple[str
 
     if checklist.get("every_line_cited"):
         add("every_line_cited", all(ln.get("fact_ids") for ln in content), "every_line_cited")
+
+    # F2 — statements, not quotes.
+    language = (meeting or {}).get("language", "en")
+    if checklist.get("no_copied_lines") and meeting is not None:
+        sentences = transcript_sentences(meeting)
+        add(
+            "no_copied_lines",
+            not any(copies_transcript(ln["text"], sentences) for ln in content),
+            "no_copied_lines",
+        )
+    if "no_information_lines_max" in checklist:
+        chatter = sum(1 for ln in content if not informs(ln["text"], ln.get("kind"), language))
+        add(
+            "no_information_lines",
+            chatter <= int(checklist["no_information_lines_max"]),
+            "no_information_lines",
+        )
+    if checklist.get("no_marks"):
+        text = "\n".join([produced.get("note_text") or "", *(ln["text"] for ln in lines)])
+        add("no_marks", not _MARKS.search(text), "no_marks")
+    for i, topic in enumerate(checklist.get("topics", [])):
+        under = [
+            ln
+            for ln in lines
+            if any(_has(ln.get("section_title") or "", m) for m in topic["match"])
+        ]
+        add(
+            f"topics[{i}]",
+            bool(under)
+            and len(under) <= int(topic.get("max_lines", 10**6))
+            and sum(1 for ln in under if ln.get("parent")) >= int(topic.get("min_children", 0)),
+            "topics",
+        )
     return out
 
 
@@ -131,7 +176,7 @@ SCRIPTED = "scripted"
 # What the engine guarantees whatever a model says: no label or default name
 # for a named speaker, none of the audit's strings, every line cited. The
 # other checks measure what a model extracted and are shown, not gated.
-ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited"})
+ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited", "no_marks"})
 
 
 def family(name: str) -> str:
@@ -182,7 +227,7 @@ async def main(backend_name: str, corpus: Path) -> int:
                 print(f"{meeting['id']}: RUN FAILED ({type(exc).__name__})")
                 failures += 1
                 continue
-            shown = results = check(checklist, produced)
+            shown = results = check(checklist, produced, meeting)
             if backend_name == SCRIPTED:
                 results = [r for r in results if family(r[0]) in ENGINE_CHECKS]
             passed = sum(1 for _n, ok, _s in results if ok)

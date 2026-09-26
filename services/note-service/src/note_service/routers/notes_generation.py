@@ -143,6 +143,8 @@ class GeneratedItemView(BaseModel):
     cites: list[str] = []
     certainty: str | None = None
     attributed_to: str | None = None
+    """F2 — for a sub-point, the row key of the bullet it sits under."""
+    parent_key: str | None = None
     corrections: list[dict[str, str]] = []
     mentions: list[dict[str, str | None]] = []
 
@@ -369,6 +371,7 @@ async def generated_items(
             cites=list(_get(r, "cites") or []),
             certainty=_get(r, "certainty"),
             attributed_to=_get(r, "attributed_to"),
+            parent_key=_get(r, "parent_key"),
             corrections=_json_list(_get(r, "corrections")),
             mentions=_json_list(_get(r, "mentions")),
         )

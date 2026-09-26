@@ -29,7 +29,7 @@ from note_service.domain.meeting_doc import (
 )
 from note_service.domain.meeting_doc.verify import VerifiedFact
 
-from .meeting_doc_fakes import ScriptedProvider, as_result, load_fixture
+from .meeting_doc_fakes import ScriptedProvider, as_result, load_fixture, spoken
 
 TUESDAY = date(2026, 9, 22)
 
@@ -203,7 +203,7 @@ def _fact(text: str, start_ms: int, kind: str = schema.KEY_POINT) -> VerifiedFac
     return VerifiedFact(
         kind=kind,
         text=text,
-        quote=text,
+        quote=spoken(text),
         turn=0,
         start_ms=start_ms,
         end_ms=start_ms + 1_000,

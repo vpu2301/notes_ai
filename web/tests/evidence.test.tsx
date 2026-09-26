@@ -127,6 +127,41 @@ describe("short, standard, detailed", () => {
     const map = uncitedBySection([shown, unused], content);
     expect(map.get("gen:rente")?.map((r) => r.text)).toEqual(["Unused fact"]);
   });
+
+  it("never lists a copied fact kept as evidence (F2)", () => {
+    const copy = { ...ROW, item_key: "c1", text: "this boat is incredible", placement: "evidence", cites: ["c1"] };
+    const content = { sections: [{ section_key: "gen:rente", text: `- ${ROW.text}` }] };
+    expect(uncitedBySection([{ ...ROW }, copy], content).size).toBe(0);
+  });
+});
+
+describe("the evidence mark is not text (F2)", () => {
+  it("the toggle carries no characters a copy could pick up", () => {
+    render(<LineEvidence noteId="n1" row={ROW} />);
+    const toggle = screen.getByRole("button", { name: "Show where this came from" });
+    expect(toggle.textContent?.trim()).toBe("");
+    expect(document.body.textContent).not.toContain("❝");
+  });
+
+  it("an evidence row resolves a cited fact in the popover", () => {
+    const copy = { ...ROW, item_key: "f2", text: "the platform drops into the water", placement: "evidence" };
+    render(<LineEvidence noteId="n1" row={ROW} rowsByKey={new Map([["f2", copy]])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("the platform drops into the water");
+  });
+});
+
+describe("sub-points (F2)", () => {
+  it("a bullet's children render nested under it", () => {
+    const { container } = render(
+      <RichText text={"- The swim platform combines both designs\n  - Fixed platform at the transom\n  - Submersible centre section"} />,
+    );
+    const nested = container.querySelectorAll("li li");
+    expect(Array.from(nested).map((li) => li.textContent)).toEqual([
+      "Fixed platform at the transom",
+      "Submersible centre section",
+    ]);
+  });
 });
 
 describe("names in the note", () => {

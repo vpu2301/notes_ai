@@ -228,7 +228,7 @@ async def supersede_previous(conn: asyncpg.Connection, *, note_id: UUID, keep: U
         """
         UPDATE note_generated_items SET placement = 'superseded'
         WHERE note_id = $1 AND generation_id <> $2
-          AND placement IN ('written', 'suggested')
+          AND placement IN ('written', 'suggested', 'evidence')
         """,
         note_id,
         keep,
@@ -314,10 +314,11 @@ async def put_lines(
                 tenant_id, note_id, generation_id, item_key, kind, section_key,
                 text, owner_label, due_text, due_date, explicit, confidence,
                 flags, quote, start_ms, end_ms, speaker_label, speaker_name,
-                placement, audience, cites, certainty, attributed_to, corrections, mentions
+                placement, audience, cites, certainty, attributed_to, corrections, mentions,
+                parent_key
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,
-                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb)
+                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26)
             ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
             """,
             tenant_id,
@@ -345,6 +346,7 @@ async def put_lines(
             row.get("attributed_to"),
             json.dumps(list(row.get("corrections") or [])[:8]),
             json.dumps(list(row.get("mentions") or [])[:8]),
+            row.get("parent_key"),
         )
         if result.endswith(" 1"):
             written += 1
@@ -367,9 +369,9 @@ async def items_for_note(
         SELECT item_key, kind, section_key, text, owner_label, due_text, due_date,
                explicit, confidence, flags, quote, start_ms, end_ms,
                speaker_label, speaker_name, placement, audience,
-               cites, certainty, attributed_to, corrections, mentions
+               cites, certainty, attributed_to, corrections, mentions, parent_key
         FROM note_generated_items
-        WHERE note_id = $1 AND placement IN ('written', 'suggested') {current}
+        WHERE note_id = $1 AND placement IN ('written', 'suggested', 'evidence') {current}
         ORDER BY start_ms
         """,
         note_id,

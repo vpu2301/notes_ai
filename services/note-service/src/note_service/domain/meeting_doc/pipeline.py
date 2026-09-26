@@ -47,6 +47,17 @@ EXTRACT_ATTEMPTS = 2
 # the note stayed a bare transcript. Unused budget costs nothing.
 EXTRACT_MAX_TOKENS = 3000
 REDUCE_MAX_TOKENS = 2500
+# F2, decision 2 — a window whose verified facts are mostly the transcript
+# copied into `text` is asked once more, told which rule it broke.
+RESTATE_COPY_SHARE: Final = 0.4
+RESTATE_MIN_FACTS: Final = 3
+# A sub-point that cites only its parent's facts and says mostly the same
+# words is the parent again, not an elaboration.
+CHILD_RESTATES_JACCARD: Final = 0.6
+
+# A topic bullet with its sub-points: ``(text, fact ids, [(text, ids)])``.
+Bullet = tuple[str, list[str], list[tuple[str, list[str]]]]
+Topics = list[tuple[str, list[Bullet], list[str]]]
 
 
 class ChatLike(Protocol):
@@ -212,28 +223,56 @@ async def run(
     out.noise = sorted({(e.start_ms, e.reason) for e in excluded})
     out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
 
+    def check(
+        facts: list[schema.Fact], window: Window, into: verify.VerifyStats
+    ) -> list[VerifiedFact]:
+        return verify.verify_facts(
+            facts,
+            window=window,
+            meeting_date=meeting_date,
+            name_candidates=name_candidates,
+            stats=into,
+            allowed_kinds=frozenset(offered),
+            judgement_fields=frozenset(family.judgement_fields),
+            carried_keys=carried_keys,
+            our_side=our_side,
+            noise_lines=noise_lines,
+            language=language,
+            glossary=tuple(glossary),
+        )
+
+    restate = {"improved": 0, "unchanged": 0}
     for window, extracted in extracted_windows:
         if extracted is None:
             out.windows_failed += 1
             out.failed_ranges.append([window.start_ms, window.end_ms])
             continue
         out.windows_done += 1
-        verified.extend(
-            verify.verify_facts(
-                extracted.facts,
-                window=window,
-                meeting_date=meeting_date,
-                name_candidates=name_candidates,
-                stats=stats,
-                allowed_kinds=frozenset(offered),
-                judgement_fields=frozenset(family.judgement_fields),
-                carried_keys=carried_keys,
-                our_side=our_side,
-                noise_lines=noise_lines,
-                language=language,
-                glossary=tuple(glossary),
+        kept = check(extracted.facts, window, stats)
+        copies = sum(1 for f in kept if f.copied)
+        if len(kept) >= RESTATE_MIN_FACTS and copies / len(kept) > RESTATE_COPY_SHARE:
+            # F2, decision 2: once per window, told the rule it broke, with
+            # no more facts than it gave the first time.
+            again_budget = max(1, len(extracted.facts))
+            again = await _extract(
+                provider,
+                window,
+                language,
+                schema.extract_schema(
+                    offered,
+                    judgement_fields=family.judgement_fields,
+                    carried_items=len(carried),
+                    max_facts=again_budget,
+                ),
+                carried=carried,
+                max_facts=again_budget,
+                max_tokens=extract_tokens(again_budget),
+                system_suffix=prompts.restate_suffix(language),
             )
-        )
+            second = check(again.facts, window, verify.VerifyStats()) if again else []
+            kept, replaced = restated(kept, second)
+            restate["improved" if replaced else "unchanged"] += 1
+        verified.extend(kept)
 
     facts = merge_rules.merge_facts(verified)
     out.facts = facts
@@ -243,7 +282,7 @@ async def run(
     out.completions = [f for f in facts if f.kind == schema.COMPLETION]
     out.judgements = [f for f in facts if f.kind == schema.JUDGEMENT]
 
-    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]] | None = None
+    topics: Topics | None = None
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
@@ -318,10 +357,28 @@ async def run(
         "facts_dropped_example": stats.dropped_example,
         "facts_dropped_paraphrase": stats.dropped_paraphrase,
         "facts_flagged_paraphrase": stats.flagged_paraphrase,
+        # F2 — copies in the final document (evidence only), windows asked
+        # to restate and how that went, and what code dropped or fixed.
+        "facts_copied": sum(1 for f in facts if f.copied),
+        "windows_restated": restate["improved"] + restate["unchanged"],
+        "restate_outcomes": dict(restate),
+        "dropped_no_information": stats.dropped_no_information,
+        "dropped_first_person": stats.dropped_first_person,
+        "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
+        "children_restated": gate.children_restated,
         "example_echo_dropped": gate.counts["example"],
         "lines_kept": gate.counts["kept"],
         "lines_unsupported": {
-            reason: gate.counts[reason] for reason in ("unsupported", "number", "name", "example")
+            reason: gate.counts[reason]
+            for reason in (
+                "unsupported",
+                "number",
+                "name",
+                "example",
+                "copied",
+                "no_information",
+                "first_person",
+            )
         },
         "summary_retries": gate.retries,
         "summary_fallback": fallback,
@@ -362,6 +419,28 @@ async def run(
         "recording_type_source": recording_type_source,
     }
     return out
+
+
+def restated(
+    first: list[VerifiedFact], second: list[VerifiedFact]
+) -> tuple[list[VerifiedFact], int]:
+    """F2's merge rule: each copied fact of the first answer is replaced by
+    a second-answer fact that cites the same line and is not a copy; every
+    other fact stays as it was. ``(facts, how many were replaced)``."""
+    spare: dict[int | None, list[VerifiedFact]] = {}
+    for fact in second:
+        if not fact.copied and not fact.evidence_only:
+            spare.setdefault(fact.line, []).append(fact)
+    out: list[VerifiedFact] = []
+    replaced = 0
+    for fact in first:
+        candidates = spare.get(fact.line) if fact.copied else None
+        if candidates:
+            out.append(candidates.pop(0))
+            replaced += 1
+        else:
+            out.append(fact)
+    return out, replaced
 
 
 def fact_budget(window: Window) -> int:
@@ -565,12 +644,27 @@ class _Gate:
     known: frozenset[str] = frozenset()
     counts: dict[str, int] = field(
         default_factory=lambda: dict.fromkeys(
-            ("kept", "unsupported", "number", "name", "example", "attribution", "hedge"), 0
+            (
+                "kept",
+                "unsupported",
+                "number",
+                "name",
+                "example",
+                "attribution",
+                "hedge",
+                "copied",
+                "no_information",
+                "first_person",
+            ),
+            0,
         )
     )
     retries: int = 0
     salient_appended: int = 0
     topics_merged: int = 0
+    """F2 — sub-points that restated their parent; openers dropped."""
+    children_restated: int = 0
+    third_person_fixed: int = 0
 
     @property
     def dropped(self) -> int:
@@ -595,6 +689,16 @@ class _Gate:
             return "example"
         if not cited:
             return "unsupported"
+        # F2 — a transcript sentence is evidence, not a line; a remark that
+        # informs nobody, or a line in the speaker's own voice, is not one.
+        if any(verify.is_copied(plain, f.quote) for f in cited):
+            return "copied"
+        if not support.carries_information(
+            plain, self.language, has_date=verify._has_date_word(plain)
+        ):
+            return "no_information"
+        if support.first_person(plain, self.language):
+            return "first_person"
         if not _numbers_supported(plain, cited):
             return "number"
         evidence = " ".join(f"{f.text} {f.quote}" for f in cited)
@@ -613,6 +717,15 @@ class _Gate:
             if unsure and not support.has_marker(plain, self.language):
                 return "hedge"
         return None
+
+    def third_person(self, text: str) -> str:
+        """Decision 4's one mechanical rewrite: a leading "So," / "Again,"
+        / "Also," goes. Nothing else is ever changed in code."""
+        fixed = support.mechanical_third_person(text)
+        if fixed is None:
+            return text
+        self.third_person_fixed += 1
+        return fixed
 
     def ok(self, text: str, cited: list[VerifiedFact], *, claims: bool = False) -> bool:
         why = self.reason(text, cited, claims=claims)
@@ -652,10 +765,14 @@ async def _extract(
     carried: list[tuple[str, str]] | None = None,
     max_facts: int | None = None,
     max_tokens: int = EXTRACT_MAX_TOKENS,
+    system_suffix: str | None = None,
 ) -> schema.ExtractOut | None:
-    """One window. ``None`` when the model could not answer in shape."""
+    """One window. ``None`` when the model could not answer in shape.
+    ``system_suffix`` (F2) is the rule the last answer broke."""
     prompt = prompts.extract_prompt(window.render(), language, carried=carried, max_facts=max_facts)
     system = prompts.extract_system(language)
+    if system_suffix:
+        system = f"{system}\n\n{system_suffix}"
     for attempt in range(EXTRACT_ATTEMPTS):
         try:
             answer = await provider.complete(
@@ -737,7 +854,7 @@ async def _topics(
     *,
     brief: Brief | None = None,
     gate: _Gate | None = None,
-) -> list[tuple[str, list[tuple[str, list[str]]], list[str]]] | None:
+) -> Topics | None:
     """Cluster facts into topics. Never sees the transcript.
 
     ``[(title, [(bullet, its fact ids)], the topic's fact ids)]`` — each
@@ -765,21 +882,22 @@ async def _topics(
         return None
 
     by_id = {f.item_key: f for f in facts}
-    out: list[tuple[str, list[tuple[str, list[str]]], list[str]]] = []
+    out: Topics = []
     for topic in parsed.topics:
         if not topic.title.strip() or gate.echo(topic.title):
             continue
-        bullets: list[tuple[str, list[str]]] = []
+        bullets: list[Bullet] = []
         for bullet in topic.bullets:
-            text = bullet.text.strip()
+            text = gate.third_person(bullet.text.strip())
             ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
             # A bullet citing nothing we verified was written from memory;
             # one the cited facts do not carry says more than they do.
             if text and gate.ok(text, [by_id[i] for i in ids]):
-                bullets.append((text, ids))
+                bullets.append((text, ids, _children(bullet, text, ids, by_id, gate)))
         if len(bullets) < MIN_BULLETS_PER_TOPIC:
             continue
-        cited = [i for _t, ids in bullets for i in ids]
+        cited = [i for _t, ids, _c in bullets for i in ids]
+        cited += [i for _t, _ids, kids in bullets for _k, child_ids in kids for i in child_ids]
         cited += [i for i in topic.fact_ids if i in by_id]
         out.append((topic.title.strip(), bullets, list(dict.fromkeys(cited))))
     out = _merge_overlapping(out, by_id, gate)
@@ -789,21 +907,46 @@ async def _topics(
     return out[: schema.MAX_TOPICS]
 
 
+def _children(
+    bullet: schema.TopicBullet,
+    parent: str,
+    parent_ids: list[str],
+    by_id: dict[str, VerifiedFact],
+    gate: _Gate,
+) -> list[tuple[str, list[str]]]:
+    """A bullet's sub-points that pass on their own (F2, decision 5): each
+    cites a fact, passes the gate, and is not the parent said again."""
+    out: list[tuple[str, list[str]]] = []
+    parent_words = support.merge_tokens(parent)
+    for child in bullet.children[: schema.MAX_CHILDREN]:
+        text = gate.third_person(child.text.strip())
+        ids = list(dict.fromkeys(i for i in child.fact_ids if i in by_id))
+        if not text or not ids or not gate.ok(text, [by_id[i] for i in ids]):
+            continue
+        if set(ids) <= set(parent_ids) and (
+            verify._jaccard(support.merge_tokens(text), parent_words) >= CHILD_RESTATES_JACCARD
+        ):
+            gate.children_restated += 1
+            continue
+        out.append((text, ids))
+    return out
+
+
 def _span(ids: list[str], by_id: dict[str, VerifiedFact]) -> tuple[int, int]:
     times = [by_id[i].start_ms for i in ids if i in by_id]
     return (min(times), max(times)) if times else (0, 0)
 
 
 def _merge_overlapping(
-    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]],
+    topics: Topics,
     by_id: dict[str, VerifiedFact],
     gate: _Gate,
-) -> list[tuple[str, list[tuple[str, list[str]]], list[str]]]:
+) -> Topics:
     """Two topics, next to each other in time, whose stretches of the
     recording overlap by more than half of the shorter one are one subject
     the model split (Q4)."""
     ordered = sorted(topics, key=lambda t: _span(t[2], by_id)[0])
-    out: list[tuple[str, list[tuple[str, list[str]]], list[str]]] = []
+    out: Topics = []
     for topic in ordered:
         if out:
             (a0, a1), (b0, b1) = _span(out[-1][2], by_id), _span(topic[2], by_id)
@@ -819,7 +962,7 @@ def _merge_overlapping(
 
 
 def _distance(
-    topic: tuple[str, list[tuple[str, list[str]]], list[str]],
+    topic: tuple[str, list[Bullet], list[str]],
     fact: VerifiedFact,
     by_id: dict[str, VerifiedFact],
 ) -> int:
@@ -828,7 +971,7 @@ def _distance(
 
 
 def _append_salient(
-    topics: list[tuple[str, list[tuple[str, list[str]]], list[str]]],
+    topics: Topics,
     facts: list[VerifiedFact],
     gate: _Gate,
 ) -> None:
@@ -838,14 +981,21 @@ def _append_salient(
     if not topics:
         return
     by_id = {f.item_key: f for f in facts}
-    written = {i for _t, bullets, _ids in topics for _b, ids in bullets for i in ids}
+    written = {i for _t, bullets, _ids in topics for bullet in bullets for i in bullet[1]}
     for fact in facts:
         if fact.kind != schema.KEY_POINT or not fact.salient or fact.item_key in written:
+            continue
+        # F2 — the fact's own text is the line here: evidence stays evidence.
+        if fact.evidence_only:
             continue
 
         index = min(range(len(topics)), key=lambda k, f=fact: _distance(topics[k], f, by_id))
         title, bullets, ids = topics[index]
-        topics[index] = (title, [*bullets, (fact.text, [fact.item_key])], [*ids, fact.item_key])
+        topics[index] = (
+            title,
+            [*bullets, (fact.text, [fact.item_key], [])],
+            [*ids, fact.item_key],
+        )
         written.add(fact.item_key)
         gate.salient_appended += 1
 
@@ -885,7 +1035,7 @@ async def _summary(
         out: list[tuple[str, list[str]]] = []
         answered = 0
         for line in parsed.summary:
-            sentence = line.sentence.strip()
+            sentence = gate.third_person(line.sentence.strip())
             if not sentence:
                 continue
             answered += 1

@@ -133,3 +133,45 @@ tests:
               description: |
                 The model is drifting; check PROMPT_VERSION and the backend. Paraphrase drops on extraction (mdx_note_generation_facts_total{outcome="dropped_paraphrase"}) usually rise with it.
                 Runbook: docs/runbooks/notes.md#unsupported-lines
+
+  - interval: 1m
+    name: copied lines are not support failures
+    input_series:
+      - series: 'mdx_note_generation_lines_total{outcome="kept"}'
+        values: "0+10x90"
+      - series: 'mdx_note_generation_lines_total{outcome="copied"}'
+        values: "0+6x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationUnsupportedLines
+        exp_alerts: []
+
+  - interval: 1m
+    name: a few copied facts are normal
+    input_series:
+      - series: 'mdx_note_generation_facts_total{outcome="kept"}'
+        values: "0+30x90"
+      - series: 'mdx_note_generation_facts_total{outcome="copied"}'
+        values: "0+3x90"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: NoteGenerationCopiedFacts
+        exp_alerts: []
+
+  - interval: 1m
+    name: half the facts copied fires
+    input_series:
+      - series: 'mdx_note_generation_facts_total{outcome="kept"}'
+        values: "0+20x120"
+      - series: 'mdx_note_generation_facts_total{outcome="copied"}'
+        values: "0+10x120"
+    alert_rule_test:
+      - eval_time: 110m
+        alertname: NoteGenerationCopiedFacts
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "More than a third of extracted facts copy the transcript (1 h)"
+              description: |
+                Copies stay evidence and never reach the note, so notes get thinner. Check PROMPT_VERSION, the summarize backend and mdx_note_generation_restate_total{outcome="unchanged"}.
+                Runbook: docs/runbooks/notes.md#copied-facts

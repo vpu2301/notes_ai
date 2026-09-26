@@ -1403,6 +1403,8 @@ export interface GeneratedItem {
   certainty?: "fact" | "estimate" | "prediction" | "opinion" | "proposal" | "allegation" | null;
   /** Q5: whose position it is. */
   attributed_to?: string | null;
+  /** F2: for a sub-point, the row key of the bullet it sits under. */
+  parent_key?: string | null;
   /** Q5: names the engine respelled in this line — the quote keeps what was heard. */
   corrections?: { surface: string; canonical: string; source: string }[];
   /** Q5: dates the line names, resolved against the recording day. */

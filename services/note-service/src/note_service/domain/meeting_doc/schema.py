@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ── Fact kinds ──────────────────────────────────────────────────────
 
@@ -155,11 +155,29 @@ class SummarySentence(BaseModel):
     fact_ids: list[str] = Field(default_factory=list)
 
 
+# F2 — a bullet may carry sub-points that elaborate it, one level deep.
+MAX_CHILDREN: Final = 3
+
+
+class SubPoint(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    text: str = Field(max_length=MAX_FACT_CHARS)
+    fact_ids: list[str] = Field(default_factory=list)
+
+
 class TopicBullet(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     text: str = Field(max_length=MAX_FACT_CHARS)
     fact_ids: list[str] = Field(default_factory=list)
+    # A longer answer is cut, not refused: the first three are kept.
+    children: list[SubPoint] = Field(default_factory=list)
+
+    @field_validator("children")
+    @classmethod
+    def _at_most_three(cls, value: list[SubPoint]) -> list[SubPoint]:
+        return value[:MAX_CHILDREN]
 
 
 class Topic(BaseModel):
@@ -288,6 +306,27 @@ REDUCE_TOPICS_SCHEMA: Final[dict[str, Any]] = {
                                     "type": "array",
                                     "minItems": 1,
                                     "items": {"type": "string"},
+                                },
+                                # F2 — sub-points, one level, each citing a fact.
+                                "children": {
+                                    "type": "array",
+                                    "maxItems": MAX_CHILDREN,
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": ["text", "fact_ids"],
+                                        "properties": {
+                                            "text": {
+                                                "type": "string",
+                                                "maxLength": MAX_FACT_CHARS,
+                                            },
+                                            "fact_ids": {
+                                                "type": "array",
+                                                "minItems": 1,
+                                                "items": {"type": "string"},
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },

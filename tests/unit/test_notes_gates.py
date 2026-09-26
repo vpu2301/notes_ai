@@ -29,6 +29,7 @@ def _load(name: str) -> ModuleType:
 notes_assert = _load("notes_assert")
 compare_notes = _load("compare_notes")
 notes_eval = _load("notes_eval")
+notes_scoring = _load("notes_scoring")
 
 
 def _line(text: str, key: str = "gen:overview", kind: str = "summary", ids: tuple = ("a",)) -> dict:
@@ -50,6 +51,11 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "dates",
         "every_line_cited",
         "sprint",
+        # F2
+        "no_copied_lines",
+        "no_information_lines_max",
+        "no_marks",
+        "topics",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
     assert {f.name for f in files} >= {
@@ -262,4 +268,92 @@ def test_wilson_interval() -> None:
 def test_the_scripted_run_gates_only_what_the_engine_guarantees() -> None:
     assert notes_assert.family("must_not_contain[3]") == "must_not_contain"
     assert notes_assert.family("every_line_cited") == "every_line_cited"
-    assert {"speakers", "must_not_contain", "every_line_cited"} == notes_assert.ENGINE_CHECKS
+    assert {
+        "speakers",
+        "must_not_contain",
+        "every_line_cited",
+        "no_marks",
+    } == notes_assert.ENGINE_CHECKS
+
+
+# ── F2: statements, not quotes ──────────────────────────────────────
+
+
+_PARDO_LIKE = {
+    "language": "en",
+    "transcript": [
+        {"speaker": "SPEAKER_1", "t_start_ms": 0, "t_end_ms": 9_000,
+         "text": "This boat is incredible. Again this is a crowded boat right now because the show opened."},
+    ],
+}  # fmt: skip
+
+
+def test_the_f2_scorers_count_copies_chatter_and_first_person() -> None:
+    produced = {
+        "lines": [
+            {
+                "kind": "bullet",
+                "text": "- Again this is a crowded boat right now because the show opened.",
+            },
+            {"kind": "bullet", "text": "- Absolutely amazing."},
+            {"kind": "bullet", "text": "- We lower the platform into the water."},
+            {"kind": "bullet", "text": "- The platform lowers into the water to form a staircase."},
+            {"kind": "action", "text": "- We should update the deck"},
+        ],
+        "facts": [],
+    }
+    row = notes_scoring.score_meeting(_PARDO_LIKE, produced)
+    assert (row["copied_lines"], row["no_information_lines"], row["first_person_lines"]) == (
+        1,
+        1,
+        1,
+    )
+    summary = notes_scoring.aggregate([row])
+    gates = notes_scoring.f2_gates(summary, baseline_recall=None)
+    assert gates == {
+        "copied_lines == 0": False,
+        "no_information_lines == 0": False,
+        "first_person_lines == 0": False,
+    }
+
+
+def test_the_recall_gate_allows_one_point() -> None:
+    clean = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
+    assert all(
+        notes_scoring.f2_gates({**clean, "key_fact_recall": 0.60}, baseline_recall=0.61).values()
+    )
+    assert not all(
+        notes_scoring.f2_gates({**clean, "key_fact_recall": 0.59}, baseline_recall=0.61).values()
+    )
+
+
+def test_the_r02_checklist_checks_topics_marks_and_copies() -> None:
+    checklist = json.loads(
+        (notes_assert.ASSERTIONS / "r02_en_pardo_65gt.assertions.json").read_text("utf-8")
+    )
+    good = {
+        "note_text": "## Swim platform\n- A hybrid of both designs\n  - Fixed platform at the transom",
+        "lines": [
+            {"section_title": "Swim platform", "kind": "bullet", "text": "- A hybrid of both designs",
+             "parent": False, "fact_ids": ["a"]},
+            {"section_title": "Swim platform", "kind": "bullet", "text": "  - Fixed platform at the transom",
+             "parent": True, "fact_ids": ["b"]},
+        ],
+    }  # fmt: skip
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, good, _PARDO_LIKE)}
+    assert results["no_copied_lines"] and results["no_marks"] and results["topics[0]"]
+    bad = {
+        "note_text": "## Swim platform\n- This boat is incredible. ❝",
+        "lines": [{"section_title": "Swim platform", "kind": "bullet",
+                   "text": "- This boat is incredible.", "parent": False, "fact_ids": ["a"]}],
+    }  # fmt: skip
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, bad, _PARDO_LIKE)}
+    assert not results["no_copied_lines"] and not results["no_marks"] and not results["topics[0]"]
+    assert not results["no_information_lines"]
+
+
+def test_the_topics_round_rates_topic_bullets_only() -> None:
+    ours = "Framing.\n\n## Swim platform\n- A hybrid\n  - fixed at the transom\n\n## Decisions\n- go blue"
+    assert notes_pairs.topic_lines(ours) == "## Swim platform\n- A hybrid\n  - fixed at the transom"
+    base = "Summary one.\nSummary two.\n\n- a decision\n\n- an action"
+    assert notes_pairs.topic_lines(base, "single_pass") == "- Summary one.\n- Summary two."

@@ -27,7 +27,7 @@ from note_service.domain.meeting_doc import (
 )
 from note_service.domain.meeting_doc.verify import VerifiedFact
 
-from .meeting_doc_fakes import ScriptedProvider
+from .meeting_doc_fakes import ScriptedProvider, spoken
 
 DAY = date(2026, 9, 22)
 
@@ -298,7 +298,8 @@ def test_a_clip_has_no_holder_among_the_participants() -> None:
 def test_a_summary_sentence_about_a_forecast_must_name_its_holder() -> None:
     fact = VerifiedFact(
         kind=schema.KEY_POINT, text="Das Aus für die Rente mit 63 wird wahrscheinlich abgeschwächt",
-        quote="das Aus für die Rente mit 63 wird wahrscheinlich abgeschwächt", turn=0,
+        quote="ich glaube, das Aus für die Rente mit 63 wird wahrscheinlich abgeschwächt, "
+        "so jedenfalls höre ich das aus der Fraktion", turn=0,
         start_ms=0, end_ms=1, speaker_label="S1", speaker_name="Fabian Reinbold",
         certainty="prediction", attributed_to="Fabian Reinbold",
     )  # fmt: skip
@@ -323,7 +324,7 @@ def test_a_summary_sentence_that_drops_the_hedge_is_dropped() -> None:
 
 def _kp(text: str, start: int, **kw: Any) -> VerifiedFact:
     return VerifiedFact(
-        kind=schema.KEY_POINT, text=text, quote=text, turn=0, start_ms=start, end_ms=start + 1,
+        kind=schema.KEY_POINT, text=text, quote=spoken(text), turn=0, start_ms=start, end_ms=start + 1,
         speaker_label="S1", speaker_name=None, **kw,
     )  # fmt: skip
 
@@ -342,7 +343,7 @@ def test_an_uncited_salient_fact_joins_the_nearest_topic() -> None:
     ]
     gate = pipeline._Gate()
     pipeline._append_salient(topics, [*facts, salient], gate)
-    assert topics[1][1][-1] == (salient.text, [salient.item_key])
+    assert topics[1][1][-1] == (salient.text, [salient.item_key], [])  # F2: no sub-points
     assert gate.salient_appended == 1
     assert salient.salient and not facts[0].salient
 

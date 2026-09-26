@@ -53,6 +53,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     STOP,
     aggregate,
     best_match,
+    f2_gates,
     overlap,
     score_meeting,
     support,
@@ -258,11 +259,16 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     )
     if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
         raise EngineBlindError(meeting["id"])
+    titles = {s.section_key: s.title for s in document.sections}
     return {
         "seconds": time.monotonic() - started,
         "lines": [
             {
                 "section_key": key,
+                # F2 — which topic a line sits under, and whether it is a
+                # sub-point, for the r02 checklist.
+                "section_title": titles.get(key),
+                "parent": bool(getattr(line, "parent", None)),
                 "kind": line.kind,
                 "text": line.text,
                 "fact_ids": list(line.fact_ids),
@@ -619,6 +625,7 @@ async def main(
     runs: int,
     judge_backend: str | None = None,
     save_notes: Path | None = None,
+    f2_baseline: Path | None = None,
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
@@ -735,6 +742,16 @@ async def main(
         from note_service.domain.meeting_doc.prompts import PROMPT_VERSION
 
         report["prompt_version"] = PROMPT_VERSION
+        # F2 acceptance: no copied, chatter or first-person line, and recall
+        # within a point of the pre-F2 report.
+        baseline_recall = None
+        if f2_baseline is not None and f2_baseline.is_file():
+            baseline = json.loads(f2_baseline.read_text("utf-8"))
+            baseline_recall = baseline["runs"][-1]["summary"].get("key_fact_recall")
+        gates = f2_gates(all_runs[-1]["summary"], baseline_recall=baseline_recall)
+        report["f2_gates"] = gates
+        for name, ok in gates.items():
+            print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")
     path = write_report(f"notes-{arm}", resolved.name, report)
     print(f"wrote {path}")
     # A hallucinated quote is a failed run, not a lower score: the whole
@@ -761,10 +778,24 @@ if __name__ == "__main__":
         default=None,
         help="write each note's text here for blind rating (must be under scripts/eval/local/)",
     )
+    ap.add_argument(
+        "--f2-baseline",
+        type=Path,
+        default=REPO / "docs" / "eval" / "notes-baseline-pipeline.json",
+        help="pre-F2 report whose key_fact_recall the F2 recall gate compares against",
+    )
     args = ap.parse_args()
     ENTITY_MODEL_TIER = args.entity_model_tier
     sys.exit(
         asyncio.run(
-            main(args.arm, args.backend, args.corpus, args.runs, args.judge, args.save_notes)
+            main(
+                args.arm,
+                args.backend,
+                args.corpus,
+                args.runs,
+                args.judge,
+                args.save_notes,
+                args.f2_baseline,
+            )
         )
     )

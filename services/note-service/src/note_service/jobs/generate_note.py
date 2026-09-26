@@ -475,6 +475,10 @@ def line_row(
         else None,
         "attributed_to": next(iter(holders)) if len(holders) == 1 else None,
         "corrections": [{"surface": s, "canonical": c, "source": src} for s, c, src in corrections],
+        # F2 — a sub-point names the bullet it sits under by that row's key.
+        "parent_key": line_rules.key_of(line_rules.strip_marker(line.parent)[1])
+        if getattr(line, "parent", None)
+        else None,
         "mentions": [
             {
                 "text": m.text,
@@ -489,8 +493,9 @@ def line_row(
 
 def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
     """Rows for the verified facts no written line cites, each placed under
-    the topic nearest to it in time (else the overview) as ``suggested``.
-    Pure."""
+    the topic nearest to it in time (else the overview) as ``suggested`` —
+    and, since F2, a row with placement ``evidence`` for every fact kept only
+    as evidence (a copy, or the speaker's own voice), cited or not. Pure."""
     from ..domain.meeting_doc import render as render_rules
     from ..domain.meeting_doc import roles as role_rules
 
@@ -498,7 +503,11 @@ def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
     topics = [s for s in document.sections if s.role == role_rules.TOPICS and s.facts]
     out: list[dict[str, Any]] = []
     for fact in document.facts:
-        if fact.item_key in cited or fact.kind in ("completion", "judgement"):
+        if fact.kind in ("completion", "judgement"):
+            continue
+        # F2 — evidence-only facts get their row whether or not a line cites
+        # them: the evidence popover resolves a line's citations by row.
+        if fact.item_key in cited and not fact.evidence_only:
             continue
         home = min(
             topics,
@@ -507,7 +516,9 @@ def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
         )
         line = render_rules.Line(fact.text, fact.kind, (fact.item_key,), fact.mentions)
         section_key = home.section_key if home else role_rules.OVERVIEW_KEY
-        row = line_row(line, section_key, writer.SUGGESTED, {fact.item_key: fact}, family=family)
+        # F2 — a copy is evidence: stored, never offered as a line.
+        placement = writer.EVIDENCE if fact.evidence_only else writer.SUGGESTED
+        row = line_row(line, section_key, placement, {fact.item_key: fact}, family=family)
         if row is not None:
             out.append(row)
     return out

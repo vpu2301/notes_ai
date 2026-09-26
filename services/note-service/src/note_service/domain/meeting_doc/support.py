@@ -510,3 +510,210 @@ def names_actor(text: str, actor: str) -> bool:
     return (
         bool(last) and re.search(rf"(?<!\w){re.escape(_fold(last))}(?!\w)", _fold(text)) is not None
     )
+
+
+# ── Sprint F2: does a line carry information, and whose voice is it in ──
+
+# Words that judge instead of inform. A line whose only content is one of
+# these ("This boat is incredible.") tells a reader who was not there
+# nothing they can use. Per language; a capitalised non-initial use is a
+# name ("Nice" the city) and counts.
+EVALUATIVE: Final[dict[str, frozenset[str]]] = {
+    "en": frozenset(
+        {
+            "incredible",
+            "amazing",
+            "great",
+            "nice",
+            "impressive",
+            "awesome",
+            "cool",
+            "interesting",
+            "beautiful",
+            "fantastic",
+            "wonderful",
+            "lovely",
+            "stunning",
+            "gorgeous",
+            "perfect",
+            "good",
+            "excellent",
+            "brilliant",
+        }
+    ),
+    "de": frozenset(
+        {
+            "toll",
+            "super",
+            "beeindruckend",
+            "spannend",
+            "schön",
+            "schöne",
+            "schönes",
+            "großartig",
+            "fantastisch",
+            "wunderbar",
+            "klasse",
+            "genial",
+            "gut",
+        }
+    ),
+    "uk": frozenset(
+        {
+            "чудовий",
+            "чудова",
+            "чудове",
+            "круто",
+            "крутий",
+            "цікаво",
+            "цікавий",
+            "класно",
+            "класний",
+            "неймовірний",
+            "неймовірно",
+            "прекрасний",
+            "гарний",
+            "гарно",
+            "супер",
+        }
+    ),
+}
+# Talk that fills time: never content, whatever the language of the line.
+FILLER: Final[frozenset[str]] = frozenset(
+    {
+        "really",
+        "actually",
+        "basically",
+        "literally",
+        "like",
+        "okay",
+        "ok",
+        "right",
+        "yeah",
+        "yes",
+        "well",
+        "um",
+        "uh",
+        "oh",
+        "wow",
+        "here",
+        "there",
+        "thing",
+        "things",
+        "stuff",
+        "guys",
+        "kind",
+        "sort",
+        "lot",
+        "bit",
+        "little",
+        "again",
+        "one",
+        "ones",
+        "halt",
+        "eben",
+        "genau",
+        "echt",
+        "wirklich",
+        "sozusagen",
+        "quasi",
+        "ну",
+        "от",
+        "типу",
+        "короче",
+        "власне",
+        "ось",
+        "тут",
+        "там",
+        # the tails of "I'll", "we've", "they're" once the apostrophe splits them
+        "ll",
+        "ve",
+        "re",
+    }
+)
+# Below this many information tokens a line is chatter, unless it is a
+# task or a decision (short by nature) or carries a number, name or date.
+MIN_INFORMATION: Final = 4
+
+_DIGITS: Final = re.compile(r"\d")
+
+
+def information_tokens(text: str, language: str) -> list[str]:
+    """The tokens of ``text`` that inform (decision 3): numbers, names, and
+    content words that are neither function words, filler nor judgement."""
+    body = _body(text)
+    names = {n.casefold() for n in names_in(body)}
+    stops = stop_words(language) | MERGE_STOP | FILLER
+    judging = EVALUATIVE.get(language, frozenset()) | EVALUATIVE["en"]
+    out: list[str] = []
+    for word in _WORD.findall(_fold(body)):
+        if (
+            _DIGITS.search(word)
+            or word in names
+            or len(word) > 1
+            and word not in stops
+            and word not in judging
+        ):
+            out.append(word)
+    return out
+
+
+def information_score(text: str, language: str) -> int:
+    return len(information_tokens(text, language))
+
+
+def carries_information(
+    text: str, language: str, *, short_ok: bool = False, has_date: bool = False
+) -> bool:
+    """False for a ``no_information`` line (F2, decision 3): nothing in it
+    informs, or it is short (fewer than :data:`MIN_INFORMATION` informing
+    tokens) and judges — "This boat is incredible." A short line that
+    states something ("Ticket prices were discussed", "Das ist nicht
+    verhandelbar") stays: the four-token floor on its own dropped real
+    facts and cost recall. A task or a decision (``short_ok``), and a line
+    with a number, a name or a date, is never too short."""
+    tokens = information_tokens(text, language)
+    if not tokens:
+        return False
+    if len(tokens) >= MIN_INFORMATION or short_ok or has_date:
+        return True
+    body = _body(text)
+    if _DIGITS.search(body) or names_in(body):
+        return True
+    judging = EVALUATIVE.get(language, frozenset()) | EVALUATIVE["en"]
+    return not any(w in judging for w in _WORD.findall(_fold(body)))
+
+
+# A line in the speaker's own voice (decision 4): at the start, or one of
+# the unmistakable contractions anywhere.
+_FIRST_PERSON_START: Final = re.compile(
+    r"^(?:I|We|You|Let's|Let’s|I'm|I’m|We're|We’re|I'll|I’ll|We'll|We’ve|We've|I've|"
+    r"Ich|Wir|Я|Ми)\b",
+)
+_FIRST_PERSON_ANY: Final = re.compile(
+    r"(?:\bI'll\b|\bI’ll\b|\bwe'll\b|\bwe’ll\b|\byou guys\b)", re.IGNORECASE
+)
+# Openers that only keep talk going. Dropping one is the only rewrite code
+# makes of a model's line.
+_MECHANICAL_OPENER: Final = re.compile(r"^(?:So|Again|Also)\s*,\s*", re.IGNORECASE)
+
+
+def mechanical_third_person(text: str) -> str | None:
+    """``text`` without a leading "So," / "Again," / "Also," (capitalised
+    again), or None when there is no such opener."""
+    body = text.strip()
+    match = _MECHANICAL_OPENER.match(body)
+    if match is None:
+        return None
+    rest = body[match.end() :].lstrip()
+    if not rest:
+        return None
+    return rest[0].upper() + rest[1:]
+
+
+def first_person(text: str, language: str = "en") -> bool:
+    """The line speaks as I / we / you — the transcript's voice, not the
+    record's."""
+    del language  # the patterns cover all three languages
+    body = _body(text).strip().lstrip("\"'“„«")
+    return bool(_FIRST_PERSON_START.match(body) or _FIRST_PERSON_ANY.search(body))

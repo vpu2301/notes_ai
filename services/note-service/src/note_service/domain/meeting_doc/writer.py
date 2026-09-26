@@ -48,6 +48,8 @@ BACKOFF_SECONDS = (0.5, 1.0, 2.0, 4.0)
 
 WRITTEN = "written"
 SUGGESTED = "suggested"
+# F2 — a fact kept only as evidence behind other lines (migration 0064).
+EVIDENCE = "evidence"
 
 
 def section_hash(text: str) -> str:

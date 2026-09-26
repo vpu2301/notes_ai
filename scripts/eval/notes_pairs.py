@@ -65,7 +65,47 @@ def _meetings(corpus: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0) -> int:
+def _role_headings() -> frozenset[str]:
+    """The fixed-role section headings in every language (decisions, action
+    items, …) — not topics."""
+    engine = REPO / "services" / "note-service" / "src"
+    if str(engine) not in sys.path:
+        sys.path.insert(0, str(engine))
+    from note_service.domain.meeting_doc.render import ROLE_LABELS
+
+    return frozenset(label.casefold() for table in ROLE_LABELS.values() for label in table.values())
+
+
+def topic_lines(note: str, arm: str = PIPELINE) -> str:
+    """F2's blind round rates topic bullets only. From our note: every line
+    under a heading that is not a fixed role (sub-points included); with no
+    topic headings, the opening block's bullets. The baseline has no topics:
+    its first paragraph — the points it chose to make — as bullets."""
+    if arm != PIPELINE:
+        first = note.strip().split("\n\n", 1)[0]
+        return "\n".join(
+            ln if ln.lstrip().startswith("- ") else f"- {ln.strip()}"
+            for ln in first.splitlines()
+            if ln.strip()
+        )
+    roles = _role_headings()
+    blocks: list[tuple[str | None, list[str]]] = [(None, [])]
+    for line in note.splitlines():
+        if line.startswith("## "):
+            blocks.append((line[3:].strip(), []))
+        elif line.strip():
+            blocks[-1][1].append(line.rstrip())
+    topics = [
+        (title, lines)
+        for title, lines in blocks
+        if title and title.casefold() not in roles and lines
+    ]
+    if topics:
+        return "\n\n".join(f"## {title}\n" + "\n".join(lines) for title, lines in topics)
+    return "\n".join(ln for ln in blocks[0][1] if ln.lstrip().startswith("- "))
+
+
+def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0, section: str = "all") -> int:
     """One pair per meeting both arms wrote a note for. ``a`` is the
     pipeline, ``b`` the baseline; which one is left is random, and only
     ``key.csv`` knows."""
@@ -80,6 +120,8 @@ def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0) -> int:
         pair_id = f"p{n:03d}"
         notes = {PIPELINE: (a / f"{meeting_id}.md").read_text("utf-8"),
                  "single_pass": (b / f"{meeting_id}.md").read_text("utf-8")}  # fmt: skip
+        if section == "topics":
+            notes = {arm: topic_lines(text, arm) for arm, text in notes.items()}
         left, right = (PIPELINE, "single_pass") if rng.random() < 0.5 else ("single_pass", PIPELINE)
         meeting = meetings[meeting_id]
         transcript = "\n".join(
@@ -185,6 +227,12 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--corpus", type=Path, required=True)
     b.add_argument("--out", type=Path, required=True)
     b.add_argument("--seed", type=int, default=0)
+    b.add_argument(
+        "--section",
+        choices=["all", "topics"],
+        default="all",
+        help="rate whole notes, or topic bullets only (F2's readability round)",
+    )
     s = sub.add_parser("score")
     s.add_argument("ratings", type=Path)
     s.add_argument("key", type=Path)
@@ -192,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--write", action="store_true", help="write docs/eval/notes-pairs-<date>.json")
     args = parser.parse_args(argv)
     if args.command == "build":
-        return build(args.a, args.b, args.corpus, args.out, seed=args.seed)
+        return build(args.a, args.b, args.corpus, args.out, seed=args.seed, section=args.section)
     result = score(args.ratings, args.key, args.corpus)
     print(json.dumps(result, indent=2))
     if args.write:

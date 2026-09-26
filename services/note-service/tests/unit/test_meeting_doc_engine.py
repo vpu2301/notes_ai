@@ -15,6 +15,8 @@ from note_service.domain.action_items import parse_action_lines
 from note_service.domain.meeting_doc import merge, render, roles, schema, verify, windows
 from note_service.domain.meeting_doc.windows import Turn, Window
 
+from .meeting_doc_fakes import spoken as said_as
+
 MEETING_DATE = date(2026, 9, 14)
 
 
@@ -304,7 +306,8 @@ def test_a_number_that_was_said_survives() -> None:
         [
             _fact(
                 kind=schema.KEY_POINT,
-                text="the budget is 12 thousand euros",
+                # A restatement (F2: the quote copied would be evidence only).
+                text="The budget stands at 12 thousand euros",
                 quote="the budget is 12 thousand euros",
             )
         ],
@@ -490,7 +493,7 @@ def _verified(
     return verify.VerifiedFact(
         kind=kind,
         text=text,
-        quote=text,
+        quote=said_as(text),
         turn=0,
         start_ms=start_ms,
         end_ms=start_ms + 1_000,

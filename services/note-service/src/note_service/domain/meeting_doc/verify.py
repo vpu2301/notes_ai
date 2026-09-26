@@ -78,6 +78,10 @@ PARAPHRASE_UNSUPPORTED: Final = "paraphrase_unsupported"
 # an opinion or forecast whose holder is not among the participants.
 ENTITY_CORRECTED: Final = "entity_corrected"
 ATTRIBUTION_MISSING: Final = "attribution_missing"
+# F2 — the text is the quote (or nearly all of it); the line speaks as
+# I / we / you. Either fact is evidence behind other lines, never a line.
+COPIED: Final = "copied"
+FIRST_PERSON: Final = "first_person"
 
 # Why a fact was dropped — counted in metrics and in the eval, never shown.
 DROPPED_QUOTE: Final = "dropped_quote"
@@ -135,6 +139,15 @@ class VerifiedFact:
     ``quote``."""
     attributed_to: str | None = None
     corrections: tuple[Correction, ...] = ()
+    """F2 — ``text`` is its quote copied: a real quote, kept to be cited,
+    never rendered as a line of its own."""
+    copied: bool = False
+
+    @property
+    def evidence_only(self) -> bool:
+        """F2 — kept as evidence behind other lines, never a line itself:
+        the text copies the transcript or speaks in its voice."""
+        return self.copied or FIRST_PERSON in self.flags
 
     @property
     def salient(self) -> bool:
@@ -582,6 +595,13 @@ class VerifyStats:
     """Facts whose text repeats a prompt example (Q1): the model copied
     its instructions, not the recording."""
     dropped_example: int = 0
+    """F2 — facts whose text is their quote (kept as evidence only); facts
+    that inform nobody (dropped, not stored); facts in the transcript's
+    voice (evidence only) and the openers code dropped to fix one."""
+    copied: int = 0
+    dropped_no_information: int = 0
+    dropped_first_person: int = 0
+    third_person_fixed: int = 0
 
 
 # The window shows each turn as "[3] Anna (00:12): …". A small model
@@ -667,9 +687,12 @@ def verify_facts(
                 continue
             refers_to_key = carried_keys[index]
 
+        # F2 — a copy is evidence, not a statement, whatever its kind. A
+        # copied decision is not a decision (it is somebody's words filed
+        # as an outcome) and is also not rendered.
+        copied = is_copied(fact.text, fact.quote)
         if kind == schema.DECISION and (
-            not is_decision(fact.quote, turn=turn, window=window)
-            or is_copied(fact.text, fact.quote)
+            not is_decision(fact.quote, turn=turn, window=window) or copied
         ):
             kind = schema.KEY_POINT
             stats.downgraded += 1
@@ -682,6 +705,28 @@ def verify_facts(
             continue
         if number_flags:
             stats.numbers_removed += 1
+
+        # F2 — information is checked in code. A remark that informs nobody
+        # ("This boat is incredible.") is not a fact and not evidence of one.
+        if not support.carries_information(
+            text,
+            language,
+            short_ok=kind in _SHORT_KINDS,
+            has_date=_has_date_word(text),
+        ):
+            stats.dropped_no_information += 1
+            continue
+        voice_flags: list[str] = []
+        if not copied and kind not in _TASK_KINDS:
+            fixed = support.mechanical_third_person(text)
+            if fixed is not None:
+                text = fixed
+                stats.third_person_fixed += 1
+            if support.first_person(text, language):
+                voice_flags = [FIRST_PERSON]
+                stats.dropped_first_person += 1
+        if copied:
+            stats.copied += 1
 
         # Q4, tier (a): names the workspace knows, spelled its way — in the
         # text only. The quote keeps what the transcriber heard.
@@ -745,7 +790,16 @@ def verify_facts(
         attributed, actor_fixes, _ = _correct(attributed, glossary, people, stats)
         corrections = [*corrections, *actor_fixes]
 
-        flags = [*number_flags, *paraphrase_flags, *owner_flags, *due_flags, *attribution_flags]
+        flags = [
+            *number_flags,
+            *paraphrase_flags,
+            *owner_flags,
+            *due_flags,
+            *attribution_flags,
+            *voice_flags,
+        ]
+        if copied:
+            flags.append(COPIED)
         if corrections:
             flags.append(ENTITY_CORRECTED)
         out.append(
@@ -775,6 +829,7 @@ def verify_facts(
                 certainty=fact.certainty,
                 attributed_to=attributed,
                 corrections=tuple(corrections),
+                copied=copied,
             )
         )
         stats.kept += 1
@@ -838,6 +893,15 @@ MIN_TEXT_SUPPORT: Final = 0.34
 # is dropped, not flagged.
 _STRICT_KINDS: Final[frozenset[str]] = frozenset(
     {schema.DECISION, schema.ACTION, "commitment_ours", "commitment_theirs"}
+)
+
+# F2 — short by nature: a task or a decision needs no four content words,
+# nor does a completion tick or a judgement value.
+_SHORT_KINDS: Final[frozenset[str]] = _STRICT_KINDS | {schema.COMPLETION, schema.JUDGEMENT}
+# Phrased in the speaker's voice by nature ("We should update the deck"):
+# a task keeps its wording; the first-person rule is for statements.
+_TASK_KINDS: Final[frozenset[str]] = frozenset(
+    {schema.ACTION, "commitment_ours", "commitment_theirs", schema.COMPLETION, schema.JUDGEMENT}
 )
 
 # Kinds that belong to one side of the table.

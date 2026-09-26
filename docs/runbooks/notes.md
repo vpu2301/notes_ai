@@ -389,6 +389,39 @@ GROUP BY 1, 2;
 `docs/security/2026-09-22-november-sentence.md`. Anything else: compare the
 backend against the committed eval baseline (`docs/eval/notes-baseline-*.md`).
 
+### copied-facts
+
+Sprint F2 (ADR-0063). A fact whose `text` is its quote copied is kept as
+**evidence** — other lines may cite it, its row has `placement =
+'evidence'` (migration 0064) — but it is never a line of the note. A window
+where more than 40 % of the verified facts are copies (and at least three)
+is extracted once more with the restate suffix and no more facts than the
+first answer had; restated facts that cite the same line replace the copies.
+`NoteGenerationCopiedFacts` fires when a third of kept facts are still
+copies after that: the note is thin because the model is transcribing.
+
+Code also drops, before a fact is stored, a remark that informs nobody
+(`dropped_no_information`: nothing but judgement words — "This boat is
+incredible.") and keeps a line in the speaker's own voice as evidence only
+(`dropped_first_person`). Lines the reduce steps write pass the same three
+rules (`lines_unsupported.copied|no_information|first_person`).
+
+```sql
+SELECT prompt_version, backend,
+       sum((stats->>'facts_copied')::int) AS copied,
+       sum((stats->>'windows_restated')::int) AS restated,
+       sum((stats->'restate_outcomes'->>'improved')::int) AS improved,
+       sum((stats->>'dropped_no_information')::int) AS chatter,
+       sum((stats->>'dropped_first_person')::int) AS first_person
+FROM note_generations WHERE created_at > now() - interval '6 hours'
+GROUP BY 1, 2;
+```
+
+`improved` near `restated` means the restate works and only the first
+answer copies — a prompt or backend change. `improved` near zero means the
+model copies whatever it is told; compare the backend against the committed
+eval baseline before changing the 40 % threshold (`pipeline.RESTATE_COPY_SHARE`).
+
 ### Deploying the engine (Summary Engine v2)
 
 **Migrate first, then the workers.** Order (Q6 T5):

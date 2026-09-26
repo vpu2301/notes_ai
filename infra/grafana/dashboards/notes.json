@@ -264,6 +264,45 @@
         "w": 24,
         "h": 8
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "Statements, not quotes: facts copied or dropped (F2, per hour)",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_facts_total{outcome=~\"copied|dropped_no_information|dropped_first_person\"}[1h]))",
+          "legendFormat": "{{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_lines_total{outcome=~\"copied|no_information|first_person\"}[1h]))",
+          "legendFormat": "line {{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Windows asked to restate (F2, per hour)",
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_restate_total[1h]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
     }
   ]
 }

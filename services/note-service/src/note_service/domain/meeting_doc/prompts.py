@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-12"
+PROMPT_VERSION: Final = "2026-10-13"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -85,6 +85,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_should": "We should really rewrite the Ferrytale rulebook.",
         "shot_estimate_quote": "I'd guess Ferrytale has sold well over forty thousand copies by now, but nobody really knows.",
         "shot_estimate_wrong": "Ferrytale has sold over forty thousand copies",
+        # F2 — a remark that informs nobody is not a fact.
+        "shot_small_talk": "Honestly, the Quillhaven fair venue is fantastic.",
         # The summary: an outcome, not the flow of talk.
         "summary_right": "The Lantern edition remains planned for the Quillhaven fair",
         "summary_wrong": "the participants talked about the Lantern edition",
@@ -105,6 +107,7 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_should": "Wir sollten das Ferrytale-Regelheft wirklich neu schreiben.",
         "shot_estimate_quote": "Ich würde schätzen, Ferrytale hat inzwischen deutlich über vierzigtausend Exemplare verkauft, aber genau weiß das niemand.",
         "shot_estimate_wrong": "Ferrytale hat über vierzigtausend Exemplare verkauft",
+        "shot_small_talk": "Ehrlich, die Halle der Quillhaven-Messe ist fantastisch.",
         "summary_right": "Die Lantern-Edition bleibt für die Quillhaven-Messe geplant",
         "summary_wrong": "die Teilnehmer sprachen über die Lantern-Edition",
         "framing": "Interview mit einer Quillhaven-Spieleautorin zum Ferrytale-Nachdruck, zu Kartenkarton, Preisen und der Lantern-Edition.",
@@ -123,6 +126,7 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_should": "Треба переписати правила Ferrytale.",
         "shot_estimate_quote": "Я б оцінила, що Ferrytale вже продано значно понад сорок тисяч примірників, але точно ніхто не знає.",
         "shot_estimate_wrong": "Ferrytale продано понад сорок тисяч примірників",
+        "shot_small_talk": "Чесно, зала ярмарку Quillhaven просто чудова.",
         "summary_right": "Lantern-видання й далі заплановане до ярмарку Quillhaven",
         "summary_wrong": "учасники говорили про Lantern-видання",
         "framing": "Інтерв'ю з авторкою ігор Quillhaven про передрук Ferrytale: картон, ціни та Lantern-видання.",
@@ -282,7 +286,9 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         'worried…", and not the quote copied)\n\n'
         f"  [15] Wren (14:02): {_EN['shot_estimate_quote']}\n"
         f'  → kind "key_point", certainty "estimate", text "{_EN["estimate_text"]}." '
-        f'(NOT "{_EN["shot_estimate_wrong"]}")'
+        f'(NOT "{_EN["shot_estimate_wrong"]}")\n\n'
+        f"  [18] Osric (16:05): {_EN['shot_small_talk']}\n"
+        "  → no fact (it informs nobody: a remark, not a point)"
     ),
     "de": (
         "Beispiele für die Fehler, die zu vermeiden sind (eine erfundene Firma — nie "
@@ -297,7 +303,9 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         'Sorge…", nicht das Zitat kopiert)\n\n'
         f"  [15] Wren (14:02): {_DE['shot_estimate_quote']}\n"
         f'  → kind "key_point", certainty "estimate", text "{_DE["estimate_text"]}." '
-        f'(NICHT "{_DE["shot_estimate_wrong"]}")'
+        f'(NICHT "{_DE["shot_estimate_wrong"]}")\n\n'
+        f"  [18] Osric (16:05): {_DE['shot_small_talk']}\n"
+        "  → kein Fakt (ohne Informationswert: eine Bemerkung, kein Punkt)"
     ),
     "uk": (
         "Приклади помилок, яких слід уникати (вигадана компанія — нічого з неї не "
@@ -312,7 +320,9 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         'боїться…", не скопійована цитата)\n\n'
         f"  [15] Врен (14:02): {_UK['shot_estimate_quote']}\n"
         f'  → kind "key_point", certainty "estimate", text "{_UK["estimate_text"]}." '
-        f'(НЕ "{_UK["shot_estimate_wrong"]}")'
+        f'(НЕ "{_UK["shot_estimate_wrong"]}")\n\n'
+        f"  [18] Остап (16:05): {_UK['shot_small_talk']}\n"
+        "  → жодного факту (без інформації: репліка, а не думка)"
     ),
 }
 
@@ -334,7 +344,10 @@ REDUCE_TOPICS_SYSTEM: Final[dict[str, str]] = {
         "and never open with 'It was stated that'. Each fact belongs in one topic only. "
         "Use only the facts given. Put the ids of the facts "
         "a bullet comes from in `fact_ids` ONLY — never in the text. Never add "
-        "information that is not in a cited fact. Use only names that appear in the facts."
+        "information that is not in a cited fact. Use only names that appear in the facts. "
+        "A bullet may carry up to three `children`: sub-points that elaborate it, each "
+        "citing its own facts; never repeat the parent in a child. Never copy what "
+        "somebody said word for word: state it."
     ),
     "de": (
         "Du gruppierst Fakten einer Besprechung in Themen für ein professionelles "
@@ -356,7 +369,9 @@ REDUCE_TOPICS_SYSTEM: Final[dict[str, str]] = {
         "Nutze nur die gegebenen Fakten. Die ids der Fakten, aus denen ein Punkt "
         "stammt, gehören NUR in `fact_ids` — nie in den Text. Füge nichts hinzu, was "
         "nicht in einem zitierten Fakt steht. Verwende nur Namen, die in den Fakten "
-        "vorkommen."
+        "vorkommen. Ein Punkt darf bis zu drei `children` haben: Unterpunkte, die ihn "
+        "ausführen, jeder mit eigenen Fakten; wiederhole nie den Oberpunkt. Übernimm nie "
+        "wörtlich, was jemand gesagt hat: formuliere es als Aussage."
     ),
     "uk": (
         "Ти групуєш факти однієї зустрічі у теми для професійного протоколу — але "
@@ -376,7 +391,10 @@ REDUCE_TOPICS_SYSTEM: Final[dict[str, str]] = {
         "Id фактів, з яких походить пункт, — ЛИШЕ у `fact_ids`, "
         "ніколи в тексті. Не додавай нічого, чого немає у процитованому факті. "
         "Використовуй лише імена, що є у фактах. Називай, хто висловлює кожну "
-        "думку чи прогноз, і зберігай їхню непевність."
+        "думку чи прогноз, і зберігай їхню непевність. Пункт може мати до трьох "
+        "`children`: підпунктів, що його розкривають, кожен із власними фактами; ніколи "
+        "не повторюй батьківський пункт. Ніколи не копіюй дослівно сказане: формулюй "
+        "твердження."
     ),
 }
 
@@ -605,6 +623,22 @@ def quote_reminder(language: str) -> str:
 
 def strict_suffix(language: str) -> str:
     return _pick(STRICT_SUFFIX, language)
+
+
+# F2 — appended to the extraction system prompt for the one restate call a
+# window gets when most of its first answer copied the transcript.
+RESTATE_SUFFIX: Final[dict[str, str]] = {
+    "en": "Your last answer copied the transcript into `text`. `text` must be one statement "
+    "in your own words, third person; the quote is separate.",
+    "de": "Deine letzte Antwort hat das Transkript in `text` kopiert. `text` muss eine Aussage "
+    "in eigenen Worten sein, in der dritten Person; das Zitat steht getrennt.",
+    "uk": "Твоя остання відповідь скопіювала транскрипт у `text`. `text` має бути одним "
+    "твердженням власними словами, у третій особі; цитата — окремо.",
+}
+
+
+def restate_suffix(language: str) -> str:
+    return _pick(RESTATE_SUFFIX, language)
 
 
 def extract_prompt(

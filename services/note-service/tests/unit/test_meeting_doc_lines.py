@@ -17,6 +17,8 @@ from typing import Any
 from note_service.domain.meeting_doc import render, roles, schema
 from note_service.domain.meeting_doc.verify import VerifiedFact
 
+from .meeting_doc_fakes import spoken
+
 SNAPSHOT = Path(__file__).parent / "snapshots" / "render_sections_q3.json"
 
 ROLE_MAP = {
@@ -31,7 +33,7 @@ def _fact(text: str, kind: str, start_ms: int, **kw: Any) -> VerifiedFact:
     base: dict[str, Any] = {
         "kind": kind,
         "text": text,
-        "quote": text,
+        "quote": spoken(text),
         "turn": start_ms // 1000,
         "start_ms": start_ms,
         "end_ms": start_ms + 4_000,

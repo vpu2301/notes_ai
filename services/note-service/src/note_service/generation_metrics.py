@@ -59,7 +59,10 @@ shadow_seconds = _meter.create_histogram(
 # a label; these say how many, and why.
 lines = _meter.create_counter(
     "mdx_note_generation_lines_total",
-    description="Composed lines by gate outcome (labels: outcome = kept|unsupported|number|name|example)",
+    description=(
+        "Composed lines by gate outcome (labels: outcome = kept|unsupported|number|name|example|"
+        "copied|no_information|first_person)"
+    ),
     unit="1",
 )
 noise = _meter.create_counter(
@@ -71,8 +74,15 @@ facts = _meter.create_counter(
     "mdx_note_generation_facts_total",
     description=(
         "Extracted facts by outcome (labels: outcome = kept|dropped_quote|dropped_noise|"
-        "dropped_paraphrase|flagged_paraphrase)"
+        "dropped_paraphrase|flagged_paraphrase|copied|dropped_no_information|dropped_first_person)"
     ),
+    unit="1",
+)
+# F2 — windows re-extracted because most of their facts copied the
+# transcript, by whether the second answer replaced any copy.
+restate = _meter.create_counter(
+    "mdx_note_generation_restate_total",
+    description="Windows asked once more to restate copied facts (labels: outcome = improved|unchanged)",
     unit="1",
 )
 excluded_share = _meter.create_histogram(
@@ -84,7 +94,15 @@ excluded_share = _meter.create_histogram(
 
 def record_document(stats: dict, *, backend: str) -> None:
     """The per-generation counts of a finished document. Counts only."""
-    for outcome in ("unsupported", "number", "name", "example"):
+    for outcome in (
+        "unsupported",
+        "number",
+        "name",
+        "example",
+        "copied",
+        "no_information",
+        "first_person",
+    ):
         n = int((stats.get("lines_unsupported") or {}).get(outcome, 0))
         if n:
             lines.add(n, {"outcome": outcome})
@@ -104,6 +122,9 @@ def record_document(stats: dict, *, backend: str) -> None:
         ("dropped_noise", "facts_dropped_noise"),
         ("dropped_paraphrase", "facts_dropped_paraphrase"),
         ("flagged_paraphrase", "facts_flagged_paraphrase"),
+        ("copied", "facts_copied"),
+        ("dropped_no_information", "dropped_no_information"),
+        ("dropped_first_person", "dropped_first_person"),
     ):
         n = int(stats.get(key, 0))
         if n:
@@ -118,6 +139,9 @@ def record_document(stats: dict, *, backend: str) -> None:
     ):
         if stats.get(key):
             entities_counter.add(int(stats[key]), {"outcome": outcome})
+    for outcome, n in (stats.get("restate_outcomes") or {}).items():
+        if n:
+            restate.add(int(n), {"outcome": outcome})
     if stats.get("redundant_lines"):
         redundant_lines.add(int(stats["redundant_lines"]))
     speech = int(stats.get("speech_ms", 0))

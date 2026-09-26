@@ -26,7 +26,7 @@ from typing import Final
 
 from .. import lines as line_rules
 from . import roles, schema, support
-from .verify import DateMention, VerifiedFact
+from .verify import DateMention, VerifiedFact, is_copied
 
 _ECHOED_FACT: Final = re.compile(
     r"^\s*(?:\[\]\s*)?(?P<id>[0-9a-f]{16})\s*\([a-z_]+,\s*\d{1,2}:\d{2}\):\s*"
@@ -184,6 +184,8 @@ class Line:
     fact_ids: tuple[str, ...] = ()
     """Q3 — the dates its facts' quotes mention, resolved with their tense."""
     dates: tuple[DateMention, ...] = ()
+    """F2 — for a sub-point, the text of the bullet it sits under."""
+    parent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,9 +332,12 @@ def render_sections(
             )
         )
 
+    # F2 — a fact whose text copies the transcript (or speaks in its
+    # voice) is evidence: other lines may cite it, it is never a line.
     grouped: dict[str, list[VerifiedFact]] = {}
     for fact in facts:
-        grouped.setdefault(fact.kind, []).append(fact)
+        if not fact.evidence_only:
+            grouped.setdefault(fact.kind, []).append(fact)
 
     # Sprint 36: the family's extra kinds, each into the role its table
     # says. Handled before the generic kinds so a family that maps, say,
@@ -413,7 +418,7 @@ def render_sections(
 
     # ── Key dates (Q5): what the recording scheduled or set a deadline
     #    for, from the dates its facts' quotes named. ──────────────────
-    dated = key_dates(facts, meeting_date=meeting_date)
+    dated = key_dates([f for f in facts if not f.evidence_only], meeting_date=meeting_date)
     if dated:
         date_lines = [
             Line(
@@ -480,28 +485,21 @@ def render_sections(
         cited = [by_id[i] for i in fact_ids if i in by_id]
         topic_lines: list[Line] = []
         for entry in bullets:
-            # A bullet is ``(text, its fact ids)``; a bare string is the
-            # older shape and cites the topic's facts.
-            bullet, own_ids = (entry, list(fact_ids)) if isinstance(entry, str) else entry
-            own = [by_id[i] for i in own_ids if i in by_id]
-            bullet = editorial(bullet)
-            # The reduce prompt lists facts as "id (kind, mm:ss): text" and
-            # a small model may echo the whole line as a bullet. The id is
-            # ours: swap in that fact's text and cite it.
-            echoed = _ECHOED_FACT.match(bullet)
-            if echoed is not None:
-                fact = by_id.get(echoed.group("id"))
-                bullet = fact.text if fact is not None else bullet[echoed.end() :]
-                if fact is not None and fact not in own:
-                    own.append(fact)
-            bullet, inline = strip_inline_ids(bullet)
-            for fact_id in inline:
-                hit = by_id.get(fact_id)
-                if hit is not None and hit not in own:
-                    own.append(hit)
-            if not bullet.strip():
+            # A bullet is ``(text, its fact ids)`` or, with sub-points (F2),
+            # ``(text, ids, [(child text, child ids)])``; a bare string is
+            # the older shape and cites the topic's facts.
+            if isinstance(entry, str):
+                bullet, own_ids, children = entry, list(fact_ids), []
+            else:
+                bullet, own_ids, *rest = entry
+                children = list(rest[0]) if rest else []
+            written = _bullet_text(bullet, own_ids, by_id)
+            if written is None:
                 continue
+            bullet, own = written
             ids = set(_ids(own))
+            # Parent and sub-points are one unit (F2): a parent already said
+            # takes its sub-points with it.
             if ids and (ids <= rendered or _said_by(bullet, ids, sentences, language)):
                 redundant += 1
                 continue
@@ -510,7 +508,21 @@ def render_sections(
                 if fact not in cited:
                     cited.append(fact)
             bullet = patch_claim(bullet.strip(), own, language)
-            topic_lines.append(Line(f"- {bullet}", "bullet", _ids(own)))
+            parent_line = Line(f"- {bullet}", "bullet", _ids(own))
+            topic_lines.append(parent_line)
+            for child_text, child_ids in children[:MAX_CHILDREN]:
+                child = _bullet_text(child_text, child_ids, by_id)
+                if child is None or not child[1]:
+                    continue
+                text, child_own = child
+                rendered |= set(_ids(child_own))
+                for fact in child_own:
+                    if fact not in cited:
+                        cited.append(fact)
+                text = patch_claim(text.strip(), child_own, language)
+                topic_lines.append(
+                    Line(f"  - {text}", "bullet", _ids(child_own), parent=parent_line.text)
+                )
         first = min((f.start_ms for f in cited), default=10**12)
         drafts.append((title.strip(), topic_lines, cited, first))
 
@@ -520,7 +532,7 @@ def render_sections(
     kept_topics: list[tuple[str, list[Line], list[VerifiedFact]]] = []
     orphans: list[Line] = []
     for title, topic_lines, cited, _first in drafts:
-        if len(topic_lines) >= MIN_BULLETS_PER_TOPIC:
+        if sum(1 for line in topic_lines if line.parent is None) >= MIN_BULLETS_PER_TOPIC:
             kept_topics.append((title, [*orphans, *topic_lines], cited))
             orphans = []
         elif topic_lines and kept_topics:
@@ -568,7 +580,7 @@ def render_sections(
         overview.append((written, [Line(written, "summary", tuple(own))]))
     used: list[VerifiedFact] = []
     if not topic_sections:
-        listed = [*key_facts]
+        listed = [f for f in key_facts if not f.evidence_only]
         listed += [f for f in grouped.get(schema.KEY_POINT, []) if f not in listed]
         in_sections = {f.item_key for section in out for f in section.facts}
         listed = [f for f in listed if f.item_key not in in_sections]
@@ -611,6 +623,41 @@ def render_sections(
     out.extend(topic_sections)
     return [_with_dates(section, by_id) for section in out]
 
+
+def _bullet_text(
+    text: str, own_ids: list[str], by_id: dict[str, VerifiedFact]
+) -> tuple[str, list[VerifiedFact]] | None:
+    """A model-written bullet, cleaned, with the facts it cites — or None
+    when there is nothing to write: an empty line, an echoed fact that is
+    evidence only, or a line that copies the quote of a fact it cites (F2:
+    a transcript sentence is evidence, not a statement)."""
+    own = [by_id[i] for i in own_ids if i in by_id]
+    bullet = editorial(text)
+    # The reduce prompt lists facts as "id (kind, mm:ss): text" and a small
+    # model may echo the whole line as a bullet. The id is ours: swap in
+    # that fact's text and cite it — unless the fact is evidence only.
+    echoed = _ECHOED_FACT.match(bullet)
+    if echoed is not None:
+        fact = by_id.get(echoed.group("id"))
+        if fact is not None and fact.evidence_only:
+            return None
+        bullet = fact.text if fact is not None else bullet[echoed.end() :]
+        if fact is not None and fact not in own:
+            own.append(fact)
+    bullet, inline = strip_inline_ids(bullet)
+    for fact_id in inline:
+        hit = by_id.get(fact_id)
+        if hit is not None and hit not in own:
+            own.append(hit)
+    if not bullet.strip():
+        return None
+    if any(is_copied(bullet, f.quote) for f in own):
+        return None
+    return bullet, own
+
+
+# F2 — a bullet may carry up to three sub-points, one level deep.
+MAX_CHILDREN: Final = 3
 
 # A bullet restating a summary sentence: same facts, mostly same words.
 SAID_BY_SENTENCE_JACCARD: Final = 0.6

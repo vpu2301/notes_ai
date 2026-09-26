@@ -175,3 +175,13 @@ class ScriptedProvider:
 
     def _summary(self, _prompt: str, facts: list[tuple[str, str, str]]) -> dict[str, Any]:
         return {"summary": [{"sentence": text, "fact_ids": [fid]} for fid, _k, text in facts[:2]]}
+
+
+def spoken(text: str) -> str:
+    """A quote a fact's text is drawn from without being a copy of it (F2:
+    a text that IS its quote is evidence only, never a line). Fixtures that
+    once used ``quote=text`` as shorthand use this instead."""
+    quote = f"so {text}"
+    while len(text) >= 0.8 * len(quote):
+        quote = f"{quote} and that was the point"
+    return quote
