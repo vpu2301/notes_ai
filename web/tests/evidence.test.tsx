@@ -208,3 +208,26 @@ describe("names in the note", () => {
     expect(reloaded).toHaveBeenCalled();
   });
 });
+
+describe("figures (F3)", () => {
+  it("a specifications table renders as a table, value cells as spoken", () => {
+    render(
+      <RichText
+        text={"| Quantity | Value |\n|---|---|\n| Length overall | 66 feet |\n| Water tank | just under 300 gallons |"}
+      />,
+    );
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("Length overall");
+    expect(table).toHaveTextContent("just under 300 gallons");
+    expect(screen.getAllByRole("row")).toHaveLength(3);
+  });
+
+  it("a figure row carries its verified fields", () => {
+    const row: GeneratedItem = {
+      ...ROW,
+      kind: "figure",
+      figure: { name: "Water tank", value: "300", unit: "gallons", qualifier: "just under" },
+    };
+    expect(row.figure?.qualifier).toBe("just under");
+  });
+});

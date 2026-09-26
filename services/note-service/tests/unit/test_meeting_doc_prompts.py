@@ -38,6 +38,7 @@ PINNED: dict[str, str] = {
     "2026-10-11": "8bde8a1ffe8c52f52c854db56259bab8368b8d0753f4e5099c2fcf1efcade7b5",
     "2026-10-12": "1acfc550bc80b3253c1465b50211cd14800c82dd4423150cb3080fa1390999ee",
     "2026-10-13": "fdeefa1c1d2906fae6f2280798c0b01e92ddde5c0bfcdd4e776a9e26e856d5c3",  # F2: restate suffix, small-talk shot, sub-points
+    "2026-10-14": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: figure/introduction/next_step rules, intro hint, presentation_demo
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")

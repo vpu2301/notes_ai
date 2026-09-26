@@ -14,6 +14,7 @@ when the real corpus is not present.
 | `m08_en_one_on_one` | en | one_on_one | feedback, one explicit action with a date |
 | `m09_en_voice_memo` | en | voice_memo | one voice, 2.5 minutes, a note to self (Q3: classified by rule) |
 | `m10_de_interview` | de | interview | a journalist and an archivist; no actions, one hedged forecast |
+| `m11_en_boat_walkthrough` | en | presentation_demo | F3's synthetic twin of the 2026-09-25 Pardo walkthrough: an invented yacht, eight figures with qualifiers ("a little over sixteen and a half", "just under two hundred and fifty"), a presenter with role and dealer, a call to action |
 
 They are **not** the gold set the gates are measured on. That corpus
 (`eval/notes/v2/`, target 100 recordings — concept §5) is real recordings

@@ -19,8 +19,8 @@ bullets.
    text as a line (fact sections, key dates, the untopicked list, salient bullets). Its row is
    stored with `placement = 'evidence'` (migration 0064) whether or not a line cites it, so the
    evidence popover can resolve every citation; the Detailed view never shows it.
-2. **Restate on demand, per window, once.** When more than 40 % of a window's verified facts
-   (at least three) are copies, the window is extracted again with `RESTATE_SUFFIX` and no more
+2. **Restate on demand, per window, once.** When a window's verified facts include a copy
+   (tuned from the work order's 40 %, see below), the window is extracted again with `RESTATE_SUFFIX` and no more
    facts than the first answer had. A restated fact that cites the same line and is not a copy
    replaces the copy; everything else stays. `mdx_note_generation_restate_total{outcome}`.
 3. **Information is checked in code** (`support.carries_information`), on facts before they are
@@ -51,6 +51,18 @@ bullets.
 - **Copies are also caught in model-written lines.** A topic bullet, summary sentence or
   framing line that copies the quote of a fact it cites is refused by the gate (`copied`), and
   render drops a bullet that copies a cited quote.
+- **Restate on any copy, not above 40 %** (tuned after the first eval, as the work order
+  says to when recall drops). The 2026-09-26 run on Gemma 3 4B
+  (`docs/eval/notes-pipeline-2026-09-26-dev_mac-f2-as-built.json`) fell from 0.61 to 0.39
+  key-fact recall: two meetings lost their only window to invalid JSON under load, and m04,
+  m07 and m08 lost facts that were copies in windows below the 40 % bar — "Candidate B was
+  the strongest on the system design round" is a copy and was the gold fact. With any copy
+  asking once, m04's copies came back restated. `is_copied` also checks each sentence of a
+  multi-sentence quote, as the eval's scorer does.
+- **Lexical recall under-counts a restatement.** The scorer matches gold facts by shared
+  content words (≥ 0.6); "Candidate A experienced difficulty with concurrency questions"
+  does not match "Candidate A struggled with the concurrency question". F2 trades verbatim
+  lines for restated ones, so the recall gate measures part of the trade itself.
 - `NoteGenerationUnsupportedLines` now counts the support outcomes only
   (`unsupported|number|name|example`); the F2 outcomes have their own alert,
   `NoteGenerationCopiedFacts`.

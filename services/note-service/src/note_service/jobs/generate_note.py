@@ -475,6 +475,11 @@ def line_row(
         else None,
         "attributed_to": next(iter(holders)) if len(holders) == 1 else None,
         "corrections": [{"surface": s, "canonical": c, "source": src} for s, c, src in corrections],
+        # F3 — a figure row carries its verified fields, so a table cell has
+        # a source and a client can draw the value without parsing the line.
+        "payload": first.figure.payload()
+        if getattr(first, "figure", None) is not None and line.kind == "figure"
+        else None,
         # F2 — a sub-point names the bullet it sits under by that row's key.
         "parent_key": line_rules.key_of(line_rules.strip_marker(line.parent)[1])
         if getattr(line, "parent", None)

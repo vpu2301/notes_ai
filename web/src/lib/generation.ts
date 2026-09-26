@@ -66,6 +66,7 @@ export const RECORDING_TYPE_LABELS: Record<string, string> = {
   one_on_one: "One-on-one",
   podcast_broadcast: "Podcast / broadcast",
   lecture_webinar: "Lecture / webinar",
+  presentation_demo: "Presentation / demo",
   voice_memo: "Voice memo",
 };
 

@@ -34,6 +34,7 @@ RecordingType = Literal[
     "podcast_broadcast",
     "lecture_webinar",
     "voice_memo",
+    "presentation_demo",
 ]
 
 
@@ -83,6 +84,21 @@ class GlossaryTerm(_Model):
     heard_as: list[str] = Field(default_factory=list)
 
 
+class GoldFigure(_Model):
+    """F3 — a number a speaker attached to a named quantity."""
+
+    name: str
+    value: str
+    unit: str = ""
+    qualifier: str = ""
+
+
+class GoldPresenter(_Model):
+    name: str
+    role: str = ""
+    organisation: str = ""
+
+
 class Gold(_Model):
     key_facts: list[str] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
@@ -97,6 +113,10 @@ class Gold(_Model):
     topics: list[TopicRef] = Field(default_factory=list)
     must_contain: list[str] = Field(default_factory=list)
     must_not_contain: list[str] = Field(default_factory=list)
+    # F3 — what a walkthrough's note must carry.
+    figures: list[GoldFigure] = Field(default_factory=list)
+    presenter: GoldPresenter | None = None
+    contact: list[str] = Field(default_factory=list)
 
 
 class Meeting(_Model):

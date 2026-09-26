@@ -174,6 +174,60 @@ class Introduction:
     name: str  # as the transcript spells it
     start: int  # character offsets of the match in the scanned text
     end: int
+    # Sprint F3: the clause after the name that says what the person does
+    # ("I am a broker with Springbrook Marine Group"), verbatim, or None.
+    # Nothing is inferred: it is a substring of the scanned text.
+    role_text: str | None = None
+
+
+# Where a role clause may start right after the name ("Mitchell, broker…",
+# "Anna from sales", "Tom with Acme"), or as the next sentence ("I am a
+# broker…"). Bounded: a clause is at most ROLE_CHARS long.
+ROLE_CHARS = 120
+_ROLE_AFTER_NAME: dict[str, re.Pattern[str]] = {
+    "en": re.compile(
+        r"^[ \t]*(?:,|—|–|-)?[ \t]*(?:and[ \t]+)?(?:i'?m[ \t]+|i am[ \t]+)?"
+        r"(?:a|an|the|from|with|of|at)\b",
+        re.IGNORECASE,
+    ),
+    "de": re.compile(
+        r"^[ \t]*(?:,|—|–|-)?[ \t]*(?:und[ \t]+)?(?:ich bin[ \t]+)?"
+        r"(?:ein|eine|der|die|von|bei|aus)\b",
+        re.IGNORECASE,
+    ),
+    "uk": re.compile(
+        r"^[ \t]*(?:,|—|–|-)?[ \t]*(?:і[ \t]+)?(?:я[ \t]+)?"
+        r"(?:з|із|від|у|в)(?![\w'’ʼ])",
+        re.IGNORECASE,
+    ),
+}
+_ROLE_SENTENCE: dict[str, re.Pattern[str]] = {
+    "en": re.compile(
+        r"^[ \t]*[.!]?[ \t]*(?:i am|i'?m)[ \t]+(?:a|an|the)\b|"
+        r"^[ \t]*[.!]?[ \t]*i work[ \t]+(?:as|for|at|with)\b",
+        re.IGNORECASE,
+    ),
+    "de": re.compile(
+        r"^[ \t]*[.!]?[ \t]*ich (?:bin|arbeite)[ \t]+(?:ein|eine|als|bei|für)\b", re.IGNORECASE
+    ),
+    "uk": re.compile(r"^[ \t]*[.!]?[ \t]*я[ \t]+(?:працюю|—)", re.IGNORECASE),
+}
+_SENTENCE_END = re.compile(r"[.!?]")
+
+
+def role_after(text: str, name_end: int, language: str) -> str | None:
+    """The role clause right after an introduced name, verbatim, or None."""
+    rest = text[name_end : name_end + ROLE_CHARS * 2]
+    for patterns in (_ROLE_AFTER_NAME, _ROLE_SENTENCE):
+        pattern = patterns.get(language)
+        if pattern is None or pattern.match(rest) is None:
+            continue
+        body = rest.lstrip(" \t.!,—–-")
+        stop = _SENTENCE_END.search(body)
+        clause = body[: stop.start()] if stop else body
+        clause = clause[:ROLE_CHARS].strip(" ,;:")
+        return clause or None
+    return None
 
 
 def _compile(language: str) -> list[tuple[re.Pattern[str], bool]]:
@@ -205,7 +259,14 @@ def find_introductions(text: str, language: str) -> list[Introduction]:
             # phrase, so read those tokens from the end.
             name = _capitalised_suffix(raw, stop) if before else _capitalised_prefix(raw, stop)
             if name:
-                found.append(Introduction(name=name, start=match.start(), end=match.end()))
+                role = None
+                if not before:
+                    at = text.find(name, match.start("name"))
+                    if at >= 0:
+                        role = role_after(text, at + len(name), language)
+                found.append(
+                    Introduction(name=name, start=match.start(), end=match.end(), role_text=role)
+                )
     return found
 
 

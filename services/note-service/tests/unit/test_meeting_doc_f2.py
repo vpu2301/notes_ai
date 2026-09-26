@@ -306,11 +306,23 @@ def test_a_window_of_copies_is_asked_once_more_with_the_rule_and_its_budget() ->
     assert not any(f.copied for f in document.facts)
 
 
-def test_a_window_with_one_copy_is_not_asked_again() -> None:
+def test_one_copy_is_enough_to_ask_and_none_is_never_asked() -> None:
+    # Tuned from the work order's 40 %: a window of 3 copies in 8 went
+    # unasked and lost its key facts (eval 2026-09-26, m04).
     provider = _Restating(copies=1)
+    document = _run(provider)
+    assert len(provider.extract_calls) == 2
+    assert document.stats["restate_outcomes"] == {"improved": 1, "unchanged": 0}
+    provider = _Restating(copies=0)
     document = _run(provider)
     assert len(provider.extract_calls) == 1
     assert document.stats["windows_restated"] == 0
+
+
+def test_a_line_that_is_one_sentence_of_a_longer_quote_is_a_copy() -> None:
+    quote = "Fine, extend the pricing test two weeks. Decision made."
+    assert verify.is_copied("Extend the pricing test two weeks.", quote)
+    assert not verify.is_copied("The pricing test runs two more weeks", quote)
 
 
 def test_a_failed_restate_keeps_the_originals() -> None:

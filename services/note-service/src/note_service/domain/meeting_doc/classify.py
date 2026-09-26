@@ -39,6 +39,7 @@ SOURCE_TEMPLATE: Final = "template"
 # order). Meeting last, as in the context prompt since Q1.
 OFFERED_ORDER: Final[tuple[str, ...]] = (
     "podcast_broadcast",
+    "presentation_demo",
     "lecture_webinar",
     "interview",
     "voice_memo",
@@ -97,10 +98,14 @@ async def classify(
     if speakers <= 1 and minutes < VOICE_MEMO_MAX_MINUTES and not calendar_title:
         return "voice_memo", SOURCE_RULE
     # One voice for longer is a talk — unless the model heard a broadcast.
-    if speakers <= 1 and minutes >= VOICE_MEMO_MAX_MINUTES and said != "podcast_broadcast":
+    if (
+        speakers <= 1
+        and minutes >= VOICE_MEMO_MAX_MINUTES
+        and said not in ("podcast_broadcast", "presentation_demo")
+    ):
         return "lecture_webinar", SOURCE_RULE
     # A calendared call with people on it is not a broadcast.
-    if calendar_title and attendees >= 2 and said == "podcast_broadcast":
+    if calendar_title and attendees >= 2 and said in ("podcast_broadcast", "presentation_demo"):
         return "meeting", SOURCE_RULE
     if said is None:
         return "meeting", SOURCE_TEMPLATE

@@ -1875,6 +1875,20 @@
             "title": "Explicit",
             "type": "boolean"
           },
+          "figure": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Figure"
+          },
           "flags": {
             "items": {
               "type": "string"
@@ -1918,6 +1932,17 @@
               }
             ],
             "title": "Owner Label"
+          },
+          "parent_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Key"
           },
           "placement": {
             "title": "Placement",

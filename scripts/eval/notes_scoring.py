@@ -180,6 +180,11 @@ TYPE_ALIASES: dict[str, str] = {
     "vorlesung": "lecture_webinar",
     "лекція": "lecture_webinar",
     "вебінар": "lecture_webinar",
+    "presentation": "presentation_demo",
+    "demo": "presentation_demo",
+    "walkthrough": "presentation_demo",
+    "produktvorstellung": "presentation_demo",
+    "презентація": "presentation_demo",
     "voice memo": "voice_memo",
     "sprachnotiz": "voice_memo",
 }
@@ -493,6 +498,9 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
         if ln.get("kind") not in _TASK_LINE_KINDS and support_rules.first_person(_body(ln["text"]))
     )
 
+    # F3: figures, presenter, contact.
+    row.update(score_f3(gold, produced, lines))
+
     # Checklists, by index.
     row["must_contain_failed"] = [
         i for i, s in enumerate(gold.get("must_contain", [])) if not _contains(everything, s)
@@ -538,6 +546,80 @@ def informs(line: str, kind: str | None, language: str = "en") -> bool:
     )
 
 
+# ── F3: figures, presenter, contact ─────────────────────────────────
+
+
+def _value(text: str, language: str = "en") -> Any:
+    from note_service.domain.meeting_doc import numbers
+
+    return numbers.parse_value(text or "", language)
+
+
+def _name_match(gold: str, produced: str) -> bool:
+    """Same quantity: most of the gold name's content words."""
+    return overlap(gold, produced) >= 0.5
+
+
+def score_f3(gold: dict[str, Any], produced: dict[str, Any], lines: list[dict[str, Any]]) -> dict:
+    """``figure_recall`` (gold figures found with their value),
+    ``figure_value_accuracy`` (of produced figures naming a gold quantity,
+    the value right), ``qualifier_preservation``, ``presenter_accuracy``,
+    ``contact_present`` — pairs ``[hit, total]``; absent when the gold has
+    nothing to score."""
+    out: dict[str, Any] = {}
+    made = [f["figure"] for f in produced.get("facts", []) if f.get("figure")]
+    wanted = gold.get("figures") or []
+    if wanted:
+        recall = Ratio()
+        values = Ratio()
+        qualifiers = Ratio()
+        for want in wanted:
+            value = _value(want["value"])
+            named = [m for m in made if _name_match(want["name"], m["name"])]
+            right = [m for m in named if _value(m["value"]) == value]
+            recall.add(bool(right))
+            for m in named:
+                values.add(_value(m["value"]) == value)
+            if want.get("qualifier") and right:
+                qualifiers.add(any(m.get("qualifier") == want["qualifier"] for m in right))
+        out["figure_recall"] = recall.pair()
+        out["figure_value_accuracy"] = values.pair()
+        out["qualifier_preservation"] = qualifiers.pair()
+    presenter = gold.get("presenter")
+    if presenter:
+        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") == "presenter")
+        fields = [presenter["name"], presenter.get("role"), presenter.get("organisation")]
+        out["presenter_accuracy"] = [
+            sum(1 for f in fields if f and _contains(text, f)),
+            sum(1 for f in fields if f),
+        ]
+    contact = gold.get("contact") or []
+    if contact:
+        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") == "next_step")
+        out["contact_present"] = (
+            [sum(1 for c in contact if best_match(c, [text])[1] >= MATCH_THRESHOLD), len(contact)]
+            if text
+            else [0, len(contact)]
+        )
+    return out
+
+
+def f3_gates(summary: dict[str, Any]) -> dict[str, bool]:
+    """F3 acceptance where the corpus has the gold for it: every value
+    right, recall ≥ 0.85, every qualifier kept, presenter ≥ 0.9."""
+    gates: dict[str, bool] = {}
+    for name, key, bar in (
+        ("figure_value_accuracy == 1.0", "figure_value_accuracy", 1.0),
+        ("figure_recall >= 0.85", "figure_recall", 0.85),
+        ("qualifier_preservation == 1.0", "qualifier_preservation", 1.0),
+        ("presenter_accuracy >= 0.9", "presenter_accuracy", 0.9),
+    ):
+        value = summary.get(key)
+        if value is not None:
+            gates[name] = value >= bar
+    return gates
+
+
 def f2_gates(summary: dict[str, Any], *, baseline_recall: float | None) -> dict[str, bool]:
     """F2 acceptance on a corpus: no copied, chatter or first-person line,
     and key-fact recall no more than one point under the pre-F2 baseline."""
@@ -576,6 +658,11 @@ def date_resolution(gold: dict[str, Any], produced: dict[str, Any]) -> list[int]
 # ── Aggregation ─────────────────────────────────────────────────────
 
 _PAIRS = (
+    "figure_recall",
+    "figure_value_accuracy",
+    "qualifier_preservation",
+    "presenter_accuracy",
+    "contact_present",
     "lines_cited",
     "key_dates_recall",
     "model_tier_precision",
@@ -649,6 +736,11 @@ def aggregate(
         "key_dates_recall": _rate(sums["key_dates_recall"]),
         "entity_sources": _sum_sources(rows),
         "date_resolution": _rate(sums["date_resolution"]),
+        "figure_recall": _rate(sums["figure_recall"]),
+        "figure_value_accuracy": _rate(sums["figure_value_accuracy"]),
+        "qualifier_preservation": _rate(sums["qualifier_preservation"]),
+        "presenter_accuracy": _rate(sums["presenter_accuracy"]),
+        "contact_present": _rate(sums["contact_present"]),
         **f2,
     }
 

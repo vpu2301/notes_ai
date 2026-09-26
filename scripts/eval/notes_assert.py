@@ -152,6 +152,38 @@ def check(
     if checklist.get("no_marks"):
         text = "\n".join([produced.get("note_text") or "", *(ln["text"] for ln in lines)])
         add("no_marks", not _MARKS.search(text), "no_marks")
+    # F3 — figures with their values and qualifiers, the presenter line,
+    # the contact line.
+    if "figures" in checklist:
+        from notes_scoring import _name_match, _value
+
+        made = [f["figure"] for f in produced.get("facts", []) if f.get("figure")]
+        right = 0
+        for want in checklist["figures"]:
+            value = _value(want["value"])
+            if any(
+                _name_match(want["name"], m["name"])
+                and _value(m["value"]) == value
+                and (m.get("qualifier") or "") == want.get("qualifier", "")
+                for m in made
+            ):
+                right += 1
+        need = int(checklist.get("figures_min", len(checklist["figures"])))
+        add("figures", right >= need, "figures")
+        rows = [ln for ln in lines if ln.get("kind") == "figure"]
+        add("figures_cited", bool(rows) and all(ln.get("fact_ids") for ln in rows), "figures")
+    if "presenter_line" in checklist:
+        add(
+            "presenter_line",
+            any(
+                ln.get("kind") == "presenter"
+                and _fold(ln["text"]) == _fold(checklist["presenter_line"])
+                for ln in lines
+            ),
+            "presenter_line",
+        )
+    if checklist.get("contact_line"):
+        add("contact_line", any(ln.get("kind") == "next_step" for ln in lines), "contact_line")
     for i, topic in enumerate(checklist.get("topics", [])):
         under = [
             ln

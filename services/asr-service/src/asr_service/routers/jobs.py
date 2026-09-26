@@ -737,6 +737,7 @@ async def get_job_result(
                 start_ms=s.start_ms,
                 end_ms=s.end_ms,
                 segment_indices=s.segment_indices,
+                role_text=s.role_text,
             )
             for s in suggest(
                 result.turns,

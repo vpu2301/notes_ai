@@ -40,6 +40,10 @@ JUDGEMENT: Final[Role] = "judgement"
 CUSTOM: Final[Role] = "custom"
 # Summary Engine v2, Q5 — the dates and deadlines a recording named.
 KEY_DATES: Final[Role] = "key_dates"
+# Sprint F3 — the figures a recording gave (a table from three on), and what
+# a broadcast or a presentation asks its audience to do.
+SPECIFICATIONS: Final[Role] = "specifications"
+CONTACT: Final[Role] = "contact"
 
 ROLES: Final[tuple[Role, ...]] = (
     SUMMARY,
@@ -57,6 +61,8 @@ ROLES: Final[tuple[Role, ...]] = (
     JUDGEMENT,
     CUSTOM,
     KEY_DATES,
+    SPECIFICATIONS,
+    CONTACT,
 )
 
 # Section ids of every template written before roles existed. A key that
@@ -87,6 +93,10 @@ _BY_ID: Final[dict[str, Role]] = {
     "recommendation": JUDGEMENT,
     "overall_status": JUDGEMENT,
     "target_date": JUDGEMENT,
+    # F3 — the engine's own sections for figures and a call to action.
+    # Not "contact": templates already use that id for the attendee block.
+    "specifications": SPECIFICATIONS,
+    "call_to_action": CONTACT,
 }
 
 

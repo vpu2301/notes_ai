@@ -805,6 +805,17 @@
             "title": "Quote",
             "type": "string"
           },
+          "role_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Text"
+          },
           "segment_indices": {
             "items": {
               "type": "integer"

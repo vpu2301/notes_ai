@@ -145,6 +145,9 @@ class GeneratedItemView(BaseModel):
     attributed_to: str | None = None
     """F2 — for a sub-point, the row key of the bullet it sits under."""
     parent_key: str | None = None
+    """F3 — a figure row's verified fields: ``{name, value, unit,
+    qualifier}``, every word in its quote. Null for every other row."""
+    figure: dict[str, str] | None = None
     corrections: list[dict[str, str]] = []
     mentions: list[dict[str, str | None]] = []
 
@@ -372,6 +375,7 @@ async def generated_items(
             certainty=_get(r, "certainty"),
             attributed_to=_get(r, "attributed_to"),
             parent_key=_get(r, "parent_key"),
+            figure=_figure(_get(r, "payload")) if r["kind"] == "figure" else None,
             corrections=_json_list(_get(r, "corrections")),
             mentions=_json_list(_get(r, "mentions")),
         )
@@ -396,3 +400,19 @@ def _json_list(value: object) -> list:
     if isinstance(value, str):
         value = json.loads(value)
     return list(value) if isinstance(value, list) else []
+
+
+def _figure(value: object) -> dict[str, str] | None:
+    """F3 — a figure row's payload as ``{name, value, unit, qualifier}``."""
+    import json
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if not isinstance(value, dict):
+        return None
+    return {k: str(value.get(k) or "") for k in ("name", "value", "unit", "qualifier")}

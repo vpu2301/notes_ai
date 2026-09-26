@@ -695,6 +695,7 @@ extension GenerationView {
         "one_on_one": "One-on-one",
         "podcast_broadcast": "Podcast / broadcast",
         "lecture_webinar": "Lecture / webinar",
+        "presentation_demo": "Presentation / demo",
         "voice_memo": "Voice memo",
     ]
 

@@ -32,6 +32,7 @@ from .roles import (  # noqa: F401  (re-exported for this module's readers)
     ACTION_ITEMS,
     AGENDA,
     ATTENDEES,
+    CONTACT,
     CUSTOM,
     DECISIONS,
     JUDGEMENT,
@@ -39,6 +40,7 @@ from .roles import (  # noqa: F401  (re-exported for this module's readers)
     OPEN_QUESTIONS,
     REQUESTS,
     RISKS,
+    SPECIFICATIONS,
     SUMMARY,
     TOPICS,
     TRANSCRIPT,
@@ -87,6 +89,9 @@ GENERIC_KINDS: Final[dict[str, Role]] = {
     "user_point": USER_NOTES,
     "agenda_item": AGENDA,
     "completion": ACTION_ITEMS,
+    # F3 — every family: a meeting's budget numbers deserve the same
+    # verification as a walkthrough's specifications.
+    "figure": SPECIFICATIONS,
 }
 
 # Internal by nature, in every family: what the author thinks about the
@@ -166,6 +171,10 @@ FAMILIES: Final[tuple[Family, ...]] = (
     Family(
         meeting_type="broadcast",
         template_prefix="broadcast",
+        # F3 — who presents, and what the audience is asked to do. A
+        # presenter is a line under the framing sentence (render), not a
+        # section; a call to action is the Contact section.
+        extra_kinds={"introduction": ATTENDEES, "next_step": CONTACT},
         excluded_kinds=frozenset({"decision", "action", "agenda_item", "completion"}),
         client_version=False,
     ),
@@ -189,6 +198,8 @@ RECORDING_TYPES: Final[tuple[str, ...]] = (
     "podcast_broadcast",
     "lecture_webinar",
     "voice_memo",
+    # F3 — one person demonstrating a product, a place or an object.
+    "presentation_demo",
 )
 _FAMILY_OF_RECORDING: Final[dict[str, str]] = {
     "meeting": "auto",
@@ -199,6 +210,7 @@ _FAMILY_OF_RECORDING: Final[dict[str, str]] = {
     "podcast_broadcast": "broadcast",
     "lecture_webinar": "broadcast",
     "voice_memo": "memo",
+    "presentation_demo": "broadcast",
 }
 _RECORDING_OF_MEETING: Final[dict[str, str]] = {
     "auto": "meeting",

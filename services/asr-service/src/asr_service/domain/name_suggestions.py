@@ -43,6 +43,8 @@ class NameSuggestion:
     end_ms: int
     segment_indices: list[int]
     source: str = "self_introduction"
+    # Sprint F3: what the person said they do, verbatim, or None.
+    role_text: str | None = None
 
 
 def suggest(
@@ -91,6 +93,7 @@ def suggest(
                     start_ms=int(getattr(turn, "start_ms", 0)),
                     end_ms=int(getattr(turn, "end_ms", 0)),
                     segment_indices=list(getattr(turn, "segment_indices", []) or []),
+                    role_text=intro.role_text,
                 ),
             )
 

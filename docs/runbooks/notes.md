@@ -394,8 +394,7 @@ backend against the committed eval baseline (`docs/eval/notes-baseline-*.md`).
 Sprint F2 (ADR-0063). A fact whose `text` is its quote copied is kept as
 **evidence** — other lines may cite it, its row has `placement =
 'evidence'` (migration 0064) — but it is never a line of the note. A window
-where more than 40 % of the verified facts are copies (and at least three)
-is extracted once more with the restate suffix and no more facts than the
+with any copy among its verified facts is extracted once more with the restate suffix and no more facts than the
 first answer had; restated facts that cite the same line replace the copies.
 `NoteGenerationCopiedFacts` fires when a third of kept facts are still
 copies after that: the note is thin because the model is transcribing.
@@ -420,7 +419,31 @@ GROUP BY 1, 2;
 `improved` near `restated` means the restate works and only the first
 answer copies — a prompt or backend change. `improved` near zero means the
 model copies whatever it is told; compare the backend against the committed
-eval baseline before changing the 40 % threshold (`pipeline.RESTATE_COPY_SHARE`).
+eval baseline before raising the threshold (`pipeline.RESTATE_COPY_SHARE`, 0 since the
+2026-09-26 eval).
+
+### figures
+
+Sprint F3 (ADR-0064). A `figure` is kept only when its value was said
+(digits or words) and its unit was said; otherwise it is dropped and
+counted (`mdx_note_generation_facts_total{outcome="figure_dropped_value"|
+"figure_dropped_unit"}`, `stats.figures_dropped_*`). A rise in
+`figure_dropped_value` with no model change is the number-word reader
+(`meeting_doc/numbers.py`) missing a form — look at the language:
+
+```sql
+SELECT stats->>'language' AS language, prompt_version,
+       sum((stats->>'figures_kept')::int) AS kept,
+       sum((stats->>'figures_dropped_value')::int) AS no_value,
+       sum((stats->>'figures_dropped_unit')::int) AS no_unit,
+       sum((stats->>'qualifiers_cleared')::int) AS qualifiers_cleared
+FROM note_generations WHERE created_at > now() - interval '1 day'
+GROUP BY 1, 2;
+```
+
+Two rows for one quantity are a conflict the speaker made (both flagged
+`figure_conflict`), never averaged. A converted value (feet said, metres
+written) is dropped by design.
 
 ### Deploying the engine (Summary Engine v2)
 

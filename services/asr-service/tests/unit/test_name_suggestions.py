@@ -246,3 +246,49 @@ def test_a_label_matching_two_invitees_still_claims_both() -> None:
         suggest(turns, language="en", candidates=["Anna Keller", "Bob Stone"], custom_names={})
         == []
     )
+
+
+# ── Sprint F3: what the person said they do ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("text", "language", "name", "role"),
+    [
+        (
+            "Thank you for watching. My name is Mitchell. I am a broker with Springbrook "
+            "Marine Group, the Pardo dealer.",
+            "en",
+            "Mitchell",
+            "I am a broker with Springbrook Marine Group, the Pardo dealer",
+        ),
+        ("Hi, I'm Anna from sales.", "en", "Anna", "from sales"),
+        ("Hallo, ich bin Jonas von Acme.", "de", "Jonas", "von Acme"),
+        ("Мене звати Олена, я з відділу продажів.", "uk", "Олена", "я з відділу продажів"),
+        ("This is Tom.", "en", "Tom", None),
+    ],
+)
+def test_the_role_clause_after_an_introduction_is_kept_verbatim(
+    text: str, language: str, name: str, role: str | None
+) -> None:
+    from asr_service.domain.name_patterns import find_introductions
+
+    [intro] = find_introductions(text, language)
+    assert intro.name == name and intro.role_text == role
+    if role is not None:
+        assert role in text  # nothing inferred: a substring of what was said
+
+
+def test_a_suggestion_carries_the_role_clause() -> None:
+    turn = type(
+        "T",
+        (),
+        {
+            "speaker": "SPEAKER_1",
+            "paragraphs": ["Hi everyone, I'm Anna from the sales team."],
+            "start_ms": 0,
+            "end_ms": 4_000,
+            "segment_indices": [0],
+        },
+    )()
+    [s] = suggest([turn], language="en", candidates=["Anna Keller"], custom_names={})
+    assert s.role_text == "from the sales team"

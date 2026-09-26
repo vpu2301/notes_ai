@@ -39,7 +39,8 @@ WITH gens AS (
         date_trunc('week', g.finished_at)::date                            AS week,
         CASE WHEN g.stats->>'recording_type' IN
                   ('meeting', 'one_on_one', 'interview', 'sales_call', 'client_call',
-                   'lecture_webinar', 'podcast_broadcast', 'voice_memo', 'other')
+                   'lecture_webinar', 'podcast_broadcast', 'voice_memo', 'presentation_demo',
+                   'other')
              THEN g.stats->>'recording_type' ELSE 'unknown' END              AS recording_type,
         CASE WHEN g.stats->>'language' ~ '^[a-z]{2}$'
              THEN g.stats->>'language' ELSE 'other' END                      AS language

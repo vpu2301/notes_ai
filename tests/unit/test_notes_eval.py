@@ -165,7 +165,7 @@ def _corpus() -> list[dict[str, Any]]:
 
 def test_the_committed_corpus_is_the_shape_the_harness_reads() -> None:
     meetings = _corpus()
-    assert len(meetings) == 10
+    assert len(meetings) == 11  # m01–m10, and F3's walkthrough m11
     for meeting in meetings:
         name = meeting["id"]
         assert meeting["gold"]["key_facts"], name

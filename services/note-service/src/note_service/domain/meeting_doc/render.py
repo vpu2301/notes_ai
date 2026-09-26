@@ -26,7 +26,7 @@ from typing import Final
 
 from .. import lines as line_rules
 from . import roles, schema, support
-from .verify import DateMention, VerifiedFact, is_copied
+from .verify import DateMention, Figure, Person, VerifiedFact, is_copied
 
 _ECHOED_FACT: Final = re.compile(
     r"^\s*(?:\[\]\s*)?(?P<id>[0-9a-f]{16})\s*\([a-z_]+,\s*\d{1,2}:\d{2}\):\s*"
@@ -71,6 +71,8 @@ FALLBACK_KEYS: Final[dict[str, str]] = {
     roles.RISKS: "risks",
     roles.NEXT_MEETING: "next_meeting",
     roles.KEY_DATES: "key_dates",
+    roles.SPECIFICATIONS: "specifications",
+    roles.CONTACT: "call_to_action",
 }
 ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
@@ -80,6 +82,8 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.RISKS: "Risks",
         roles.NEXT_MEETING: "Next meeting",
         roles.KEY_DATES: "Key dates",
+        roles.SPECIFICATIONS: "Specifications",
+        roles.CONTACT: "Contact",
     },
     "de": {
         roles.DECISIONS: "Entscheidungen",
@@ -88,6 +92,8 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.RISKS: "Risiken",
         roles.NEXT_MEETING: "Nächstes Treffen",
         roles.KEY_DATES: "Termine & Fristen",
+        roles.SPECIFICATIONS: "Technische Daten",
+        roles.CONTACT: "Kontakt",
     },
     "uk": {
         roles.DECISIONS: "Рішення",
@@ -96,6 +102,8 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.RISKS: "Ризики",
         roles.NEXT_MEETING: "Наступна зустріч",
         roles.KEY_DATES: "Дати та терміни",
+        roles.SPECIFICATIONS: "Характеристики",
+        roles.CONTACT: "Контакт",
     },
 }
 
@@ -280,6 +288,8 @@ def render_sections(
     key_fact_ids: list[str] | None = None,
     counters: dict[str, int] | None = None,
     meeting_date: date | None = None,
+    presenter_lines: bool = False,
+    subject: str = "",
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
@@ -342,7 +352,9 @@ def render_sections(
     # Sprint 36: the family's extra kinds, each into the role its table
     # says. Handled before the generic kinds so a family that maps, say,
     # `risk` somewhere of its own wins.
-    extra = {k: r for k, r in (kind_roles or {}).items() if k not in KIND_TO_ROLE}
+    extra = {
+        k: r for k, r in (kind_roles or {}).items() if k not in KIND_TO_ROLE and k not in _F3_KINDS
+    }
     by_extra_role: dict[str, list[VerifiedFact]] = {}
     for kind, role in extra.items():
         for fact in grouped.get(kind, []):
@@ -416,6 +428,17 @@ def render_sections(
             [fact_line(f, plain_line(f, language)) for f in nexts],
         )
 
+    # ── Contact (F3): what a broadcast or a presentation asks its
+    #    audience to do. Never an action item: its own section key. ─────
+    contact = grouped.get(schema.NEXT_STEP, [])
+    if contact:
+        emit(
+            roles.CONTACT,
+            "\n".join(plain_line(f, language) for f in contact),
+            contact,
+            [Line(plain_line(f, language), "next_step", (f.item_key,)) for f in contact],
+        )
+
     # ── Key dates (Q5): what the recording scheduled or set a deadline
     #    for, from the dates its facts' quotes named. ──────────────────
     dated = key_dates([f for f in facts if not f.evidence_only], meeting_date=meeting_date)
@@ -473,6 +496,32 @@ def render_sections(
         if written.strip():
             sentences.append((written, own))
 
+    # F3 — figures are written by code from their verified fields: in the
+    # topic that cites them (a table from three on), else in a section of
+    # their own. A model bullet that only restates figures is not written.
+    figures = _merged_figures([f for f in facts if f.figure is not None])
+    figure_ids = {i for group in figures for i in group.ids}
+    figure_topic: dict[str, str] = {}
+    for title, bullets, fact_ids in topics or []:
+        cited_here = list(fact_ids)
+        for entry in bullets:
+            if not isinstance(entry, str):
+                cited_here.extend(entry[1])
+                kids: list[tuple[str, list[str]]] = list(entry[2]) if len(entry) > 2 else []
+                for _kid, kid_ids in kids:
+                    cited_here.extend(kid_ids)
+        for fact_id in cited_here:
+            if fact_id in figure_ids:
+                figure_topic.setdefault(fact_id, title.strip())
+
+    # A topic's figures count towards it being a topic: its bullets may all
+    # have been the figures the table now says.
+    figures_by_title: dict[str, int] = {}
+    for group in figures:
+        home = next((figure_topic[i] for i in group.ids if i in figure_topic), None)
+        if home is not None:
+            figures_by_title[home] = figures_by_title.get(home, 0) + 1
+
     # One fact, once (Q3): what a decision, task or question section
     # already carries, and what an earlier topic already said, is not a
     # bullet again.
@@ -488,27 +537,32 @@ def render_sections(
             # A bullet is ``(text, its fact ids)`` or, with sub-points (F2),
             # ``(text, ids, [(child text, child ids)])``; a bare string is
             # the older shape and cites the topic's facts.
+            children: list[tuple[str, list[str]]] = []
             if isinstance(entry, str):
-                bullet, own_ids, children = entry, list(fact_ids), []
+                bullet, own_ids = entry, list(fact_ids)
             else:
-                bullet, own_ids, *rest = entry
-                children = list(rest[0]) if rest else []
-            written = _bullet_text(bullet, own_ids, by_id)
-            if written is None:
+                bullet, own_ids = entry[0], list(entry[1])
+                if len(entry) > 2:
+                    children = list(entry[2])
+            made = _bullet_text(bullet, own_ids, by_id)
+            if made is None:
                 continue
-            bullet, own = written
-            ids = set(_ids(own))
+            bullet, own_facts = made
+            if own_facts and all(f.item_key in figure_ids for f in own_facts):
+                redundant += 1  # the figure lines say it, with the value as spoken
+                continue
+            ids = set(_ids(own_facts))
             # Parent and sub-points are one unit (F2): a parent already said
             # takes its sub-points with it.
             if ids and (ids <= rendered or _said_by(bullet, ids, sentences, language)):
                 redundant += 1
                 continue
             rendered |= ids
-            for fact in own:
+            for fact in own_facts:
                 if fact not in cited:
                     cited.append(fact)
-            bullet = patch_claim(bullet.strip(), own, language)
-            parent_line = Line(f"- {bullet}", "bullet", _ids(own))
+            bullet = patch_claim(bullet.strip(), own_facts, language)
+            parent_line = Line(f"- {bullet}", "bullet", _ids(own_facts))
             topic_lines.append(parent_line)
             for child_text, child_ids in children[:MAX_CHILDREN]:
                 child = _bullet_text(child_text, child_ids, by_id)
@@ -532,7 +586,8 @@ def render_sections(
     kept_topics: list[tuple[str, list[Line], list[VerifiedFact]]] = []
     orphans: list[Line] = []
     for title, topic_lines, cited, _first in drafts:
-        if sum(1 for line in topic_lines if line.parent is None) >= MIN_BULLETS_PER_TOPIC:
+        points = sum(1 for line in topic_lines if line.parent is None)
+        if points + figures_by_title.get(title, 0) >= MIN_BULLETS_PER_TOPIC:
             kept_topics.append((title, [*orphans, *topic_lines], cited))
             orphans = []
         elif topic_lines and kept_topics:
@@ -565,6 +620,29 @@ def render_sections(
             )
         )
 
+    # ── Figures (F3) ─────────────────────────────────────────────────
+    by_title = {section.title: n for n, section in enumerate(topic_sections)}
+    homeless: list[_FigureGroup] = []
+    placed: dict[int, list[_FigureGroup]] = {}
+    for group in figures:
+        home = next((figure_topic[i] for i in group.ids if i in figure_topic), None)
+        if home is not None and home in by_title:
+            placed.setdefault(by_title[home], []).append(group)
+        else:
+            homeless.append(group)
+    for index, groups in placed.items():
+        section = topic_sections[index]
+        text, figure_lines = _figure_block(groups, language)
+        topic_sections[index] = replace(
+            section,
+            text=f"{section.text}\n\n{text}" if section.text else text,
+            facts=(*section.facts, *(f for g in groups for f in g.facts)),
+            lines=(*section.lines, *figure_lines),
+        )
+    if homeless:
+        text, figure_lines = _figure_block(homeless, language)
+        emit(roles.SPECIFICATIONS, text, [f for g in homeless for f in g.facts], figure_lines)
+
     # ── The opening block: no heading. It is the note. ──────────────
     # Framing and summary. The facts themselves live in their topics; with
     # no topics they are one list here — key facts first. Nothing else:
@@ -576,6 +654,11 @@ def render_sections(
         # The framing is written about the conversation, from the facts
         # the context pass named as the ones to know first.
         overview.append((framed, [Line(framed, "framing", _ids(key_facts) or _ids(facts))]))
+    # F3 — who presented, for a broadcast or a presentation: one line under
+    # the framing sentence, every word from the introduction's quote.
+    if presenter_lines:
+        for line in _presenter_lines(grouped.get(schema.INTRODUCTION, []), language):
+            overview.append((line.text, [line]))
     for written, own in sentences:
         overview.append((written, [Line(written, "summary", tuple(own))]))
     used: list[VerifiedFact] = []
@@ -658,6 +741,135 @@ def _bullet_text(
 
 # F2 — a bullet may carry up to three sub-points, one level deep.
 MAX_CHILDREN: Final = 3
+
+# ── F3: figures, presenter ─────────────────────────────────────────
+
+_F3_KINDS: Final = frozenset({schema.FIGURE, schema.INTRODUCTION, schema.NEXT_STEP})
+# From this many figures on, one subject's figures are a table.
+MIN_TABLE_FIGURES: Final = 3
+FIGURE_CONFLICT: Final = "figure_conflict"
+_TABLE_HEAD: Final[dict[str, tuple[str, str]]] = {
+    "en": ("Quantity", "Value"),
+    "de": ("Größe", "Wert"),
+    "uk": ("Величина", "Значення"),
+}
+PRESENTER_LABELS: Final[dict[str, tuple[str, str, str]]] = {
+    # (presenter, somebody introduced, "with" between role and organisation)
+    "en": ("Presenter", "Introduced", "with"),
+    "de": ("Präsentiert von", "Vorgestellt", "bei"),
+    "uk": ("Ведучий", "Представлено", "—"),
+}
+
+
+@dataclass(slots=True)
+class _FigureGroup:
+    """One figure as written: the facts that said it (duplicates merged)."""
+
+    facts: list[VerifiedFact]
+
+    @property
+    def figure(self) -> Figure:
+        figure = self.facts[0].figure
+        assert figure is not None
+        return figure
+
+    @property
+    def ids(self) -> tuple[str, ...]:
+        return tuple(f.item_key for f in self.facts)
+
+
+def _merged_figures(facts: list[VerifiedFact]) -> list[_FigureGroup]:
+    """In speech order. The same name with the same value is one figure;
+    the same name with another value is two figures, each flagged."""
+    groups: list[_FigureGroup] = []
+    for fact in sorted(facts, key=lambda f: f.start_ms):
+        fig = fact.figure
+        assert fig is not None
+        same = next(
+            (
+                g
+                for g in groups
+                if g.figure.name.casefold() == fig.name.casefold()
+                and g.figure.value == fig.value
+                and g.figure.unit.casefold() == fig.unit.casefold()
+            ),
+            None,
+        )
+        if same is not None:
+            same.facts.append(fact)
+            continue
+        groups.append(_FigureGroup([fact]))
+    names: dict[str, list[_FigureGroup]] = {}
+    for group in groups:
+        names.setdefault(group.figure.name.casefold(), []).append(group)
+    for clash in names.values():
+        if len(clash) > 1:
+            for group in clash:
+                for fact in group.facts:
+                    if FIGURE_CONFLICT not in fact.flags:
+                        fact.flags.append(FIGURE_CONFLICT)
+    return groups
+
+
+def _cell(text: str) -> str:
+    return text.replace("|", "/").strip()
+
+
+def _figure_block(groups: list[_FigureGroup], language: str) -> tuple[str, list[Line]]:
+    """A table from :data:`MIN_TABLE_FIGURES` on, else bullets. Every row
+    and bullet cites the facts behind it; the table head cites nothing."""
+    if len(groups) >= MIN_TABLE_FIGURES:
+        head_q, head_v = _TABLE_HEAD.get(language, _TABLE_HEAD["en"])
+        lines = [
+            Line(f"| {head_q} | {head_v} |", "heading"),
+            Line("|---|---|", "heading"),
+        ]
+        for group in groups:
+            fig = group.figure
+            lines.append(
+                Line(f"| {_cell(fig.name)} | {_cell(fig.value_text)} |", "figure", group.ids)
+            )
+    else:
+        lines = [
+            Line(f"- {group.figure.name}: {group.figure.value_text}", "figure", group.ids)
+            for group in groups
+        ]
+    return "\n".join(line.text for line in lines), lines
+
+
+_ARTICLE: Final = re.compile(r"^(?:a|an|the|ein|eine|einen|der|die|das)\s+", re.IGNORECASE)
+
+
+def presenter_text(person: Person, language: str = "en") -> str:
+    """ "Presenter: Mitchell, broker with Springbrook Marine Group (Pardo
+    dealer for the Great Lakes)" — from the verified fields only."""
+    label_self, label_other, joiner = PRESENTER_LABELS.get(language, PRESENTER_LABELS["en"])
+    role = _ARTICLE.sub("", person.role).strip()
+    org = person.organisation.strip()
+    what = f"{role} {joiner} {org}" if role and org else (role or org)
+    text = person.name + (f", {what}" if what else "")
+    if person.qualifier:
+        text += f" ({person.qualifier})"
+    return f"{label_self if person.self_introduction else label_other}: {text}"
+
+
+def _presenter_lines(facts: list[VerifiedFact], language: str) -> list[Line]:
+    """The first self-introduction is the presenter; anybody else a
+    speaker introduced gets an "Introduced" line. Once per name."""
+    out: list[Line] = []
+    seen: set[str] = set()
+    presenter = False
+    for fact in sorted(facts, key=lambda f: f.start_ms):
+        person = fact.person
+        if person is None or person.name.casefold() in seen:
+            continue
+        if person.self_introduction and presenter:
+            continue
+        seen.add(person.name.casefold())
+        presenter = presenter or person.self_introduction
+        out.append(Line(presenter_text(person, language), "presenter", (fact.item_key,)))
+    return out
+
 
 # A bullet restating a summary sentence: same facts, mostly same words.
 SAID_BY_SENTENCE_JACCARD: Final = 0.6

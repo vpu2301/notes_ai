@@ -1405,6 +1405,8 @@ export interface GeneratedItem {
   attributed_to?: string | null;
   /** F2: for a sub-point, the row key of the bullet it sits under. */
   parent_key?: string | null;
+  /** F3: a figure row's verified fields (every word in its quote). */
+  figure?: { name: string; value: string; unit: string; qualifier: string } | null;
   /** Q5: names the engine respelled in this line — the quote keeps what was heard. */
   corrections?: { surface: string; canonical: string; source: string }[];
   /** Q5: dates the line names, resolved against the recording day. */

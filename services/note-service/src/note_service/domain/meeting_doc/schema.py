@@ -31,6 +31,16 @@ NEXT_MEETING: Final = "next_meeting"
 COMPLETION: Final = "completion"
 JUDGEMENT: Final = "judgement"
 
+# Sprint F3 — a number a speaker attached to a named quantity; a person
+# introducing themselves (or someone else); what the audience is asked to do.
+FIGURE: Final = "figure"
+INTRODUCTION: Final = "introduction"
+NEXT_STEP: Final = "next_step"
+# The typed payload a figure or an introduction carries, and its limits.
+MAX_FIGURE_NAME_CHARS: Final = 60
+MAX_UNIT_CHARS: Final = 20
+MAX_PERSON_FIELD_CHARS: Final = 80
+
 FACT_KINDS: Final[tuple[str, ...]] = (
     DECISION,
     ACTION,
@@ -113,6 +123,17 @@ class Fact(BaseModel):
     """Q4 — who holds this position: a speaker, or a person or organisation
     the speaker reports. Verified like an owner; null for a plain fact."""
     attributed_to: str | None = None
+    """F3 — a `figure`: the quantity (`name`), the number as spoken
+    (`value`), its `unit` and the speaker's own `qualifier`. An
+    `introduction`: the person (`name`), `role`, `organisation` and a
+    `qualifier` ("dealer for the Great Lakes"). Every word is checked
+    against the quote."""
+    name: str | None = Field(default=None, max_length=MAX_PERSON_FIELD_CHARS)
+    value: str | None = Field(default=None, max_length=60)
+    unit: str | None = Field(default=None, max_length=MAX_UNIT_CHARS)
+    qualifier: str | None = Field(default=None, max_length=MAX_PERSON_FIELD_CHARS)
+    role: str | None = Field(default=None, max_length=MAX_PERSON_FIELD_CHARS)
+    organisation: str | None = Field(default=None, max_length=MAX_PERSON_FIELD_CHARS)
 
 
 class NoiseTurn(BaseModel):
@@ -237,6 +258,19 @@ def extract_schema(
             "type": ["integer", "null"],
             "minimum": 1,
             "maximum": carried_items,
+        }
+    if FIGURE in kinds or INTRODUCTION in kinds:
+        text_field = {"type": ["string", "null"], "maxLength": MAX_PERSON_FIELD_CHARS}
+        properties["name"] = text_field
+        properties["qualifier"] = text_field
+    if FIGURE in kinds:
+        properties["value"] = {"type": ["string", "null"], "maxLength": 60}
+        properties["unit"] = {"type": ["string", "null"], "maxLength": MAX_UNIT_CHARS}
+    if INTRODUCTION in kinds:
+        properties["role"] = {"type": ["string", "null"], "maxLength": MAX_PERSON_FIELD_CHARS}
+        properties["organisation"] = {
+            "type": ["string", "null"],
+            "maxLength": MAX_PERSON_FIELD_CHARS,
         }
     if judgement_fields:
         properties["field"] = {

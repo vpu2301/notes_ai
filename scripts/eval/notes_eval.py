@@ -54,6 +54,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     aggregate,
     best_match,
     f2_gates,
+    f3_gates,
     overlap,
     score_meeting,
     support,
@@ -199,6 +200,17 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "start_ms": fact.start_ms,
         "end_ms": fact.end_ms,
         "window_index": fact.window_index,
+        # F3 — the verified payloads.
+        "figure": fact.figure.payload() if getattr(fact, "figure", None) else None,
+        "person": (
+            {
+                "name": fact.person.name,
+                "role": fact.person.role,
+                "organisation": fact.person.organisation,
+            }
+            if getattr(fact, "person", None)
+            else None
+        ),
     }
 
 
@@ -749,6 +761,7 @@ async def main(
             baseline = json.loads(f2_baseline.read_text("utf-8"))
             baseline_recall = baseline["runs"][-1]["summary"].get("key_fact_recall")
         gates = f2_gates(all_runs[-1]["summary"], baseline_recall=baseline_recall)
+        gates.update(f3_gates(all_runs[-1]["summary"]))
         report["f2_gates"] = gates
         for name, ok in gates.items():
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")

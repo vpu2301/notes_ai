@@ -74,7 +74,8 @@ facts = _meter.create_counter(
     "mdx_note_generation_facts_total",
     description=(
         "Extracted facts by outcome (labels: outcome = kept|dropped_quote|dropped_noise|"
-        "dropped_paraphrase|flagged_paraphrase|copied|dropped_no_information|dropped_first_person)"
+        "dropped_paraphrase|flagged_paraphrase|copied|dropped_no_information|dropped_first_person|"
+        "figure|figure_dropped_value|figure_dropped_unit|introduction)"
     ),
     unit="1",
 )
@@ -125,6 +126,10 @@ def record_document(stats: dict, *, backend: str) -> None:
         ("copied", "facts_copied"),
         ("dropped_no_information", "dropped_no_information"),
         ("dropped_first_person", "dropped_first_person"),
+        ("figure", "figures_kept"),
+        ("figure_dropped_value", "figures_dropped_value"),
+        ("figure_dropped_unit", "figures_dropped_unit"),
+        ("introduction", "introductions_kept"),
     ):
         n = int(stats.get(key, 0))
         if n:

@@ -91,13 +91,21 @@ def test_a_heading_or_a_line_without_evidence_is_no_row() -> None:
 def test_every_kind_the_engine_can_write_is_one_the_database_accepts() -> None:
     """The 0059 CHECK lists every kind; a family growing a new one without
     the migration would fail inserts in production."""
-    sql = MIGRATION.read_text("utf-8")
-    block = sql[sql.index("note_generated_items_kind_vocab_check") :]
+    # The newest migration that (re)defines the vocabulary is the one in force.
+    defining = [
+        m
+        for m in sorted(MIGRATION.parent.glob("0*.sql"))
+        if not m.name.endswith(".down.sql")
+        and "ADD CONSTRAINT note_generated_items_kind_vocab_check" in m.read_text("utf-8")
+    ]
+    sql = defining[-1].read_text("utf-8")
+    block = sql[sql.index("ADD CONSTRAINT note_generated_items_kind_vocab_check") :]
     allowed = set(re.findall(r"'([a-z_]+)'", block[: block.index("));")]))
     engine = set(types.GENERIC_KINDS) | set(schema.FACT_KINDS) | {schema.JUDGEMENT}
     for family in types.FAMILIES:
         engine |= set(family.extra_kinds)
     engine |= {"summary_sentence", "framing", "topic_bullet", "date"}
+    engine |= {schema.FIGURE, schema.INTRODUCTION, schema.NEXT_STEP}
     assert engine <= allowed, engine - allowed
 
 

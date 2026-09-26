@@ -56,6 +56,11 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "no_information_lines_max",
         "no_marks",
         "topics",
+        # F3
+        "figures",
+        "figures_min",
+        "presenter_line",
+        "contact_line",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
     assert {f.name for f in files} >= {
@@ -357,3 +362,75 @@ def test_the_topics_round_rates_topic_bullets_only() -> None:
     assert notes_pairs.topic_lines(ours) == "## Swim platform\n- A hybrid\n  - fixed at the transom"
     base = "Summary one.\nSummary two.\n\n- a decision\n\n- an action"
     assert notes_pairs.topic_lines(base, "single_pass") == "- Summary one.\n- Summary two."
+
+
+# ── F3: figures, presenter, contact ─────────────────────────────────
+
+
+def test_the_f3_scorers() -> None:
+    gold = {
+        "figures": [
+            {"name": "beam", "value": "16.5", "unit": "feet", "qualifier": "a little over"},
+            {"name": "fuel tank", "value": "700", "unit": "gallons", "qualifier": "about"},
+            {"name": "cabins", "value": "3"},
+        ],
+        "presenter": {
+            "name": "Corvin Aldmere",
+            "role": "broker",
+            "organisation": "Harbourline Yachts",
+        },
+        "contact": ["Questions by email or as a comment below the video"],
+    }
+    produced = {
+        "facts": [
+            {
+                "figure": {
+                    "name": "Beam",
+                    "value": "16.5",
+                    "unit": "feet",
+                    "qualifier": "a little over",
+                }
+            },
+            {"figure": {"name": "Fuel tank", "value": "800", "unit": "gallons", "qualifier": ""}},
+        ]
+    }
+    lines = [
+        {"kind": "presenter", "text": "Presenter: Corvin Aldmere, broker with Harbourline Yachts"},
+        {"kind": "next_step", "text": "- Questions by email or as a comment below the video"},
+    ]
+    row = notes_scoring.score_f3(gold, produced, lines)
+    assert row["figure_recall"] == [1, 3]
+    assert row["figure_value_accuracy"] == [1, 2]  # the fuel figure is wrong: worse than none
+    assert row["qualifier_preservation"] == [1, 1]
+    assert row["presenter_accuracy"] == [3, 3]
+    assert row["contact_present"] == [1, 1]
+    gates = notes_scoring.f3_gates(notes_scoring.aggregate([row]))
+    assert gates["figure_value_accuracy == 1.0"] is False
+    assert gates["presenter_accuracy >= 0.9"] is True
+
+
+def test_the_r02_checklist_checks_figures_presenter_and_contact() -> None:
+    checklist = json.loads(
+        (notes_assert.ASSERTIONS / "r02_en_pardo_65gt.assertions.json").read_text("utf-8")
+    )
+    produced = {
+        "facts": [
+            {"figure": {"name": "Length overall", "value": "66", "unit": "feet", "qualifier": ""}},
+            {
+                "figure": {
+                    "name": "Water tank",
+                    "value": "300",
+                    "unit": "gallons",
+                    "qualifier": "just under",
+                }
+            },
+        ],
+        "lines": [
+            {"kind": "presenter", "fact_ids": ["p"], "text": checklist["presenter_line"]},
+            {"kind": "figure", "fact_ids": ["a"], "text": "| Length overall | 66 feet |"},
+            {"kind": "next_step", "fact_ids": ["c"], "text": "- Questions by email"},
+        ],
+    }
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced, _PARDO_LIKE)}
+    assert results["figures"] and results["figures_cited"]
+    assert results["presenter_line"] and results["contact_line"]

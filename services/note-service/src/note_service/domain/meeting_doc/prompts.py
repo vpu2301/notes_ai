@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-13"
+PROMPT_VERSION: Final = "2026-10-14"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -87,6 +87,9 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_wrong": "Ferrytale has sold over forty thousand copies",
         # F2 — a remark that informs nobody is not a fact.
         "shot_small_talk": "Honestly, the Quillhaven fair venue is fantastic.",
+        # F3 — a figure: the quantity, the number as said, the unit, the hedge.
+        "figure_quote": "the Lantern edition box weighs just under two kilos",
+        "figure_name": "Lantern edition box weight",
         # The summary: an outcome, not the flow of talk.
         "summary_right": "The Lantern edition remains planned for the Quillhaven fair",
         "summary_wrong": "the participants talked about the Lantern edition",
@@ -108,6 +111,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_quote": "Ich würde schätzen, Ferrytale hat inzwischen deutlich über vierzigtausend Exemplare verkauft, aber genau weiß das niemand.",
         "shot_estimate_wrong": "Ferrytale hat über vierzigtausend Exemplare verkauft",
         "shot_small_talk": "Ehrlich, die Halle der Quillhaven-Messe ist fantastisch.",
+        "figure_quote": "die Schachtel der Lantern-Edition wiegt knapp zwei Kilo",
+        "figure_name": "Gewicht der Lantern-Schachtel",
         "summary_right": "Die Lantern-Edition bleibt für die Quillhaven-Messe geplant",
         "summary_wrong": "die Teilnehmer sprachen über die Lantern-Edition",
         "framing": "Interview mit einer Quillhaven-Spieleautorin zum Ferrytale-Nachdruck, zu Kartenkarton, Preisen und der Lantern-Edition.",
@@ -127,6 +132,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_quote": "Я б оцінила, що Ferrytale вже продано значно понад сорок тисяч примірників, але точно ніхто не знає.",
         "shot_estimate_wrong": "Ferrytale продано понад сорок тисяч примірників",
         "shot_small_talk": "Чесно, зала ярмарку Quillhaven просто чудова.",
+        "figure_quote": "коробка Lantern-видання важить трохи менше двох кілограмів",
+        "figure_name": "Вага коробки Lantern",
         "summary_right": "Lantern-видання й далі заплановане до ярмарку Quillhaven",
         "summary_wrong": "учасники говорили про Lantern-видання",
         "framing": "Інтерв'ю з авторкою ігор Quillhaven про передрук Ferrytale: картон, ціни та Lantern-видання.",
@@ -177,6 +184,16 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Do not open with 'It was stated/noted/mentioned/established/discussed that'. "
         "State the point, with enough context to stand on its own — the reader did not "
         f"attend: '{_EN['standalone_right']}', not '{_EN['standalone_wrong']}'.\n"
+        "- `figure`: a number a speaker attaches to a named quantity. `name` is the "
+        "quantity, `value` the number exactly as said (digits or words), `unit` as said "
+        "(may be empty), `qualifier` the speaker's own hedge ('just under', 'about', "
+        "'up to') or empty. Never compute, round or convert. "
+        f"'{_EN['figure_quote']}' → name '{_EN['figure_name']}', value 'two', unit "
+        "'kilos', qualifier 'just under'.\n"
+        "- `introduction`: somebody introducing themselves or someone else — `name`, "
+        "`role`, `organisation` and `qualifier` in the words that were said, nothing "
+        "added.\n"
+        "- `next_step`: what the listener is asked to do (write, call, comment, visit).\n"
         "- The examples in these instructions are about an invented company. Never copy "
         "a name or a sentence from them.\n"
         "- List in `noise` the turns that are clearly not part of this conversation — "
@@ -219,6 +236,16 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Nicht mit „Es wurde gesagt/erwähnt/festgestellt/besprochen, dass“ beginnen. "
         "Die Sache nennen, mit genug Kontext, um allein zu stehen — der Leser war nicht "
         f"dabei: „{_DE['standalone_right']}“, nicht „{_DE['standalone_wrong']}“.\n"
+        "- `figure`: eine Zahl, die jemand einer benannten Größe zuordnet. `name` ist die "
+        "Größe, `value` die Zahl genau wie gesagt (Ziffern oder Wörter), `unit` wie gesagt "
+        "(darf leer sein), `qualifier` die eigene Einschränkung („knapp“, „etwa“, „bis zu“) "
+        "oder leer. Nie rechnen, runden oder umrechnen. "
+        f"„{_DE['figure_quote']}“ → name „{_DE['figure_name']}“, value „zwei“, unit "
+        "„Kilo“, qualifier „knapp“.\n"
+        "- `introduction`: jemand stellt sich oder eine andere Person vor — `name`, `role`, "
+        "`organisation` und `qualifier` in den gesagten Worten, nichts hinzugefügt.\n"
+        "- `next_step`: wozu die Zuhörer aufgefordert werden (schreiben, anrufen, "
+        "kommentieren, besuchen).\n"
         "- Die Beispiele in diesen Anweisungen handeln von einer erfundenen Firma. Nie "
         "einen Namen oder Satz daraus übernehmen.\n"
         "- In `noise` die Redebeiträge nennen, die eindeutig nicht zu diesem Gespräch "
@@ -258,6 +285,16 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Не починай з «Було зазначено/сказано/встановлено/обговорено, що». Називай "
         "суть із достатнім контекстом, щоб вона стояла окремо — читач не був присутній: "
         f"«{_UK['standalone_right']}», а не «{_UK['standalone_wrong']}».\n"
+        "- `figure`: число, яке мовець пов'язує з названою величиною. `name` — величина, "
+        "`value` — число точно як сказано (цифрами чи словами), `unit` — як сказано (може "
+        "бути порожнім), `qualifier` — власне застереження мовця («трохи менше», "
+        "«приблизно», «до») або порожньо. Ніколи не рахуй, не округлюй і не переводь. "
+        f"«{_UK['figure_quote']}» → name «{_UK['figure_name']}», value «двох», unit "
+        "«кілограмів», qualifier «трохи менше».\n"
+        "- `introduction`: хтось представляє себе чи іншу людину — `name`, `role`, "
+        "`organisation` і `qualifier` сказаними словами, нічого не додаючи.\n"
+        "- `next_step`: що слухачам пропонують зробити (написати, зателефонувати, "
+        "прокоментувати, відвідати).\n"
         "- Приклади в цих інструкціях стосуються вигаданої компанії. Ніколи не копіюй "
         "з них імен чи речень.\n"
         "- У `noise` перелічи репліки, що явно не належать до цієї розмови — фонова "
@@ -545,7 +582,8 @@ CLASSIFY_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "You read the opening of a recording and say what kind of recording it is. "
         "podcast_broadcast: a produced show for an audience — hosts, correspondents, news "
-        "or discussion. lecture_webinar: one person teaching or presenting, with at most a "
+        "or discussion. presentation_demo: one person demonstrating or presenting a product, "
+        "place or object to an audience. lecture_webinar: one person teaching or presenting, with at most a "
         "few questions. interview: one side asks, the other answers at length. voice_memo: "
         "one person recording a note for themselves. one_on_one: a manager and one report "
         "about work and growth. sales_call: selling to a prospect. client_call: a call with "
@@ -555,7 +593,8 @@ CLASSIFY_SYSTEM: Final[dict[str, str]] = {
     "de": (
         "Du liest den Anfang einer Aufnahme und sagst, welche Art von Aufnahme es ist. "
         "podcast_broadcast: eine produzierte Sendung für ein Publikum — Moderation, "
-        "Korrespondenten, Nachrichten oder Diskussion. lecture_webinar: eine Person lehrt "
+        "Korrespondenten, Nachrichten oder Diskussion. presentation_demo: eine Person führt "
+        "einem Publikum ein Produkt, einen Ort oder einen Gegenstand vor. lecture_webinar: eine Person lehrt "
         "oder präsentiert, höchstens mit einigen Fragen. interview: eine Seite fragt, die "
         "andere antwortet ausführlich. voice_memo: eine Person spricht eine Notiz für sich "
         "selbst ein. one_on_one: eine Führungskraft und eine Person aus dem Team über Arbeit "
@@ -566,6 +605,7 @@ CLASSIFY_SYSTEM: Final[dict[str, str]] = {
     "uk": (
         "Ти читаєш початок запису й кажеш, що це за запис. podcast_broadcast: "
         "підготовлена передача для аудиторії — ведучі, кореспонденти, новини чи дискусія. "
+        "presentation_demo: одна людина демонструє аудиторії продукт, місце чи предмет. "
         "lecture_webinar: одна людина навчає чи презентує, щонайбільше з кількома "
         "питаннями. interview: одна сторона питає, інша розлого відповідає. voice_memo: "
         "одна людина записує нотатку для себе. one_on_one: керівник і одна людина з "
@@ -641,12 +681,22 @@ def restate_suffix(language: str) -> str:
     return _pick(RESTATE_SUFFIX, language)
 
 
+# F3 — the lines code found an introduction in (a self-introduction cue, or
+# the quote of an asr-service name suggestion), pointed out to the extractor.
+_INTRODUCTION_HINT: Final[dict[str, str]] = {
+    "en": "Line(s) {lines} contain an introduction; return each as an `introduction`.",
+    "de": "Zeile(n) {lines} enthalten eine Vorstellung; gib jede als `introduction` zurück.",
+    "uk": "Рядок(и) {lines} містять представлення; поверни кожне як `introduction`.",
+}
+
+
 def extract_prompt(
     window_text: str,
     language: str,
     *,
     carried: list[tuple[str, str]] | None = None,
     max_facts: int | None = None,
+    introduction_lines: list[int] | None = None,
 ) -> str:
     """The window, and — for a meeting in a series — what is still open
     from last time, as a NUMBERED list.
@@ -660,6 +710,12 @@ def extract_prompt(
     if max_facts:
         # The window's own budget (Q2): a dense passage is allowed more.
         parts.append(_pick(_BUDGET, language).format(n=max_facts))
+    if introduction_lines:
+        parts.append(
+            _pick(_INTRODUCTION_HINT, language).format(
+                lines=", ".join(f"[{n}]" for n in introduction_lines)
+            )
+        )
     if carried:
         listing = "\n".join(f"{i}. {text}" for i, (_key, text) in enumerate(carried, 1))
         parts.append(f"{_pick(_CARRIED_HEADING, language)}\n{listing}")

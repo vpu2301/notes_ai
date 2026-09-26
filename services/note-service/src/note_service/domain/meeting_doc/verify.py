@@ -45,6 +45,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, time
+from decimal import Decimal
 from typing import Final
 
 from ..action_items import (
@@ -58,7 +59,7 @@ from ..action_items import (
     parse_when,
 )
 from ..glossary import Term
-from . import entities, schema, support
+from . import entities, numbers, schema, support
 from .entities import Correction
 from .windows import Turn, Window
 
@@ -96,6 +97,43 @@ AGREEMENT_WINDOW_TURNS: Final = 3
 CONF_EXPLICIT: Final = 1.0
 CONF_INFERRED: Final = 0.7
 CONF_FLAGGED: Final = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class Figure:
+    """F3 — a number a speaker attached to a named quantity, verified."""
+
+    name: str
+    value: Decimal
+    unit: str = ""
+    qualifier: str = ""
+
+    @property
+    def value_text(self) -> str:
+        """ "just under 300 gallons" — as the speaker qualified it."""
+        parts = [self.qualifier, numbers.display(self.value), self.unit]
+        return " ".join(p for p in parts if p)
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "value": numbers.display(self.value),
+            "unit": self.unit,
+            "qualifier": self.qualifier,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Person:
+    """F3 — somebody introduced in the recording, every word verified."""
+
+    name: str
+    role: str = ""
+    organisation: str = ""
+    qualifier: str = ""
+    """The speaker introduced themselves ("my name is…"), as opposed to
+    introducing somebody else ("this is Anna from sales")."""
+    self_introduction: bool = False
 
 
 @dataclass(slots=True)
@@ -142,11 +180,18 @@ class VerifiedFact:
     """F2 — ``text`` is its quote copied: a real quote, kept to be cited,
     never rendered as a line of its own."""
     copied: bool = False
+    """F3 — the verified payload of a `figure` or an `introduction`."""
+    figure: Figure | None = None
+    person: Person | None = None
 
     @property
     def evidence_only(self) -> bool:
         """F2 — kept as evidence behind other lines, never a line itself:
-        the text copies the transcript or speaks in its voice."""
+        the text copies the transcript or speaks in its voice. A figure or
+        an introduction is written from its verified fields, never from
+        its text, so a copied text does not matter there."""
+        if self.figure is not None or self.person is not None:
+            return False
         return self.copied or FIRST_PERSON in self.flags
 
     @property
@@ -479,22 +524,34 @@ def date_mentions(quote: str, *, meeting_date: date, language: str = "en") -> li
     return out
 
 
-def check_numbers(text: str, *, quote: str, turn: Turn) -> tuple[str, list[str]]:
+def check_numbers(
+    text: str, *, quote: str, turn: Turn, language: str = "en"
+) -> tuple[str, list[str]]:
     """Every number in the text must have been said.
 
     A number that was not is REMOVED from the text rather than the whole
     fact being dropped: "they want it by the twentieth" is still worth
     having when the model hallucinated a price alongside it.
+
+    Said means said in digits OR in words (F3): a conversation's
+    transcript keeps "eighteen and a half" as words since G0, and the
+    model writing 18.5 has not invented anything.
     """
-    said = normalise_quote(f"{quote} {turn.text}")
+    raw = f"{quote} {turn.text}"
+    said = normalise_quote(raw)
     said_numbers = {n.replace(",", "").replace(".", "") for n in _NUMBER.findall(said)}
+    said_values = set(numbers.numbers_in(raw, language))
     flags: list[str] = []
     out = text
     for match in _NUMBER.findall(text):
         plain = match.replace(",", "").replace(".", "")
-        if plain and plain not in said_numbers:
-            out = out.replace(match, "").replace("  ", " ")
-            flags.append(NUMBER_UNVERIFIED)
+        if not plain or plain in said_numbers:
+            continue
+        value = numbers.parse_value(match, language)
+        if value is not None and value in said_values:
+            continue
+        out = out.replace(match, "").replace("  ", " ")
+        flags.append(NUMBER_UNVERIFIED)
     return out.strip(), flags[:1]
 
 
@@ -526,10 +583,21 @@ def is_copied(text: str, quote: str) -> bool:
     it reads as somebody's aside ("Man war sehr zögerlich…") filed as an
     outcome.
     """
-    said, claim = normalise_quote(strip_turn_header(quote)), normalise_quote(text)
-    if not claim or not said:
+    claim = normalise_quote(text)
+    if not claim:
         return False
-    return claim == said or (claim in said and len(claim) >= 0.8 * len(said))
+    # The whole quote, and each of its sentences (F2): a quote often spans
+    # two sentences, and a line that is one of them word for word is as
+    # much a copy as a line that is all of it.
+    quote = strip_turn_header(quote)
+    for part in (quote, *_SENTENCE.split(quote)):
+        said = normalise_quote(part)
+        if said and (claim == said or (claim in said and len(claim) >= 0.8 * len(said))):
+            return True
+    return False
+
+
+_SENTENCE: Final = re.compile(r"(?<=[.!?…])\s+")
 
 
 def is_decision(quote: str, *, turn: Turn, window: Window) -> bool:
@@ -602,6 +670,16 @@ class VerifyStats:
     dropped_no_information: int = 0
     dropped_first_person: int = 0
     third_person_fixed: int = 0
+    """F3 — figures kept, and dropped because the value or the unit was
+    not said; qualifiers and introduction fields cleared because the
+    words were not in the quote; next steps addressed to the audience."""
+    figures_kept: int = 0
+    figures_dropped_value: int = 0
+    figures_dropped_unit: int = 0
+    qualifiers_cleared: int = 0
+    introductions_kept: int = 0
+    introduction_fields_cleared: int = 0
+    contact_steps: int = 0
 
 
 # The window shows each turn as "[3] Anna (00:12): …". A small model
@@ -687,6 +765,37 @@ def verify_facts(
                 continue
             refers_to_key = carried_keys[index]
 
+        # F3 — a figure or an introduction is its payload, checked word by
+        # word against the quote. A figure whose value or unit was not said
+        # is dropped, never softened.
+        figure: Figure | None = None
+        person: Person | None = None
+        if kind == schema.FIGURE:
+            figure, why = verify_figure(fact, language=language)
+            if figure is None:
+                if why == "unit":
+                    stats.figures_dropped_unit += 1
+                else:
+                    stats.figures_dropped_value += 1
+                continue
+            if fact.qualifier and not figure.qualifier:
+                stats.qualifiers_cleared += 1
+            stats.figures_kept += 1
+        elif kind == schema.INTRODUCTION:
+            person, cleared = verify_introduction(fact, language=language)
+            if person is None:
+                stats.dropped_quote += 1
+                continue
+            stats.introduction_fields_cleared += cleared
+            stats.introductions_kept += 1
+        elif kind == schema.NEXT_STEP:
+            # Addressed to the listener ("email me", "leave a comment") it is
+            # the recording's call to action; otherwise a plain point.
+            if addresses_audience(fact.quote, language):
+                stats.contact_steps += 1
+            else:
+                kind = schema.KEY_POINT
+
         # F2 — a copy is evidence, not a statement, whatever its kind. A
         # copied decision is not a decision (it is somebody's words filed
         # as an outcome) and is also not rendered.
@@ -698,7 +807,7 @@ def verify_facts(
             stats.downgraded += 1
 
         text, number_flags = check_numbers(
-            strip_turn_header(fact.text), quote=fact.quote, turn=turn
+            strip_turn_header(fact.text), quote=fact.quote, turn=turn, language=language
         )
         if not text:
             stats.dropped_quote += 1
@@ -830,10 +939,197 @@ def verify_facts(
                 attributed_to=attributed,
                 corrections=tuple(corrections),
                 copied=copied,
+                figure=figure,
+                person=person,
             )
         )
         stats.kept += 1
     return out
+
+
+# ── F3: figures, introductions, calls to action ────────────────────
+
+# The speaker's own hedge on a number. Closed: a qualifier outside this list,
+# or one the quote does not have, is cleared — the value stays.
+QUALIFIERS: Final[dict[str, tuple[str, ...]]] = {
+    "en": (
+        "just under", "just over", "a little over", "a little under", "slightly over",
+        "slightly under", "about", "around", "approximately", "roughly", "nearly", "almost",
+        "up to", "at least", "more than", "less than", "over", "under", "optional",
+        "optionally",
+    ),
+    "de": (
+        "knapp unter", "knapp über", "knapp", "etwas über", "etwas mehr als", "etwas unter",
+        "etwa", "ungefähr", "rund", "circa", "ca", "bis zu", "mindestens", "mehr als",
+        "weniger als", "über", "unter", "optional",
+    ),
+    "uk": (
+        "трохи менше", "трохи більше", "близько", "приблизно", "майже", "до", "щонайменше",
+        "понад", "більше ніж", "менше ніж", "опційно",
+    ),
+}  # fmt: skip
+
+# A unit as written ↔ the words a speaker says for it.
+UNIT_WORDS: Final[dict[str, tuple[str, ...]]] = {
+    "ft": ("feet", "foot", "fuß", "фут", "футів", "фути"),
+    "m": ("meter", "meters", "metre", "metres", "metern", "метр", "метри", "метрів"),
+    "l": ("liter", "liters", "litre", "litres", "litern", "літр", "літри", "літрів"),
+    "gal": ("gallon", "gallons", "gallonen", "галон", "галонів"),
+    "kn": ("knot", "knots", "knoten", "вузол", "вузли", "вузлів"),
+    "kts": ("knot", "knots"),
+    "hp": ("horsepower", "horse power"),
+    "ps": ("ps", "pferdestärken"),
+    "kg": ("kilogram", "kilograms", "kilo", "kilos", "kilogramm", "кілограм", "кілограмів"),
+    "lb": ("pound", "pounds"),
+    "lbs": ("pound", "pounds"),
+    "km": ("kilometer", "kilometers", "kilometre", "kilometres", "кілометр", "кілометрів"),
+    "nm": ("nautical mile", "nautical miles", "seemeilen"),
+    "mph": ("miles per hour",),
+    "%": ("percent", "per cent", "prozent", "відсоток", "відсотків", "відсотки"),
+    "€": ("euro", "euros", "євро"),
+    "$": ("dollar", "dollars", "доларів"),
+}
+_STEM_MIN: Final = 4
+
+
+def _norm_words(text: str) -> list[str]:
+    return normalise_quote(text).split()
+
+
+def _has_phrase(text: str, phrase: str) -> bool:
+    padded = f" {normalise_quote(text)} "
+    return f" {normalise_quote(phrase)} " in padded
+
+
+def _word_said(word: str, said: list[str]) -> bool:
+    """``word`` is in ``said`` — exactly, or by a shared stem for inflected
+    forms ("gallon" / "gallons", "Liter" / "Litern")."""
+    if word in said:
+        return True
+    if len(word) < _STEM_MIN:
+        return False
+    # The engine's five-letter stem (support.STEM): "cruising" / "cruises".
+    stem = word[: support.STEM]
+    return any(w[: support.STEM] == stem for w in said if len(w) >= _STEM_MIN)
+
+
+def _unit_said(unit: str, quote: str) -> bool:
+    words = _norm_words(quote)
+    folded = unit.strip().casefold().rstrip(".")
+    for alias in UNIT_WORDS.get(folded, ()):
+        if _has_phrase(quote, alias):
+            return True
+    if folded in ("%",) and "%" in quote:
+        return True
+    tokens = _norm_words(unit)
+    return bool(tokens) and all(_word_said(t, words) for t in tokens)
+
+
+def _qualifier(raw: str | None, quote: str, language: str) -> str:
+    """The qualifier when it is on the closed list AND in the quote, else ""."""
+    if not raw or not raw.strip():
+        return ""
+    wanted = " ".join(raw.casefold().split())
+    allowed = QUALIFIERS.get(language, ()) + QUALIFIERS["en"]
+    if wanted not in allowed or not _has_phrase(quote, wanted):
+        return ""
+    return wanted
+
+
+def verify_figure(fact: schema.Fact, *, language: str = "en") -> tuple[Figure | None, str]:
+    """F3, decision 1: ``(figure, "")`` or ``(None, reason)`` where reason
+    is ``value`` (not said, not one number) or ``unit`` / ``name``."""
+    quote = fact.quote
+    value = numbers.parse_value(fact.value or "", language)
+    if value is None or not numbers.said(value, quote, language):
+        return None, "value"
+    unit = " ".join((fact.unit or "").split())[: schema.MAX_UNIT_CHARS]
+    if unit and not _unit_said(unit, quote):
+        return None, "unit"
+    name = " ".join((fact.name or "").split())[: schema.MAX_FIGURE_NAME_CHARS]
+    said = _norm_words(quote)
+    content = [w for w in _norm_words(name) if w not in support.stop_words(language)]
+    if not content or not any(_word_said(w, said) for w in content):
+        return None, "name"
+    return (
+        Figure(
+            name=name[:1].upper() + name[1:],
+            value=value,
+            unit=unit,
+            qualifier=_qualifier(fact.qualifier, quote, language),
+        ),
+        "",
+    )
+
+
+# "my name is", "I'm", "ich bin", "мене звати": the speaker is the person.
+_SELF_INTRO: Final = re.compile(
+    r"\b(?:my name is|i am|i'm|i’m|this is me|ich bin|ich heiße|ich heisse|mein name ist|"
+    r"мене звати|моє ім'я|моє імʼя)\b|(?<![\w'’ʼ])я\s",
+    re.IGNORECASE,
+)
+
+
+def _field_said(value: str | None, quote: str) -> str:
+    """A person field whose every content word is in the quote, else ""."""
+    text = " ".join((value or "").split())[: schema.MAX_PERSON_FIELD_CHARS]
+    if not text:
+        return ""
+    said = _norm_words(quote)
+    words = [w for w in _norm_words(text) if len(w) > 1]
+    return text if words and all(_word_said(w, said) for w in words) else ""
+
+
+def verify_introduction(fact: schema.Fact, *, language: str = "en") -> tuple[Person | None, int]:
+    """F3, decision 3: ``(person, fields cleared)``. The name must be in the
+    quote, whole; a role, organisation or qualifier word that is not
+    clears that field — nothing about a person is inferred."""
+    name = _field_said(fact.name, fact.quote)
+    if not name or not any(w[:1].isupper() for w in name.split()):
+        return None, 0
+    fields = {
+        "role": _field_said(fact.role, fact.quote),
+        "organisation": _field_said(fact.organisation, fact.quote),
+        "qualifier": _field_said(fact.qualifier, fact.quote),
+    }
+    asked = {"role": fact.role, "organisation": fact.organisation, "qualifier": fact.qualifier}
+    cleared = sum(1 for k, v in fields.items() if (asked[k] or "").strip() and not v)
+    return (
+        Person(
+            name=name,
+            role=fields["role"],
+            organisation=fields["organisation"],
+            qualifier=fields["qualifier"],
+            self_introduction=bool(_SELF_INTRO.search(fact.quote)),
+        ),
+        cleared,
+    )
+
+
+# The recording speaking to its listener: "email me", "leave a comment",
+# "schreiben Sie mir", "підпишіться".
+_AUDIENCE: Final[dict[str, re.Pattern[str]]] = {
+    "en": re.compile(
+        r"\b(?:you|your|email me|e-mail me|shoot me|reach out|contact me|contact us|"
+        r"leave a comment|comment below|subscribe|visit|call us|write to|message me|dm me)\b",
+        re.IGNORECASE,
+    ),
+    "de": re.compile(
+        r"\b(?:sie|ihnen|ihr|euch|du|dich|dir|schreiben sie|kontaktieren|melden sie|"
+        r"abonnieren|besuchen sie|rufen sie)\b",
+        re.IGNORECASE,
+    ),
+    "uk": re.compile(
+        r"(?<![\w'’ʼ])(?:ви|вас|вам|напишіть|пишіть|залиште|підпишіться|звертайтеся|"
+        r"телефонуйте|заходьте)(?![\w'’ʼ])",
+        re.IGNORECASE,
+    ),
+}
+
+
+def addresses_audience(quote: str, language: str = "en") -> bool:
+    pattern = _AUDIENCE.get(language) or _AUDIENCE["en"]
+    return bool(pattern.search(quote))
 
 
 def _correct(

@@ -20,6 +20,7 @@ Pure.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Final
 
 from . import support
@@ -66,6 +67,13 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
         for index, (other_tokens, other) in enumerate(kept):
             if other.kind != fact.kind:
                 continue
+            # F3 — two figures are one only when they say the same number
+            # about the same thing; "300 gallons" and "200 gallons" read
+            # alike and are a conflict to show, not a duplicate to fold.
+            if (
+                fact.figure is not None or other.figure is not None
+            ) and fact.figure != other.figure:
+                continue
             if (
                 fact.item_key == other.item_key
                 or _jaccard(tokens, other_tokens) >= SAME_FACT_JACCARD
@@ -83,30 +91,18 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
         # better owner, a real date, and its doubts.
         merged = existing
         if _better(fact, existing):
-            merged = VerifiedFact(
-                kind=existing.kind,
-                text=existing.text,
-                quote=existing.quote,
-                turn=existing.turn,
-                start_ms=existing.start_ms,
-                end_ms=existing.end_ms,
-                speaker_label=existing.speaker_label,
-                speaker_name=existing.speaker_name,
+            # Every field of the earlier copy, including the ones added since
+            # (F2's `copied`, F3's payloads), with what the later copy adds.
+            merged = dataclasses.replace(
+                existing,
                 owner_label=fact.owner_label or existing.owner_label,
                 due_text=fact.due_text or existing.due_text,
                 due_date=fact.due_date or existing.due_date,
                 explicit=fact.explicit or existing.explicit,
                 confidence=max(fact.confidence, existing.confidence),
-                flags=existing.flags,
-                window_index=existing.window_index,
-                refers_to_key=existing.refers_to_key,
-                judgement_field=existing.judgement_field,
-                side=existing.side,
+                flags=list(existing.flags),
                 certainty=existing.certainty or fact.certainty,
-                line=existing.line,
-                mentions=existing.mentions,
                 attributed_to=existing.attributed_to or fact.attributed_to,
-                corrections=existing.corrections,
             )
         else:
             merged.owner_label = merged.owner_label or fact.owner_label

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final, Protocol
@@ -47,10 +48,14 @@ EXTRACT_ATTEMPTS = 2
 # the note stayed a bare transcript. Unused budget costs nothing.
 EXTRACT_MAX_TOKENS = 3000
 REDUCE_MAX_TOKENS = 2500
-# F2, decision 2 — a window whose verified facts are mostly the transcript
-# copied into `text` is asked once more, told which rule it broke.
-RESTATE_COPY_SHARE: Final = 0.4
-RESTATE_MIN_FACTS: Final = 3
+# F2, decision 2 — a window whose verified facts copy the transcript into
+# `text` is asked once more, told which rule it broke. Tuned (as the work
+# order says to when recall drops): the 40 % share it named left windows
+# of three copies in eight unasked, and each copy is a fact the note loses;
+# the 2026-09-26 eval on Gemma 3 4B lost 2 of 3 key facts on m04 that way.
+# Any copy now asks — still at most one extra call per window.
+RESTATE_COPY_SHARE: Final = 0.0
+RESTATE_MIN_FACTS: Final = 1
 # A sub-point that cites only its parent's facts and says mostly the same
 # words is the parent again, not an elaboration.
 CHILD_RESTATES_JACCARD: Final = 0.6
@@ -170,6 +175,19 @@ async def run(
     verified: list[VerifiedFact] = []
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
 
+    # F3 — lines with an introduction in the first windows, pointed out to
+    # the extractor when this family writes introductions.
+    suggested_quotes = [
+        str(s.get("quote") or "")
+        for s in (result.get("name_suggestions") or [])
+        if isinstance(s, dict)
+    ]
+
+    def hints(window: Window) -> list[int] | None:
+        if schema.INTRODUCTION not in offered or window.index >= INTRODUCTION_WINDOWS:
+            return None
+        return introduction_lines(window, suggested_quotes) or None
+
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
         budget = fact_budget(window)
         window_schema = schema.extract_schema(
@@ -187,6 +205,7 @@ async def run(
                 carried=carried,
                 max_facts=budget,
                 max_tokens=extract_tokens(budget),
+                introduction_lines=hints(window),
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
@@ -250,7 +269,7 @@ async def run(
         out.windows_done += 1
         kept = check(extracted.facts, window, stats)
         copies = sum(1 for f in kept if f.copied)
-        if len(kept) >= RESTATE_MIN_FACTS and copies / len(kept) > RESTATE_COPY_SHARE:
+        if copies and len(kept) >= RESTATE_MIN_FACTS and copies / len(kept) > RESTATE_COPY_SHARE:
             # F2, decision 2: once per window, told the rule it broke, with
             # no more facts than it gave the first time.
             again_budget = max(1, len(extracted.facts))
@@ -286,9 +305,13 @@ async def run(
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
+    # F3 — a person introduced in the recording is somebody a line may name.
+    introduced = {f.person.name for f in document_facts if f.person is not None}
     gate = _Gate(
         language=language,
-        known=frozenset({t.speaker_name for t in turns if t.speaker_name} | set(name_candidates)),
+        known=frozenset(
+            {t.speaker_name for t in turns if t.speaker_name} | set(name_candidates) | introduced
+        ),
     )
     if document_facts:
         # Understand the conversation first; then write topics and the
@@ -344,6 +367,8 @@ async def run(
         key_fact_ids=key_fact_ids,
         counters=render_counts,
         meeting_date=meeting_date,
+        presenter_lines=family.meeting_type == "broadcast",
+        subject=brief.subject if brief else "",
     )
     thirds = windows.thirds(built)
     by_third = [0, 0, 0]
@@ -366,6 +391,14 @@ async def run(
         "dropped_first_person": stats.dropped_first_person,
         "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
         "children_restated": gate.children_restated,
+        # F3 — figures, introductions, calls to action.
+        "figures_kept": stats.figures_kept,
+        "figures_dropped_value": stats.figures_dropped_value,
+        "figures_dropped_unit": stats.figures_dropped_unit,
+        "qualifiers_cleared": stats.qualifiers_cleared,
+        "introductions_kept": stats.introductions_kept,
+        "introduction_fields_cleared": stats.introduction_fields_cleared,
+        "contact_steps": stats.contact_steps,
         "example_echo_dropped": gate.counts["example"],
         "lines_kept": gate.counts["kept"],
         "lines_unsupported": {
@@ -418,6 +451,33 @@ async def run(
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,
     }
+    return out
+
+
+# F3 — introductions happen at the start: the first windows are searched.
+INTRODUCTION_WINDOWS: Final = 2
+_INTRODUCTION_CUE: Final = re.compile(
+    r"\b(?:my name is|i'm|i’m|i am|this is|ich bin|ich heiße|ich heisse|mein name ist|"
+    r"hier ist|мене звати|моє ім['’ʼ]я)\b|(?<![\w'’ʼ])(?:це|я)\s+[А-ЯІЇЄҐ]",
+    re.IGNORECASE,
+)
+
+
+def introduction_lines(window: Window, suggested_quotes: list[str]) -> list[int]:
+    """The window's line numbers that hold an introduction: a cue ("my name
+    is", "ich bin", "мене звати") followed by a capitalised word, or the
+    quote of an asr-service name suggestion."""
+    out: list[int] = []
+    quotes = [verify.normalise_quote(q) for q in suggested_quotes if q.strip()]
+    for turn in window.turns:
+        text = turn.text
+        said = verify.normalise_quote(text)
+        cue = _INTRODUCTION_CUE.search(text)
+        named = cue is not None and any(
+            w[:1].isupper() for w in text[cue.end() : cue.end() + 60].split()[:3]
+        )
+        if named or any(q and (q in said or said in q) for q in quotes):
+            out.append(turn.number)
     return out
 
 
@@ -766,10 +826,18 @@ async def _extract(
     max_facts: int | None = None,
     max_tokens: int = EXTRACT_MAX_TOKENS,
     system_suffix: str | None = None,
+    introduction_lines: list[int] | None = None,
 ) -> schema.ExtractOut | None:
     """One window. ``None`` when the model could not answer in shape.
-    ``system_suffix`` (F2) is the rule the last answer broke."""
-    prompt = prompts.extract_prompt(window.render(), language, carried=carried, max_facts=max_facts)
+    ``system_suffix`` (F2) is the rule the last answer broke;
+    ``introduction_lines`` (F3) the lines code found an introduction in."""
+    prompt = prompts.extract_prompt(
+        window.render(),
+        language,
+        carried=carried,
+        max_facts=max_facts,
+        introduction_lines=introduction_lines,
+    )
     system = prompts.extract_system(language)
     if system_suffix:
         system = f"{system}\n\n{system_suffix}"

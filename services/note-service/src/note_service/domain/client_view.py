@@ -44,6 +44,8 @@ CLIENT_ROLES: Final[tuple[str, ...]] = (
     types.AGENDA,
     types.DECISIONS,
     types.TOPICS,
+    # F3 — the figures a meeting gave (budget numbers, specifications).
+    types.SPECIFICATIONS,
     types.REQUESTS,
     types.ACTION_ITEMS,
     types.OPEN_QUESTIONS,

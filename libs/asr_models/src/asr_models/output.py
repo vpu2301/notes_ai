@@ -321,6 +321,9 @@ class NameSuggestionView(BaseModel):
     start_ms: NonNegativeInt
     end_ms: NonNegativeInt
     segment_indices: list[int] = Field(default_factory=list)
+    # Sprint F3: the role clause after the name, verbatim ("I am a broker
+    # with Springbrook Marine Group"), or None. Nothing is inferred.
+    role_text: str | None = None
 
 
 class CoverageView(BaseModel):

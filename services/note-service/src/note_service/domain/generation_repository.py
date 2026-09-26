@@ -315,10 +315,10 @@ async def put_lines(
                 text, owner_label, due_text, due_date, explicit, confidence,
                 flags, quote, start_ms, end_ms, speaker_label, speaker_name,
                 placement, audience, cites, certainty, attributed_to, corrections, mentions,
-                parent_key
+                parent_key, payload
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,
-                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26)
+                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26,$27::jsonb)
             ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
             """,
             tenant_id,
@@ -347,6 +347,7 @@ async def put_lines(
             json.dumps(list(row.get("corrections") or [])[:8]),
             json.dumps(list(row.get("mentions") or [])[:8]),
             row.get("parent_key"),
+            json.dumps(row["payload"]) if row.get("payload") else None,
         )
         if result.endswith(" 1"):
             written += 1
@@ -369,7 +370,7 @@ async def items_for_note(
         SELECT item_key, kind, section_key, text, owner_label, due_text, due_date,
                explicit, confidence, flags, quote, start_ms, end_ms,
                speaker_label, speaker_name, placement, audience,
-               cites, certainty, attributed_to, corrections, mentions, parent_key
+               cites, certainty, attributed_to, corrections, mentions, parent_key, payload
         FROM note_generated_items
         WHERE note_id = $1 AND placement IN ('written', 'suggested', 'evidence') {current}
         ORDER BY start_ms
