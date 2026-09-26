@@ -15,7 +15,7 @@ RUN apt-get update \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
-RUN pip install --no-cache-dir --upgrade pip uv==0.4.29
+RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/
@@ -35,7 +35,11 @@ RUN uv pip install --system --no-cache \
     /build/libs/secret \
     /build/libs/models \
     /build/libs/jobs \
-    /build/libs/asr_models
+    /build/libs/asr_models \
+    /build/libs/notification_events \
+    /build/libs/ratelimit \
+    /build/libs/crypto \
+    /build/libs/storage
 
 # Editable workspace libs install as .pth files, which Python only honors
 # in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because

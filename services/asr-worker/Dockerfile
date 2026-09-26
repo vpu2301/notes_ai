@@ -150,7 +150,7 @@ RUN apt-get update \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
-RUN python3.12 -m pip install --no-cache-dir --upgrade pip uv==0.4.29
+RUN python3.12 -m pip install --no-cache-dir --upgrade pip uv==0.10.6
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/
@@ -169,7 +169,9 @@ RUN python3.12 -m uv pip install --system --no-cache \
     /build/libs/storage \
     /build/libs/asr_models \
     /build/libs/diarization \
-    /build/libs/secret
+    /build/libs/secret \
+    /build/libs/notification_events \
+    /build/libs/models
 
 # Bake the verified weights from the fetch stages.
 COPY --from=model-fetch /opt/models/whisper /opt/models/whisper-large-v3

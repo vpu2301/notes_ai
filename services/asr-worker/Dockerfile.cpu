@@ -92,7 +92,7 @@ RUN apt-get update \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
-RUN pip install --no-cache-dir --upgrade pip uv==0.4.29
+RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/
@@ -123,7 +123,9 @@ RUN uv pip install --system --no-cache \
     /build/libs/storage \
     /build/libs/asr_models \
     /build/libs/diarization \
-    /build/libs/secret
+    /build/libs/secret \
+    /build/libs/notification_events \
+    /build/libs/models
 
 COPY --from=model-fetch /opt/models/whisper /opt/models/whisper-tiny
 COPY --from=ecapa-fetch /opt/models/ecapa /opt/models/ecapa

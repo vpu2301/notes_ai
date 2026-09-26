@@ -3,7 +3,7 @@ FROM python:3.12-slim AS build
 
 WORKDIR /build
 
-RUN pip install --no-cache-dir uv==0.4.29
+RUN pip install --no-cache-dir uv==0.10.6
 
 COPY pyproject.toml .
 # Install production deps only into /deps so we can copy them cleanly
