@@ -127,7 +127,12 @@ class HTTPASRProvider:
         language: str,
         prompt: str | None,
         should_cancel: ShouldCancel | None = None,
+        second_pass: bool = False,
     ) -> TranscriptionOutput:
+        # ``second_pass``: an OpenAI-compatible server takes no beam or
+        # conditioning switch; the caller already sends no prompt, which is
+        # the part of decision 3 this backend can honour.
+        del second_pass
         if not self._loaded:
             raise RuntimeError("HTTPASRProvider.warm_up() must succeed before transcribe()")
         started = time.monotonic()

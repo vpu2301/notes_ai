@@ -75,6 +75,28 @@ async def probe_hint_column(pool: asyncpg.Pool) -> bool:
     return HINT_COLUMN_PRESENT
 
 
+# Sprint F1: whether the capture-timing columns (migration 0063) exist.
+# Same rule as the hint: a service ahead of its migration stores no timing
+# and never fails a job over it.
+CAPTURE_TIMING_PRESENT: bool = True
+
+
+async def probe_capture_timing_columns(pool: asyncpg.Pool) -> bool:
+    global CAPTURE_TIMING_PRESENT  # noqa: PLW0603 — a startup fact, read by every insert
+    async with pool.acquire() as conn:
+        present = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+            " WHERE table_name = 'transcription_jobs' AND column_name = 'first_frame_offset_ms')"
+        )
+    CAPTURE_TIMING_PRESENT = bool(present)
+    if not CAPTURE_TIMING_PRESENT:
+        logging.getLogger(__name__).warning(
+            "asr.capture_timing_columns_missing",
+            extra={"migration": "0063_transcription_capture_timing"},
+        )
+    return CAPTURE_TIMING_PRESENT
+
+
 async def insert_job_row(
     conn: asyncpg.Connection,
     *,
@@ -87,33 +109,20 @@ async def insert_job_row(
     name_candidates: list[str] | None = None,
     capture_context: dict[str, str] | None = None,
     vocabulary_hint: str | None = None,
+    record_pressed_at: datetime | None = None,
+    first_frame_offset_ms: int | None = None,
 ) -> None:
-    if HINT_COLUMN_PRESENT:
-        await conn.execute(
-            """
-            INSERT INTO transcription_jobs
-                (id, tenant_id, audio_id, requester_sub, language, model,
-                 speaker_name_candidates, capture_context, vocabulary_hint)
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
-            """,
-            job_id,
-            tenant_id,
-            audio_id,
-            requester_sub,
-            language,
-            model,
-            json.dumps(name_candidates or []),
-            json.dumps(capture_context or {}),
-            vocabulary_hint,
-        )
-        return
-    await conn.execute(
-        """
-        INSERT INTO transcription_jobs
-            (id, tenant_id, audio_id, requester_sub, language, model,
-             speaker_name_candidates, capture_context)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
-        """,
+    columns = [
+        "id",
+        "tenant_id",
+        "audio_id",
+        "requester_sub",
+        "language",
+        "model",
+        "speaker_name_candidates",
+        "capture_context",
+    ]
+    values: list[object] = [
         job_id,
         tenant_id,
         audio_id,
@@ -122,6 +131,18 @@ async def insert_job_row(
         model,
         json.dumps(name_candidates or []),
         json.dumps(capture_context or {}),
+    ]
+    if HINT_COLUMN_PRESENT:
+        columns.append("vocabulary_hint")
+        values.append(vocabulary_hint)
+    if CAPTURE_TIMING_PRESENT:
+        columns += ["record_pressed_at", "first_frame_offset_ms"]
+        values += [record_pressed_at, first_frame_offset_ms]
+    casts = {"speaker_name_candidates": "::jsonb", "capture_context": "::jsonb"}
+    placeholders = ", ".join(f"${k + 1}{casts.get(c, '')}" for k, c in enumerate(columns))
+    await conn.execute(
+        f"INSERT INTO transcription_jobs ({', '.join(columns)}) VALUES ({placeholders})",
+        *values,
     )
 
 
@@ -913,7 +934,25 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
         diarization_runs=int(row.get("diarization_runs") or 0),
         can_undo_rediarize=row.get("previous_result_storage_uri") is not None,
         vocabulary_hint=row.get("vocabulary_hint"),
+        record_pressed_at=row.get("record_pressed_at"),
+        first_frame_offset_ms=row.get("first_frame_offset_ms"),
+        coverage_share=_coverage_share(row.get("metadata")),
     )
+
+
+def _coverage_share(raw: object) -> float | None:
+    """``metadata.coverage_share`` off the job row (Sprint F1): the worker
+    writes the transcript metadata there on completion. Text without a
+    jsonb codec; None before F1 or while the job runs."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    share = raw.get("coverage_share")
+    return float(share) if isinstance(share, int | float) else None
 
 
 def parse_speaker_names(raw: object) -> dict[str, str]:

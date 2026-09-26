@@ -56,6 +56,12 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         /// would have. Absent from older sidecars, which decode with nil.
         var channelLayout: String? = nil
         var localSpeakerName: String? = nil
+        /// Sprint F1 — when Record was pressed and how many milliseconds
+        /// passed before audio reached the file, so a later upload still
+        /// says when the recording really began. Absent from older
+        /// sidecars (and imported files), which upload without them.
+        var recordPressedAt: Date? = nil
+        var firstFrameOffsetMs: Int? = nil
 
         enum CodingKeys: String, CodingKey {
             case title, language, diarize
@@ -68,6 +74,20 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
             case captureSource = "capture_source"
             case channelLayout = "channel_layout"
             case localSpeakerName = "local_speaker_name"
+            case recordPressedAt = "record_pressed_at"
+            case firstFrameOffsetMs = "first_frame_offset_ms"
+        }
+
+        /// The timing a retry sends: both halves, or nothing.
+        var captureTiming: CaptureTiming? {
+            get {
+                guard let recordPressedAt, let firstFrameOffsetMs else { return nil }
+                return CaptureTiming(recordPressedAt: recordPressedAt, firstFrameOffsetMs: firstFrameOffsetMs)
+            }
+            set {
+                recordPressedAt = newValue?.recordPressedAt
+                firstFrameOffsetMs = newValue?.firstFrameOffsetMs
+            }
         }
 
         /// The `channel_layout` a retry sends: the recorded one, and only

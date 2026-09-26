@@ -147,6 +147,8 @@ final class NoteViewModel: ObservableObject {
     /// rename repaints every turn of that speaker at once.
     @Published private(set) var speakerNames: [String: String] = [:]
     @Published private(set) var transcriptError: String?
+    /// Sprint F1: speech the transcript is missing — "Not transcribed: …".
+    @Published private(set) var coverageLine: CoverageGapsFormatter.Line?
     @Published private(set) var renamingSpeaker = false
     /// Roster (after merges) and talk time per speaker.
     @Published private(set) var speakers: [String] = []
@@ -386,6 +388,7 @@ final class NoteViewModel: ObservableObject {
         speakerNameSources = result.speakerNameSources ?? [:]
         nameSuggestions = result.nameSuggestions ?? []
         relabelAvailable = result.relabelAvailable ?? false
+        coverageLine = CoverageGapsFormatter.line(result.coverage)
         // A selection is of the turns as they were; drop picks that are gone.
         let ids = Set((result.turns ?? []).map(\.id))
         selectedTurnIds.formIntersection(ids)

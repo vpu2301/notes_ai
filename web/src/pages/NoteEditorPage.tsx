@@ -44,6 +44,7 @@ import { defaultSpeakerName } from "../api/types";
 import { AskNote } from "../components/AskNote";
 import { CarriedItems } from "../components/CarriedItems";
 import { GenerationStatus } from "../components/GenerationStatus";
+import { NotTranscribed } from "../components/NotTranscribed";
 import { DocTypePill } from "../components/DocTypePill";
 import { ClientVersionPanel } from "../components/ClientVersion";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -977,15 +978,21 @@ export function TranscriptView({
 
   // Q3: a "Not included" range was clicked on the Notes tab — scroll to
   // the turn that holds that moment and light it up, as for a suggestion.
-  useEffect(() => {
-    if (seekMs == null || turns.length === 0) return;
-    let i = turns.findIndex((t) => t.start_ms <= seekMs && seekMs < t.end_ms);
-    if (i < 0) i = turns.reduce((best, t, k) => (t.start_ms <= seekMs ? k : best), 0);
+  /** Scroll to the turn that holds `ms` and light it up. */
+  const showMoment = (ms: number) => {
+    if (turns.length === 0) return;
+    let i = turns.findIndex((t) => t.start_ms <= ms && ms < t.end_ms);
+    if (i < 0) i = turns.reduce((best, t, k) => (t.start_ms <= ms ? k : best), 0);
     const el = turnRefs.current[i];
     if (!el) return;
     setFocusTurn(i);
     el.scrollIntoView?.({ block: "center", behavior: "smooth" });
     setHighlight(i);
+  };
+
+  useEffect(() => {
+    if (seekMs == null) return;
+    showMoment(seekMs);
     // Re-run on every click (seekKey), and once the turns have loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekMs, seekKey, turns.length]);
@@ -1138,6 +1145,7 @@ export function TranscriptView({
         </button>
       </div>
       {echoLine && <p className="help transcript-diagnostic">{echoLine}</p>}
+      <NotTranscribed coverage={result?.coverage} onSeek={showMoment} />
       {selection.length > 0 && (
         <div className="turn-actions" role="toolbar" aria-label="Selected turns">
           <span className="grow">{turnsLabel(selection.length)} selected</span>

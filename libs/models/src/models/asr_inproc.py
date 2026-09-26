@@ -43,6 +43,7 @@ class InProcEngine(Protocol):
         language: str,
         prompt: str | None,
         should_cancel: ShouldCancel | None = None,
+        second_pass: bool = False,
     ) -> TranscriptionOutput: ...
 
 
@@ -78,13 +79,23 @@ class InProcASRProvider:
         language: str,
         prompt: str | None,
         should_cancel: ShouldCancel | None = None,
+        second_pass: bool = False,
     ) -> TranscriptionOutput:
         started = time.monotonic()
         audio_seconds = float(len(audio_pcm)) / 16_000
         try:
-            output = await self._engine.transcribe(
-                audio_pcm, language=language, prompt=prompt, should_cancel=should_cancel
-            )
+            if second_pass:
+                output = await self._engine.transcribe(
+                    audio_pcm,
+                    language=language,
+                    prompt=prompt,
+                    should_cancel=should_cancel,
+                    second_pass=True,
+                )
+            else:
+                output = await self._engine.transcribe(
+                    audio_pcm, language=language, prompt=prompt, should_cancel=should_cancel
+                )
         except Exception as exc:
             emit(
                 UsageRecord(

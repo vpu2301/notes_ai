@@ -623,6 +623,36 @@ struct NoteView: View {
         }
     }
 
+    /// Sprint F1, under the transcript's status line: speech that did not
+    /// make it into the transcript, and why. A range inside the recording
+    /// opens the transcript there; audio lost before the file began cannot.
+    private func notTranscribed(_ line: CoverageGapsFormatter.Line) -> some View {
+        var text = AttributedString("Not transcribed: ")
+        for (index, item) in line.items.enumerated() {
+            if index > 0 { text += AttributedString(", ") }
+            var part = AttributedString(item.text)
+            if item.seekable, model.canSeekTranscript,
+               let url = URL(string: "\(Self.seekScheme):\(item.startMs)") {
+                part.link = url
+                part.underlineStyle = .single
+            }
+            text += part
+        }
+        if line.more > 0 { text += AttributedString(" +\(line.more) more") }
+        return Text(text)
+            .font(.dsMeta)
+            .foregroundStyle(DS.muted)
+            .tint(DS.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == Self.seekScheme,
+                      let ms = Int(url.absoluteString.dropFirst(Self.seekScheme.count + 1))
+                else { return .systemAction }
+                Task { await model.seekTranscript(to: ms) }
+                return .handled
+            })
+    }
+
     /// Links in the "Not included" line are these, handled in place.
     private static let seekScheme = "notesai-seek"
 
@@ -692,6 +722,9 @@ struct NoteView: View {
                     }
                     .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
                     .disabled(turns.isEmpty)
+                }
+                if let line = model.coverageLine {
+                    notTranscribed(line)
                 }
                 ForEach(turns) { turn in
                     HStack(alignment: .top, spacing: 12) {

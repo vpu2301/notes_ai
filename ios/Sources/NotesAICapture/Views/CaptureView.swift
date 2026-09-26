@@ -42,10 +42,26 @@ struct ActiveCaptureCard: View {
                 } else {
                     PulsingDot()
                 }
-                Text(formatElapsed(capture.recorder.elapsed))
-                    .font(.dsMono(18, .medium))
-                    .foregroundStyle(DS.text1)
-                    .monospacedDigit()
+                // Sprint F1: "Starting…" until audio actually reaches the
+                // file; then the counter, with one quiet line when the
+                // audio began noticeably after the press.
+                VStack(alignment: .leading, spacing: 1) {
+                    if let offset = capture.recorder.firstFrameOffsetMs {
+                        Text(formatElapsed(capture.recorder.elapsed))
+                            .font(.dsMono(18, .medium))
+                            .foregroundStyle(DS.text1)
+                            .monospacedDigit()
+                        if let notice = CaptureTiming.latencyNotice(offsetMs: offset) {
+                            Text(notice)
+                                .font(.dsMeta)
+                                .foregroundStyle(DS.muted)
+                        }
+                    } else {
+                        Text("Starting…")
+                            .font(.dsMono(18, .medium))
+                            .foregroundStyle(DS.muted)
+                    }
+                }
                 LevelMeter(level: capture.recorder.level, active: !capture.recorder.interrupted,
                            segments: 14, height: 12)
                 Spacer(minLength: 8)
@@ -400,7 +416,8 @@ private struct CompactCaptureRow: View {
                 } else {
                     PulsingDot(size: 8)
                 }
-                Text(formatElapsed(capture.recorder.elapsed))
+                Text(capture.recorder.firstFrameOffsetMs == nil
+                     ? "Starting…" : formatElapsed(capture.recorder.elapsed))
                     .font(.dsMono(15, .medium))
                     .foregroundStyle(DS.text1)
                     .monospacedDigit()

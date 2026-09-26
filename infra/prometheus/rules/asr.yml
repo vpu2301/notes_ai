@@ -95,3 +95,22 @@ groups:
             hour of audio in the last day. Check the workspace glossaries
             (`scripts/admin/glossary_audit.py`), the backend and
             `MDX_ASR_CONDITION_PREV`. Runbook: docs/runbooks/asr-worker.md#prompt-echo
+
+      # Sprint F1: speech that reached the file but not the transcript. The
+      # capture latency (`no_audio`) happened before the file and is the
+      # clients' to fix, so it is not part of this share.
+      - alert: AsrUncoveredSpeech
+        expr: |
+          sum(increase(mdx_asr_uncovered_speech_ms_total{cause!="no_audio"}[1h]))
+            /
+          sum(increase(mdx_asr_speech_ms_total[1h])) > 0.05
+        for: 15m
+        labels:
+          severity: warn
+          team: asr
+        annotations:
+          summary: "More than 5% of speech left untranscribed over 1h"
+          description: |
+            {{ $value | humanizePercentage }} of the speech VAD heard in the last
+            hour has no transcript. Look at mdx_asr_uncovered_speech_ms_total by
+            cause and mdx_asr_second_pass_total. Runbook: docs/runbooks/asr-worker.md#coverage

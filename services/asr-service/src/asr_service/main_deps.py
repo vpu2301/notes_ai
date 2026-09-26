@@ -85,6 +85,8 @@ async def build_state() -> ServiceState:
     from .domain import repository
 
     await repository.probe_hint_column(app_pool)
+    # Sprint F1: the same for the capture-timing columns (migration 0063).
+    await repository.probe_capture_timing_columns(app_pool)
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,
         application_name=f"{settings.service_name}/audit_writer",

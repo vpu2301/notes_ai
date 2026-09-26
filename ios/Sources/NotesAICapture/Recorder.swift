@@ -97,6 +97,12 @@ final class AudioRecorder: ObservableObject {
     private var limitHit = false
     /// True while a call or Siri has the microphone.
     @Published private(set) var interrupted = false
+    /// Sprint F1: milliseconds from the Record press to the first buffer
+    /// written to the file; nil until that buffer arrives.
+    @Published private(set) var firstFrameOffsetMs: Int?
+    /// Sprint F1: the wall clock at the Record press (kept after `stop()`
+    /// so the upload can carry it).
+    private(set) var recordPressedAt: Date?
 
     private(set) var fileURL: URL?
     private(set) var format: RecordingFormat = .flac
@@ -108,6 +114,11 @@ final class AudioRecorder: ObservableObject {
     private let sink = TapSink()
 
     func start() async throws {
+        // Sprint F1: the press, before the permission and session setup —
+        // that wait is exactly what the offset measures.
+        recordPressedAt = Date()
+        firstFrameOffsetMs = nil
+        sink.firstFrame.reset()
         // A denied grant never re-prompts; say so instead of failing quietly.
         if AVAudioApplication.shared.recordPermission == .denied {
             throw RecorderError.permissionDenied
@@ -170,6 +181,12 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
+    /// Sprint F1: the press and the first frame of the last recording, for
+    /// the upload; nil when no buffer ever reached the file.
+    var captureTiming: CaptureTiming? {
+        CaptureTiming(pressedAt: recordPressedAt, firstFrameAt: sink.firstFrame.firstFrameAt)
+    }
+
     /// Stops recording and returns the finished audio file.
     func stop() -> URL? {
         meterTimer?.invalidate()
@@ -194,6 +211,9 @@ final class AudioRecorder: ObservableObject {
         guard isRecording, let startedAt else { return }
         elapsed = Date().timeIntervalSince(startedAt)
         level = interrupted ? 0 : sink.currentLevel()
+        if firstFrameOffsetMs == nil, let timing = captureTiming {
+            firstFrameOffsetMs = timing.firstFrameOffsetMs
+        }
         if !warned, remaining <= Self.warningLead {
             warned = true
             onLimitWarning?()
@@ -268,6 +288,8 @@ final class AudioRecorder: ObservableObject {
 /// the meter. Everything is guarded by a lock because the tap callback and
 /// `start`/`stop` run on different threads.
 private final class TapSink: @unchecked Sendable {
+    /// Sprint F1: when the first buffer was written to the file.
+    let firstFrame = FirstFrameClock()
     private let lock = NSLock()
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?
@@ -337,7 +359,7 @@ private final class TapSink: @unchecked Sendable {
             return buffer
         }
         guard status != .error, output.frameLength > 0 else { return }
-        try? file.write(from: output)
+        if (try? file.write(from: output)) != nil { firstFrame.mark() }
     }
 
     /// RMS of the first channel mapped from roughly -50…0 dBFS to 0…1.

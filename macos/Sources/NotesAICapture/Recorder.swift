@@ -160,6 +160,12 @@ final class AudioRecorder: ObservableObject {
     @Published private(set) var captureMode: CaptureMode = .micOnly(.settingOff)
     /// The call audio stopped mid-recording; the rest of ch1 is silence.
     @Published private(set) var systemAudioLost = false
+    /// Sprint F1: milliseconds from the Record press to the first buffer
+    /// written to the file; nil until that buffer arrives.
+    @Published private(set) var firstFrameOffsetMs: Int?
+    /// Sprint F1: the wall clock at the Record press (kept after `stop()`
+    /// so the upload can carry it).
+    private(set) var recordPressedAt: Date?
     /// The server's cap on one recording. The app reads the real value
     /// before each recording (`AsrLimits`); this is the fallback.
     @Published var limitSeconds: TimeInterval = 2 * 3600
@@ -194,6 +200,11 @@ final class AudioRecorder: ObservableObject {
     /// accepted the current call-audio notice. Both false → exactly the
     /// microphone path of before.
     func start(captureSystemAudio: Bool = false, consentCurrent: Bool = false) async throws {
+        // Sprint F1: the press, before any permission or tap setup — that
+        // wait is exactly what the offset measures.
+        recordPressedAt = Date()
+        firstFrameOffsetMs = nil
+        sink.firstFrame.reset()
         // A previously denied (or silently dropped — see scripts/make-app.sh)
         // grant never re-prompts; say so instead of failing quietly.
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -318,6 +329,12 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
+    /// Sprint F1: the press and the first frame of the last recording, for
+    /// the upload; nil when no buffer ever reached the file.
+    var captureTiming: CaptureTiming? {
+        CaptureTiming(pressedAt: recordPressedAt, firstFrameAt: sink.firstFrame.firstFrameAt)
+    }
+
     /// Stops recording and returns the finished audio file.
     func stop() -> URL? {
         meterTimer?.invalidate()
@@ -341,6 +358,9 @@ final class AudioRecorder: ObservableObject {
         guard isRecording, let startedAt else { return }
         elapsed = Date().timeIntervalSince(startedAt)
         level = sink.currentLevel()
+        if firstFrameOffsetMs == nil, let timing = captureTiming {
+            firstFrameOffsetMs = timing.firstFrameOffsetMs
+        }
         if captureMode.recordsSystemAudio {
             systemLevel = sink.currentSystemLevel()
             if !systemAudioLost, sink.systemLost { systemAudioLost = true }
@@ -391,6 +411,8 @@ final class TapSink: @unchecked Sendable {
     private var interleaver = ChannelInterleaver()
     private var systemLevel: Double = 0
     private var lost = false
+    /// Sprint F1: when the first buffer was written to the file.
+    let firstFrame = FirstFrameClock()
 
     func begin(file: AVAudioFile, converter: AVAudioConverter, inputFormat: AVAudioFormat) {
         lock.lock()
@@ -480,7 +502,7 @@ final class TapSink: @unchecked Sendable {
             return buffer
         }
         guard status != .error, output.frameLength > 0 else { return }
-        try? file.write(from: output)
+        if (try? file.write(from: output)) != nil { firstFrame.mark() }
     }
 
     /// One cycle of both streams. `system == nil` means the call audio did
@@ -513,6 +535,8 @@ final class TapSink: @unchecked Sendable {
               output.format.channelCount == 2
         else { return }
         output.frameLength = AVAudioFrameCount(count)
+        var written = false
+        defer { if written { firstFrame.mark() } }
         if output.format.isInterleaved {
             for i in 0..<count {
                 channels[0][2 * i] = frames.mic[i]
@@ -522,7 +546,7 @@ final class TapSink: @unchecked Sendable {
             frames.mic.withUnsafeBufferPointer { channels[0].update(from: $0.baseAddress!, count: count) }
             frames.system.withUnsafeBufferPointer { channels[1].update(from: $0.baseAddress!, count: count) }
         }
-        try? file.write(from: output)
+        written = (try? file.write(from: output)) != nil
     }
 
     /// RMS of the first channel mapped from roughly -50…0 dBFS to 0…1.

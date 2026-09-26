@@ -35,6 +35,10 @@ export interface SubmitJobParams {
   channelLayout?: ChannelLayout;
   /** The author's name for their own channel's speaker (≤ 400 chars; the server trims). */
   localSpeakerName?: string;
+  /** Sprint F1: when Record was clicked (ISO 8601); omitted for uploaded files. */
+  recordPressedAt?: string;
+  /** Sprint F1: ms from the click to the first frame written (0–600 000). */
+  firstFrameOffsetMs?: number;
 }
 
 export function submitJob(params: SubmitJobParams): Promise<AsrJob> {
@@ -62,6 +66,13 @@ export function submitJob(params: SubmitJobParams): Promise<AsrJob> {
   }
   if (params.localSpeakerName && params.localSpeakerName.trim()) {
     form.append("local_speaker_name", params.localSpeakerName.trim().slice(0, 400));
+  }
+  if (params.recordPressedAt) {
+    form.append("record_pressed_at", params.recordPressedAt);
+  }
+  if (params.firstFrameOffsetMs != null && Number.isFinite(params.firstFrameOffsetMs)) {
+    const offset = Math.min(600_000, Math.max(0, Math.round(params.firstFrameOffsetMs)));
+    form.append("first_frame_offset_ms", String(offset));
   }
   return api<AsrJob>("asr", "/asr/jobs", { method: "POST", form });
 }

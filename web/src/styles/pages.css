@@ -728,6 +728,8 @@ ol.rt-list > li::before {
 .recorder-bar .level-meter.sm { height: 24px; }
 .recorder-bar .stage-pulse.sm { width: 9px; height: 9px; flex: none; }
 .rec-status { font-size: calc(13px * var(--fs)); color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
+/* Sprint F1: "Recording from 0:03" — quiet, beside the clock, in body type. */
+.rec-timer .rec-latency { font-family: var(--sans); font-size: calc(12px * var(--fs)); font-weight: 400; color: var(--text-2); margin: 0; }
 
 .scratchpad { display: flex; flex-direction: column; gap: calc(8px * var(--density)); }
 .scratchpad .title-input { font-size: calc(22px * var(--fs)); }

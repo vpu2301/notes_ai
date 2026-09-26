@@ -34,10 +34,26 @@ struct ActiveCaptureCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 PulsingDot()
-                Text(formatElapsed(capture.recorder.elapsed))
-                    .font(.dsMono(compact ? 15 : 17, .medium))
-                    .foregroundStyle(DS.text1)
-                    .monospacedDigit()
+                // Sprint F1: "Starting…" until audio actually reaches the
+                // file; then the counter, with one quiet line when the
+                // audio began noticeably after the press.
+                VStack(alignment: .leading, spacing: 1) {
+                    if let offset = capture.recorder.firstFrameOffsetMs {
+                        Text(formatElapsed(capture.recorder.elapsed))
+                            .font(.dsMono(compact ? 15 : 17, .medium))
+                            .foregroundStyle(DS.text1)
+                            .monospacedDigit()
+                        if let notice = CaptureTiming.latencyNotice(offsetMs: offset) {
+                            Text(notice)
+                                .font(.dsMeta)
+                                .foregroundStyle(DS.muted)
+                        }
+                    } else {
+                        Text("Starting…")
+                            .font(.dsMono(compact ? 15 : 17, .medium))
+                            .foregroundStyle(DS.muted)
+                    }
+                }
                 if capture.recorder.captureMode.recordsSystemAudio {
                     // Sprint 31: one meter per channel.
                     VStack(alignment: .leading, spacing: 3) {

@@ -356,6 +356,43 @@ engine then falls back to its script heuristic. Turn it off with
 `MDX_ASR_CHUNK_LANGUAGE_ID=false` if a bilingual workspace complains about
 flips; report the chunk count first.
 
+### § coverage (Sprint F1)
+
+**Symptom.** A transcript starts late or has a hole in it; the Transcript
+tab shows "Not transcribed: 00:00–00:44 (…)"; `AsrUncoveredSpeech` fires
+(more than 5 % of the speech VAD heard in an hour has no transcript).
+
+**What the worker measures.** After the echo guard, the processor runs VAD
+on the recording (per channel for a mic/system capture) and checks every
+speech run of ≥ 3 s. A run whose surviving words cover < 50 % of it, whose
+words were > 30 % echo, or that has no words is decoded once more without
+the prompt, without conditioning, beam ≥ 5 (HTTP backends: without the
+prompt only); the attempt with more non-echo words is kept, and a
+second attempt below 0.4 average word probability is never kept. What is
+still uncovered is a gap with a cause, in the artifact's
+`diagnostics.coverage` and on `/result` as `coverage`; the share is on
+the job view as `coverage_share`.
+
+| Cause | Meaning | Where to look |
+|---|---|---|
+| `no_audio` | the client took ≥ 3 s from Record to its first frame; that stretch never reached the file | client capture start (permissions, system-audio tap); the job's `first_frame_offset_ms` |
+| `no_speech_detected` | only the floor pass (lower threshold, per channel) heard it | quiet call audio under a loud microphone; `MD_ASR_VAD_FLOOR_*` |
+| `prompt_echo` | the guard removed the words and the second pass recovered nothing | § prompt-echo |
+| `other_language` | the chunk was labelled another language and still came back empty | § other-language |
+| `decoder_empty` | both decodes produced no words | backend health, model, audio level |
+| `unknown` | anything else (a second pass that errored or timed out) | `asr.second_pass_failed` logs, `mdx_asr_second_pass_total{cause="timeout"}` |
+
+**Knobs.** `MD_ASR_VAD_PAD_MS` (300; every run starts this much earlier),
+`MD_ASR_VAD_FLOOR_ENABLED` / `_THRESHOLD` (0.35) / `_MAX_SPEECH_SHARE`
+(0.2), `MD_ASR_SECOND_PASS_ENABLED`. The inference budget
+(`MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`) covers both passes and was
+raised 1.3× for it; the reaper's running grace moved to 14 h to stay above
+it. With the Silero stub (dev without silero-vad) the whole file is one
+run and coverage is complete by construction (`coverage.vad = "stub"`).
+
+**If it fires.** Break the counter down by cause on the ASR dashboard's
+F1 row; a jump in one cause after a deploy is a regression in that stage.
+
 ## Pre-flight after deployment
 
 - Confirm `mdx_asr_model_loaded == 1` on every replica.

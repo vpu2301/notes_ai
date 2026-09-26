@@ -1111,6 +1111,7 @@ actor APIClient {
                    speakersExpected: Int? = nil,
                    context: CaptureContext? = nil,
                    vocabularyHint: String? = nil,
+                   captureTiming: CaptureTiming? = nil,
                    tenantId: String? = nil) async throws -> TranscriptionJob {
         // The upload is the one request in this app that can be tens of
         // megabytes over a phone connection. Start it with a token that
@@ -1127,7 +1128,8 @@ actor APIClient {
                 boundary: boundary,
                 fields: Self.jobFields(language: language, diarize: diarize,
                                        speakersExpected: speakersExpected, context: context,
-                                       vocabularyHint: vocabularyHint),
+                                       vocabularyHint: vocabularyHint,
+                                       captureTiming: captureTiming),
                 fileField: "audio",
                 fileName: fileURL.lastPathComponent,
                 contentType: contentType,
@@ -1154,7 +1156,8 @@ actor APIClient {
     static func jobFields(language: String, diarize: Bool,
                           speakersExpected: Int?,
                           context: CaptureContext? = nil,
-                          vocabularyHint: String? = nil) -> [(String, String)] {
+                          vocabularyHint: String? = nil,
+                          captureTiming: CaptureTiming? = nil) -> [(String, String)] {
         var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
         if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
         if let context { fields += context.formFields(diarize: diarize) }
@@ -1163,6 +1166,9 @@ actor APIClient {
         if let vocabularyHint, !vocabularyHint.isEmpty {
             fields.append(("vocabulary_hint", String(vocabularyHint.prefix(2000))))
         }
+        // Sprint F1: when Record was pressed and how late the audio began;
+        // both or neither.
+        if let captureTiming { fields += captureTiming.formFields }
         return fields
     }
 

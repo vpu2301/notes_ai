@@ -298,6 +298,8 @@ final class CaptureViewModel: ObservableObject {
             phase = .idle
             return
         }
+        // Sprint F1: read now — the next recording resets it.
+        let timing = recorder.captureTiming
         // Whatever was typed in the last second goes with the meeting.
         Task { await saveNotesNow() }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -307,10 +309,13 @@ final class CaptureViewModel: ObservableObject {
         // The context belongs to this recording; the next one starts manual.
         let context = self.context
         self.context = .manual
-        pipelineTask = Task { await process(fileURL: fileURL, meetingTitle: meetingTitle, context: context) }
+        pipelineTask = Task {
+            await process(fileURL: fileURL, meetingTitle: meetingTitle, context: context, timing: timing)
+        }
     }
 
-    private func process(fileURL: URL, meetingTitle: String, context: CaptureContext) async {
+    private func process(fileURL: URL, meetingTitle: String, context: CaptureContext,
+                         timing: CaptureTiming? = nil) async {
         // The recording is deleted only once the server has it. Every other
         // exit from this function — a failed upload, a lost session, the
         // app being quit mid-pipeline — moves it to `pending/` with a
@@ -326,7 +331,7 @@ final class CaptureViewModel: ObservableObject {
                 try? FileManager.default.removeItem(at: fileURL)
             } else {
                 keep(fileURL, title: meetingTitle, recordedAt: recordedAt, context: context,
-                     channelLayout: channelLayout, localSpeakerName: speakerName)
+                     channelLayout: channelLayout, localSpeakerName: speakerName, timing: timing)
             }
         }
         var jobId: String?
@@ -339,7 +344,8 @@ final class CaptureViewModel: ObservableObject {
                                                   context: context,
                                                   vocabularyHint: vocabularyHint,
                                                   channelLayout: channelLayout,
-                                                  localSpeakerName: speakerName)
+                                                  localSpeakerName: speakerName,
+                                                  captureTiming: timing)
             uploaded = true
             jobId = job.id
             activeJobId = job.id
@@ -415,7 +421,8 @@ final class CaptureViewModel: ObservableObject {
     /// the banner where it went — a file the person is not told about is
     /// only technically not lost.
     private func keep(_ fileURL: URL, title: String, recordedAt: Date, context: CaptureContext,
-                      channelLayout: String?, localSpeakerName: String?) {
+                      channelLayout: String?, localSpeakerName: String?,
+                      timing: CaptureTiming? = nil) {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         var info = PendingCapture.Info(
             title: title,
@@ -428,6 +435,7 @@ final class CaptureViewModel: ObservableObject {
         info.setCaptureContext(context)
         info.channelLayout = channelLayout
         info.localSpeakerName = localSpeakerName
+        info.captureTiming = timing
         let kept = PendingCaptures.keep(fileURL, info: info)
         // The typing is kept whatever happened to the audio.
         persistNow()

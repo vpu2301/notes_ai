@@ -147,11 +147,12 @@ class Settings(BaseSettings):
     # The grace windows are the ONLY interlock: asr-worker publishes no
     # heartbeat. Keep `running` comfortably above the worst case the worker
     # allows itself — max_duration_seconds × the worker's inference
-    # multiplier (2 h × 5 = 10 h at the defaults), plus a redelivery.
+    # multiplier (2 h × 6.5 = 13 h at the defaults since Sprint F1 raised it
+    # for the second pass), plus a redelivery.
     job_reaper_enabled: bool = Field(default=True, alias="MD_ASR_JOB_REAPER_ENABLED")
     job_reaper_interval_s: float = Field(default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S")
     job_reaper_running_grace_s: float = Field(
-        default=11 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
+        default=14 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
     )
     # A job nobody has claimed in this long is not backlogged, it is lost.
     job_reaper_queued_grace_s: float = Field(

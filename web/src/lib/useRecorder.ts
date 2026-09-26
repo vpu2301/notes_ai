@@ -9,6 +9,10 @@ export interface RecordedAudio {
   filename: string;
   /** `mic_system` when the file carries the microphone on L and the tab audio on R; omitted = mono. */
   channelLayout?: ChannelLayout;
+  /** Sprint F1: when Record was clicked (ISO 8601, this browser's clock). */
+  recordPressedAt?: string;
+  /** Sprint F1: ms from the click to the first audio the recorder wrote. */
+  firstFrameOffsetMs?: number;
 }
 
 export interface RecorderOptions {
@@ -62,6 +66,29 @@ async function acquireSystemAudio(): Promise<MediaStream | null> {
   return new MediaStream(audio);
 }
 
+/** The longest offset the server accepts (10 minutes). */
+export const MAX_FIRST_FRAME_OFFSET_MS = 600_000;
+
+/**
+ * Sprint F1: the capture-timing fields of a recording — when Record was
+ * clicked and how long until the recorder wrote its first audio. The two
+ * clocks differ on purpose: the wall clock for the moment, the monotonic
+ * one for the distance. No first frame → no offset (the field is omitted).
+ */
+export function captureTiming(
+  pressedWallMs: number,
+  pressedPerfMs: number,
+  firstFramePerfMs: number | null,
+): { recordPressedAt: string; firstFrameOffsetMs?: number } {
+  const recordPressedAt = new Date(pressedWallMs).toISOString();
+  if (firstFramePerfMs == null) return { recordPressedAt };
+  const offset = Math.round(firstFramePerfMs - pressedPerfMs);
+  return {
+    recordPressedAt,
+    firstFrameOffsetMs: Math.min(MAX_FIRST_FRAME_OFFSET_MS, Math.max(0, offset)),
+  };
+}
+
 /** Microphone recorder with a rolling level strip and an elapsed timer. */
 export function useRecorder(
   onDone: (audio: RecordedAudio) => void,
@@ -70,6 +97,8 @@ export function useRecorder(
 ) {
   const [recording, setRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  // Sprint F1: null until the recorder has written its first audio.
+  const [firstFrameOffsetMs, setFirstFrameOffsetMs] = useState<number | null>(null);
   const [levels, setLevels] = useState<number[]>(() => Array(LEVEL_BARS).fill(0));
 
   const recorder = useRef<MediaRecorder | null>(null);
@@ -98,6 +127,18 @@ export function useRecorder(
   useEffect(() => cleanup, [cleanup]);
 
   const start = useCallback(async () => {
+    // Sprint F1: the click, before permission prompts, the tab picker and
+    // the audio graph — everything between here and the first frame is
+    // speech the recording cannot hold.
+    const pressedWall = Date.now();
+    const pressedPerf = performance.now();
+    let firstFramePerf: number | null = null;
+    const firstFrame = () => {
+      if (firstFramePerf !== null) return;
+      firstFramePerf = performance.now();
+      setFirstFrameOffsetMs(captureTiming(pressedWall, pressedPerf, firstFramePerf).firstFrameOffsetMs ?? 0);
+    };
+    setFirstFrameOffsetMs(null);
     try {
       const media = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.current = media;
@@ -152,8 +193,15 @@ export function useRecorder(
       const mimeType = pickMimeType();
       const rec = new MediaRecorder(recorded, mimeType ? { mimeType } : undefined);
       const chunks: BlobPart[] = [];
+      // The first frame is when the recorder starts writing: `start` fires
+      // then. The first non-empty chunk only arrives a timeslice later, so
+      // it is the fallback, not the measure.
+      rec.onstart = firstFrame;
       rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
+        if (e.data.size > 0) {
+          firstFrame();
+          chunks.push(e.data);
+        }
       };
       rec.onstop = () => {
         const type = rec.mimeType || "audio/webm";
@@ -169,6 +217,7 @@ export function useRecorder(
           blob,
           filename: `meeting-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.${ext}`,
           channelLayout: layout,
+          ...captureTiming(pressedWall, pressedPerf, firstFramePerf),
         });
       };
       recorder.current = rec;
@@ -192,5 +241,5 @@ export function useRecorder(
     recorder.current?.stop();
   }, []);
 
-  return { recording, elapsedMs, levels, start, stop };
+  return { recording, elapsedMs, firstFrameOffsetMs, levels, start, stop };
 }

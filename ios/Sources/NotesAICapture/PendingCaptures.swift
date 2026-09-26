@@ -42,6 +42,12 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         var speakersMax: Int? = nil
         var nameCandidates: [String]? = nil
         var captureSource: String? = nil
+        /// Sprint F1 — when Record was pressed and how many milliseconds
+        /// passed before audio reached the file, so a later upload still
+        /// says when the recording really began. Absent from older
+        /// sidecars, which upload without them.
+        var recordPressedAt: Date? = nil
+        var firstFrameOffsetMs: Int? = nil
 
         enum CodingKeys: String, CodingKey {
             case title, language, diarize
@@ -52,6 +58,20 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
             case speakersMax = "speakers_max"
             case nameCandidates = "name_candidates"
             case captureSource = "capture_source"
+            case recordPressedAt = "record_pressed_at"
+            case firstFrameOffsetMs = "first_frame_offset_ms"
+        }
+
+        /// The timing a retry sends: both halves, or nothing.
+        var captureTiming: CaptureTiming? {
+            get {
+                guard let recordPressedAt, let firstFrameOffsetMs else { return nil }
+                return CaptureTiming(recordPressedAt: recordPressedAt, firstFrameOffsetMs: firstFrameOffsetMs)
+            }
+            set {
+                recordPressedAt = newValue?.recordPressedAt
+                firstFrameOffsetMs = newValue?.firstFrameOffsetMs
+            }
         }
 
         /// The context the upload carries; nil for a sidecar that has none.

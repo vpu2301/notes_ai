@@ -34,8 +34,21 @@ from asr_models import (
 )
 from models import TranscriptionCancelledError as _SeamCancelled
 
+from . import vad as _vad
 from .config import settings
-from .vad import SpeechSegment, detect_speech
+from .vad import SpeechSegment
+
+
+def detect_speech(audio_pcm: np.ndarray) -> list[SpeechSegment]:
+    """The engine's VAD (Sprint F1): the ordinary pass, the leading pad and,
+    when decision 4's condition holds, the floor pass on the mixdown."""
+    return _vad.speech_runs(
+        audio_pcm,
+        pad_ms=settings.asr_vad_pad_ms,
+        floor=settings.asr_vad_floor_enabled,
+        floor_threshold=settings.asr_vad_floor_threshold,
+        floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
+    ).runs
 
 
 class TranscriptionCancelledError(_SeamCancelled):
@@ -214,8 +227,14 @@ class WhisperEngine:
         language: str,
         prompt: str | None,
         should_cancel: Callable[[], Awaitable[bool]] | None = None,
+        second_pass: bool = False,
     ) -> TranscriptionOutput:
         """Run VAD + Whisper on the full audio.
+
+        ``second_pass`` (Sprint F1, decision 3): ``audio_pcm`` is one speech
+        run the first decode lost. It is decoded whole — no VAD, no language
+        identification (``language`` is the recording's) — with no prompt,
+        no conditioning and a beam of at least 5.
 
         ``audio_pcm`` is mono 16 kHz float32 in [-1, 1].
         Offloads the (blocking) Whisper call to a thread so the asyncio
@@ -229,6 +248,8 @@ class WhisperEngine:
         if not self._loaded:
             raise RuntimeError("WhisperEngine.load() must be called before transcribe()")
         t_start = time.monotonic()
+        if second_pass:
+            return await self._second_pass(audio_pcm, language=language, t_start=t_start)
         speech = detect_speech(audio_pcm)
         vad_seconds_speech = sum((s.end_ms - s.start_ms) / 1000.0 for s in speech)
 
@@ -325,6 +346,32 @@ class WhisperEngine:
             segments=segments_out,
             metadata=meta,
             diagnostics=Diagnostics(other_language_chunks=other_language_chunks),
+        )
+
+    async def _second_pass(
+        self, pcm: np.ndarray, *, language: str, t_start: float
+    ) -> TranscriptionOutput:
+        if language == AUTO_LANGUAGE:
+            language = _LANGUAGE_ID_FALLBACK
+        loop = asyncio.get_running_loop()
+        segs: list[Segment] = []
+        if pcm.size:
+            segs = await loop.run_in_executor(
+                None, lambda: self._run_chunk(pcm, language, None, 0, second_pass=True)
+            )
+        infer_seconds = time.monotonic() - t_start
+        beam = max(5, settings.asr_beam_size)
+        return TranscriptionOutput(
+            language=language,
+            segments=segs,
+            metadata=TranscriptionMetadata(
+                model=settings.asr_model,
+                vad_seconds_speech=len(pcm) / 16_000,
+                infer_seconds=infer_seconds,
+                gpu_seconds=infer_seconds if settings.asr_device == "cuda" else 0.0,
+                peak_gpu_mem_mb=_peak_gpu_mem_mb(),
+                beam_size=beam,
+            ),
         )
 
     def _detect_chunk_language(self, pcm: np.ndarray) -> LanguageGuess:
@@ -475,17 +522,25 @@ class WhisperEngine:
         language: str,
         prompt: str | None,
         offset_ms: int,
+        *,
+        second_pass: bool = False,
     ) -> list[Segment]:
         assert self._model is not None
+        if second_pass:
+            options: dict[str, Any] = {"initial_prompt": None, "condition_on_previous_text": False}
+            beam = max(5, settings.asr_beam_size)
+        else:
+            options = chunk_decode_options(prompt)
+            beam = settings.asr_beam_size
         result_segs, _info = self._model.transcribe(
             chunk,
             language=language,
             word_timestamps=True,
-            beam_size=settings.asr_beam_size,
+            beam_size=beam,
             # `task` is never "translate": a passage in another language is
             # decoded in that language (Sprint I2 T4), not rendered in this one.
             task="transcribe",
-            **chunk_decode_options(prompt),
+            **options,
         )
         out: list[Segment] = []
         for seg in result_segs:

@@ -119,6 +119,7 @@ final class PendingUploads: ObservableObject {
                 context: capture.info.captureContext,
                 channelLayout: layout,
                 localSpeakerName: speakerName,
+                captureTiming: capture.info.captureTiming,
                 tenant: tenantId)
             // The server has the audio now — and only now is the local copy
             // redundant.

@@ -74,6 +74,10 @@ class JobEnqueuePayload(BaseModel):
     # worker first anyway). The local name is content: never logged.
     channel_layout: Literal["mono", "mic_system"] = "mono"
     local_speaker_name: str | None = Field(default=None, max_length=80)
+    # Sprint F1: ms between the Record press and the first frame the client
+    # wrote. A leading stretch that long never reached the file; the worker
+    # reports it as a ``no_audio`` gap. None from older clients.
+    first_frame_offset_ms: int | None = Field(default=None, ge=0, le=600_000)
     requester_sub: UUID
     schema_version: int = 1
 
@@ -107,6 +111,11 @@ class TranscriptionJobView(BaseModel):
     # (migration 0061). Tenant data; None for older jobs and jobs sent
     # without one. Served to the job's own tenant only.
     vocabulary_hint: str | None = None
+    # Sprint F1 (migration 0063): capture timing the client reported, and
+    # the share of speech the transcript covers (None before F1 / running).
+    record_pressed_at: datetime | None = None
+    first_frame_offset_ms: int | None = None
+    coverage_share: float | None = None
 
     result_url: str | None = None  # populated only when status == complete
     queued_at: datetime

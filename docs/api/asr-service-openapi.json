@@ -51,6 +51,18 @@
             "title": "Diarize",
             "type": "boolean"
           },
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
           "language": {
             "pattern": "^(auto|uk|en)$",
             "title": "Language",
@@ -79,6 +91,18 @@
               }
             ],
             "title": "Name Candidates"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
           },
           "speakers_expected": {
             "anyOf": [
@@ -126,6 +150,37 @@
         "title": "Body_submit_job_asr_jobs_post",
         "type": "object"
       },
+      "CaptureTimingView": {
+        "description": "When the person pressed Record and how long the first audio frame\ntook (Sprint F1). Client wall clock; both None for older clients.",
+        "properties": {
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
+          }
+        },
+        "title": "CaptureTimingView",
+        "type": "object"
+      },
       "ConfidenceSpanView": {
         "description": "A character range in an enriched segment's ``text`` flagged by the\nNLP confidence stage (low word-probability regions, risky numbers,\n\u2026).",
         "properties": {
@@ -152,9 +207,180 @@
         "title": "ConfidenceSpanView",
         "type": "object"
       },
+      "Coverage": {
+        "description": "How much of the speech the transcript covers (Sprint F1, decision 1).\n\n``speech_ms`` is what voice activity detection heard; ``transcribed_ms``\nis ``speech_ms`` minus every gap inside the file. A gap is a speech run\nof at least 3 s that no surviving word covers for half its length. The\n``no_audio`` gap (capture latency) is reported but lies outside the file\nand therefore outside both totals. Offsets and counts only, never text.",
+        "properties": {
+          "first_segment_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Segment Ms"
+          },
+          "first_speech_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Speech Ms"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageGap"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "speech_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "transcribed_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Transcribed Ms",
+            "type": "integer"
+          },
+          "vad": {
+            "default": "silero",
+            "enum": [
+              "silero",
+              "stub"
+            ],
+            "title": "Vad",
+            "type": "string"
+          }
+        },
+        "title": "Coverage",
+        "type": "object"
+      },
+      "CoverageGap": {
+        "description": "A stretch of speech the transcript does not cover (Sprint F1).",
+        "properties": {
+          "cause": {
+            "enum": [
+              "no_audio",
+              "no_speech_detected",
+              "decoder_empty",
+              "prompt_echo",
+              "other_language",
+              "unknown"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "cause"
+        ],
+        "title": "CoverageGap",
+        "type": "object"
+      },
+      "CoverageView": {
+        "description": "``Coverage`` as served on ``/result``, with the share spelled out.",
+        "properties": {
+          "first_segment_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Segment Ms"
+          },
+          "first_speech_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Speech Ms"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageGap"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "type": "number"
+          },
+          "speech_ms": {
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "transcribed_ms": {
+            "minimum": 0.0,
+            "title": "Transcribed Ms",
+            "type": "integer"
+          },
+          "vad": {
+            "default": "silero",
+            "enum": [
+              "silero",
+              "stub"
+            ],
+            "title": "Vad",
+            "type": "string"
+          }
+        },
+        "required": [
+          "speech_ms",
+          "transcribed_ms",
+          "share"
+        ],
+        "title": "CoverageView",
+        "type": "object"
+      },
       "Diagnostics": {
         "description": "What the guards did to this transcript. Counts and timestamps only;\nlives in the stored artifact, not in a table.",
         "properties": {
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "other_language_chunks": {
             "default": 0,
             "minimum": 0.0,
@@ -173,6 +399,9 @@
             "minimum": 0.0,
             "title": "Prompt Echo Segments Dropped",
             "type": "integer"
+          },
+          "second_pass": {
+            "$ref": "#/components/schemas/SecondPass"
           }
         },
         "title": "Diagnostics",
@@ -678,6 +907,32 @@
         "title": "RediarizeStatusView",
         "type": "object"
       },
+      "SecondPass": {
+        "description": "Chunks decoded a second time, without the prompt (Sprint F1,\ndecision 3): how many, how many words the second attempt brought back,\nand why each ran (``low_coverage`` | ``prompt_echo`` | ``decoder_empty``\n| ``timeout``).",
+        "properties": {
+          "by_cause": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Cause",
+            "type": "object"
+          },
+          "chunks": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "recovered_words": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Recovered Words",
+            "type": "integer"
+          }
+        },
+        "title": "SecondPass",
+        "type": "object"
+      },
       "SpeakerEditResult": {
         "properties": {
           "created_label": {
@@ -931,6 +1186,16 @@
       "TranscriptResultView": {
         "description": "Plaintext transcript response for a COMPLETE job (proxy-decrypt).\n\nThe stored artifact stays :class:`TranscriptionOutput` (raw ASR);\nNLP enrichment is applied at read time and degrades gracefully \u2014\n``nlp_applied=False`` means the segments are the raw transcript.",
         "properties": {
+          "capture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureTimingView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "count_confidence": {
             "anyOf": [
               {
@@ -945,6 +1210,16 @@
               }
             ],
             "title": "Count Confidence"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CoverageView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "diagnostics": {
             "$ref": "#/components/schemas/Diagnostics"
@@ -1218,6 +1493,17 @@
             "title": "Cancel Requested",
             "type": "boolean"
           },
+          "coverage_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Share"
+          },
           "detected_language": {
             "anyOf": [
               {
@@ -1345,6 +1631,17 @@
             ],
             "title": "Finished At"
           },
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
           "hints_applied": {
             "anyOf": [
               {
@@ -1373,6 +1670,18 @@
             "format": "date-time",
             "title": "Queued At",
             "type": "string"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
           },
           "requester_sub": {
             "format": "uuid",
@@ -1451,6 +1760,19 @@
             "minimum": 1.0,
             "title": "Beam Size",
             "type": "integer"
+          },
+          "coverage_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Share"
           },
           "diarization": {
             "anyOf": [

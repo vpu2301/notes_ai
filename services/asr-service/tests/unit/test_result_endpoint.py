@@ -689,7 +689,11 @@ def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
         "prompt_echo": [{"start_ms": 0, "end_ms": 900, "words": 3}],
         "prompt_echo_segments_dropped": 0,
         "other_language_chunks": 1,
+        # Sprint F1 fields; an artifact from before F1 carries no coverage.
+        "coverage": None,
+        "second_pass": {"chunks": 0, "recovered_words": 0, "by_cause": {}},
     }
+    assert body["coverage"] is None and body["capture"] is None
 
 
 # ── Sprint I3 T2: the view says how much the post-processor shaped it ──

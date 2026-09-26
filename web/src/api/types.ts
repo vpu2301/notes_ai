@@ -916,6 +916,8 @@ export interface AsrJob {
   can_undo_rediarize?: boolean;
   /** Submit response only: the speaker-count hint was used (true), ignored (false), or not sent (null). */
   hints_applied?: boolean | null;
+  /** Sprint F1: transcribed share of the speech (support view); null before F1. */
+  coverage_share?: number | null;
 }
 
 export type DiarizationStatus = "queued" | "running" | "complete" | "failed";
@@ -1047,6 +1049,44 @@ export interface TranscriptResult {
    * were in another language than the recording. Absent on older results.
    */
   diagnostics?: TranscriptDiagnostics;
+  /**
+   * Sprint F1: how much of the speech the transcript holds, and the gaps
+   * with their cause. Absent/null on results stored before it existed.
+   */
+  coverage?: TranscriptCoverage | null;
+  /** Sprint F1: when Record was pressed and how long until audio flowed. */
+  capture?: CaptureTiming | null;
+}
+
+export type CoverageGapCause =
+  | "no_audio"
+  | "no_speech_detected"
+  | "decoder_empty"
+  | "prompt_echo"
+  | "other_language"
+  | "unknown";
+
+export interface CoverageGap {
+  /** For `no_audio`: 0 → the offset, the time BEFORE the file began (not seekable). */
+  start_ms: number;
+  end_ms: number;
+  cause: CoverageGapCause;
+}
+
+export interface TranscriptCoverage {
+  speech_ms: number;
+  transcribed_ms: number;
+  first_speech_ms: number | null;
+  first_segment_ms: number | null;
+  /** transcribed_ms / speech_ms, 0..1. */
+  share: number;
+  vad: "silero" | "stub";
+  gaps: CoverageGap[];
+}
+
+export interface CaptureTiming {
+  record_pressed_at: string | null;
+  first_frame_offset_ms: number | null;
 }
 
 export interface PromptEcho {

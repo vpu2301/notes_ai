@@ -139,7 +139,7 @@ terminal row:
 The grace windows are the reaper's **only** interlock — asr-worker
 publishes no heartbeat. Keep the running window comfortably above the
 worst case the worker allows itself (`MD_ASR_MAX_DURATION_SECONDS` ×
-`MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`, ≈ 2.5 h at the defaults) plus
+`MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`, 2 h × 6.5 = 13 h at the defaults; the running grace is 14 h) plus
 a redelivery. Reaping early is not catastrophic — the worker's idempotency
 check sees the terminal row on redelivery and skips — but it costs the
 user a transcript that was on its way.

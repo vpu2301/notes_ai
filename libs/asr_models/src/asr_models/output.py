@@ -67,6 +67,62 @@ class EchoSpan(BaseModel):
     words: NonNegativeInt
 
 
+# Sprint F1: why a stretch of speech has no transcript. ``no_audio`` is the
+# time between the Record press and the first frame the client wrote — it
+# precedes the file, so its range is in Record-press time and not seekable.
+GapCause = Literal[
+    "no_audio",
+    "no_speech_detected",
+    "decoder_empty",
+    "prompt_echo",
+    "other_language",
+    "unknown",
+]
+
+
+class CoverageGap(BaseModel):
+    """A stretch of speech the transcript does not cover (Sprint F1)."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    cause: GapCause
+
+
+class Coverage(BaseModel):
+    """How much of the speech the transcript covers (Sprint F1, decision 1).
+
+    ``speech_ms`` is what voice activity detection heard; ``transcribed_ms``
+    is ``speech_ms`` minus every gap inside the file. A gap is a speech run
+    of at least 3 s that no surviving word covers for half its length. The
+    ``no_audio`` gap (capture latency) is reported but lies outside the file
+    and therefore outside both totals. Offsets and counts only, never text.
+    """
+
+    speech_ms: NonNegativeInt = 0
+    transcribed_ms: NonNegativeInt = 0
+    first_speech_ms: NonNegativeInt | None = None
+    first_segment_ms: NonNegativeInt | None = None
+    gaps: list[CoverageGap] = Field(default_factory=list)
+    # "stub" = Silero was not installed (dev CPU fallback): the whole file is
+    # one speech run, so coverage is complete by construction.
+    vad: Literal["silero", "stub"] = "silero"
+
+    @property
+    def share(self) -> float:
+        return 1.0 if self.speech_ms == 0 else min(1.0, self.transcribed_ms / self.speech_ms)
+
+
+class SecondPass(BaseModel):
+    """Chunks decoded a second time, without the prompt (Sprint F1,
+    decision 3): how many, how many words the second attempt brought back,
+    and why each ran (``low_coverage`` | ``prompt_echo`` | ``decoder_empty``
+    | ``timeout``)."""
+
+    chunks: NonNegativeInt = 0
+    recovered_words: NonNegativeInt = 0
+    by_cause: dict[str, int] = Field(default_factory=dict)
+
+
 class Diagnostics(BaseModel):
     """What the guards did to this transcript. Counts and timestamps only;
     lives in the stored artifact, not in a table."""
@@ -74,6 +130,9 @@ class Diagnostics(BaseModel):
     prompt_echo: list[EchoSpan] = Field(default_factory=list)
     prompt_echo_segments_dropped: NonNegativeInt = 0
     other_language_chunks: NonNegativeInt = 0
+    # Sprint F1. None on artifacts stored before coverage was measured.
+    coverage: Coverage | None = None
+    second_pass: SecondPass = Field(default_factory=SecondPass)
 
 
 class DiarizationStats(BaseModel):
@@ -118,6 +177,10 @@ class TranscriptionMetadata(BaseModel):
     beam_size: int = Field(ge=1)
     # None for undiarized jobs and for transcripts stored before Sprint 28.
     diarization: DiarizationStats | None = None
+    # Sprint F1: ``diagnostics.coverage.share``, copied here because the
+    # metadata is also written to the job row — support reads it off the
+    # job view without decrypting the transcript. None before F1.
+    coverage_share: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class TranscriptionOutput(BaseModel):
@@ -260,6 +323,30 @@ class NameSuggestionView(BaseModel):
     segment_indices: list[int] = Field(default_factory=list)
 
 
+class CoverageView(BaseModel):
+    """``Coverage`` as served on ``/result``, with the share spelled out."""
+
+    speech_ms: NonNegativeInt
+    transcribed_ms: NonNegativeInt
+    first_speech_ms: NonNegativeInt | None = None
+    first_segment_ms: NonNegativeInt | None = None
+    share: float = Field(ge=0.0, le=1.0)
+    gaps: list[CoverageGap] = Field(default_factory=list)
+    vad: Literal["silero", "stub"] = "silero"
+
+    @classmethod
+    def of(cls, coverage: Coverage) -> CoverageView:
+        return cls(**coverage.model_dump(), share=round(coverage.share, 4))
+
+
+class CaptureTimingView(BaseModel):
+    """When the person pressed Record and how long the first audio frame
+    took (Sprint F1). Client wall clock; both None for older clients."""
+
+    record_pressed_at: datetime | None = None
+    first_frame_offset_ms: NonNegativeInt | None = None
+
+
 class TranscriptResultView(BaseModel):
     """Plaintext transcript response for a COMPLETE job (proxy-decrypt).
 
@@ -319,4 +406,9 @@ class TranscriptResultView(BaseModel):
     enrichment: Literal["full", "partial", "raw"] = "raw"
     # Sprint I2: what the guards removed or labelled (timestamps and counts).
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
+    # Sprint F1: how much of the speech is transcribed, and every gap with
+    # its cause (None on transcripts stored before coverage was measured);
+    # and the capture timing the client reported at upload.
+    coverage: CoverageView | None = None
+    capture: CaptureTimingView | None = None
     schema_version: int = 1

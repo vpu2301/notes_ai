@@ -730,6 +730,7 @@ final class AppState: ObservableObject {
                 diarize: capture.info.diarize,
                 speakersExpected: capture.info.speakersExpected,
                 context: capture.info.captureContext,
+                captureTiming: capture.info.captureTiming,
                 tenantId: capture.info.tenantId)
             // On the server now: the file may go.
             PendingCaptures.delete(capture)

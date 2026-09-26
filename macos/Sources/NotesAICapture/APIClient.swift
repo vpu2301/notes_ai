@@ -1106,6 +1106,7 @@ actor APIClient {
                    vocabularyHint: String? = nil,
                    channelLayout: String? = nil,
                    localSpeakerName: String? = nil,
+                   captureTiming: CaptureTiming? = nil,
                    tenant: String? = nil) async throws -> TranscriptionJob {
         let audioData = try Data(contentsOf: fileURL)
         func post(_ context: CaptureContext?, channelLayout: String? = channelLayout) async throws -> TranscriptionJob {
@@ -1116,7 +1117,8 @@ actor APIClient {
                                        speakersExpected: speakersExpected, context: context,
                                        vocabularyHint: vocabularyHint,
                                        channelLayout: channelLayout,
-                                       localSpeakerName: localSpeakerName),
+                                       localSpeakerName: localSpeakerName,
+                                       captureTiming: captureTiming),
                 fileField: "audio",
                 fileName: fileURL.lastPathComponent,
                 contentType: contentType,
@@ -1158,7 +1160,8 @@ actor APIClient {
                           context: CaptureContext? = nil,
                           vocabularyHint: String? = nil,
                           channelLayout: String? = nil,
-                          localSpeakerName: String? = nil) -> [(String, String)] {
+                          localSpeakerName: String? = nil,
+                          captureTiming: CaptureTiming? = nil) -> [(String, String)] {
         var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
         if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
         if let context { fields += context.formFields(diarize: diarize) }
@@ -1169,6 +1172,9 @@ actor APIClient {
         }
         if let channelLayout { fields.append(("channel_layout", channelLayout)) }
         if let name = LocalSpeakerName.normalized(localSpeakerName) { fields.append(("local_speaker_name", name)) }
+        // Sprint F1: when Record was pressed and how late the audio began;
+        // both or neither.
+        if let captureTiming { fields += captureTiming.formFields }
         return fields
     }
 

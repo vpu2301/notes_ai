@@ -60,6 +60,27 @@ class Settings(BaseSettings):
     # engine only; HTTP backends cannot do it.
     asr_chunk_language_id: bool = Field(default=True, alias="MDX_ASR_CHUNK_LANGUAGE_ID")
 
+    # ── Coverage (Sprint F1) ────────────────────────────────────────────
+    # Decision 5: every VAD speech run starts this much earlier (clamped to
+    # the previous run's end) — Silero's onset is late on plosive-initial
+    # words and Whisper drops a clipped first word. 0 = off.
+    asr_vad_pad_ms: int = Field(default=300, ge=0, le=2000, alias="MD_ASR_VAD_PAD_MS")
+    # Decision 4: a recording in which VAD hears speech in less than
+    # MAX_SPEECH_SHARE of the file while the rest is louder than -45 dBFS is
+    # run through VAD again at a lower threshold (per channel for a
+    # mic/system file) and the union of runs is used — quiet call audio
+    # under a loud microphone.
+    asr_vad_floor_enabled: bool = Field(default=True, alias="MD_ASR_VAD_FLOOR_ENABLED")
+    asr_vad_floor_threshold: float = Field(
+        default=0.35, gt=0.0, lt=1.0, alias="MD_ASR_VAD_FLOOR_THRESHOLD"
+    )
+    asr_vad_floor_max_speech_share: float = Field(
+        default=0.2, ge=0.0, le=1.0, alias="MD_ASR_VAD_FLOOR_MAX_SPEECH_SHARE"
+    )
+    # Decision 3: a speech run the first decode left empty, mostly
+    # uncovered, or mostly echo is decoded once more without the prompt.
+    asr_second_pass_enabled: bool = Field(default=True, alias="MD_ASR_SECOND_PASS_ENABLED")
+
     # ── Streaming-window hallucination guard ────────────────────────────
     # A streaming window is a fixed-length slice, so it regularly contains
     # only silence or a breath between utterances. Whisper does not return
@@ -100,8 +121,10 @@ class Settings(BaseSettings):
     )
     asr_model_revision: str = Field(default="", alias="MD_ASR_MODEL_REVISION")
     asr_model_sha256: str = Field(default="", alias="MD_ASR_MODEL_SHA256")
+    # Sprint F1: raised 1.3× (5.0 → 6.5) — the budget now covers the
+    # second pass on chunks that failed the first.
     asr_max_inference_seconds_multiplier: float = Field(
-        default=5.0, alias="MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER"
+        default=6.5, alias="MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER"
     )
     asr_jobs_before_recycle: int = Field(default=100, alias="MD_ASR_JOBS_BEFORE_RECYCLE")
 

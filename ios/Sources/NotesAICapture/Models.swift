@@ -1338,9 +1338,15 @@ struct TranscriptResult: Decodable, Sendable {
     /// Sprint 32: labelled by an older engine and the audio is still there,
     /// so a re-label is worth offering. Absent from older servers.
     var relabelAvailable: Bool? = nil
+    /// Sprint F1: how much of the speech made it into the transcript, and
+    /// the stretches that did not. Absent from older servers and results.
+    var coverage: TranscriptCoverage? = nil
+    /// Sprint F1: the capture timing the recording app sent.
+    var capture: CaptureInfo? = nil
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
+        case coverage, capture
         case nameSuggestions = "name_suggestions"
         case relabelAvailable = "relabel_available"
         case segments, speakers, turns, edits

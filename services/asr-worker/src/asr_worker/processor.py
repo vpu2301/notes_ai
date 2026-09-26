@@ -64,6 +64,7 @@ from asr_models import (
     DiarizationStats,
     JobEnqueuePayload,
     JobErrorKind,
+    SecondPass,
     Segment,
     TranscriptionOutput,
     spec_for,
@@ -84,7 +85,8 @@ from messaging import Message, RedisStreamsConsumer
 from models import ProviderError, TranscriptionCancelledError
 from storage import ObjectNotFoundError
 
-from . import audit_kinds
+from . import audit_kinds, vad
+from . import coverage as cov
 from .audio_io import AudioDecodeError, decode_to_pcm, mixdown
 from .config import settings
 from .echo import guard_segments
@@ -179,6 +181,28 @@ _prompt_echo_segments_dropped = _meter.create_counter(
     "mdx_asr_prompt_echo_segments_dropped_total",
     description="Segments left empty by the prompt-echo guard and dropped (Sprint I2 T3)",
     unit="1",
+)
+# Sprint F1: coverage of speech by the transcript.
+_uncovered_speech_ms = _meter.create_counter(
+    "mdx_asr_uncovered_speech_ms_total",
+    description="Speech with no transcript, by gap cause (Sprint F1)",
+    unit="1",
+)
+_speech_ms = _meter.create_counter(
+    "mdx_asr_speech_ms_total",
+    description="Speech heard by VAD in completed jobs; the uncovered share's denominator (Sprint F1)",
+    unit="1",
+)
+_second_pass_total = _meter.create_counter(
+    "mdx_asr_second_pass_total",
+    description="Speech runs decoded a second time without the prompt, by cause and outcome (Sprint F1)",
+    unit="1",
+)
+_coverage_share = _meter.create_histogram(
+    "mdx_asr_coverage_share",
+    description="Share of a job's speech the transcript covers (Sprint F1)",
+    unit="1",
+    explicit_bucket_boundaries_advisory=[0.5, 0.8, 0.9, 0.95, 0.98, 0.99, 1.0],
 )
 _rediarize_total = _meter.create_counter(
     "mdx_asr_rediarize_total",
@@ -469,6 +493,9 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             60.0,
             audio_seconds * settings.asr_max_inference_seconds_multiplier,
         )
+        # One budget for both passes (Sprint F1 raised the multiplier 1.3×).
+        deadline = time.monotonic() + max_infer
+        should_cancel = _cancel_poller(state, tenant_id, job_id)
         try:
             output: TranscriptionOutput = await asyncio.wait_for(
                 state.engine.transcribe(
@@ -482,7 +509,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                     # looked again after inference started, so pressing Cancel
                     # on a job that was already transcribing did nothing at
                     # all — the job ran to completion and came back `complete`.
-                    should_cancel=_cancel_poller(state, tenant_id, job_id),
+                    should_cancel=should_cancel,
                 ),
                 timeout=max_infer,
             )
@@ -514,6 +541,25 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         # whatever backend decoded them. A transcript that was nothing but
         # the prompt is then an empty one and files as `no_speech` below.
         output = _guarded(output, payload.vocabulary_hint, job_id=job_id)
+
+        # Sprint F1: what the transcript covers of the speech; runs the first
+        # decode lost are decoded again without the prompt. Before the empty
+        # check: a recording whose every word was echo can still be rescued.
+        try:
+            output = await _covered(
+                state,
+                output,
+                pcm=pcm,
+                stereo=stereo,
+                prompt=payload.vocabulary_hint,
+                first_frame_offset_ms=payload.first_frame_offset_ms,
+                deadline=deadline,
+                should_cancel=should_cancel,
+                job_id=job_id,
+            )
+        except TranscriptionCancelledError:
+            await _mark_cancelled(state, tenant_id, job_id)
+            return
 
         # Inference ran and produced nothing. Same reasoning as the empty-PCM
         # gate above, one stage later: a zero-segment transcript stored as
@@ -749,6 +795,148 @@ def _guarded(
         }
     )
     return output.model_copy(update={"segments": segments, "diagnostics": diagnostics})
+
+
+async def _covered(
+    state: WorkerState,
+    output: TranscriptionOutput,
+    *,
+    pcm: np.ndarray,
+    stereo: np.ndarray | None,
+    prompt: str | None,
+    first_frame_offset_ms: int | None,
+    deadline: float,
+    should_cancel: Any,
+    job_id: UUID,
+) -> TranscriptionOutput:
+    """Sprint F1 decisions 1, 3 and 4: measure how much of the speech the
+    transcript covers, decode the runs the first pass lost once more without
+    the prompt, and name the cause of every gap that remains.
+
+    Never fails the job: a VAD error leaves the transcript as it was, with
+    no coverage recorded. Cancellation propagates."""
+    try:
+        heard = await asyncio.to_thread(
+            vad.speech_runs,
+            pcm,
+            stereo=stereo,
+            floor=settings.asr_vad_floor_enabled,
+            floor_threshold=settings.asr_vad_floor_threshold,
+            floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
+        )
+    except Exception as exc:  # noqa: BLE001 — diagnostics must not cost the transcript
+        logger.warning(
+            "asr.coverage_vad_failed",
+            extra={"job_id": str(job_id), "error_class": type(exc).__name__},
+        )
+        return output
+    runs = heard.runs
+    segments = list(output.segments)
+    spans = list(output.diagnostics.prompt_echo)
+    outcomes: dict[tuple[int, int], cov.RunOutcome] = {}
+    by_cause: dict[str, int] = {}
+    chunks = 0
+    recovered = 0
+    timed_out = False
+    prev_end = 0
+    second_pass_on = settings.asr_second_pass_enabled and not heard.stub
+    for run in runs:
+        outcome = cov.RunOutcome(
+            run=run,
+            echo_removed=cov.echo_words_in(run, spans) > 0,
+            other_language=cov.run_language(run, segments) is not None,
+        )
+        outcomes[(run.start_ms, run.end_ms)] = outcome
+        slice_start = max(run.start_ms - settings.asr_vad_pad_ms, prev_end, 0)
+        prev_end = run.end_ms
+        cause = cov.second_pass_cause(run, segments, spans) if second_pass_on else None
+        if cause is None:
+            continue
+        remaining = deadline - time.monotonic()
+        if timed_out or remaining <= 1.0:
+            timed_out = True
+            by_cause[cov.TIMEOUT_CAUSE] = by_cause.get(cov.TIMEOUT_CAUSE, 0) + 1
+            _second_pass_total.add(1, {"cause": cov.TIMEOUT_CAUSE, "outcome": "empty"})
+            continue
+        language = cov.run_language(run, segments) or output.language
+        chunk = pcm[int(slice_start * 16) : int(run.end_ms * 16)]
+        try:
+            second = await asyncio.wait_for(
+                state.engine.transcribe(
+                    chunk,
+                    language=language,
+                    prompt=None,
+                    should_cancel=should_cancel,
+                    second_pass=True,
+                ),
+                timeout=remaining,
+            )
+        except TimeoutError:
+            timed_out = True
+            by_cause[cov.TIMEOUT_CAUSE] = by_cause.get(cov.TIMEOUT_CAUSE, 0) + 1
+            _second_pass_total.add(1, {"cause": cov.TIMEOUT_CAUSE, "outcome": "empty"})
+            continue
+        except ProviderError as exc:
+            # The first attempt stands; the gap's cause stays unknown.
+            logger.warning(
+                "asr.second_pass_failed",
+                extra={"job_id": str(job_id), "start_ms": run.start_ms, "kind": str(exc.kind)},
+            )
+            _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
+            continue
+        chunks += 1
+        by_cause[cause] = by_cause.get(cause, 0) + 1
+        fresh = cov.shift(second.segments, slice_start)
+        # The second attempt had no prompt, but the guard still applies:
+        # the rule is about what reaches a transcript, not how it was asked.
+        fresh, fresh_spans, _ = guard_segments(fresh, prompt)
+        first_words = cov.words_in(run, segments)
+        second_words = cov.words_in(run, fresh)
+        outcome.second_pass_words = second_words
+        if second_words > first_words and cov.confident(fresh):
+            segments = cov.splice(segments, slice_start, run.end_ms, fresh)
+            spans.extend(fresh_spans)
+            recovered += second_words - first_words
+            _second_pass_total.add(1, {"cause": cause, "outcome": "recovered"})
+        else:
+            _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
+
+    coverage = cov.measure(
+        runs,
+        segments,
+        outcomes,
+        first_frame_offset_ms=first_frame_offset_ms,
+        stub=heard.stub,
+    )
+    _speech_ms.add(coverage.speech_ms)
+    for gap in coverage.gaps:
+        _uncovered_speech_ms.add(gap.end_ms - gap.start_ms, {"cause": gap.cause})
+    _coverage_share.record(coverage.share)
+    logger.info(
+        "asr.coverage",
+        extra={
+            "job_id": str(job_id),
+            "speech_ms": coverage.speech_ms,
+            "transcribed_ms": coverage.transcribed_ms,
+            "first_speech_ms": coverage.first_speech_ms,
+            "first_segment_ms": coverage.first_segment_ms,
+            "gaps": len(coverage.gaps),
+            "floor_pass": heard.floor_used,
+            "second_pass_chunks": chunks,
+            "recovered_words": recovered,
+        },
+    )
+    diagnostics = output.diagnostics.model_copy(
+        update={
+            "prompt_echo": spans,
+            "coverage": coverage,
+            "second_pass": SecondPass(chunks=chunks, recovered_words=recovered, by_cause=by_cause),
+        }
+    )
+    metadata = output.metadata.model_copy(update={"coverage_share": round(coverage.share, 4)})
+    return output.model_copy(
+        update={"segments": segments, "diagnostics": diagnostics, "metadata": metadata}
+    )
 
 
 def _apply_diarization(

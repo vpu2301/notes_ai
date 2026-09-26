@@ -776,6 +776,95 @@
           "datasource": null
         }
       ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Uncovered speech share (1 h, alert > 5 %) — Sprint F1",
+      "gridPos": {
+        "x": 0,
+        "y": 89,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(mdx_asr_uncovered_speech_ms_total{cause!=\"no_audio\"}[1h])) / sum(increase(mdx_asr_speech_ms_total[1h]))",
+          "legendFormat": "uncovered share"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Uncovered speech by cause (minutes per hour) — Sprint F1",
+      "gridPos": {
+        "x": 12,
+        "y": 89,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause) (increase(mdx_asr_uncovered_speech_ms_total[1h])) / 60000",
+          "legendFormat": "{{cause}}"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Coverage share per job (p50 / p05) — Sprint F1",
+      "gridPos": {
+        "x": 0,
+        "y": 97,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdx_asr_coverage_share_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.05, sum by (le) (rate(mdx_asr_coverage_share_bucket[1h])))",
+          "legendFormat": "p05"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Second-pass chunks by cause and outcome (per hour) — Sprint F1",
+      "gridPos": {
+        "x": 12,
+        "y": 97,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause, outcome) (increase(mdx_asr_second_pass_total[1h]))",
+          "legendFormat": "{{cause}} / {{outcome}}"
+        }
+      ]
     }
   ],
   "uid": "asr-health"

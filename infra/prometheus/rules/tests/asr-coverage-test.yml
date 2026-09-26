@@ -1,0 +1,41 @@
+rule_files:
+  - ../asr.yml
+evaluation_interval: 1m
+tests:
+  # One hour of speech per hour (3 600 000 ms). 1 % uncovered is a noisy
+  # room; 10 % is the Pardo opening happening to every tenth job. Late
+  # capture starts (`no_audio`) are the clients', not the transcriber's.
+  - interval: 1m
+    name: one percent uncovered and many late starts do not fire
+    input_series:
+      - series: 'mdx_asr_speech_ms_total'
+        values: "0+60000x120"
+      - series: 'mdx_asr_uncovered_speech_ms_total{cause="decoder_empty"}'
+        values: "0+600x120"
+      - series: 'mdx_asr_uncovered_speech_ms_total{cause="no_audio"}'
+        values: "0+30000x120"
+    alert_rule_test:
+      - eval_time: 110m
+        alertname: AsrUncoveredSpeech
+        exp_alerts: []
+
+  - interval: 1m
+    name: ten percent uncovered fires after fifteen minutes
+    input_series:
+      - series: 'mdx_asr_speech_ms_total'
+        values: "0+60000x120"
+      - series: 'mdx_asr_uncovered_speech_ms_total{cause="prompt_echo"}'
+        values: "0+6000x120"
+    alert_rule_test:
+      - eval_time: 110m
+        alertname: AsrUncoveredSpeech
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              team: asr
+            exp_annotations:
+              summary: "More than 5% of speech left untranscribed over 1h"
+              description: |
+                10% of the speech VAD heard in the last
+                hour has no transcript. Look at mdx_asr_uncovered_speech_ms_total by
+                cause and mdx_asr_second_pass_total. Runbook: docs/runbooks/asr-worker.md#coverage

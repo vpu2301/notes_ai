@@ -183,7 +183,7 @@ apps:
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MD_ASR_DEVICE: cpu
       MD_ASR_COMPUTE_TYPE: int8
-      MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "40.0"
+      MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "52.0"  # F1: 40 × 1.3 for the second pass
       # Model-provider registry (libs/models, DEP-S0/S1). ENV selects the
       # registry environment; ASR_BACKEND names a backend in
       # config/models.yaml. staging-up.sh flips ASR_BACKEND to hf_eu_asr

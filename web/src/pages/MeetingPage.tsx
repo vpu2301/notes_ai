@@ -14,7 +14,7 @@ import { MicIcon, StopIcon, UploadIcon } from "../components/icons";
 import { useToast } from "../components/Toaster";
 import { contextFields, meetingCalendar, readCaptureContext } from "../lib/captureContext";
 import { markMine, rememberTitle } from "../lib/captures";
-import { formatElapsed } from "../lib/time";
+import { formatElapsed, formatOffset } from "../lib/time";
 import { useCaptures } from "../lib/useCaptures";
 import { useMeetingNote } from "../lib/useMeetingNote";
 import { useRecorder, type RecordedAudio } from "../lib/useRecorder";
@@ -185,6 +185,9 @@ export function MeetingPage() {
           // Both go when set; a "People" number wins on the server.
           ...(s.diarize ? contextFields(s.eventCtx) : {}),
           captureSource,
+          // Sprint F1: absent for an uploaded file — nobody pressed Record.
+          ...(audio.recordPressedAt ? { recordPressedAt: audio.recordPressedAt } : {}),
+          ...(audio.firstFrameOffsetMs != null ? { firstFrameOffsetMs: audio.firstFrameOffsetMs } : {}),
           ...(twoChannel
             ? { channelLayout: "mic_system" as const, localSpeakerName: s.displayName }
             : {}),
@@ -355,7 +358,16 @@ export function MeetingPage() {
             <>
               <div className="rec-timer sm">
                 <span className="rec-pulse" aria-hidden="true" />
-                <span aria-live="off">{formatElapsed(rec.elapsedMs)}</span>
+                <span aria-live="off">
+                  {rec.firstFrameOffsetMs == null ? "Starting…" : formatElapsed(rec.elapsedMs)}
+                </span>
+                {/* Sprint F1: what the recording will not hold, said while it
+                    still matters. Under a second is ordinary; not shown. */}
+                {rec.firstFrameOffsetMs != null && rec.firstFrameOffsetMs >= 1000 && (
+                  <span className="help rec-latency">
+                    Recording from {formatOffset(rec.firstFrameOffsetMs)}
+                  </span>
+                )}
               </div>
               <button className="btn rec" onClick={onStop}>
                 <StopIcon size={13} /> Stop

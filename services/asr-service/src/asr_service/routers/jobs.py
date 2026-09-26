@@ -40,7 +40,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from asr_models import (
     SPEAKER_LABEL_PATTERN,
+    CaptureTimingView,
     ConfidenceSpanView,
+    CoverageView,
     EnrichedSegment,
     JobEnqueuePayload,
     JobErrorKind,
@@ -202,6 +204,11 @@ async def submit_job(
     # never logged or audited).
     channel_layout: Annotated[str, Form(pattern="^(mono|mic_system)$")] = "mono",
     local_speaker_name: Annotated[str | None, Form(max_length=400)] = None,
+    # Sprint F1: when the person pressed Record (client wall clock, ISO 8601
+    # with an offset) and how long until the first frame was written. Parsed
+    # by hand: an out-of-range value is a 400 `validation_error`.
+    record_pressed_at: Annotated[str | None, Form(max_length=64)] = None,
+    first_frame_offset_ms: Annotated[str | None, Form(max_length=16)] = None,
     x_client_type: Annotated[str | None, Header(alias="X-Client-Type", max_length=32)] = None,
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> TranscriptionJobView:
@@ -215,6 +222,7 @@ async def submit_job(
             title="invalid local speaker name",
             status_code=422,
         )
+    pressed_at, frame_offset = _capture_timing(record_pressed_at, first_frame_offset_ms)
     hint_sent = speakers_expected is not None or speakers_max is not None
     # Forwarded only to a job that will diarize; reported either way.
     hints_applied = diarize if hint_sent else None
@@ -327,6 +335,8 @@ async def submit_job(
             capture_context=capture_context,
             # Sprint I2 T2: the exact string the transcriber is told.
             vocabulary_hint=vocabulary_hint or None,
+            record_pressed_at=pressed_at,
+            first_frame_offset_ms=frame_offset,
         )
 
     # Audit the upload + job creation.
@@ -356,6 +366,7 @@ async def submit_job(
         max_speakers=max_speakers,
         channel_layout=channel_layout,  # type: ignore[arg-type]
         local_speaker_name=local_name,
+        first_frame_offset_ms=frame_offset,
         language=language,
         model="large-v3",
         requester_sub=claims.sub,
@@ -445,7 +456,44 @@ async def submit_job(
         diarize=diarize,
         hints_applied=hints_applied,
         vocabulary_hint=vocabulary_hint or None,
+        record_pressed_at=pressed_at,
+        first_frame_offset_ms=frame_offset,
     )
+
+
+MAX_FIRST_FRAME_OFFSET_MS = 600_000
+
+
+def _capture_timing(
+    pressed_raw: str | None, offset_raw: str | None
+) -> tuple[datetime | None, int | None]:
+    """Sprint F1's two optional fields, validated. Empty strings are
+    "not sent" (a form library that always posts every field)."""
+    pressed: datetime | None = None
+    offset: int | None = None
+    if pressed_raw and pressed_raw.strip():
+        try:
+            pressed = datetime.fromisoformat(pressed_raw.strip())
+        except ValueError:
+            pressed = None
+        if pressed is None or pressed.tzinfo is None:
+            raise _reject(
+                "validation_error",
+                "record_pressed_at must be an ISO 8601 timestamp with a UTC offset",
+                title="invalid capture timing",
+            )
+    if offset_raw and offset_raw.strip():
+        try:
+            offset = int(offset_raw.strip())
+        except ValueError:
+            offset = -1
+        if not 0 <= offset <= MAX_FIRST_FRAME_OFFSET_MS:
+            raise _reject(
+                "validation_error",
+                f"first_frame_offset_ms must be an integer from 0 to {MAX_FIRST_FRAME_OFFSET_MS}",
+                title="invalid capture timing",
+            )
+    return pressed, offset
 
 
 def _hint_terms(hint: str | None) -> int:
@@ -663,7 +711,22 @@ async def get_job_result(
         name_sources=name_sources,
     )
     update: dict[str, object] = {
-        "relabel_available": await _relabel_available(state, claims.tid, job_id, output)
+        "relabel_available": await _relabel_available(state, claims.tid, job_id, output),
+        # Sprint F1: how much of the speech is transcribed, and the capture
+        # timing the client reported.
+        "coverage": (
+            CoverageView.of(output.diagnostics.coverage)
+            if output.diagnostics.coverage is not None
+            else None
+        ),
+        "capture": (
+            CaptureTimingView(
+                record_pressed_at=view.record_pressed_at,
+                first_frame_offset_ms=view.first_frame_offset_ms,
+            )
+            if view.record_pressed_at is not None or view.first_frame_offset_ms is not None
+            else None
+        ),
     }
     if settings.name_suggestions_enabled:
         offered = [

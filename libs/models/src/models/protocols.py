@@ -97,7 +97,13 @@ class ASRProvider(Protocol):
         language: str,
         prompt: str | None,
         should_cancel: ShouldCancel | None = None,
-    ) -> TranscriptionOutput: ...
+        second_pass: bool = False,
+    ) -> TranscriptionOutput:
+        """``second_pass`` (Sprint F1, decision 3): ``audio_pcm`` is one
+        speech run the first decode lost; decode all of it, with no prompt,
+        no conditioning on earlier text and a beam of at least 5 — as far as
+        the backend lets a caller choose (HTTP backends: no prompt only)."""
+        ...
 
     async def aclose(self) -> None: ...
 
