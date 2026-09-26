@@ -22,6 +22,7 @@
 #   llama-server          :8089   (inference backend — mounts the
 #                                  host's `ollama pull gemma3:1b` blob)
 #   asr-worker            (no port — Redis-stream consumer)
+#   note-worker           (no port — drains the note.generate queue)
 #
 # NOTE: building asr-worker + dictation-service downloads the pinned
 # faster-whisper-tiny weights from Hugging Face at BUILD time (offline
@@ -462,7 +463,7 @@ services:
       context: .
       dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
-    environment:
+    environment: &note-env
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
@@ -523,6 +524,44 @@ services:
         condition: service_completed_successfully
       mailpit:
         condition: service_healthy
+
+  # ── note-worker — the process that writes notes (ADR-0058) ────────
+  # Same image and same code as note-service, different container: a
+  # generation is minutes of model calls, and running it on the request
+  # loop would tie a browser to it and let one slow meeting starve every
+  # other note operation. It is the first consumer of the `libs/jobs`
+  # queue, so without it `POST /v1/notes/{id}/generate` enqueues a job
+  # that nothing ever drains and the note stays `queued` forever.
+  #
+  # `environment: *note-env` is deliberate — the worker calls the API's
+  # own `build_state()`, so it needs exactly the API's wiring (pool,
+  # envelope crypto, object store). Drift between the two blocks is a
+  # generation that fails only in the worker.
+  #
+  # No port and no healthcheck: it serves no HTTP. In dev the chat
+  # backend it resolves is `dev_mac` — the Mac's Ollama on :11434 (see
+  # config/models.yaml). With nothing listening there, a generation
+  # fails with a model error and the note keeps the transcript it had.
+  note-worker:
+    build:
+      context: .
+      dockerfile: services/note-service/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "note_service.worker"]
+    environment: *note-env
+    volumes:
+      - ./infra/dev/master.key:/etc/mdx/master.key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:

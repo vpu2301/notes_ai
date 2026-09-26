@@ -392,7 +392,9 @@ class Settings(BaseSettings):
     )
     auth_email_from: str = Field(default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_FROM")
     auth_email_from_name: str = Field(default="Notes AI", alias="MDX_AUTH_EMAIL_FROM_NAME")
-    auth_email_reply_to: str = Field(default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_REPLY_TO")
+    auth_email_reply_to: str = Field(
+        default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_REPLY_TO"
+    )
     # SPA origin the mailed links point at. The reset link is only useful
     # if it lands on the app the user actually runs.
     app_base_url: str = Field(default="http://localhost:5173", alias="MDX_APP_BASE_URL")

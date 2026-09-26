@@ -103,6 +103,10 @@ class TranscriptionJobView(BaseModel):
     # the list endpoint. `spec_for` maps anything unrecognised to UNKNOWN.
     error_kind: str | None = None
     error_detail: str | None = None
+    # Sprint I2 T2: the exact vocabulary string the transcriber was given
+    # (migration 0061). Tenant data; None for older jobs and jobs sent
+    # without one. Served to the job's own tenant only.
+    vocabulary_hint: str | None = None
 
     result_url: str | None = None  # populated only when status == complete
     queued_at: datetime

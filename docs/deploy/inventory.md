@@ -39,6 +39,7 @@ silently; the deliberate non-migrations are justified inline.
 | migrate (one-shot) | Helm hook Job `mdx-migrate-<rev>` (post-install/upgrade) |
 | seed (one-shot) | Helm hook Job `mdx-seed-<rev>` — **staging only**, `jobs.seed.enabled=false` in prod |
 | nightly-verify.cron | CronJob `mdx-nightly-verify` |
+| — | CronJob `mdx-ai-retention` (Sprint 37): terminal `jobs` after 30 days, `model_usage` after 400. Runs as **tenant_writer**, the only role allowed to delete from either (migration 0054) |
 
 The cron script ships in the chart (`files/jobs/`), drift-gated against
 `scripts/jobs/` by `check-k8s-rendered`, and runs on the note-service
@@ -123,3 +124,19 @@ community-1 runs at **0.64–0.85 × audio on four CPU threads** and
 than inside the worker. A worker on `MDX_DIAR_ENGINE=http` spends its own
 time only on the upload and the wait, so worker sizing stays as measured
 for the legacy engine; the GPU capacity is the endpoint's `max_replica`.
+
+## Note generation (Sprint 37)
+
+| What | Where |
+|---|---|
+| Secrets | the bake-off candidates read the same `HF_TOKEN` as `hf_eu` plus a per-candidate `CAND_*_URL`; a premium candidate adds `CAND_FRONTIER_TOKEN`. Per environment, never in the web bundle, never in a log |
+| Worker | `note-worker`: same image as note-service, `python -m note_service.worker`. Two jobs at a time per replica, at most `MDX_NOTE_GENERATION_PER_TENANT` (3) from one workspace |
+| Snapshots | `tenant/{tid}/generation/*.json.enc` in the transcripts bucket — deleted at the end of every run, swept daily, and nothing older than `MDX_NOTE_GENERATION_SNAPSHOT_HOURS` (24) may exist |
+| Shadow runs | `MDX_NOTE_GENERATION_SHADOW_BACKEND` + `_PERCENT` on the worker only. Output is discarded; only counts are kept |
+
+**Capacity: not measured.** A generation is `ceil(minutes / ~6000 chars)`
+windows of extraction plus one reduce, so throughput is the backend's
+tokens per second and not ours — which is exactly why the line has to be
+measured on the environment that will serve the pilot rather than guessed
+here. `docs/testing/load/notes-README.md` scenario `burst` produces it:
+meeting-hours per day per worker replica per tier.

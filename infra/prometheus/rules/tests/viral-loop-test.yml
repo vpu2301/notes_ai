@@ -72,8 +72,11 @@ tests:
   - interval: 1h
     name: abuse reports over a day
     input_series:
+      # Four reports between 1h and 5h. At 25h the rule's 24h window starts
+      # at 1h, so all four are inside it; with the first report at 0h->1h
+      # the window saw only three (1 -> 4) and the alert rightly stayed off.
       - series: 'mdx_share_abuse_reports_total{reason="spam"}'
-        values: "0 1 2 3 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4"
+        values: "0 0 1 2 3 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4"
     alert_rule_test:
       - eval_time: 25h
         alertname: SharedPageReportsHigh

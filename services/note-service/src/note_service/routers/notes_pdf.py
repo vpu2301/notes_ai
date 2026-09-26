@@ -1,10 +1,10 @@
 """GET /notes/{id}/pdf — server-rendered PDF (M1·A3 + draft export).
 
-Renders the current version of a note as a PDF. Draft notes are
-rendered with a visible DRAFT treatment (watermark + banner) so a
-work-in-progress export is never mistaken for the final record. Only a
-*cancelled* note is refused (409); a finalized/amended note can be
-exported "clean" via ``?variant=clean``. The weasyprint import lives
+Renders the current version of a note as a PDF. A note is a living
+document (0042/ADR-0051), so there is no watermark-by-status rule: the
+export is clean unless the author explicitly asks for the DRAFT
+treatment (watermark + banner) via ``?variant=draft``. Only a
+*cancelled* note is refused (409). The weasyprint import lives
 behind ``domain.pdf`` so it never loads on the router import path.
 """
 
@@ -49,9 +49,9 @@ async def get_note_pdf(
     variant: Annotated[
         Literal["draft", "clean"],
         Query(
-            description="'clean' is only honoured for finalized/amended notes; drafts always render as draft."
+            description="'draft' adds the DRAFT watermark + banner. Opt-in: exports are clean by default."
         ),
-    ] = "draft",
+    ] = "clean",
     lang: Annotated[
         Literal["uk", "en", "de"] | None,
         Query(description="Render language; falls back to 'en'."),

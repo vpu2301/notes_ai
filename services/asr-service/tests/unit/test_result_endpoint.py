@@ -549,3 +549,194 @@ def test_limits_say_what_one_upload_may_be(
     resp = rig.client.get("/asr/limits")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"max_duration_seconds": 5400, "max_upload_mb": 250}
+
+
+# ── Sprint G0 / Summary Engine v2 Q3: a conversation stays verbatim ─
+
+
+def _serve(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, diarized: bool) -> None:
+    from asr_service.routers import jobs
+
+    if diarized:
+        rig.store.body = _diarized_output().model_dump_json().encode("utf-8")
+        rig.nlp.response["segments"].append({"text": "Так.", "confidence_spans": []})
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+
+
+def test_a_diarized_result_skips_every_rewriting_stage(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(rig, monkeypatch, diarized=True)
+    assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+    (call,) = rig.nlp.calls
+    assert call["stages_disabled"] == sorted(
+        [
+            "voice_commands",
+            "punctuation",
+            "number_norm",
+            "date_norm",
+            "abbreviation",
+            "field_extraction",
+        ]
+    )
+
+
+def test_a_dictation_result_keeps_its_stages(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(rig, monkeypatch, diarized=False)
+    assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+    (call,) = rig.nlp.calls
+    assert call["stages_disabled"] is None
+
+
+def test_relative_dates_are_anchored_on_the_recording_day(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not the reader's today: "heute" in a recording from 2026-05-20
+    means 2026-05-20 on every later read."""
+    from datetime import date
+
+    for diarized in (True, False):
+        rig.nlp.calls.clear()
+        _serve(rig, monkeypatch, diarized=diarized)
+        assert rig.client.get(f"/asr/jobs/{uuid4()}/result").status_code == 200
+        (call,) = rig.nlp.calls
+        assert call["reference_date"] == date(2026, 5, 20)
+
+
+def test_the_batch_client_posts_stages_sorted_and_only_when_set() -> None:
+    import asyncio
+    from datetime import date
+
+    import httpx
+
+    from asr_service.integrations.nlp_client import NlpBatchClient
+
+    sent: list[dict] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"segments": []})
+
+    client = NlpBatchClient.__new__(NlpBatchClient)
+    client._client = httpx.AsyncClient(  # type: ignore[attr-defined]
+        base_url="http://nlp", transport=httpx.MockTransport(_handler)
+    )
+    asyncio.run(
+        client.process_segments(
+            tenant_id=uuid4(),
+            segments=[],
+            language="de",
+            reference_date=date(2026, 9, 22),
+            stages_disabled=["date_norm", "punctuation", "date_norm"],
+        )
+    )
+    asyncio.run(client.process_segments(tenant_id=uuid4(), segments=[], language="de"))
+    assert sent[0]["stages_disabled"] == ["date_norm", "punctuation"]
+    assert sent[0]["reference_date"] == "2026-09-22"
+    assert "stages_disabled" not in sent[1]
+
+
+# ── Sprint I2 T4: a passage in another language is labelled, not enriched ──
+
+
+def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_models import Diagnostics, EchoSpan
+    from asr_service.routers import jobs
+
+    output = _output()
+    # The second segment was decoded as Ukrainian inside an English recording.
+    output = output.model_copy(
+        update={
+            "language": "en",
+            "segments": [
+                output.segments[0].model_copy(update={"text": "we looked at the flybridge"}),
+                output.segments[1].model_copy(update={"text": "Що це таке?", "language": "uk"}),
+            ],
+            "diagnostics": Diagnostics(
+                prompt_echo=[EchoSpan(start_ms=0, end_ms=900, words=3)], other_language_chunks=1
+            ),
+        }
+    )
+    rig.store.body = output.model_dump_json().encode("utf-8")
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    resp = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["nlp_applied"] is True
+    # The fake NLP answers its fixed rendering for the first segment and
+    # "." for the second; the Ukrainian segment is served raw instead and
+    # never merged into the English one.
+    assert [s["text"] for s in body["segments"]] == ["Скарги на кашель.", "Що це таке?"]
+    assert [s["language"] for s in body["segments"]] == [None, "uk"]
+    assert [t["language"] for t in body["turns"]] == [None, "uk"]
+    assert body["diagnostics"] == {
+        "prompt_echo": [{"start_ms": 0, "end_ms": 900, "words": 3}],
+        "prompt_echo_segments_dropped": 0,
+        "other_language_chunks": 1,
+    }
+
+
+# ── Sprint I3 T2: the view says how much the post-processor shaped it ──
+
+
+def test_enrichment_is_full_partial_or_raw(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    full = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert full.json()["enrichment"] == "full"
+
+    # One segment's stage failed: that segment shows its raw text, the view says partial.
+    rig.nlp.response["segments"][0]["warnings"] = [
+        {"code": "stage_failed", "detail": "x", "stage": "punctuation"}
+    ]
+    partial = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    body = partial.json()
+    assert body["enrichment"] == "partial" and body["nlp_applied"] is True
+    # Raw text (the fake's "." segment still merges its period into it).
+    assert body["segments"][0]["text"].rstrip(".") == body["segments"][0]["raw_text"]
+
+    rig.nlp.response = None
+    raw = rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    assert raw.json()["enrichment"] == "raw" and raw.json()["nlp_applied"] is False
+
+
+def test_a_diarized_result_tells_nlp_it_is_a_conversation(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asr_service.routers import jobs
+
+    output = _output().model_copy(update={"speakers": ["SPEAKER_1"]})
+    rig.store.body = output.model_dump_json().encode("utf-8")
+    view = _job_view(JobStatus.COMPLETE)
+
+    async def _get_job(conn, *, job_id):  # noqa: ANN001
+        return view
+
+    monkeypatch.setattr(jobs.repository, "get_job", _get_job)
+    rig.client.get(f"/asr/jobs/{uuid4()}/result", headers={"Authorization": "Bearer t"})
+    (call,) = rig.nlp.calls
+    assert call["conversation"] is True and "punctuation" in call["stages_disabled"]

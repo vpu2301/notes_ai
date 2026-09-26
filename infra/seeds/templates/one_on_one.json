@@ -6,6 +6,17 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "user_notes",
+      "name": "My notes",
+      "voice_aliases": ["my notes", "scratchpad", "my note"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "The note-taker's own lines, typed during the meeting.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Never rewrite, reorder, summarise or correct this section. Reproduce it exactly as the author typed it."
+    },
+    {
       "id": "check_in",
       "name": "Check-in",
       "voice_aliases": ["check in", "how are you"],
@@ -13,7 +24,7 @@
       "field_type": "free_text",
       "asr_prompt": "Personal check-in. Mood, energy, workload, work-life balance, time off, general wellbeing.",
       "min_chars": 0,
-      "order": 0,
+      "order": 1,
       "synthesis_prompt": "Two or three sentences capturing how the person is doing overall."
     },
     {
@@ -24,7 +35,7 @@
       "field_type": "free_text",
       "asr_prompt": "Recent wins and highlights. Shipped, delivered, closed, launched, milestone reached, positive feedback, kudos.",
       "min_chars": 0,
-      "order": 1,
+      "order": 2,
       "synthesis_prompt": "Short bullet list of concrete wins, most impactful first."
     },
     {
@@ -35,7 +46,7 @@
       "field_type": "free_text",
       "asr_prompt": "Challenges and blockers. Blocked by, waiting on, dependency, unclear priorities, capacity, tooling issues, cross-team friction.",
       "min_chars": 0,
-      "order": 2,
+      "order": 3,
       "synthesis_prompt": "One bullet per challenge: the problem, its impact, and what help is needed."
     },
     {
@@ -46,7 +57,7 @@
       "field_type": "free_text",
       "asr_prompt": "Feedback in both directions. Manager feedback, peer feedback, what to keep doing, what to change, expectations.",
       "min_chars": 0,
-      "order": 3,
+      "order": 4,
       "synthesis_prompt": "Separate 'feedback given' and 'feedback received', each as brief bullets."
     },
     {
@@ -57,7 +68,7 @@
       "field_type": "free_text",
       "asr_prompt": "Growth and career development. Goals, skills, training, mentoring, promotion, new responsibilities, stretch project.",
       "min_chars": 0,
-      "order": 4,
+      "order": 5,
       "synthesis_prompt": "Summarise development goals and any agreed steps towards them."
     },
     {
@@ -68,7 +79,7 @@
       "field_type": "free_text",
       "asr_prompt": "Action items. Assignee, task, due date, follow up next one-on-one, check back on.",
       "min_chars": 0,
-      "order": 5,
+      "order": 6,
       "synthesis_prompt": "One bullet per action item in the form 'Owner: task — due date'."
     }
   ]

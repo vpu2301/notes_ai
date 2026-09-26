@@ -101,10 +101,6 @@ class InferenceQueue:
         )
         return await fut
 
-    @property
-    def consecutive_deadline_misses(self) -> int:
-        return self._consecutive_deadline_misses
-
     async def _consume(self) -> None:
         while not self._stop.is_set():
             try:

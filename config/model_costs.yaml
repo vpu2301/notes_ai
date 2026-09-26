@@ -18,5 +18,15 @@ backends:
   hf_eu:          { input_cents_per_1k: 0.08, output_cents_per_1k: 0.83, cold_start_cents: 6 }
   # nvidia-t4 x1 ≈ €0.50/h; whisper-large-v3-turbo ≈ 0.05× realtime on T4 → 1200 audio-min/h
   hf_eu_asr:      { audio_cents_per_minute: 0.04, cold_start_cents: 4 }
+  # Sprint 37 bake-off candidates. Eval-only backends, but they are
+  # metered like any other: "cheapest candidate that passes every gate" is
+  # the pre-registered decision rule, and a rule needs numbers. Rates are
+  # list-price ÷ measured throughput per run; the winner's row is copied
+  # to its production backend when routing flips.
+  cand_gemma_27b:     { input_cents_per_1k: 0.20, output_cents_per_1k: 2.10, cold_start_cents: 8 }
+  cand_mistral_small: { input_cents_per_1k: 0.18, output_cents_per_1k: 1.90, cold_start_cents: 8 }
+  cand_qwen_32b:      { input_cents_per_1k: 0.22, output_cents_per_1k: 2.30, cold_start_cents: 8 }
+  cand_gptoss_20b:    { input_cents_per_1k: 0.15, output_cents_per_1k: 1.60, cold_start_cents: 8 }
+  cand_frontier_eu:   { input_cents_per_1k: null, output_cents_per_1k: null }   # at selection
   hosted_eu:      { input_cents_per_1k: null, output_cents_per_1k: null }   # DEP-S6
   anthropic:      { input_cents_per_1k: null, output_cents_per_1k: null }   # BE-S3

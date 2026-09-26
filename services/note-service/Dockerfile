@@ -34,6 +34,7 @@ RUN uv pip install --system --no-cache \
     /build/libs/note_models \
     /build/libs/secret \
     /build/libs/models \
+    /build/libs/jobs \
     /build/libs/asr_models
 
 # Editable workspace libs install as .pth files, which Python only honors

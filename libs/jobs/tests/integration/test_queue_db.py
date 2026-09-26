@@ -155,3 +155,45 @@ async def test_tenant_isolation_jobs_and_usage(
         assert any(r["backend"] == "hf_eu" for r in daily)
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await c.execute("DELETE FROM model_usage WHERE job_id = $1", job.id)
+
+
+# ── Fair claim (migration 0055, Sprint 37) ──────────────────────────
+
+
+async def test_one_tenant_cannot_take_the_whole_queue(pool: asyncpg.Pool, tenants) -> None:  # noqa: ANN001
+    """The scenario the fair claim exists for: A uploads fifty, B records
+    one meeting. B's note must not wait for A's fifty."""
+    a, b = tenants
+    queue = JobQueue(pool)
+    for _ in range(50):
+        await queue.enqueue(a, KIND, {})
+    await queue.enqueue(b, KIND, {})
+
+    claimed = await queue.claim([KIND], worker="w1", limit=2, per_tenant=3)
+    assert {j.tenant_id for j in claimed} == {a, b}
+
+
+async def test_a_workspace_at_its_cap_claims_nothing_more(pool: asyncpg.Pool, tenants) -> None:  # noqa: ANN001
+    a, _b = tenants
+    queue = JobQueue(pool)
+    for _ in range(5):
+        await queue.enqueue(a, KIND, {})
+
+    running = await queue.claim([KIND], worker="w1", limit=2, per_tenant=2)
+    assert len(running) == 2
+    # Two already in flight for this workspace, so the next round is empty
+    # even though three jobs are queued and the worker is free.
+    assert await queue.claim([KIND], worker="w2", limit=2, per_tenant=2) == []
+
+
+async def test_an_interactive_job_still_jumps_the_queue(pool: asyncpg.Pool, tenants) -> None:  # noqa: ANN001
+    """Fairness is between background uploads. Somebody pressing
+    Regenerate is on the screen waiting, and priority still wins."""
+    a, b = tenants
+    queue = JobQueue(pool)
+    for _ in range(10):
+        await queue.enqueue(a, KIND, {})
+    urgent = await queue.enqueue(b, KIND, {}, priority=5)
+
+    [first] = await queue.claim([KIND], worker="w1", limit=1, per_tenant=3)
+    assert first.id == urgent.id

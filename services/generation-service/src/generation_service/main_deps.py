@@ -41,6 +41,7 @@ def auth_issuers() -> list[IssuerConfig]:
         audience=settings.auth_audience,
     )
 
+
 @dataclass
 class ServiceState:
     jwks_cache: JwksCache

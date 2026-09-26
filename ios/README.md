@@ -143,6 +143,53 @@ toggle that works for half the user base is worse than one that is not
 there yet. It comes back with I1-05, once A4/A5 has made every session
 native.
 
+## My notes: typing during the meeting (Sprint 34, ADR-0055)
+
+Pressing Record now **opens the note**, before there is any audio. The
+capture card carries a scratchpad — the note's own `user_notes` section —
+and what you type there is the note from the first second.
+
+What that guarantees, and how:
+
+- **It is saved as you type.** Every change is written to the app's
+  protected container within half a second (`PendingMeetingNotes`), and
+  autosaved into the note (`PUT /v1/notes/{id}/draft`) about a second
+  later. An app kill, a crash or a flat battery costs a sentence at worst.
+- **Offline is not a special case.** With no network the recorder starts
+  anyway and the note is opened at Stop instead; if that fails too, the
+  typing waits on disk and is replayed the next time a workspace loads.
+  Creating the note is idempotent on the capture id, so a replay never
+  makes a second one.
+- **Two devices never overwrite each other.** When the server already has
+  different text (you typed on the Mac too), the local lines are
+  **appended under a `---` divider**, and lines the server already holds
+  are skipped. Nothing you typed is ever replaced by something else.
+- **Nothing rewrites your words.** `user_notes` comes back byte-identical
+  after the transcript lands. A line the recording cannot support is kept
+  and marked, never silently corrected or dropped.
+- **Line times, not keystrokes.** The first moment each line appears is
+  recorded as `line_key → offset_ms` — a hash and an offset, no content —
+  so the document can later say what was being said when you wrote it.
+- **Sign-out clears them.** Unsynced scratchpads for the identity signing
+  out are deleted (`SignOutCleanup`); another person's on a shared device
+  are left alone, and kept *recordings* are never touched.
+
+## Names and terms: the workspace glossary (Sprint 35)
+
+Renaming a speaker offers, once, to remember the spelling for the
+workspace — and only a tap on **Remember** writes anything. The rules for
+when it is worth asking live in `RememberableName` and are the same on all
+three clients: a name typed over a placeholder or over a different
+spelling counts; case, spacing, or clearing a name back to "Speaker 2" do
+not, and neither do the invisible characters that make one name render as
+another.
+
+The terms are listed under **Settings → Names and terms**, deletable by
+whoever added them, and the capture sends them as the upload's
+`vocabulary_hint` so the transcriber has the spellings before it guesses.
+Fetching the hint never delays a recording: it happens beside
+`beginRecording()`, and a failure costs the hint, not the meeting.
+
 ## Workspaces, and recordings that are waiting (IDX-I2)
 
 One account can be in several **workspaces** — an agency and each of its

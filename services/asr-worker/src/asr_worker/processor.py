@@ -54,7 +54,6 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -88,6 +87,7 @@ from storage import ObjectNotFoundError
 from . import audit_kinds
 from .audio_io import AudioDecodeError, decode_to_pcm, mixdown
 from .config import settings
+from .echo import guard_segments
 from .main_deps import WorkerState
 from .notifications import emit_transcription_completed, emit_transcription_failed
 
@@ -168,6 +168,16 @@ _diarizer_unavailable = _meter.create_counter(
 _dual_jobs = _meter.create_counter(
     "mdx_asr_diarization_dual_jobs_total",
     description="Dual-channel captures diarized, by outcome (dual | mono_fallback)",
+    unit="1",
+)
+_prompt_echo_words = _meter.create_counter(
+    "mdx_asr_prompt_echo_words_total",
+    description="Words removed as prompt echo by the lexical guard (Sprint I2 T3)",
+    unit="1",
+)
+_prompt_echo_segments_dropped = _meter.create_counter(
+    "mdx_asr_prompt_echo_segments_dropped_total",
+    description="Segments left empty by the prompt-echo guard and dropped (Sprint I2 T3)",
     unit="1",
 )
 _rediarize_total = _meter.create_counter(
@@ -500,6 +510,11 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _release_cuda_cache()
             raise err from exc
 
+        # Sprint I2 T3: words the decoder copied from its prompt come out,
+        # whatever backend decoded them. A transcript that was nothing but
+        # the prompt is then an empty one and files as `no_speech` below.
+        output = _guarded(output, payload.vocabulary_hint, job_id=job_id)
+
         # Inference ran and produced nothing. Same reasoning as the empty-PCM
         # gate above, one stage later: a zero-segment transcript stored as
         # `complete` reads to the user as "we transcribed your recording
@@ -702,6 +717,38 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _release_cuda_cache()
             raise err from exc
         raise
+
+
+def _guarded(
+    output: TranscriptionOutput, prompt: str | None, *, job_id: UUID
+) -> TranscriptionOutput:
+    """The transcript with prompt echo removed and the removal recorded in
+    its diagnostics. Counts and timestamps in the log, never words."""
+    segments, spans, dropped = guard_segments(output.segments, prompt)
+    if not spans:
+        return output
+    words = sum(s.words for s in spans)
+    _prompt_echo_words.add(words)
+    if dropped:
+        _prompt_echo_segments_dropped.add(dropped)
+    logger.info(
+        "whisper.prompt_echo_stripped",
+        extra={
+            "job_id": str(job_id),
+            "spans": len(spans),
+            "words": words,
+            "segments_dropped": dropped,
+            "first_start_ms": spans[0].start_ms,
+        },
+    )
+    diagnostics = output.diagnostics.model_copy(
+        update={
+            "prompt_echo": [*output.diagnostics.prompt_echo, *spans],
+            "prompt_echo_segments_dropped": output.diagnostics.prompt_echo_segments_dropped
+            + dropped,
+        }
+    )
+    return output.model_copy(update={"segments": segments, "diagnostics": diagnostics})
 
 
 def _apply_diarization(
@@ -1557,8 +1604,3 @@ def _release_cuda_cache() -> None:
             torch.cuda.empty_cache()
     except Exception:
         pass
-
-
-# Re-export the timestamp helper for the worker tests.
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat()

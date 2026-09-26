@@ -1,0 +1,83 @@
+{
+ "id": "m10_de_interview",
+ "language": "de",
+ "meeting_type": "auto",
+ "recording_type": "interview",
+ "recorded_on": "2026-09-17",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 14000,
+   "text": "Frau Brandt, Sie leiten seit drei Jahren das Stadtarchiv. Was hat sich in dieser Zeit am meisten verändert?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 14000,
+   "t_end_ms": 96000,
+   "text": "Vor allem die Digitalisierung. Als ich angefangen habe, waren weniger als zehn Prozent unserer Bestände online. Heute sind es knapp vierzig Prozent, vor allem die Kirchenbücher und die alten Stadtpläne. Das hat die Zahl der Anfragen von außerhalb ungefähr verdreifacht, viele davon aus Übersee, von Menschen, die ihre Familiengeschichte suchen."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 96000,
+   "t_end_ms": 106000,
+   "text": "Und wo stoßen Sie an Grenzen?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 106000,
+   "t_end_ms": 190000,
+   "text": "Beim Personal und beim Platz. Wir sind sechs Leute für rund acht Kilometer Akten. Das Magazin im Keller ist fast voll, und bei starkem Regen haben wir ein Feuchtigkeitsproblem. Die Stadt prüft gerade einen Umzug in das ehemalige Zollgebäude am Hafen, aber entschieden ist das noch nicht. Ich rechne ehrlich gesagt nicht vor zwanzig achtundzwanzig damit."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 190000,
+   "t_end_ms": 200000,
+   "text": "Was wünschen Sie sich von der Politik?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 200000,
+   "t_end_ms": 262000,
+   "text": "Eine verlässliche Finanzierung für die Digitalisierung, nicht nur Projektgeld für zwei Jahre. Und dass Archive als Teil der Infrastruktur verstanden werden, nicht als Museum. Wer heute eine Baugenehmigung prüft, braucht oft Akten aus den Sechzigerjahren, und die finden sich nur bei uns."
+  }
+ ],
+ "gold": {
+  "key_facts": [
+   "Knapp vierzig Prozent der Bestände des Stadtarchivs sind heute online",
+   "Die Zahl der Anfragen von außerhalb hat sich ungefähr verdreifacht",
+   "Sechs Mitarbeitende betreuen rund acht Kilometer Akten",
+   "Das Magazin ist fast voll und hat bei starkem Regen ein Feuchtigkeitsproblem",
+   "Die Stadt prüft einen Umzug in das ehemalige Zollgebäude am Hafen",
+   "Brandt wünscht sich eine verlässliche Finanzierung der Digitalisierung"
+  ],
+  "actions": [],
+  "decisions": [],
+  "open_questions": [],
+  "entities": [
+   {
+    "canonical": "Brandt",
+    "surface_forms": [],
+    "kind": "person"
+   }
+  ],
+  "hedged": [
+   {
+    "fact": "Ein Umzug wird nicht vor 2028 erwartet",
+    "modality": "forecast"
+   }
+  ],
+  "speakers": {
+   "SPEAKER_1": "Moderation",
+   "SPEAKER_2": "Frau Brandt"
+  },
+  "name_candidates": [
+   "Frau Brandt"
+  ],
+  "must_not_contain": [
+   "Quillhaven",
+   "Ferrytale",
+   "Teambesprechung"
+  ]
+ }
+}

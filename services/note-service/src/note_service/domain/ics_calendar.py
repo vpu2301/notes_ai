@@ -38,6 +38,7 @@ import httpx
 from dateutil import rrule as du_rrule
 
 from .google_calendar import CalendarEvent, CalendarInfo, find_meeting_url
+from .meeting_doc.agenda import agenda_lines
 
 logger = logging.getLogger(__name__)
 
@@ -637,6 +638,7 @@ def to_calendar_event(
         organizer=event.organizer,
         response_status=response_status,
         attendees=names[:12],
+        agenda_lines=agenda_lines(event.description),
     )
 
 

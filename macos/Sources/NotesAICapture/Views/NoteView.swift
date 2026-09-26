@@ -49,6 +49,14 @@ struct NoteView: View {
             await model.load()
         }
         .task(id: model.noteId) { await model.loadSharing() }
+        .onChange(of: model.note?.title) { old, title in
+            // The server's name for the note — the one a recording gets
+            // once it has been heard — replaces this device's placeholder
+            // in the recents and the notes list.
+            guard let title, !title.isEmpty else { return }
+            if let jobId = capture?.jobId { app.updateRecent(jobId: jobId, title: title) }
+            if old != nil, old != title { Task { await app.refreshNotes() } }
+        }
         .task(id: model.version) { await model.loadItems() }
         .onChange(of: model.deleted) { _, deleted in
             // The note is gone; drop every local trace and go back home.
@@ -475,24 +483,77 @@ struct NoteView: View {
                 // recipients did. The section text below stays the source.
                 ActionItemsSection(model: model)
             }
+            // Sprint 33: the engine, from the Notes tab. The button lives here
+            // and nowhere else — a draft of ours, made from a recording, that
+            // was never written up.
+            if model.canGenerateSummary {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("Create a structured summary from this conversation.")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                    Spacer(minLength: 0)
+                    Button {
+                        Task { await model.generateSummary() }
+                    } label: {
+                        if model.generating {
+                            ProgressView().controlSize(.small).frame(width: 120)
+                        } else {
+                            Text("Generate Summary")
+                        }
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 28))
+                    .disabled(model.generating)
+                }
+                .dsCard()
+            } else if let generation = model.generation, generation.isLive {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(generation.progressText)
+                        .font(.dsBody)
+                        .foregroundStyle(DS.muted)
+                }
+            } else if let generation = model.generation, model.editable,
+                      generation.status == "failed" || generation.wroteNothing {
+                HStack(alignment: .center, spacing: 10) {
+                    DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
+                             text: generation.wroteNothing
+                                 ? GenerationView.nothingWrittenText : generation.failureText)
+                    if generation.errorKind != "budget_exceeded" {
+                        Button("Try again") { Task { await model.generateSummary() } }
+                            .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
+                            .disabled(model.generating)
+                    }
+                }
+            }
+            if let generation = model.generation, !generation.isLive {
+                generationFacts(generation)
+            }
+            if let error = model.generationError {
+                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
+            }
             if model.sections.isEmpty {
                 Text("This note's template has no sections.")
                     .font(.dsBody)
                     .foregroundStyle(DS.muted)
             }
-            if model.noteSections.isEmpty, !model.sections.isEmpty {
-                Text("No notes yet — the transcript is under the other tab.")
+            if model.blocks.isEmpty, !model.sections.isEmpty {
+                Text(model.hasTranscript
+                     ? "No notes yet — the transcript is under the other tab."
+                     : "Nothing here yet.")
                     .font(.dsBody)
                     .foregroundStyle(DS.muted)
             }
 
-            ForEach(model.noteSections) { def in
+            // Structure follows content: one block per section the note
+            // HAS, headed only when it has a title. Nothing is drawn for
+            // being in the template.
+            ForEach(model.blocks) { block in
                 VStack(alignment: .leading, spacing: 6) {
-                    // A "#" hangs in the gutter so the document's outline
-                    // is legible at a glance; it sits outside the text
-                    // column, so it never pushes the words in.
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(def.name)
+                    if let title = block.title, !title.isEmpty {
+                        // A "#" hangs in the gutter so the document's outline
+                        // is legible at a glance; it sits outside the text
+                        // column, so it never pushes the words in.
+                        Text(title)
                             .font(.dsDisplay(18, .semibold))
                             .foregroundStyle(DS.text1)
                             .overlay(alignment: .leading) {
@@ -501,36 +562,84 @@ struct NoteView: View {
                                     .foregroundStyle(DS.muted.opacity(0.45))
                                     .offset(x: -20)
                             }
-                        if def.required == true {
-                            Text("required")
-                                .font(.ds(10, .medium))
-                                .foregroundStyle(DS.muted)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(DS.surface2))
-                        }
                     }
-                    if def.isFreeText {
+                    if block.isFreeText {
                         SectionField(
                             text: Binding(
-                                get: { model.content?.section(def.id).text ?? "" },
-                                set: { model.setSectionText(def.id, $0) }
+                                get: { model.content?.section(block.key).text ?? "" },
+                                set: { model.setSectionText(block.key, $0) }
                             ),
-                            name: def.name,
-                            placeholder: def.minChars.map { "At least \($0) characters…" } ?? "Start writing…",
+                            name: block.name,
+                            placeholder: block.placeholder,
                             editable: model.editable,
                             editing: Binding(
-                                get: { editingSection == def.id },
-                                set: { editingSection = $0 ? def.id : nil }
+                                get: { editingSection == block.key },
+                                set: { editingSection = $0 ? block.key : nil }
                             ))
                     } else {
                         // Structured fields (choice, date, number) are edited in
                         // the web app; show the value read-only here.
-                        RichTextView(text: model.content?.section(def.id).text ?? "", size: DS.docText)
+                        RichTextView(text: model.content?.section(block.key).text ?? "", size: DS.docText)
                     }
                 }
             }
         }
+    }
+
+    // MARK: - What the engine made of the recording (Q3)
+
+    /// Under the status line, quietly: what the recording was taken to be
+    /// (nothing for a meeting), and the passages left out of the note —
+    /// "Not included: 00:45–00:52 (background speech)". Each range opens
+    /// the transcript at that moment when there is a timed one to open.
+    @ViewBuilder
+    private func generationFacts(_ generation: GenerationView) -> some View {
+        let label = generation.recordingTypeLabel
+        let excluded = generation.isFinished && !generation.wroteNothing
+            ? generation.shownExcluded : (items: [], more: 0)
+        if label != nil || !excluded.items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                if let label {
+                    Text(label)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                if !excluded.items.isEmpty {
+                    Text(notIncludedText(excluded.items, more: excluded.more,
+                                         linked: model.canSeekTranscript))
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                        .tint(DS.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard url.scheme == Self.seekScheme,
+                                  let ms = Int(url.absoluteString.dropFirst(Self.seekScheme.count + 1))
+                            else { return .systemAction }
+                            Task { await model.seekTranscript(to: ms) }
+                            return .handled
+                        })
+                }
+            }
+        }
+    }
+
+    /// Links in the "Not included" line are these, handled in place.
+    private static let seekScheme = "notesai-seek"
+
+    private func notIncludedText(_ items: [GenerationView.ExcludedItem], more: Int,
+                                 linked: Bool) -> AttributedString {
+        var line = AttributedString("Not included: ")
+        for (index, item) in items.enumerated() {
+            if index > 0 { line += AttributedString(", ") }
+            var part = AttributedString(item.text)
+            if linked, let url = URL(string: "\(Self.seekScheme):\(item.startMs)") {
+                part.link = url
+                part.underlineStyle = .single
+            }
+            line += part
+        }
+        if more > 0 { line += AttributedString(" +\(more) more") }
+        return line
     }
 
     // MARK: - Transcript
@@ -570,6 +679,7 @@ struct NoteView: View {
                         editingSpeaker = label
                     }
                 }
+                RememberTermBanner(model: model)
                 HStack {
                     Text(turns.isEmpty ? "Nothing was said." : speakerSummary)
                         .font(.dsMeta)

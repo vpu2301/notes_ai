@@ -129,6 +129,21 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         digest_eligible=False,
     ),
     CategorySpec(
+        category=Category.AI_BUDGET_REACHED,
+        # Only an admin can raise a budget, so only an admin is told.
+        recipient_rule=RecipientRule.TENANT_ADMINS,
+        default_in_app=True,
+        # No mail: the numbers are on the Data page, and one budget is
+        # reached once a month at most — a banner is the right weight.
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.WARNING,
+        digest_eligible=False,
+        # System-raised at enqueue time; the "actor" is whoever happened
+        # to record the meeting that crossed the line, and they need
+        # telling as much as anyone.
+        exclude_actor=False,
+    ),
+    CategorySpec(
         category=Category.NOTE_LINK_STATUS_CHANGED,
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,

@@ -9,6 +9,7 @@ order; changing it is an ADR-level event.
 from .abbreviation import AbbreviationStage
 from .confidence import ConfidenceStage
 from .date_norm import DateNormStage
+from .disfluency import DisfluencyStage
 from .field_extraction import FieldExtractionStage
 from .number_norm import NumberNormStage
 from .operations import operations_for
@@ -20,6 +21,7 @@ __all__ = [
     "AbbreviationStage",
     "CommandSpec",
     "ConfidenceStage",
+    "DisfluencyStage",
     "DateNormStage",
     "FieldExtractionStage",
     "NumberNormStage",

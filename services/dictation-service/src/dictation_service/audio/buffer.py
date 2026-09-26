@@ -25,7 +25,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -149,15 +148,6 @@ class SessionAudioBuffer:
             # Zero the key reference.
             self._key = b"\x00" * _DEK_BYTES
             self._nonce = b"\x00" * 8
-
-    def assert_mode(self) -> None:
-        """Verify mode 0700 on dir, 0600 on file. Raised on mismatch."""
-        dir_mode = stat.S_IMODE(self._path.parent.stat().st_mode)
-        file_mode = stat.S_IMODE(self._path.stat().st_mode)
-        if dir_mode != 0o700 or file_mode & ~0o600:
-            raise PermissionError(
-                f"audio buffer modes wrong: dir={oct(dir_mode)} file={oct(file_mode)}"
-            )
 
     # ── Crypto ──────────────────────────────────────────────────────
 

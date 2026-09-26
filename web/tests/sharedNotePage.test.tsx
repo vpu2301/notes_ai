@@ -101,6 +101,19 @@ describe("shared outcome page", () => {
     expect(screen.queryByText("Speaker 1")).toBeNull();
   });
 
+  it("says the notes are still being written while the writer works, instead of 'empty'", async () => {
+    stub(200, { ...VIEW, sections: [], preparing: true });
+    page();
+    expect(await screen.findByRole("status")).toHaveTextContent(/still being written/);
+    expect(screen.queryByText("This note is empty.")).toBeNull();
+  });
+
+  it("says a note with nothing shareable is empty once the writer is done", async () => {
+    stub(200, { ...VIEW, sections: [], preparing: false });
+    page();
+    expect(await screen.findByText("This note is empty.")).toBeInTheDocument();
+  });
+
   it("opens on the notes when there are some, with the transcript one tab away", async () => {
     stub(200, {
       ...VIEW,

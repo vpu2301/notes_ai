@@ -57,9 +57,61 @@ final class NoteViewModel: ObservableObject {
     var transcriptSections: [TemplateSectionDef] {
         sections.filter { TranscriptText.isTranscript(content?.section($0.id).text ?? "") }
     }
-    var noteSections: [TemplateSectionDef] {
-        let hidden = Set(transcriptSections.map(\.id))
-        return sections.filter { !hidden.contains($0.id) }
+    /// The author's own pad — always there to type into, never headed.
+    static let padKey = "user_notes"
+
+    /// One block per section the content HAS, in its order — never one
+    /// per template section. A block without a title is read as the note
+    /// itself. See `blocks(editable:)`.
+    struct NoteBlock: Identifiable {
+        let key: String
+        let title: String?
+        let def: TemplateSectionDef?
+        var id: String { key }
+        var isFreeText: Bool { def?.isFreeText ?? true }
+        var name: String { title ?? def?.name ?? "Notes" }
+        var placeholder: String {
+            def?.minChars.map { "At least \($0) characters…" } ?? "Start writing…"
+        }
+    }
+
+    var blocks: [NoteBlock] { blocks(editable: editable) }
+
+    /// Structure follows content. A block is shown when it has text.
+    /// While editable, three kinds of empty block are shown too, because
+    /// there is no other way to put something in them: the pad; a typed
+    /// field (its picker is the only way to set it); and, on a template
+    /// without a pad (the older, form-shaped ones), the template's own
+    /// free-text fields. A dialogue-shaped section is the transcript.
+    func blocks(editable: Bool) -> [NoteBlock] {
+        let byId = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let hasPad = byId[Self.padKey] != nil
+        var out: [NoteBlock] = []
+        var seen = Set<String>()
+        func push(_ key: String, title: String?, def: TemplateSectionDef?) {
+            guard !seen.contains(key) else { return }
+            seen.insert(key)
+            let heading: String? = key == Self.padKey ? nil : (def?.name ?? title?.trimmed.nonEmpty)
+            out.append(NoteBlock(key: key, title: heading, def: def))
+        }
+        for section in content?.sections ?? [] {
+            let text = (section.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty, TranscriptText.isTranscript(text) { continue }
+            let def = byId[section.sectionKey]
+            let shownEmpty = editable && (
+                section.sectionKey == Self.padKey
+                || (def != nil && !(def!.isFreeText))
+                || (!hasPad && def != nil))
+            if !text.isEmpty || shownEmpty { push(section.sectionKey, title: section.title, def: def) }
+        }
+        if editable {
+            for def in sections where !seen.contains(def.id) {
+                if def.id == Self.padKey || !def.isFreeText || !hasPad {
+                    push(def.id, title: nil, def: def)
+                }
+            }
+        }
+        return out
     }
     /// The transcript as text turns, for a note without a readable job.
     var textTurns: [TranscriptText.Turn] {
@@ -73,6 +125,22 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var sharing: SharingView?
     /// Set after a successful delete so the view can close itself.
     @Published private(set) var deleted = false
+    /// The engine's status for this note (Sprint 33); nil when the note
+    /// was never written up.
+    @Published private(set) var generation: GenerationView?
+    /// True once the server has answered about `generation`, so the button
+    /// does not flash before the first answer.
+    @Published private(set) var generationKnown = false
+    @Published private(set) var generating = false
+    @Published private(set) var generationError: String?
+    var generationPollInterval: Duration = .seconds(2)
+    private var generationTask: Task<Void, Never>?
+
+    /// *Generate Summary* lives in exactly one place: the Notes tab of a
+    /// draft we may edit, made from a recording, never written up.
+    var canGenerateSummary: Bool {
+        editable && jobId != nil && generationKnown && generation == nil
+    }
     @Published private(set) var turns: [TranscriptTurn]?
     /// Label → display name for the transcript's speakers (people's names
     /// where given, "Speaker N" elsewhere). Kept apart from `turns` so a
@@ -209,6 +277,7 @@ final class NoteViewModel: ObservableObject {
             note = envelope
             content = envelope.content
             if jobId == nil, let job = envelope.sourceJobId { jobId = job }
+            await loadGeneration()
             version = envelope.currentVersionNumber
             saveState = .saved
             conflict = false
@@ -229,6 +298,61 @@ final class NoteViewModel: ObservableObject {
             loadError = error.localizedDescription
         }
         isLoading = false
+    }
+
+    // MARK: - Generate Summary (Sprint 33)
+
+    /// Ask once how the engine is doing with this note. 404 is an answer:
+    /// never written up, so the button is offered.
+    func loadGeneration() async {
+        guard jobId != nil else { return }
+        do {
+            let view = try await api.generation(noteId: noteId)
+            // A latest run that is `superseded` was reset by an operator:
+            // as far as the reader is concerned there is none.
+            generation = view.status == "superseded" ? nil : view
+            generationKnown = true
+            if view.isLive { followGeneration() }
+        } catch APIError.http(status: 404, problem: _) {
+            generation = nil
+            generationKnown = true
+        } catch {
+            // A blip: the tab shows the note as it is, without the button.
+        }
+    }
+
+    func generateSummary() async {
+        guard !generating else { return }
+        generating = true
+        generationError = nil
+        defer { generating = false }
+        do {
+            try await api.regenerate(noteId: noteId)
+            await loadGeneration()
+        } catch {
+            generationError = error.localizedDescription
+        }
+    }
+
+    /// Poll while the engine writes; when it stops, show what it wrote.
+    private func followGeneration() {
+        generationTask?.cancel()
+        let api = api
+        let interval = generationPollInterval
+        generationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self else { return }
+                // A failed poll is a blip, not a verdict: keep asking.
+                guard let view = try? await api.generation(noteId: self.noteId) else { continue }
+                self.generation = view
+                if !view.isLive { break }
+            }
+            guard !Task.isCancelled, let self else { return }
+            // Unsaved typing wins; the autosave's version check then says
+            // the note moved on, and "Reload latest" brings the text in.
+            if self.saveState == .saved { await self.load() }
+        }
     }
 
     func loadTranscript() async {
@@ -279,6 +403,10 @@ final class NoteViewModel: ObservableObject {
         return speakerNames[label] ?? turn.name ?? defaultSpeakerName(label)
     }
 
+    /// Sprint 35 — a name the author fixed, waiting on
+    /// "Remember this for the workspace?". Nil when nothing is pending.
+    @Published var rememberOffer: RememberOffer?
+
     /// Rename a speaker everywhere: on the job (so the web app agrees), in
     /// this transcript, and — while the note is live — in the note body,
     /// whose turn lines start with the name. A cancelled note is a record;
@@ -301,6 +429,7 @@ final class NoteViewModel: ObservableObject {
         guard to != from else { return false }
         guard let jobId, !textOnly else {
             renameSpeakerInNote(from: from, to: to)
+            offerToRemember(from: from, to: to)
             return true
         }
 
@@ -322,6 +451,7 @@ final class NoteViewModel: ObservableObject {
             // A name given by hand settles what a suggestion was offering.
             if custom[label] != nil { nameSuggestions.removeAll { $0.label == label } }
             renameSpeakerInNote(from: from, to: speakerNames[label] ?? to)
+            offerToRemember(from: from, to: speakerNames[label] ?? to)
             return true
         } catch {
             actionError = error.localizedDescription
@@ -898,6 +1028,33 @@ final class NoteViewModel: ObservableObject {
     /// Tap on the quote: scroll to its turn and highlight it for 2 s.
     func revealTurn(for suggestion: NameSuggestion) {
         guard let id = Self.turnId(for: suggestion, in: turns ?? []) else { return }
+        reveal(turnId: id)
+    }
+
+    /// Q3: whether a moment in the recording can be shown — only a
+    /// transcript read from the job has timed turns to scroll to.
+    var canSeekTranscript: Bool { jobId != nil && transcriptError == nil }
+
+    /// The turn a moment of the recording falls in (the first turn for a
+    /// moment before anyone spoke).
+    nonisolated static func turnId(at ms: Int, in turns: [TranscriptTurn]) -> Int? {
+        (turns.last { $0.startMs <= ms } ?? turns.first)?.id
+    }
+
+    /// "Not included: 00:45–00:52 …" was tapped: open the transcript at
+    /// that moment and highlight the turn, as a suggestion's quote does.
+    func seekTranscript(to ms: Int) async {
+        guard canSeekTranscript else { return }
+        tab = .transcript
+        await loadTranscript()
+        // One turn of the run loop so the transcript is laid out before
+        // the scroll view is asked to reach into it.
+        await Task.yield()
+        guard let id = Self.turnId(at: ms, in: turns ?? []) else { return }
+        reveal(turnId: id)
+    }
+
+    private func reveal(turnId id: Int) {
         let reveal = TurnReveal(turnId: id)
         revealedTurn = reveal
         let duration = highlightDuration
@@ -953,6 +1110,44 @@ final class NoteViewModel: ObservableObject {
 
     func dismissRelabelBanner() {
         relabelBannerDismissed = true
+    }
+
+    // MARK: - The workspace glossary (Sprint 35)
+
+    /// A name the author just fixed, waiting on "Remember this?".
+    ///
+    /// The offer is the design. A vocabulary that learned silently would,
+    /// the first time it learned something wrong, quietly misspell a
+    /// customer's name in every note afterwards with nobody able to say
+    /// why. One term, one question, an answer the person gives.
+    struct RememberOffer: Identifiable, Equatable, Sendable {
+        var id: String { term }
+        let term: String
+        /// The previous spelling, or "" when it was only a placeholder.
+        let heardAs: String
+    }
+
+    /// Offer to teach the workspace a name the author corrected.
+    func offerToRemember(from: String, to: String) {
+        guard RememberableName.worthRemembering(from: from, to: to) else { return }
+        rememberOffer = RememberOffer(term: to.trimmingCharacters(in: .whitespacesAndNewlines),
+                                      heardAs: RememberableName.heardAs(from))
+    }
+
+    /// "Remember" was tapped. Failure is not worth a banner: the name in
+    /// this note is already fixed, and the glossary is next time's help.
+    /// That includes the server's 422 `term_not_vocabulary` — a role label
+    /// the app should not have offered; the offer is already gone.
+    func acceptRememberOffer() async {
+        guard let offer = rememberOffer else { return }
+        rememberOffer = nil
+        _ = try? await api.rememberTerm(offer.term, kind: .person,
+                                        heardAs: offer.heardAs.isEmpty ? [] : [offer.heardAs],
+                                        noteId: noteId)
+    }
+
+    func dismissRememberOffer() {
+        rememberOffer = nil
     }
 
     private func renameSpeakerInNote(from: String, to: String) {
@@ -1332,11 +1527,13 @@ final class NoteViewModel: ObservableObject {
             lines.append("_\(note.code) · \(note.updatedAt.formatted(date: .abbreviated, time: .shortened))_")
             lines.append("")
         }
-        for def in sections {
-            let text = (content.section(def.id).text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        for block in blocks(editable: false) {
+            let text = (content.section(block.key).text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if text.isEmpty { continue }
-            lines.append("## \(def.name)")
-            lines.append("")
+            if let title = block.title, !title.isEmpty {
+                lines.append("## \(title)")
+                lines.append("")
+            }
             lines.append(text)
             lines.append("")
         }
@@ -1352,4 +1549,10 @@ final class NoteViewModel: ObservableObject {
             return diarized ? "\(displayName(for: turn)): \(body)" : body
         }.joined(separator: "\n\n")
     }
+}
+
+
+extension String {
+    fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+    fileprivate var nonEmpty: String? { isEmpty ? nil : self }
 }

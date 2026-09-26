@@ -114,6 +114,7 @@ class NoteAsker:
         environ: Mapping[str, str],
         max_tokens: int,
         max_chars: int,
+        settings_source: Any = None,
     ) -> None:
         self._config_path = config_path
         self._env = env
@@ -122,13 +123,23 @@ class NoteAsker:
         self._max_chars = max_chars
         self._registry: Registry | None = None
         self._providers: dict[str, ChatProvider] = {}
+        # Sprint 37: "Ask" follows the workspace's tier for free — same
+        # registry, same settings table. A workspace that pays for the
+        # premium tier gets it for answers too, without a second switch.
+        self._settings_source = settings_source
 
     def _provider(self, workspace_id: str) -> ChatProvider:
         if self._registry is None:
             # Only the chat route matters here — validate=False keeps an
             # unrelated (e.g. ASR) misconfiguration from blocking answers.
             self._registry = Registry.load(
-                self._config_path, env=self._env, environ=self._environ, validate=False
+                self._config_path,
+                env=self._env,
+                environ=self._environ,
+                validate=False,
+                settings_source=(
+                    self._settings_source.cached if self._settings_source is not None else None
+                ),
             )
         resolved = self._registry.resolve(workspace_id, "understand")
         provider = self._providers.get(resolved.name)
@@ -185,6 +196,8 @@ def section_label(section_key: str, names: Mapping[str, str] | None = None) -> s
     """The template's section name when known, else the key made readable."""
     if names and section_key in names:
         return names[section_key]
+    if section_key.startswith("gen:"):
+        return section_key.removeprefix("gen:").replace("-", " ").strip().capitalize()
     return section_key.replace("_", " ").strip().capitalize() or section_key
 
 

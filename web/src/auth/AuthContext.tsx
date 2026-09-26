@@ -71,6 +71,11 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+/** `useAuth` for a screen that only *prefers* to know who is signed in (null outside the provider). */
+export function useAuthOptional(): AuthContextValue | null {
+  return useContext(AuthContext);
+}
+
 /**
  * The person behind a `/auth/me`, whichever half of the cut-over answered.
  *

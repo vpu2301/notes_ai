@@ -114,8 +114,3 @@ def parse_client_frame(raw: str | bytes) -> ClientCommand:
     is visible to the client instead of looking like a network fault.
     """
     return _CLIENT_ADAPTER.validate_json(raw)
-
-
-def dump_frame(frame: BaseModel) -> str:
-    """Serialise a server frame. `mode="json"` so UUIDs/datetimes render."""
-    return frame.model_dump_json()

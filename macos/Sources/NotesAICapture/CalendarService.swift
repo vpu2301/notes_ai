@@ -23,6 +23,10 @@ final class CalendarService: ObservableObject {
         /// talk too), and the others' names, at most twelve.
         var attendeeCount: Int = 0
         var attendeeNames: [String] = []
+        /// Sprint 34: the invite's notes field. The server has never seen
+        /// this calendar, so the client hands it over once, at capture
+        /// start; the server reads the agenda out of it and drops the rest.
+        var notes: String? = nil
     }
 
     /// The invitee count and names of an event, the current user left out
@@ -143,7 +147,10 @@ final class CalendarService: ObservableObject {
                              title: $0.title ?? "Untitled event",
                              start: $0.startDate, end: $0.endDate, isAllDay: $0.isAllDay,
                              calendarColor: $0.calendar?.cgColor,
-                             attendeeCount: invited.count, attendeeNames: invited.names)
+                             attendeeCount: invited.count, attendeeNames: invited.names,
+                             notes: $0.notes.map {
+                                 String($0.prefix(MeetingCalendarContext.maxDescription))
+                             })
             }
     }
 }

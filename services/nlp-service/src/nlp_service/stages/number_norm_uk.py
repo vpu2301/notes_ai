@@ -21,7 +21,6 @@ no random fallback, no float ops, ordered iteration.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
@@ -184,13 +183,6 @@ class Tag(StrEnum):
     UNIT = "UNIT"
     SEP_NA = "SEP_NA"
     OTHER = "OTHER"
-
-
-@dataclass(slots=True)
-class _Tok:
-    text: str
-    tag: Tag
-    value: int | None = None  # only for NUM
 
 
 def _tokenize(text: str) -> list[str]:

@@ -546,12 +546,17 @@ struct NoteSection: Codable, Equatable, Sendable {
     var text: String?
     var fieldSpecificMetadata: [String: JSONValue]?
     var transcriptSegmentIds: [String]?
+    /// The heading of a section the template does not name (one the
+    /// engine made from the conversation). nil: no heading — the block
+    /// is read as the note itself. Round-tripped, never set here.
+    var title: String?
 
     enum CodingKeys: String, CodingKey {
         case sectionKey = "section_key"
         case text
         case fieldSpecificMetadata = "field_specific_metadata"
         case transcriptSegmentIds = "transcript_segment_ids"
+        case title
     }
 }
 
@@ -590,6 +595,189 @@ struct SectionLabel: Decodable, Sendable {
         case sectionKey = "section_key"
         case name
     }
+}
+
+/// The document engine's status for one note (Sprint 33): the Notes
+/// tab's status line, and whether *Generate Summary* is offered.
+struct GenerationView: Decodable, Sendable {
+    let id: String
+    /// queued | running | partial | complete | failed | superseded
+    let status: String
+    let windowsTotal: Int?
+    let windowsDone: Int?
+    /// Why it ended without a document, from a closed vocabulary.
+    let errorKind: String?
+    /// How many sections the run wrote; 0 on a finished run means the
+    /// recording yielded nothing the verifier let through.
+    let sectionsWritten: Int?
+    /// Q3 — what the recording was taken to be (`meeting`, `interview`,
+    /// `podcast_broadcast`, …) and who decided (`user`, `classifier`,
+    /// `rule`, `template`). Nil before Q3.
+    let recordingType: String?
+    let recordingTypeSource: String?
+    /// Q2 — the passages the engine left out of the note. Nil or empty
+    /// when nothing was, and on runs made before Q2.
+    let excludedRanges: [ExcludedRange]?
+    /// The spoken language the run wrote in (`en`/`de`/`uk`), so the
+    /// exclusions are named in it. Nil before Q3.
+    let language: String?
+
+    var isLive: Bool { status == "queued" || status == "running" }
+    var isFinished: Bool { status == "complete" || status == "partial" }
+    /// Finished, and nothing to show for it: say so, offer another go.
+    var wroteNothing: Bool { isFinished && sectionsWritten == 0 }
+
+    var progressText: String {
+        if let total = windowsTotal, total > 0 {
+            return "Writing this note — \(min(windowsDone ?? 0, total)) of \(total) minutes read"
+        }
+        return "Writing this note…"
+    }
+
+    /// A sentence per reason. The API never sends prose.
+    var failureText: String {
+        switch errorKind {
+        case "budget_exceeded":
+            return "This workspace has used its AI budget for the month, so this note was not written up."
+        case "generation_disabled":
+            return "Automatic note writing is off for this workspace."
+        case "no_snapshot", "snapshot_unreadable":
+            return "The recording could not be read when the note was written."
+        case "model_unavailable":
+            return "The model was unavailable. Try writing the note again."
+        default:
+            return "This note could not be written automatically."
+        }
+    }
+
+    static let nothingWrittenText =
+        "Nothing could be written from this recording: no statement in it could be verified against the words that were said."
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case windowsTotal = "windows_total"
+        case windowsDone = "windows_done"
+        case errorKind = "error_kind"
+        case sectionsWritten = "sections_written"
+        case recordingType = "recording_type"
+        case recordingTypeSource = "recording_type_source"
+        case excludedRanges = "excluded_ranges"
+        case language
+    }
+}
+
+/// One passage the engine left out of a note (Summary Engine v2, Q2):
+/// background speech, another language, a duplicate. `reason` comes from a
+/// closed vocabulary, but is kept a string so a reason this build does not
+/// know yet still decodes — it is then called "a passage".
+struct ExcludedRange: Decodable, Equatable, Sendable {
+    let startMs: Int
+    let endMs: Int
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+    }
+}
+
+/// The words for what the engine did with a recording (Q3), as the web
+/// client says them (`web/src/lib/generation.ts`). Pure, so the tests can
+/// pin the wording.
+extension GenerationView {
+    /// What the recording was taken to be. `meeting` (and anything this
+    /// build does not know) has no label: the template name says enough.
+    static let recordingTypeLabels: [String: String] = [
+        "client_call": "Client call",
+        "sales_call": "Sales call",
+        "interview": "Interview",
+        "one_on_one": "One-on-one",
+        "podcast_broadcast": "Podcast / broadcast",
+        "lecture_webinar": "Lecture / webinar",
+        "voice_memo": "Voice memo",
+    ]
+
+    static func recordingTypeLabel(_ recordingType: String?) -> String? {
+        guard let recordingType, recordingType != "meeting" else { return nil }
+        return recordingTypeLabels[recordingType]
+    }
+
+    var recordingTypeLabel: String? { Self.recordingTypeLabel(recordingType) }
+
+    /// Why a passage was left out, in the language that was spoken. The
+    /// API never sends prose; `passage` is the word for a reason this
+    /// build does not know.
+    static let noiseLabels: [String: [String: String]] = [
+        "en": [
+            "background": "background speech",
+            "other_language": "a passage in another language",
+            "artifact": "a transcription artifact",
+            "duplicate": "a duplicated passage",
+            "unrelated": "an unrelated fragment",
+            "passage": "a passage",
+        ],
+        "de": [
+            "background": "Hintergrundgespräch",
+            "other_language": "eine Passage in einer anderen Sprache",
+            "artifact": "ein Transkriptionsartefakt",
+            "duplicate": "eine doppelte Passage",
+            "unrelated": "ein unzusammenhängendes Fragment",
+            "passage": "eine Passage",
+        ],
+        "uk": [
+            "background": "фонова мова",
+            "other_language": "уривок іншою мовою",
+            "artifact": "артефакт транскрипції",
+            "duplicate": "повторений уривок",
+            "unrelated": "непов'язаний фрагмент",
+            "passage": "уривок",
+        ],
+    ]
+
+    static func noiseLabel(_ reason: String, language: String?) -> String {
+        let labels = noiseLabels[language ?? ""] ?? noiseLabels["en"] ?? [:]
+        return labels[reason] ?? labels["passage"] ?? "a passage"
+    }
+
+    /// Ranges shown before "+N more".
+    static let maxShownRanges = 4
+
+    /// "00:45" — minutes are not wrapped into hours, as on the web.
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    struct ExcludedItem: Equatable, Sendable {
+        let startMs: Int
+        /// "00:45–00:52 (background speech)"
+        let text: String
+    }
+
+    /// Every excluded passage, in time order, in the note's language.
+    var excludedItems: [ExcludedItem] {
+        (excludedRanges ?? [])
+            .sorted { $0.startMs < $1.startMs }
+            .map { range in
+                ExcludedItem(
+                    startMs: range.startMs,
+                    text: "\(Self.mmss(range.startMs))–\(Self.mmss(range.endMs)) (\(Self.noiseLabel(range.reason, language: language)))"
+                )
+            }
+    }
+
+    /// The items the line shows, and how many more there are.
+    var shownExcluded: (items: [ExcludedItem], more: Int) {
+        let all = excludedItems
+        let shown = Array(all.prefix(Self.maxShownRanges))
+        return (shown, all.count - shown.count)
+    }
+}
+
+struct GenerationStarted: Decodable, Sendable {
+    let id: String
+    let status: String
 }
 
 struct NoteEnvelope: Decodable, Sendable {
@@ -1530,9 +1718,16 @@ struct UpcomingEvent: Decodable, Identifiable, Equatable, Sendable {
     let attendees: [String]
     let organizer: String?
     let responseStatus: String?
+    /// Sprint 34 — stable across the copies an invite makes in several
+    /// calendars, and the agenda the server read out of its description
+    /// (the description itself never leaves the server).
+    let icalUid: String
+    let agendaLines: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, color, title, start, end, location, attendees, organizer
+        case icalUid = "ical_uid"
+        case agendaLines = "agenda_lines"
         case connectionId = "connection_id"
         case accountEmail = "account_email"
         case calendarId = "calendar_id"
@@ -1865,5 +2060,357 @@ struct AsrLimits: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case maxDurationSeconds = "max_duration_seconds"
         case maxUploadMb = "max_upload_mb"
+    }
+}
+
+// MARK: - The note that exists from the first second (Sprint 34, ADR-0055)
+
+/// What a capture is doing right now. It lives on `note_meetings`, not on
+/// the note's status — a note is a draft until it is cancelled (ADR-0051).
+enum MeetingState: String, Codable, Sendable {
+    case recording, uploading, transcribing, generating, ready
+    case noAudio = "no_audio"
+    case failed
+
+    /// Whether the recording still has to reach the server. The sweeper
+    /// reclaims these after 12 hours; a client that is still alive should
+    /// not leave one behind.
+    var isPreUpload: Bool { self == .recording || self == .uploading }
+}
+
+/// What kind of meeting this is — picks the template family the note is
+/// written into. `auto` is the default and is always right enough.
+enum MeetingType: String, Codable, CaseIterable, Sendable {
+    case auto, client, team, sales
+    case oneOnOne = "one_on_one"
+    case interview
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .client: return "Client"
+        case .team: return "Team"
+        case .sales: return "Sales"
+        case .oneOnOne: return "1:1"
+        case .interview: return "Interview"
+        }
+    }
+}
+
+/// What the invite knew, as `POST /v1/notes/meeting` takes it.
+///
+/// `description` is only ever sent for an EventKit event, whose notes field
+/// the client has but the server has never seen; the server reads the
+/// agenda out of it and discards the rest. For a server-owned calendar the
+/// agenda arrives already extracted on `/v1/calendar/events`.
+struct MeetingCalendarContext: Codable, Equatable, Sendable {
+    var source: String
+    var title: String?
+    var icalUid: String?
+    var attendeeNames: [String]?
+    var agendaLines: [String]?
+    var description: String?
+
+    /// The server's cap on an EventKit notes field.
+    static let maxDescription = 8192
+
+    enum CodingKeys: String, CodingKey {
+        case source, title, description
+        case icalUid = "ical_uid"
+        case attendeeNames = "attendee_names"
+        case agendaLines = "agenda_lines"
+    }
+}
+
+struct StartMeetingRequest: Encodable, Sendable {
+    let clientCaptureId: String
+    let title: String?
+    /// ISO-8601, explicitly: the shared `JSONEncoder` has no date strategy
+    /// and a Unix timestamp on the wire is a contract nobody can read.
+    let startedAt: String
+    let language: String?
+    let meetingType: String
+    let calendar: MeetingCalendarContext?
+
+    enum CodingKeys: String, CodingKey {
+        case title, language, calendar
+        case clientCaptureId = "client_capture_id"
+        case startedAt = "started_at"
+        case meetingType = "meeting_type"
+    }
+}
+
+struct StartMeetingResponse: Decodable, Sendable {
+    let id: String
+    let code: String
+    let versionNumber: Int
+    let templateId: String
+    let state: MeetingState
+
+    enum CodingKeys: String, CodingKey {
+        case id, code, state
+        case versionNumber = "version_number"
+        case templateId = "template_id"
+    }
+}
+
+/// `GET /v1/notes/{id}/meeting` — what a second device needs to show the
+/// right status and to finish what the first one started.
+struct MeetingInfo: Decodable, Sendable {
+    let state: MeetingState
+    let asrJobId: String?
+    let meetingType: MeetingType
+    let startedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case asrJobId = "asr_job_id"
+        case meetingType = "meeting_type"
+        case startedAt = "started_at"
+    }
+}
+
+struct AttachTranscriptResponse: Decodable, Sendable {
+    let id: String
+    let versionNumber: Int
+    let state: MeetingState
+
+    enum CodingKeys: String, CodingKey {
+        case id, state
+        case versionNumber = "version_number"
+    }
+}
+
+/// When a typed line was first touched, relative to the recording's t=0.
+struct UserLineTime: Codable, Equatable, Sendable {
+    let lineKey: String
+    let offsetMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case lineKey = "line_key"
+        case offsetMs = "offset_ms"
+    }
+}
+
+// MARK: - The workspace glossary (Sprint 35)
+
+/// A name, company, product or term this workspace spells a particular way.
+///
+/// The point of the table is that a correction is made once. You fix "Jon
+/// Meyer" to "John Mayer", the workspace remembers it, and the transcriber
+/// is told the spelling before the next recording instead of guessing the
+/// same way again.
+struct GlossaryTerm: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let term: String
+    let kind: GlossaryKind
+    /// How it has been misheard or misspelled before.
+    let heardAs: [String]
+    let createdAt: Date
+    /// Whether this person may remove it: its creator, or an admin.
+    let canDelete: Bool
+    /// Sprint I2 — whether the server still sends it to the transcriber.
+    /// False for a role label ("Moderator II") that got in before the
+    /// rule existed: kept so it can be seen and removed, never sent.
+    let inHint: Bool
+    /// The note it was remembered from, when it came from a correction.
+    let sourceNoteId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, term, kind
+        case heardAs = "heard_as"
+        case createdAt = "created_at"
+        case canDelete = "can_delete"
+        case inHint = "in_hint"
+        case sourceNoteId = "source_note_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        term = try c.decode(String.self, forKey: .term)
+        kind = try c.decode(GlossaryKind.self, forKey: .kind)
+        heardAs = try c.decodeIfPresent([String].self, forKey: .heardAs) ?? []
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        canDelete = try c.decode(Bool.self, forKey: .canDelete)
+        // An older server does not say; everything it stores is sent.
+        inHint = try c.decodeIfPresent(Bool.self, forKey: .inHint) ?? true
+        sourceNoteId = try c.decodeIfPresent(String.self, forKey: .sourceNoteId)
+    }
+}
+
+enum GlossaryKind: String, Codable, CaseIterable, Sendable {
+    case person, company, product, term
+
+    var label: String {
+        switch self {
+        case .person: return "Person"
+        case .company: return "Company"
+        case .product: return "Product"
+        case .term: return "Term"
+        }
+    }
+}
+
+/// `GET /v1/glossary/hint` — the terms as the capture form's
+/// `vocabulary_hint`, ready to send with the next upload.
+struct GlossaryHint: Decodable, Equatable, Sendable {
+    let hint: String
+    let terms: Int
+}
+
+struct RememberTermRequest: Encodable, Sendable {
+    let term: String
+    let kind: String
+    let heardAs: [String]
+    /// The note the correction was made in, when there is one (Sprint I2).
+    var noteId: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case term, kind
+        case heardAs = "heard_as"
+        case noteId = "note_id"
+    }
+}
+
+/// Whether a rename is worth offering to remember, and what the old
+/// spelling should be recorded as.
+///
+/// Only a real correction counts: a name typed over a placeholder or over
+/// a different name. A name cleared back to "Speaker 2", or one that only
+/// changed case or spacing, teaches nothing — and an offer that appears
+/// when nothing was learned trains people to dismiss it.
+enum RememberableName {
+    /// Characters a term may not contain — the same set the server
+    /// refuses. Written as code-point RANGES rather than as a literal
+    /// character class: half of them are invisible, and source that
+    /// contains a bidi override in order to reject bidi overrides is
+    /// source nobody can review.
+    ///
+    ///   0000–001F, 007F–009F  C0 / C1 controls
+    ///   200B–200F             zero-width space, joiners, LRM/RLM
+    ///   2028–202E             line/paragraph separators, bidi embedding
+    ///   2066–2069             bidi isolates
+    static let forbidden: [ClosedRange<UInt32>] = [
+        0x0000...0x001F, 0x007F...0x009F, 0x200B...0x200F, 0x2028...0x202E, 0x2066...0x2069,
+    ]
+
+    /// Whitespace collapsed, exactly as the server stores it — so a
+    /// rename that only changes the spacing compares as no change.
+    static func normalised(_ name: String) -> String {
+        name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    static func isPlaceholder(_ name: String) -> Bool {
+        let trimmed = normalised(name).lowercased()
+        guard trimmed.hasPrefix("speaker") else { return false }
+        let rest = trimmed.dropFirst("speaker".count).trimmingCharacters(in: .whitespaces)
+        return !rest.isEmpty && rest.allSatisfy(\.isNumber)
+    }
+
+    // MARK: Role labels are not vocabulary (Sprint I2)
+
+    /// Words a person uses to label a voice rather than name it, in the
+    /// three languages the apps speak. The one list every client and the
+    /// server share: `tests/fixtures/glossary/role_words.json`, and the
+    /// test asserts this set equals it. A term made only of these (and
+    /// ordinals) is "Moderator II", not a name — and once it reached the
+    /// glossary it was read to the transcriber before every recording,
+    /// which echoed it into a transcript (the 2026-09-25 incident).
+    static let roleWords: Set<String> = [
+        // en
+        "speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee",
+        "presenter", "caller", "background", "unknown", "voice", "participant", "translator",
+        "announcer",
+        // de
+        "sprecher", "sprecherin", "moderatorin", "gast", "gastgeber", "erzähler", "erzählerin",
+        "hintergrund", "unbekannt", "stimme", "teilnehmer", "teilnehmerin", "übersetzer",
+        // uk
+        "спікер", "ведучий", "ведуча", "гість", "гостя", "оповідач", "фон", "невідомий", "голос",
+        "учасник", "учасниця", "перекладач",
+    ]
+
+    static let ordinals: Set<String> = [
+        "i", "ii", "iii", "iv", "v", "1", "2", "3", "4", "5", "one", "two", "three", "eins", "zwei",
+        "drei", "один", "два", "три", "first", "second", "erste", "zweite", "перший", "другий",
+    ]
+
+    /// Whether a term belongs in the transcriber's vocabulary — the same
+    /// rule as the server's `is_vocabulary`.
+    ///
+    /// No: every token is a role word or an ordinal; a person with no
+    /// capital letter anywhere ("moderatorin"). Yes: anything else — the
+    /// rule only has to keep labels out, not judge names.
+    static func isVocabulary(_ term: String, kind: GlossaryKind) -> Bool {
+        let tokens = term.split { !($0.isLetter || $0.isNumber) }.map { $0.lowercased() }
+        guard !tokens.isEmpty else { return false }
+        if tokens.allSatisfy({ roleWords.contains($0) || ordinals.contains($0) }) { return false }
+        if kind == .person {
+            let anyCapital = term.split(whereSeparator: \.isWhitespace).contains { part in
+                part.unicodeScalars.first?.properties.isUppercase == true
+            }
+            if !anyCapital { return false }
+        }
+        return true
+    }
+
+    static func worthRemembering(from: String, to: String) -> Bool {
+        let term = normalised(to)
+        guard term.count >= 2, term.count <= 80, !isPlaceholder(term) else { return false }
+        guard normalised(from).lowercased() != term.lowercased() else { return false }
+        guard isVocabulary(term, kind: .person) else { return false }
+        return !term.unicodeScalars.contains { scalar in
+            forbidden.contains { $0.contains(scalar.value) }
+        }
+    }
+
+    /// The previous spelling, or "" when it was only a placeholder.
+    static func heardAs(_ from: String) -> String {
+        let previous = normalised(from)
+        return isPlaceholder(previous) || previous.count < 2 ? "" : previous
+    }
+}
+
+// MARK: - Who processes this workspace's meetings (Sprint 37)
+
+/// One company in the data path, as the server's registry reports it.
+struct AIProcessor: Decodable, Identifiable, Equatable, Sendable {
+    let name: String
+    let region: String
+    /// What it does with the data — "writing your meeting notes", …
+    let purpose: String
+    /// Which tiers route to it.
+    let tiers: [String]
+    let acknowledged: Bool
+
+    var id: String { "\(name)/\(region)" }
+}
+
+/// `GET /v1/ai/settings`. Read-only here on purpose: changing who
+/// processes a workspace's meetings is an admin decision with an
+/// acknowledgement dialog, and it belongs on one surface — the web page.
+struct AISettings: Decodable, Equatable, Sendable {
+    let provider: String
+    let tier: String
+    let generationEnabled: Bool
+    let effectiveProvider: String
+    let effectiveTier: String
+    let processors: [AIProcessor]
+    let needsAcknowledgement: [AIProcessor]
+    let monthToDateCents: Int
+    let budgetCents: Int
+    let mayChoosePremium: Bool
+    let canEdit: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider, tier, processors
+        case generationEnabled = "generation_enabled"
+        case effectiveProvider = "effective_provider"
+        case effectiveTier = "effective_tier"
+        case needsAcknowledgement = "needs_acknowledgement"
+        case monthToDateCents = "month_to_date_cents"
+        case budgetCents = "budget_cents"
+        case mayChoosePremium = "may_choose_premium"
+        case canEdit = "can_edit"
     }
 }

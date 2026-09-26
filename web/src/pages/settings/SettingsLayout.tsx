@@ -18,7 +18,7 @@ export function SettingsLayout() {
       <div className="page-h">
         <div>
           <h1>Settings</h1>
-          <p className="sub">Your account, how you sign in, and the devices in this workspace.</p>
+          <p className="sub">Your account, how you sign in, who processes your meetings, and the devices in this workspace.</p>
         </div>
       </div>
 
@@ -27,6 +27,9 @@ export function SettingsLayout() {
       <nav className="tabs" aria-label="Settings sections">
         <SettingsTab to="/settings/account" label="Account" />
         <SettingsTab to="/settings/security" label="Security" />
+        {/* Every member, not only a manager: which companies process
+            your employer's meetings is not admin-only information. */}
+        <SettingsTab to="/settings/data" label="Data & AI" />
         {manages && <SettingsTab to="/settings/devices" label="Room devices" />}
         {manages && <SettingsTab to="/settings/workspace" label="Workspace" />}
       </nav>

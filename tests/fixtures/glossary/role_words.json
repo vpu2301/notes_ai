@@ -1,0 +1,9 @@
+{
+  "_comment": "Sprint I2 T1 — the one list every client and the server read. A glossary term whose tokens are ALL role words or ordinals is a label a person gave a voice ('Moderator II', 'speaker background'), not a name worth teaching the transcriber. Python: note_service.domain.glossary; Swift: RememberableName; web: lib/glossaryRule.ts. Each test asserts its table equals this file.",
+  "role_words": {
+    "en": ["speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee", "presenter", "caller", "background", "unknown", "voice", "participant", "translator", "announcer"],
+    "de": ["sprecher", "sprecherin", "moderator", "moderatorin", "gast", "gastgeber", "erzähler", "erzählerin", "hintergrund", "unbekannt", "stimme", "teilnehmer", "teilnehmerin", "übersetzer"],
+    "uk": ["спікер", "ведучий", "ведуча", "гість", "гостя", "оповідач", "фон", "невідомий", "голос", "учасник", "учасниця", "перекладач"]
+  },
+  "ordinals": ["i", "ii", "iii", "iv", "v", "1", "2", "3", "4", "5", "one", "two", "three", "eins", "zwei", "drei", "один", "два", "три", "first", "second", "erste", "zweite", "перший", "другий"]
+}

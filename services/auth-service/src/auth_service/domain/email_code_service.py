@@ -741,9 +741,7 @@ def _refuse_legacy_mfa(identity: Identity) -> None:
     raise EmailCodeError(
         "use_password",
         409,
-        detail=(
-            "your account uses an authenticator app — sign in with your password"
-        ),
+        detail=("your account uses an authenticator app — sign in with your password"),
     )
 
 

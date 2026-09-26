@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from notification_events import Category, build_event, publish_event
@@ -72,3 +73,51 @@ async def emit_note_event(
         payload=payload,
     )
     await publish_event(redis, event)
+
+
+async def emit_budget_reached(
+    redis: Any,
+    *,
+    tenant_id: UUID,
+    actor_user_id: UUID | None,
+    spent_cents: int,
+    budget_cents: int,
+) -> bool:
+    """Tell the workspace's admins that generation has stopped for money.
+
+    Once per workspace per calendar month: the check runs on every
+    enqueue, and a workspace that keeps recording would otherwise get one
+    of these per meeting. The guard is a Redis key rather than a table —
+    losing it costs a duplicate banner, which is the cheap failure.
+
+    Returns whether it published, so callers can log the crossing rather
+    than every attempt after it.
+    """
+    if not settings.notifications_enabled:
+        return False
+
+    month = datetime.now(UTC).strftime("%Y-%m")
+    try:
+        first = await redis.set(f"ai:budget:{tenant_id}:{month}", b"1", nx=True, ex=40 * 86400)
+    except Exception:  # noqa: BLE001 — a Redis outage must not stop the note
+        logger.warning("ai_budget.guard_unavailable", extra={"tenant": str(tenant_id)})
+        first = True
+    if not first:
+        return False
+
+    await publish_event(
+        redis,
+        build_event(
+            event_id=uuid4(),
+            tenant_id=tenant_id,
+            category=Category.AI_BUDGET_REACHED,
+            actor_user_id=actor_user_id,
+            resource_type="tenant",
+            resource_id=tenant_id,
+            occurred_at=datetime.now(UTC),
+            recipient_hints=(),
+            # Numbers only — never a note, never a meeting title.
+            payload={"spent_cents": spent_cents, "budget_cents": budget_cents},
+        ),
+    )
+    return True

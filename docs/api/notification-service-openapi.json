@@ -15,6 +15,7 @@
           "transcription.completed",
           "transcription.failed",
           "security.mfa_reminder",
+          "ai.budget_reached",
           "system.digest"
         ],
         "title": "Category",

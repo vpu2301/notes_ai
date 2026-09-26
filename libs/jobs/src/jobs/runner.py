@@ -46,6 +46,11 @@ class Handler(Protocol):
 
 ProbeFn = Callable[[JobContext], Awaitable[None]]
 BackendFn = Callable[[JobContext], tuple[str, int]]  # → (backend name, cold_start_seconds)
+# (ctx, error_kind) — called once the job will never run again (`dead` after
+# its last attempt, or `failed` on a non-retryable error), so the handler
+# can settle whatever row it owns. Without it a probe that never passes
+# leaves the caller's own state "queued" forever while the job is dead.
+DeadFn = Callable[[JobContext, str], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -55,6 +60,7 @@ class HandlerSpec:
         None  # which model backend this job talks to (for warming state + metrics)
     )
     probe: ProbeFn | None = None
+    on_dead: DeadFn | None = None
 
 
 class JobRunner:
@@ -68,6 +74,7 @@ class JobRunner:
         lease_seconds: int = 60,
         poll_interval_s: float = 1.0,
         batch: int = 1,
+        per_tenant: int | None = None,
     ) -> None:
         self._queue = queue
         self._handlers = handlers
@@ -75,6 +82,9 @@ class JobRunner:
         self._ledger = ledger
         self._lease = lease_seconds
         self._poll = poll_interval_s
+        # None = plain FIFO. A number makes every claim fair between
+        # workspaces and caps how many one of them may run at once.
+        self._per_tenant = per_tenant
         self._batch = batch
         self._stop = asyncio.Event()
 
@@ -88,9 +98,7 @@ class JobRunner:
     # ── loop ────────────────────────────────────────────────────────────
     async def run_forever(self) -> None:
         while not self._stop.is_set():
-            jobs = await self._queue.claim(
-                self.kinds, worker=self._worker_id, lease_seconds=self._lease, limit=self._batch
-            )
+            jobs = await self._claim()
             if not jobs:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop.wait(), timeout=self._poll)
@@ -98,11 +106,21 @@ class JobRunner:
             for job in jobs:
                 await self.run_one(job)
 
+    async def _claim(self) -> list[Job]:
+        # `per_tenant` is passed only when asked for, so a queue that has
+        # no fairness question (and every test double) keeps its signature.
+        extra = {"per_tenant": self._per_tenant} if self._per_tenant is not None else {}
+        return await self._queue.claim(
+            self.kinds,
+            worker=self._worker_id,
+            lease_seconds=self._lease,
+            limit=self._batch,
+            **extra,
+        )
+
     async def run_once(self) -> int:
         """Claim and run up to ``batch`` jobs; returns how many ran (tests, cron twins)."""
-        jobs = await self._queue.claim(
-            self.kinds, worker=self._worker_id, lease_seconds=self._lease, limit=self._batch
-        )
+        jobs = await self._claim()
         for job in jobs:
             await self.run_one(job)
         return len(jobs)
@@ -122,6 +140,7 @@ class JobRunner:
             status = await self._complete(job, result)
         except ProviderError as exc:
             status = await self._on_provider_error(job, spec, ctx, exc)
+            await self._if_dead(spec, ctx, status, str(exc.kind))
         except TranscriptionCancelledError:
             await self._queue.cancel(job, reason="cancel requested")
             status = JobStatus.CANCELLED
@@ -132,6 +151,7 @@ class JobRunner:
             status = await self._queue.fail(
                 job, error_kind="unhandled", message=f"{type(exc).__name__}: {exc}", retryable=True
             )
+            await self._if_dead(spec, ctx, status, "unhandled")
         finally:
             hb.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -188,6 +208,20 @@ class JobRunner:
         return await self._queue.fail(
             job, error_kind=str(exc.kind), message=exc.message, retryable=exc.retryable
         )
+
+    async def _if_dead(
+        self, spec: HandlerSpec, ctx: JobContext, status: JobStatus, error_kind: str
+    ) -> None:
+        """Tell the handler its job is over, once, and never let that call
+        turn a settled job into an unhandled one."""
+        if status not in (JobStatus.DEAD, JobStatus.FAILED) or spec.on_dead is None:
+            return
+        try:
+            await spec.on_dead(ctx, error_kind)
+        except Exception:
+            logger.exception(
+                "jobs.on_dead_failed", extra={**ctx.job.log_fields(), "error_kind": error_kind}
+            )
 
     async def _heartbeat(self, job: Job) -> None:
         interval = max(1.0, self._lease / 3)

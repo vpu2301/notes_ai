@@ -122,32 +122,37 @@ async def insert_items(
     items: list[ParsedItem],
     statuses: dict[str, str],
 ) -> int:
-    inserted = 0
-    for position, p in enumerate(items):
-        result = await conn.execute(
-            """
-            INSERT INTO note_action_items
-                (tenant_id, note_id, note_version_id, item_key, position, text,
-                 owner_label, owner_confidence, due_date, due_text, due_confidence, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::action_item_status)
-            ON CONFLICT (note_version_id, item_key) DO NOTHING
-            """,
-            tenant_id,
-            note_id,
-            version_id,
-            p.item_key,
-            position,
-            p.text,
-            p.owner_label,
-            p.owner_confidence,
-            p.due_date,
-            p.due_text,
-            p.due_confidence,
-            statuses.get(p.item_key, "open"),
-        )
-        if result and result.split()[-1] == "1":
-            inserted += 1
-    return inserted
+    if not items:
+        return 0
+    # One statement, not one per item: a long meeting note carries dozens of
+    # action items and the per-row round trip dominated the derive path.
+    # ON CONFLICT DO NOTHING still de-duplicates within the batch.
+    result = await conn.execute(
+        """
+        INSERT INTO note_action_items
+            (tenant_id, note_id, note_version_id, item_key, position, text,
+             owner_label, owner_confidence, due_date, due_text, due_confidence, status)
+        SELECT $1, $2, $3, u.k, u.pos, u.txt, u.ol, u.oc, u.dd, u.dt, u.dc,
+               u.st::action_item_status
+        FROM unnest($4::text[], $5::int[], $6::text[], $7::text[], $8::real[],
+                    $9::date[], $10::text[], $11::real[], $12::text[])
+             AS u(k, pos, txt, ol, oc, dd, dt, dc, st)
+        ON CONFLICT (note_version_id, item_key) DO NOTHING
+        """,
+        tenant_id,
+        note_id,
+        version_id,
+        [p.item_key for p in items],
+        list(range(len(items))),
+        [p.text for p in items],
+        [p.owner_label for p in items],
+        [p.owner_confidence for p in items],
+        [p.due_date for p in items],
+        [p.due_text for p in items],
+        [p.due_confidence for p in items],
+        [statuses.get(p.item_key, "open") for p in items],
+    )
+    return int(result.split()[-1]) if result else 0
 
 
 async def fetch_items(conn: asyncpg.Connection, *, version_id: UUID) -> list[ItemRow]:
@@ -264,20 +269,6 @@ async def clear_response(
         actor_sub,
     )
     return _response(row) if row else None
-
-
-async def clear_responses_for_note(
-    conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID
-) -> int:
-    result = await conn.execute(
-        """
-        UPDATE share_link_responses SET cleared_at = now(), cleared_by = $2
-        WHERE note_id = $1 AND cleared_at IS NULL
-        """,
-        note_id,
-        actor_sub,
-    )
-    return int(result.split()[-1]) if result else 0
 
 
 async def list_responses(

@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     asr_model: str = Field(default="large-v3", alias="MD_ASR_MODEL")
     asr_compute_type: str = Field(default="float16", alias="MD_ASR_COMPUTE_TYPE")
     asr_beam_size: int = Field(default=5, alias="MD_ASR_BEAM_SIZE")
+    # Sprint I2 T5/T7: conditioning each batch chunk on the text decoded
+    # before it is the second amplifier of prompt-echo cascades — but T7
+    # measured the cost of turning it off: conversation chunks (no
+    # punctuation model, G0) come back as lower-case run-ons. With the
+    # vocabulary rule and the word-level guard the cascade is contained, so
+    # it stays ON; the switch remains for a workspace that echoes anyway.
+    asr_condition_prev: bool = Field(default=True, alias="MDX_ASR_CONDITION_PREV")
+    # Sprint I2 T7: how the vocabulary reaches the decoder — as
+    # `initial_prompt` (today) or as faster-whisper `hotwords` (a variant
+    # measured in T7, not bet on).
+    asr_vocabulary_mode: str = Field(default="prompt", alias="MDX_ASR_VOCABULARY_MODE")
+    # Sprint I2 T4: language identification per VAD chunk, so a passage in
+    # another language is decoded in that language and labelled. In-process
+    # engine only; HTTP backends cannot do it.
+    asr_chunk_language_id: bool = Field(default=True, alias="MDX_ASR_CHUNK_LANGUAGE_ID")
 
     # ── Streaming-window hallucination guard ────────────────────────────
     # A streaming window is a fixed-length slice, so it regularly contains

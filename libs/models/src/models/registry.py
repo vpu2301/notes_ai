@@ -247,3 +247,20 @@ class Registry:
                 if r.processor is not None:
                     seen[r.processor.name] = r.processor
         return list(seen.values())
+
+    def processor_routes(self) -> list[tuple[ProcessorInfo, str, str]]:
+        """``(processor, operation, tier)`` for every route in this env.
+
+        The Data page has to say what a company DOES with the data —
+        "transcription", "notes", "answers" — and a bare processor list
+        cannot answer that. Same walk as `processors_for_env`, one level
+        less collapsed, so the page and the router still read the same
+        object rather than a description of it.
+        """
+        routes: list[tuple[ProcessorInfo, str, str]] = []
+        for operation, tiers in self._config.routing.items():
+            for tier in tiers:
+                r = self._resolve_platform(operation, tier)  # type: ignore[arg-type]
+                if r.processor is not None:
+                    routes.append((r.processor, operation, str(tier)))
+        return routes

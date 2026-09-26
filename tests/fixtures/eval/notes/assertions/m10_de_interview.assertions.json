@@ -1,0 +1,40 @@
+{
+ "id": "m10_de_interview",
+ "recording_type": "interview",
+ "must_not_contain": [
+  "Quillhaven",
+  "Ferrytale",
+  "Teambesprechung",
+  "Entscheidung"
+ ],
+ "must_contain_any": [
+  [
+   "vierzig Prozent",
+   "40 Prozent"
+  ],
+  [
+   "Zollgebäude"
+  ],
+  [
+   "Feuchtigkeit"
+  ]
+ ],
+ "hedged_must_keep": [
+  {
+   "match": "Zollgebäude",
+   "markers": [
+    "prüft",
+    "nicht entschieden",
+    "noch nicht"
+   ]
+  }
+ ],
+ "every_line_cited": true,
+ "sprint": {
+  "recording_type": "Q3",
+  "must_contain_any": "Q2",
+  "must_not_contain": "Q3",
+  "hedged_must_keep": "Q4",
+  "every_line_cited": "Q5"
+ }
+}

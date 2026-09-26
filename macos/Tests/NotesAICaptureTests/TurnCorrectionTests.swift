@@ -199,7 +199,8 @@ final class TurnCorrectionTests: XCTestCase {
             calendarName: "Work", color: nil, title: "Planning", start: start, end: start + 1800,
             allDay: false, location: nil, meetingUrl: nil, htmlLink: nil, attendeeCount: 4,
             attendees: ["Anna Keller", "olena@acme.example", "Tom Berg", "Room 4"], organizer: nil,
-            responseStatus: nil)
+            responseStatus: nil, icalUid: "g1@google.com",
+            agendaLines: ["Roadmap", "Hiring"])
         let device = CalendarService.Event(id: "d1", title: "1:1", start: start + 7200, end: start + 9000,
                                            isAllDay: false, calendarColor: nil,
                                            attendeeCount: 2, attendeeNames: ["Ida"])
@@ -209,6 +210,15 @@ final class TurnCorrectionTests: XCTestCase {
         XCTAssertEqual(items[0].captureContext.inviteLine, "4 invited · names will be offered for speakers")
         XCTAssertEqual(items[1].captureContext.speakersMax, 2)
         XCTAssertEqual(items[1].captureContext.nameCandidates, ["Ida"])
+        // Sprint 34: what goes ON the note — the people and the invite's
+        // own agenda. A device calendar has no agenda of its own, only the
+        // raw notes field for the server to read once.
+        XCTAssertEqual(items[0].meetingCalendar?.agendaLines, ["Roadmap", "Hiring"])
+        XCTAssertEqual(items[0].meetingCalendar?.icalUid, "g1@google.com")
+        XCTAssertEqual(items[0].meetingCalendar?.source, "google")
+        XCTAssertNil(items[0].meetingCalendar?.description)
+        XCTAssertEqual(items[1].meetingCalendar?.source, "eventkit")
+        XCTAssertNil(items[1].meetingCalendar?.agendaLines)
     }
 
     // MARK: - The pending-capture sidecar

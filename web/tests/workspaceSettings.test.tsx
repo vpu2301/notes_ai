@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setSessionListener } from "../src/api/http";
@@ -16,7 +17,17 @@ function server() {
     const method = (init?.method ?? "GET").toUpperCase();
     const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : null;
     calls.push({ method, path, body });
-    const reply = path.startsWith("/tenants/") ? (method === "PATCH" ? { ...TENANT, ...body } : TENANT) : method === "PUT" ? body : POLICY;
+    const reply = path.startsWith("/tenants/")
+      ? method === "PATCH"
+        ? { ...TENANT, ...body }
+        : TENANT
+      : path === "/v1/glossary/hint"
+        ? { hint: "", terms: 0 }
+        : path === "/v1/glossary"
+          ? []
+          : method === "PUT"
+            ? body
+            : POLICY;
     return new Response(JSON.stringify(reply), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   return calls;
@@ -31,7 +42,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("workspace settings", () => {
   it("round-trips the policy and locks the CTA row on a free plan", async () => {
     const calls = server();
-    render(<ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider>);
+    render(<MemoryRouter><ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider></MemoryRouter>);
     const publicLinks = await screen.findByLabelText(/anyone with the link/i);
     expect(publicLinks).toBeChecked();
     expect(screen.queryByLabelText(/only finalized notes/i)).toBeNull();
@@ -45,7 +56,7 @@ describe("workspace settings", () => {
 
   it("saves branding through the tenant profile", async () => {
     const calls = server();
-    render(<ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider>);
+    render(<MemoryRouter><ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider></MemoryRouter>);
     const email = await screen.findByLabelText(/contact e-mail/i);
     await userEvent.clear(email);
     await userEvent.type(email, "team@acme.com");

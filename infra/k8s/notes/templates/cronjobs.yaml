@@ -19,16 +19,24 @@ data:
 {{ .Files.Get "files/jobs/loop_funnel.sql" | indent 4 }}
   share_retention.py: |
 {{ .Files.Get "files/jobs/share_retention.py" | indent 4 }}
+  ai_retention.py: |
+{{ .Files.Get "files/jobs/ai_retention.py" | indent 4 }}
   weekly_speakers.py: |
 {{ .Files.Get "files/jobs/weekly_speakers.py" | indent 4 }}
   speaker_quality.sql: |
 {{ .Files.Get "files/jobs/speaker_quality.sql" | indent 4 }}
+  weekly_notes_quality.py: |
+{{ .Files.Get "files/jobs/weekly_notes_quality.py" | indent 4 }}
+  notes_quality.sql: |
+{{ .Files.Get "files/jobs/notes_quality.sql" | indent 4 }}
 {{- $cron := .Values.cronJobs }}
 {{- range $job := list
       (dict "name" "nightly-verify" "script" "nightly_verify.py" "schedule" $cron.nightlyVerify.schedule "databaseUrl" $cron.nightlyVerify.databaseUrl)
       (dict "name" "weekly-funnel" "script" "weekly_funnel.py" "schedule" $cron.weeklyFunnel.schedule "databaseUrl" $cron.weeklyFunnel.databaseUrl)
       (dict "name" "share-retention" "script" "share_retention.py" "schedule" $cron.shareRetention.schedule "databaseUrl" $cron.shareRetention.databaseUrl)
-      (dict "name" "weekly-speakers" "script" "weekly_speakers.py" "schedule" $cron.weeklySpeakers.schedule "databaseUrl" $cron.weeklySpeakers.databaseUrl) }}
+      (dict "name" "ai-retention" "script" "ai_retention.py" "schedule" $cron.aiRetention.schedule "databaseUrl" $cron.aiRetention.databaseUrl)
+      (dict "name" "weekly-speakers" "script" "weekly_speakers.py" "schedule" $cron.weeklySpeakers.schedule "databaseUrl" $cron.weeklySpeakers.databaseUrl)
+      (dict "name" "weekly-notes" "script" "weekly_notes_quality.py" "schedule" $cron.weeklyNotes.schedule "databaseUrl" $cron.weeklyNotes.databaseUrl) }}
 ---
 apiVersion: batch/v1
 kind: CronJob

@@ -77,7 +77,7 @@ def build_turns(
     overlaps = overlap_ms or []
     runs = _speaker_runs(segments)
     turns: list[TranscriptTurnView] = []
-    for speaker, indices, absorbed in runs:
+    for speaker, indices, absorbed in _split_by_language(segments, runs):
         run = [segments[i] for i in indices]
         paragraphs = _paragraphs(run, policy)
         if not paragraphs:
@@ -99,9 +99,32 @@ def build_turns(
                 paragraphs=paragraphs,
                 segment_indices=artifact,
                 uncertain=bool(uncertain),
+                language=getattr(run[0], "language", None) or None,
             )
         )
     return turns
+
+
+def _split_by_language(
+    segments: list[_SegmentLike], runs: list[tuple[str | None, list[int], bool]]
+) -> list[tuple[str | None, list[int], bool]]:
+    """A turn is never in two languages (Sprint I2): a speaker run breaks
+    where a segment's ``language`` changes, so the reader sees "[uk]" on
+    exactly the passage that was in Ukrainian."""
+    out: list[tuple[str | None, list[int], bool]] = []
+    for speaker, indices, absorbed in runs:
+        current: list[int] = []
+        language: str | None = None
+        for idx in indices:
+            here = getattr(segments[idx], "language", None) or None
+            if current and here != language:
+                out.append((speaker, current, absorbed))
+                current = []
+            current.append(idx)
+            language = here
+        if current:
+            out.append((speaker, current, absorbed))
+    return out
 
 
 def _overlaps(seg: _SegmentLike, spans: list[tuple[int, int]]) -> bool:

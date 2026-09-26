@@ -199,8 +199,8 @@ check(
     r.text[:300],
 )
 check(
-    "a link was minted for the outsider",
-    body.get("public_link_created") is True and body.get("sharing", {}).get("public_link"),
+    "the note stays private — no public link is minted (Sprint 22)",
+    body.get("public_link_created") is False and body.get("sharing", {}).get("public_link") is None,
     r.text[:300],
 )
 r = viewer.get(f"/v1/notes/{nid}")
@@ -208,17 +208,20 @@ check("e-mailed member can read it", r.status_code == 200, r.text[:120])
 r = member.post(f"/v1/notes/{nid}/share/email", json={"recipients": ["not an address"]})
 check("nonsense address -> 422", r.status_code == 422, r.text[:120])
 r = member.get(f"/v1/notes/{nid}/sharing")
-outsider = next((l for l in r.json().get("links", []) if l.get("recipient_email") == "outsider@example.org"), None)
+outsider = next(
+    (x for x in r.json().get("links", []) if x.get("recipient_email") == "outsider@example.org"),
+    None,
+)
 check("outsider got their own link", outsider is not None, r.text[:200])
 if outsider:
     r = member.delete(f"/v1/notes/{nid}/links/{outsider['id']}")
-    check("link from the e-mail can be turned off", r.status_code == 200, r.text[:120])
+    check("link from the e-mail can be turned off", r.status_code == 204, r.text[:120])
 r = member.delete(f"/v1/notes/{nid}/share/{viewer_sub}")
 check("unshare after e-mail", r.status_code == 200, r.text[:120])
 
-# 7. synthesize, pdf, search
+# 7. pdf, search
 r = member.post(f"/v1/notes/{nid}/synthesize", json={"language": "en"})
-check("synthesize", r.status_code == 200, r.text[:200])
+check("synthesize route is gone (0054)", r.status_code == 404, r.text[:200])
 r = member.get(f"/v1/notes/{nid}/pdf")
 check("author pdf", r.status_code == 200 and r.content[:4] == b"%PDF", r.text[:120])
 r = member.get("/v1/notes/search", params={"q": "quarterly roadmap"})
@@ -237,6 +240,7 @@ check(
 # 8. a note is a living document (0042): no finalize, no draft gate
 r = member.post(f"/v1/notes/{nid}/finalize", json={"expected_version": 2})
 check("finalize route is gone (404)", r.status_code == 404, r.text[:120])
+time.sleep(5.2)  # autosave: 1 PUT per 5 s per draft
 r = member.put(
     f"/v1/notes/{nid}/draft",
     json={

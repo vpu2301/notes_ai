@@ -160,6 +160,12 @@ class EventView(BaseModel):
     attendees: list[str]
     organizer: str | None
     response_status: str | None
+    # Sprint 34: what a capture started from this event hands back to
+    # `POST /v1/notes/meeting` — the invite's own identity and the agenda
+    # derived from its description. The description itself never leaves
+    # the server.
+    ical_uid: str
+    agenda_lines: list[str]
 
 
 class ProblemView(BaseModel):
@@ -567,6 +573,8 @@ async def upcoming_events(
                 attendees=list(e.attendees),
                 organizer=e.organizer,
                 response_status=e.response_status,
+                ical_uid=e.ical_uid,
+                agenda_lines=list(e.agenda_lines),
             )
             for item in result.events
             for e in (item.event,)

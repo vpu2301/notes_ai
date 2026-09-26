@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import asyncpg
 from opentelemetry import metrics
@@ -13,12 +14,14 @@ from audit import AuditWriter, Severity
 from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
+from jobs import JobQueue
 from storage import EncryptedObjectStore, S3Client
 
 from . import audit_kinds
 from .adapters.email import EmailProvider
 from .adapters.email import build_provider as build_email_provider
 from .config import settings
+from .domain.ai_settings import WorkspaceSettings
 from .domain.autosave_rate_limit import AutosaveRateLimiter
 from .domain.cache import TemplateCache
 from .domain.clip_rate_limit import ClipRateLimiter
@@ -72,6 +75,13 @@ class ServiceState:
     crypto_pool: asyncpg.Pool
     audio_store: EncryptedObjectStore
     transcripts_store: EncryptedObjectStore
+    # Sprint 33 — the queue the note-worker drains. `libs/jobs`'s
+    # first consumer; the API only ever enqueues.
+    job_queue: Any
+    # Sprint 37 — the table behind `Registry(settings_source=…)`. Cached
+    # for a minute; the settings route invalidates it on write so a tier
+    # change takes effect while the admin is still on the page.
+    workspace_model_settings: Any
     clips_store: EncryptedObjectStore
     clip_rate_limiter: ClipRateLimiter
     # Sprint 15: aggregated search.expanded audit (ADR-0038).
@@ -267,6 +277,8 @@ async def build_state() -> ServiceState:
         crypto_pool=crypto_pool,
         audio_store=audio_store,
         transcripts_store=transcripts_store,
+        job_queue=JobQueue(app_pool),
+        workspace_model_settings=WorkspaceSettings(app_pool),
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
         email_provider=email_provider,

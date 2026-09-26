@@ -93,9 +93,7 @@ def check_reads_the_list(service_src: Path) -> list[str]:
             f"issuer list with auth.issuers_from_env()"
         )
     if verifies and declares:
-        uses_helper = any(
-            "issuers_from_env" in p.read_text(encoding="utf-8") for p in sources
-        )
+        uses_helper = any("issuers_from_env" in p.read_text(encoding="utf-8") for p in sources)
         if not uses_helper:
             problems.append(
                 f"{service_src.relative_to(ROOT)}: declares AUTH_ISSUERS_JSON but "

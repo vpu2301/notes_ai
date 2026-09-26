@@ -697,25 +697,6 @@ async def fetch_tenant_logo(
     return bytes(row["logo_bytes"]), str(row["logo_content_type"])
 
 
-async def set_source_session_id_if_absent(
-    conn: asyncpg.Connection, *, note_id: UUID, session_id: UUID
-) -> None:
-    """Backfill ``source_session_id`` only when it is still NULL.
-
-    Used by finalize to link a dictation session to its note. A note
-    that already carries a source session is left untouched (no-op).
-    """
-    await conn.execute(
-        """
-        UPDATE notes
-        SET source_session_id = $2, updated_at = now()
-        WHERE id = $1 AND source_session_id IS NULL
-        """,
-        note_id,
-        session_id,
-    )
-
-
 async def fetch_version(conn: asyncpg.Connection, *, version_id: UUID) -> VersionRow | None:
     row = await conn.fetchrow(
         """
@@ -828,6 +809,10 @@ async def create_note_with_v1(
     source_session_id: UUID | None,
     content: NoteContent,
     source_asr_job_id: UUID | None = None,
+    # 0057 — "default" when the server made the title up and the
+    # generation job may name the note; None for a note that is never
+    # titled automatically.
+    title_source: str | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
 
@@ -847,9 +832,9 @@ async def create_note_with_v1(
         INSERT INTO notes (
             tenant_id, code, status, primary_author_id, co_author_ids,
             template_id, template_schema_version,
-            title, source_session_id, source_asr_job_id
+            title, source_session_id, source_asr_job_id, title_source
         )
-        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         """,
         tenant_id,
@@ -861,6 +846,7 @@ async def create_note_with_v1(
         content.title,
         source_session_id,
         source_asr_job_id,
+        title_source,
     )
 
     version_id: UUID = await conn.fetchval(
@@ -898,7 +884,7 @@ async def fetch_notes_by_source_jobs(
         """
         SELECT source_asr_job_id, id, code, status
         FROM notes
-        WHERE source_asr_job_id = ANY($1::uuid[])
+        WHERE source_asr_job_id = ANY($1::uuid[]) AND deleted_at IS NULL
         """,
         asr_job_ids,
     )
@@ -920,6 +906,14 @@ async def append_version(
     amendment_reason: str | None = None,
     parent_version_id_override: UUID | None = None,
     body_hash_override: str | None = None,
+    # Sprint 33 — merged into `note_versions.metadata` beside the body
+    # hash, so History can say a version was written by the engine and
+    # which run produced it. Never content.
+    extra_metadata: dict[str, Any] | None = None,
+    # 0057 — set by the one writer that names a note on the user's
+    # behalf (`note_title`). Everyone else leaves it None, and a title
+    # that changes under None is a person renaming the note.
+    title_source: str | None = None,
 ) -> tuple[UUID, int]:
     """Append a new version row to ``note_id``.
 
@@ -973,7 +967,7 @@ async def append_version(
         json.dumps(new_content.model_dump(mode="json")),
         rendered,
         json.dumps(diff_jsonb),
-        json.dumps({"body_hash": body_hash}),
+        json.dumps({"body_hash": body_hash, **(extra_metadata or {})}),
         is_amendment,
         amendment_type.value if amendment_type else None,
         amendment_reason,
@@ -982,6 +976,15 @@ async def append_version(
         """
         UPDATE notes
         SET current_version_id = $2,
+            title_source       = CASE
+                WHEN $4::text IS NOT NULL THEN $4::text
+                WHEN title IS DISTINCT FROM $3 THEN 'user'
+                ELSE title_source
+            END,
+            title_generated_at = CASE
+                WHEN $4::text = 'ai' THEN now()
+                ELSE title_generated_at
+            END,
             title              = $3,
             updated_at         = now()
         WHERE id = $1
@@ -989,6 +992,7 @@ async def append_version(
         note_id,
         new_version_id,
         new_content.title,
+        title_source,
     )
     return new_version_id, new_version_number
 
@@ -1009,41 +1013,44 @@ async def lock_note_for_update(conn: asyncpg.Connection, *, note_id: UUID) -> No
     return await fetch_note(conn, note_id=note_id)
 
 
-async def find_existing_version_by_body_hash(
-    conn: asyncpg.Connection,
-    *,
-    note_id: UUID,
-    body_hash: str,
-) -> VersionRow | None:
-    """Idempotency lookup: did we already record this exact body for
-    this note? Used to make autosave PUTs idempotent on retry."""
-    row_id = await conn.fetchval(
+async def template_code_for(conn: asyncpg.Connection, *, note_id: UUID) -> str | None:
+    """The seed code of the note's template ("sales_call_uk", …).
+
+    Sprint 36 picks the meeting FAMILY from this, and the family decides
+    what may leave the workspace. A note whose template has been deleted
+    answers None, and the caller falls back to the generic family — which
+    is the conservative direction: fewer kinds, nothing extra shared.
+    """
+    code: str | None = await conn.fetchval(
         """
-        SELECT id FROM note_versions
-        WHERE note_id = $1 AND metadata->>'body_hash' = $2
-        ORDER BY version_number DESC LIMIT 1
+        SELECT t.code FROM notes n JOIN templates t ON t.id = n.template_id
+        WHERE n.id = $1
         """,
         note_id,
-        body_hash,
     )
-    if row_id is None:
-        return None
-    return await fetch_version(conn, version_id=row_id)
+    return code
 
 
-async def list_amendment_chain(conn: asyncpg.Connection, *, note_id: UUID) -> list[VersionRow]:
-    """Returns all versions for ``note_id`` ordered by version_number ASC.
+async def replace_v1_content(
+    conn: asyncpg.Connection, *, note_id: UUID, content: NoteContent
+) -> None:
+    """Rewrite the note's FIRST version in place.
 
-    Used by the chain reconciler + the diff endpoint when resolving
-    'from'/'to' by number.
+    Only legal while v1 is the only version and the note has just been
+    created in this same transaction — Sprint 36 uses it to fold the
+    carry-over block into v1 rather than appending a second version that
+    the author did not make. Anything later goes through
+    :func:`append_version`, which keeps the hash chain honest.
     """
-    rows = await conn.fetch(
-        "SELECT id FROM note_versions WHERE note_id = $1 ORDER BY version_number",
+    rendered = rendered_text_from_content(content)
+    await conn.execute(
+        """
+        UPDATE note_versions
+        SET content_jsonb = $2::jsonb, rendered_text = $3, metadata = $4::jsonb
+        WHERE note_id = $1 AND version_number = 1
+        """,
         note_id,
+        json.dumps(content.model_dump(mode="json")),
+        rendered,
+        json.dumps({"body_hash": body_hash_for(content)}),
     )
-    out: list[VersionRow] = []
-    for r in rows:
-        v = await fetch_version(conn, version_id=r["id"])
-        if v is not None:
-            out.append(v)
-    return out

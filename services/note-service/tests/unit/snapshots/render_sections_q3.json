@@ -1,0 +1,68 @@
+{
+ "topics_and_overview": [
+  {
+   "section_key": "gen:overview",
+   "role": "summary",
+   "title": null,
+   "text": "A planning meeting about the harbour ferry.\n\nPassenger numbers fell by 12 percent.\n\nThe second ferry returns in October.\n\n- The second ferry returns from repair in October\n- Ticket machines at the north pier are unreliable"
+  },
+  {
+   "section_key": "agenda",
+   "role": "agenda",
+   "title": null,
+   "text": "- Review of the harbour ferry timetable"
+  },
+  {
+   "section_key": "decisions",
+   "role": "decisions",
+   "title": null,
+   "text": "- The winter timetable starts on the first of the month"
+  },
+  {
+   "section_key": "action_items",
+   "role": "action_items",
+   "title": null,
+   "text": "- Mira: Publish the new timetable on the website — by Friday\n- Check the pier lighting"
+  },
+  {
+   "section_key": "open_questions",
+   "role": "open_questions",
+   "title": "Open questions",
+   "text": "- Whether the night crossing continues"
+  },
+  {
+   "section_key": "risks",
+   "role": "risks",
+   "title": "Risks",
+   "text": "- Fuel costs may rise"
+  }
+ ],
+ "overview_only": [
+  {
+   "section_key": "gen:overview",
+   "role": "summary",
+   "title": null,
+   "text": "Numbers fell.\n\n- Passenger numbers fell by 12 percent in August\n- The second ferry returns from repair in October\n- Ticket machines at the north pier are unreliable"
+  },
+  {
+   "section_key": "open_questions",
+   "role": "open_questions",
+   "title": "Open questions",
+   "text": "- Whether the night crossing continues"
+  }
+ ],
+ "sided_actions_de": [
+  {
+   "section_key": "gen:overview",
+   "role": "summary",
+   "title": null,
+   "text": "- Die Laufzeit beträgt zwei Jahre"
+  },
+  {
+   "section_key": "action_items",
+   "role": "action_items",
+   "title": "Aufgaben",
+   "text": "### Wir übernehmen\n- Ada: Send the revised offer\n\n### Nordwind übernimmt\n- Ben: Sign the framework contract\n\n### Noch zuzuordnen\n- Share the reference list"
+  }
+ ]
+}

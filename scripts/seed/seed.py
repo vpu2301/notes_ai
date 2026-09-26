@@ -224,9 +224,7 @@ DEV_DEVICE_SECRET = "dev-room-device-secret"  # noqa: S105 — dev realm parity
 async def _seed_dev_device(conn: asyncpg.Connection) -> None:
     import hashlib
 
-    exists = await conn.fetchval(
-        "SELECT 1 FROM service_credentials WHERE id = $1", DEV_DEVICE_ID
-    )
+    exists = await conn.fetchval("SELECT 1 FROM service_credentials WHERE id = $1", DEV_DEVICE_ID)
     if exists:
         print("-- dev room device: already present")
         return
