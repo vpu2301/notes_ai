@@ -62,9 +62,12 @@ class Settings(BaseSettings):
 
     # ── Coverage (Sprint F1) ────────────────────────────────────────────
     # Decision 5: every VAD speech run starts this much earlier (clamped to
-    # the previous run's end) — Silero's onset is late on plosive-initial
-    # words and Whisper drops a clipped first word. 0 = off.
-    asr_vad_pad_ms: int = Field(default=300, ge=0, le=2000, alias="MD_ASR_VAD_PAD_MS")
+    # the previous run's end). OFF by default since the T3 measurement
+    # (docs/eval/asr-coverage-2026-10.md): 300 ms moved chunk boundaries,
+    # deleted 3.3 % and substituted 5.2 % of words against today and opened
+    # a gap on one file; the floor and the second pass without it recovered
+    # every gap with no word deleted or substituted.
+    asr_vad_pad_ms: int = Field(default=0, ge=0, le=2000, alias="MD_ASR_VAD_PAD_MS")
     # Decision 4: a recording in which VAD hears speech in less than
     # MAX_SPEECH_SHARE of the file while the rest is louder than -45 dBFS is
     # run through VAD again at a lower threshold (per channel for a

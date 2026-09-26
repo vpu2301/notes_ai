@@ -382,7 +382,8 @@ the job view as `coverage_share`.
 | `decoder_empty` | both decodes produced no words | backend health, model, audio level |
 | `unknown` | anything else (a second pass that errored or timed out) | `asr.second_pass_failed` logs, `mdx_asr_second_pass_total{cause="timeout"}` |
 
-**Knobs.** `MD_ASR_VAD_PAD_MS` (300; every run starts this much earlier),
+**Knobs.** `MD_ASR_VAD_PAD_MS` (0 — off since the T3 measurement; when set, every run
+starts this much earlier),
 `MD_ASR_VAD_FLOOR_ENABLED` / `_THRESHOLD` (0.35) / `_MAX_SPEECH_SHARE`
 (0.2), `MD_ASR_SECOND_PASS_ENABLED`. The inference budget
 (`MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`) covers both passes and was

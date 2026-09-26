@@ -1,0 +1,852 @@
+{
+  "kind": "asr-coverage",
+  "date": "2026-09-26",
+  "generated_at": "2026-09-26T14:21:33+00:00",
+  "git": "188dd64",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "model": "large-v3",
+  "device": "cpu",
+  "compute_type": "int8",
+  "wer": null,
+  "wer_note": "the speakers corpus carries RTTM only; word change vs today bounds the WER delta",
+  "der": null,
+  "der_note": "none of the changes touches the diarizer's input or labels; not re-measured",
+  "configs": {
+    "today": {
+      "pad_ms": 0,
+      "floor": false,
+      "second_pass": false,
+      "files": {
+        "vc-atgpi": {
+          "kind": "speakers",
+          "audio_seconds": 121.8,
+          "seconds": 343.4,
+          "first_pass_reused_from": null,
+          "words": 431,
+          "coverage_share": 1.0,
+          "speech_ms": 120334,
+          "transcribed_ms": 120334,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.1,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 431,
+          "rttm_speech_ms": 119840,
+          "rttm_coverage": 0.9975
+        },
+        "vc-ampme": {
+          "kind": "speakers",
+          "audio_seconds": 148.3,
+          "seconds": 482.6,
+          "first_pass_reused_from": null,
+          "words": 466,
+          "coverage_share": 1.0,
+          "speech_ms": 138102,
+          "transcribed_ms": 138102,
+          "first_speech_s": 0.3,
+          "first_segment_s": 0.3,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 466,
+          "rttm_speech_ms": 137120,
+          "rttm_coverage": 0.9993
+        },
+        "vc-afjiv": {
+          "kind": "speakers",
+          "audio_seconds": 151.2,
+          "seconds": 547.4,
+          "first_pass_reused_from": null,
+          "words": 398,
+          "coverage_share": 1.0,
+          "speech_ms": 129736,
+          "transcribed_ms": 129736,
+          "first_speech_s": 5.3,
+          "first_segment_s": 5.3,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 398,
+          "rttm_speech_ms": 123640,
+          "rttm_coverage": 0.9933
+        },
+        "vc-eqttu": {
+          "kind": "speakers",
+          "audio_seconds": 161.1,
+          "seconds": 515.8,
+          "first_pass_reused_from": null,
+          "words": 557,
+          "coverage_share": 1.0,
+          "speech_ms": 161046,
+          "transcribed_ms": 161046,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.1,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 557,
+          "rttm_speech_ms": 160720,
+          "rttm_coverage": 0.9995
+        },
+        "vc-djngn": {
+          "kind": "speakers",
+          "audio_seconds": 172.6,
+          "seconds": 723.0,
+          "first_pass_reused_from": null,
+          "words": 458,
+          "coverage_share": 0.8592,
+          "speech_ms": 167344,
+          "transcribed_ms": 143780,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.1,
+          "gaps": [
+            {
+              "start_s": 148.5,
+              "end_s": 172.1,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 458,
+          "rttm_speech_ms": 164880,
+          "rttm_coverage": 0.796
+        },
+        "vc-gpjne": {
+          "kind": "speakers",
+          "audio_seconds": 185.3,
+          "seconds": 1433.9,
+          "first_pass_reused_from": null,
+          "words": 541,
+          "coverage_share": 1.0,
+          "speech_ms": 181800,
+          "transcribed_ms": 181800,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.1,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 541,
+          "rttm_speech_ms": 181280,
+          "rttm_coverage": 0.9319
+        },
+        "vc-azisu": {
+          "kind": "speakers",
+          "audio_seconds": 194.1,
+          "seconds": 726.6,
+          "first_pass_reused_from": null,
+          "words": 655,
+          "coverage_share": 1.0,
+          "speech_ms": 192690,
+          "transcribed_ms": 192690,
+          "first_speech_s": 0.9,
+          "first_segment_s": 0.9,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 655,
+          "rttm_speech_ms": 193079,
+          "rttm_coverage": 0.985
+        },
+        "incident": {
+          "kind": "incident",
+          "audio_seconds": 166.4,
+          "seconds": 412.5,
+          "first_pass_reused_from": null,
+          "words": 411,
+          "coverage_share": 0.8564,
+          "speech_ms": 136003,
+          "transcribed_ms": 116471,
+          "first_speech_s": 11.7,
+          "first_segment_s": 11.7,
+          "gaps": [
+            {
+              "start_s": 99.4,
+              "end_s": 119.0,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 0,
+          "today_words": 411,
+          "r02": {
+            "coverage_share>=0.98": "FAIL",
+            "must_contain_before_ms[0]": "PASS",
+            "must_contain_before_ms[1]": "PASS"
+          }
+        }
+      },
+      "coverage_share": 0.9649,
+      "rttm_coverage": 0.9536,
+      "word_change_vs_today": 0.0,
+      "second_pass_chunks_per_audio_hour": 0.0,
+      "seconds_per_audio_hour": 14350.0,
+      "inference_vs_today": 1.0
+    },
+    "pad": {
+      "pad_ms": 300,
+      "floor": false,
+      "second_pass": false,
+      "files": {
+        "vc-atgpi": {
+          "kind": "speakers",
+          "audio_seconds": 121.8,
+          "seconds": 263.6,
+          "first_pass_reused_from": null,
+          "words": 419,
+          "coverage_share": 1.0,
+          "speech_ms": 120334,
+          "transcribed_ms": 120334,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 20,
+          "today_words": 431,
+          "rttm_speech_ms": 119840,
+          "rttm_coverage": 0.9987
+        },
+        "vc-ampme": {
+          "kind": "speakers",
+          "audio_seconds": 148.3,
+          "seconds": 412.3,
+          "first_pass_reused_from": null,
+          "words": 458,
+          "coverage_share": 1.0,
+          "speech_ms": 138102,
+          "transcribed_ms": 138102,
+          "first_speech_s": 0.3,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 11,
+          "today_words": 466,
+          "rttm_speech_ms": 137120,
+          "rttm_coverage": 0.9978
+        },
+        "vc-afjiv": {
+          "kind": "speakers",
+          "audio_seconds": 151.2,
+          "seconds": 486.4,
+          "first_pass_reused_from": null,
+          "words": 380,
+          "coverage_share": 1.0,
+          "speech_ms": 129736,
+          "transcribed_ms": 129736,
+          "first_speech_s": 5.3,
+          "first_segment_s": 5.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 21,
+          "today_words": 398,
+          "rttm_speech_ms": 123640,
+          "rttm_coverage": 0.9761
+        },
+        "vc-eqttu": {
+          "kind": "speakers",
+          "audio_seconds": 161.1,
+          "seconds": 356.9,
+          "first_pass_reused_from": null,
+          "words": 549,
+          "coverage_share": 1.0,
+          "speech_ms": 161046,
+          "transcribed_ms": 161046,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 26,
+          "today_words": 557,
+          "rttm_speech_ms": 160720,
+          "rttm_coverage": 0.9995
+        },
+        "vc-djngn": {
+          "kind": "speakers",
+          "audio_seconds": 172.6,
+          "seconds": 339.1,
+          "first_pass_reused_from": null,
+          "words": 477,
+          "coverage_share": 0.8592,
+          "speech_ms": 167344,
+          "transcribed_ms": 143780,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [
+            {
+              "start_s": 148.5,
+              "end_s": 172.1,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 27,
+          "today_words": 458,
+          "rttm_speech_ms": 164880,
+          "rttm_coverage": 0.8518
+        },
+        "vc-gpjne": {
+          "kind": "speakers",
+          "audio_seconds": 185.3,
+          "seconds": 820.7,
+          "first_pass_reused_from": null,
+          "words": 537,
+          "coverage_share": 1.0,
+          "speech_ms": 181800,
+          "transcribed_ms": 181800,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 38,
+          "today_words": 541,
+          "rttm_speech_ms": 181280,
+          "rttm_coverage": 1.0
+        },
+        "vc-azisu": {
+          "kind": "speakers",
+          "audio_seconds": 194.1,
+          "seconds": 413.4,
+          "first_pass_reused_from": null,
+          "words": 559,
+          "coverage_share": 0.8443,
+          "speech_ms": 192690,
+          "transcribed_ms": 162690,
+          "first_speech_s": 0.9,
+          "first_segment_s": 0.6,
+          "gaps": [
+            {
+              "start_s": 118.0,
+              "end_s": 148.0,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 152,
+          "today_words": 655,
+          "rttm_speech_ms": 193079,
+          "rttm_coverage": 0.9095
+        },
+        "incident": {
+          "kind": "incident",
+          "audio_seconds": 166.4,
+          "seconds": 446.5,
+          "first_pass_reused_from": null,
+          "words": 446,
+          "coverage_share": 1.0,
+          "speech_ms": 136003,
+          "transcribed_ms": 136003,
+          "first_speech_s": 11.7,
+          "first_segment_s": 11.4,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 81,
+          "today_words": 411,
+          "r02": {
+            "coverage_share>=0.98": "PASS",
+            "must_contain_before_ms[0]": "PASS",
+            "must_contain_before_ms[1]": "PASS"
+          }
+        }
+      },
+      "coverage_share": 0.9563,
+      "rttm_coverage": 0.958,
+      "word_change_vs_today": 0.096,
+      "second_pass_chunks_per_audio_hour": 0.0,
+      "seconds_per_audio_hour": 9794.0,
+      "inference_vs_today": 0.683
+    },
+    "pad_floor": {
+      "pad_ms": 300,
+      "floor": true,
+      "second_pass": false,
+      "files": {
+        "vc-atgpi": {
+          "kind": "speakers",
+          "audio_seconds": 121.8,
+          "seconds": 263.6,
+          "first_pass_reused_from": "pad",
+          "words": 419,
+          "coverage_share": 1.0,
+          "speech_ms": 120334,
+          "transcribed_ms": 120334,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 20,
+          "today_words": 431,
+          "rttm_speech_ms": 119840,
+          "rttm_coverage": 0.9987
+        },
+        "vc-ampme": {
+          "kind": "speakers",
+          "audio_seconds": 148.3,
+          "seconds": 412.3,
+          "first_pass_reused_from": "pad",
+          "words": 458,
+          "coverage_share": 1.0,
+          "speech_ms": 138102,
+          "transcribed_ms": 138102,
+          "first_speech_s": 0.3,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 11,
+          "today_words": 466,
+          "rttm_speech_ms": 137120,
+          "rttm_coverage": 0.9978
+        },
+        "vc-afjiv": {
+          "kind": "speakers",
+          "audio_seconds": 151.2,
+          "seconds": 486.4,
+          "first_pass_reused_from": "pad",
+          "words": 380,
+          "coverage_share": 1.0,
+          "speech_ms": 129736,
+          "transcribed_ms": 129736,
+          "first_speech_s": 5.3,
+          "first_segment_s": 5.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 21,
+          "today_words": 398,
+          "rttm_speech_ms": 123640,
+          "rttm_coverage": 0.9761
+        },
+        "vc-eqttu": {
+          "kind": "speakers",
+          "audio_seconds": 161.1,
+          "seconds": 356.9,
+          "first_pass_reused_from": "pad",
+          "words": 549,
+          "coverage_share": 1.0,
+          "speech_ms": 161046,
+          "transcribed_ms": 161046,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 26,
+          "today_words": 557,
+          "rttm_speech_ms": 160720,
+          "rttm_coverage": 0.9995
+        },
+        "vc-djngn": {
+          "kind": "speakers",
+          "audio_seconds": 172.6,
+          "seconds": 339.1,
+          "first_pass_reused_from": "pad",
+          "words": 477,
+          "coverage_share": 0.8592,
+          "speech_ms": 167344,
+          "transcribed_ms": 143780,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [
+            {
+              "start_s": 148.5,
+              "end_s": 172.1,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 27,
+          "today_words": 458,
+          "rttm_speech_ms": 164880,
+          "rttm_coverage": 0.8518
+        },
+        "vc-gpjne": {
+          "kind": "speakers",
+          "audio_seconds": 185.3,
+          "seconds": 820.8,
+          "first_pass_reused_from": "pad",
+          "words": 537,
+          "coverage_share": 1.0,
+          "speech_ms": 181800,
+          "transcribed_ms": 181800,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 38,
+          "today_words": 541,
+          "rttm_speech_ms": 181280,
+          "rttm_coverage": 1.0
+        },
+        "vc-azisu": {
+          "kind": "speakers",
+          "audio_seconds": 194.1,
+          "seconds": 413.5,
+          "first_pass_reused_from": "pad",
+          "words": 559,
+          "coverage_share": 0.8443,
+          "speech_ms": 192690,
+          "transcribed_ms": 162690,
+          "first_speech_s": 0.9,
+          "first_segment_s": 0.6,
+          "gaps": [
+            {
+              "start_s": 118.0,
+              "end_s": 148.0,
+              "cause": "unknown"
+            }
+          ],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 152,
+          "today_words": 655,
+          "rttm_speech_ms": 193079,
+          "rttm_coverage": 0.9095
+        },
+        "incident": {
+          "kind": "incident",
+          "audio_seconds": 166.4,
+          "seconds": 446.2,
+          "first_pass_reused_from": "pad",
+          "words": 446,
+          "coverage_share": 1.0,
+          "speech_ms": 136003,
+          "transcribed_ms": 136003,
+          "first_speech_s": 11.7,
+          "first_segment_s": 11.4,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 81,
+          "today_words": 411,
+          "r02": {
+            "coverage_share>=0.98": "PASS",
+            "must_contain_before_ms[0]": "PASS",
+            "must_contain_before_ms[1]": "PASS"
+          }
+        }
+      },
+      "coverage_share": 0.9563,
+      "rttm_coverage": 0.958,
+      "word_change_vs_today": 0.096,
+      "second_pass_chunks_per_audio_hour": 0.0,
+      "seconds_per_audio_hour": 9794.0,
+      "inference_vs_today": 0.683
+    },
+    "pad_floor_second": {
+      "pad_ms": 300,
+      "floor": true,
+      "second_pass": true,
+      "files": {
+        "vc-atgpi": {
+          "kind": "speakers",
+          "audio_seconds": 121.8,
+          "seconds": 263.6,
+          "first_pass_reused_from": "pad_floor",
+          "words": 419,
+          "coverage_share": 1.0,
+          "speech_ms": 120334,
+          "transcribed_ms": 120334,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 20,
+          "today_words": 431,
+          "rttm_speech_ms": 119840,
+          "rttm_coverage": 0.9987
+        },
+        "vc-ampme": {
+          "kind": "speakers",
+          "audio_seconds": 148.3,
+          "seconds": 412.3,
+          "first_pass_reused_from": "pad_floor",
+          "words": 458,
+          "coverage_share": 1.0,
+          "speech_ms": 138102,
+          "transcribed_ms": 138102,
+          "first_speech_s": 0.3,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 11,
+          "today_words": 466,
+          "rttm_speech_ms": 137120,
+          "rttm_coverage": 0.9978
+        },
+        "vc-afjiv": {
+          "kind": "speakers",
+          "audio_seconds": 151.2,
+          "seconds": 486.4,
+          "first_pass_reused_from": "pad_floor",
+          "words": 380,
+          "coverage_share": 1.0,
+          "speech_ms": 129736,
+          "transcribed_ms": 129736,
+          "first_speech_s": 5.3,
+          "first_segment_s": 5.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 21,
+          "today_words": 398,
+          "rttm_speech_ms": 123640,
+          "rttm_coverage": 0.9761
+        },
+        "vc-eqttu": {
+          "kind": "speakers",
+          "audio_seconds": 161.1,
+          "seconds": 356.9,
+          "first_pass_reused_from": "pad_floor",
+          "words": 549,
+          "coverage_share": 1.0,
+          "speech_ms": 161046,
+          "transcribed_ms": 161046,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 26,
+          "today_words": 557,
+          "rttm_speech_ms": 160720,
+          "rttm_coverage": 0.9995
+        },
+        "vc-djngn": {
+          "kind": "speakers",
+          "audio_seconds": 172.6,
+          "seconds": 388.8,
+          "first_pass_reused_from": "pad_floor",
+          "words": 563,
+          "coverage_share": 1.0,
+          "speech_ms": 167344,
+          "transcribed_ms": 167344,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 1,
+            "recovered_words": 78,
+            "by_cause": {
+              "low_coverage": 1
+            }
+          },
+          "word_changes_vs_today": 109,
+          "today_words": 458,
+          "rttm_speech_ms": 164880,
+          "rttm_coverage": 0.9669
+        },
+        "vc-gpjne": {
+          "kind": "speakers",
+          "audio_seconds": 185.3,
+          "seconds": 821.2,
+          "first_pass_reused_from": "pad_floor",
+          "words": 537,
+          "coverage_share": 1.0,
+          "speech_ms": 181800,
+          "transcribed_ms": 181800,
+          "first_speech_s": 0.1,
+          "first_segment_s": 0.0,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 38,
+          "today_words": 541,
+          "rttm_speech_ms": 181280,
+          "rttm_coverage": 1.0
+        },
+        "vc-azisu": {
+          "kind": "speakers",
+          "audio_seconds": 194.1,
+          "seconds": 493.4,
+          "first_pass_reused_from": "pad_floor",
+          "words": 662,
+          "coverage_share": 1.0,
+          "speech_ms": 192690,
+          "transcribed_ms": 192690,
+          "first_speech_s": 0.9,
+          "first_segment_s": 0.6,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 1,
+            "recovered_words": 97,
+            "by_cause": {
+              "low_coverage": 1
+            }
+          },
+          "word_changes_vs_today": 47,
+          "today_words": 655,
+          "rttm_speech_ms": 193079,
+          "rttm_coverage": 0.9994
+        },
+        "incident": {
+          "kind": "incident",
+          "audio_seconds": 166.4,
+          "seconds": 446.4,
+          "first_pass_reused_from": "pad_floor",
+          "words": 446,
+          "coverage_share": 1.0,
+          "speech_ms": 136003,
+          "transcribed_ms": 136003,
+          "first_speech_s": 11.7,
+          "first_segment_s": 11.4,
+          "gaps": [],
+          "second_pass": {
+            "chunks": 0,
+            "recovered_words": 0,
+            "by_cause": {}
+          },
+          "word_changes_vs_today": 81,
+          "today_words": 411,
+          "r02": {
+            "coverage_share>=0.98": "PASS",
+            "must_contain_before_ms[0]": "PASS",
+            "must_contain_before_ms[1]": "PASS"
+          }
+        }
+      },
+      "coverage_share": 1.0,
+      "rttm_coverage": 0.9916,
+      "word_change_vs_today": 0.0901,
+      "second_pass_chunks_per_audio_hour": 5.5,
+      "seconds_per_audio_hour": 10154.0,
+      "inference_vs_today": 0.708
+    }
+  },
+  "incident_before_fix": {
+    "coverage_share": 0.6358,
+    "first_speech_s": 11.7,
+    "first_segment_s": 40.9,
+    "gaps": [
+      {
+        "start_s": 11.7,
+        "end_s": 41.7,
+        "cause": "unknown"
+      },
+      {
+        "start_s": 99.4,
+        "end_s": 119.0,
+        "cause": "unknown"
+      }
+    ],
+    "has_diagnostics": false,
+    "r02": {
+      "coverage_share>=0.98": "FAIL",
+      "must_contain_before_ms[0]": "FAIL",
+      "must_contain_before_ms[1]": "FAIL"
+    }
+  }
+}

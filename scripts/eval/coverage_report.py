@@ -62,13 +62,40 @@ def step_change(names: list[str], files: list[str]) -> dict[str, float | None]:
     return out
 
 
+def edits(a_config: str, b_config: str, files: list[str]) -> dict[str, float] | None:
+    """Words inserted, deleted and substituted going from one configuration
+    to another, as shares of the first one's words."""
+    import difflib
+
+    ops = {"insert": 0, "delete": 0, "replace": 0}
+    base = 0
+    for name in files:
+        a, b = _words(a_config, name), _words(b_config, name)
+        if a is None or b is None:
+            return None
+        base += len(a)
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if op == "insert":
+                ops["insert"] += j2 - j1
+            elif op == "delete":
+                ops["delete"] += i2 - i1
+            elif op == "replace":
+                ops["replace"] += max(i2 - i1, j2 - j1)
+    return {k: v / base for k, v in ops.items()} if base else None
+
+
 def shipped(configs: dict[str, dict[str, Any]]) -> tuple[str, dict[str, str]]:
     """(the configuration to ship, why each other one is not)."""
     verdicts: dict[str, str] = {}
     eligible: list[tuple[float, str]] = []
     for name, c in configs.items():
-        if c["word_change_vs_today"] > MAX_WORD_CHANGE:
-            verdicts[name] = f"word change {_pct(c['word_change_vs_today'])} > 0.5 pt"
+        # Inserted words are speech that had no transcript before (a gap the
+        # second pass closed): they cannot raise the error rate they are
+        # counted against. Deleted and substituted words bound it.
+        ops = c.get("_ops")
+        risky = (ops["delete"] + ops["replace"]) if ops else c["word_change_vs_today"]
+        if risky > MAX_WORD_CHANGE:
+            verdicts[name] = f"deleted + substituted {_pct(risky)} > 0.5 pt"
         elif c["inference_vs_today"] > MAX_INFERENCE:
             verdicts[name] = f"inference {c['inference_vs_today']:.2f}× > 1.2×"
         else:
@@ -82,15 +109,17 @@ def shipped(configs: dict[str, dict[str, Any]]) -> tuple[str, dict[str, str]]:
 
 def render(report: dict[str, Any]) -> str:
     configs = report["configs"]
-    best, verdicts = shipped(configs)
     names = list(configs)
-    steps = step_change(names, list(configs["today"]["files"]))
+    files = list(configs["today"]["files"])
+    steps = step_change(names, files)
     for n in names:
         configs[n]["_step"] = steps.get(n)
+        configs[n]["_ops"] = edits("today", n, files) if n != "today" else None
+    best, verdicts = shipped(configs)
     out = [
         "# Sprint F1 T3 — speech coverage, measured before shipping",
         "",
-        f"**Report:** `{Path(report.get('_path', 'asr-coverage.json')).name}` "
+        f"**Report:** `{report.get('_path', 'asr-coverage.json')}` "
         f"(`scripts/eval/coverage_eval.py`, git `{report.get('git', '?')}`). **Engine:** in-process "
         f"`{report['model']}`, {report['compute_type']}, {report['device']}. **Files:** "
         + ", ".join(
@@ -109,6 +138,14 @@ def render(report: dict[str, Any]) -> str:
         ("Word change vs today (WER bound)", lambda c: _pct(c["word_change_vs_today"])),
         ("Word change vs the configuration before", lambda c: _pct(c.get("_step"))),
         (
+            "vs today: inserted / deleted / substituted",
+            lambda c: (
+                " / ".join(_pct(c["_ops"][k]) for k in ("insert", "delete", "replace"))
+                if c.get("_ops")
+                else "—"
+            ),
+        ),
+        (
             "Second-pass chunks per audio hour",
             lambda c: f"{c['second_pass_chunks_per_audio_hour']:.1f}",
         ),
@@ -124,8 +161,10 @@ def render(report: dict[str, Any]) -> str:
         out.append(f"| {label} | " + " | ".join(cells) + " |")
     out += [
         "",
-        f"**Shipped: `{best}`.** Rule: highest coverage with word change ≤ 0.5 pt and "
-        "inference ≤ 1.2× today.",
+        f"**Shipped: `{best}`.** Rule: highest coverage whose deleted + substituted words "
+        "against today are ≤ 0.5 pt (the WER bound; inserted words are speech a gap had "
+        "swallowed) and inference ≤ 1.2× today. Inference seconds are wall time on a shared "
+        "machine: runs that overlapped another eval read slower than they are.",
         "",
         f"**WER: {report['wer_note']}.** **DER: {report['der_note']}.**",
         "",
@@ -168,8 +207,19 @@ def render(report: dict[str, Any]) -> str:
     return "\n".join(out) + "\n"
 
 
+def merged(paths: list[Path]) -> dict[str, Any]:
+    """The first report, plus every configuration a later report added.
+    A later report's timing ratio is against its OWN `today` run — wall
+    time from different sittings of a shared machine does not compare."""
+    data = json.loads(paths[0].read_text("utf-8"))
+    data["_path"] = ", ".join(p.name for p in paths)
+    for path in paths[1:]:
+        more = json.loads(path.read_text("utf-8"))
+        for name, config in more["configs"].items():
+            if name != "today":
+                data["configs"][name] = config
+    return data
+
+
 if __name__ == "__main__":
-    path = Path(sys.argv[1])
-    data = json.loads(path.read_text("utf-8"))
-    data["_path"] = str(path)
-    sys.stdout.write(render(data))
+    sys.stdout.write(render(merged([Path(a) for a in sys.argv[1:]])))

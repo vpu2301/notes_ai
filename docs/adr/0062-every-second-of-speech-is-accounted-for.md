@@ -33,7 +33,10 @@ opening looked exactly like a quiet one.
 4. **VAD gets a floor, not a threshold change.** When VAD hears < 20 % speech but the rest is
    louder than −45 dBFS, VAD runs again at threshold 0.35, per channel for a mic/system file,
    and the union is used.
-5. **A 300 ms leading pad** on every run, clamped to the previous run's end.
+5. **A leading pad** on every run, clamped to the previous run's end — built, and **off by
+   default** (`MD_ASR_VAD_PAD_MS=0`) after T3: at 300 ms it deleted 3.3 % and substituted 5.2 %
+   of words against today's transcripts, while the floor and the second pass without it closed
+   every gap with no word deleted or substituted (`docs/eval/asr-coverage-2026-10.md`).
 
 ## Deviations from the work order
 

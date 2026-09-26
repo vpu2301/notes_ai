@@ -114,6 +114,8 @@ async def test_a_prompt_only_first_decode_is_replaced_by_the_second_pass(
     )
     rescued = [_seg(opening, 300, step_ms=900)]
     engine = _ScriptedEngine(rescued)
+    # The pad is off by default since T3; set, it moves the slice start.
+    monkeypatch.setattr(processor.settings, "asr_vad_pad_ms", 300)
 
     out = await _run(monkeypatch, _output(first), runs, engine)
 

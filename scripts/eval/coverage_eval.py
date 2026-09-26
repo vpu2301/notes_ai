@@ -67,6 +67,10 @@ CONFIGS: dict[str, dict[str, Any]] = {
     "pad": {"pad_ms": 300, "floor": False, "second_pass": False},
     "pad_floor": {"pad_ms": 300, "floor": True, "second_pass": False},
     "pad_floor_second": {"pad_ms": 300, "floor": True, "second_pass": True},
+    # Added after the first run: the pad changed words broadly (3.3 % deleted,
+    # 5.2 % substituted), the second pass only inserted recovered speech —
+    # so the candidate to ship is the floor and the second pass without it.
+    "floor_second": {"pad_ms": 0, "floor": True, "second_pass": True},
 }
 # The incident workspace's vocabulary at the time: role labels, no names
 # anyone said (a hint with "Mitchell" in it would make the check pointless).
@@ -221,9 +225,11 @@ async def main(args: argparse.Namespace) -> int:
         "der_note": "none of the changes touches the diarizer's input or labels; not re-measured",
         "configs": {},
     }
+    wanted = ["today", *(c for c in args.configs.split(",") if c and c != "today")]
+    run_configs = {c: CONFIGS[c] for c in wanted}
     first_pass: dict[tuple[str, str], tuple[Any, float]] = {}
     today_tokens: dict[str, list[str]] = {}
-    for config, opts in CONFIGS.items():
+    for config, opts in run_configs.items():
         rows: dict[str, Any] = {}
         out_dir = LOCAL / f"coverage-{config}"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -240,6 +246,12 @@ async def main(args: argparse.Namespace) -> int:
                     reuse = "pad"
             elif config == "pad_floor_second":
                 reuse = "pad_floor"
+            elif config == "floor_second":
+                ordinary = vad.speech_runs(pcm).runs
+                if not vad.floor_applies(
+                    pcm, ordinary, 16_000, max_speech_share=settings.asr_vad_floor_max_speech_share
+                ):
+                    reuse = "today"
             if reuse is not None:
                 output, first_seconds = first_pass[(reuse, name)]
                 if config == "pad_floor":
@@ -353,7 +365,7 @@ async def main(args: argparse.Namespace) -> int:
             "seconds_per_audio_hour": round(sum(r["seconds"] for r in rows.values()) / audio_h, 0),
         }
     today_cost = report["configs"]["today"]["seconds_per_audio_hour"]
-    for config in CONFIGS:
+    for config in run_configs:
         report["configs"][config]["inference_vs_today"] = round(
             report["configs"][config]["seconds_per_audio_hour"] / today_cost, 3
         )
@@ -401,4 +413,9 @@ if __name__ == "__main__":
     ap.add_argument("--audio", action="append", default=[], help="any other file (wav/flac)")
     ap.add_argument("--incident-job", help="job id whose stored audio to re-run (dev stack)")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument(
+        "--configs",
+        default=",".join(CONFIGS),
+        help="comma-separated subset of the configurations (today is always run first)",
+    )
     sys.exit(asyncio.run(main(ap.parse_args())))
