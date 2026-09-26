@@ -25,7 +25,10 @@
   and excluded by the note engine as confirmed `other_language` (the Transcript tab tags it and
   leaves it out of "copy as text" by default); batch chunks no longer condition on previous text
   (`MDX_ASR_CONDITION_PREV`, default off). The "Remember this?" offer names the consequence and
-  never fires for a role label; the glossary page shows what the transcriber is told.
+  never fires for a role label; the glossary page shows what the transcriber is told. T7
+  (`docs/eval/asr-echo-2026-09-25.md`): the shipped configuration keeps conditioning on (off made
+  conversation chunks lower-case run-ons) and the guard is term-aware after it removed a product
+  name the presenter said; the incident recording re-transcribed carries none of the seven names.
 - **Isolation audit (Sprint I1)** (`docs/security/2026-09-25-isolation-audit.md`): the names that
   appeared in the 2026-09-25 transcript came from the same workspace's own glossary (7 terms, 7
   audit events, the transcript's echo in the hint's exact order); no path was found by which one
