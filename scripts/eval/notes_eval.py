@@ -241,6 +241,8 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     # Q3: the worker's own decision — the author's type, a specific
     # template, or the classifier on the opening windows (a model call).
     turns = windows.turns_from_result(result)
+    # F3 amendment: classify what the pipeline will read — adverts cut.
+    turns = windows.prepare_turns(turns).turns
     built = windows.build_windows(turns)
     recording_type, source = await _recording_type(
         provider,

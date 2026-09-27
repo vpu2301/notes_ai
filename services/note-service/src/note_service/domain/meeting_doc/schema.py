@@ -91,6 +91,9 @@ NOISE_REASONS: Final[tuple[str, ...]] = (
     "duplicate",
     "unrelated",
 )
+# F3 amendment — set by code only (a broadcast cue at the recording's edge or
+# between two turns of one speaker), never offered to the model.
+ADVERTISEMENT: Final = "advertisement"
 MAX_QUOTE_WORDS: Final = 30
 
 

@@ -299,6 +299,7 @@ def render_sections(
     meeting_date: date | None = None,
     presenter_lines: bool = False,
     subject: str = "",
+    figure_tables: bool = True,
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
@@ -647,6 +648,12 @@ def render_sections(
         for i in small:
             del placed[i]
         homeless = sorted(pooled, key=lambda g: g.facts[0].start_ms)
+    # F3 amendment §2.4 — figures form a block only in a demo or a lecture,
+    # or where three or more give at least two measured quantities. Anywhere
+    # else they stay in the statements that say them (stored as rows).
+    placed = {i: g for i, g in placed.items() if figure_tables or _measured(g)}
+    if not (figure_tables or _measured(homeless)):
+        homeless = []
     for index, groups in placed.items():
         section = topic_sections[index]
         text, figure_lines = _figure_block(groups, language)
@@ -779,6 +786,9 @@ PRESENTER_LABELS: Final[dict[str, tuple[str, str, str]]] = {
     "de": ("Präsentiert von", "Vorgestellt", "bei"),
     "uk": ("Ведучий", "Представлено", "—"),
 }
+# F3 amendment — a speaker with turns of their own who is not the recording's
+# voice.
+GUEST_LABELS: Final[dict[str, str]] = {"en": "Guest", "de": "Gast", "uk": "Гість"}
 
 
 @dataclass(slots=True)
@@ -831,6 +841,12 @@ def _merged_figures(facts: list[VerifiedFact]) -> list[_FigureGroup]:
     return groups
 
 
+def _measured(groups: list[_FigureGroup]) -> bool:
+    """≥ 3 figures with ≥ 2 distinct quantity names that carry a unit."""
+    named = {g.figure.name.casefold() for g in groups if g.figure.unit}
+    return len(groups) >= MIN_TABLE_FIGURES and len(named) >= 2
+
+
 def _cell(text: str) -> str:
     return text.replace("|", "/").strip()
 
@@ -866,11 +882,14 @@ def presenter_text(person: Person, language: str = "en") -> str:
     label_self, label_other, joiner = PRESENTER_LABELS.get(language, PRESENTER_LABELS["en"])
     role = _ARTICLE.sub("", person.role).strip()
     org = person.organisation.strip()
+    joiner = person.joiner or joiner
     what = f"{role} {joiner} {org}" if role and org else (role or org)
     text = person.name + (f", {what}" if what else "")
     qualifier = _ARTICLE.sub("", person.qualifier).strip()
     if qualifier:
         text += f" ({qualifier})"
+    if person.standing == "guest":
+        return f"{GUEST_LABELS.get(language, GUEST_LABELS['en'])}: {text}"
     return f"{label_self if person.self_introduction else label_other}: {text}"
 
 
@@ -882,12 +901,12 @@ def _presenter_lines(facts: list[VerifiedFact], language: str) -> list[Line]:
     presenter = False
     for fact in sorted(facts, key=lambda f: f.start_ms):
         person = fact.person
-        if person is None or person.name.casefold() in seen:
+        if person is None or person.name.casefold() in seen or person.standing == "clip":
             continue
-        if person.self_introduction and presenter:
+        if person.self_introduction and person.standing == "presenter" and presenter:
             continue
         seen.add(person.name.casefold())
-        presenter = presenter or person.self_introduction
+        presenter = presenter or (person.self_introduction and person.standing == "presenter")
         out.append(Line(presenter_text(person, language), "presenter", (fact.item_key,)))
     return out
 

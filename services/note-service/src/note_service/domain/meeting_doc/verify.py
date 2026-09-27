@@ -134,6 +134,13 @@ class Person:
     """The speaker introduced themselves ("my name is…"), as opposed to
     introducing somebody else ("this is Anna from sales")."""
     self_introduction: bool = False
+    """F3 amendment — who this is to the recording, decided by code from
+    the speakers' share (``pipeline.standing_of``): ``presenter`` (the
+    recording's own voice), ``guest`` (a speaker with turns of their own)
+    or ``clip`` (a trailer, a sound bite — never written)."""
+    standing: str = "presenter"
+    """The words said between role and organisation ("beim", "with")."""
+    joiner: str = ""
 
 
 @dataclass(slots=True)
@@ -676,6 +683,8 @@ class VerifyStats:
     figures_kept: int = 0
     figures_dropped_value: int = 0
     figures_dropped_unit: int = 0
+    figures_dropped_unit_lost: int = 0
+    figures_dropped_name: int = 0
     qualifiers_cleared: int = 0
     introductions_kept: int = 0
     introduction_fields_cleared: int = 0
@@ -782,7 +791,11 @@ def verify_facts(
                 spoken, language=language, context=f"{before} {turn.text}".strip()
             )
             if figure is None:
-                if why == "unit":
+                if why == "unit_lost":
+                    stats.figures_dropped_unit_lost += 1
+                elif why == "name":
+                    stats.figures_dropped_name += 1
+                elif why == "unit":
                     stats.figures_dropped_unit += 1
                 else:
                     stats.figures_dropped_value += 1
@@ -1102,9 +1115,44 @@ def _adjacent_qualifier(qualifier: str, value: str, said: str) -> str:
     return qualifier if any(tokens[max(0, i - len(q)) : i] == q for i in starts) else ""
 
 
+# Words that measure or count when said right after a number: the units
+# above, and time, distance, share and head counts (§2.3's `unit_lost`).
 _UNIT_SPOKEN: Final[frozenset[str]] = frozenset(
-    w for forms in UNIT_WORDS.values() for form in forms for w in [form]
+    {w for forms in UNIT_WORDS.values() for w in forms}
+    | {
+        "stunden", "stunde", "minuten", "minute", "sekunden", "tage", "tagen", "wochen",
+        "monate", "monaten", "jahre", "jahren", "jahr", "kilometer", "kilometern", "meilen",
+        "prozent", "menschen", "leute", "personen", "euro", "dollar",
+        "hours", "hour", "minutes", "seconds", "days", "day", "weeks", "months",
+        "years", "year", "kilometres", "kilometers", "miles", "mile", "percent", "people",
+        "persons", "dollars", "euros",
+        "годин", "години", "хвилин", "днів", "дні", "тижнів", "місяців", "років", "роки",
+        "кілометрів", "відсотків", "людей", "осіб", "гривень", "доларів",
+    }
+)  # fmt: skip
+# "ein einziges", "one single", "exactly one": a count of one, said as one.
+_EXPLICIT_ONE: Final = re.compile(
+    r"\b(?:ein(?:e|en|em|er)? einzig(?:e|en|es|er)?|genau ein(?:e|en)?|nur ein(?:e|en)?|"
+    r"one single|exactly one|only one|a single|один-єдин\w*|лише од\w+|рівно од\w+)\b",
+    re.IGNORECASE,
 )
+# What a figure without a unit may be named: a quantity, by its noun.
+QUANTITY_NOUNS: Final[dict[str, tuple[str, ...]]] = {
+    "de": ("länge", "breite", "höhe", "gewicht", "preis", "kosten", "umsatz", "dauer",
+           "anzahl", "entfernung", "alter", "anteil", "leistung", "verbrauch", "kapazität"),
+    "en": ("length", "width", "height", "weight", "price", "cost", "revenue", "duration",
+           "count", "number", "distance", "age", "share", "power", "consumption", "capacity",
+           "cabins", "heads", "beam", "draft", "berths", "seats", "rooms"),
+    "uk": ("довжина", "ширина", "висота", "вага", "ціна", "вартість", "виторг",
+           "тривалість", "кількість", "відстань", "вік", "частка", "потужність",
+           "споживання", "місткість"),
+}  # fmt: skip
+
+
+def _quantity_noun(name: str, language: str) -> bool:
+    words = _norm_words(name)
+    nouns = QUANTITY_NOUNS.get(language, ()) + QUANTITY_NOUNS["en"]
+    return any(w[:5] == n[:5] for w in words for n in nouns if len(w) >= 4)
 
 
 def _is_unit_word(name: str) -> bool:
@@ -1171,12 +1219,23 @@ def verify_figure(
     unit = " ".join((fact.unit or "").split())[: schema.MAX_UNIT_CHARS]
     if unit and not _unit_said(unit, quote):
         return None, "unit"
-    if not unit:
-        # The unit said right after the value, from the known units only.
-        unit = _unit_after(fact.value or "", f"{quote} {context}")
     name = " ".join((fact.name or "").split())[: schema.MAX_FIGURE_NAME_CHARS]
-    if _is_unit_word(name):
+    if _is_unit_word(name) or (unit and name.casefold() == unit.casefold()):
         return None, "name"  # "Gallons: just under 300" names the unit, not the quantity
+    # F3 amendment §2.3 — a name is words, not a number ("Zwanzig Jahre").
+    if _DIGITS_RE.search(name) or numbers.number_words(name, language):
+        return None, "name"
+    # An indefinite article is not a count: "eine Software" is not 1.
+    if value == 1 and not _EXPLICIT_ONE.search(f"{quote} {context}"):
+        return None, "value"
+    if not unit:
+        # A unit said right after the value that the figure did not take
+        # ("über zwei Stunden" → "über 2") is a figure that lost its meaning.
+        if _unit_after(fact.value or "", f"{quote} {context}"):
+            return None, "unit_lost"
+        # Without a unit the name must say what is counted or measured.
+        if not _quantity_noun(name, language):
+            return None, "name"
     said = _norm_words(f"{quote} {context}")
     content = [w for w in _norm_words(name) if w not in support.stop_words(language)]
     if not content or not any(_word_said(w, said) for w in content):
@@ -1291,9 +1350,23 @@ def verify_introduction(
             organisation=fields["organisation"],
             qualifier=fields["qualifier"],
             self_introduction=bool(_SELF_INTRO.search(said)),
+            joiner=_joiner(fields["role"], fields["organisation"], said),
         ),
         cleared,
     )
+
+
+def _joiner(role: str, organisation: str, said: str) -> str:
+    """The one or two words the speaker put between role and organisation
+    ("Büroleiter beim Handelsblatt", "a broker with Springbrook")."""
+    if not role or not organisation:
+        return ""
+    match = re.search(
+        rf"{re.escape(role)}\s+(\S+(?:\s+\S+)?)\s+{re.escape(organisation)}", said, re.IGNORECASE
+    )
+    if match and len(match.group(1).split()) <= 2:
+        return match.group(1).strip(" ,")
+    return ""
 
 
 # The recording speaking to its listener: "email me", "leave a comment",

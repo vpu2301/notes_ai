@@ -16,6 +16,7 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     artifact: "a transcription artifact",
     duplicate: "a duplicated passage",
     unrelated: "an unrelated fragment",
+    advertisement: "an advertisement",
   },
   de: {
     background: "Hintergrundgespräch",
@@ -23,6 +24,7 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     artifact: "ein Transkriptionsartefakt",
     duplicate: "eine doppelte Passage",
     unrelated: "ein unzusammenhängendes Fragment",
+    advertisement: "Werbung",
   },
   uk: {
     background: "фонова мова",
@@ -30,6 +32,7 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     artifact: "артефакт транскрипції",
     duplicate: "повторений уривок",
     unrelated: "непов'язаний фрагмент",
+    advertisement: "реклама",
   },
 };
 

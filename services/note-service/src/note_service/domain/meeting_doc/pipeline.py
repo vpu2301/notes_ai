@@ -23,6 +23,7 @@ harness measures the production code or it measures nothing.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import re
 from dataclasses import dataclass, field
@@ -160,6 +161,14 @@ async def run(
     carried = carried or []
     carried_keys = tuple(key for key, _ in carried)
     turns = windows.turns_from_result(result)
+    # F3 amendment: adverts and trailers are cut before windowing (the
+    # extractor never sees them) and one-word turns inside somebody's
+    # sentence are merged into it. When that changed anything, the windows
+    # the worker built for classification are rebuilt from the result.
+    prepared = windows.prepare_turns(turns)
+    if prepared.adverts or prepared.microturns_merged:
+        turns = prepared.turns
+        built = None
     # The worker builds the windows once, to classify the recording from
     # the first of them before extraction (Q3), and hands them in.
     built = built if built is not None else windows.build_windows(turns)
@@ -244,6 +253,12 @@ async def run(
         sorted(confirmed.values(), key=lambda e: e.start_ms), speech_ms=speech_ms
     )
     noise_lines = frozenset(e.line for e in excluded)
+    # Adverts are confirmed by code already (a cue, at the edge or between
+    # two turns of the same speaker) and cut; they are listed, not capped.
+    excluded = sorted(
+        [*excluded, *(verify.Exclusion(-1, a, b, "advertisement") for a, b in prepared.adverts)],
+        key=lambda e: e.start_ms,
+    )
     out.excluded = excluded
     out.noise = sorted({(e.start_ms, e.reason) for e in excluded})
     out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
@@ -268,6 +283,8 @@ async def run(
 
     restate = {"improved": 0, "unchanged": 0}
     details_asked = 0
+    # F3 amendment §2.4 — a table is for a demonstration or a lecture.
+    tables = recording_type is None or recording_type in TABLE_TYPES
     for window, extracted in extracted_windows:
         if extracted is None:
             out.windows_failed += 1
@@ -284,7 +301,12 @@ async def run(
                 provider, window, [*extracted.facts, *twins], language, contact_hints(window)
             )
         await _person_details(provider, window, extracted, language)
-        kept = _without_figure_twins(check([*extracted.facts, *twins], window, stats))
+        kept = check([*extracted.facts, *twins], window, stats)
+        if tables:
+            # A verified figure replaces the key point it was promoted from
+            # only where figures are written as a table; elsewhere the
+            # statement stays and the figure is stored as a row.
+            kept = _without_figure_twins(kept)
         # A figure or introduction is written from its payload: its text
         # being a copy is no reason to ask again, nor to replace it.
         copies = sum(1 for f in kept if f.copied and f.figure is None and f.person is None)
@@ -313,6 +335,13 @@ async def run(
         verified.extend(kept)
 
     facts = merge_rules.merge_facts(verified)
+    # F3 amendment — who an introduced person is to this recording.
+    facts = [
+        dataclasses.replace(f, person=dataclasses.replace(f.person, standing=standing_of(f, turns)))
+        if f.person is not None
+        else f
+        for f in facts
+    ]
     out.facts = facts
     # Completions and judgements are not lines of the document: one
     # ticks a carried item off, the other is offered under a field.
@@ -388,6 +417,7 @@ async def run(
         meeting_date=meeting_date,
         presenter_lines=family.meeting_type == "broadcast",
         subject=brief.subject if brief else "",
+        figure_tables=tables,
     )
     thirds = windows.thirds(built)
     by_third = [0, 0, 0]
@@ -410,11 +440,16 @@ async def run(
         "dropped_first_person": stats.dropped_first_person,
         "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
         "children_restated": gate.children_restated,
+        # F3 amendment — the engine's view of the turns.
+        "microturns_merged": prepared.microturns_merged,
+        "adverts_cut": len(prepared.adverts),
         # F3 — figures, introductions, calls to action.
         "figure_details_asked": details_asked,
         "figures_kept": stats.figures_kept,
         "figures_dropped_value": stats.figures_dropped_value,
         "figures_dropped_unit": stats.figures_dropped_unit,
+        "figures_dropped_unit_lost": stats.figures_dropped_unit_lost,
+        "figures_dropped_name": stats.figures_dropped_name,
         "qualifiers_cleared": stats.qualifiers_cleared,
         "introductions_kept": stats.introductions_kept,
         "introduction_fields_cleared": stats.introduction_fields_cleared,
@@ -499,6 +534,46 @@ def introduction_lines(window: Window, suggested_quotes: list[str]) -> list[int]
         if named or any(q and (q in said or said in q) for q in quotes):
             out.append(turn.number)
     return out
+
+
+TABLE_TYPES: Final = frozenset({"presentation_demo", "lecture_webinar"})
+
+# F3 amendment §2.1 — the presenter is the recording's own voice.
+PRESENTER_MIN_SHARE: Final = 0.15
+SPEAKER_MIN_TURNS: Final = 3
+AD_CUE_AFTER_MS: Final = 20_000
+
+
+def standing_of(fact: VerifiedFact, turns: list[windows.Turn]) -> str:
+    """``presenter`` — the introducing voice is the recording's dominant
+    speaker (≥ 15 % of speech, ≥ 3 turns) and no broadcast cue follows the
+    name within 20 s; ``guest`` — any other speaker with ≥ 3 turns;
+    ``clip`` — a trailer or a sound bite. A name is never inferred from a
+    channel or a show."""
+    speech: dict[str | None, int] = {}
+    count: dict[str | None, int] = {}
+    for turn in turns:
+        speech[turn.speaker_label] = speech.get(turn.speaker_label, 0) + max(
+            0, turn.end_ms - turn.start_ms
+        )
+        count[turn.speaker_label] = count.get(turn.speaker_label, 0) + 1
+    label = fact.speaker_label
+    total = sum(speech.values()) or 1
+    if count.get(label, 0) < SPEAKER_MIN_TURNS or label in (None, "", "UNKNOWN"):
+        return "clip"
+    cued = any(
+        t.speaker_label == label
+        and fact.start_ms <= t.start_ms <= fact.start_ms + AD_CUE_AFTER_MS
+        and windows.AD_CUES.search(t.text)
+        for t in turns
+    )
+    if cued:
+        return "clip"
+    known = {k: v for k, v in speech.items() if k not in (None, "", "UNKNOWN")}
+    dominant = max(known, key=lambda k: known[k]) if known else None
+    if label == dominant and speech[label] / total >= PRESENTER_MIN_SHARE:
+        return "presenter"
+    return "guest"
 
 
 def restated(

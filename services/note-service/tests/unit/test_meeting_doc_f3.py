@@ -8,6 +8,7 @@ wiring.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from datetime import date
 from decimal import Decimal
@@ -666,7 +667,6 @@ def test_the_presenter_qualifier_may_be_the_next_sentence_and_keeps_its_casing()
             False,
         ),
         ("just like on a 52 gt, the centre part is submersible", "gt", "52", False),
-        ("hull length again 65 feet your max beam is wide", "hull length", "65", True),
     ],
 )
 def test_numbers_that_name_a_model_are_not_figures(
@@ -675,8 +675,20 @@ def test_numbers_that_name_a_model_are_not_figures(
     fact = schema.Fact(kind=schema.FIGURE, text="x", quote=line, turn=1, name=name, value=value)
     out = _verify([fact], _window(line))
     assert bool(out) is kept
-    if kept:
-        assert out[0].figure.value_text == "65 feet"  # the unit said right after the value
+
+
+def test_a_unit_said_but_not_taken_is_unit_lost_and_a_unit_taken_is_kept() -> None:
+    line = "hull length again 65 feet your max beam is wide"
+    stats = verify.VerifyStats()
+    lost = schema.Fact(
+        kind=schema.FIGURE, text="x", quote=line, turn=1, name="hull length", value="65"
+    )
+    assert (
+        _verify([lost], _window(line), stats=stats) == [] and stats.figures_dropped_unit_lost == 1
+    )
+    taken = lost.model_copy(update={"unit": "feet"})
+    [kept] = _verify([taken], _window(line))
+    assert kept.figure.value_text == "65 feet"
 
 
 def test_a_unit_is_not_a_quantity_name() -> None:
@@ -690,3 +702,124 @@ def test_a_unit_is_not_a_quantity_name() -> None:
 def test_i_am_mid_sentence_is_the_speakers_voice() -> None:
     assert support.first_person("For those that don't know, my name is Mitchell, I am a broker.")
     assert not support.first_person("The broker is with Springbrook Marine Group.")
+
+
+# ── F3 amendment (r03) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("line", "name", "value", "unit", "why"),
+    [
+        (
+            "Zwanzig Jahre später ist die Firma an der Börse",
+            "Zwanzig Jahre",
+            "zwanzig",
+            "Jahre",
+            "name",
+        ),
+        ("Er gründet eine Software für Geheimdienste", "Software", "eine", "", "value"),
+        ("Das Gespräch dauerte über zwei Stunden", "Gespräch", "zwei", "", "unit_lost"),
+    ],
+)
+def test_the_r03_figures_are_not_figures(
+    line: str, name: str, value: str, unit: str, why: str
+) -> None:
+    fact = schema.Fact(
+        kind=schema.FIGURE, text="x", quote=line, turn=1, name=name, value=value, unit=unit or None
+    )
+    figure, reason = verify.verify_figure(fact, language="de", context=line)
+    assert figure is None and reason == why
+
+
+def test_a_distance_with_its_unit_is_a_figure_and_one_said_as_one_counts() -> None:
+    line = "Das Büro liegt über viertausend Kilometer entfernt"
+    fact = schema.Fact(kind=schema.FIGURE, text="x", quote=line, turn=1, name="Entfernung",
+                       value="viertausend", unit="Kilometer", qualifier="über")  # fmt: skip
+    figure, _why = verify.verify_figure(fact, language="de", context=line)
+    assert figure is not None and figure.value_text == "über 4,000 Kilometer"
+    one = "Es gab nur ein einziges Büro in der Stadt"
+    fact = schema.Fact(
+        kind=schema.FIGURE, text="x", quote=one, turn=1, name="Anzahl Büro", value="ein"
+    )
+    assert verify.verify_figure(fact, language="de", context=one)[0] is not None
+
+
+def test_a_narrative_recording_writes_a_table_only_for_measured_quantities() -> None:
+    figures = _pardo_figures()
+    sections = render.render_sections(figures, role_by_key=ROLE_BY_KEY, figure_tables=False)
+    assert [s for s in sections if s.role == roles.SPECIFICATIONS]  # ≥ 3, ≥ 2 names with units
+    two = figures[:2]
+    sections = render.render_sections(two, role_by_key=ROLE_BY_KEY, figure_tables=False)
+    assert not [s for s in sections if s.role == roles.SPECIFICATIONS]
+
+
+def _turn(i: int, label: str, text: str, start: int, end: int) -> Turn:
+    return Turn(i, label, None, text, start, end)
+
+
+def test_a_trailer_at_the_start_is_cut_as_an_advertisement() -> None:
+    from note_service.domain.meeting_doc import windows
+
+    turns = [
+        _turn(0, "UNKNOWN", "Ich bin Chris Hansen von Dateline NBC.", 5_000, 9_000),
+        _turn(1, "UNKNOWN", "Prime Time. Jetzt im Kino.", 9_000, 33_000),
+        _turn(2, "SPEAKER_1", "Willkommen zu dieser Folge über Palantir.", 34_000, 40_000),
+        _turn(3, "SPEAKER_1", "Heute geht es um Peter Thiel.", 40_000, 44_000),
+    ]
+    prepared = windows.prepare_turns(turns)
+    assert prepared.adverts == [(5_000, 33_000)]
+    assert prepared.turns[0].text.startswith("Willkommen")
+
+
+def test_a_mid_roll_between_two_turns_of_one_speaker_is_cut() -> None:
+    from note_service.domain.meeting_doc import windows
+
+    turns = [
+        _turn(0, "SPEAKER_1", "Wir sprechen über Palantir.", 200_000, 260_000),
+        _turn(1, "SPEAKER_4", "Diese Folge wird unterstützt von einer Bank.", 261_000, 290_000),
+        _turn(2, "SPEAKER_1", "Zurück zu Alex Karp.", 291_000, 330_000),
+        _turn(3, "SPEAKER_1", "Er studierte in Frankfurt.", 330_000, 900_000),
+    ]
+    assert windows.advert_runs(turns) == [(1, 1)]
+
+
+def test_a_micro_turn_inside_a_sentence_is_merged() -> None:
+    from note_service.domain.meeting_doc import windows
+
+    turns = [
+        _turn(0, "SPEAKER_2", "Wie", 0, 800),
+        _turn(1, "SPEAKER_1", "Kann", 800, 1_200),
+        _turn(2, "SPEAKER_2", "man Terrorismus bekämpfen?", 1_200, 3_000),
+        _turn(3, "SPEAKER_3", "Gute Frage", 3_000, 4_000),
+        _turn(4, "SPEAKER_1", "Ja", 4_000, 4_500),
+    ]
+    merged, n = windows.merge_micro_turns(turns)
+    assert n == 1 and merged[0].text == "Wie Kann man Terrorismus bekämpfen?"
+    assert [t.speaker_label for t in merged] == ["SPEAKER_2", "SPEAKER_3", "SPEAKER_1"]
+
+
+def _person(label: str, start: int) -> VerifiedFact:
+    return VerifiedFact(
+        kind=schema.INTRODUCTION, text="x", quote="x y z", turn=0, start_ms=start, end_ms=start + 1,
+        speaker_label=label, speaker_name=None,
+        person=verify.Person(name="Felix Holtermann", role="Büroleiter", organisation="Handelsblatt",
+                             self_introduction=True, joiner="beim"),
+    )  # fmt: skip
+
+
+def test_a_guest_is_a_guest_and_a_trailer_voice_is_nobody() -> None:
+    turns = (
+        [_turn(i, "SPEAKER_1", "Erzählung", i * 10_000, i * 10_000 + 9_000) for i in range(10)]
+        + [
+            _turn(10 + i, "SPEAKER_3", "Antwort", 200_000 + i * 5_000, 204_000 + i * 5_000)
+            for i in range(4)
+        ]
+        + [_turn(20, "SPEAKER_9", "Ich bin Chris Hansen. Jetzt im Kino.", 400_000, 405_000)]
+    )
+    assert pipeline.standing_of(_person("SPEAKER_3", 200_000), turns) == "guest"
+    assert pipeline.standing_of(_person("SPEAKER_9", 400_000), turns) == "clip"
+    assert pipeline.standing_of(_person("SPEAKER_1", 0), turns) == "presenter"
+    guest = dataclasses.replace(_person("SPEAKER_3", 0).person, standing="guest")
+    assert (
+        render.presenter_text(guest, "de") == "Gast: Felix Holtermann, Büroleiter beim Handelsblatt"
+    )

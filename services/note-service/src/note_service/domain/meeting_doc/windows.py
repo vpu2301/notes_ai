@@ -339,3 +339,140 @@ def thirds(windows: list[Window]) -> dict[int, int]:
         share = (middle - start) / span
         out[window.index] = 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
     return out
+
+
+# ── The engine's view of the turns (F3 amendment, r03) ──────────────
+#
+# Two things the diarizer's output is not changed for, but the engine
+# should not read as it comes: a one-word "turn" by another label in the
+# middle of somebody's sentence, and an advertisement or a trailer before,
+# inside or after the recording's own content.
+
+MICRO_TURN_WORDS: Final = 3
+MICRO_TURN_MS: Final = 1_500
+AD_HEAD_MS: Final = 120_000
+AD_TAIL_MS: Final = 60_000
+AD_MIDROLL_MAX_MS: Final = 90_000
+# Broadcast cues — the words an advert or a trailer says, per language.
+AD_CUES: Final = re.compile(
+    r"\b(?:jetzt im kino|ab heute im kino|now in (?:cinemas|theaters|theatres)|in theaters now|"
+    r"sponsored|sponsor(?:ed)? by|this episode is brought to you|brought to you by|werbung|"
+    r"anzeige|presented by|präsentiert von|podcast von|unterstützt von|"
+    r"реклама|спонсор|за підтримки)\b",
+    re.IGNORECASE,
+)
+_UNKNOWN_LABELS: Final = frozenset({None, "", "UNKNOWN", "unknown"})
+
+
+@dataclass(frozen=True, slots=True)
+class Prepared:
+    turns: list[Turn]
+    """``[(start_ms, end_ms)]`` of the passages cut as advertisements."""
+    adverts: list[tuple[int, int]]
+    microturns_merged: int
+
+
+def merge_micro_turns(turns: list[Turn]) -> tuple[list[Turn], int]:
+    """A turn of ≤ 3 words and ≤ 1.5 s whose neighbours on both sides carry
+    one label is part of that speaker's sentence ("Kann" between two halves
+    of one question). Merged into them, text in time order."""
+    out: list[Turn] = []
+    merged = 0
+    i = 0
+    while i < len(turns):
+        turn = turns[i]
+        if (
+            out
+            and i + 1 < len(turns)
+            and len(turn.text.split()) <= MICRO_TURN_WORDS
+            and turn.end_ms - turn.start_ms <= MICRO_TURN_MS
+            and out[-1].speaker_label == turns[i + 1].speaker_label
+            and turn.speaker_label != out[-1].speaker_label
+        ):
+            prev, nxt = out.pop(), turns[i + 1]
+            out.append(
+                Turn(
+                    index=prev.index,
+                    speaker_label=prev.speaker_label,
+                    speaker_name=prev.speaker_name,
+                    text=f"{prev.text} {turn.text} {nxt.text}",
+                    start_ms=prev.start_ms,
+                    end_ms=max(prev.end_ms, nxt.end_ms),
+                    language=prev.language,
+                )
+            )
+            merged += 1
+            i += 2
+            continue
+        out.append(turn)
+        i += 1
+    return [_renumbered(t, n) for n, t in enumerate(out)], merged
+
+
+def _renumbered(turn: Turn, index: int) -> Turn:
+    return Turn(
+        index=index,
+        speaker_label=turn.speaker_label,
+        speaker_name=turn.speaker_name,
+        text=turn.text,
+        start_ms=turn.start_ms,
+        end_ms=turn.end_ms,
+        language=turn.language,
+    )
+
+
+def _runs(turns: list[Turn]) -> list[tuple[int, int]]:
+    """``[(first, last)]`` indices of maximal same-label runs."""
+    runs: list[tuple[int, int]] = []
+    start = 0
+    for i in range(1, len(turns) + 1):
+        if i == len(turns) or turns[i].speaker_label != turns[start].speaker_label:
+            runs.append((start, i - 1))
+            start = i
+    return runs
+
+
+def advert_runs(turns: list[Turn]) -> list[tuple[int, int]]:
+    """Runs of turns that are an advertisement or a trailer:
+
+    * in the first 120 s or the last 60 s, by a label that never speaks
+      again (or no known label), saying a broadcast cue — whatever length;
+    * mid-recording, a label change, a cue, and the previous speaker back
+      within 90 s.
+    """
+    if not turns:
+        return []
+    end = max(t.end_ms for t in turns)
+    runs = _runs(turns)
+    out: list[tuple[int, int]] = []
+    for k, (a, b) in enumerate(runs):
+        label = turns[a].speaker_label
+        text = " ".join(t.text for t in turns[a : b + 1])
+        if not AD_CUES.search(text):
+            continue
+        later = any(t.speaker_label == label for t in turns[b + 1 :])
+        unknown = label in _UNKNOWN_LABELS
+        edge = turns[a].start_ms < AD_HEAD_MS or turns[b].end_ms > end - AD_TAIL_MS
+        if edge and (unknown or not later):
+            out.append((a, b))
+            continue
+        if 0 < k < len(runs) - 1:
+            before = turns[runs[k - 1][1]].speaker_label
+            after = turns[runs[k + 1][0]].speaker_label
+            if (
+                before == after != label
+                and turns[b].end_ms - turns[a].start_ms <= AD_MIDROLL_MAX_MS
+            ):
+                out.append((a, b))
+    return out
+
+
+def prepare_turns(turns: list[Turn]) -> Prepared:
+    """The engine's view: adverts cut (before windowing — the extractor
+    never sees them), micro-turns merged."""
+    cut = advert_runs(turns)
+    drop = {i for a, b in cut for i in range(a, b + 1)}
+    adverts = [(turns[a].start_ms, turns[b].end_ms) for a, b in cut]
+    kept = [t for i, t in enumerate(turns) if i not in drop]
+    merged_turns, merged = merge_micro_turns(kept)
+    return Prepared(turns=merged_turns, adverts=adverts, microturns_merged=merged)

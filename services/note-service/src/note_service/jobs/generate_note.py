@@ -131,6 +131,8 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     # Q3: what the recording IS decides which kinds are extracted — before
     # extraction, so a podcast is never offered "decision" or "action".
     turns = windows.turns_from_result(result)
+    # F3 amendment: classify what the pipeline will read — adverts cut.
+    turns = windows.prepare_turns(turns).turns
     built = windows.build_windows(turns)
     recording_type, recording_source = await _recording_type(
         provider,
@@ -522,7 +524,13 @@ def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
         line = render_rules.Line(fact.text, fact.kind, (fact.item_key,), fact.mentions)
         section_key = home.section_key if home else role_rules.OVERVIEW_KEY
         # F2 — a copy is evidence: stored, never offered as a line.
-        placement = writer.EVIDENCE if fact.evidence_only else writer.SUGGESTED
+        # A figure no line writes (a narrative recording has no table) is
+        # stored for search and evidence, never offered as a line.
+        placement = (
+            writer.EVIDENCE
+            if fact.evidence_only or getattr(fact, "figure", None) is not None
+            else writer.SUGGESTED
+        )
         row = line_row(line, section_key, placement, {fact.item_key: fact}, family=family)
         if row is not None:
             out.append(row)

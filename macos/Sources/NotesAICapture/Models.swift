@@ -716,6 +716,7 @@ extension GenerationView {
             "artifact": "a transcription artifact",
             "duplicate": "a duplicated passage",
             "unrelated": "an unrelated fragment",
+            "advertisement": "an advertisement",
             "passage": "a passage",
         ],
         "de": [
@@ -724,6 +725,7 @@ extension GenerationView {
             "artifact": "ein Transkriptionsartefakt",
             "duplicate": "eine doppelte Passage",
             "unrelated": "ein unzusammenhängendes Fragment",
+            "advertisement": "Werbung",
             "passage": "eine Passage",
         ],
         "uk": [
@@ -732,6 +734,7 @@ extension GenerationView {
             "artifact": "артефакт транскрипції",
             "duplicate": "повторений уривок",
             "unrelated": "непов'язаний фрагмент",
+            "advertisement": "реклама",
             "passage": "уривок",
         ],
     ]
