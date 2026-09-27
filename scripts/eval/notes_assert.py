@@ -223,7 +223,7 @@ def check(
         from notes_scoring import lint_produced
 
         linted = lint_produced(meeting, produced)
-        found = linted.by_code() if linted is not None else None
+        found = (linted.get("unresolved") or {}) if linted is not None else None
         for code, limit in sorted(checklist["lint"].items()):
             add(f"lint[{code}]", found is not None and found.get(code, 0) <= int(limit), "lint")
     for i, topic in enumerate(checklist.get("topics", [])):

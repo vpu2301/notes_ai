@@ -1,61 +1,80 @@
-# ADR-0065 — D1: the document standard, linted before the write
+# ADR-0065 — D1: no note below the document standard is written
 
-**Status:** Accepted · **Date:** 2026-09-27 · **Implements:** `docs/eval/document-standard.md`
-(Sprint D1) with the codes of `docs/eval/error-taxonomy.md`
-
-## Context
-
-The document standard states what a generated note must look like, with numbers: title
-length, two orientation paragraphs of set lengths, a section count from the recording's length,
-heading and bullet lengths, one level of at most three sub-bullets, 8·D to 18·D words, under 5 %
-redundancy, and a blind rubric with a release gate. It names `meeting_doc/doclint.py` as the
-enforcer "before a document is written".
+**Status:** Accepted · **Date:** 2026-09-27 · **Implements:** Sprint D1 ("The document linter")
+against `docs/eval/document-standard.md`, with the codes of `docs/eval/error-taxonomy.md`
 
 ## Decisions
 
-1. **`doclint.repair` makes only the mechanical changes.** A line that cites no fact is not
-   written (§7), and a heading loses trailing ":" "." "!" (§4). Code never rewords a model's line
-   or a person's words, so every other departure is reported, not fixed.
-2. **`doclint.lint` reports everything else** as `(code, rule, section key, line)`, never text.
-   47 rules across §1–§7, each mapped to a taxonomy code; most are D-codes, plus F-INV (an
-   unsupported name in a title or heading), F-SUBJ, F-COPY and F-DESC for bullets. The rule
-   table is `doclint.RULES`.
-3. **It runs on every generation**, after render and before the write: `stats.lint`,
-   `stats.lint_rules`, `stats.lint_repairs`, and `mdx_note_generation_lint_total{code, rule}`.
-   Findings never block a note. The standard's release gate is the blind rubric (§8), and
-   nightly gates per code wait for a v2 baseline.
-4. **The eval runs the same function** (`notes_scoring.lint_produced`): `lint_findings`,
-   `lint_clean_rate`, and the rubric's Q3 and Q7 read by code. A checklist can cap findings per
-   code.
-5. **Titles (§1) are held in `note_title.py`.** The prompt asks for 30–80 characters naming the
-   subject and angle. An answer is cut at a word above 80 characters, and one with a second
-   colon or a placeholder shape is refused. `PROMPT_VERSION` 2026-10-21.
-6. **The rubric (§8)** is `notes_pairs.py rubric-build` / `rubric-score`. It is per note, blind
-   across arms. Each page lists five random lines for Q4 and the word band for Q7. A note's score
-   is the median of its raters, and the gate is mean ≥ 13/16, Q4 = 2 on ≥ 95 % of notes and no
-   note with Q1 = 0.
+1. **One linter, two callers.** `meeting_doc/doclint.enforce(document)` runs in the worker
+   between `pipeline.run` and `writer.apply` (`jobs/generate_note.py`), and in the eval harness on
+   every output (`scripts/eval/notes_eval.run_pipeline`). The scorer imports the same module.
+   `pipeline.run` no longer lints: the pipeline's tests see the document the model produced; the
+   writer sees the one the standard allows.
+2. **Rules are data.** `doclint.RULES` maps each rule of the work order (`sections.count`,
+   `heading.form`, `line.subject`, `orient.p1`, …) to a taxonomy code and says whether a D2
+   regeneration can fix it. Severity is the code's (S1/S2 hard, S3 soft). A finding is
+   `(rule, code, severity, section key, line index, detail)`; `detail` is a closed word, never
+   text.
+3. **Order of work:** check → hard findings with a hookable rule go to D2's `regenerate` once →
+   deterministic repairs and fallbacks → check again. What is still found is `unresolved`.
+   Stats: `stats.lint = {findings_by_code, findings_by_rule, repaired_by_code, regenerated,
+   unresolved, unresolved_rules, unresolved_hard}`. Metric
+   `mdx_note_generation_lint_total{code, outcome=found|repaired|regenerated|unresolved|
+   unresolved_note|error}`; alert `NoteGenerationLintUnresolved` when unresolved S1/S2 notes
+   exceed 10 % of complete generations over an hour.
+4. **Repairs** (in order):
+   - text: strip glyphs and ids (`line.glyph`), add the Q4 certainty marker (`line.certainty`);
+   - lines: a line breaking a line rule is not rendered and its fact stays evidence
+     (`line.cited`, `line.subject`, `line.person` after F2's mechanical fix, `line.language`,
+     `line.copy`, `line.descriptive`, `line.specific`); sub-points go with their parent, past
+     three or restating it are cut;
+   - orientation: map the type word, rebuild paragraph 1 by code from the verified roles
+     (`brief.orientation`, written by the pipeline), take the composed rung below three
+     sentences, trim past six or 140 words, compose the block when it is missing;
+   - headings: strip punctuation, recase all caps, cut to 8 words past 60 characters; a generic
+     heading, one naming what its section does not say, or one restating the title takes the
+     fallback heading (the section's name and first time); a heading saying what the one before
+     it says merges the two sections;
+   - sections: order by first cited time; one point joins its neighbour; past six split at the
+     largest gap; too many merge where headings share ≥ 40 % or spans fit in 90 s; too few fall
+     back to chapters (amendment §2.6);
+   - redundancy: the later duplicate goes, or the earlier when the later is more specific;
+   - volume: below 8·D render facts that meet the line rules, by time, into the section whose
+     span holds them; above 18·D drop the least specific points, never below two per section.
+5. **Titles (§1)** are constraints on `note_title`: 30–80 characters, one colon, no repeated
+   phrase, not a placeholder shape. A failing suggestion is not applied (reason `lint`).
+6. **`descriptive` gains evaluations** of a person or thing with no claim after them
+   ("Alex Karp hatte einen ungewöhnlichen Lebenslauf"): no digits, no date, an evaluative
+   adjective, and no reason or relative clause following.
+7. **Eval gates** (`notes_scoring.d1_gates`): no unresolved S1; unresolved S2 in ≤ 2 % of notes;
+   volume and section bands met on ≥ 90 %; no rendered line with a label or pronoun subject;
+   none with specificity 0.
 
-## Choices the standard leaves open
+## Choices the work order leaves open
 
-- **D is transcribed speech:** merged turn spans minus exclusions, not wall time.
-- **Section count** (`max(3, min(8, round(D / 4)))`) is judged from 5 minutes of speech, with
-  the standard's own tolerance ("a 30-minute podcast has 6–8 sections"): too few below
-  target − 2, never below 3. Under 5 minutes Q3's "too little to head" stands.
-- **Paragraph 2's sentences** are its summary lines; a full-stop count would split at "11.".
-- **Names in titles and headings** are runs of two or more capitalised words, acronyms and
-  known names. German capitalises every noun, so a single capital proves nothing. A name is
-  supported when every word appears in a fact's text or quote.
-- **"Restates the title"** means every heading word is in the title. **Two headings sharing
-  > 60 %** is measured over the smaller heading's words.
-- **D-LANG is broader than F2's first-person rule** ("we", "wir", "ми"): F2 drops facts on its
-  rule, and the lint only reports.
-- **Not checked by the lint:** sentence case, since German nouns make it undecidable. Also the
-  certainty marker, which the client's chip can carry instead. And tense consistency.
+- **D2 is not merged.** The worker passes no hook; `regenerated` is 0 and fallbacks apply
+  directly. The hook's shape is `regenerate(requests, sections) -> sections | None`.
+- **D is transcribed speech minus exclusions.** The section count is judged from 5 minutes of
+  speech, with the standard's own tolerance (target ± 2, never below 3).
+- **An orientation sentence and a section line are never duplicates.** §2 has paragraph 2 name
+  the most specific facts, which the sections carry too. Redundancy is measured within the
+  orientation and among section lines.
+- **Names in German headings and titles** are runs of capitalised words, acronyms and known
+  names (every German noun is capitalised). A run like "Gast Felix Holtermann" counts as
+  supported when all but its first word are.
+- **"Es gibt …" / "It is …"** are expletives, not pronoun subjects.
+- **Another language** means its stop words are at least twice as present as the note's.
+- **Recasing German** capitalises every word but the function words. A word stays upper case
+  only when the facts spell it so.
+- **Not checked:** sentence case (undecidable for German nouns), tense.
+- **`orient.p1` "every proper noun verified"** reads names against facts, verified speakers and
+  guests; "Erzähler/in" needs a narrator entry in the roles.
 
 ## Consequences
 
-On the stored r03 Gemma 3 4B run the lint reports what the standard's own scoring of that note
-says is wrong: a short first paragraph, no second paragraph, too few sections, too little text.
-On the synthetic fixtures run through the scripted stand-in, it reports that stand-in's copies,
-"Part 1" headings and two-sentence summaries. The engine's own gap it shows: with no verified
-subject or themes, the code-composed first paragraph is under 25 words.
+- A short or unsupported title now keeps the placeholder: "Q4 Product Roadmap" is under 30
+  characters. The prompt asks for 30–80.
+- Our own code-composed first paragraph is under 25 words when no subject or themes were
+  verified. It stays unresolved (`orient.p1 length`) until D2 writes it.
+- Tests: `services/note-service/tests/unit/test_meeting_doc_doclint.py`; fixtures of r03 note 1,
+  note 2 and the comparison note's shape in `tests/fixtures/meeting_doc/doclint/`.

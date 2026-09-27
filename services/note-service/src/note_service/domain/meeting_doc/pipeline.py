@@ -31,7 +31,6 @@ from datetime import date
 from typing import Any, Final, Protocol
 
 from . import (
-    doclint,
     entities,
     numbers,
     overview,
@@ -452,17 +451,32 @@ async def run(
     # verified values; the model's framing replaces only its first clause.
     opening = ""
     if document_facts:
+        orientation: dict[str, Any] = {
+            "subject": _gated_phrase(brief.subject if brief else "", document_facts, gate),
+            "framing": brief.framing if brief else "",
+            "speakers": _speakers(turns, document_facts, language),
+            "guests": _guests(document_facts),
+            "themes": [
+                t for t in (brief.themes if brief else []) if _gated_phrase(t, document_facts, gate)
+            ],
+        }
         opening = overview.first_paragraph(
             language=language,
             recording_type=recording_type,
-            subject=_gated_phrase(brief.subject if brief else "", document_facts, gate),
-            framing=brief.framing if brief else "",
-            speakers=_speakers(turns, document_facts, language),
-            guests=_guests(document_facts),
-            themes=[
-                t for t in (brief.themes if brief else []) if _gated_phrase(t, document_facts, gate)
-            ],
+            subject=str(orientation["subject"]),
+            framing=str(orientation["framing"]),
+            speakers=list(orientation["speakers"]),
+            guests=list(orientation["guests"]),
+            themes=list(orientation["themes"]),
         )
+        # D1 — the verified roles and values paragraph 1 is built from, so
+        # the linter can check it and rebuild it by code (doclint.p1_faults).
+        # Names are people and things verified as names — not the recording's
+        # frequent capitalised words (German nouns) and never a default label.
+        names = sorted(
+            n for n in gate.known - rec_names if n and not _DEFAULT_NAME.match(n.strip())
+        )
+        out.brief = {**out.brief, "orientation": {**orientation, "names": names}}
 
     render_counts: dict[str, int] = {}
     out.sections = render.render_sections(
@@ -481,20 +495,6 @@ async def run(
         subject=brief.subject if brief else "",
         figure_tables=tables,
         recording_names=gate.known,
-    )
-    # D1 — the document standard (docs/eval/document-standard.md) before the
-    # document is written: the mechanical repairs, then every other
-    # departure counted by taxonomy code. Nothing else is rewritten.
-    repaired, repairs = doclint.repair(out.sections)
-    out.sections = [s for s in repaired if isinstance(s, render.RenderedSection)]
-    excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
-    linted = doclint.lint(
-        doclint.from_rendered(out.sections),
-        language=language,
-        speech_ms=max(0, speech_ms - excluded_speech),
-        recording_type=recording_type,
-        facts={f.item_key: doclint.LintFact(f.start_ms, f.text, f.quote) for f in document_facts},
-        known=gate.known,
     )
     thirds = windows.thirds(built)
     by_third = [0, 0, 0]
@@ -586,9 +586,6 @@ async def run(
         "topics_merged": gate.topics_merged,
         "lines_by_third": _lines_by_third(out.sections, document_facts, thirds),
         "lines_total": sum(len(s.lines) for s in out.sections),
-        "lint": linted.by_code(),
-        "lint_rules": linted.by_rule(),
-        "lint_repairs": repairs,
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,

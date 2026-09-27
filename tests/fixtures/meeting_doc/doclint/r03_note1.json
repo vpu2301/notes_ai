@@ -1,0 +1,129 @@
+{
+ "_note": "Rendered-document fixtures for Sprint D1 acceptance 1. The SHAPE of three notes on r03 (docs/eval/error-taxonomy.md, amendment after r03 §5); the wording is reconstructed from what those documents quote, not the notes themselves.",
+ "id": "r03_note1",
+ "language": "de",
+ "speech_ms": 1800000,
+ "recording_type": "podcast_broadcast",
+ "brief": {},
+ "facts": [
+  {
+   "id": "f0",
+   "text": "Die Stimmung nach den Anschlägen ist angespannt",
+   "quote": "und dann die stimmung nach den anschlägen ist angespannt wie man sieht",
+   "start_ms": 120000
+  },
+  {
+   "id": "f1",
+   "text": "Ein riesiger Feuerball entsteht",
+   "quote": "und dann ein riesiger feuerball entsteht wie man sieht",
+   "start_ms": 300000
+  },
+  {
+   "id": "f2",
+   "text": "Menschen auf der Straße werden gefilmt",
+   "quote": "und dann menschen auf der straße werden gefilmt wie man sieht",
+   "start_ms": 480000
+  },
+  {
+   "id": "f3",
+   "text": "Die Idee für eine neue Firma entsteht",
+   "quote": "und dann die idee für eine neue firma entsteht wie man sieht",
+   "start_ms": 660000
+  },
+  {
+   "id": "f4",
+   "text": "Die Firma sammelt sehr viele Daten",
+   "quote": "und dann die firma sammelt sehr viele daten wie man sieht",
+   "start_ms": 840000
+  },
+  {
+   "id": "f5",
+   "text": "Es gibt viel Kritik an der Überwachung",
+   "quote": "und dann es gibt viel kritik an der überwachung wie man sieht",
+   "start_ms": 1020000
+  },
+  {
+   "id": "f6",
+   "text": "Der Chef hat einen ungewöhnlichen Lebenslauf",
+   "quote": "und dann der chef hat einen ungewöhnlichen lebenslauf wie man sieht",
+   "start_ms": 1200000
+  },
+  {
+   "id": "f7",
+   "text": "Die Firma ist heute sehr mächtig",
+   "quote": "und dann die firma ist heute sehr mächtig wie man sieht",
+   "start_ms": 1380000
+  }
+ ],
+ "sections": [
+  {
+   "section_key": "gen:overview",
+   "role": "summary",
+   "title": null,
+   "lines": [
+    {
+     "text": "- Die Stimmung nach den Anschlägen ist angespannt",
+     "kind": "bullet",
+     "fact_ids": [
+      "f0"
+     ]
+    },
+    {
+     "text": "- Ein riesiger Feuerball entsteht",
+     "kind": "bullet",
+     "fact_ids": [
+      "f1"
+     ]
+    },
+    {
+     "text": "- Menschen auf der Straße werden gefilmt",
+     "kind": "bullet",
+     "fact_ids": [
+      "f2"
+     ]
+    },
+    {
+     "text": "- Die Idee für eine neue Firma entsteht",
+     "kind": "bullet",
+     "fact_ids": [
+      "f3"
+     ]
+    },
+    {
+     "text": "- Die Firma sammelt sehr viele Daten",
+     "kind": "bullet",
+     "fact_ids": [
+      "f4"
+     ]
+    },
+    {
+     "text": "- Es gibt viel Kritik an der Überwachung",
+     "kind": "bullet",
+     "fact_ids": [
+      "f5"
+     ]
+    },
+    {
+     "text": "- Der Chef hat einen ungewöhnlichen Lebenslauf",
+     "kind": "bullet",
+     "fact_ids": [
+      "f6"
+     ]
+    },
+    {
+     "text": "- Die Firma ist heute sehr mächtig",
+     "kind": "bullet",
+     "fact_ids": [
+      "f7"
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "sections.count": "too_few",
+  "volume.words": "below",
+  "line.specific": "zero",
+  "orient.present": "bullets"
+ }
+}

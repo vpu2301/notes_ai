@@ -34,7 +34,16 @@ from ..domain import carry_over, note_title
 from ..domain import generation_repository as gen_repo
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
-from ..domain.meeting_doc import classify, pipeline, prompts, roles, types, windows, writer
+from ..domain.meeting_doc import (
+    classify,
+    doclint,
+    pipeline,
+    prompts,
+    roles,
+    types,
+    windows,
+    writer,
+)
 from ..domain.meeting_doc.render import RenderedSection
 
 logger = logging.getLogger(__name__)
@@ -178,6 +187,10 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         glossary=glossary,
         entity_model_tier=deps.entity_model_tier,
     )
+    # D1 — no note below the document standard is written: lint, repair,
+    # fall back, record (stats.lint). D2's regeneration hook is not merged,
+    # so nothing is regenerated. Never raises.
+    document = await doclint.enforce(document, known=frozenset(known_people))
 
     # ── Write #1: what the reader came for ──────────────────────────
     items_sections = [s for s in document.sections if s.role in ITEM_ROLES]
@@ -327,6 +340,9 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "topics_fallback": document.stats.get("topics_fallback"),
             "topics_failure": document.stats.get("topics_failure"),
             "adverts_cut": document.stats.get("adverts_cut", 0),
+            # D1 — codes and counts only.
+            "lint_unresolved": (document.stats.get("lint") or {}).get("unresolved"),
+            "lint_error": bool((document.stats.get("lint") or {}).get("error")),
             "prompt_version": document.stats.get("prompt_version"),
         },
     )

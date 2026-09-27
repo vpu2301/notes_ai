@@ -83,7 +83,7 @@ class _Store:
 class _Provider:
     def __init__(
         self,
-        answer: str = '{"title": "Q4 Product Roadmap"}',
+        answer: str = '{"title": "Q4 product roadmap: HubSpot integration first"}',
         *,
         fail: bool = False,
         before_answer=None,
@@ -160,12 +160,12 @@ async def test_a_meaningful_transcript_names_the_note(store: _Store) -> None:
     provider = _Provider()
     await _name(provider, _result(ROADMAP))
 
-    assert store.title == "Q4 Product Roadmap"
+    assert store.title == "Q4 product roadmap: HubSpot integration first"
     assert store.source == note_title.AI
     assert store.generated_at is not None
     # The name is on the row every list reads AND in the version the
     # editor loads, so a reload on any device shows the same title.
-    assert store.versions[-1].title == "Q4 Product Roadmap"
+    assert store.versions[-1].title == "Q4 product roadmap: HubSpot integration first"
     (append,) = store.appends
     assert append["extra_metadata"]["step"] == "title"
     # Only the title moved; the sections are the ones that were there.
@@ -245,7 +245,7 @@ async def test_notes_older_than_the_feature_are_never_renamed(store: _Store) -> 
 async def test_duplicate_runs_write_the_title_once(store: _Store) -> None:
     """The same job delivered twice, at the same time: both may ask the
     model, only one writes."""
-    first = _Provider('{"title": "Q4 Product Roadmap"}')
+    first = _Provider('{"title": "Q4 product roadmap: HubSpot integration first"}')
     second = _Provider('{"title": "Fourth Quarter Roadmap"}')
     await asyncio.gather(_name(first, _result(ROADMAP)), _name(second, _result(ROADMAP)))
 
@@ -350,20 +350,27 @@ async def test_a_title_naming_what_was_never_said_is_not_written(store: _Store) 
 
 @pytest.mark.anyio
 async def test_a_good_title_still_lands_as_ai(store: _Store) -> None:
-    await _name(_Provider('{"title": "HubSpot Integration Roadmap"}'), _result(ROADMAP))
-    assert store.title == "HubSpot Integration Roadmap"
+    await _name(
+        _Provider('{"title": "HubSpot integration roadmap for the fourth quarter"}'),
+        _result(ROADMAP),
+    )
+    assert store.title == "HubSpot integration roadmap for the fourth quarter"
     assert store.source == note_title.AI
 
 
 @pytest.mark.parametrize(
     ("title", "reason"),
     [
-        ("Q4 Product Roadmap", None),
+        ("Q4 product roadmap: HubSpot integration first", None),
         # A title-cased topic word is not a name when the transcript says its stem.
-        ("Enterprise Pricing Changes", None),
-        ("HubSpot Integration", None),
+        ("Enterprise Pricing Changes and the Mobile Redesign", None),
+        ("HubSpot Integration in the Fourth Quarter", None),
         ("Walzmann Interview", "unsupported"),  # first word checked too
         ("Lantern edition won't be ready", "example"),
+        # Sprint D1 T2 — the document standard §1.
+        ("Q4 Product Roadmap", "lint"),  # under 30 characters
+        ("Roadmap: HubSpot: pricing: the mobile redesign", "lint"),  # colons
+        ("HubSpot integration and HubSpot integration again", "lint"),  # repeated phrase
     ],
 )
 def test_unsupported(title: str, reason: str | None) -> None:

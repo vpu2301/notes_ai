@@ -510,10 +510,10 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     row.update(score_taxonomy(meeting, produced, content, names))
     linted = lint_produced(meeting, produced)
     if linted is not None:
-        row["lint"] = linted.by_code()
+        row["lint"] = linted
         # The document standard §8: Q3 and Q7, the questions code can answer.
-        auto = lint_produced(meeting, produced, rubric=True)
-        row["rubric_auto"] = {k: auto[k] for k in ("Q3", "Q7")}
+        auto = rubric_auto(meeting, produced)
+        row["rubric_auto"] = {k: auto[k] for k in ("Q3", "Q7")} if auto else {}
 
     # Checklists, by index.
     row["must_contain_failed"] = [
@@ -747,72 +747,99 @@ def score_taxonomy(
     return out
 
 
-def lint_produced(
-    meeting: dict[str, Any], produced: dict[str, Any], *, rubric: bool = False
-) -> Any:
-    """D1 — the engine's own document-standard lint (``meeting_doc.doclint``)
-    over a produced note (the pipeline arm's sections and lines), so eval
-    and production count the same findings. None when the arm writes no
-    sections."""
+# F- codes that are S2 (docs/eval/error-taxonomy.md); the other F- codes the
+# linter reports are S1.
+_S2_F = frozenset({"F-COPY", "F-DESC", "F-TYPE", "F-DROP", "F-COV"})
+
+
+def d1_gates(summary: dict[str, Any]) -> dict[str, bool]:
+    """Sprint D1 acceptance 2, on eval/notes/v2: no unresolved S1; unresolved
+    S2 in ≤ 2 % of notes; volume and section bands met on ≥ 90 %; no line
+    with a label or pronoun subject, none that names, counts and dates
+    nothing."""
+    if summary.get("d1_unresolved_s1") is None:
+        return {}
+    return {
+        "d1_no_unresolved_s1": summary["d1_unresolved_s1"] == 0,
+        "d1_unresolved_s2_le_2pct": summary["d1_unresolved_s2_share"] <= 0.02,
+        "d1_volume_band_90pct": summary["d1_volume_band"] >= 0.9,
+        "d1_section_band_90pct": summary["d1_section_band"] >= 0.9,
+        "d1_no_label_or_pronoun_subject": summary["d1_label_or_pronoun_lines"] == 0,
+        "d1_no_unspecific_line": summary["d1_unspecific_lines"] == 0,
+    }
+
+
+def _lint_inputs(meeting: dict[str, Any], produced: dict[str, Any]) -> tuple[Any, Any] | None:
+    """The produced note as the linter reads it: rendered sections and a
+    context from the meeting. None when the arm writes no sections."""
+    from types import SimpleNamespace
+
     from note_service.domain.meeting_doc import doclint
 
     if "sections" not in produced:
         return None
-    by_key: dict[str, list[Any]] = {}
-    for ln in produced.get("lines", []):
-        by_key.setdefault(ln.get("section_key", ""), []).append(
-            doclint.LintLine(
-                text=ln["text"],
-                kind=ln.get("kind", ""),
-                fact_ids=tuple(ln.get("fact_ids") or ()),
-                child=bool(ln.get("parent")),
-                has_date=bool(ln.get("dates")),
-            )
-        )
-    sections = [
-        doclint.LintSection(
-            section_key=sec["section_key"],
-            role=sec.get("role", ""),
-            title=sec.get("title"),
-            text=sec.get("text", ""),
-            lines=tuple(by_key.get(sec["section_key"], ())),
-        )
-        for sec in produced["sections"]
-    ]
+    sections = doclint.as_rendered(produced["sections"], produced.get("lines", []))
     speech = _merged_span([(t["t_start_ms"], t["t_end_ms"]) for t in meeting.get("transcript", [])])
     excluded = _merged_span([(int(r[0]), int(r[1])) for r in produced.get("noise_ranges", [])])
     gold = meeting.get("gold") or {}
-    known = frozenset(
-        w
-        for name in [
-            *gold.get("name_candidates", []),
-            *(gold.get("speakers") or {}).values(),
-            *(e["canonical"] for e in gold.get("entities", [])),
-        ]
-        for w in [name, *name.split()]
-    )
+    names = [
+        *gold.get("name_candidates", []),
+        *(gold.get("speakers") or {}).values(),
+        *(e["canonical"] for e in gold.get("entities", [])),
+    ]
     stats = produced.get("stats") or {}
-    if rubric:
-        return doclint.rubric_auto(
-            sections,
-            language=meeting.get("language", "en"),
-            speech_ms=max(0, speech - excluded),
-            known=known,
+    facts = {
+        f["item_key"]: SimpleNamespace(
+            item_key=f["item_key"],
+            text=f.get("text", ""),
+            quote=f.get("quote", ""),
+            start_ms=int(f.get("start_ms") or 0),
+            certainty=f.get("certainty"),
+            evidence_only=bool(f.get("evidence_only")),
+            figure=f.get("figure"),
+            person=f.get("person"),
         )
-    return doclint.lint(
-        sections,
+        for f in produced.get("facts", [])
+    }
+    ctx = doclint.LintContext(
         language=meeting.get("language", "en"),
         speech_ms=max(0, speech - excluded),
         recording_type=stats.get("recording_type"),
-        facts={
-            f["item_key"]: doclint.LintFact(
-                int(f.get("start_ms") or 0), f.get("text", ""), f.get("quote", "")
-            )
-            for f in produced.get("facts", [])
-        },
-        known=known,
+        facts=facts,  # type: ignore[arg-type]
+        known=frozenset(w for n in names for w in [n, *n.split()]),
+        brief=dict(produced.get("brief") or {}),
         title=produced.get("title"),
     )
+    return sections, ctx
+
+
+def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any] | None:
+    """Sprint D1 — what the linter says about a produced note, by the same
+    module production uses. A note the pipeline arm wrote was enforced
+    already (``stats.lint``): its unresolved findings are what is left. Any
+    other note is checked as it stands."""
+    from note_service.domain.meeting_doc import doclint
+
+    stats_lint = (produced.get("stats") or {}).get("lint")
+    if stats_lint and not stats_lint.get("error"):
+        return dict(stats_lint)
+    inputs = _lint_inputs(meeting, produced)
+    if inputs is None:
+        return None
+    findings = doclint.check(*inputs)
+    return {
+        "findings_by_code": doclint._count(f.code for f in findings),
+        "unresolved": doclint._count(f.code for f in findings),
+        "unresolved_rules": doclint._count(f.rule for f in findings),
+        "unresolved_hard": doclint._count(f.code for f in findings if f.hard),
+    }
+
+
+def rubric_auto(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any] | None:
+    from note_service.domain.meeting_doc import doclint
+
+    inputs = _lint_inputs(meeting, produced)
+    return None if inputs is None else doclint.rubric_auto(*inputs)
 
 
 _PAIRS = (
@@ -853,7 +880,10 @@ def aggregate(
     thirds = {k: [0, 0] for k in ("1", "2", "3")}
     excluded = [0, 0]
     invented = echo = labels = 0
+    lint_found: dict[str, int] = {}
     lint_codes: dict[str, int] = {}
+    s1_left = s2_notes = volume_ok = sections_ok = 0
+    subject_left = unspecific_left = 0
     auto: dict[str, list[int]] = {"Q3": [], "Q7": []}
     linted_docs = lint_clean = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
@@ -877,10 +907,22 @@ def aggregate(
             if score is not None:
                 auto[q].append(int(score))
         if "lint" in row:
+            lint = row["lint"]
+            left = lint.get("unresolved") or {}
+            left_rules = lint.get("unresolved_rules") or {}
             linted_docs += 1
-            lint_clean += 0 if row["lint"] else 1
-            for code, n in row["lint"].items():
+            lint_clean += 0 if left else 1
+            for code, n in (lint.get("findings_by_code") or {}).items():
+                lint_found[code] = lint_found.get(code, 0) + int(n)
+            for code, n in left.items():
                 lint_codes[code] = lint_codes.get(code, 0) + int(n)
+            hard = lint.get("unresolved_hard") or {}
+            s1_left += sum(int(n) for c, n in hard.items() if c.startswith("F-") and c not in _S2_F)
+            s2_notes += 1 if any(not c.startswith("F-") or c in _S2_F for c in hard) else 0
+            volume_ok += 0 if left_rules.get("volume.words") else 1
+            sections_ok += 0 if left_rules.get("sections.count") else 1
+            subject_left += int(left_rules.get("line.subject") or 0)
+            unspecific_left += int(left_rules.get("line.specific") or 0)
         for key in f2:
             f2[key] += int(row.get(key) or 0)
         kind = (types or [None] * len(rows))[n] or "unlabelled"
@@ -923,9 +965,17 @@ def aggregate(
         "words_per_minute": (
             sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
         ),
-        # D1 lint: findings by code, and the share of notes with none.
-        "lint_findings": dict(sorted(lint_codes.items())),
+        # Sprint D1: what the linter found, what it could not repair, and the
+        # numbers its gates read.
+        "lint_findings": dict(sorted(lint_found.items())),
+        "lint_unresolved": dict(sorted(lint_codes.items())),
         "lint_clean_rate": (lint_clean / linted_docs) if linted_docs else None,
+        "d1_unresolved_s1": s1_left if linted_docs else None,
+        "d1_unresolved_s2_share": (s2_notes / linted_docs) if linted_docs else None,
+        "d1_volume_band": (volume_ok / linted_docs) if linted_docs else None,
+        "d1_section_band": (sections_ok / linted_docs) if linted_docs else None,
+        "d1_label_or_pronoun_lines": subject_left if linted_docs else None,
+        "d1_unspecific_lines": unspecific_left if linted_docs else None,
         # The rubric's Q3 and Q7 read by code, mean of 0–2 per note.
         "rubric_auto_q3": (sum(auto["Q3"]) / len(auto["Q3"])) if auto["Q3"] else None,
         "rubric_auto_q7": (sum(auto["Q7"]) / len(auto["Q7"])) if auto["Q7"] else None,

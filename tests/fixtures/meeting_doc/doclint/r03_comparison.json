@@ -1,0 +1,289 @@
+{
+ "_note": "Rendered-document fixtures for Sprint D1 acceptance 1. The SHAPE of three notes on r03 (docs/eval/error-taxonomy.md, amendment after r03 §5); the wording is reconstructed from what those documents quote, not the notes themselves. Headings 1–5 are the ones the amendment and the standard name; the sixth is reconstructed.",
+ "id": "r03_comparison",
+ "language": "de",
+ "speech_ms": 1800000,
+ "recording_type": "podcast_broadcast",
+ "brief": {},
+ "facts": [
+  {
+   "id": "f0",
+   "text": "Am 11. September 2001 fliegen zwei Flugzeuge in das World Trade Center",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 60000
+  },
+  {
+   "id": "f1",
+   "text": "Fast 3000 Menschen sterben bei den Anschlägen in New York und Washington",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 120000
+  },
+  {
+   "id": "f2",
+   "text": "Der Auslöser für Thiels Idee ist das Versagen der Geheimdienste vor 2001",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 180000
+  },
+  {
+   "id": "f3",
+   "text": "In den USA gibt es 90 % Zustimmung für Präsident Bush nach den Anschlägen",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 360000
+  },
+  {
+   "id": "f4",
+   "text": "Weniger als einen Monat später beginnt der Einmarsch in Afghanistan 2001",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 420000
+  },
+  {
+   "id": "f5",
+   "text": "Die USA beschließen im Oktober 2001 den Patriot Act zur Überwachung",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 480000
+  },
+  {
+   "id": "f6",
+   "text": "Peter Thiel verkauft PayPal 2002 für 1,5 Milliarden Dollar an eBay",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 660000
+  },
+  {
+   "id": "f7",
+   "text": "Peter Thiel will die Daten der Geheimdienste mit Software zusammenführen",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 720000
+  },
+  {
+   "id": "f8",
+   "text": "Thiel nennt die Idee nach den Palantíri aus dem Herrn der Ringe",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 780000
+  },
+  {
+   "id": "f9",
+   "text": "Palantir wird 2004 in Palo Alto von Peter Thiel und vier Partnern gegründet",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 960000
+  },
+  {
+   "id": "f10",
+   "text": "Das erste Geld für Palantir kommt über In-Q-Tel von der CIA im Jahr 2005",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1020000
+  },
+  {
+   "id": "f11",
+   "text": "Das Gründungstreffen war auf 45 Minuten geplant und dauerte über 2 Stunden",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1080000
+  },
+  {
+   "id": "f12",
+   "text": "Alex Karp promoviert 2002 in Frankfurt bei Jürgen Habermas in Philosophie",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1260000
+  },
+  {
+   "id": "f13",
+   "text": "Alex Karp wird 2004 CEO von Palantir und spricht fließend Deutsch",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1320000
+  },
+  {
+   "id": "f14",
+   "text": "Karp nennt Palantir in Interviews gern ein Unternehmen von Künstlern",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1380000
+  },
+  {
+   "id": "f15",
+   "text": "Das Programm Total Information Awareness wird 2003 vom Kongress gestoppt",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1560000
+  },
+  {
+   "id": "f16",
+   "text": "Kritiker sehen in Total Information Awareness eine Massenüberwachung der USA",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1620000
+  },
+  {
+   "id": "f17",
+   "text": "Palantir übernimmt ab 2004 Aufgaben, die Total Information Awareness plante",
+   "quote": "so wurde es in der Folge erzählt",
+   "start_ms": 1680000
+  }
+ ],
+ "sections": [
+  {
+   "section_key": "gen:s0",
+   "role": "topics",
+   "title": "11. September 2001: Der Auslöser",
+   "lines": [
+    {
+     "text": "- Am 11. September 2001 fliegen zwei Flugzeuge in das World Trade Center",
+     "kind": "bullet",
+     "fact_ids": [
+      "f0"
+     ]
+    },
+    {
+     "text": "- Fast 3000 Menschen sterben bei den Anschlägen in New York und Washington",
+     "kind": "bullet",
+     "fact_ids": [
+      "f1"
+     ]
+    },
+    {
+     "text": "- Der Auslöser für Thiels Idee ist das Versagen der Geheimdienste vor 2001",
+     "kind": "bullet",
+     "fact_ids": [
+      "f2"
+     ]
+    }
+   ]
+  },
+  {
+   "section_key": "gen:s1",
+   "role": "topics",
+   "title": "Stimmung und Reaktion in den USA",
+   "lines": [
+    {
+     "text": "- In den USA gibt es 90 % Zustimmung für Präsident Bush nach den Anschlägen",
+     "kind": "bullet",
+     "fact_ids": [
+      "f3"
+     ]
+    },
+    {
+     "text": "- Weniger als einen Monat später beginnt der Einmarsch in Afghanistan 2001",
+     "kind": "bullet",
+     "fact_ids": [
+      "f4"
+     ]
+    },
+    {
+     "text": "- Die USA beschließen im Oktober 2001 den Patriot Act zur Überwachung",
+     "kind": "bullet",
+     "fact_ids": [
+      "f5"
+     ]
+    }
+   ]
+  },
+  {
+   "section_key": "gen:s2",
+   "role": "topics",
+   "title": "Peter Thiel und die Idee",
+   "lines": [
+    {
+     "text": "- Peter Thiel verkauft PayPal 2002 für 1,5 Milliarden Dollar an eBay",
+     "kind": "bullet",
+     "fact_ids": [
+      "f6"
+     ]
+    },
+    {
+     "text": "- Peter Thiel will die Daten der Geheimdienste mit Software zusammenführen",
+     "kind": "bullet",
+     "fact_ids": [
+      "f7"
+     ]
+    },
+    {
+     "text": "- Thiel nennt die Idee nach den Palantíri aus dem Herrn der Ringe",
+     "kind": "bullet",
+     "fact_ids": [
+      "f8"
+     ]
+    }
+   ]
+  },
+  {
+   "section_key": "gen:s3",
+   "role": "topics",
+   "title": "Gründung von Palantir",
+   "lines": [
+    {
+     "text": "- Palantir wird 2004 in Palo Alto von Peter Thiel und vier Partnern gegründet",
+     "kind": "bullet",
+     "fact_ids": [
+      "f9"
+     ]
+    },
+    {
+     "text": "- Das erste Geld für Palantir kommt über In-Q-Tel von der CIA im Jahr 2005",
+     "kind": "bullet",
+     "fact_ids": [
+      "f10"
+     ]
+    },
+    {
+     "text": "- Das Gründungstreffen war auf 45 Minuten geplant und dauerte über 2 Stunden",
+     "kind": "bullet",
+     "fact_ids": [
+      "f11"
+     ]
+    }
+   ]
+  },
+  {
+   "section_key": "gen:s4",
+   "role": "topics",
+   "title": "Alex Karp: Palantirs ungewöhnlicher CEO",
+   "lines": [
+    {
+     "text": "- Alex Karp promoviert 2002 in Frankfurt bei Jürgen Habermas in Philosophie",
+     "kind": "bullet",
+     "fact_ids": [
+      "f12"
+     ]
+    },
+    {
+     "text": "- Alex Karp wird 2004 CEO von Palantir und spricht fließend Deutsch",
+     "kind": "bullet",
+     "fact_ids": [
+      "f13"
+     ]
+    },
+    {
+     "text": "- Karp nennt Palantir in Interviews gern ein Unternehmen von Künstlern",
+     "kind": "bullet",
+     "fact_ids": [
+      "f14"
+     ]
+    }
+   ]
+  },
+  {
+   "section_key": "gen:s5",
+   "role": "topics",
+   "title": "Kritik an Total Information Awareness",
+   "lines": [
+    {
+     "text": "- Das Programm Total Information Awareness wird 2003 vom Kongress gestoppt",
+     "kind": "bullet",
+     "fact_ids": [
+      "f15"
+     ]
+    },
+    {
+     "text": "- Kritiker sehen in Total Information Awareness eine Massenüberwachung der USA",
+     "kind": "bullet",
+     "fact_ids": [
+      "f16"
+     ]
+    },
+    {
+     "text": "- Palantir übernimmt ab 2004 Aufgaben, die Total Information Awareness plante",
+     "kind": "bullet",
+     "fact_ids": [
+      "f17"
+     ]
+    }
+   ]
+  }
+ ],
+ "expect_structural": 0
+}

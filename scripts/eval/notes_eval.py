@@ -54,6 +54,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     _body,
     aggregate,
     best_match,
+    d1_gates,
     f2_gates,
     f3_gates,
     overlap,
@@ -227,7 +228,7 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     from types import SimpleNamespace
 
     from note_service.domain.glossary import Term
-    from note_service.domain.meeting_doc import pipeline, types, windows
+    from note_service.domain.meeting_doc import doclint, pipeline, types, windows
     from note_service.jobs.generate_note import _recording_type
 
     language = meeting.get("language", "en")
@@ -273,6 +274,11 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         built=built,
         recording_type=recording_type,
         recording_type_source=source,
+    )
+    # Sprint D1 — the worker's linter, on every eval output: the eval scores
+    # the document the writer would receive.
+    document = await doclint.enforce(
+        document, known=frozenset({*(gold.get("speakers") or {}).values()})
     )
     if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
         raise EngineBlindError(meeting["id"])
@@ -823,6 +829,7 @@ async def main(
             baseline_recall = baseline["runs"][-1]["summary"].get("key_fact_recall")
         gates = f2_gates(all_runs[-1]["summary"], baseline_recall=baseline_recall)
         gates.update(f3_gates(all_runs[-1]["summary"]))
+        gates.update(d1_gates(all_runs[-1]["summary"]))
         report["f2_gates"] = gates
         for name, ok in gates.items():
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")

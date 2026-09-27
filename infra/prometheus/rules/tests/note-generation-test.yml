@@ -175,3 +175,33 @@ tests:
               description: |
                 Copies stay evidence and never reach the note, so notes get thinner. Check PROMPT_VERSION, the summarize backend and mdx_note_generation_restate_total{outcome="unchanged"}.
                 Runbook: docs/runbooks/notes.md#copied-facts
+
+  - interval: 1m
+    name: a few notes below the standard stay quiet
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+20x120"
+      - series: 'mdx_note_generation_lint_total{code="D-VOL",outcome="unresolved_note"}'
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 110m
+        alertname: NoteGenerationLintUnresolved
+        exp_alerts: []
+
+  - interval: 1m
+    name: a fifth of notes without structure fires
+    input_series:
+      - series: 'mdx_note_generations_total{outcome="complete",backend="hf_eu"}'
+        values: "0+20x120"
+      - series: 'mdx_note_generation_lint_total{code="D-STRUCT",outcome="unresolved_note"}'
+        values: "0+4x120"
+    alert_rule_test:
+      - eval_time: 110m
+        alertname: NoteGenerationLintUnresolved
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "More than 10 % of notes break a hard rule of the document standard (1 h)"
+              description: |
+                The linter could not repair them; they were written in their fallback form. Break it down by code with mdx_note_generation_lint_total{outcome="unresolved_note"}.
+                Runbook: docs/runbooks/notes.md#document-lint

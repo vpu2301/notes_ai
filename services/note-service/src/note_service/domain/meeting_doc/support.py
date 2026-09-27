@@ -809,13 +809,45 @@ def descriptive(
     no named thing, number or date ("Menschen auf der Straße werden
     gefilmt", "Ein riesiger Feuerball entsteht")."""
     body = _body(text)
-    if has_date or _DIGITS.search(body) or entities_in(body, language, known):
+    if has_date or _DIGITS.search(body):
+        return False
+    if evaluative(body, language):
+        return True
+    if entities_in(body, language, known):
         return False
     words = _WORD.findall(_fold(body))
     stems = SCENE_VERBS.get(language, ()) + SCENE_VERBS["en"]
     verb = any(w.startswith(stem) for w in words for stem in stems)
     subject = any(w in GENERIC_SUBJECTS for w in words)
     return verb and subject
+
+
+# Sprint D1 T3 — an evaluation of a person or thing with no claim after it
+# ("Alex Karp hatte einen ungewöhnlichen Lebenslauf für einen Tech-CEO"):
+# the note learns an opinion of the adjective, nothing checkable.
+EVALUATIVE_STEMS: Final[dict[str, tuple[str, ...]]] = {
+    "en": ("unusual", "interesting", "special", "remarkable", "impressive", "incredible",
+           "fascinating", "amazing", "strange", "extraordinary", "notable", "unique"),
+    "de": ("ungewöhnlich", "interessant", "besonder", "bemerkenswert", "beeindruckend",
+           "unglaublich", "faszinierend", "erstaunlich", "außergewöhnlich", "spannend",
+           "merkwürdig", "einzigartig"),
+    "uk": ("незвичайн", "цікав", "особлив", "вражаюч", "дивовижн", "дивн", "унікальн"),
+}  # fmt: skip
+# What follows an evaluation when it says something: a reason, a relative
+# clause, an explanation.
+_CLAIM_FOLLOWS: Final = re.compile(
+    r",\s*(?:weil|da|dass|der|die|das|denn|which|who|that|because|since|бо|який|яка|яке|що)\b"
+    r"|\b(?:because|weil|denn|тому що)\b|[:—]",
+    re.IGNORECASE,
+)
+
+
+def evaluative(text: str, language: str) -> bool:
+    words = _WORD.findall(_fold(_body(text)))
+    stems = EVALUATIVE_STEMS.get(language, ()) + EVALUATIVE_STEMS["en"]
+    if not any(w.startswith(stem) for w in words for stem in stems):
+        return False
+    return not _CLAIM_FOLLOWS.search(text)
 
 
 def specificity(

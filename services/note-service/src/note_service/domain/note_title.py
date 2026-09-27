@@ -262,8 +262,6 @@ def unsupported(title: str, result: dict[str, Any]) -> str | None:
         return "example"
     # The document standard §1: one colon at most, and never the shape of
     # a placeholder ("Meeting notes — 2026-09-26").
-    if title.count(":") > doclint.TITLE_MAX_COLONS or doclint.GENERIC_TITLE.match(title):
-        return "form"
     said = " ".join(_spoken(result))
     heads = {w[:_NAME_PREFIX] for w in _WORD.findall(said.casefold()) if len(w) >= _NAME_PREFIX}
     # `new_names` never counts a sentence's first word; a title's first
@@ -272,6 +270,13 @@ def unsupported(title: str, result: dict[str, Any]) -> str | None:
         words = [w for w in _WORD.findall(name.casefold()) if len(w) >= _NAME_PREFIX]
         if any(w[:_NAME_PREFIX] not in heads for w in words):
             return "unsupported"
+    # Sprint D1 T2 — the document standard §1 as constraints: 30–80
+    # characters, one colon at most, no repeated phrase, not a placeholder.
+    # A failing suggestion is not applied (``title_skipped: lint``); the
+    # name rule is the one above, against the transcript.
+    ctx = doclint.LintContext(language="en", speech_ms=0)
+    if [f for f in doclint.title_faults(title, ctx) if f != "name"]:
+        return "lint"
     return None
 
 

@@ -480,19 +480,24 @@ dominant-speaker rule (`pipeline.PRESENTER_MIN_SHARE`) did not hold.
 
 ### document-lint
 
-D1 (ADR-0065). Every generation is held to the document standard
-(`docs/eval/document-standard.md`) before it is written. Uncited lines are
-dropped and heading punctuation stripped (`stats.lint_repairs`). Every other
-departure is counted by taxonomy code and rule (`meeting_doc/doclint.RULES`),
-never with text. A code climbing after a deploy points at the prompt or the
-render.
+Sprint D1 (ADR-0065). Every generation passes `doclint.enforce` between the
+pipeline and the writer. It repairs what the document standard lets code
+repair, writes the rest in its fallback form, and records what is left in
+`stats.lint` (codes and counts, never text). `NoteGenerationLintUnresolved`
+fires when more than a tenth of notes in an hour keep a hard (S1/S2) finding.
 
 ```sql
-SELECT prompt_version, key AS code, sum(value::int) AS findings, count(*) AS notes
-FROM note_generations, jsonb_each_text(stats->'lint')
+SELECT prompt_version, key AS code, sum(value::int) AS unresolved, count(*) AS notes
+FROM note_generations, jsonb_each_text(stats->'lint'->'unresolved')
 WHERE created_at > now() - interval '1 day'
 GROUP BY 1, 2 ORDER BY 3 DESC;
 ```
+
+`stats->'lint'->'unresolved_rules'` names the rule. `D-STRUCT` with
+`sections.count` means the topics pass and the chapters fallback both came up
+short; `D-ORIENT` with `orient.p1` usually means no subject or themes were
+verified. `stats->'lint'->'error' = true` means the linter itself failed: the
+note was written as the pipeline produced it.
 
 ### Deploying the engine (Summary Engine v2)
 

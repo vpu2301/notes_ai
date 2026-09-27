@@ -162,3 +162,25 @@ groups:
           description: |
             Copies stay evidence and never reach the note, so notes get thinner. Check PROMPT_VERSION, the summarize backend and mdx_note_generation_restate_total{outcome="unchanged"}.
             Runbook: docs/runbooks/notes.md#copied-facts
+
+      - alert: NoteGenerationLintUnresolved
+        # Sprint D1: the document linter repairs what it can and writes the
+        # rest in its fallback form. When more than a tenth of notes in an
+        # hour still break a hard (S1/S2) rule of the document standard, the
+        # model or the render has changed under it.
+        expr: |
+          max(
+            sum by (code) (increase(mdx_note_generation_lint_total{outcome="unresolved_note",code=~"F-INV|F-DIST|F-SUBJ|D-ORIENT|D-STRUCT|D-SPEC|D-VOL|D-REF|D-LABEL|F-COPY|F-DESC"}[1h]))
+          )
+          /
+          clamp_min(sum(increase(mdx_note_generations_total{outcome="complete"}[1h])) or vector(0), 1)
+          > 0.1
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "More than 10 % of notes break a hard rule of the document standard (1 h)"
+          description: |
+            The linter could not repair them; they were written in their fallback form. Break it down by code with mdx_note_generation_lint_total{outcome="unresolved_note"}.
+            Runbook: docs/runbooks/notes.md#document-lint

@@ -78,13 +78,13 @@ Prose sections (bullets under headings are the body); slide-like decks; a fixed 
 
 ## In code (2026-09-27)
 
-- **`meeting_doc/doclint.py`** runs in `pipeline.run` before the document is written
-  (ADR-0065). `repair` drops lines that cite nothing and strips a heading's trailing
-  punctuation. `lint` reports every other departure by taxonomy code and rule: §1–§7, 47
-  rules. Findings go to `stats.lint`, `stats.lint_rules` and
-  `mdx_note_generation_lint_total{code, rule}`. They do not block a note.
-- **§1 titles.** `note_title.py` asks for 30–80 characters with the subject and angle. It cuts
-  at a word above 80 characters, and refuses a second colon or a placeholder shape.
+- **Sprint D1 (ADR-0065).** `meeting_doc/doclint.enforce` runs in the worker between the
+  pipeline and the writer, and in the eval harness. It checks every rule of §1–§7 that code can
+  check, sends hard findings to D2 once (not merged yet), repairs and falls back
+  deterministically, and records what is left (`stats.lint`,
+  `mdx_note_generation_lint_total`, alert `NoteGenerationLintUnresolved`).
+- **§1 titles.** `note_title.py` asks for 30–80 characters with subject and angle. A suggestion
+  that breaks §1 is not applied.
 - **§8 rubric.** `scripts/eval/notes_pairs.py rubric-build` / `rubric-score` run the blind
   rubric per note, with the release gate. Q3 and Q7 are also read by code in every eval
   (`rubric_auto_q3`, `rubric_auto_q7`).

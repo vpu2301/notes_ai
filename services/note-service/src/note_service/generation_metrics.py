@@ -9,9 +9,9 @@ unbounded cardinality.
 
 from __future__ import annotations
 
-from opentelemetry import metrics
+from typing import Any
 
-from .domain.meeting_doc.doclint import RULES as _LINT_CODE
+from opentelemetry import metrics
 
 _meter = metrics.get_meter("mdx.note.generation")
 
@@ -88,12 +88,37 @@ restate = _meter.create_counter(
     description="Windows asked once more to restate copied facts (labels: outcome = improved|unchanged)",
     unit="1",
 )
-# D1 — what the document lint found (docs/eval/error-taxonomy.md).
+# D1 — what the document linter did (docs/eval/document-standard.md).
 lint_findings = _meter.create_counter(
     "mdx_note_generation_lint_total",
-    description="Document-standard findings (labels: code = taxonomy code, rule = meeting_doc.doclint.RULES)",
+    description=(
+        "Document-linter outcomes (labels: code = taxonomy code | none, outcome = found|"
+        "repaired|regenerated|unresolved|unresolved_note|error). unresolved_note counts a "
+        "note once per code still found after repair."
+    ),
     unit="1",
 )
+
+
+def record_lint(lint: dict[str, Any]) -> None:
+    """Counts only; codes are the closed taxonomy vocabulary."""
+    if lint.get("error"):
+        lint_findings.add(1, {"code": "none", "outcome": "error"})
+        return
+    for outcome, key in (
+        ("found", "findings_by_code"),
+        ("repaired", "repaired_by_code"),
+        ("unresolved", "unresolved"),
+    ):
+        for code, n in (lint.get(key) or {}).items():
+            if n:
+                lint_findings.add(int(n), {"code": code, "outcome": outcome})
+    for code in lint.get("unresolved") or {}:
+        lint_findings.add(1, {"code": code, "outcome": "unresolved_note"})
+    if lint.get("regenerated"):
+        lint_findings.add(int(lint["regenerated"]), {"code": "none", "outcome": "regenerated"})
+
+
 excluded_share = _meter.create_histogram(
     "mdx_note_generation_excluded_share",
     description="Share of speech time left out of a generation as noise (0..1)",
@@ -157,11 +182,7 @@ def record_document(stats: dict, *, backend: str) -> None:
             restate.add(int(n), {"outcome": outcome})
     if stats.get("redundant_lines"):
         redundant_lines.add(int(stats["redundant_lines"]))
-    # D1 — lint findings by taxonomy code and rule (closed vocabularies:
-    # meeting_doc.doclint.RULES).
-    for rule, n in (stats.get("lint_rules") or {}).items():
-        if n:
-            lint_findings.add(int(n), {"rule": rule, "code": _LINT_CODE.get(rule, "other")})
+    record_lint(stats.get("lint") or {})
     speech = int(stats.get("speech_ms", 0))
     if speech > 0:
         excluded_share.record(int(stats.get("excluded_ms", 0)) / speech, {"backend": backend})
