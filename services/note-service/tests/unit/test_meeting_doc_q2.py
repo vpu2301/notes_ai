@@ -343,10 +343,13 @@ def test_three_failures_in_five_retry_strictly_then_fall_back_to_key_facts() -> 
     assert prompts.strict_suffix("de") not in systems[0]
     assert prompts.strict_suffix("de") in systems[1]
     assert document.stats["summary_retries"] == 1
-    assert document.stats["summary_fallback"] == "key_facts"
+    # F3 amendment §2.9: the third rung is composed prose, never a list.
+    assert document.stats["summary_ladder"] == "composed"
     overview = document.sections[0]
     assert overview.section_key == roles.OVERVIEW_KEY
-    assert overview.lines and all(line.kind == "key_point" for line in overview.lines)
+    assert overview.lines and all(line.kind != "key_point" for line in overview.lines)
+    assert any(line.kind == "summary" for line in overview.lines)
+    assert "\n- " not in overview.text
 
 
 def test_a_topic_left_with_one_bullet_is_not_a_topic() -> None:
@@ -408,7 +411,10 @@ def test_a_framing_its_key_facts_do_not_carry_is_not_written() -> None:
         }
 
     document, _ = _meeting_with(context=context)
-    assert all(line.kind != "framing" for _key, line in document.lines)
+    # The model's sentence is not written; the code-composed first
+    # paragraph (F3 amendment §2.9) stands in its place.
+    framings = [line.text for _key, line in document.lines if line.kind == "framing"]
+    assert all("Scholz" not in text for text in framings)
     assert document.stats["lines_unsupported"]["name"] >= 1
 
 

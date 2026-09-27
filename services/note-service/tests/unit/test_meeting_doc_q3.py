@@ -263,9 +263,10 @@ def test_a_bullet_the_summary_already_says_is_dropped() -> None:
         summary=[("The union calls a strike.", [IDS[2]])],
     )
     assert "- the union calls a strike" not in _bullets(sections)
-    # The topic then has one bullet: it joins the one before it.
+    # The topic then has one bullet: it joins the one before it. The one
+    # topic left keeps its heading (F3 amendment §2.9: no list above it).
     titles = [s.title for s in sections if s.role == roles.TOPICS]
-    assert titles == []  # one topic left is no heading: a single list
+    assert titles == ["Pension"]
 
 
 def test_a_single_bullet_topic_joins_the_topic_before_it() -> None:

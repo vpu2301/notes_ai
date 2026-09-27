@@ -155,7 +155,9 @@ def test_a_copy_is_stored_as_evidence_cited_or_not() -> None:
     )
     placements = {row["text"]: row["placement"] for row in uncited_rows(document)}
     assert placements[copied.text] == "evidence"
-    assert plain.text not in placements  # rendered in the overview list
+    # No key-point list in the overview any more (F3 amendment §2.9): a
+    # plain fact no line cites is a suggested row.
+    assert placements[plain.text] == "suggested"
 
 
 # ── T3: information and voice, in code ──────────────────────────────

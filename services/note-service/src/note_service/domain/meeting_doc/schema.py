@@ -570,3 +570,16 @@ def contact_details_schema(count: int) -> dict[str, Any]:
             }
         },
     }
+
+
+# A-12 — one part of a long recording: ONE heading and its bullets.
+BLOCK_TOPIC_SCHEMA: Final[dict[str, Any]] = {
+    **REDUCE_TOPICS_SCHEMA,
+    "properties": {
+        "topics": {
+            **REDUCE_TOPICS_SCHEMA["properties"]["topics"],
+            "maxItems": 1,
+            "minItems": 1,
+        }
+    },
+}

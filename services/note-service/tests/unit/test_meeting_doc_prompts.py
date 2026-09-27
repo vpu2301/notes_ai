@@ -45,6 +45,7 @@ PINNED: dict[str, str] = {
     "2026-10-17": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action line hint
     "2026-10-18": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action follow-up
     "2026-10-19": "7145b51eb8abe1ee535a7a6b35773879b0e860a93ff16a44c05510b8b264c33f",  # F3 amendment: scene example, specific claims
+    "2026-10-20": "847a3d2c44452868a551f8752f9d54c199f3d756ca8cfd1914f1eb133a34533a",  # F3 amendment: block headings, summary skeleton
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")
@@ -91,6 +92,7 @@ def test_the_examples_are_the_invented_company_in_every_language() -> None:
         assert set(table) == set(prompts.EXAMPLES["en"]), language
         systems = prompts.extract_system(language) + prompts.extract_prompt("", language)
         systems += prompts.summary_system(language) + prompts.context_system(language)
+        systems += prompts.block_system(language)
         for sentence in table.values():
             # One source of truth: every example is shown by some prompt.
             assert sentence in systems, (language, sentence)

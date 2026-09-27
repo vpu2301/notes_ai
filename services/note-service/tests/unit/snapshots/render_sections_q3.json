@@ -4,7 +4,7 @@
    "section_key": "gen:overview",
    "role": "summary",
    "title": null,
-   "text": "A planning meeting about the harbour ferry.\n\nPassenger numbers fell by 12 percent.\n\nThe second ferry returns in October.\n\n- The second ferry returns from repair in October\n- Ticket machines at the north pier are unreliable"
+   "text": "A planning meeting about the harbour ferry.\n\nPassenger numbers fell by 12 percent.\nThe second ferry returns in October."
   },
   {
    "section_key": "agenda",
@@ -35,6 +35,12 @@
    "role": "risks",
    "title": "Risks",
    "text": "- Fuel costs may rise"
+  },
+  {
+   "section_key": "gen:timetable",
+   "role": "topics",
+   "title": "Timetable",
+   "text": "- The second ferry returns from repair in October\n- Machines fail often.\n- Numbers fell in August."
   }
  ],
  "overview_only": [
@@ -42,7 +48,7 @@
    "section_key": "gen:overview",
    "role": "summary",
    "title": null,
-   "text": "Numbers fell.\n\n- Passenger numbers fell by 12 percent in August\n- The second ferry returns from repair in October\n- Ticket machines at the north pier are unreliable"
+   "text": "Numbers fell."
   },
   {
    "section_key": "open_questions",
@@ -52,12 +58,6 @@
   }
  ],
  "sided_actions_de": [
-  {
-   "section_key": "gen:overview",
-   "role": "summary",
-   "title": null,
-   "text": "- Die Laufzeit beträgt zwei Jahre"
-  },
   {
    "section_key": "action_items",
    "role": "action_items",

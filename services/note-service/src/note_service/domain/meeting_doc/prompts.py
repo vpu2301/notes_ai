@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-19"
+PROMPT_VERSION: Final = "2026-10-20"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -91,6 +91,9 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_scene": "Smoke rises from the old Quillhaven warehouse.",
         "shot_event_quote": "The old Quillhaven warehouse flooded on the third of March.",
         "shot_event_text": "The Quillhaven warehouse was flooded on 3 March",
+        # A-14 — headings that name a phase of the story.
+        "heading_event": "3 March: the Quillhaven warehouse floods",
+        "heading_phase": "Rebuilding the Ferrytale print run",
         # F3 — a figure: the quantity, the number as said, the unit, the hedge.
         "figure_quote": "the Lantern edition box weighs just under two kilos",
         "figure_name": "Lantern edition box weight",
@@ -118,6 +121,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_scene": "Rauch steigt aus dem alten Quillhaven-Lager auf.",
         "shot_event_quote": "Das alte Quillhaven-Lager wurde am dritten März überflutet.",
         "shot_event_text": "Das Quillhaven-Lager stand am 3. März unter Wasser",
+        "heading_event": "3. März: Das Quillhaven-Lager wird überflutet",
+        "heading_phase": "Neustart der Ferrytale-Auflage",
         "figure_quote": "die Schachtel der Lantern-Edition wiegt knapp zwei Kilo",
         "figure_name": "Gewicht der Lantern-Schachtel",
         "summary_right": "Die Lantern-Edition bleibt für die Quillhaven-Messe geplant",
@@ -142,6 +147,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_scene": "Над старим складом Quillhaven піднімається дим.",
         "shot_event_quote": "Старий склад Quillhaven затопило третього березня.",
         "shot_event_text": "Склад Quillhaven був затоплений 3 березня",
+        "heading_event": "3 березня: склад Quillhaven затоплено",
+        "heading_phase": "Відновлення накладу Ferrytale",
         "figure_quote": "коробка Lantern-видання важить трохи менше двох кілограмів",
         "figure_name": "Вага коробки Lantern",
         "summary_right": "Lantern-видання й далі заплановане до ярмарку Quillhaven",
@@ -762,6 +769,56 @@ def extract_prompt(
         parts.append(f"{_pick(_CARRIED_HEADING, language)}\n{listing}")
     parts.append(f"{DATA_OPEN}\n{window_text}\n{DATA_CLOSE}")
     return "\n\n".join(parts)
+
+
+# A-12/A-14 — one part of a long recording at a time.
+BLOCK_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "These facts are one part of a longer recording, in time order. Return exactly ONE "
+        "topic: a heading that names what this part of the story is — a noun phrase, with "
+        f"the date when the part is about an event ('{_EN['heading_event']}', "
+        f"'{_EN['heading_phase']}') — and its bullets. Each bullet is one specific claim "
+        "(who or what, and the number, date or name that makes it checkable), third person, "
+        "citing its facts in `fact_ids` only. A bullet may carry up to three `children`. "
+        "Use only the facts given; add nothing; never copy what somebody said word for word."
+    ),
+    "de": (
+        "Diese Fakten sind ein Teil einer längeren Aufnahme, in zeitlicher Reihenfolge. Gib "
+        "genau EIN Thema zurück: eine Überschrift, die sagt, welcher Abschnitt der Geschichte "
+        "das ist — eine Nominalphrase, mit Datum, wenn es um ein Ereignis geht "
+        f"(„{_DE['heading_event']}“, „{_DE['heading_phase']}“) — und die Punkte dazu. Jeder "
+        "Punkt ist eine konkrete Aussage (wer oder was, und Zahl, Datum oder Name, die sie "
+        "prüfbar machen), in der dritten Person, mit den Fakten nur in `fact_ids`. Ein Punkt "
+        "darf bis zu drei `children` haben. Nur die gegebenen Fakten; nichts hinzufügen; nie "
+        "wörtlich übernehmen, was jemand gesagt hat."
+    ),
+    "uk": (
+        "Ці факти — одна частина довшого запису, у часовому порядку. Поверни рівно ОДНУ "
+        "тему: заголовок, що називає цей етап історії — іменникова фраза, з датою, якщо "
+        f"йдеться про подію («{_UK['heading_event']}», «{_UK['heading_phase']}») — і пункти. "
+        "Кожен пункт — одне конкретне твердження (хто чи що, і число, дата чи назва, що "
+        "роблять його перевірюваним), у третій особі, з фактами лише в `fact_ids`. Пункт "
+        "може мати до трьох `children`. Лише надані факти; нічого не додавай; ніколи не "
+        "копіюй дослівно."
+    ),
+}
+
+
+def block_system(language: str) -> str:
+    return f"{_pick(BLOCK_SYSTEM, language)}\n\n{guard(language)}"
+
+
+# §2.9 ladder rung 2 — the strict retry names the facts to use, in order.
+SKELETON: Final[dict[str, str]] = {
+    "en": "Write one sentence for each group, in this order, citing exactly those ids: {groups}.",
+    "de": "Schreibe einen Satz pro Gruppe, in dieser Reihenfolge, mit genau diesen ids: {groups}.",
+    "uk": "Напиши по одному реченню на групу, у цьому порядку, з саме цими ids: {groups}.",
+}
+
+
+def skeleton(groups: list[list[str]], language: str) -> str:
+    listed = "; ".join("+".join(g) for g in groups)
+    return _pick(SKELETON, language).format(groups=listed)
 
 
 def topics_system(language: str) -> str:

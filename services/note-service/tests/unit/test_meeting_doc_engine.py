@@ -1274,11 +1274,11 @@ def test_the_overview_opens_with_the_framing_and_writes_no_transcript_note() -> 
         language="en",
     )
     overview = next(s for s in written if s.role == roles.SUMMARY)
-    # No topics: the one key point reads as part of the same block.
+    # F3 amendment §2.9: two paragraphs of prose and never a list — a key
+    # point with no heading to live under is left to the Detailed view.
     assert overview.text == (
         "Interview with a defence expert on the war in Ukraine.\n\n"
-        "Sanctions remain limited by enforcement gaps.\n\n"
-        "- the economy has been weak for some time"
+        "Sanctions remain limited by enforcement gaps."
     )
     assert not hasattr(render, "transcript_note")
 
@@ -1313,24 +1313,38 @@ def test_key_facts_live_in_their_topics_not_above_them() -> None:
     assert main.item_key in {f.item_key for f in written[1].facts}
 
 
-def test_a_conversation_with_one_subject_is_one_unheaded_block() -> None:
-    """Test B / Test D of the spec: nothing to divide, nothing divided —
-    key facts first, then the rest, as ONE list."""
+def test_a_conversation_with_one_subject_writes_no_list_above_the_first_heading() -> None:
+    """F3 amendment §2.9 (replaces Q3's one-list rule): with no topics and
+    no summary, nothing is listed as bullets above the first heading — the
+    pipeline writes the prose; render lists nothing."""
     main = _verified("the timeline is the main risk", start_ms=9_000, kind=schema.KEY_POINT)
     other = _verified("the budget is fixed", start_ms=20_000, kind=schema.KEY_POINT)
     written = render.render_sections(
         [other, main], role_by_key=ROLE_MAP, key_fact_ids=[main.item_key], language="de"
     )
-    (block,) = written
-    assert (block.section_key, block.title) == ("gen:overview", None)
-    assert block.text == "- the timeline is the main risk\n- the budget is fixed"
+    assert written == []
+
+
+def test_a_single_topic_keeps_its_heading() -> None:
+    a = _verified("the timeline is the main risk", start_ms=9_000, kind=schema.KEY_POINT)
+    b = _verified("the budget is fixed", start_ms=20_000, kind=schema.KEY_POINT)
+    written = render.render_sections(
+        [a, b],
+        role_by_key=ROLE_MAP,
+        topics=[
+            ("Schedule", [(a.text, [a.item_key]), (b.text, [b.item_key])], [a.item_key, b.item_key])
+        ],
+    )
+    assert [(s.title, s.role) for s in written] == [("Schedule", roles.TOPICS)]
 
 
 def test_nobody_is_listed_as_an_attendee_automatically() -> None:
     """Speaker 1 / Speaker 2 in the transcript is not a Participants
     section. The roster is the transcript's."""
     point = _verified("we talked about pricing", start_ms=1_000, kind=schema.KEY_POINT)
-    written = render.render_sections([point], role_by_key=ROLE_MAP)
+    written = render.render_sections(
+        [point], role_by_key=ROLE_MAP, summary=[("Pricing was discussed.", [point.item_key])]
+    )
     assert [s.role for s in written] == [roles.SUMMARY]
 
 

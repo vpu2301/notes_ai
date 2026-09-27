@@ -606,11 +606,11 @@ def render_sections(
             kept_topics[-1] = (prev_title, [*prev_lines, *topic_lines], [*prev_cited, *cited])
         else:
             orphans.extend(topic_lines)
-    if len(kept_topics) < 2:
-        # One subject is no subject heading: everything reads as one list.
-        orphans = [*orphans, *(line for _t, lines_, _c in kept_topics for line in lines_)]
-        kept_topics = []
-    elif orphans:
+    # F3 amendment §2.9 — bullets live only under headings: a single subject
+    # keeps its heading (it no longer dissolves into a list above the
+    # first heading), and a lone bullet with no topic to join is left to the
+    # Detailed view.
+    if kept_topics and orphans:
         title, lines_, cited = kept_topics[-1]
         kept_topics[-1] = (title, [*lines_, *orphans], cited)
         orphans = []
@@ -669,53 +669,28 @@ def render_sections(
         emit(roles.SPECIFICATIONS, text, [f for g in homeless for f in g.facts], figure_lines)
 
     # ── The opening block: no heading. It is the note. ──────────────
-    # Framing and summary. The facts themselves live in their topics; with
-    # no topics they are one list here — key facts first. Nothing else:
-    # what was left out of the notes is data for the client (Q3), never a
-    # paragraph a renderer could mistake for somebody speaking.
+    # F3 amendment §2.9: two paragraphs of prose, never a list. Paragraph 1
+    # — what this recording is (``framing``: composed by code, the model's
+    # framing only as its first clause). Paragraph 2 — the summary sentences,
+    # one paragraph, each its own cited line. The facts live under their
+    # headings; what was left out is data for the client (Q3).
     overview: list[tuple[str, list[Line]]] = []
     if framing.strip():
         framed = editorial(strip_inline_ids(framing)[0])
-        # The framing is written about the conversation, from the facts
-        # the context pass named as the ones to know first.
         overview.append((framed, [Line(framed, "framing", _ids(key_facts) or _ids(facts))]))
-    # F3 — who presented, for a broadcast or a presentation: one line under
-    # the framing sentence, every word from the introduction's quote.
+    # F3 — who presented, for a broadcast or a presentation.
     if presenter_lines:
         for line in _presenter_lines(grouped.get(schema.INTRODUCTION, []), language):
             overview.append((line.text, [line]))
+    summary_lines: list[Line] = []
     for written, own in sentences:
         if own and all(i in figure_ids for i in own):
             redundant += 1  # the figures are written from their fields, with a source
             continue
-        overview.append((written, [Line(written, "summary", tuple(own))]))
+        summary_lines.append(Line(written, "summary", tuple(own)))
+    if summary_lines:
+        overview.append(("\n".join(line.text for line in summary_lines), summary_lines))
     used: list[VerifiedFact] = []
-    if not topic_sections:
-        listed = [f for f in key_facts if not f.evidence_only]
-        listed += [f for f in grouped.get(schema.KEY_POINT, []) if f not in listed]
-        in_sections = {f.item_key for section in out for f in section.facts}
-        listed = [f for f in listed if f.item_key not in in_sections]
-        list_lines = [Line(plain_line(f, language), "key_point", (f.item_key,)) for f in listed]
-        # A bullet left over from a dissolved topic says a listed fact again
-        # when every fact it cites is already on the list: once is enough.
-        # A listed fact a summary sentence already says (same fact, mostly
-        # the same words) is not listed again — rule 2, applied to the list.
-        said = [
-            line
-            for line in list_lines
-            if _said_by(line.text, set(line.fact_ids), sentences, language)
-        ]
-        redundant += len(said)
-        list_lines = [line for line in list_lines if line not in said]
-        listed_ids = {f.item_key for f in listed} | in_sections
-        for line in orphans:
-            if line.fact_ids and set(line.fact_ids) <= listed_ids:
-                redundant += 1
-                continue
-            list_lines.append(line)
-        if list_lines:
-            overview.append(("\n".join(line.text for line in list_lines), list_lines))
-            used.extend(listed)
     if counters is not None:
         counters["redundant_lines"] = counters.get("redundant_lines", 0) + redundant
     kept = [(block, block_lines) for block, block_lines in overview if block and block.strip()]

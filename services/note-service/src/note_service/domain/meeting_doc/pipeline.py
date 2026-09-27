@@ -30,7 +30,19 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final, Protocol
 
-from . import entities, numbers, prompts, render, roles, schema, support, types, verify, windows
+from . import (
+    entities,
+    numbers,
+    overview,
+    prompts,
+    render,
+    roles,
+    schema,
+    support,
+    types,
+    verify,
+    windows,
+)
 from . import merge as merge_rules
 from .verify import VerifiedFact
 from .windows import Window
@@ -389,10 +401,38 @@ async def run(
         gate.known = frozenset(
             gate.known | {c.canonical for f in document_facts for c in f.corrections}
         )
+        long_run = len(document_facts) > TWO_STAGE_MIN_FACTS
         topics, summary = await asyncio.gather(
-            _topics(provider, document_facts, language, brief=brief, gate=gate),
+            _topics_by_block(provider, document_facts, language, gate=gate)
+            if long_run
+            else _topics(provider, document_facts, language, brief=brief, gate=gate),
             _summary(provider, document_facts, language, brief=brief, gate=gate),
         )
+    # §2.6 — a long recording whose topics failed is chaptered by time, from
+    # data the engine has; a model failure no longer collapses it.
+    duration = (turns[-1].end_ms - turns[0].start_ms) if turns else 0
+    topics_fallback: str | None = None
+    if document_facts and topics is None and duration > overview.CHAPTERS_AFTER_MS:
+        chaptered = overview.chapters(document_facts, language=language, known=gate.known)
+        if chaptered:
+            topics = chaptered
+            topics_fallback = "chapters"
+    # §2.9, ladder rung 3 — the summary is prose, always: composed from the
+    # most specific facts when both model rungs failed.
+    ladder = "model" if summary else None
+    if summary and gate.retries:
+        ladder = "strict"
+    if document_facts and not summary:
+        summary = (
+            overview.composed_sentences(
+                document_facts,
+                language=language,
+                known=gate.known,
+                key_ids=brief.key_fact_ids if brief else None,
+            )
+            or None
+        )
+        ladder = "composed" if summary else None
     if brief is not None:
         out.brief = {
             "conversation_type": brief.conversation_type,
@@ -401,14 +441,27 @@ async def run(
             "key_fact_ids": brief.key_fact_ids,
         }
 
-    # Neither summary nor topics survived the gate: the document is the
-    # facts themselves, written by code — still a document, never filler.
     key_fact_ids = brief.key_fact_ids if brief else None
     fallback: str | None = None
     if document_facts and summary is None and topics is None:
         fallback = "key_facts"
         if not key_fact_ids:
             key_fact_ids = _earliest_per_window(document_facts)
+    # §2.9, paragraph 1 — what this recording is, composed by code from
+    # verified values; the model's framing replaces only its first clause.
+    opening = ""
+    if document_facts:
+        opening = overview.first_paragraph(
+            language=language,
+            recording_type=recording_type,
+            subject=_gated_phrase(brief.subject if brief else "", document_facts, gate),
+            framing=brief.framing if brief else "",
+            speakers=_speakers(turns, document_facts, language),
+            guests=_guests(document_facts),
+            themes=[
+                t for t in (brief.themes if brief else []) if _gated_phrase(t, document_facts, gate)
+            ],
+        )
 
     render_counts: dict[str, int] = {}
     out.sections = render.render_sections(
@@ -419,7 +472,7 @@ async def run(
         kind_roles=kinds,
         language=language,
         counterpart=counterpart,
-        framing=brief.framing if brief else "",
+        framing=opening,
         key_fact_ids=key_fact_ids,
         counters=render_counts,
         meeting_date=meeting_date,
@@ -482,6 +535,9 @@ async def run(
         },
         "summary_retries": gate.retries,
         "summary_fallback": fallback,
+        "summary_ladder": ladder,
+        "topics_fallback": topics_fallback,
+        "topics_failure": gate.topics_failure,
         "noise_passages": len(out.noise),
         "noise_flagged": flagged,
         "noise_confirmed": len(confirmed),
@@ -834,6 +890,8 @@ class _Gate:
     """F2 — sub-points that restated their parent; openers dropped."""
     children_restated: int = 0
     third_person_fixed: int = 0
+    """A-12 — why the topics pass gave nothing (None when it did)."""
+    topics_failure: str | None = None
 
     @property
     def dropped(self) -> int:
@@ -1257,10 +1315,24 @@ async def _topics(
             system=prompts.topics_system(language),
         )
         parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
-    except Exception:  # noqa: BLE001
+    except ValueError:
+        gate.topics_failure = "schema_invalid"
         logger.warning("meeting_doc.topics_failed", exc_info=True)
         return None
+    except Exception:  # noqa: BLE001
+        gate.topics_failure = "provider_error"
+        logger.warning("meeting_doc.topics_failed", exc_info=True)
+        return None
+    topics = _topics_from(parsed, facts, gate)
+    if topics is None and gate.topics_failure is None:
+        gate.topics_failure = (
+            "too_few_topics" if len(parsed.topics) < 2 else "all_bullets_unsupported"
+        )
+    return topics
 
+
+def _topics_from(parsed: schema.ReduceOut, facts: list[VerifiedFact], gate: _Gate) -> Topics | None:
+    """Parsed topics → the gated structure render writes (≥ 2 topics)."""
     by_id = {f.item_key: f for f in facts}
     out: Topics = []
     for topic in parsed.topics:
@@ -1309,6 +1381,122 @@ def _children(
             gate.children_restated += 1
             continue
         out.append((text, ids))
+    return out
+
+
+TWO_STAGE_MIN_FACTS: Final = 40
+# §2.9 — an unnamed voice with this share of the talk is the narrator.
+NARRATOR_MIN_SHARE: Final = 0.6
+BLOCK_HEADINGS_MERGE_JACCARD: Final = 0.6
+
+
+async def _topics_by_block(
+    provider: ChatLike, facts: list[VerifiedFact], language: str, *, gate: _Gate
+) -> Topics | None:
+    """A-12 — a long recording's topics in two stages: time-contiguous
+    blocks (≤ 8, ≥ 4 facts each, code), one call per block for a phase
+    heading and its bullets, then adjacent blocks whose headings say the
+    same are merged (code — a small model merging its own headings is one
+    more place to fail)."""
+    out: Topics = []
+    for block in overview.reduce_blocks(facts):
+        listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in block])
+        try:
+            answer = await provider.complete(
+                listing,
+                schema.BLOCK_TOPIC_SCHEMA,
+                max_tokens=REDUCE_MAX_TOKENS,
+                temperature=0.0,
+                system=prompts.block_system(language),
+            )
+            parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
+        except Exception:  # noqa: BLE001 — one block must not cost the note
+            logger.warning("meeting_doc.block_failed", exc_info=True)
+            continue
+        by_id = {f.item_key: f for f in block}
+        for topic in parsed.topics[:1]:
+            title = topic.title.strip()
+            if not title or gate.echo(title):
+                continue
+            bullets: list[Bullet] = []
+            for bullet in topic.bullets:
+                text = gate.third_person(bullet.text.strip())
+                ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
+                if text and gate.ok(text, [by_id[i] for i in ids]):
+                    bullets.append((text, ids, _children(bullet, text, ids, by_id, gate)))
+            if bullets:
+                cited = [i for _t, ids, _c in bullets for i in ids]
+                out.append((title, bullets, list(dict.fromkeys([*cited, *by_id]))))
+    merged: Topics = []
+    for heading in out:
+        if (
+            merged
+            and verify._jaccard(
+                support.merge_tokens(merged[-1][0]), support.merge_tokens(heading[0])
+            )
+            >= BLOCK_HEADINGS_MERGE_JACCARD
+        ):
+            title, bullets, ids = merged[-1]
+            merged[-1] = (title, [*bullets, *heading[1]], list(dict.fromkeys([*ids, *heading[2]])))
+            gate.topics_merged += 1
+            continue
+        merged.append(heading)
+    if len(merged) < 2:
+        gate.topics_failure = "too_few_topics" if merged else "all_bullets_unsupported"
+        return None
+    return merged
+
+
+def _gated_phrase(phrase: str, facts: list[VerifiedFact], gate: _Gate) -> str:
+    """A subject or theme the context pass named, kept when the facts carry
+    it (support ≥ the line bar, no new name) — else nothing."""
+    phrase = " ".join(phrase.split())
+    if not phrase:
+        return ""
+    evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
+    if support.new_names(phrase, evidence, gate.known):
+        return ""
+    if support.support_ratio(phrase, evidence, gate.language) < MIN_LINE_SUPPORT:
+        return ""
+    return phrase
+
+
+def _speakers(turns: list[windows.Turn], facts: list[VerifiedFact], language: str) -> list[str]:
+    """Named speakers in order of appearance; the presenter by name; an
+    unnamed dominant voice as the narrator. Never a name nobody verified."""
+    named: list[str] = []
+    for turn in turns:
+        if turn.speaker_name and turn.speaker_name not in named:
+            named.append(turn.speaker_name)
+    presenter = [
+        f.person.name
+        for f in facts
+        if f.person is not None and f.person.standing == "presenter" and f.person.self_introduction
+    ]
+    for name in presenter[:1]:
+        if name not in named:
+            named.insert(0, name)
+    if not named and turns:
+        # One unnamed voice that carries the recording is its narrator; two
+        # or more unnamed voices sharing it are nobody the note can name.
+        talk: dict[str, int] = {}
+        for turn in turns:
+            label = turn.speaker_label or ""
+            talk[label] = talk.get(label, 0) + turn.end_ms - turn.start_ms
+        total = sum(talk.values())
+        if total and max(talk.values()) / total >= NARRATOR_MIN_SHARE:
+            return [str(overview._pick(overview.NARRATOR, language))]
+    return named
+
+
+def _guests(facts: list[VerifiedFact]) -> list[str]:
+    out: list[str] = []
+    for fact in sorted(facts, key=lambda f: f.start_ms):
+        person = fact.person
+        if person is None or person.standing != "guest" or person.name in out:
+            continue
+        where = ", ".join(p for p in (person.organisation, person.qualifier) if p)
+        out.append(f"{person.name} ({where})" if where else person.name)
     return out
 
 
@@ -1426,10 +1614,17 @@ async def _summary(
             if gate.ok(sentence, cited, claims=True):
                 out.append((sentence, [f.item_key for f in cited]))
         failed = answered - len(out)
-        if answered and failed / answered > SUMMARY_FAIL_SHARE:
+        if (answered and failed / answered > SUMMARY_FAIL_SHARE) or not answered:
             if attempt == 0:
                 gate.retries += 1
-                system = f"{system}\n\n{prompts.strict_suffix(language)}"
+                # Rung 2: the facts to use, in time order, one sentence per
+                # one or two of them.
+                ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
+                groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
+                system = (
+                    f"{system}\n\n{prompts.strict_suffix(language)}\n"
+                    f"{prompts.skeleton(groups, language)}"
+                )
                 continue
             return None
         return out[: schema.MAX_SUMMARY_SENTENCES] or None
