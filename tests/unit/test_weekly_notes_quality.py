@@ -70,6 +70,7 @@ METRICS = {
     "kept_line_rate",
     "dismiss_rate",
     "dismiss_reason",
+    "dismiss_code",
     "regenerate_rate",
     "share_without_edit",
     "minutes_to_first_share",
@@ -174,3 +175,46 @@ def test_main_refuses_without_database_url(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert asyncio.run(weekly.main(tmp_path)) == 2
     assert not list(tmp_path.iterdir())
+
+
+# ── Error taxonomy (docs/eval/error-taxonomy.md) ────────────────────
+
+
+def test_dismissals_are_counted_by_the_taxonomy_code_of_their_reason() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "taxonomy", REPO / "scripts" / "eval" / "taxonomy.py"
+    )
+    assert spec and spec.loader
+    taxonomy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(taxonomy)
+    in_sql = dict(re.findall(r"WHEN '([a-z_]+)'\s+THEN '([A-Z]-[A-Z]+)'", SQL_TEXT))
+    assert in_sql == taxonomy.REASON_CODES
+    route = (
+        REPO / "services" / "note-service" / "src" / "note_service" / "routers"
+        / "notes_corrections.py"
+    ).read_text("utf-8")  # fmt: skip
+    block = route[
+        route.index("DismissReason = Literal[") : route.index("]", route.index("DismissReason"))
+    ]
+    assert set(re.findall(r'"([a-z_]+)"', block)) == set(taxonomy.REASON_CODES)
+    assert set(taxonomy.REASON_CODES.values()) <= set(taxonomy.CODES)
+
+
+def _code_row(code: str, week: str, value: float) -> dict:
+    return {**_row("dismiss_code", week, value), "dimension": "code", "bucket": code}
+
+
+def test_a_code_rising_two_weeks_running_is_flagged() -> None:
+    now = datetime(2026, 10, 19, 6, 45, tzinfo=UTC)
+    rows = [
+        _code_row("F-INV", "2026-09-28", 10.0),
+        _code_row("F-INV", "2026-10-05", 12.0),
+        _code_row("F-INV", "2026-10-12", 15.0),
+        _code_row("F-ATTR", "2026-09-28", 10.0),
+        _code_row("F-ATTR", "2026-10-05", 20.0),
+        _code_row("F-ATTR", "2026-10-12", 5.0),
+    ]
+    text = "\n".join(weekly.headline(rows, now))
+    assert "dismiss codes rising two weeks running: F-INV  [open a sprint item]" in text
+    assert "F-ATTR" not in text
+    assert "rising two weeks running: none" in "\n".join(weekly.headline([], now))

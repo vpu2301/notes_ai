@@ -7,6 +7,7 @@ import asyncio
 import csv
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -66,6 +67,8 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "guest_line",
         "chapters_min",
         "overview",
+        # docs/eval/error-taxonomy.md — codes pinned per check
+        "codes",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
     assert {f.name for f in files} >= {
@@ -564,3 +567,55 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
     produced["lines"][0]["text"] = "Präsentiert von: Felix Holtermann"
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
     assert not results["guest_line"]
+
+
+# ── Error taxonomy (docs/eval/error-taxonomy.md) ────────────────────
+
+taxonomy = _load("taxonomy")
+
+
+def test_every_code_the_tools_use_is_in_the_taxonomy_document() -> None:
+    doc = (REPO / "docs" / "eval" / "error-taxonomy.md").read_text("utf-8")
+    documented = set(re.findall(r"^\| ([A-Z]-[A-Z]+) \|", doc, re.MULTILINE))
+    assert documented == set(taxonomy.CODES)
+    used = {
+        *(c for codes in taxonomy.CHECK_CODES.values() for c in codes),
+        *(c for codes in taxonomy.METRIC_CODES.values() for c in codes),
+        *taxonomy.REASON_CODES.values(),
+    }
+    assert used <= set(taxonomy.CODES)
+
+
+def test_every_scorer_metric_and_checklist_check_has_a_code() -> None:
+    summary = notes_scoring.aggregate([{}])
+    assert set(summary) <= set(taxonomy.METRIC_CODES), set(summary) - set(taxonomy.METRIC_CODES)
+    for path in sorted(notes_assert.ASSERTIONS.glob("*.assertions.json")):
+        checklist = json.loads(path.read_text("utf-8"))
+        for name, _ok, _s in notes_assert.check(checklist, {"lines": [], "sections": []}):
+            codes = taxonomy.check_codes(name, checklist)
+            assert codes and set(codes) <= set(taxonomy.CODES), (path.name, name)
+
+
+def test_the_taxonomy_detectors() -> None:
+    meeting = {
+        "language": "de",
+        "transcript": [{"t_start_ms": 0, "t_end_ms": 600_000, "text": "x", "speaker": "SPEAKER_1"}],
+    }
+    content = [
+        {"kind": "framing", "text": "Podcast-Folge. Es sprechen Erzähler/in."},
+        {"kind": "summary", "text": "Er ist genervt, dass er die Schuhe ausziehen muss."},
+        {"kind": "summary", "text": "Zunächst — Peter Thiel gründet 2004 Palantir."},
+        {"kind": "bullet", "text": "- Speaker 1 findet das schwierig"},
+        {"kind": "bullet", "text": "- Ein riesiger Feuerball entsteht"},
+        {"kind": "bullet", "text": "- Fast 3000 Menschen sterben"},
+    ]
+    produced = {"sections": [{"role": "topics", "title": "Gründung"}, {"role": "summary"}]}
+    row = notes_scoring.score_taxonomy(meeting, produced, content, {"Peter Thiel"})
+    assert row["label_lines"] == 1  # "Speaker 1"; the framing may name the narrator
+    assert row["unresolved_subject"] == [1, 5]
+    assert row["unspecific_bullets"] == [2, 3]
+    assert row["volume"][1] == 600
+    assert row["headings"] == [1, 600]
+    summary = notes_scoring.aggregate([row])
+    assert summary["headings_per_10_min"] == 1.0
+    assert summary["unspecific_bullet_rate"] == 2 / 3

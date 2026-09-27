@@ -505,6 +505,10 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # F3: figures, presenter, contact.
     row.update(score_f3(gold, produced, lines))
 
+    # Error taxonomy detectors (docs/eval/error-taxonomy.md).
+    names = {*known_names, *(e["canonical"] for e in gold.get("entities", []))}
+    row.update(score_taxonomy(meeting, produced, content, names))
+
     # Checklists, by index.
     row["must_contain_failed"] = [
         i for i, s in enumerate(gold.get("must_contain", [])) if not _contains(everything, s)
@@ -661,7 +665,87 @@ def date_resolution(gold: dict[str, Any], produced: dict[str, Any]) -> list[int]
 
 # ── Aggregation ─────────────────────────────────────────────────────
 
+# ── Error taxonomy detectors (docs/eval/error-taxonomy.md) ──────────
+
+# D-LABEL: a diarizer label or a default name as an actor. "Erzähler/in"
+# and "the narrator" count outside the framing line, which lists speakers.
+_DEFAULT_LABEL = re.compile(
+    r"\bSPEAKER_\d+\b|\b(?:[Ss]peaker|[Ss]precher(?:in)?)\s\d+\b|\b[Uu]nknown speaker\b|\bUNKNOWN\b"
+)
+_NARRATOR_LABEL = re.compile(r"Erzähler/in|\bthe narrator\b|\bоповідач\b", re.IGNORECASE)
+# F-SUBJ: a line whose subject is a bare pronoun.
+_PRONOUNS: dict[str, frozenset[str]] = {
+    "en": frozenset({"he", "she", "they", "him", "her", "his", "their", "them"}),
+    "de": frozenset({"er", "sie", "ihm", "ihn", "ihr", "sein", "seine", "ihre"}),
+    "uk": frozenset({"він", "вона", "вони", "його", "її", "їх", "йому", "їй"}),
+}
+# "Zunächst — …": a connective before the sentence proper.
+_LEAD = re.compile(r"^[^—]{1,20}—\s+")
+_PROSE_KINDS = frozenset({"summary", "bullet", "key_point"})
+
+
+def score_taxonomy(
+    meeting: dict[str, Any],
+    produced: dict[str, Any],
+    content: list[dict[str, Any]],
+    known_names: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """``label_lines`` (D-LABEL), ``unresolved_subject`` (F-SUBJ),
+    ``unspecific_bullets`` (D-SPEC), ``volume`` = [words, audio seconds]
+    (D-VOL) and ``headings`` = [headed sections, audio seconds]
+    (D-STRUCT)."""
+    from note_service.domain.meeting_doc.verify import _has_date_word
+
+    language = meeting.get("language", "en")
+    pronouns = _PRONOUNS.get(language, _PRONOUNS["en"])
+    known = frozenset(n for name in known_names for n in [name, *name.split()] if n)
+    out: dict[str, Any] = {}
+    out["label_lines"] = sum(
+        1
+        for ln in content
+        if _DEFAULT_LABEL.search(ln["text"])
+        or (ln.get("kind") != "framing" and _NARRATOR_LABEL.search(ln["text"]))
+    )
+    prose = [ln for ln in content if ln.get("kind") in _PROSE_KINDS]
+    unresolved = 0
+    for ln in prose:
+        words = _LEAD.sub("", _body(ln["text"]).strip()).split()
+        if words and words[0].strip(",.;:").casefold() in pronouns:
+            unresolved += 1
+    out["unresolved_subject"] = [unresolved, len(prose)]
+    bullets = [ln for ln in content if ln.get("kind") == "bullet"]
+    vague = sum(
+        1
+        for ln in bullets
+        # A label is not a name, and its digit is not a number.
+        if support_rules.specificity(
+            _DEFAULT_LABEL.sub("", ln["text"]),
+            language,
+            known=known,
+            has_date=_has_date_word(ln["text"]),
+        )
+        == 0
+    )
+    out["unspecific_bullets"] = [vague, len(bullets)]
+    turns = meeting.get("transcript", [])
+    seconds = (turns[-1]["t_end_ms"] - turns[0]["t_start_ms"]) // 1000 if turns else 0
+    words = sum(len(_body(ln["text"]).split()) for ln in content)
+    out["volume"] = [words, seconds]
+    if "sections" in produced:
+        headed = sum(
+            1
+            for sec in produced["sections"]
+            if sec.get("role") == "topics" and (sec.get("title") or "").strip()
+        )
+        out["headings"] = [headed, seconds]
+    return out
+
+
 _PAIRS = (
+    "unresolved_subject",
+    "unspecific_bullets",
+    "volume",
+    "headings",
     "figure_recall",
     "figure_value_accuracy",
     "qualifier_preservation",
@@ -694,7 +778,7 @@ def aggregate(
     sums: dict[str, list[int]] = {k: [0, 0] for k in _PAIRS}
     thirds = {k: [0, 0] for k in ("1", "2", "3")}
     excluded = [0, 0]
-    invented = echo = 0
+    invented = echo = labels = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     by_type: dict[str, list[int]] = {}
     for n, row in enumerate(rows):
@@ -711,6 +795,7 @@ def aggregate(
             excluded[1] += row["excluded_ms"][1]
         invented += int(row.get("invented_claims") or 0)
         echo += int(row.get("example_echo") or 0)
+        labels += int(row.get("label_lines") or 0)
         for key in f2:
             f2[key] += int(row.get(key) or 0)
         kind = (types or [None] * len(rows))[n] or "unlabelled"
@@ -746,6 +831,16 @@ def aggregate(
         "presenter_accuracy": _rate(sums["presenter_accuracy"]),
         "contact_present": _rate(sums["contact_present"]),
         **f2,
+        # Error taxonomy detectors.
+        "label_lines": labels,
+        "unresolved_subject_rate": _rate(sums["unresolved_subject"]),
+        "unspecific_bullet_rate": _rate(sums["unspecific_bullets"]),
+        "words_per_minute": (
+            sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
+        ),
+        "headings_per_10_min": (
+            sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
+        ),
     }
 
 

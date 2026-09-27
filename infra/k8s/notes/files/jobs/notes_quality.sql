@@ -5,9 +5,9 @@
 --   week         the Monday of the week the generation finished (for shares:
 --                the week of the first share; for titles and types: the
 --                week the note was created)
---   dimension    all | recording_type | language | kind | reason
+--   dimension    all | recording_type | language | kind | reason | code
 --   bucket       a closed vocabulary; anything else folds into 'other'
---   metric       kept_line_rate | dismiss_rate | dismiss_reason |
+--   metric       kept_line_rate | dismiss_rate | dismiss_reason | dismiss_code |
 --                regenerate_rate | share_without_edit | minutes_to_first_share |
 --                corrections_accepted | type_changed | title_changed
 --   numerator, denominator, value (a percentage; for minutes_to_first_share
@@ -144,6 +144,24 @@ rows AS (
     UNION ALL
     -- the reasons people give (not_said is the faithfulness signal)
     SELECT g.week, 'reason', x.reason, 'dismiss_reason',
+           count(*), sum(count(*)) OVER (PARTITION BY g.week)
+    FROM dismissed x JOIN gens g ON g.id = x.generation_id
+    GROUP BY 1, 2, 3
+    UNION ALL
+    -- the same dismissals by error-taxonomy code (docs/eval/error-taxonomy.md;
+    -- the table is scripts/eval/taxonomy.py REASON_CODES)
+    SELECT g.week, 'code',
+           CASE x.reason
+               WHEN 'not_said'       THEN 'F-INV'
+               WHEN 'not_a_decision' THEN 'F-DIST'
+               WHEN 'not_a_task'     THEN 'F-DIST'
+               WHEN 'wrong_owner'    THEN 'F-ATTR'
+               WHEN 'wrong_date'     THEN 'F-NUM'
+               WHEN 'duplicate'      THEN 'D-RED'
+               WHEN 'not_relevant'   THEN 'F-DESC'
+               ELSE 'other'
+           END,
+           'dismiss_code',
            count(*), sum(count(*)) OVER (PARTITION BY g.week)
     FROM dismissed x JOIN gens g ON g.id = x.generation_id
     GROUP BY 1, 2, 3

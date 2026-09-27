@@ -112,7 +112,31 @@ def headline(rows: Sequence[Mapping[str, Any]], now: datetime) -> list[str]:
             verdict = f"  [{rule[2]}]"
         lines.append(f"  {metric:24s} {shown}{verdict}")
     lines.append("  evidence_opened_per_line  not reported: no evidence-opened metric exists yet")
+    lines.extend(rising_codes(rows, last_week))
     return lines
+
+
+def rising_codes(rows: Sequence[Mapping[str, Any]], last_week: date) -> list[str]:
+    """Error-taxonomy codes whose share of dismissals rose two weeks running
+    (docs/eval/error-taxonomy.md: such a code opens a sprint item under its
+    owning sprint). Compares the last three complete weeks."""
+    weeks = [last_week - timedelta(days=14), last_week - timedelta(days=7), last_week]
+    share: dict[str, dict[date, float]] = {}
+    for r in rows:
+        week = _as_date(r["week"])
+        if r["metric"] != "dismiss_code" or week not in weeks or r["value"] is None:
+            continue
+        share.setdefault(str(r["bucket"]), {})[week] = float(r["value"])
+    rising = sorted(
+        code
+        for code, by_week in share.items()
+        if code != "other"
+        and all(w in by_week for w in weeks)
+        and by_week[weeks[0]] < by_week[weeks[1]] < by_week[weeks[2]]
+    )
+    if not rising:
+        return ["  dismiss codes rising two weeks running: none"]
+    return [f"  dismiss codes rising two weeks running: {', '.join(rising)}  [open a sprint item]"]
 
 
 def _as_date(value: Any) -> date | None:

@@ -14,7 +14,11 @@ A checklist may say which sprint owns each check (``"sprint": {check:
 "Q3"}``); the output reports it, so a failing check that belongs to a
 later sprint reads as planned rather than as a regression.
 
-Output is check names, indices and PASS/FAIL — never the string a check
+Each check prints its error-taxonomy codes (``scripts/eval/taxonomy.py``,
+``docs/eval/error-taxonomy.md``); a checklist may pin them per check under
+``"codes"``.
+
+Output is check names, indices, codes and PASS/FAIL — never the string a check
 looks for, so a run against the real corpus is safe to paste anywhere.
 Exit 1 when any check fails.
 """
@@ -38,6 +42,7 @@ from notes_scoring import (  # noqa: E402
     recording_type_of,
     transcript_sentences,
 )
+from taxonomy import check_codes  # noqa: E402
 
 ASSERTIONS = REPO / "tests" / "fixtures" / "eval" / "notes" / "assertions"
 _CONTENT_KINDS_EXCLUDED = frozenset({"heading", "note"})
@@ -346,6 +351,8 @@ async def main(backend_name: str, corpus: Path) -> int:
             gated = {name for name, _ok, _s in results}
             for name, ok, sprint in shown:
                 owner = f"  ({sprint})" if sprint else ""
+                codes = check_codes(name, checklist)
+                owner += f"  [{','.join(codes)}]" if codes else ""
                 verdict = ("PASS" if ok else "FAIL") if name in gated else "----"
                 note = "" if name in gated else "  (needs a model)"
                 print(f"  {verdict}  {name}{owner}{note}")

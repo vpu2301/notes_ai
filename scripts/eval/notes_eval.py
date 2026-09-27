@@ -62,6 +62,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     support_rules,
     words,
 )
+from taxonomy import METRIC_CODES  # noqa: E402
 
 DEFAULT_CORPUS = REPO / "tests" / "fixtures" / "eval" / "notes"
 ENGINE_SRC = REPO / "services" / "note-service" / "src"
@@ -807,6 +808,8 @@ async def main(
         "corpus": str(corpus.relative_to(REPO)) if corpus.is_relative_to(REPO) else corpus.name,
         "meetings": len(meetings),
         "runs": all_runs,
+        # docs/eval/error-taxonomy.md — which defect each metric measures.
+        "metric_codes": {k: list(v) for k, v in METRIC_CODES.items()},
     }
     if arm == "pipeline":
         from note_service.domain.meeting_doc.prompts import PROMPT_VERSION

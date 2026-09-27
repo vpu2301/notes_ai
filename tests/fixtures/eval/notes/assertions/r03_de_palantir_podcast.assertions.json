@@ -75,5 +75,88 @@
   "themes_min": 3,
   "bullets_above_first_heading": 0
  },
- "every_line_cited": true
+ "every_line_cited": true,
+ "codes": {
+  "must_not_contain[0]": [
+   "T-INJ"
+  ],
+  "must_not_contain[1]": [
+   "T-ADV",
+   "F-ROLE"
+  ],
+  "must_not_contain[2]": [
+   "T-ADV"
+  ],
+  "must_not_contain[3]": [
+   "F-ROLE"
+  ],
+  "must_not_contain[4]": [
+   "D-FORM"
+  ],
+  "must_not_contain[5]": [
+   "F-NUM"
+  ],
+  "must_not_contain[6]": [
+   "F-NUM"
+  ],
+  "must_not_contain[7]": [
+   "F-INV"
+  ],
+  "must_not_contain[8]": [
+   "F-INV"
+  ],
+  "must_not_contain[9]": [
+   "F-INV"
+  ],
+  "must_not_contain[10]": [
+   "F-INV"
+  ],
+  "must_not_contain[11]": [
+   "F-INV"
+  ],
+  "must_not_contain[12]": [
+   "F-INV"
+  ],
+  "must_contain_any[0]": [
+   "F-ROLE",
+   "F-COV"
+  ],
+  "must_contain_any[1]": [
+   "F-ROLE",
+   "F-COV"
+  ],
+  "must_contain_any[2]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[3]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[4]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[5]": [
+   "F-COV"
+  ],
+  "must_contain_any[6]": [
+   "F-COV"
+  ],
+  "must_contain_any[7]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[8]": [
+   "F-COV"
+  ],
+  "must_contain_any[9]": [
+   "F-NUM",
+   "F-COV"
+  ],
+  "must_contain_any[10]": [
+   "F-NUM",
+   "F-COV"
+  ]
+ }
 }

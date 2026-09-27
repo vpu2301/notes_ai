@@ -19,6 +19,15 @@
 - [ ] Coverage did not drop below 70% (`make test-cov`)
 - [ ] Manual test against local stack (`make dev-up && make smoke-test`)
 
+## Quality taxonomy
+
+<!-- For a change to transcripts or notes: the defect codes it addresses or
+could move, from docs/eval/error-taxonomy.md (e.g. F-INV, D-STRUCT), and the
+gold-set number that shows it (P-MEAS: no rule ships unmeasured). -->
+
+- Codes: 
+- [ ] Not a transcript or note change
+
 ## Security & PII checklist
 
 - [ ] No secrets, credentials, or tokens are committed (not even in tests)
