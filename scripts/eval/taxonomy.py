@@ -116,7 +116,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "unspecific_bullet_rate": ("D-SPEC",),
     "words_per_minute": ("D-VOL",),
     "headings_per_10_min": ("D-STRUCT",),
-    # D1 document lint (meeting_doc/lint.py)
+    # D1 document-standard lint (meeting_doc/doclint.py)
     "lint_findings": (
         "D-ORIENT",
         "D-STRUCT",
@@ -127,6 +127,12 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
         "D-LABEL",
         "D-LANG",
         "D-FORM",
+        "D-RED",
+        "D-NEST",
+        "F-INV",
+        "F-SUBJ",
+        "F-COPY",
+        "F-DESC",
     ),
     "lint_clean_rate": (
         "D-ORIENT",
@@ -138,7 +144,16 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
         "D-LABEL",
         "D-LANG",
         "D-FORM",
+        "D-RED",
+        "D-NEST",
+        "F-INV",
+        "F-SUBJ",
+        "F-COPY",
+        "F-DESC",
     ),
+    # The document standard §8, read by code
+    "rubric_auto_q3": ("D-SPEC",),
+    "rubric_auto_q7": ("D-VOL",),
     # The judge column
     "judge_unsupported_rate": ("F-INV", "F-DIST"),
     "judge_problems": ("F-INV", "F-DIST", "F-NUM", "F-ATTR"),

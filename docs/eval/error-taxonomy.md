@@ -87,7 +87,8 @@ Every regression assertion, scorer and PR label references a code. The weekly qu
   The job's headline flags a code whose dismiss share rose two weeks running.
 - **PR labels.** The pull-request template asks for the codes a change addresses.
 
-- **D1 lint.** `meeting_doc/lint.py` (ADR-0065) runs on every generation and in the eval.
+- **D1 lint.** `meeting_doc/doclint.py` (ADR-0065) holds a note to the document standard
+  (`docs/eval/document-standard.md`) before it is written, on every generation and in the eval.
   It writes `stats.lint` by code and the metric `mdx_note_generation_lint_total{code, rule}`.
   A checklist caps findings per code with `"lint"`.
 

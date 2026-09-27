@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from opentelemetry import metrics
 
-from .domain.meeting_doc.lint import RULES as _LINT_CODE
+from .domain.meeting_doc.doclint import RULES as _LINT_CODE
 
 _meter = metrics.get_meter("mdx.note.generation")
 
@@ -91,7 +91,7 @@ restate = _meter.create_counter(
 # D1 — what the document lint found (docs/eval/error-taxonomy.md).
 lint_findings = _meter.create_counter(
     "mdx_note_generation_lint_total",
-    description="Document lint findings (labels: code = D-*, rule = meeting_doc.lint.RULES)",
+    description="Document-standard findings (labels: code = taxonomy code, rule = meeting_doc.doclint.RULES)",
     unit="1",
 )
 excluded_share = _meter.create_histogram(
@@ -158,7 +158,7 @@ def record_document(stats: dict, *, backend: str) -> None:
     if stats.get("redundant_lines"):
         redundant_lines.add(int(stats["redundant_lines"]))
     # D1 — lint findings by taxonomy code and rule (closed vocabularies:
-    # meeting_doc.lint.RULES).
+    # meeting_doc.doclint.RULES).
     for rule, n in (stats.get("lint_rules") or {}).items():
         if n:
             lint_findings.add(int(n), {"rule": rule, "code": _LINT_CODE.get(rule, "other")})

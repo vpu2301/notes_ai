@@ -34,7 +34,7 @@ from uuid import UUID
 from note_models import NoteStatus
 
 from . import notes_repository as repo
-from .meeting_doc import prompts, support, windows
+from .meeting_doc import doclint, prompts, support, windows
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ SAMPLE_WORDS: Final = 1_200
 _EXCERPTS: Final = 3
 
 MAX_TITLE_WORDS: Final = 10
-MAX_TITLE_CHARS: Final = 120
+MAX_TITLE_CHARS: Final = doclint.TITLE_MAX_CHARS  # document standard §1
 MAX_TOKENS: Final = 60
 TIMEOUT_SECONDS: Final = 45.0
 
@@ -139,7 +139,8 @@ _SYSTEM: Final = (
     "- Name the primary topic or purpose of the conversation as a whole, not its first "
     "sentence.\n"
     "- Prefer specific nouns (products, projects, customers, subjects) over generic labels.\n"
-    "- 3 to 8 words.\n"
+    "- 30 to 80 characters, 3 to 10 words, sentence case. Name the subject and, when "
+    "the conversation has one, the angle; at most one colon.\n"
     "- No quotation marks, no date or time, no trailing punctuation.\n"
     '- Do not start with "Meeting about", "Discussion about", "Note about" or the like '
     "unless it genuinely makes the title clearer.\n"
@@ -201,7 +202,10 @@ def clean(raw: str) -> str:
     words = text.split()
     if len(words) > MAX_TITLE_WORDS:
         text = " ".join(words[:MAX_TITLE_WORDS])
-    return text[:MAX_TITLE_CHARS].strip()
+    if len(text) > MAX_TITLE_CHARS:
+        # At a word, never mid-word (the document standard §1: ≤ 80 characters).
+        text = text[: MAX_TITLE_CHARS + 1].rsplit(" ", 1)[0].rstrip(" ,:;—-")
+    return text.strip()
 
 
 def _answer_text(answer: Any) -> str:
@@ -256,6 +260,10 @@ def unsupported(title: str, result: dict[str, Any]) -> str | None:
     transcript never says. Same rules as the document's lines."""
     if prompts.echoes_example(title):
         return "example"
+    # The document standard §1: one colon at most, and never the shape of
+    # a placeholder ("Meeting notes — 2026-09-26").
+    if title.count(":") > doclint.TITLE_MAX_COLONS or doclint.GENERIC_TITLE.match(title):
+        return "form"
     said = " ".join(_spoken(result))
     heads = {w[:_NAME_PREFIX] for w in _WORD.findall(said.casefold()) if len(w) >= _NAME_PREFIX}
     # `new_names` never counts a sentence's first word; a title's first

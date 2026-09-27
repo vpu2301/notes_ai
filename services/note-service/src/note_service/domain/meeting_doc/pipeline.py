@@ -31,8 +31,8 @@ from datetime import date
 from typing import Any, Final, Protocol
 
 from . import (
+    doclint,
     entities,
-    lint,
     numbers,
     overview,
     prompts,
@@ -482,13 +482,18 @@ async def run(
         figure_tables=tables,
         recording_names=gate.known,
     )
-    # D1 — the document lint: what is wrong with the note's form, by
-    # taxonomy code. Counts only; it rewrites nothing.
-    linted = lint.lint(
-        lint.from_rendered(out.sections),
+    # D1 — the document standard (docs/eval/document-standard.md) before the
+    # document is written: the mechanical repairs, then every other
+    # departure counted by taxonomy code. Nothing else is rewritten.
+    repaired, repairs = doclint.repair(out.sections)
+    out.sections = [s for s in repaired if isinstance(s, render.RenderedSection)]
+    excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
+    linted = doclint.lint(
+        doclint.from_rendered(out.sections),
         language=language,
-        duration_ms=duration,
-        fact_start_ms={f.item_key: f.start_ms for f in document_facts},
+        speech_ms=max(0, speech_ms - excluded_speech),
+        recording_type=recording_type,
+        facts={f.item_key: doclint.LintFact(f.start_ms, f.text, f.quote) for f in document_facts},
         known=gate.known,
     )
     thirds = windows.thirds(built)
@@ -583,6 +588,7 @@ async def run(
         "lines_total": sum(len(s.lines) for s in out.sections),
         "lint": linted.by_code(),
         "lint_rules": linted.by_rule(),
+        "lint_repairs": repairs,
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,

@@ -511,6 +511,9 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     linted = lint_produced(meeting, produced)
     if linted is not None:
         row["lint"] = linted.by_code()
+        # The document standard §8: Q3 and Q7, the questions code can answer.
+        auto = lint_produced(meeting, produced, rubric=True)
+        row["rubric_auto"] = {k: auto[k] for k in ("Q3", "Q7")}
 
     # Checklists, by index.
     row["must_contain_failed"] = [
@@ -744,18 +747,21 @@ def score_taxonomy(
     return out
 
 
-def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> Any:
-    """D1 — the engine's own document lint over a produced note (the
-    pipeline arm's sections and lines), so eval and production count the
-    same findings. None when the arm writes no sections."""
-    from note_service.domain.meeting_doc import lint
+def lint_produced(
+    meeting: dict[str, Any], produced: dict[str, Any], *, rubric: bool = False
+) -> Any:
+    """D1 — the engine's own document-standard lint (``meeting_doc.doclint``)
+    over a produced note (the pipeline arm's sections and lines), so eval
+    and production count the same findings. None when the arm writes no
+    sections."""
+    from note_service.domain.meeting_doc import doclint
 
     if "sections" not in produced:
         return None
     by_key: dict[str, list[Any]] = {}
     for ln in produced.get("lines", []):
         by_key.setdefault(ln.get("section_key", ""), []).append(
-            lint.LintLine(
+            doclint.LintLine(
                 text=ln["text"],
                 kind=ln.get("kind", ""),
                 fact_ids=tuple(ln.get("fact_ids") or ()),
@@ -764,7 +770,7 @@ def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> Any:
             )
         )
     sections = [
-        lint.LintSection(
+        doclint.LintSection(
             section_key=sec["section_key"],
             role=sec.get("role", ""),
             title=sec.get("title"),
@@ -773,8 +779,8 @@ def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> Any:
         )
         for sec in produced["sections"]
     ]
-    turns = meeting.get("transcript", [])
-    duration = (turns[-1]["t_end_ms"] - turns[0]["t_start_ms"]) if turns else 0
+    speech = _merged_span([(t["t_start_ms"], t["t_end_ms"]) for t in meeting.get("transcript", [])])
+    excluded = _merged_span([(int(r[0]), int(r[1])) for r in produced.get("noise_ranges", [])])
     gold = meeting.get("gold") or {}
     known = frozenset(
         w
@@ -785,12 +791,27 @@ def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> Any:
         ]
         for w in [name, *name.split()]
     )
-    return lint.lint(
+    stats = produced.get("stats") or {}
+    if rubric:
+        return doclint.rubric_auto(
+            sections,
+            language=meeting.get("language", "en"),
+            speech_ms=max(0, speech - excluded),
+            known=known,
+        )
+    return doclint.lint(
         sections,
         language=meeting.get("language", "en"),
-        duration_ms=duration,
-        fact_start_ms={f["item_key"]: f.get("start_ms", 0) for f in produced.get("facts", [])},
+        speech_ms=max(0, speech - excluded),
+        recording_type=stats.get("recording_type"),
+        facts={
+            f["item_key"]: doclint.LintFact(
+                int(f.get("start_ms") or 0), f.get("text", ""), f.get("quote", "")
+            )
+            for f in produced.get("facts", [])
+        },
         known=known,
+        title=produced.get("title"),
     )
 
 
@@ -833,6 +854,7 @@ def aggregate(
     excluded = [0, 0]
     invented = echo = labels = 0
     lint_codes: dict[str, int] = {}
+    auto: dict[str, list[int]] = {"Q3": [], "Q7": []}
     linted_docs = lint_clean = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     by_type: dict[str, list[int]] = {}
@@ -851,6 +873,9 @@ def aggregate(
         invented += int(row.get("invented_claims") or 0)
         echo += int(row.get("example_echo") or 0)
         labels += int(row.get("label_lines") or 0)
+        for q, score in (row.get("rubric_auto") or {}).items():
+            if score is not None:
+                auto[q].append(int(score))
         if "lint" in row:
             linted_docs += 1
             lint_clean += 0 if row["lint"] else 1
@@ -901,6 +926,9 @@ def aggregate(
         # D1 lint: findings by code, and the share of notes with none.
         "lint_findings": dict(sorted(lint_codes.items())),
         "lint_clean_rate": (lint_clean / linted_docs) if linted_docs else None,
+        # The rubric's Q3 and Q7 read by code, mean of 0–2 per note.
+        "rubric_auto_q3": (sum(auto["Q3"]) / len(auto["Q3"])) if auto["Q3"] else None,
+        "rubric_auto_q7": (sum(auto["Q7"]) / len(auto["Q7"])) if auto["Q7"] else None,
         "headings_per_10_min": (
             sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
         ),

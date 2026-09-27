@@ -650,3 +650,42 @@ def test_the_lint_check_reads_the_engine_lint_per_code() -> None:
     results = {n: ok for n, ok, _s in notes_assert.check(checklist, produced, meeting)}
     assert results == {"lint[D-ORIENT]": False, "lint[D-VOL]": True}  # no overview
     assert taxonomy.check_codes("lint[D-ORIENT]") == ("D-ORIENT",)
+
+
+# ── The document standard's blind rubric (§8) ───────────────────────
+
+
+def test_rubric_round_trip_and_release_gate(tmp_path: Path, monkeypatch: Any) -> None:
+    local = tmp_path / "local"
+    monkeypatch.setattr(notes_pairs, "LOCAL", local)
+    corpus = REPO / "tests" / "fixtures" / "eval" / "notes"
+    arms = {"pipeline": local / "a", "comparison": local / "b"}
+    for arm, folder in arms.items():
+        folder.mkdir(parents=True)
+        for mid in ("m01_en_product_sync", "m06_de_news_podcast"):
+            (folder / f"{mid}.md").write_text(f"{arm} line one\n{arm} line two", "utf-8")
+    out = local / "rubric"
+    assert notes_pairs.rubric_build(arms, corpus, out, seed=2) == 0
+    key = {r["note_id"]: r for r in csv.DictReader((out / "rubric_key.csv").open())}
+    assert len(key) == 4
+    page = (out / "n001.md").read_text("utf-8")
+    assert "Q4 lines to check" in page and "Q7 band" in page and "Q8 Form" in page
+    rows = [["note_id", "rater", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"]]
+    for note_id, k in key.items():
+        ours = k["arm"] == "pipeline"
+        for rater in ("r1", "r2", "r3"):
+            scores = [2] * 8 if ours else [1, 2, 2, 0, 0, 2, 2, 2]
+            if ours and rater == "r1":
+                scores[3] = 1  # one rater finds an unsupported line; the median stays 2
+            rows.append([note_id, rater, *scores])
+    ratings = out / "ratings.csv"
+    with ratings.open("w", newline="") as handle:
+        csv.writer(handle).writerows(rows)
+    result = notes_pairs.rubric_score(ratings, out / "rubric_key.csv")
+    assert result["arms"]["pipeline"]["mean_total"] == 16
+    assert result["arms"]["comparison"]["mean_total"] == 11  # the r03 comparison note's shape
+    assert result["release_gate"] == {
+        "mean_total": True,
+        "faithful_share": True,
+        "no_orientation_zero": True,
+    }

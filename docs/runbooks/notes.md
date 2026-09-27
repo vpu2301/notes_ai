@@ -480,9 +480,12 @@ dominant-speaker rule (`pipeline.PRESENTER_MIN_SHARE`) did not hold.
 
 ### document-lint
 
-D1 (ADR-0065). Every generation is linted for form; findings are counted by
-taxonomy code and rule, never with text. A code climbing after a deploy
-points at the prompt or the render; see the rule table in ADR-0065.
+D1 (ADR-0065). Every generation is held to the document standard
+(`docs/eval/document-standard.md`) before it is written. Uncited lines are
+dropped and heading punctuation stripped (`stats.lint_repairs`). Every other
+departure is counted by taxonomy code and rule (`meeting_doc/doclint.RULES`),
+never with text. A code climbing after a deploy points at the prompt or the
+render.
 
 ```sql
 SELECT prompt_version, key AS code, sum(value::int) AS findings, count(*) AS notes

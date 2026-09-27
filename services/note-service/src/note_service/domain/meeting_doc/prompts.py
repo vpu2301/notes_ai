@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-20"
+PROMPT_VERSION: Final = "2026-10-21"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"

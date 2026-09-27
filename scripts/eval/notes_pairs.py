@@ -18,6 +18,11 @@ facts, and the two notes as "Note L" and "Note R" in a random order — plus
 from it. Everything stays under ``scripts/eval/local/``: the notes and the
 transcripts are content.
 
+``rubric-build`` / ``rubric-score`` run the document standard's blind
+rubric (docs/eval/document-standard.md §8): eight questions, 0–2 each, per
+note rather than per pair, with the release gate (mean ≥ 13/16, Q4 = 2 on
+≥ 95 % of notes, no note with Q1 = 0).
+
 ``score`` reads the raters' ``ratings.csv`` (``pair_id, rater, preferred
 [L|R|tie], accuracy, completeness, usefulness, readability`` — scores 1–5 —
 and, since the F3 amendment after r03 (§2.10), ``overview_L, overview_R``:
@@ -255,6 +260,128 @@ def score(ratings_path: Path, key_path: Path, corpus: Path | None = None) -> dic
     }
 
 
+# ── The blind rubric (docs/eval/document-standard.md §8) ────────────
+
+RUBRIC: tuple[tuple[str, str, str], ...] = (
+    ("q1", "Orientation", "From the first block alone: what is this, who speaks, what does it "
+     "cover? 2 all three · 1 two · 0 fewer"),
+    ("q2", "Structure", "Do the headings alone tell the story in order? 2 yes · 1 partly · 0 no"),
+    ("q3", "Specificity", "Share of bullets with a name, number, date or term: "
+     "2 ≥ 90 % · 1 60–89 % · 0 < 60 %"),
+    ("q4", "Faithfulness", "Check the five lines listed below against the transcript. Claims "
+     "not supported: 2 none · 1 one · 0 two or more"),
+    ("q5", "Exactness", "Numbers, units, qualifiers as spoken: 2 all · 1 one miss · 0 more"),
+    ("q6", "Subjects and roles", "Pronouns or labels as subjects; wrong presenter, guest or "
+     "type: 2 none · 1 one · 0 more"),
+    ("q7", "Volume", "Body words within the band shown below: 2 yes · 1 within 25 % · 0 worse"),
+    ("q8", "Form", "Copies, description, redundancy, rendering defects: 2 none · 1 one · 0 more"),
+)  # fmt: skip
+RUBRIC_MAX = 2 * len(RUBRIC)
+RUBRIC_GATE_MEAN = 13.0
+RUBRIC_GATE_FAITHFUL = 0.95  # share of notes with Q4 = 2
+FAITHFULNESS_LINES = 5
+
+
+def _speech_minutes(meeting: dict[str, Any]) -> float:
+    spans = sorted((t["t_start_ms"], t["t_end_ms"]) for t in meeting.get("transcript", []))
+    total, end = 0, 0
+    for start, stop in spans:
+        start = max(start, end)
+        if stop > start:
+            total += stop - start
+            end = stop
+    return total / 60_000
+
+
+def rubric_build(arms: dict[str, Path], corpus: Path, out: Path, *, seed: int = 0) -> int:
+    """One file per (meeting, arm) note, in a random order under a neutral
+    id; ``rubric.csv`` for the raters, ``rubric_key.csv`` kept apart. Each
+    file lists the five lines the rater checks for Q4 and the word band for
+    Q7."""
+    out = _local(out)
+    out.mkdir(parents=True, exist_ok=True)
+    meetings = _meetings(corpus)
+    rng = random.Random(seed)
+    notes = [
+        (meeting_id, arm, folder / f"{meeting_id}.md")
+        for meeting_id in sorted(meetings)
+        for arm, folder in arms.items()
+        if (folder / f"{meeting_id}.md").is_file()
+    ]
+    rng.shuffle(notes)
+    sheet: list[list[str]] = [["note_id", "rater", *(q for q, _n, _t in RUBRIC)]]
+    key: list[list[str]] = [["note_id", "meeting_id", "arm"]]
+    for n, (meeting_id, arm, path) in enumerate(notes, 1):
+        note_id = f"n{n:03d}"
+        meeting = meetings[meeting_id]
+        text = path.read_text("utf-8")
+        body = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+        checked = rng.sample(body, min(FAITHFULNESS_LINES, len(body)))
+        minutes = _speech_minutes(meeting)
+        transcript = "\n".join(
+            f"[{t['t_start_ms'] // 60000:02d}:{t['t_start_ms'] // 1000 % 60:02d}] "
+            f"{t['speaker']}: {t['text']}"
+            for t in meeting["transcript"]
+        )
+        questions = "\n".join(f"- **{q.upper()} {name}** — {text}" for q, name, text in RUBRIC)
+        (out / f"{note_id}.md").write_text(
+            f"# Note {note_id}\n\n## Questions (0–2 each)\n\n{questions}\n\n"
+            f"**Q4 lines to check:**\n\n" + "\n".join(f"- {ln}" for ln in checked) + "\n\n"
+            f"**Q7 band:** {round(8 * minutes)}–{round(18 * minutes)} words "
+            f"({minutes:.1f} minutes of speech)\n\n"
+            f"## The note\n\n{text}\n\n## Transcript\n\n{transcript}\n",
+            encoding="utf-8",
+        )
+        sheet.append([note_id, "", *([""] * len(RUBRIC))])
+        key.append([note_id, meeting_id, arm])
+    for name, rows in (("rubric.csv", sheet), ("rubric_key.csv", key)):
+        with (out / name).open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerows(rows)
+    print(f"{len(notes)} notes in {out}")
+    return 0
+
+
+def rubric_score(ratings_path: Path, key_path: Path) -> dict[str, Any]:
+    """Per arm: mean total (of 16), mean per question, the share of notes
+    with Q4 = 2, the notes with Q1 = 0 — each note's score is the median of
+    its raters — and the release gate for the pipeline (§8)."""
+    import statistics
+
+    with key_path.open(encoding="utf-8") as handle:
+        key = {row["note_id"]: row for row in csv.DictReader(handle)}
+    with ratings_path.open(encoding="utf-8") as handle:
+        rows = [r for r in csv.DictReader(handle) if all(r.get(q) for q, _n, _t in RUBRIC)]
+    by_note: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        by_note[row["note_id"]].append(row)
+    arms: dict[str, list[dict[str, float]]] = defaultdict(list)
+    for note_id, ratings in by_note.items():
+        scores = {q: float(statistics.median(int(r[q]) for r in ratings)) for q, _n, _t in RUBRIC}
+        arms[key[note_id]["arm"]].append(scores)
+    out: dict[str, Any] = {"raters": len({r["rater"] for r in rows}), "arms": {}}
+    for arm, notes in sorted(arms.items()):
+        totals = [sum(n.values()) for n in notes]
+        out["arms"][arm] = {
+            "notes": len(notes),
+            "mean_total": sum(totals) / len(totals),
+            "max_total": RUBRIC_MAX,
+            "per_question": {q: sum(n[q] for n in notes) / len(notes) for q, _name, _t in RUBRIC},
+            "faithful_share": sum(1 for n in notes if n["q4"] == 2) / len(notes),
+            "orientation_zero": sum(1 for n in notes if n["q1"] == 0),
+        }
+    ours = out["arms"].get(PIPELINE)
+    out["release_gate"] = (
+        None
+        if ours is None
+        else {
+            "mean_total": ours["mean_total"] >= RUBRIC_GATE_MEAN,
+            "faithful_share": ours["faithful_share"] >= RUBRIC_GATE_FAITHFUL,
+            "no_orientation_zero": ours["orientation_zero"] == 0,
+        }
+    )
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -275,7 +402,37 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("key", type=Path)
     s.add_argument("--corpus", type=Path, default=None)
     s.add_argument("--write", action="store_true", help="write docs/eval/notes-pairs-<date>.json")
+    rb = sub.add_parser("rubric-build", help="the document standard's blind rubric (§8)")
+    rb.add_argument(
+        "--arm",
+        action="append",
+        required=True,
+        metavar="NAME=DIR",
+        help="notes folder per arm, e.g. pipeline=scripts/eval/local/notes-pipeline",
+    )
+    rb.add_argument("--corpus", type=Path, required=True)
+    rb.add_argument("--out", type=Path, required=True)
+    rb.add_argument("--seed", type=int, default=0)
+    rs = sub.add_parser("rubric-score")
+    rs.add_argument("ratings", type=Path)
+    rs.add_argument("key", type=Path)
+    rs.add_argument("--write", action="store_true", help="write docs/eval/notes-rubric-<date>.json")
     args = parser.parse_args(argv)
+    if args.command == "rubric-build":
+        arms = dict(item.split("=", 1) for item in args.arm)
+        return rubric_build(
+            {k: Path(v) for k, v in arms.items()}, args.corpus, args.out, seed=args.seed
+        )
+    if args.command == "rubric-score":
+        scored = rubric_score(args.ratings, args.key)
+        print(json.dumps(scored, indent=2))
+        if args.write:
+            DOCS_EVAL.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(UTC).strftime("%Y-%m-%d")
+            target = DOCS_EVAL / f"notes-rubric-{stamp}.json"
+            target.write_text(json.dumps(scored, indent=2) + "\n", encoding="utf-8")
+            print(f"wrote {target}")
+        return 0
     if args.command == "build":
         return build(args.a, args.b, args.corpus, args.out, seed=args.seed, section=args.section)
     result = score(args.ratings, args.key, args.corpus)
