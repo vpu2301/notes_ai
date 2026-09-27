@@ -83,6 +83,9 @@ ATTRIBUTION_MISSING: Final = "attribution_missing"
 # I / we / you. Either fact is evidence behind other lines, never a line.
 COPIED: Final = "copied"
 FIRST_PERSON: Final = "first_person"
+# F3 amendment §2.5 — a scene (a perception verb, a generic subject, nothing
+# named or counted): evidence behind other lines, never a line.
+DESCRIPTIVE: Final = "descriptive"
 
 # Why a fact was dropped — counted in metrics and in the eval, never shown.
 DROPPED_QUOTE: Final = "dropped_quote"
@@ -199,7 +202,7 @@ class VerifiedFact:
         its text, so a copied text does not matter there."""
         if self.figure is not None or self.person is not None:
             return False
-        return self.copied or FIRST_PERSON in self.flags
+        return self.copied or FIRST_PERSON in self.flags or DESCRIPTIVE in self.flags
 
     @property
     def salient(self) -> bool:
@@ -677,6 +680,7 @@ class VerifyStats:
     dropped_no_information: int = 0
     dropped_first_person: int = 0
     third_person_fixed: int = 0
+    descriptive: int = 0
     """F3 — figures kept, and dropped because the value or the unit was
     not said; qualifiers and introduction fields cleared because the
     words were not in the quote; next steps addressed to the audience."""
@@ -716,6 +720,7 @@ def verify_facts(
     noise_lines: frozenset[int] = frozenset(),
     language: str = "en",
     glossary: tuple[Term, ...] = (),
+    recording_names: frozenset[str] = frozenset(),
 ) -> list[VerifiedFact]:
     """One window's claims, checked. Anything that fails is dropped.
 
@@ -866,6 +871,15 @@ def verify_facts(
                 stats.dropped_first_person += 1
         if copied:
             stats.copied += 1
+        if (
+            not by_payload
+            and kind not in _TASK_KINDS
+            and support.descriptive(
+                text, language, known=recording_names, has_date=_has_date_word(text)
+            )
+        ):
+            voice_flags = [*voice_flags, DESCRIPTIVE]
+            stats.descriptive += 1
 
         # Q4, tier (a): names the workspace knows, spelled its way — in the
         # text only. The quote keeps what the transcriber heard.
@@ -874,7 +888,7 @@ def verify_facts(
             | set(name_candidates)
             | {g.term for g in glossary if g.kind == "person"}
         )
-        text, corrections, marked = _correct(text, glossary, people, stats)
+        text, corrections, marked = _correct(text, glossary, people, stats, recording_names)
 
         # The restatement must mean what was said: enough shared content,
         # and no name the words behind it do not have.
@@ -1422,10 +1436,16 @@ def addresses_audience(quote: str, language: str = "en") -> bool:
 
 
 def _correct(
-    text: str | None, glossary: tuple[Term, ...], people: frozenset[str], stats: VerifyStats
+    text: str | None,
+    glossary: tuple[Term, ...],
+    people: frozenset[str],
+    stats: VerifyStats,
+    recording_names: frozenset[str] = frozenset(),
 ) -> tuple[str | None, list[Correction], set[str]]:
     """Tier (a) on one string, counted."""
-    fixed, applied, marked = entities.correct(text, glossary=glossary, known_people=people)
+    fixed, applied, marked = entities.correct(
+        text, glossary=glossary, known_people=people, recording_names=recording_names
+    )
     for correction in applied:
         stats.corrected[correction.source] = stats.corrected.get(correction.source, 0) + 1
     stats.marked += len(marked)

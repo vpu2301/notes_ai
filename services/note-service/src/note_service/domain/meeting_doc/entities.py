@@ -42,6 +42,8 @@ UNSURE_MARK: Final = " (?)"
 SOURCE_GLOSSARY: Final = "glossary"
 SOURCE_CANDIDATE: Final = "candidate"
 SOURCE_MODEL: Final = "model"
+# F3 amendment §2.8 — a name the recording itself says three times or more.
+SOURCE_RECORDING: Final = "recording"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +78,11 @@ def candidates_in(text: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def _pool(glossary: tuple[Term, ...], known_people: frozenset[str]) -> dict[str, str]:
+def _pool(
+    glossary: tuple[Term, ...],
+    known_people: frozenset[str],
+    recording_names: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """``{spelling: source}`` — every name this recording may mean, as a
     whole and, for people, surname by surname."""
     pool: dict[str, str] = {}
@@ -84,6 +90,8 @@ def _pool(glossary: tuple[Term, ...], known_people: frozenset[str]) -> dict[str,
         pool.setdefault(term.term, SOURCE_GLOSSARY)
     for person in known_people:
         pool.setdefault(person, SOURCE_CANDIDATE)
+    for name in recording_names:
+        pool.setdefault(name, SOURCE_RECORDING)
     for name, source in list(pool.items()):
         parts = name.split()
         if len(parts) > 1:
@@ -99,6 +107,7 @@ def resolve(
     glossary: tuple[Term, ...] = (),
     known_people: frozenset[str] = frozenset(),
     threshold: float = THRESHOLD,
+    recording_names: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Correction], set[str]]:
     """``(corrections, marked)`` for these surfaces.
 
@@ -111,7 +120,7 @@ def resolve(
     "Sommerfeld".
     """
     heard = {h.casefold(): t.term for t in glossary for h in t.heard_as}
-    pool = _pool(glossary, known_people)
+    pool = _pool(glossary, known_people, recording_names)
     exact = {spelling.casefold() for spelling in pool}
     out: dict[str, Correction] = {}
     marked: set[str] = set()
@@ -130,6 +139,16 @@ def resolve(
             continue
         best, spelling = scored[0]
         runner_up = scored[1][0] if len(scored) > 1 else 0.0
+        if pool[spelling] == SOURCE_RECORDING and _inflected(surface, spelling):
+            continue  # "Mensch" / "Menschen": grammar, not a mishearing
+        if (
+            pool[spelling] == SOURCE_RECORDING
+            and best < threshold
+            and _one_substitution(surface, spelling)
+            and best - runner_up > AMBIGUITY_MARGIN
+        ):
+            out[surface] = Correction(surface, spelling, SOURCE_RECORDING)
+            continue
         if best >= threshold and best - runner_up > AMBIGUITY_MARGIN:
             out[surface] = Correction(surface, spelling, pool[spelling])
         elif MODEL_THRESHOLD <= best < threshold and _aligned(surface, spelling):
@@ -140,6 +159,19 @@ def resolve(
         for part in span.split():
             out.pop(part, None)
     return out, marked
+
+
+def _inflected(a: str, b: str) -> bool:
+    x, y = a.casefold(), b.casefold()
+    return x.startswith(y) or y.startswith(x)
+
+
+def _one_substitution(a: str, b: str) -> bool:
+    """Same length (≥ 4), one letter different: "Carp" / "Karp"."""
+    x, y = a.casefold(), b.casefold()
+    return (
+        len(x) == len(y) >= MIN_TOKEN_CHARS and sum(c != d for c, d in zip(x, y, strict=True)) == 1
+    )
 
 
 def _aligned(surface: str, name: str) -> bool:
@@ -168,10 +200,16 @@ def correct(
     *,
     glossary: tuple[Term, ...] = (),
     known_people: frozenset[str] = frozenset(),
+    recording_names: frozenset[str] = frozenset(),
 ) -> tuple[str | None, list[Correction], set[str]]:
     """One string through tier (a): ``(corrected, applied, marked)``."""
     if not text:
         return text, [], set()
-    table, marked = resolve(candidates_in(text), glossary=glossary, known_people=known_people)
+    table, marked = resolve(
+        candidates_in(text),
+        glossary=glossary,
+        known_people=known_people,
+        recording_names=recording_names,
+    )
     applied = [c for s, c in table.items() if re.search(rf"(?<!\w){re.escape(s)}(?!\w)", text)]
     return apply(text, table, marked), applied, marked

@@ -719,3 +719,93 @@ def first_person(text: str, language: str = "en") -> bool:
     del language  # the patterns cover all three languages
     body = _body(text).strip().lstrip("\"'“„«")
     return bool(_FIRST_PERSON_START.match(body) or _FIRST_PERSON_ANY.search(body))
+
+
+# ── F3 amendment §2.5 / §2.8 / A-13: what is specific, what is scenery ──
+
+# Scene and perception verbs — a line that only says what could be seen or
+# heard (stems, case-folded).
+SCENE_VERBS: Final[dict[str, tuple[str, ...]]] = {
+    "de": ("seh", "sieht", "sah", "gesehen", "zeig", "gezeigt", "film", "gefilmt", "hör",
+           "gehört", "schau", "steig", "stieg", "entsteh", "entstand", "brenn", "explodier"),
+    "en": ("see", "sees", "saw", "seen", "show", "shows", "shown", "film", "filmed", "hear",
+           "heard", "look", "looks", "rise", "rises", "rising", "appear", "appears", "burn",
+           "explod"),
+    "uk": ("бач", "бачи", "показ", "зніма", "знято", "чут", "чуємо", "дивит", "підніма",
+           "з'являє", "горить", "вибух"),
+}  # fmt: skip
+# Subjects that are nobody in particular.
+GENERIC_SUBJECTS: Final[frozenset[str]] = frozenset(
+    {"menschen", "leute", "kamera", "kameras", "video", "videos", "rauch", "geräusch",
+     "geräusche", "feuerball", "flammen", "straße", "straßen", "passanten", "zuschauer",
+     "people", "camera", "cameras", "smoke", "sound", "sounds", "fireball",
+     "flames", "crowd", "street", "streets", "passers",
+     "люди", "камера", "відео", "дим", "звук", "звуки", "натовп", "вулиця", "полум'я"}
+)  # fmt: skip
+RECORDING_NAME_MIN: Final = 3
+_QUOTED: Final = re.compile(r"[\"„“«»]([^\"„“«»]{2,60})[\"“”«»]")
+
+
+def recording_names(texts: list[str], minimum: int = RECORDING_NAME_MIN) -> frozenset[str]:
+    """Capitalised words said at least ``minimum`` times inside a sentence
+    in this recording — what the recording itself spells ("Palantir",
+    "Thiel", "Karp"). German nouns qualify too; the rules that use this set
+    exclude the generic ones."""
+    counts: dict[str, int] = {}
+    for text in texts:
+        for name in names_in(text):
+            counts[name] = counts.get(name, 0) + 1
+    return frozenset(n for n, c in counts.items() if c >= minimum)
+
+
+def entities_in(text: str, language: str, known: frozenset[str] = frozenset()) -> list[str]:
+    """Named things in a line: capitalised words inside the sentence — in
+    German only those the recording or the workspace knows as names (every
+    noun is capitalised there) — and acronyms; never a generic subject."""
+    out: list[str] = []
+    for name in names_in(text):
+        folded = name.casefold()
+        if folded in GENERIC_SUBJECTS:
+            continue
+        acronym = len(name) > 1 and name.isupper()
+        if language == "de" and not acronym and name not in known:
+            continue
+        out.append(name)
+    return list(dict.fromkeys(out))
+
+
+def descriptive(
+    text: str, language: str, *, known: frozenset[str] = frozenset(), has_date: bool = False
+) -> bool:
+    """§2.5: a scene — a perception or scene verb, a generic subject, and
+    no named thing, number or date ("Menschen auf der Straße werden
+    gefilmt", "Ein riesiger Feuerball entsteht")."""
+    body = _body(text)
+    if has_date or _DIGITS.search(body) or entities_in(body, language, known):
+        return False
+    words = _WORD.findall(_fold(body))
+    stems = SCENE_VERBS.get(language, ()) + SCENE_VERBS["en"]
+    verb = any(w.startswith(stem) for w in words for stem in stems)
+    subject = any(w in GENERIC_SUBJECTS for w in words)
+    return verb and subject
+
+
+def specificity(
+    text: str, language: str, *, known: frozenset[str] = frozenset(), has_date: bool = False
+) -> int:
+    """A-13: how checkable a line is — named things, numbers (digits or
+    words), a date, quoted terms."""
+    from . import numbers
+
+    body = _body(text)
+    # An article is not a count ("ein Feuerball", "a fireball"): a one said
+    # as a word does not make a line checkable; digits always do.
+    counted = numbers.digit_numbers(body) + [
+        n for n in numbers.number_words(body, language) if n != 1
+    ]
+    return (
+        len(entities_in(body, language, known))
+        + len(counted)
+        + (1 if has_date else 0)
+        + len(_QUOTED.findall(body))
+    )

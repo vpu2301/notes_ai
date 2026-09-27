@@ -263,6 +263,9 @@ async def run(
     out.noise = sorted({(e.start_ms, e.reason) for e in excluded})
     out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
 
+    # F3 amendment §2.8 — what the recording itself spells three times or more.
+    rec_names = support.recording_names([t.text for t in turns])
+
     def check(
         facts: list[schema.Fact], window: Window, into: verify.VerifyStats
     ) -> list[VerifiedFact]:
@@ -279,6 +282,7 @@ async def run(
             noise_lines=noise_lines,
             language=language,
             glossary=tuple(glossary),
+            recording_names=rec_names,
         )
 
     restate = {"improved": 0, "unchanged": 0}
@@ -358,9 +362,13 @@ async def run(
     gate = _Gate(
         language=language,
         known=frozenset(
-            {t.speaker_name for t in turns if t.speaker_name} | set(name_candidates) | introduced
+            {t.speaker_name for t in turns if t.speaker_name}
+            | set(name_candidates)
+            | introduced
+            | rec_names
         ),
     )
+
     if document_facts:
         # Understand the conversation first; then write topics and the
         # summary about it, side by side.
@@ -418,6 +426,7 @@ async def run(
         presenter_lines=family.meeting_type == "broadcast",
         subject=brief.subject if brief else "",
         figure_tables=tables,
+        recording_names=gate.known,
     )
     thirds = windows.thirds(built)
     by_third = [0, 0, 0]
@@ -438,6 +447,8 @@ async def run(
         "restate_outcomes": dict(restate),
         "dropped_no_information": stats.dropped_no_information,
         "dropped_first_person": stats.dropped_first_person,
+        "facts_descriptive": stats.descriptive,
+        "recording_names": len(rec_names),
         "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
         "children_restated": gate.children_restated,
         # F3 amendment — the engine's view of the turns.
@@ -466,6 +477,7 @@ async def run(
                 "copied",
                 "no_information",
                 "first_person",
+                "descriptive",
             )
         },
         "summary_retries": gate.retries,
@@ -811,6 +823,7 @@ class _Gate:
                 "copied",
                 "no_information",
                 "first_person",
+                "descriptive",
             ),
             0,
         )
@@ -855,6 +868,10 @@ class _Gate:
             return "no_information"
         if support.first_person(plain, self.language):
             return "first_person"
+        if support.descriptive(
+            plain, self.language, known=self.known, has_date=verify._has_date_word(plain)
+        ):
+            return "descriptive"
         if not _numbers_supported(plain, cited):
             return "number"
         evidence = " ".join(f"{f.text} {f.quote}" for f in cited)

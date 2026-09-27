@@ -823,3 +823,52 @@ def test_a_guest_is_a_guest_and_a_trailer_voice_is_nobody() -> None:
     assert (
         render.presenter_text(guest, "de") == "Gast: Felix Holtermann, Büroleiter beim Handelsblatt"
     )
+
+
+def test_scenery_is_evidence_and_the_substance_stays() -> None:
+    names = frozenset({"Thiel", "Palantir"})
+    scenes = ["Menschen auf der Straße werden gefilmt", "Ein riesiger Feuerball entsteht"]
+    for text in scenes:
+        assert support.descriptive(text, "de", known=names)
+    assert not support.descriptive("Peter Thiel gründet Palantir", "de", known=names)
+    assert not support.descriptive("Fast 3.000 Menschen sterben", "de", known=names)
+    line = "man sieht, wie ein riesiger Feuerball entsteht über der Stadt"
+    [fact] = _verify(
+        [schema.Fact(kind="key_point", text="Ein riesiger Feuerball entsteht", quote=line, turn=1)],
+        _window(line), language="de",
+    )  # fmt: skip
+    assert verify.DESCRIPTIVE in fact.flags and fact.evidence_only
+    assert (
+        pipeline._Gate(language="de").reason("Ein riesiger Feuerball entsteht", [fact])
+        == "descriptive"
+    )
+
+
+def test_specificity_counts_what_makes_a_line_checkable() -> None:
+    names = frozenset({"Thiel", "Palantir"})
+    assert support.specificity("Ein riesiger Feuerball entsteht", "de", known=names) == 0
+    assert support.specificity("Fast 3.000 Menschen sterben", "de", known=names) == 1
+    assert support.specificity("Peter Thiel gründet Palantir 2004", "de", known=names) == 3
+
+
+def test_a_name_the_recording_says_often_corrects_a_near_miss_and_nothing_else() -> None:
+    from note_service.domain.meeting_doc import entities
+
+    texts = [
+        "Alex Karp ist CEO.",
+        "Heute studierte Karp.",
+        "Das sagt Karp.",
+        "Menschen sterben",
+        "Die Menschen",
+        "viele Menschen",
+    ]
+    names = support.recording_names(texts)
+    assert "Karp" in names
+    fixed, applied, _ = entities.correct("Alex Carp studierte in Frankfurt", recording_names=names)
+    assert fixed == "Alex Karp studierte in Frankfurt" and applied[0].source == "recording"
+    assert (
+        entities.correct("Ein Mensch steht da", recording_names=names)[0] == "Ein Mensch steht da"
+    )
+    assert (
+        entities.correct("Peter Tiers gründet", recording_names=names)[0] == "Peter Tiers gründet"
+    )

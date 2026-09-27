@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-18"
+PROMPT_VERSION: Final = "2026-10-19"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -87,6 +87,10 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_wrong": "Ferrytale has sold over forty thousand copies",
         # F2 — a remark that informs nobody is not a fact.
         "shot_small_talk": "Honestly, the Quillhaven fair venue is fantastic.",
+        # F3 amendment — a scene is not a fact; a dated event is.
+        "shot_scene": "Smoke rises from the old Quillhaven warehouse.",
+        "shot_event_quote": "The old Quillhaven warehouse flooded on the third of March.",
+        "shot_event_text": "The Quillhaven warehouse was flooded on 3 March",
         # F3 — a figure: the quantity, the number as said, the unit, the hedge.
         "figure_quote": "the Lantern edition box weighs just under two kilos",
         "figure_name": "Lantern edition box weight",
@@ -111,6 +115,9 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_quote": "Ich würde schätzen, Ferrytale hat inzwischen deutlich über vierzigtausend Exemplare verkauft, aber genau weiß das niemand.",
         "shot_estimate_wrong": "Ferrytale hat über vierzigtausend Exemplare verkauft",
         "shot_small_talk": "Ehrlich, die Halle der Quillhaven-Messe ist fantastisch.",
+        "shot_scene": "Rauch steigt aus dem alten Quillhaven-Lager auf.",
+        "shot_event_quote": "Das alte Quillhaven-Lager wurde am dritten März überflutet.",
+        "shot_event_text": "Das Quillhaven-Lager stand am 3. März unter Wasser",
         "figure_quote": "die Schachtel der Lantern-Edition wiegt knapp zwei Kilo",
         "figure_name": "Gewicht der Lantern-Schachtel",
         "summary_right": "Die Lantern-Edition bleibt für die Quillhaven-Messe geplant",
@@ -132,6 +139,9 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_estimate_quote": "Я б оцінила, що Ferrytale вже продано значно понад сорок тисяч примірників, але точно ніхто не знає.",
         "shot_estimate_wrong": "Ferrytale продано понад сорок тисяч примірників",
         "shot_small_talk": "Чесно, зала ярмарку Quillhaven просто чудова.",
+        "shot_scene": "Над старим складом Quillhaven піднімається дим.",
+        "shot_event_quote": "Старий склад Quillhaven затопило третього березня.",
+        "shot_event_text": "Склад Quillhaven був затоплений 3 березня",
         "figure_quote": "коробка Lantern-видання важить трохи менше двох кілограмів",
         "figure_name": "Вага коробки Lantern",
         "summary_right": "Lantern-видання й далі заплановане до ярмарку Quillhaven",
@@ -184,6 +194,8 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Do not open with 'It was stated/noted/mentioned/established/discussed that'. "
         "State the point, with enough context to stand on its own — the reader did not "
         f"attend: '{_EN['standalone_right']}', not '{_EN['standalone_wrong']}'.\n"
+        "- One fact = one specific claim: who or what, and the number, date or name that "
+        "makes it checkable. A scene (what could be seen or heard) is not a fact.\n"
         "- `figure`: a number a speaker attaches to a named quantity. `name` is the "
         "quantity, `value` the number exactly as said (digits or words), `unit` as said "
         "(may be empty), `qualifier` the speaker's own hedge ('just under', 'about', "
@@ -236,6 +248,9 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Nicht mit „Es wurde gesagt/erwähnt/festgestellt/besprochen, dass“ beginnen. "
         "Die Sache nennen, mit genug Kontext, um allein zu stehen — der Leser war nicht "
         f"dabei: „{_DE['standalone_right']}“, nicht „{_DE['standalone_wrong']}“.\n"
+        "- Ein Fakt = eine konkrete Aussage: wer oder was, und die Zahl, das Datum oder der "
+        "Name, die sie überprüfbar machen. Eine Szene (was zu sehen oder zu hören war) ist "
+        "kein Fakt.\n"
         "- `figure`: eine Zahl, die jemand einer benannten Größe zuordnet. `name` ist die "
         "Größe, `value` die Zahl genau wie gesagt (Ziffern oder Wörter), `unit` wie gesagt "
         "(darf leer sein), `qualifier` die eigene Einschränkung („knapp“, „etwa“, „bis zu“) "
@@ -285,6 +300,8 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- Не починай з «Було зазначено/сказано/встановлено/обговорено, що». Називай "
         "суть із достатнім контекстом, щоб вона стояла окремо — читач не був присутній: "
         f"«{_UK['standalone_right']}», а не «{_UK['standalone_wrong']}».\n"
+        "- Один факт = одне конкретне твердження: хто чи що, і число, дата чи назва, що "
+        "робить його перевірюваним. Сцена (що було видно чи чутно) — не факт.\n"
         "- `figure`: число, яке мовець пов'язує з названою величиною. `name` — величина, "
         "`value` — число точно як сказано (цифрами чи словами), `unit` — як сказано (може "
         "бути порожнім), `qualifier` — власне застереження мовця («трохи менше», "
@@ -325,7 +342,11 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         f'  → kind "key_point", certainty "estimate", text "{_EN["estimate_text"]}." '
         f'(NOT "{_EN["shot_estimate_wrong"]}")\n\n'
         f"  [18] Osric (16:05): {_EN['shot_small_talk']}\n"
-        "  → no fact (it informs nobody: a remark, not a point)"
+        "  → no fact (it informs nobody: a remark, not a point)\n\n"
+        f"  [19] Wren (17:30): {_EN['shot_scene']}\n"
+        "  → no fact (a scene: nothing named, counted or dated)\n"
+        f"  [20] Wren (17:41): {_EN['shot_event_quote']}\n"
+        f'  → kind "key_point", text "{_EN["shot_event_text"]}"'
     ),
     "de": (
         "Beispiele für die Fehler, die zu vermeiden sind (eine erfundene Firma — nie "
@@ -342,7 +363,11 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         f'  → kind "key_point", certainty "estimate", text "{_DE["estimate_text"]}." '
         f'(NICHT "{_DE["shot_estimate_wrong"]}")\n\n'
         f"  [18] Osric (16:05): {_DE['shot_small_talk']}\n"
-        "  → kein Fakt (ohne Informationswert: eine Bemerkung, kein Punkt)"
+        "  → kein Fakt (ohne Informationswert: eine Bemerkung, kein Punkt)\n\n"
+        f"  [19] Wren (17:30): {_DE['shot_scene']}\n"
+        "  → kein Fakt (eine Szene: nichts benannt, gezählt oder datiert)\n"
+        f"  [20] Wren (17:41): {_DE['shot_event_quote']}\n"
+        f'  → kind "key_point", text "{_DE["shot_event_text"]}"'
     ),
     "uk": (
         "Приклади помилок, яких слід уникати (вигадана компанія — нічого з неї не "
@@ -359,7 +384,11 @@ _EXTRACT_SHOTS: Final[dict[str, str]] = {
         f'  → kind "key_point", certainty "estimate", text "{_UK["estimate_text"]}." '
         f'(НЕ "{_UK["shot_estimate_wrong"]}")\n\n'
         f"  [18] Остап (16:05): {_UK['shot_small_talk']}\n"
-        "  → жодного факту (без інформації: репліка, а не думка)"
+        "  → жодного факту (без інформації: репліка, а не думка)\n\n"
+        f"  [19] Врен (17:30): {_UK['shot_scene']}\n"
+        "  → жодного факту (сцена: нічого не названо, не пораховано, не датовано)\n"
+        f"  [20] Врен (17:41): {_UK['shot_event_quote']}\n"
+        f'  → kind "key_point", text "{_UK["shot_event_text"]}"'
     ),
 }
 

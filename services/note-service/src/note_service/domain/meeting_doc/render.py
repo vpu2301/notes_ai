@@ -300,6 +300,7 @@ def render_sections(
     presenter_lines: bool = False,
     subject: str = "",
     figure_tables: bool = True,
+    recording_names: frozenset[str] = frozenset(),
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
@@ -845,6 +846,12 @@ def _measured(groups: list[_FigureGroup]) -> bool:
     """≥ 3 figures with ≥ 2 distinct quantity names that carry a unit."""
     named = {g.figure.name.casefold() for g in groups if g.figure.unit}
     return len(groups) >= MIN_TABLE_FIGURES and len(named) >= 2
+
+
+def _has_date(text: str) -> bool:
+    from .verify import _has_date_word
+
+    return _has_date_word(text)
 
 
 def _cell(text: str) -> str:

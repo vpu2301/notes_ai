@@ -44,6 +44,7 @@ PINNED: dict[str, str] = {
     "2026-10-16": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: person-details follow-up
     "2026-10-17": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action line hint
     "2026-10-18": "43d58e09d2cb4e8f75ff549bcdc5271a6416b5274c57392507315935a2f952a6",  # F3: call-to-action follow-up
+    "2026-10-19": "7145b51eb8abe1ee535a7a6b35773879b0e860a93ff16a44c05510b8b264c33f",  # F3 amendment: scene example, specific claims
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")
