@@ -1,0 +1,79 @@
+{
+ "id": "r03_de_palantir_podcast",
+ "sprint": {
+  "recording_type": "F3-amendment",
+  "must_not_contain": "F3-amendment",
+  "must_contain_any": "F3-amendment",
+  "excluded_reasons": "F3-amendment",
+  "guest_line": "F3-amendment",
+  "chapters_min": "F3-amendment",
+  "overview": "F3-amendment",
+  "every_line_cited": "F3-amendment"
+ },
+ "recording_type": "podcast_broadcast",
+ "must_not_contain": [
+  "Gysi",
+  "Chris Hansen",
+  "Dateline",
+  "Präsentiert von",
+  "Technische Daten",
+  "Zwanzig Jahre",
+  "Eine Software",
+  "8:46",
+  "Nordturm",
+  "Südturm",
+  "World Trade Center",
+  "Hegel",
+  "Gymnastikhanteln"
+ ],
+ "must_contain_any": [
+  [
+   "Felix Holtermann"
+  ],
+  [
+   "Handelsblatt"
+  ],
+  [
+   "Palantir"
+  ],
+  [
+   "Peter Thiel"
+  ],
+  [
+   "Alex Karp"
+  ],
+  [
+   "PayPal"
+  ],
+  [
+   "Total Information Awareness"
+  ],
+  [
+   "Habermas"
+  ],
+  [
+   "Herr der Ringe",
+   "Palantiri"
+  ],
+  [
+   "2004"
+  ],
+  [
+   "3000",
+   "3.000"
+  ]
+ ],
+ "excluded_reasons": [
+  "advertisement"
+ ],
+ "guest_line": "Felix Holtermann",
+ "chapters_min": 4,
+ "overview": {
+  "prose_paragraphs_min": 2,
+  "names_recording_type": true,
+  "names_guest": "Felix Holtermann",
+  "themes_min": 3,
+  "bullets_above_first_heading": 0
+ },
+ "every_line_cited": true
+}

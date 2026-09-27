@@ -268,3 +268,92 @@ def test_a_long_recording_asks_for_topics_block_by_block_and_merges_same_heading
     assert len(titles) >= 2
     # Neighbouring blocks with the same heading are one topic.
     assert all(a != b for a, b in zip(titles, titles[1:], strict=False))
+
+
+# ── §2.10 the support gate per language ─────────────────────────────
+
+
+def test_a_compound_is_supported_by_its_parts() -> None:
+    from note_service.domain.meeting_doc import support
+
+    claim = "Geheimdienstdaten fließen zusammen"
+    evidence = "die Daten der Dienste fließen zusammen"
+    assert support.support_ratio(claim, evidence, "de") == 1.0
+    # A five-letter stem alone would not have found it.
+    assert support._stem("geheimdienstdaten") not in {support._stem(w) for w in evidence.split()}
+    # Words that share no run of six letters are still new.
+    assert support.support_ratio("Waffenlieferungen stocken", evidence, "de") == 0.0
+
+
+def test_the_line_gate_threshold_is_per_language() -> None:
+    from note_service.domain.meeting_doc import support
+
+    assert support.line_support_threshold("en") == 0.5
+    assert support.line_support_threshold("de") == 0.4
+    assert support.line_support_threshold("uk") == 0.4
+    assert support.line_support_threshold("fr") == support.LINE_SUPPORT_DEFAULT
+
+
+def test_introductions_sit_in_the_first_paragraph_and_never_read_as_turns() -> None:
+    from note_service.domain.meeting_doc import render, verify
+
+    people = [
+        VerifiedFact(
+            kind=schema.INTRODUCTION,
+            text="x",
+            quote="x y z",
+            turn=0,
+            start_ms=n * 1_000,
+            end_ms=n * 1_000 + 1,
+            speaker_label=f"SPEAKER_{n}",
+            speaker_name=None,
+            person=verify.Person(
+                name=name,
+                role="Reporterin",
+                organisation="Handelsblatt",
+                self_introduction=n == 0,
+                joiner="beim",
+                standing="presenter" if n == 0 else "guest",
+            ),
+        )  # fmt: skip
+        for n, name in enumerate(["Anna Berg", "Felix Holtermann", "Eva Klein", "Jonas Roth"])
+    ]
+    point = _vf("Palantir wurde im Jahr 2004 gegründet", 9_000)
+    [top, *_rest] = render.render_sections(
+        [*people, point],
+        role_by_key={},
+        language="de",
+        framing="Podcast-Folge über Palantir.",
+        summary=[("Palantir wurde 2004 gegründet.", [point.item_key])],
+        presenter_lines=True,
+    )
+    paragraphs = top.text.split("\n\n")
+    assert len(paragraphs) == 2
+    assert paragraphs[0].startswith("Podcast-Folge über Palantir.\n")
+    assert "Gast: Felix Holtermann, Reporterin beim Handelsblatt" in paragraphs[0]
+    assert not client_view.looks_like_transcript(top.text)
+
+
+def test_default_speaker_names_are_nobody() -> None:
+    from note_service.domain.meeting_doc.windows import Turn
+
+    turns = [
+        Turn(0, "SPEAKER_1", "Speaker 1", "Erzählung", 0, 50_000),
+        Turn(1, "UNKNOWN", "UNKNOWN", "Werbung", 50_000, 52_000),
+        Turn(2, "SPEAKER_2", "Speaker 2", "Antwort", 52_000, 60_000),
+    ]
+    assert pipeline._speakers(turns, [], "de") == ["Erzähler/in"]
+    named = [*turns, Turn(3, "SPEAKER_3", "Ada Lovelace", "Hallo", 60_000, 61_000)]
+    assert pipeline._speakers(named, [], "de") == ["Ada Lovelace"]
+
+
+def test_composed_prose_passes_over_a_part_that_names_nothing() -> None:
+    facts = [
+        _vf("The sky is clear over the towers", 0),
+        _vf("It is a quiet morning", 60_000),
+        _vf("Peter Thiel founds Palantir in 2004", 120_000),
+        _vf("Palantir hires 3000 people", 180_000),
+        _vf("Alex Karp becomes CEO in 2004", 240_000),
+    ]
+    out = overview.composed_sentences(facts, language="en", known=frozenset(NAMES))
+    assert [ids[0] for _s, ids in out] == [f.item_key for f in facts[2:]]

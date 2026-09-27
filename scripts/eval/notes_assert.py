@@ -184,6 +184,35 @@ def check(
         )
     if checklist.get("contact_line"):
         add("contact_line", any(ln.get("kind") == "next_step" for ln in lines), "contact_line")
+    # F3 amendment after r03 — adverts cut, the guest line, chapters, and
+    # the overview as two paragraphs of prose.
+    stats = produced.get("stats") or {}
+    for i, reason in enumerate(checklist.get("excluded_reasons", [])):
+        reasons = {r[2] for r in stats.get("excluded_ranges") or [] if len(r) > 2}
+        add(f"excluded_reasons[{i}]", reason in reasons, "excluded_reasons")
+    if "guest_line" in checklist:
+        from note_service.domain.meeting_doc.render import GUEST_LABELS
+
+        labels = {_fold(label) for label in GUEST_LABELS.values()}
+        add(
+            "guest_line",
+            any(
+                ln.get("kind") == "presenter"
+                and _has(ln["text"], checklist["guest_line"])
+                and _fold(ln["text"]).split(":", 1)[0] in labels
+                for ln in lines
+            ),
+            "guest_line",
+        )
+    headed = [
+        s
+        for s in produced.get("sections") or []
+        if s.get("role") == "topics" and (s.get("title") or "").strip()
+    ]
+    if "chapters_min" in checklist:
+        add("chapters_min", len(headed) >= int(checklist["chapters_min"]), "chapters_min")
+    if "overview" in checklist:
+        add_overview(checklist["overview"], produced, add)
     for i, topic in enumerate(checklist.get("topics", [])):
         under = [
             ln
@@ -200,6 +229,43 @@ def check(
     return out
 
 
+def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> None:
+    """The top of the note (F3 amendment §2.9): ``overview.<check>``."""
+    from note_service.domain.meeting_doc.overview import TYPE_LABELS
+
+    top = next(
+        (s for s in produced.get("sections") or [] if s.get("section_key") == "gen:overview"),
+        None,
+    )
+    text = (top or {}).get("text") or ""
+    paragraphs = [p for p in text.split("\n\n") if p.strip()]
+    first = paragraphs[0] if paragraphs else ""
+    bullets = sum(1 for line in text.splitlines() if re.match(r"^\s*[-*] ", line))
+    if "prose_paragraphs_min" in want:
+        add(
+            "overview.prose_paragraphs_min",
+            len(paragraphs) >= int(want["prose_paragraphs_min"]) and not bullets,
+            "overview",
+        )
+    if want.get("names_recording_type"):
+        language = produced.get("language", "en")
+        kind = (produced.get("stats") or {}).get("recording_type") or ""
+        label = (TYPE_LABELS.get(language) or TYPE_LABELS["en"]).get(kind, "")
+        add("overview.names_recording_type", bool(label) and _has(first, label), "overview")
+    if "names_guest" in want:
+        add("overview.names_guest", _has(first, want["names_guest"]), "overview")
+    if "themes_min" in want:
+        themes = (produced.get("brief") or {}).get("themes") or []
+        written = sum(1 for t in themes if t.strip() and _has(first, t.strip().rstrip(".")))
+        add("overview.themes_min", written >= int(want["themes_min"]), "overview")
+    if "bullets_above_first_heading" in want:
+        add(
+            "overview.bullets_above_first_heading",
+            bullets <= int(want["bullets_above_first_heading"]),
+            "overview",
+        )
+
+
 # `--backend scripted`: the engine tests' deterministic stand-in for the
 # model (no network, same answers every run) — what CI's notes-engine job
 # runs, so a checklist check that passes there fails only when the ENGINE
@@ -209,10 +275,19 @@ SCRIPTED = "scripted"
 # for a named speaker, none of the audit's strings, every line cited. The
 # other checks measure what a model extracted and are shown, not gated.
 ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited", "no_marks"})
+# F3 amendment: code writes the overview as prose and cuts adverts by cue,
+# whatever the model says.
+ENGINE_CHECK_NAMES = frozenset(
+    {
+        "overview.prose_paragraphs_min",
+        "overview.bullets_above_first_heading",
+        "excluded_reasons[0]",
+    }
+)
 
 
 def family(name: str) -> str:
-    return name.split("[", 1)[0]
+    return name.split("[", 1)[0].split(".", 1)[0]
 
 
 def _scripted_provider() -> Any:
@@ -261,7 +336,11 @@ async def main(backend_name: str, corpus: Path) -> int:
                 continue
             shown = results = check(checklist, produced, meeting)
             if backend_name == SCRIPTED:
-                results = [r for r in results if family(r[0]) in ENGINE_CHECKS]
+                results = [
+                    r
+                    for r in results
+                    if family(r[0]) in ENGINE_CHECKS or r[0] in ENGINE_CHECK_NAMES
+                ]
             passed = sum(1 for _n, ok, _s in results if ok)
             print(f"{meeting['id']}: {passed}/{len(results)} checks pass")
             gated = {name for name, _ok, _s in results}

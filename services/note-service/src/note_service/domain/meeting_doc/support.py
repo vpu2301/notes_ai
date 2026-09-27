@@ -382,14 +382,42 @@ def content_tokens(text: str, language: str) -> list[str]:
     return [_stem(w) for w in _WORD.findall(_fold(text)) if len(w) > 1 and w not in stops]
 
 
+# F3 amendment §2.10 — a German or Ukrainian word is often a compound or
+# an inflection of the evidence's word ("Geheimdienstdaten" / "Daten des
+# Geheimdienstes"): a claim word also counts as supported when it shares a
+# run of this many letters with an evidence word.
+COMPOUND_MIN: Final = 6
+# §2.10 — the line gate's threshold per language. PROVISIONAL: the values
+# the amendment expects (≈ 0.5 en, ≈ 0.4 de/uk). Calibrate against the
+# judge column on eval/notes/v2 (scripts/eval/support_calibration.py) and
+# replace them with the measured ones.
+LINE_SUPPORT_BY_LANGUAGE: Final[dict[str, float]] = {"en": 0.5, "de": 0.4, "uk": 0.4}
+LINE_SUPPORT_DEFAULT: Final = 0.5
+
+
+def line_support_threshold(language: str) -> float:
+    return LINE_SUPPORT_BY_LANGUAGE.get(language, LINE_SUPPORT_DEFAULT)
+
+
+def _runs(word: str) -> set[str]:
+    return {word[i : i + COMPOUND_MIN] for i in range(len(word) - COMPOUND_MIN + 1)}
+
+
 def support_ratio(claim: str, evidence: str, language: str = "en") -> float:
-    """Share of the claim's content tokens that the evidence has. 1.0
-    for a claim with no content tokens — there is nothing to support."""
-    claim_tokens = set(content_tokens(claim, language))
-    if not claim_tokens:
+    """Share of the claim's content words that the evidence has — by
+    five-letter stem, or by a shared run of :data:`COMPOUND_MIN` letters
+    (compounds and inflections). 1.0 for a claim with no content words:
+    there is nothing to support."""
+    stops = stop_words(language) | MERGE_STOP
+    words = {w for w in _WORD.findall(_fold(claim)) if len(w) > 1 and w not in stops}
+    claim_stems = {_stem(w): w for w in sorted(words)}
+    if not claim_stems:
         return 1.0
-    have = set(content_tokens(evidence, language))
-    return len(claim_tokens & have) / len(claim_tokens)
+    evidence_words = [w for w in _WORD.findall(_fold(evidence)) if len(w) > 1 and w not in stops]
+    have = {_stem(w) for w in evidence_words}
+    runs = set().union(*(_runs(w) for w in evidence_words)) if evidence_words else set()
+    supported = sum(1 for stem, word in claim_stems.items() if stem in have or (_runs(word) & runs))
+    return supported / len(claim_stems)
 
 
 def _body(text: str) -> str:

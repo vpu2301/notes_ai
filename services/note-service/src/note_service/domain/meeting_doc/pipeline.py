@@ -845,8 +845,8 @@ def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int
 
 # A composed line must carry at least this share of its content from the
 # facts it cites (Q2). Half: a sentence may connect and condense, it may
-# not add.
-MIN_LINE_SUPPORT: Final = 0.5
+# not add. Per language since the F3 amendment (§2.10):
+# ``support.line_support_threshold``.
 # More than this share of a summary failing the gate means the model is
 # writing from somewhere other than the facts: ask once more, strictly.
 SUMMARY_FAIL_SHARE: Final = 0.3
@@ -937,7 +937,9 @@ class _Gate:
         owners |= {f.attributed_to for f in cited if f.attributed_to}
         if support.new_names(plain, evidence, self.known | owners):
             return "name"
-        if support.support_ratio(plain, evidence, self.language) < MIN_LINE_SUPPORT:
+        if support.support_ratio(plain, evidence, self.language) < support.line_support_threshold(
+            self.language
+        ):
             return "unsupported"
         if claims:
             unsure = [f for f in cited if f.certainty in support.UNSURE_CERTAINTIES]
@@ -1456,7 +1458,9 @@ def _gated_phrase(phrase: str, facts: list[VerifiedFact], gate: _Gate) -> str:
     evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
     if support.new_names(phrase, evidence, gate.known):
         return ""
-    if support.support_ratio(phrase, evidence, gate.language) < MIN_LINE_SUPPORT:
+    if support.support_ratio(phrase, evidence, gate.language) < support.line_support_threshold(
+        gate.language
+    ):
         return ""
     return phrase
 
@@ -1466,8 +1470,8 @@ def _speakers(turns: list[windows.Turn], facts: list[VerifiedFact], language: st
     unnamed dominant voice as the narrator. Never a name nobody verified."""
     named: list[str] = []
     for turn in turns:
-        if turn.speaker_name and turn.speaker_name not in named:
-            named.append(turn.speaker_name)
+        if _a_real_name(turn) and turn.speaker_name not in named:
+            named.append(turn.speaker_name or "")
     presenter = [
         f.person.name
         for f in facts
@@ -1487,6 +1491,16 @@ def _speakers(turns: list[windows.Turn], facts: list[VerifiedFact], language: st
         if total and max(talk.values()) / total >= NARRATOR_MIN_SHARE:
             return [str(overview._pick(overview.NARRATOR, language))]
     return named
+
+
+_DEFAULT_NAME = re.compile(r"(?i)^(?:speaker[ _]?\d+|unknown(?: speaker)?|sprecher(?:in)? \d+)$")
+
+
+def _a_real_name(turn: windows.Turn) -> bool:
+    """A person named this voice — not the diarizer's label or the ASR
+    view's default ("Speaker 2", "UNKNOWN")."""
+    name = (turn.speaker_name or "").strip()
+    return bool(name) and name != turn.speaker_label and not _DEFAULT_NAME.match(name)
 
 
 def _guests(facts: list[VerifiedFact]) -> list[str]:

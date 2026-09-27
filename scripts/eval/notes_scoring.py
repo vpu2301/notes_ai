@@ -131,7 +131,8 @@ def best_match(gold: str, lines: list[str]) -> tuple[int, float]:
 
 # ── Support: does what a line says rest on what it cites? ───────────
 
-SUPPORT_THRESHOLD = 0.5
+# The engine's own per-language threshold (F3 amendment §2.10).
+SUPPORT_THRESHOLD = support_rules.LINE_SUPPORT_DEFAULT
 REDUNDANT_JACCARD = 0.6
 # Lines the metrics look at. A heading is structure; the transcript note
 # is ours, rendered from a closed vocabulary.
@@ -205,14 +206,17 @@ def _body(text: str) -> str:
     return support_rules._body(text)
 
 
-def support(line: str, cited: list[str], language: str = "en") -> bool:
+def support(
+    line: str, cited: list[str], language: str = "en", *, threshold: float | None = None
+) -> bool:
     """A line is supported when at least half its content is in the text and
     quotes of what it cites, every number in it is too, and it names nobody
     they do not. The ratio and the name rule are the engine's own
     (``meeting_doc.support``), so the eval and the gate cannot disagree."""
     evidence = " ".join(cited)
     body = _body(line)
-    if support_rules.support_ratio(body, evidence, language) < SUPPORT_THRESHOLD:
+    floor = support_rules.line_support_threshold(language) if threshold is None else threshold
+    if support_rules.support_ratio(body, evidence, language) < floor:
         return False
     if not _numbers(line) <= _numbers(evidence):
         return False

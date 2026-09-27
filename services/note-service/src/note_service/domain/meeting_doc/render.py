@@ -675,13 +675,17 @@ def render_sections(
     # one paragraph, each its own cited line. The facts live under their
     # headings; what was left out is data for the client (Q3).
     overview: list[tuple[str, list[Line]]] = []
+    first_lines: list[Line] = []
     if framing.strip():
         framed = editorial(strip_inline_ids(framing)[0])
-        overview.append((framed, [Line(framed, "framing", _ids(key_facts) or _ids(facts))]))
-    # F3 — who presented, for a broadcast or a presentation.
+        first_lines.append(Line(framed, "framing", _ids(key_facts) or _ids(facts)))
+    # F3 — who presented, for a broadcast or a presentation: part of the
+    # first paragraph, one line each, so the overview stays two paragraphs
+    # (and never reads as transcript turns — client_view.looks_like_transcript).
     if presenter_lines:
-        for line in _presenter_lines(grouped.get(schema.INTRODUCTION, []), language):
-            overview.append((line.text, [line]))
+        first_lines.extend(_presenter_lines(grouped.get(schema.INTRODUCTION, []), language))
+    if first_lines:
+        overview.append(("\n".join(line.text for line in first_lines), first_lines))
     summary_lines: list[Line] = []
     for written, own in sentences:
         if own and all(i in figure_ids for i in own):

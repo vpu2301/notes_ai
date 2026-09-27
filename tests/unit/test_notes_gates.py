@@ -61,6 +61,11 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "figures_min",
         "presenter_line",
         "contact_line",
+        # F3 amendment after r03
+        "excluded_reasons",
+        "guest_line",
+        "chapters_min",
+        "overview",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
     assert {f.name for f in files} >= {
@@ -237,15 +242,38 @@ def test_pairs_round_trip_from_notes_to_a_preference(tmp_path: Path, monkeypatch
     assert len(key) == 2
     text = (out / "p001.md").read_text("utf-8")
     assert "## Note L" in text and "## Note R" in text and "## Transcript" in text
+    assert notes_pairs.OVERVIEW_QUESTION in text
+    sheet = list(csv.reader((out / "sheet.csv").open()))
+    assert sheet[0][-2:] == ["overview_L", "overview_R"]
+    assert all(len(row) == len(sheet[0]) for row in sheet)
     # Raters: two prefer the pipeline on both pairs, one picks the baseline once.
     rows = [
-        ["pair_id", "rater", "preferred", "accuracy", "completeness", "usefulness", "readability"]
+        [
+            "pair_id",
+            "rater",
+            "preferred",
+            "accuracy",
+            "completeness",
+            "usefulness",
+            "readability",
+            "overview_L",
+            "overview_R",
+        ]
     ]
     for pid, k in key.items():
         pipeline_side = "L" if k["left"] == "pipeline" else "R"
         other = "R" if pipeline_side == "L" else "L"
-        rows += [[pid, "r1", pipeline_side, 4, 4, 4, 4], [pid, "r2", pipeline_side, 5, 4, 4, 5]]
-        rows += [[pid, "r3", other if pid == "p001" else pipeline_side, 3, 3, 3, 3]]
+        # Ours: yes from every rater but r3 on p001 ("partly"); the
+        # baseline: "no" throughout.
+        ov = {pipeline_side: "yes", other: "no"}
+        rows += [
+            [pid, "r1", pipeline_side, 4, 4, 4, 4, ov["L"], ov["R"]],
+            [pid, "r2", pipeline_side, 5, 4, 4, 5, ov["L"], ov["R"]],
+        ]
+        r3 = dict(ov, **({pipeline_side: "partly"} if pid == "p001" else {}))
+        rows += [
+            [pid, "r3", other if pid == "p001" else pipeline_side, 3, 3, 3, 3, r3["L"], r3["R"]]
+        ]
     ratings = out / "ratings.csv"
     with ratings.open("w", newline="") as handle:
         csv.writer(handle).writerows(rows)
@@ -256,6 +284,10 @@ def test_pairs_round_trip_from_notes_to_a_preference(tmp_path: Path, monkeypatch
     assert 0 < low < 5 / 6 < high <= 1
     assert set(result["by_language"]) == {"en", "de"}
     assert result["inter_rater_agreement"] == 4 / 6
+    overview = result["overview"]
+    assert overview["pipeline"]["n"] == 6 and overview["pipeline"]["yes"] == 5 / 6
+    assert overview["baseline"]["no"] == 1.0
+    assert overview["gate_met"] is False  # 5/6 < 0.9
 
 
 def test_pairs_never_leave_the_local_folder(tmp_path: Path) -> None:
@@ -434,3 +466,101 @@ def test_the_r02_checklist_checks_figures_presenter_and_contact() -> None:
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced, _PARDO_LIKE)}
     assert results["figures"] and results["figures_cited"]
     assert results["presenter_line"] and results["contact_line"]
+
+
+# ── Support-gate calibration (F3 amendment after r03, §2.10) ────────
+
+support_calibration = _load("support_calibration")
+
+
+def test_calibration_picks_the_threshold_the_judge_agrees_with(tmp_path: Path) -> None:
+    records = []
+    # German: the judge accepts every line at ratio ≥ 0.35 and none below.
+    for n in range(40):
+        ratio = n / 40
+        records.append(
+            {
+                "language": "de",
+                "ratio": ratio,
+                "rules_ok": True,
+                "judge_supported": ratio >= 0.35,
+                "text": "SECRET LINE",
+            }  # fmt: skip
+        )
+    # English: too few lines to calibrate.
+    records += [
+        {"language": "en", "ratio": 0.6, "rules_ok": True, "judge_supported": True, "text": "x"}
+    ] * 5
+    # A line failing the number/name rules is unsupported at any threshold.
+    records.append(
+        {"language": "de", "ratio": 1.0, "rules_ok": False, "judge_supported": False, "text": "y"}
+    )
+    result = support_calibration.calibrate(records)
+    de = result["de"]
+    assert de["calibrated_threshold"] == 0.35
+    assert de["at_calibrated"]["agreement"] == 1.0 and de["meets_target"]
+    assert de["at_provisional"]["agreement"] < 1.0
+    assert result["en"]["calibrated_threshold"] is None
+    path = tmp_path / "lines.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in records), "utf-8")
+    out = tmp_path / "report.json"
+    import sys as _sys
+
+    argv = _sys.argv
+    _sys.argv = ["support_calibration.py", str(path), "--out", str(out)]
+    try:
+        assert support_calibration.main() == 0
+    finally:
+        _sys.argv = argv
+    assert "SECRET LINE" not in out.read_text("utf-8")
+
+
+def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
+    checklist = json.loads(
+        (notes_assert.ASSERTIONS / "r03_de_palantir_podcast.assertions.json").read_text("utf-8")
+    )
+    top = (
+        "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann. "
+        "Themen sind Thiel, Karp und Überwachung.\nGast: Felix Holtermann, Büroleiter beim "
+        "Handelsblatt\n\nZunächst — Palantir wird 2004 gegründet."
+    )
+    produced = {
+        "language": "de",
+        "stats": {
+            "recording_type": "podcast_broadcast",
+            "excluded_ranges": [[0, 20_000, "advertisement"]],
+        },
+        "brief": {"themes": ["Thiel", "Karp", "Überwachung"]},
+        "sections": [
+            {"section_key": "gen:overview", "role": "summary", "title": None, "text": top},
+            *(
+                {"section_key": f"gen:{n}", "role": "topics", "title": f"0{n}:00 — X", "text": "-"}
+                for n in range(4)
+            ),
+        ],
+        "lines": [
+            {"kind": "presenter", "text": "Gast: Felix Holtermann, Büroleiter", "fact_ids": ["a"]}
+        ],
+    }
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
+    for name in (
+        "excluded_reasons[0]",
+        "guest_line",
+        "chapters_min",
+        "overview.prose_paragraphs_min",
+        "overview.names_recording_type",
+        "overview.names_guest",
+        "overview.themes_min",
+        "overview.bullets_above_first_heading",
+    ):
+        assert results[name], name
+    assert notes_assert.family("overview.themes_min") == "overview"
+    # A key-point list above the first heading fails two checks.
+    produced["sections"][0]["text"] = top + "\n\n- a point"
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
+    assert not results["overview.prose_paragraphs_min"]
+    assert not results["overview.bullets_above_first_heading"]
+    # A presenter is not a guest.
+    produced["lines"][0]["text"] = "Präsentiert von: Felix Holtermann"
+    results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
+    assert not results["guest_line"]

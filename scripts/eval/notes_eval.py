@@ -51,6 +51,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     COMPOSED,
     MATCH_THRESHOLD,
     STOP,
+    _body,
     aggregate,
     best_match,
     f2_gates,
@@ -58,6 +59,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     overlap,
     score_meeting,
     support,
+    support_rules,
     words,
 )
 
@@ -312,6 +314,13 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         "brief": dict(document.brief),
         "noise_ranges": [list(r) for r in document.noise_ranges],
         "evidence": "facts",
+        # F3 amendment — the sections as written, for the overview checks
+        # of notes_assert (content: never copied into a report).
+        "sections": [
+            {"section_key": s.section_key, "title": s.title, "role": s.role, "text": s.text}
+            for s in document.sections
+        ],
+        "language": meeting.get("language", "en"),
         # The note as a reader sees it — only ever written to local disk
         # (--save-notes, for blind rating), never into a report.
         "note_text": "\n\n".join(
@@ -544,6 +553,9 @@ class JudgeTotals:
     unsupported: int = 0
     disagree: int = 0
     problems: Counter = field(default_factory=Counter)
+    # F3 amendment §2.10 — one record per judged line, for
+    # support_calibration.py. Carries the line's text: local disk only.
+    records: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         if not self.judged:
@@ -561,7 +573,13 @@ class JudgeTotals:
 
 
 async def judge(
-    produced: dict[str, Any], provider: Any, totals: JudgeTotals, usage: Totals
+    produced: dict[str, Any],
+    provider: Any,
+    totals: JudgeTotals,
+    usage: Totals,
+    *,
+    language: str = "en",
+    meeting_id: str = "",
 ) -> None:
     """One call per composed line that cites facts: the line and those
     facts' text and quote — never the transcript. Records whether the
@@ -584,8 +602,24 @@ async def judge(
         totals.judged += 1
         totals.unsupported += 0 if supported else 1
         totals.problems[problem] += 1
-        deterministic = support(line["text"], [f"{f['text']} {f['quote']}" for f in cited])
+        evidence = [f"{f['text']} {f['quote']}" for f in cited]
+        deterministic = support(line["text"], evidence, language)
         totals.disagree += 1 if deterministic != supported else 0
+        body = _body(line["text"])
+        totals.records.append(
+            {
+                "meeting": meeting_id,
+                "language": language,
+                "kind": line.get("kind"),
+                "text": line["text"],
+                "ratio": support_rules.support_ratio(body, " ".join(evidence), language),
+                # The rules the threshold does not decide: a line failing
+                # them is unsupported at any threshold.
+                "rules_ok": support(line["text"], evidence, language, threshold=0.0),
+                "judge_supported": supported,
+                "problem": problem,
+            }
+        )
 
 
 _STAT_KEYS = (
@@ -621,6 +655,18 @@ _STAT_KEYS = (
 LOCAL = REPO / "scripts" / "eval" / "local"
 
 
+def save_judge_lines(path: Path, run: int, records: list[dict[str, Any]]) -> None:
+    """The judged lines, for support_calibration.py — local disk only, like
+    notes: a line's text is content."""
+    path = path.resolve()
+    if not path.is_relative_to(LOCAL.resolve()):
+        raise SystemExit(f"--judge-lines must be under {LOCAL}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps({"run": run, **record}, ensure_ascii=False) + "\n")
+
+
 def save_note(folder: Path, meeting_id: str, text: str) -> None:
     """A note's text for blind rating. Only under the gitignored
     ``scripts/eval/local/`` — a note written from a real recording is
@@ -640,6 +686,7 @@ async def main(
     judge_backend: str | None = None,
     save_notes: Path | None = None,
     f2_baseline: Path | None = None,
+    judge_lines: Path | None = None,
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
@@ -702,7 +749,14 @@ async def main(
             row["stats"] = {k: stats[k] for k in _STAT_KEYS if k in stats}
             if judge_ok:
                 try:
-                    await judge(produced, judge_provider, judge_totals, totals)
+                    await judge(
+                        produced,
+                        judge_provider,
+                        judge_totals,
+                        totals,
+                        language=meeting.get("language", "en"),
+                        meeting_id=meeting["id"],
+                    )
                 except Exception as exc:  # noqa: BLE001
                     judge_ok = False
                     print(f"  judge failed ({type(exc).__name__}); column will be null")
@@ -736,6 +790,8 @@ async def main(
                     "deterministic_vs_judge_disagreement": None,
                 }
             )
+        if judge_lines is not None and judge_ok:
+            save_judge_lines(judge_lines, run_index + 1, judge_totals.records)
         all_runs.append({"run": run_index + 1, "summary": summary, "meetings": rows})
         print(f"  run {run_index + 1}: " + json.dumps(summary))
 
@@ -799,6 +855,13 @@ if __name__ == "__main__":
         default=REPO / "docs" / "eval" / "notes-baseline-pipeline.json",
         help="pre-F2 report whose key_fact_recall the F2 recall gate compares against",
     )
+    ap.add_argument(
+        "--judge-lines",
+        type=Path,
+        default=None,
+        help="append every judged line (ratio, rules, verdict) as JSONL for "
+        "support_calibration.py (must be under scripts/eval/local/)",
+    )
     args = ap.parse_args()
     ENTITY_MODEL_TIER = args.entity_model_tier
     sys.exit(
@@ -811,6 +874,7 @@ if __name__ == "__main__":
                 args.judge,
                 args.save_notes,
                 args.f2_baseline,
+                args.judge_lines,
             )
         )
     )

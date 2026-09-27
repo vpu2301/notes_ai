@@ -182,11 +182,18 @@ def composed_sentences(
         ordered = sorted(usable, key=lambda f: f.start_ms)
         slices = max(1, min(COMPOSED_MAX, len(ordered)))
         size = max(1, len(ordered) // slices)
+        # One per part of the recording — a fact that names, counts or
+        # dates something; a part with none is passed over unless that
+        # leaves fewer than three sentences.
+        spare: list[VerifiedFact] = []
         for k in range(0, len(ordered), size):
             part = ordered[k : k + size]
             best = max(part, key=lambda f: _specific(f, language, known))
-            if best not in chosen:
-                chosen.append(best)
+            if best in chosen:
+                continue
+            (chosen if _specific(best, language, known) > 0 else spare).append(best)
+        while len(chosen) < COMPOSED_MIN and spare:
+            chosen.append(spare.pop(0))
     chosen = sorted(chosen[:COMPOSED_MAX], key=lambda f: f.start_ms)
     first, middle, last = CONNECTIVES.get(language) or CONNECTIVES["en"]
     out: list[tuple[str, list[str]]] = []

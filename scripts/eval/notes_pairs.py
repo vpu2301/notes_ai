@@ -19,8 +19,9 @@ from it. Everything stays under ``scripts/eval/local/``: the notes and the
 transcripts are content.
 
 ``score`` reads the raters' ``ratings.csv`` (``pair_id, rater, preferred
-[L|R|tie], accuracy, completeness, usefulness, readability`` — scores 1–5)
-and prints the pipeline's preference rate with a 95 % Wilson interval,
+[L|R|tie], accuracy, completeness, usefulness, readability`` — scores 1–5 —
+and, since the F3 amendment after r03 (§2.10), ``overview_L, overview_R``:
+the overview question answered for each note, yes/partly/no) and prints the pipeline's preference rate with a 95 % Wilson interval,
 per recording type and language, and inter-rater agreement. It writes
 numbers only to ``docs/eval/notes-pairs-<date>.json``.
 """
@@ -45,6 +46,15 @@ from _common import DOCS_EVAL, REPO  # noqa: E402
 LOCAL = REPO / "scripts" / "eval" / "local"
 SCORES = ("accuracy", "completeness", "usefulness", "readability")
 PIPELINE = "pipeline"
+# F3 amendment §2.10 — one question on the overview alone, asked of both
+# notes of a pair (the rater does not know which is ours). Gate: "yes" for
+# our notes on ≥ 90 % of answers on v2.
+OVERVIEW_QUESTION = (
+    "From the top two paragraphs only: can you say what this recording is, "
+    "who speaks, and what it covers? (yes / partly / no)"
+)
+OVERVIEW_ANSWERS = ("yes", "partly", "no")
+OVERVIEW_GATE = 0.9
 
 
 def _local(path: Path) -> Path:
@@ -114,7 +124,9 @@ def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0, section: 
     meetings = _meetings(corpus)
     rng = random.Random(seed)
     ids = sorted(m for m in meetings if (a / f"{m}.md").is_file() and (b / f"{m}.md").is_file())
-    sheet: list[list[str]] = [["pair_id", "rater", "preferred", *SCORES]]
+    sheet: list[list[str]] = [
+        ["pair_id", "rater", "preferred", *SCORES, "overview_L", "overview_R"]
+    ]
     key: list[list[str]] = [["pair_id", "meeting_id", "left", "right"]]
     for n, meeting_id in enumerate(ids, 1):
         pair_id = f"p{n:03d}"
@@ -133,10 +145,11 @@ def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0, section: 
         (out / f"{pair_id}.md").write_text(
             f"# Pair {pair_id}\n\n## Transcript\n\n{transcript}\n\n"
             f"## What the note should carry\n\n{facts}\n\n"
-            f"## Note L\n\n{notes[left]}\n\n## Note R\n\n{notes[right]}\n",
+            f"## Note L\n\n{notes[left]}\n\n## Note R\n\n{notes[right]}\n\n"
+            f"## Overview question (each note: overview_L, overview_R)\n\n{OVERVIEW_QUESTION}\n",
             encoding="utf-8",
         )
-        sheet.append([pair_id, "", "", "", "", "", ""])
+        sheet.append([pair_id, "", "", "", "", "", "", "", ""])
         key.append([pair_id, meeting_id, left, right])
     for name, rows in (("sheet.csv", sheet), ("key.csv", key)):
         with (out / name).open("w", newline="", encoding="utf-8") as handle:
@@ -206,6 +219,29 @@ def score(ratings_path: Path, key_path: Path, corpus: Path | None = None) -> dic
             out[field] = (sum(values) / len(values)) if values else None
         return out
 
+    def overview() -> dict[str, Any]:
+        answers: dict[str, list[str]] = {"pipeline": [], "baseline": []}
+        for row in ratings:
+            for side in ("L", "R"):
+                answer = (row.get(f"overview_{side}") or "").strip().casefold()
+                if answer not in OVERVIEW_ANSWERS:
+                    continue
+                arm = key[row["pair_id"]]["left" if side == "L" else "right"]
+                answers["pipeline" if arm == PIPELINE else "baseline"].append(answer)
+        out: dict[str, Any] = {}
+        for arm, given in answers.items():
+            n = len(given)
+            yes = given.count("yes")
+            out[arm] = {
+                "n": n,
+                **{a: (given.count(a) / n) if n else None for a in OVERVIEW_ANSWERS},
+                "ci95_yes": list(wilson(yes, n)),
+            }
+        ours = out["pipeline"]
+        out["gate"] = OVERVIEW_GATE
+        out["gate_met"] = None if not ours["n"] else ours["yes"] >= OVERVIEW_GATE
+        return out
+
     return {
         "pairs": len(by_pair),
         "raters": len({r["rater"] for r in ratings}),
@@ -215,6 +251,7 @@ def score(ratings_path: Path, key_path: Path, corpus: Path | None = None) -> dic
         "by_language": {k: rate(v) for k, v in sorted(groups["language"].items())},
         "inter_rater_agreement": (agree / total) if total else None,
         "scores_when_preferred": {"pipeline": means("pipeline"), "baseline": means("baseline")},
+        "overview": overview(),
     }
 
 
