@@ -298,6 +298,8 @@ async def run(
 
     # F3 amendment §2.8 — what the recording itself spells three times or more.
     rec_names = support.recording_names([t.text for t in turns])
+    # Sprint D2 — of those, the ones that are names (not German nouns).
+    rec_proper = support.proper_names([t.text for t in turns], rec_names, language)
 
     def check(
         facts: list[schema.Fact], window: Window, into: verify.VerifyStats
@@ -446,7 +448,7 @@ async def run(
         )
         gate.people = frozenset(
             w
-            for n in gate.known - rec_names
+            for n in (gate.known - rec_names) | rec_proper
             if n and not _DEFAULT_NAME.match(n.strip())
             for w in (n, *n.split())
         )
@@ -518,8 +520,10 @@ async def run(
             "speakers": speakers,
             "guests": guests,
             "themes": [
-                t for t in (brief.themes if brief else []) if _gated_phrase(t, document_facts, gate)
-            ],
+                t
+                for t in compose.clean_themes(brief.themes if brief else [])
+                if _gated_phrase(t, document_facts, gate)
+            ][: compose.MAX_THEMES],
         }
         opening = compose.orientation_p1(
             language=language,
@@ -535,7 +539,9 @@ async def run(
         # Names are people and things verified as names — not the recording's
         # frequent capitalised words (German nouns) and never a default label.
         names = sorted(
-            n for n in gate.known - rec_names if n and not _DEFAULT_NAME.match(n.strip())
+            n
+            for n in (gate.known - rec_names) | rec_proper
+            if n and not _DEFAULT_NAME.match(n.strip())
         )
         out.brief = {
             **out.brief,
@@ -1589,7 +1595,16 @@ def _block_bullets(
     for bullet in parsed.bullets[: schema.MAX_BLOCK_BULLETS]:
         text = gate.third_person(bullet.text.strip())
         ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
-        if not text or not gate.ok(text, [by_id[i] for i in ids]):
+        if not text:
+            continue
+        why = gate.reason(text, [by_id[i] for i in ids])
+        if why == "name":
+            # A name another fact of this block says: that fact is cited too
+            # (code finds it; the bullet must still pass on its own facts).
+            ids = _cite_names(text, ids, by_id, gate)
+            why = gate.reason(text, [by_id[i] for i in ids])
+        gate.counts[why or "kept"] += 1
+        if why is not None:
             continue
         if support.pronoun_initial(text, language):
             gate.counts["subject"] += 1
@@ -1613,6 +1628,29 @@ def _block_bullets(
                 gate.quote_children += 1
         out.append((text, ids, children))
     return out
+
+
+def _cite_names(
+    text: str, ids: list[str], by_id: dict[str, VerifiedFact], gate: _Gate
+) -> list[str]:
+    """The block's facts that say a name the bullet uses and its cited
+    facts do not, added to its citations — never more than two."""
+    evidence = " ".join(f"{by_id[i].text} {by_id[i].quote}" for i in ids)
+    missing = support.new_names(text, evidence, gate.known)
+    added: list[str] = []
+    for name in missing:
+        stem = name.casefold()[:5]
+        source = next(
+            (
+                f.item_key
+                for f in by_id.values()
+                if f.item_key not in ids and stem in f"{f.text} {f.quote}".casefold()
+            ),
+            None,
+        )
+        if source and source not in added:
+            added.append(source)
+    return [*ids, *added[:2]]
 
 
 def _block_chapter(

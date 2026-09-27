@@ -131,7 +131,8 @@ def build(
     speaking = [
         label
         for label in ranked
-        if not (content[label] / total < CLIP_MAX_SHARE and count[label] <= CLIP_MAX_TURNS)
+        if label.upper() != "UNKNOWN"
+        and not (content[label] / total < CLIP_MAX_SHARE and count[label] <= CLIP_MAX_TURNS)
     ]
     dominant = speaking[0] if speaking else None
     runner_up = speaking[1] if len(speaking) > 1 else None
@@ -153,7 +154,9 @@ def build(
         person = introduced.get(label)
         if not _not_advert(label, speech, in_advert):
             role = ADVERT
-        elif label not in speaking:
+        elif label not in speaking or label.upper() == "UNKNOWN":
+            # The diarizer's catch-all is trailer voices and sound bites,
+            # never a person taking part.
             role = CLIP
         elif table.ambiguous:
             role = PARTICIPANT

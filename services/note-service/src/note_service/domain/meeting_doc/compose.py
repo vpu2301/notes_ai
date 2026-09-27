@@ -232,3 +232,23 @@ def orientation_p1(
         if text.startswith(word):
             text = f"{word} ({show}){text[len(word) :]}"
     return text
+
+
+MAX_THEMES: Final = 5
+_THEME_SPLIT: Final = re.compile(r"[,;]|[„“”\"«»]")
+
+
+def clean_themes(themes: Sequence[str]) -> list[str]:
+    """Themes as a reader's list: a model that packs several quoted themes
+    into one string ("Datensammlung”, „Geheimdienste”, …") gets them split
+    and unquoted; a fragment the answer's length limit cut ends the list."""
+    out: list[str] = []
+    for theme in themes:
+        parts = [p.strip(" .-—") for p in _THEME_SPLIT.split(theme)]
+        pieces = [p for p in parts if len(p) >= 3]
+        if len(pieces) > 1 and len(theme) >= 50:
+            pieces = pieces[:-1]  # the last piece of a long, packed answer is often cut
+        for piece in pieces:
+            if piece.casefold() not in {o.casefold() for o in out}:
+                out.append(piece)
+    return out

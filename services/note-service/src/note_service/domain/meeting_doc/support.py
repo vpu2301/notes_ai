@@ -923,3 +923,50 @@ def capital_runs(text: str) -> list[str]:
         if len(words) >= 2:
             out.append(" ".join(words))
     return out
+
+
+# Sprint D2 — which of the recording's frequent capitalised words are names.
+_DETERMINERS: Final[dict[str, frozenset[str]]] = {
+    "de": frozenset({
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
+        "eines", "kein", "keine", "diese", "dieser", "dieses", "diesen", "jede", "jeder",
+        "jedes", "alle", "viele", "mehr", "wenige", "zwei", "drei", "unsere", "seine", "ihre",
+        "im", "am", "zum", "zur", "vom", "beim",
+    }),
+}  # fmt: skip
+NOUN_SHARE: Final = 0.5
+_ADJECTIVE_END: Final = re.compile(r"(?:en|er|es|em|e)$")
+
+
+def proper_names(texts: list[str], candidates: frozenset[str], language: str) -> frozenset[str]:
+    """In German every noun is capitalised: a frequent capitalised word is a
+    name only when it mostly stands without an article or determiner before
+    it ("Thiel", "Palantir"), not "die Menschen", "das Unternehmen". Other
+    languages: the candidates as they are."""
+    determiners = _DETERMINERS.get(language)
+    if not determiners:
+        return candidates
+    after: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for text in texts:
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            words = _WORD.findall(sentence)
+            for k, word in enumerate(words):
+                # A sentence's first word is capitalised anyway: it says nothing.
+                if k == 0 or word not in candidates:
+                    continue
+                seen[word] = seen.get(word, 0) + 1
+                before = words[k - 1]
+                # A noun's company: an article or determiner, a number, or an
+                # inflected adjective ("3000 Menschen", "brennenden Gebäude").
+                if (
+                    before.casefold() in determiners
+                    or before.isdigit()
+                    or (before.islower() and _ADJECTIVE_END.search(before))
+                ):
+                    after[word] = after.get(word, 0) + 1
+    acronyms = {n for n in candidates if len(n) > 1 and n.isupper()}
+    return (
+        frozenset(n for n in candidates if seen.get(n) and after.get(n, 0) / seen[n] < NOUN_SHARE)
+        | acronyms
+    )

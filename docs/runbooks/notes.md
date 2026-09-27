@@ -451,12 +451,12 @@ written) is dropped by design.
 
 ### overview-and-topics
 
-F3 amendment after r03 (ADR-0064). Every note opens with two paragraphs of
-prose: what the recording is (code) and what it says (the summary ladder).
-Headings come from the topics pass; over 40 facts it runs block by block.
-When it fails on a recording over 10 minutes, the note is chaptered by time
-("07:40 — Alex Karp") instead. Nightly gates: `composed` ≤ 5 % of notes,
-`topics_failure` ≤ 5 % of podcasts and lectures.
+Sprint D2 (ADR-0066). Every note opens with two paragraphs of prose: what
+the recording is (code, from the roles table) and what it says (the summary
+ladder over the blocks). The body is `round(D/4)` time-contiguous blocks
+(3–8), one small reduce call each; a block whose call fails twice is
+written as its chapter ("07:40 — Alex Karp"). Nightly gates: `composed`
+≤ 5 % of notes, block chapters ≤ 5 % of blocks.
 
 ```sql
 SELECT prompt_version, backend,
@@ -467,6 +467,9 @@ SELECT prompt_version, backend,
        count(*) FILTER (WHERE stats->>'topics_failure' = 'too_few_topics') AS too_few,
        count(*) FILTER (WHERE stats->>'topics_failure' = 'all_bullets_unsupported') AS unsupported,
        sum((stats->>'adverts_cut')::int) AS adverts_cut,
+       sum((stats->>'blocks')::int) AS blocks,
+       sum((stats->>'block_chapters')::int) AS block_chapters,
+       sum((stats->>'headings_fallback')::int) AS heading_fallbacks,
        count(*) AS notes
 FROM note_generations WHERE created_at > now() - interval '1 day'
 GROUP BY 1, 2;
@@ -475,8 +478,10 @@ GROUP BY 1, 2;
 `provider_error` or `schema_invalid` is the backend. `all_bullets_unsupported`
 rising with `composed` is the support gate: check the language, then the
 calibration. An advert that reached a note means a cue is missing from
-`windows.AD_CUES`; a presenter line naming a trailer voice means the
-dominant-speaker rule (`pipeline.PRESENTER_MIN_SHARE`) did not hold.
+`windows.AD_CUES`. Who is presenter, guest, narrator or clip is
+`stats.roles` (label → role, from `roles_table.build`); a presenter line
+naming a trailer voice means that table got the voice wrong. A type changed
+by cues shows `recording_type_source = 'cues'` and `stats.type_cues`.
 
 ### document-lint
 

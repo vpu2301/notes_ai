@@ -111,7 +111,7 @@ def test_a_block_whose_call_fails_twice_is_a_chapter_and_the_rest_are_model_head
         if any("2000 " in t for _i, _k, t in facts):
             return {"heading": 5, "bullets": "broken"}  # not the schema
         return {
-            "heading": "Peter Thiel und die Investoren im Valley",
+            "heading": "Peter Thiel und die Investoren in Kalifornien",
             "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[:3]],
         }
 
@@ -121,13 +121,13 @@ def test_a_block_whose_call_fails_twice_is_a_chapter_and_the_rest_are_model_head
     assert stats["block_failures"] == {"schema_invalid": 2}
     titles = [s.title or "" for s in document.sections if s.role == roles.TOPICS]
     assert re.match(r"^00:00( — .+)?$", titles[0])
-    assert any(t == "Peter Thiel und die Investoren im Valley" for t in titles[1:])
+    assert any(t == "Peter Thiel und die Investoren in Kalifornien" for t in titles[1:])
 
 
 def test_bullets_stay_within_the_budget() -> None:
     def block(facts: list[tuple[str, str, str]]) -> dict:
         return {
-            "heading": "Peter Thiel und die Investoren im Valley",
+            "heading": "Peter Thiel und die Investoren in Kalifornien",
             "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[:6]],
         }
 
@@ -532,3 +532,66 @@ def render_section_with(document: pipeline.DocumentResult, bullet: str) -> Any:
     return RenderedSection(
         "gen:x", roles.TOPICS, "", title="Peter Thiel und die Kontrollen", lines=lines
     )
+
+
+# ── From r03 on the stack model (2026-09-27) ────────────────────────
+
+
+def test_themes_packed_into_one_quoted_string_are_split() -> None:
+    packed = "Datensammlung”, „Geheimdienste”, „Militär”, „Technologische Lösungen”, „Autoritä"
+    assert compose.clean_themes([packed]) == [
+        "Datensammlung", "Geheimdienste", "Militär", "Technologische Lösungen"
+    ]  # fmt: skip
+    assert compose.clean_themes(["die Gründung von Palantir"]) == ["die Gründung von Palantir"]
+
+
+def test_a_name_another_fact_of_the_block_says_is_cited_not_refused() -> None:
+    said = _fact("Peter Thiel gründet 2004 die Firma Palantir", 0)
+    other = _fact("Der Chef der Firma ist Alex Karp", 60_000)
+    by_id = {f.item_key: f for f in (said, other)}
+    gate = pipeline._Gate(language="de")
+    parsed = schema.BlockOut(
+        heading="Gründung von Palantir",
+        bullets=[
+            schema.TopicBullet(
+                text="Peter Thiel gründet 2004 Palantir mit Alex Karp", fact_ids=[said.item_key]
+            )
+        ],
+    )
+    [(_text, ids, _children)] = pipeline._block_bullets(parsed, by_id, "de", gate, _table())
+    assert ids == [said.item_key, other.item_key]
+
+
+def test_the_unknown_label_is_never_a_participant() -> None:
+    turns = [
+        Turn(n, "SPEAKER_1", None, "Erzählung über Palantir 2004.", n * 20_000, n * 20_000 + 19_000)
+        for n in range(10)
+    ]
+    turns += [
+        Turn(
+            20 + n,
+            "UNKNOWN",
+            None,
+            "The goal is to instill fear.",
+            300_000 + n * 5_000,
+            303_000 + n * 5_000,
+        )
+        for n in range(5)
+    ]
+    table = roles_table.build(turns, [], "podcast_broadcast")
+    assert table.role_of("UNKNOWN") == roles_table.CLIP
+    assert table.role_of("SPEAKER_1") == roles_table.NARRATOR
+
+
+def test_german_names_are_told_from_nouns_by_their_company() -> None:
+    from note_service.domain.meeting_doc import support
+
+    texts = [
+        "Viele Menschen sehen es. Die Menschen fliehen. 3000 Menschen sterben.",
+        "Peter Thiel gründet Palantir. Dann trifft Thiel die USA. Später sagt Thiel etwas.",
+        "Im brennenden Gebäude. Das Gebäude fällt. Ein Gebäude steht.",
+    ]
+    candidates = support.recording_names(texts)
+    assert {"Menschen", "Gebäude", "Thiel"} <= candidates
+    assert support.proper_names(texts, candidates, "de") >= {"Thiel"}
+    assert not support.proper_names(texts, candidates, "de") & {"Menschen", "Gebäude"}
