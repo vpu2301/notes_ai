@@ -26,17 +26,23 @@ import asyncio
 import dataclasses
 import logging
 import re
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final, Protocol
 
 from . import (
+    classify,
+    compose,
+    doclint,
     entities,
     numbers,
     overview,
     prompts,
     render,
     roles,
+    roles_table,
     schema,
     support,
     types,
@@ -44,7 +50,7 @@ from . import (
     windows,
 )
 from . import merge as merge_rules
-from .verify import VerifiedFact
+from .verify import PARAPHRASE_UNSUPPORTED, VerifiedFact
 from .windows import Window
 
 logger = logging.getLogger(__name__)
@@ -74,7 +80,11 @@ RESTATE_MIN_FACTS: Final = 1
 CHILD_RESTATES_JACCARD: Final = 0.6
 
 # A topic bullet with its sub-points: ``(text, fact ids, [(text, ids)])``.
-Bullet = tuple[str, list[str], list[tuple[str, list[str]]]]
+# A sub-point: ``(text, fact ids)``, or ``(text, fact ids, "quote")`` for a
+# quote written by code from its fact (Sprint D2 T2).
+Child = tuple[str, list[str]] | tuple[str, list[str], str]
+QUOTE: Final = "quote"
+Bullet = tuple[str, list[str], list[Child]]
 Topics = list[tuple[str, list[Bullet], list[str]]]
 
 
@@ -126,6 +136,10 @@ class DocumentResult:
     """Q2 — the lines left out, CONFIRMED by code (``verify.confirm_noise``)
     and within the cap. ``noise`` and ``noise_ranges`` are derived from it."""
     excluded: list[verify.Exclusion] = field(default_factory=list)
+    """Sprint D2 — D1's regeneration hook for this run (``doclint.Regenerate``):
+    it re-extracts a window whose facts left a line without a named subject.
+    Not data; never stored."""
+    regenerator: Any = field(default=None, repr=False, compare=False)
 
     @property
     def partial(self) -> bool:
@@ -177,6 +191,7 @@ async def run(
     # extractor never sees them) and one-word turns inside somebody's
     # sentence are merged into it. When that changed anything, the windows
     # the worker built for classification are rebuilt from the result.
+    raw_turns = list(turns)  # the roles table reads every voice, adverts included
     prepared = windows.prepare_turns(turns)
     if prepared.adverts or prepared.microturns_merged:
         turns = prepared.turns
@@ -236,6 +251,12 @@ async def run(
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
+    # Sprint D2 decision 1 — where the extractor saw a new topic begin.
+    topic_titles = {
+        window.index: (extracted.topic_title or "")
+        for window, extracted in extracted_windows
+        if extracted is not None
+    }
 
     # Noise first, across the whole recording: the model's flags are
     # checked by code, and the cap needs every window's exclusions.
@@ -351,13 +372,34 @@ async def run(
         verified.extend(kept)
 
     facts = merge_rules.merge_facts(verified)
-    # F3 amendment — who an introduced person is to this recording.
+    # Sprint D2 decision 5 — who each voice is to this recording, by code.
+    table = roles_table.build(
+        raw_turns,
+        [f for f in facts if f.person is not None],
+        recording_type,
+        prepared.adverts,
+        broadcast=(recording_type or "") in roles_table.BROADCAST
+        or family.meeting_type == "broadcast",
+    )
     facts = [
-        dataclasses.replace(f, person=dataclasses.replace(f.person, standing=standing_of(f, turns)))
+        dataclasses.replace(
+            f, person=dataclasses.replace(f.person, standing=roles_table.standing(f, table))
+        )
         if f.person is not None
         else f
         for f in facts
     ]
+    # Decision 6 — cues settle a close call between a lecture and a podcast.
+    cue_type, type_cues = classify.type_cues(raw_turns, table, prepared.adverts)
+    if (
+        recording_type in classify.CUE_PAIR
+        and recording_type_source != classify.SOURCE_USER
+        and cue_type
+        and cue_type != recording_type
+    ):
+        recording_type, recording_type_source = cue_type, classify.SOURCE_CUES
+    # Decision 4 — narrators report; they do not hold.
+    facts, reattributed = _narrator_attribution(facts, table, recording_type)
     out.facts = facts
     # Completions and judgements are not lines of the document: one
     # ticks a carried item off, the other is offered under a field.
@@ -366,6 +408,7 @@ async def run(
     out.judgements = [f for f in facts if f.kind == schema.JUDGEMENT]
 
     topics: Topics | None = None
+    tops: list[VerifiedFact] = []
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
@@ -401,24 +444,39 @@ async def run(
         gate.known = frozenset(
             gate.known | {c.canonical for f in document_facts for c in f.corrections}
         )
-        long_run = len(document_facts) > TWO_STAGE_MIN_FACTS
-        topics, summary = await asyncio.gather(
-            _topics_by_block(provider, document_facts, language, gate=gate)
-            if long_run
-            else _topics(provider, document_facts, language, brief=brief, gate=gate),
-            _summary(provider, document_facts, language, brief=brief, gate=gate),
+        gate.people = frozenset(
+            w
+            for n in gate.known - rec_names
+            if n and not _DEFAULT_NAME.match(n.strip())
+            for w in (n, *n.split())
         )
-    # §2.6 — a long recording whose topics failed is chaptered by time, from
-    # data the engine has; a model failure no longer collapses it.
-    duration = (turns[-1].end_ms - turns[0].start_ms) if turns else 0
-    topics_fallback: str | None = None
-    if document_facts and topics is None and duration > overview.CHAPTERS_AFTER_MS:
-        chaptered = overview.chapters(document_facts, language=language, known=gate.known)
-        if chaptered:
-            topics = chaptered
-            topics_fallback = "chapters"
-    # §2.9, ladder rung 3 — the summary is prose, always: composed from the
-    # most specific facts when both model rungs failed.
+        # Sprint D2 decisions 1–2 — the budget from the length of speech,
+        # then one small reduce per time-contiguous block, then the headings
+        # merged where the section band allows. Paragraph 2 follows the
+        # blocks, so it is written after them.
+        excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
+        minutes = max(0, speech_ms - excluded_speech) / 60_000
+        parts = compose.blocks(document_facts, minutes, topic_titles)
+        budget = compose.VolumeBudget(minutes, len(parts))
+        topics = await _reduce_blocks(
+            provider, parts, language, budget, brief=brief, gate=gate, table=table, minutes=minutes
+        )
+        if topics:
+            # Q4 — an uncited fact with a number, a date or a holder is kept.
+            _append_salient(topics, document_facts, gate)
+        tops = compose.top_per_block(parts, language, gate.people)
+        summary = await _summary(
+            provider,
+            document_facts,
+            language,
+            brief=brief,
+            gate=gate,
+            headings=[t[0] for t in topics or []],
+            skeleton_ids=[f.item_key for f in tops],
+        )
+    topics_fallback: str | None = "chapters" if gate.block_chapters else None
+    # T5 ladder rung 3 — the summary is prose, always: composed from the most
+    # specific fact of each block when both model rungs failed.
     ladder = "model" if summary else None
     if summary and gate.retries:
         ladder = "strict"
@@ -428,7 +486,7 @@ async def run(
                 document_facts,
                 language=language,
                 known=gate.known,
-                key_ids=brief.key_fact_ids if brief else None,
+                key_ids=[f.item_key for f in tops] or (brief.key_fact_ids if brief else None),
             )
             or None
         )
@@ -447,27 +505,30 @@ async def run(
         fallback = "key_facts"
         if not key_fact_ids:
             key_fact_ids = _earliest_per_window(document_facts)
-    # §2.9, paragraph 1 — what this recording is, composed by code from
-    # verified values; the model's framing replaces only its first clause.
+    # T4, paragraph 1 — what this recording is, from the roles table, the
+    # reader's type word, the show, the subject and the themes (code); the
+    # model's framing replaces only its first clause.
     opening = ""
     if document_facts:
+        speakers, guests = compose.speakers_of(table, language)
+        show = compose.show_name(raw_turns)
         orientation: dict[str, Any] = {
             "subject": _gated_phrase(brief.subject if brief else "", document_facts, gate),
             "framing": brief.framing if brief else "",
-            "speakers": _speakers(turns, document_facts, language),
-            "guests": _guests(document_facts),
+            "speakers": speakers,
+            "guests": guests,
             "themes": [
                 t for t in (brief.themes if brief else []) if _gated_phrase(t, document_facts, gate)
             ],
         }
-        opening = overview.first_paragraph(
+        opening = compose.orientation_p1(
             language=language,
             recording_type=recording_type,
+            table=table,
             subject=str(orientation["subject"]),
             framing=str(orientation["framing"]),
-            speakers=list(orientation["speakers"]),
-            guests=list(orientation["guests"]),
             themes=list(orientation["themes"]),
+            show=show,
         )
         # D1 — the verified roles and values paragraph 1 is built from, so
         # the linter can check it and rebuild it by code (doclint.p1_faults).
@@ -476,7 +537,11 @@ async def run(
         names = sorted(
             n for n in gate.known - rec_names if n and not _DEFAULT_NAME.match(n.strip())
         )
-        out.brief = {**out.brief, "orientation": {**orientation, "names": names}}
+        out.brief = {
+            **out.brief,
+            "orientation": {**orientation, "names": names, "show": show},
+            "roles": table.as_stats(),
+        }
 
     render_counts: dict[str, int] = {}
     out.sections = render.render_sections(
@@ -584,12 +649,106 @@ async def run(
         "attribution_missing": stats.attribution_missing,
         "salient_appended": gate.salient_appended,
         "topics_merged": gate.topics_merged,
+        # Sprint D2 — blocks, headings, roles, subjects.
+        "blocks": gate.blocks,
+        "block_calls": gate.block_calls,
+        "block_chapters": gate.block_chapters,
+        "block_failures": dict(gate.block_failures),
+        "merges_applied": gate.topics_merged,
+        "merges_refused": gate.merges_refused,
+        "headings_retried": gate.headings_retried,
+        "headings_fallback": gate.headings_fallback,
+        "quote_children": gate.quote_children,
+        "lines_dropped_subject": gate.counts["subject"],
+        "lines_dropped_unspecific": gate.counts["unspecific"],
+        "roles": table.as_stats(),
+        "roles_ambiguous": table.ambiguous,
+        "type_cues": type_cues,
+        "narrator_reattributed": reattributed,
+        "subject_unresolved": stats.subject_unresolved,
         "lines_by_third": _lines_by_third(out.sections, document_facts, thirds),
         "lines_total": sum(len(s.lines) for s in out.sections),
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,
     }
+
+    async def regenerate(
+        requests: list[doclint.RegenRequest], sections: list[render.RenderedSection]
+    ) -> list[render.RenderedSection] | None:
+        """D1 ``line.subject`` → re-extract each window once, told to name
+        every subject; a verified fact on the same line with a subject
+        replaces the line whose subject was a pronoun or a label."""
+        wanted = {i for r in requests if r.rule == "line.subject" for i in r.fact_ids}
+        by_id = {f.item_key: f for f in out.facts}
+        targets = {by_id[i].window_index for i in wanted if i in by_id}
+        if not targets:
+            return None
+        replacements: dict[str, VerifiedFact] = {}
+        for window in built:
+            if window.index not in targets:
+                continue
+            allowance = fact_budget(window)
+            again = await _extract(
+                provider,
+                window,
+                language,
+                schema.extract_schema(
+                    offered,
+                    judgement_fields=family.judgement_fields,
+                    carried_items=len(carried),
+                    max_facts=allowance,
+                ),
+                carried=carried,
+                max_facts=allowance,
+                max_tokens=extract_tokens(allowance),
+                system_suffix=prompts.subject_suffix(language),
+            )
+            if again is None:
+                continue
+            fresh = [
+                f
+                for f in check(again.facts, window, verify.VerifyStats())
+                if f.subject and not f.evidence_only
+            ]
+            for old_id in wanted:
+                old = by_id.get(old_id)
+                if old is None or old.window_index != window.index or old_id in replacements:
+                    continue
+                match = next((f for f in fresh if f.turn == old.turn), None)
+                if match is not None:
+                    replacements[old_id] = match
+        if not replacements:
+            return None
+        out.facts.extend(f for f in replacements.values() if f.item_key not in by_id)
+        rebuilt = []
+        for section in sections:
+            lines, changed = [], False
+            for line in section.lines:
+                hit = next((replacements[i] for i in line.fact_ids if i in replacements), None)
+                unnamed = support.pronoun_initial(line.text, language) or doclint.has_label(
+                    line.text
+                )
+                if hit is not None and unnamed and line.kind in ("bullet", "summary"):
+                    body = hit.text.strip().rstrip(".")
+                    text = (
+                        f"{'  ' if line.parent else ''}- {body}"
+                        if line.kind == "bullet"
+                        else f"{body}."
+                    )
+                    line = dataclasses.replace(line, text=text, fact_ids=(hit.item_key,))
+                    changed = True
+                lines.append(line)
+            rebuilt.append(
+                dataclasses.replace(
+                    section, lines=tuple(lines), text=doclint.text_of(section, lines)
+                )
+                if changed
+                else section
+            )
+        return rebuilt
+
+    out.regenerator = regenerate
     return out
 
 
@@ -623,41 +782,14 @@ def introduction_lines(window: Window, suggested_quotes: list[str]) -> list[int]
 TABLE_TYPES: Final = frozenset({"presentation_demo", "lecture_webinar"})
 
 # F3 amendment §2.1 — the presenter is the recording's own voice.
-PRESENTER_MIN_SHARE: Final = 0.15
-SPEAKER_MIN_TURNS: Final = 3
-AD_CUE_AFTER_MS: Final = 20_000
 
 
 def standing_of(fact: VerifiedFact, turns: list[windows.Turn]) -> str:
-    """``presenter`` — the introducing voice is the recording's dominant
-    speaker (≥ 15 % of speech, ≥ 3 turns) and no broadcast cue follows the
-    name within 20 s; ``guest`` — any other speaker with ≥ 3 turns;
-    ``clip`` — a trailer or a sound bite. A name is never inferred from a
-    channel or a show."""
-    speech: dict[str | None, int] = {}
-    count: dict[str | None, int] = {}
-    for turn in turns:
-        speech[turn.speaker_label] = speech.get(turn.speaker_label, 0) + max(
-            0, turn.end_ms - turn.start_ms
-        )
-        count[turn.speaker_label] = count.get(turn.speaker_label, 0) + 1
-    label = fact.speaker_label
-    total = sum(speech.values()) or 1
-    if count.get(label, 0) < SPEAKER_MIN_TURNS or label in (None, "", "UNKNOWN"):
-        return "clip"
-    cued = any(
-        t.speaker_label == label
-        and fact.start_ms <= t.start_ms <= fact.start_ms + AD_CUE_AFTER_MS
-        and windows.AD_CUES.search(t.text)
-        for t in turns
-    )
-    if cued:
-        return "clip"
-    known = {k: v for k, v in speech.items() if k not in (None, "", "UNKNOWN")}
-    dominant = max(known, key=lambda k: known[k]) if known else None
-    if label == dominant and speech[label] / total >= PRESENTER_MIN_SHARE:
-        return "presenter"
-    return "guest"
+    """``presenter``, ``guest`` or ``clip`` for an introduction, read from
+    the roles table of these turns (Sprint D2 decision 5; the amendment's
+    §2.1 gating is subsumed by it)."""
+    table = roles_table.build(turns, [fact], "podcast_broadcast")
+    return roles_table.standing(fact, table)
 
 
 def restated(
@@ -896,6 +1028,8 @@ class _Gate:
                 "no_information",
                 "first_person",
                 "descriptive",
+                "subject",
+                "unspecific",
             ),
             0,
         )
@@ -908,6 +1042,18 @@ class _Gate:
     third_person_fixed: int = 0
     """A-12 — why the topics pass gave nothing (None when it did)."""
     topics_failure: str | None = None
+    """Sprint D2 — verified names only: `known` less the recording's frequent
+    capitalised words (German nouns), for headings and specificity."""
+    people: frozenset[str] = frozenset()
+    # Sprint D2 — the blocks.
+    blocks: int = 0
+    block_calls: int = 0
+    block_chapters: int = 0
+    headings_retried: int = 0
+    headings_fallback: int = 0
+    merges_refused: int = 0
+    quote_children: int = 0
+    block_failures: Counter[str] = field(default_factory=Counter)
 
     @property
     def dropped(self) -> int:
@@ -1303,80 +1449,6 @@ def _with_brief(block: str, brief: Brief | None, language: str) -> str:
     return f"{context}\n\n{block}" if context else block
 
 
-async def _topics(
-    provider: ChatLike,
-    facts: list[VerifiedFact],
-    language: str,
-    *,
-    brief: Brief | None = None,
-    gate: _Gate | None = None,
-) -> Topics | None:
-    """Cluster facts into topics. Never sees the transcript.
-
-    ``[(title, [(bullet, its fact ids)], the topic's fact ids)]`` — each
-    bullet keeps what it cites, so every written line can say where it
-    came from. A bullet that fails the gate is dropped; a topic left with
-    fewer than two bullets is not a topic; fewer than two topics is one
-    list, written by render."""
-    gate = gate or _Gate(language=language)
-    if len(facts) < schema.MIN_FACTS_FOR_TOPICS:
-        # Too little to head: `render` writes one list, which is honest,
-        # rather than inventing topics for a short conversation.
-        return None
-    block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
-    try:
-        answer = await provider.complete(
-            _with_brief(block, brief, language),
-            schema.REDUCE_TOPICS_SCHEMA,
-            max_tokens=REDUCE_MAX_TOKENS,
-            temperature=0.0,
-            system=prompts.topics_system(language),
-        )
-        parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
-    except ValueError:
-        gate.topics_failure = "schema_invalid"
-        logger.warning("meeting_doc.topics_failed", exc_info=True)
-        return None
-    except Exception:  # noqa: BLE001
-        gate.topics_failure = "provider_error"
-        logger.warning("meeting_doc.topics_failed", exc_info=True)
-        return None
-    topics = _topics_from(parsed, facts, gate)
-    if topics is None and gate.topics_failure is None:
-        gate.topics_failure = (
-            "too_few_topics" if len(parsed.topics) < 2 else "all_bullets_unsupported"
-        )
-    return topics
-
-
-def _topics_from(parsed: schema.ReduceOut, facts: list[VerifiedFact], gate: _Gate) -> Topics | None:
-    """Parsed topics → the gated structure render writes (≥ 2 topics)."""
-    by_id = {f.item_key: f for f in facts}
-    out: Topics = []
-    for topic in parsed.topics:
-        if not topic.title.strip() or gate.echo(topic.title):
-            continue
-        bullets: list[Bullet] = []
-        for bullet in topic.bullets:
-            text = gate.third_person(bullet.text.strip())
-            ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
-            # A bullet citing nothing we verified was written from memory;
-            # one the cited facts do not carry says more than they do.
-            if text and gate.ok(text, [by_id[i] for i in ids]):
-                bullets.append((text, ids, _children(bullet, text, ids, by_id, gate)))
-        if len(bullets) < MIN_BULLETS_PER_TOPIC:
-            continue
-        cited = [i for _t, ids, _c in bullets for i in ids]
-        cited += [i for _t, _ids, kids in bullets for _k, child_ids in kids for i in child_ids]
-        cited += [i for i in topic.fact_ids if i in by_id]
-        out.append((topic.title.strip(), bullets, list(dict.fromkeys(cited))))
-    out = _merge_overlapping(out, by_id, gate)
-    _append_salient(out, facts, gate)
-    if len(out) < 2:
-        return None
-    return out[: schema.MAX_TOPICS]
-
-
 def _children(
     bullet: schema.TopicBullet,
     parent: str,
@@ -1389,6 +1461,8 @@ def _children(
     out: list[tuple[str, list[str]]] = []
     parent_words = support.merge_tokens(parent)
     for child in bullet.children[: schema.MAX_CHILDREN]:
+        if child.quote_of:
+            continue  # Sprint D2 T2: a quote sub-point is written by code
         text = gate.third_person(child.text.strip())
         ids = list(dict.fromkeys(i for i in child.fact_ids if i in by_id))
         if not text or not ids or not gate.ok(text, [by_id[i] for i in ids]):
@@ -1402,67 +1476,271 @@ def _children(
     return out
 
 
-TWO_STAGE_MIN_FACTS: Final = 40
-# §2.9 — an unnamed voice with this share of the talk is the narrator.
-NARRATOR_MIN_SHARE: Final = 0.6
-BLOCK_HEADINGS_MERGE_JACCARD: Final = 0.6
+# Sprint D2 T1 — a block's call is retried once; a heading once more.
+BLOCK_ATTEMPTS: Final = 2
+BLOCK_CONCURRENCY: Final = 4
 
 
-async def _topics_by_block(
-    provider: ChatLike, facts: list[VerifiedFact], language: str, *, gate: _Gate
-) -> Topics | None:
-    """A-12 — a long recording's topics in two stages: time-contiguous
-    blocks (≤ 8, ≥ 4 facts each, code), one call per block for a phase
-    heading and its bullets, then adjacent blocks whose headings say the
-    same are merged (code — a small model merging its own headings is one
-    more place to fail)."""
-    out: Topics = []
-    for block in overview.reduce_blocks(facts):
-        listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in block])
+def _heading_faults(heading: str, facts: Sequence[VerifiedFact], gate: _Gate) -> list[str]:
+    """Why a model heading cannot head its block: D1's form rules, a
+    generic label, or a name its facts do not say."""
+    faults = [f for f in doclint.heading_faults(heading) if f not in ("punctuation", "question")]
+    if heading.casefold().rstrip(":.!?") in doclint.GENERIC_HEADINGS:
+        faults.append("generic")
+    evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
+    if doclint.unsupported_names(heading, evidence, gate.language, gate.people):
+        faults.append("name")
+    if gate.echo(heading):
+        faults.append("example")
+    return faults
+
+
+def _speaker_name(fact: VerifiedFact, table: roles_table.RolesTable) -> str | None:
+    speaker = table.speakers.get(fact.speaker_label or "")
+    return (speaker.name if speaker else None) or support.real_name(fact.speaker_name)
+
+
+async def _reduce_block(
+    provider: ChatLike,
+    block: compose.Block,
+    language: str,
+    budget: compose.VolumeBudget,
+    *,
+    brief: Brief | None,
+    gate: _Gate,
+    table: roles_table.RolesTable,
+) -> tuple[str, list[Bullet], list[str]] | None:
+    """One block: a phase heading and its bullets, gated line by line —
+    the support gate, a subject that is not a pronoun, specificity — kept
+    to the budget by specificity and written in time order. A call that
+    fails twice, or leaves fewer than two bullets, is the block's chapter:
+    its statements by time under its name and first time."""
+    facts = list(block.facts)
+    by_id = {f.item_key: f for f in facts}
+    listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
+    system = prompts.block_system(language, budget.bullets_per_block)
+    heading = ""
+    bullets: list[Bullet] = []
+    parsed_any = False
+    for attempt in range(BLOCK_ATTEMPTS):
+        gate.block_calls += 1
         try:
             answer = await provider.complete(
-                listing,
-                schema.BLOCK_TOPIC_SCHEMA,
+                _with_brief(listing, brief, language),
+                schema.BLOCK_SCHEMA,
                 max_tokens=REDUCE_MAX_TOKENS,
                 temperature=0.0,
-                system=prompts.block_system(language),
+                system=system,
             )
-            parsed = schema.ReduceOut.model_validate_json(_json_of(answer))
-        except Exception:  # noqa: BLE001 — one block must not cost the note
+            parsed = schema.BlockOut.model_validate_json(_json_of(answer))
+        except ValueError:
+            gate.block_failures["schema_invalid"] += 1
             logger.warning("meeting_doc.block_failed", exc_info=True)
             continue
-        by_id = {f.item_key: f for f in block}
-        for topic in parsed.topics[:1]:
-            title = topic.title.strip()
-            if not title or gate.echo(title):
-                continue
-            bullets: list[Bullet] = []
-            for bullet in topic.bullets:
-                text = gate.third_person(bullet.text.strip())
-                ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
-                if text and gate.ok(text, [by_id[i] for i in ids]):
-                    bullets.append((text, ids, _children(bullet, text, ids, by_id, gate)))
-            if bullets:
-                cited = [i for _t, ids, _c in bullets for i in ids]
-                out.append((title, bullets, list(dict.fromkeys([*cited, *by_id]))))
-    merged: Topics = []
-    for heading in out:
-        if (
-            merged
-            and verify._jaccard(
-                support.merge_tokens(merged[-1][0]), support.merge_tokens(heading[0])
-            )
-            >= BLOCK_HEADINGS_MERGE_JACCARD
-        ):
-            title, bullets, ids = merged[-1]
-            merged[-1] = (title, [*bullets, *heading[1]], list(dict.fromkeys([*ids, *heading[2]])))
-            gate.topics_merged += 1
+        except Exception:  # noqa: BLE001 — one block must not cost the note
+            gate.block_failures["provider_error"] += 1
+            logger.warning("meeting_doc.block_failed", exc_info=True)
             continue
-        merged.append(heading)
-    if len(merged) < 2:
-        gate.topics_failure = "too_few_topics" if merged else "all_bullets_unsupported"
+        parsed_any = True
+        written = _block_bullets(parsed, by_id, language, gate, table)
+        if len(written) >= len(bullets):
+            bullets = written
+        candidate = parsed.heading.strip().rstrip(":.!?").strip()
+        if candidate and not _heading_faults(candidate, facts, gate):
+            heading = candidate
+        if heading and len(bullets) >= MIN_BULLETS_PER_TOPIC:
+            break
+        if attempt == 0 and not heading:
+            gate.headings_retried += 1
+            system = f"{system}\n\n{prompts.heading_retry(language)}"
+    if len(bullets) < MIN_BULLETS_PER_TOPIC:
+        if parsed_any and not bullets:
+            gate.block_failures["all_bullets_unsupported"] += 1
+        chapter = _block_chapter(facts, language, gate, budget)
+        if chapter is None:
+            return None
+        gate.block_chapters += 1
+        return chapter
+    if not heading:
+        heading = compose.fallback_heading(facts, language, gate.people)
+        gate.headings_fallback += 1
+
+    # Within the budget, the most specific first; then in time order.
+    def first_start(bullet: Bullet) -> int:
+        return min((by_id[i].start_ms for i in bullet[1] if i in by_id), default=0)
+
+    kept = sorted(
+        bullets,
+        key=lambda b: -support.specificity(b[0], language, known=gate.known),
+    )[: budget.bullets_per_block]
+    kept.sort(key=first_start)
+    cited = [i for _t, ids, _c in kept for i in ids]
+    return heading, kept, list(dict.fromkeys([*cited, *by_id]))
+
+
+def _block_bullets(
+    parsed: schema.BlockOut,
+    by_id: dict[str, VerifiedFact],
+    language: str,
+    gate: _Gate,
+    table: roles_table.RolesTable,
+) -> list[Bullet]:
+    out: list[Bullet] = []
+    for bullet in parsed.bullets[: schema.MAX_BLOCK_BULLETS]:
+        text = gate.third_person(bullet.text.strip())
+        ids = list(dict.fromkeys(i for i in bullet.fact_ids if i in by_id))
+        if not text or not gate.ok(text, [by_id[i] for i in ids]):
+            continue
+        if support.pronoun_initial(text, language):
+            gate.counts["subject"] += 1
+            continue
+        if (
+            support.specificity(
+                text, language, known=gate.known, has_date=verify._has_date_word(text)
+            )
+            == 0
+        ):
+            gate.counts["unspecific"] += 1
+            continue
+        children: list[Child] = list(_children(bullet, text, ids, by_id, gate))
+        for child in bullet.children:
+            if not child.quote_of or child.quote_of not in by_id:
+                continue
+            fact = by_id[child.quote_of]
+            quoted = compose.quote_child(fact, _speaker_name(fact, table), language)
+            if quoted and len(children) < schema.MAX_CHILDREN:
+                children.append((quoted, [fact.item_key], QUOTE))
+                gate.quote_children += 1
+        out.append((text, ids, children))
+    return out
+
+
+def _block_chapter(
+    facts: list[VerifiedFact], language: str, gate: _Gate, budget: compose.VolumeBudget
+) -> tuple[str, list[Bullet], list[str]] | None:
+    """Amendment §2.6 for one block: its statements by time, the specific
+    ones when there are any, under its name and first time."""
+    usable = [
+        f
+        for f in facts
+        if not f.evidence_only
+        and f.figure is None
+        and f.person is None
+        and PARAPHRASE_UNSUPPORTED not in f.flags
+    ]
+    specific = [f for f in usable if compose.specificity(f, language, gate.people) > 0]
+    shown = (specific or usable)[: budget.bullets_per_block]
+    if len(shown) < MIN_BULLETS_PER_TOPIC:
         return None
-    return merged
+    title = compose.fallback_heading(facts, language, gate.people)
+    return (
+        title,
+        [(f.text, [f.item_key], []) for f in sorted(shown, key=lambda f: f.start_ms)],
+        [f.item_key for f in facts],
+    )
+
+
+async def _reduce_blocks(
+    provider: ChatLike,
+    parts: list[compose.Block],
+    language: str,
+    budget: compose.VolumeBudget,
+    *,
+    brief: Brief | None,
+    gate: _Gate,
+    table: roles_table.RolesTable,
+    minutes: float,
+) -> Topics | None:
+    """Every block in parallel (a few at a time), then one tiny call over
+    the headings for merges, applied only while the section band holds."""
+    semaphore = asyncio.Semaphore(BLOCK_CONCURRENCY)
+
+    async def one(block: compose.Block) -> tuple[str, list[Bullet], list[str]] | None:
+        async with semaphore:
+            return await _reduce_block(
+                provider, block, language, budget, brief=brief, gate=gate, table=table
+            )
+
+    results = await asyncio.gather(*(one(b) for b in parts))
+    topics: Topics = [r for r in results if r is not None]
+    gate.blocks = len(parts)
+    if len(topics) < len(parts) and not gate.block_failures:
+        gate.block_failures["too_few_topics"] += 1
+    if gate.block_chapters == len(topics) and gate.block_failures:
+        gate.topics_failure = max(gate.block_failures, key=lambda k: gate.block_failures[k])
+    if not topics:
+        gate.topics_failure = gate.topics_failure or "all_bullets_unsupported"
+        return None
+    return await _merge_headings(provider, topics, language, gate, minutes)
+
+
+async def _merge_headings(
+    provider: ChatLike, topics: Topics, language: str, gate: _Gate, minutes: float
+) -> Topics:
+    if len(topics) < 2:
+        return topics
+    floor = (
+        max(doclint.SECTIONS_MIN, doclint.target_sections(minutes) - doclint.SECTIONS_TOLERANCE)
+        if minutes >= doclint.SECTIONS_FROM_MINUTES
+        else 1
+    )
+    listing = "\n".join(f"{n}. {title}" for n, (title, _b, _i) in enumerate(topics))
+    try:
+        answer = await provider.complete(
+            f"{prompts.DATA_OPEN}\n{listing}\n{prompts.DATA_CLOSE}",
+            schema.MERGE_SCHEMA,
+            max_tokens=200,
+            temperature=0.0,
+            system=prompts.merge_system(language),
+        )
+        parsed = schema.MergeOut.model_validate_json(_json_of(answer))
+    except Exception:  # noqa: BLE001 — merges are an improvement, never a need
+        logger.warning("meeting_doc.merge_failed", exc_info=True)
+        return topics
+    pairs = sorted(
+        {(i, j) for i, j in (m[:2] for m in parsed.merges if len(m) >= 2) if j == i + 1},
+        reverse=True,
+    )
+    out = list(topics)
+    for i, j in pairs:
+        if j >= len(out) or len(out) - 1 < floor:
+            gate.merges_refused += 1
+            continue
+        title, bullets, ids = out[i]
+        _t2, more, more_ids = out[j]
+        out[i : j + 1] = [(title, [*bullets, *more], list(dict.fromkeys([*ids, *more_ids])))]
+        gate.topics_merged += 1
+    return out
+
+
+def _narrator_attribution(
+    facts: list[VerifiedFact], table: roles_table.RolesTable, recording_type: str | None
+) -> tuple[list[VerifiedFact], int]:
+    """Decision 4 — in a broadcast, the dominant voice reports: a statement
+    it makes about somebody is that person's, never the narrator's. The Q4
+    default (an opinion is its speaker's) stands only when the speaker says
+    it in the first person ("ich finde", "I think")."""
+    if not any(s.role in (roles_table.NARRATOR, roles_table.HOST) for s in table.speakers.values()):
+        return facts, 0
+    out, changed = [], 0
+    for fact in facts:
+        role = table.role_of(fact.speaker_label)
+        if role not in (roles_table.NARRATOR, roles_table.HOST) or roles_table.first_person(
+            fact.quote
+        ):
+            out.append(fact)
+            continue
+        own = _speaker_name(fact, table)
+        holder = fact.attributed_to
+        if holder and own and holder.casefold() == own.casefold():
+            holder = None
+        if not holder and fact.certainty in support.UNSURE_CERTAINTIES:
+            holder = fact.subject
+        if holder != fact.attributed_to:
+            fact = dataclasses.replace(fact, attributed_to=holder)
+            changed += 1
+        out.append(fact)
+    return out, changed
 
 
 def _gated_phrase(phrase: str, facts: list[VerifiedFact], gate: _Gate) -> str:
@@ -1481,82 +1759,12 @@ def _gated_phrase(phrase: str, facts: list[VerifiedFact], gate: _Gate) -> str:
     return phrase
 
 
-def _speakers(turns: list[windows.Turn], facts: list[VerifiedFact], language: str) -> list[str]:
-    """Named speakers in order of appearance; the presenter by name; an
-    unnamed dominant voice as the narrator. Never a name nobody verified."""
-    named: list[str] = []
-    for turn in turns:
-        if _a_real_name(turn) and turn.speaker_name not in named:
-            named.append(turn.speaker_name or "")
-    presenter = [
-        f.person.name
-        for f in facts
-        if f.person is not None and f.person.standing == "presenter" and f.person.self_introduction
-    ]
-    for name in presenter[:1]:
-        if name not in named:
-            named.insert(0, name)
-    if not named and turns:
-        # One unnamed voice that carries the recording is its narrator; two
-        # or more unnamed voices sharing it are nobody the note can name.
-        talk: dict[str, int] = {}
-        for turn in turns:
-            label = turn.speaker_label or ""
-            talk[label] = talk.get(label, 0) + turn.end_ms - turn.start_ms
-        total = sum(talk.values())
-        if total and max(talk.values()) / total >= NARRATOR_MIN_SHARE:
-            return [str(overview._pick(overview.NARRATOR, language))]
-    return named
-
-
 _DEFAULT_NAME = re.compile(r"(?i)^(?:speaker[ _]?\d+|unknown(?: speaker)?|sprecher(?:in)? \d+)$")
-
-
-def _a_real_name(turn: windows.Turn) -> bool:
-    """A person named this voice — not the diarizer's label or the ASR
-    view's default ("Speaker 2", "UNKNOWN")."""
-    name = (turn.speaker_name or "").strip()
-    return bool(name) and name != turn.speaker_label and not _DEFAULT_NAME.match(name)
-
-
-def _guests(facts: list[VerifiedFact]) -> list[str]:
-    out: list[str] = []
-    for fact in sorted(facts, key=lambda f: f.start_ms):
-        person = fact.person
-        if person is None or person.standing != "guest" or person.name in out:
-            continue
-        where = ", ".join(p for p in (person.organisation, person.qualifier) if p)
-        out.append(f"{person.name} ({where})" if where else person.name)
-    return out
 
 
 def _span(ids: list[str], by_id: dict[str, VerifiedFact]) -> tuple[int, int]:
     times = [by_id[i].start_ms for i in ids if i in by_id]
     return (min(times), max(times)) if times else (0, 0)
-
-
-def _merge_overlapping(
-    topics: Topics,
-    by_id: dict[str, VerifiedFact],
-    gate: _Gate,
-) -> Topics:
-    """Two topics, next to each other in time, whose stretches of the
-    recording overlap by more than half of the shorter one are one subject
-    the model split (Q4)."""
-    ordered = sorted(topics, key=lambda t: _span(t[2], by_id)[0])
-    out: Topics = []
-    for topic in ordered:
-        if out:
-            (a0, a1), (b0, b1) = _span(out[-1][2], by_id), _span(topic[2], by_id)
-            shorter = min(a1 - a0, b1 - b0)
-            overlap = min(a1, b1) - max(a0, b0)
-            if shorter > 0 and overlap > shorter / 2:
-                title, bullets, ids = out[-1]
-                out[-1] = (title, [*bullets, *topic[1]], list(dict.fromkeys([*ids, *topic[2]])))
-                gate.topics_merged += 1
-                continue
-        out.append(topic)
-    return out
 
 
 def _distance(
@@ -1605,8 +1813,14 @@ async def _summary(
     *,
     brief: Brief | None = None,
     gate: _Gate | None = None,
+    headings: list[str] | None = None,
+    skeleton_ids: list[str] | None = None,
 ) -> list[tuple[str, list[str]]] | None:
     """``[(sentence, the fact ids it rests on)]``, or None.
+
+    Sprint D2 T5 — rung 1 is told the blocks' headings ("one sentence per
+    part, in order"); rung 2 names the fact for each sentence: the most
+    specific of each block (``skeleton_ids``).
 
     Every sentence passes the gate or is dropped. When more than
     ``SUMMARY_FAIL_SHARE`` of an answer fails, the model is asked once
@@ -1616,6 +1830,8 @@ async def _summary(
     block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     by_id = {f.item_key: f for f in facts}
     system = prompts.summary_system(language)
+    if headings:
+        system = f"{system}\n\n{prompts.summary_blocks(headings, language)}"
     for attempt in range(2):
         try:
             answer = await provider.complete(
@@ -1649,8 +1865,11 @@ async def _summary(
                 gate.retries += 1
                 # Rung 2: the facts to use, in time order, one sentence per
                 # one or two of them.
-                ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
-                groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
+                if skeleton_ids:
+                    groups = [[i] for i in skeleton_ids][: schema.MAX_SUMMARY_SENTENCES + 1]
+                else:
+                    ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
+                    groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
                 system = (
                     f"{system}\n\n{prompts.strict_suffix(language)}\n"
                     f"{prompts.skeleton(groups, language)}"

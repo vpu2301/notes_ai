@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final = "2026-10-21"
+PROMPT_VERSION: Final = "2026-10-22"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -94,6 +94,9 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         # A-14 — headings that name a phase of the story.
         "heading_event": "3 March: the Quillhaven warehouse floods",
         "heading_phase": "Rebuilding the Ferrytale print run",
+        # D2 — a sentence whose subject would be a pronoun names it.
+        "subject_quote": "He is annoyed that the Ferrytale print run slipped again.",
+        "subject_text": "Marek Quill is annoyed that the Ferrytale print run slipped again",
         # F3 — a figure: the quantity, the number as said, the unit, the hedge.
         "figure_quote": "the Lantern edition box weighs just under two kilos",
         "figure_name": "Lantern edition box weight",
@@ -123,6 +126,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_event_text": "Das Quillhaven-Lager stand am 3. März unter Wasser",
         "heading_event": "3. März: Das Quillhaven-Lager wird überflutet",
         "heading_phase": "Neustart der Ferrytale-Auflage",
+        "subject_quote": "Er ist genervt, dass sich die Ferrytale-Auflage wieder verschiebt.",
+        "subject_text": "Marek Quill ist genervt, dass sich die Ferrytale-Auflage wieder verschiebt",
         "figure_quote": "die Schachtel der Lantern-Edition wiegt knapp zwei Kilo",
         "figure_name": "Gewicht der Lantern-Schachtel",
         "summary_right": "Die Lantern-Edition bleibt für die Quillhaven-Messe geplant",
@@ -149,6 +154,8 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_event_text": "Склад Quillhaven був затоплений 3 березня",
         "heading_event": "3 березня: склад Quillhaven затоплено",
         "heading_phase": "Відновлення накладу Ferrytale",
+        "subject_quote": "Він роздратований, що наклад Ferrytale знову зсувається.",
+        "subject_text": "Марек Квілл роздратований, що наклад Ferrytale знову зсувається",
         "figure_quote": "коробка Lantern-видання важить трохи менше двох кілограмів",
         "figure_name": "Вага коробки Lantern",
         "summary_right": "Lantern-видання й далі заплановане до ярмарку Quillhaven",
@@ -157,7 +164,7 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
     },
 }
 # The invented names themselves: a line naming either came from a prompt.
-EXAMPLE_NAMES: Final[tuple[str, ...]] = ("Quillhaven", "Ferrytale")
+EXAMPLE_NAMES: Final[tuple[str, ...]] = ("Quillhaven", "Ferrytale", "Marek Quill", "Марек Квілл")
 
 # Conversation types, in an order that does not start with a meeting: the
 # first example in a list is the one a small model picks when unsure, and
@@ -198,6 +205,10 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "allegation. Never make a claim more certain than it was said.\n"
         "- `attributed_to` is who holds this position — a speaker, or a person or "
         "organisation the speaker reports; null for a plain fact.\n"
+        "- `text` never opens with a pronoun (he, she, it, they). Write who it is, and put "
+        "that name in `subject`: "
+        f"'{_EN['subject_quote']}' becomes subject 'Marek Quill', text '{_EN['subject_text']}'. "
+        "Take the name from these lines only; if nobody is named, leave the fact out.\n"
         "- Do not open with 'It was stated/noted/mentioned/established/discussed that'. "
         "State the point, with enough context to stand on its own — the reader did not "
         f"attend: '{_EN['standalone_right']}', not '{_EN['standalone_wrong']}'.\n"
@@ -252,6 +263,10 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- `attributed_to` ist, wer diese Position vertritt — ein Sprecher oder eine "
         "Person oder Organisation, über die berichtet wird; null bei einer reinen "
         "Tatsache.\n"
+        "- `text` beginnt nie mit einem Pronomen (er, sie, es). Schreibe, wer es ist, und "
+        "setze diesen Namen in `subject`: "
+        f"„{_DE['subject_quote']}“ wird zu subject „Marek Quill“, text „{_DE['subject_text']}“. "
+        "Den Namen nur aus diesen Zeilen nehmen; nennt ihn niemand, den Fakt weglassen.\n"
         "- Nicht mit „Es wurde gesagt/erwähnt/festgestellt/besprochen, dass“ beginnen. "
         "Die Sache nennen, mit genug Kontext, um allein zu stehen — der Leser war nicht "
         f"dabei: „{_DE['standalone_right']}“, nicht „{_DE['standalone_wrong']}“.\n"
@@ -304,6 +319,10 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "звинуваченням. Ніколи не роби твердження впевненішим, ніж його сказали.\n"
         "- `attributed_to` — хто дотримується цієї позиції: мовець або людина чи "
         "організація, про яку він розповідає; null для простого факту.\n"
+        "- `text` ніколи не починається із займенника (він, вона, воно, вони). Напиши, хто це, "
+        "і постав це ім'я в `subject`: "
+        f"«{_UK['subject_quote']}» стає subject «Марек Квілл», text «{_UK['subject_text']}». "
+        "Бери ім'я лише з цих рядків; якщо його ніхто не назвав, пропусти факт.\n"
         "- Не починай з «Було зазначено/сказано/встановлено/обговорено, що». Називай "
         "суть із достатнім контекстом, щоб вона стояла окремо — читач не був присутній: "
         f"«{_UK['standalone_right']}», а не «{_UK['standalone_wrong']}».\n"
@@ -771,41 +790,116 @@ def extract_prompt(
     return "\n\n".join(parts)
 
 
-# A-12/A-14 — one part of a long recording at a time.
+# Sprint D2 T2 — one block of the recording at a time.
 BLOCK_SYSTEM: Final[dict[str, str]] = {
     "en": (
-        "These facts are one part of a longer recording, in time order. Return exactly ONE "
-        "topic: a heading that names what this part of the story is — a noun phrase, with "
-        f"the date when the part is about an event ('{_EN['heading_event']}', "
-        f"'{_EN['heading_phase']}') — and its bullets. Each bullet is one specific claim "
-        "(who or what, and the number, date or name that makes it checkable), third person, "
-        "citing its facts in `fact_ids` only. A bullet may carry up to three `children`. "
-        "Use only the facts given; add nothing; never copy what somebody said word for word."
+        "These facts are one part of a recording, in time order. Return a `heading` and "
+        "`bullets` for this part only.\n"
+        "- The heading is a noun phrase of 3 to 8 words naming what this part is about — a "
+        "phase, an event, a person, a decision — with the date when it is about an event "
+        f"('{_EN['heading_event']}', '{_EN['heading_phase']}'). Never a generic label "
+        "(Discussion, Introduction, Summary, Other, Topics), never a question.\n"
+        "- Write {bullets} bullets. Each is one specific claim — who or what, and the "
+        "number, date or name that makes it checkable — in the third person, citing its "
+        "facts in `fact_ids`. Its subject is a name or a definite noun, never a pronoun.\n"
+        "- A bullet may carry up to three `children` for its parts, examples or "
+        "consequences, or one short quote: a child with `quote_of` set to the id of the fact "
+        "whose words it is (the words are taken from that fact). A child never repeats its "
+        "bullet.\n"
+        "- Use only the facts given; add nothing; never copy what somebody said word for word."
     ),
     "de": (
-        "Diese Fakten sind ein Teil einer längeren Aufnahme, in zeitlicher Reihenfolge. Gib "
-        "genau EIN Thema zurück: eine Überschrift, die sagt, welcher Abschnitt der Geschichte "
-        "das ist — eine Nominalphrase, mit Datum, wenn es um ein Ereignis geht "
-        f"(„{_DE['heading_event']}“, „{_DE['heading_phase']}“) — und die Punkte dazu. Jeder "
-        "Punkt ist eine konkrete Aussage (wer oder was, und Zahl, Datum oder Name, die sie "
-        "prüfbar machen), in der dritten Person, mit den Fakten nur in `fact_ids`. Ein Punkt "
-        "darf bis zu drei `children` haben. Nur die gegebenen Fakten; nichts hinzufügen; nie "
-        "wörtlich übernehmen, was jemand gesagt hat."
+        "Diese Fakten sind ein Teil einer Aufnahme, in zeitlicher Reihenfolge. Gib eine "
+        "`heading` und `bullets` nur für diesen Teil zurück.\n"
+        "- Die Überschrift ist eine Nominalphrase aus 3 bis 8 Wörtern, die sagt, worum es in "
+        "diesem Teil geht — eine Phase, ein Ereignis, eine Person, eine Entscheidung — mit "
+        f"Datum, wenn es um ein Ereignis geht („{_DE['heading_event']}“, "
+        f"„{_DE['heading_phase']}“). Nie eine allgemeine Bezeichnung (Diskussion, Einleitung, "
+        "Zusammenfassung, Weitere Punkte, Themen), nie eine Frage.\n"
+        "- Schreibe {bullets} Punkte. Jeder ist eine konkrete Aussage — wer oder was, und "
+        "Zahl, Datum oder Name, die sie prüfbar machen — in der dritten Person, mit den "
+        "Fakten in `fact_ids`. Das Subjekt ist ein Name oder ein bestimmtes Nomen, nie ein "
+        "Pronomen.\n"
+        "- Ein Punkt darf bis zu drei `children` haben: Teile, Beispiele, Folgen, oder ein "
+        "kurzes Zitat — ein Kind mit `quote_of`, der id des Fakts, dessen Worte es sind (die "
+        "Worte kommen aus diesem Fakt). Ein Kind wiederholt nie seinen Punkt.\n"
+        "- Nur die gegebenen Fakten; nichts hinzufügen; nie wörtlich übernehmen, was jemand "
+        "gesagt hat."
     ),
     "uk": (
-        "Ці факти — одна частина довшого запису, у часовому порядку. Поверни рівно ОДНУ "
-        "тему: заголовок, що називає цей етап історії — іменникова фраза, з датою, якщо "
-        f"йдеться про подію («{_UK['heading_event']}», «{_UK['heading_phase']}») — і пункти. "
-        "Кожен пункт — одне конкретне твердження (хто чи що, і число, дата чи назва, що "
-        "роблять його перевірюваним), у третій особі, з фактами лише в `fact_ids`. Пункт "
-        "може мати до трьох `children`. Лише надані факти; нічого не додавай; ніколи не "
-        "копіюй дослівно."
+        "Ці факти — одна частина запису, у часовому порядку. Поверни `heading` і `bullets` "
+        "лише для цієї частини.\n"
+        "- Заголовок — іменникова фраза з 3–8 слів, що називає, про що ця частина — етап, "
+        "подія, людина, рішення — з датою, якщо йдеться про подію "
+        f"(«{_UK['heading_event']}», «{_UK['heading_phase']}»). Ніколи не загальна назва "
+        "(Обговорення, Вступ, Підсумок, Інше, Теми), ніколи не питання.\n"
+        "- Напиши {bullets} пунктів. Кожен — одне конкретне твердження (хто чи що, і число, "
+        "дата чи назва, що роблять його перевірюваним), у третій особі, з фактами в "
+        "`fact_ids`. Підмет — ім'я або конкретний іменник, ніколи займенник.\n"
+        "- Пункт може мати до трьох `children`: частини, приклади, наслідки або одну коротку "
+        "цитату — дитину з `quote_of`, id факту, чиї це слова (слова беруться з факту). "
+        "Дитина ніколи не повторює свій пункт.\n"
+        "- Лише надані факти; нічого не додавай; ніколи не копіюй дослівно."
     ),
+}
+# A heading the code refused: asked once more.
+HEADING_RETRY: Final[dict[str, str]] = {
+    "en": "Your heading was generic, too long or named something these facts do not. "
+    "Write a 3–8 word noun phrase naming this part.",
+    "de": "Deine Überschrift war allgemein, zu lang oder nannte etwas, das diese Fakten nicht "
+    "sagen. Schreibe eine Nominalphrase aus 3–8 Wörtern, die diesen Teil benennt.",
+    "uk": "Твій заголовок був загальним, задовгим або називав те, чого немає у фактах. "
+    "Напиши іменникову фразу з 3–8 слів, що називає цю частину.",
+}
+MERGE_SYSTEM: Final[dict[str, str]] = {
+    "en": "These are the headings of consecutive parts of one recording, numbered. List the "
+    "pairs of NEIGHBOURING parts (i, i+1) that are about the same subject and should be one "
+    "part. Propose none if every part has its own subject.",
+    "de": "Das sind die Überschriften aufeinanderfolgender Teile einer Aufnahme, nummeriert. "
+    "Nenne die Paare BENACHBARTER Teile (i, i+1), die dasselbe Thema haben und ein Teil "
+    "sein sollten. Keine, wenn jeder Teil sein eigenes Thema hat.",
+    "uk": "Це заголовки послідовних частин одного запису, пронумеровані. Назви пари СУСІДНІХ "
+    "частин (i, i+1), що про одне й те саме і мають бути однією частиною. Жодної, якщо "
+    "кожна частина має свою тему.",
+}
+# D1's line.subject hook: the window extracted once more.
+SUBJECT_SUFFIX: Final[dict[str, str]] = {
+    "en": "Name every subject: no `text` may open with a pronoun. Put the name in `subject`.",
+    "de": "Nenne jedes Subjekt: kein `text` darf mit einem Pronomen beginnen. Den Namen in "
+    "`subject`.",
+    "uk": "Називай кожен підмет: жоден `text` не починається із займенника. Ім'я — у `subject`.",
+}
+# T5 ladder 1 — the summary follows the blocks.
+SUMMARY_BLOCKS: Final[dict[str, str]] = {
+    "en": "The recording's parts, in order: {headings}. Write one sentence per part, in "
+    "this order, 3 to 6 sentences, each specific (a name, number or date).",
+    "de": "Die Teile der Aufnahme, in dieser Reihenfolge: {headings}. Schreibe einen Satz "
+    "pro Teil, in dieser Reihenfolge, 3 bis 6 Sätze, jeder konkret (Name, Zahl oder Datum).",
+    "uk": "Частини запису по черзі: {headings}. Напиши по реченню на частину, у цьому "
+    "порядку, 3–6 речень, кожне конкретне (ім'я, число чи дата).",
 }
 
 
-def block_system(language: str) -> str:
-    return f"{_pick(BLOCK_SYSTEM, language)}\n\n{guard(language)}"
+def block_system(language: str, bullets: int = 4) -> str:
+    text = _pick(BLOCK_SYSTEM, language).replace("{bullets}", str(bullets))
+    return f"{text}\n\n{guard(language)}"
+
+
+def heading_retry(language: str) -> str:
+    return _pick(HEADING_RETRY, language)
+
+
+def merge_system(language: str) -> str:
+    return f"{_pick(MERGE_SYSTEM, language)}\n\n{guard(language)}"
+
+
+def subject_suffix(language: str) -> str:
+    return _pick(SUBJECT_SUFFIX, language)
+
+
+def summary_blocks(headings: list[str], language: str) -> str:
+    listed = "; ".join(f"{n}. {h}" for n, h in enumerate(headings, 1))
+    return _pick(SUMMARY_BLOCKS, language).format(headings=listed)
 
 
 # §2.9 ladder rung 2 — the strict retry names the facts to use, in order.
@@ -1153,6 +1247,12 @@ def fingerprint() -> str:
         "classify": CLASSIFY_SYSTEM,
         "entity": ENTITY_SYSTEM,
         "brief": _BRIEF_LABELS,
+        # Sprint D2 — blocks, their headings, merges, the subject retry.
+        "block": BLOCK_SYSTEM,
+        "heading_retry": HEADING_RETRY,
+        "merge": MERGE_SYSTEM,
+        "subject_suffix": SUBJECT_SUFFIX,
+        "summary_blocks": SUMMARY_BLOCKS,
         # ADR-0059's title call changes what the note says, so it is pinned
         # with the rest (Q6).
         "title": _title_prompt(),
@@ -1163,6 +1263,8 @@ def fingerprint() -> str:
             "context": schema.REDUCE_CONTEXT_SCHEMA,
             "classify": _classify_schema(),
             "entity": schema.ENTITY_SCHEMA,
+            "block": schema.BLOCK_SCHEMA,
+            "merge": schema.MERGE_SCHEMA,
             "title": _title_prompt_schema(),
         },
     }

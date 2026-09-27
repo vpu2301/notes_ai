@@ -689,3 +689,31 @@ def test_rubric_round_trip_and_release_gate(tmp_path: Path, monkeypatch: Any) ->
         "faithful_share": True,
         "no_orientation_zero": True,
     }
+
+
+# ── Sprint D2: composition scorers and gates ────────────────────────
+
+
+def test_the_d2_scorers_read_an_enforced_note_end_to_end() -> None:
+    sys.path.insert(0, str(REPO / "services" / "note-service" / "tests" / "unit"))
+    from meeting_doc_fakes import ScriptedProvider
+
+    harness = _load("notes_eval")
+    meeting = json.loads(
+        (REPO / "tests" / "fixtures" / "eval" / "notes" / "m06_de_news_podcast.json").read_text()
+    )
+    meeting["gold"]["roles"] = {"SPEAKER_1": "narrator"}
+    produced = asyncio.run(harness.run_pipeline(meeting, ScriptedProvider()))
+    row = notes_scoring.score_meeting(meeting, produced)
+    for key in ("headings_pass", "bullets_specific", "children", "lint_first_pass"):
+        assert key in row, key
+    assert row["subject_failures"] == 0
+    summary = notes_scoring.aggregate([row])
+    gates = notes_scoring.d2_gates(summary)
+    assert set(gates) >= {
+        "d2_lint_first_pass_90pct",
+        "d2_lint_after_regeneration_98pct",
+        "d2_no_subject_failures",
+        "d2_roles_correct_95pct",
+    }
+    assert gates["d2_no_subject_failures"]

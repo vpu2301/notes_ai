@@ -55,6 +55,7 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     aggregate,
     best_match,
     d1_gates,
+    d2_gates,
     f2_gates,
     f3_gates,
     overlap,
@@ -198,6 +199,9 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "owner": fact.owner_label,
         "due_text": fact.due_text,
         "attributed_to": getattr(fact, "attributed_to", None),
+        # Sprint D2 — whose sentence it is, and who said it.
+        "subject": getattr(fact, "subject", None),
+        "speaker_label": getattr(fact, "speaker_label", None),
         "corrections": [
             [c.surface, c.canonical, c.source] for c in getattr(fact, "corrections", ())
         ],
@@ -278,7 +282,9 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     # Sprint D1 — the worker's linter, on every eval output: the eval scores
     # the document the writer would receive.
     document = await doclint.enforce(
-        document, known=frozenset({*(gold.get("speakers") or {}).values()})
+        document,
+        regenerate=document.regenerator,
+        known=frozenset({*(gold.get("speakers") or {}).values()}),
     )
     if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
         raise EngineBlindError(meeting["id"])
@@ -830,6 +836,7 @@ async def main(
         gates = f2_gates(all_runs[-1]["summary"], baseline_recall=baseline_recall)
         gates.update(f3_gates(all_runs[-1]["summary"]))
         gates.update(d1_gates(all_runs[-1]["summary"]))
+        gates.update(d2_gates(all_runs[-1]["summary"]))
         report["f2_gates"] = gates
         for name, ok in gates.items():
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")

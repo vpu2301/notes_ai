@@ -508,6 +508,8 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # Error taxonomy detectors (docs/eval/error-taxonomy.md).
     names = {*known_names, *(e["canonical"] for e in gold.get("entities", []))}
     row.update(score_taxonomy(meeting, produced, content, names))
+    # Sprint D2: composition to the standard.
+    row.update(score_d2(meeting, produced))
     linted = lint_produced(meeting, produced)
     if linted is not None:
         row["lint"] = linted
@@ -747,6 +749,115 @@ def score_taxonomy(
     return out
 
 
+# ── Sprint D2: composition to the standard ─────────────────────────
+
+
+def score_d2(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any]:
+    """Per note: ``sections_in_band``, ``headings_pass``, ``bullets_specific``,
+    ``children``, ``subject_failures``, ``narrator_attribution_errors``,
+    ``roles_correct``, ``orientation_p1_ok``, ``lint_first_pass``,
+    ``lint_after_regeneration``, ``summary_ladder``. Pairs are
+    ``[hit, total]``; absent when the arm writes no sections."""
+    from note_service.domain.meeting_doc import doclint
+    from note_service.domain.meeting_doc import support as rules
+
+    inputs = _lint_inputs(meeting, produced)
+    if inputs is None:
+        return {}
+    sections, ctx = inputs
+    out: dict[str, Any] = {}
+    headed = [s for s in sections if s.role == "topics" and (s.title or "").strip()]
+    if ctx.minutes >= doclint.SECTIONS_FROM_MINUTES:
+        target = doclint.target_sections(ctx.minutes)
+        low = max(doclint.SECTIONS_MIN, target - doclint.SECTIONS_TOLERANCE)
+        high = min(doclint.SECTIONS_MAX, target + doclint.SECTIONS_TOLERANCE)
+        out["sections_in_band"] = [1 if low <= len(headed) <= high else 0, 1]
+    good = [
+        s
+        for s in headed
+        if not doclint.heading_faults(s.title or "")
+        and (s.title or "").casefold() not in doclint.GENERIC_HEADINGS
+    ]
+    out["headings_pass"] = [len(good), len(headed)]
+    points = [
+        (s, n, ln)
+        for s in sections
+        for n, ln in enumerate(s.lines)
+        if ln.kind == "bullet" and not ln.parent
+    ]
+    out["bullets_specific"] = [
+        sum(1 for _s, _n, ln in points if doclint.specificity(ln, ctx) > 0),
+        len(points),
+    ]
+    with_children = sum(1 for s, n, _ln in points if n + 1 < len(s.lines) and s.lines[n + 1].parent)
+    out["children"] = [with_children, len(points)]
+    out["subject_failures"] = sum(
+        1
+        for s in sections
+        for ln in s.lines
+        if (fault := doclint.line_fault(ln, ctx)) and fault[0] == "line.subject"
+    )
+    stats = produced.get("stats") or {}
+    roles = stats.get("roles") or {}
+    names = (meeting.get("gold") or {}).get("speakers") or {}
+    errors = 0
+    for fact in produced.get("facts", []):
+        holder = fact.get("attributed_to")
+        label = fact.get("speaker_label")
+        if not holder:
+            continue
+        if rules.real_name(holder) is None:
+            errors += 1  # a label as a holder
+        elif (
+            roles.get(label) in ("narrator", "host")
+            and holder == names.get(label)
+            and not _FIRST_PERSON_CUE.search(fact.get("quote", ""))
+        ):
+            errors += 1  # the narrator holding what it reports
+    out["narrator_attribution_errors"] = errors
+    gold_roles = (meeting.get("gold") or {}).get("roles") or {}
+    if gold_roles:
+        out["roles_correct"] = [
+            sum(1 for label, role in gold_roles.items() if roles.get(label) == role),
+            len(gold_roles),
+        ]
+    top = next((s for s in sections if s.section_key == "gen:overview"), None)
+    first = [ln for ln in top.lines if ln.kind in ("framing", "presenter")] if top else []
+    if first:
+        out["orientation_p1_ok"] = [0 if doclint.p1_faults(first, ctx) else 1, 1]
+    lint = stats.get("lint") or {}
+    if lint and not lint.get("error"):
+        hard = {c for c, sev in doclint.SEVERITY.items() if sev in doclint.HARD}
+        found = set(lint.get("findings_by_code") or {}) & hard
+        left = set(lint.get("unresolved_hard") or {})
+        out["lint_first_pass"] = [0 if found else 1, 1]
+        out["lint_after_regeneration"] = [0 if left else 1, 1]
+    if stats.get("summary_ladder"):
+        out["summary_ladder"] = stats["summary_ladder"]
+    return out
+
+
+_FIRST_PERSON_CUE = re.compile(r"\b(?:ich|wir|I|we|я|ми)\b", re.IGNORECASE)
+
+
+def d2_gates(summary: dict[str, Any]) -> dict[str, bool]:
+    """Sprint D2 acceptance 2: the linter passes first time on ≥ 90 % of
+    notes and after one regeneration on ≥ 98 %; roles and types right on
+    ≥ 95 %; no rendered line whose subject is a pronoun or a label."""
+    if summary.get("lint_first_pass") is None:
+        return {}
+    out = {
+        "d2_lint_first_pass_90pct": summary["lint_first_pass"] >= 0.9,
+        "d2_lint_after_regeneration_98pct": summary["lint_after_regeneration"] >= 0.98,
+        "d2_no_subject_failures": summary["subject_failures"] == 0,
+    }
+    if summary.get("roles_correct") is not None:
+        out["d2_roles_correct_95pct"] = summary["roles_correct"] >= 0.95
+    if summary.get("recording_type_acc") is not None:
+        out["d2_type_correct_95pct"] = summary["recording_type_acc"] >= 0.95
+    return out
+
+
 # F- codes that are S2 (docs/eval/error-taxonomy.md); the other F- codes the
 # linter reports are S1.
 _S2_F = frozenset({"F-COPY", "F-DESC", "F-TYPE", "F-DROP", "F-COV"})
@@ -843,6 +954,15 @@ def rubric_auto(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, 
 
 
 _PAIRS = (
+    # Sprint D2
+    "sections_in_band",
+    "headings_pass",
+    "bullets_specific",
+    "children",
+    "roles_correct",
+    "orientation_p1_ok",
+    "lint_first_pass",
+    "lint_after_regeneration",
     "unresolved_subject",
     "unspecific_bullets",
     "volume",
@@ -885,6 +1005,8 @@ def aggregate(
     s1_left = s2_notes = volume_ok = sections_ok = 0
     subject_left = unspecific_left = 0
     auto: dict[str, list[int]] = {"Q3": [], "Q7": []}
+    subject_failures = narrator_errors = 0
+    ladders: dict[str, int] = {}
     linted_docs = lint_clean = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     by_type: dict[str, list[int]] = {}
@@ -903,6 +1025,10 @@ def aggregate(
         invented += int(row.get("invented_claims") or 0)
         echo += int(row.get("example_echo") or 0)
         labels += int(row.get("label_lines") or 0)
+        subject_failures += int(row.get("subject_failures") or 0)
+        narrator_errors += int(row.get("narrator_attribution_errors") or 0)
+        if row.get("summary_ladder"):
+            ladders[row["summary_ladder"]] = ladders.get(row["summary_ladder"], 0) + 1
         for q, score in (row.get("rubric_auto") or {}).items():
             if score is not None:
                 auto[q].append(int(score))
@@ -912,10 +1038,10 @@ def aggregate(
             left_rules = lint.get("unresolved_rules") or {}
             linted_docs += 1
             lint_clean += 0 if left else 1
-            for code, n in (lint.get("findings_by_code") or {}).items():
-                lint_found[code] = lint_found.get(code, 0) + int(n)
-            for code, n in left.items():
-                lint_codes[code] = lint_codes.get(code, 0) + int(n)
+            for code, count in (lint.get("findings_by_code") or {}).items():
+                lint_found[code] = lint_found.get(code, 0) + int(count)
+            for code, count in left.items():
+                lint_codes[code] = lint_codes.get(code, 0) + int(count)
             hard = lint.get("unresolved_hard") or {}
             s1_left += sum(int(n) for c, n in hard.items() if c.startswith("F-") and c not in _S2_F)
             s2_notes += 1 if any(not c.startswith("F-") or c in _S2_F for c in hard) else 0
@@ -965,6 +1091,18 @@ def aggregate(
         "words_per_minute": (
             sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
         ),
+        # Sprint D2: composition.
+        "sections_in_band": _rate(sums["sections_in_band"]),
+        "headings_pass": _rate(sums["headings_pass"]),
+        "bullets_specific_share": _rate(sums["bullets_specific"]),
+        "children_share": _rate(sums["children"]),
+        "subject_failures": subject_failures,
+        "narrator_attribution_errors": narrator_errors,
+        "roles_correct": _rate(sums["roles_correct"]),
+        "orientation_p1_ok": _rate(sums["orientation_p1_ok"]),
+        "lint_first_pass": _rate(sums["lint_first_pass"]),
+        "lint_after_regeneration": _rate(sums["lint_after_regeneration"]),
+        "summary_ladder": dict(sorted(ladders.items())),
         # Sprint D1: what the linter found, what it could not repair, and the
         # numbers its gates read.
         "lint_findings": dict(sorted(lint_found.items())),

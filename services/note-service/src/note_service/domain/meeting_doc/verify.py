@@ -86,6 +86,9 @@ FIRST_PERSON: Final = "first_person"
 # F3 amendment §2.5 — a scene (a perception verb, a generic subject, nothing
 # named or counted): evidence behind other lines, never a line.
 DESCRIPTIVE: Final = "descriptive"
+# Sprint D2 — the text opens with a pronoun: whose sentence it is was not
+# written, so it is evidence and never a line ("Er ist genervt …").
+SUBJECT_UNRESOLVED: Final = "subject_unresolved"
 
 # Why a fact was dropped — counted in metrics and in the eval, never shown.
 DROPPED_QUOTE: Final = "dropped_quote"
@@ -186,6 +189,8 @@ class VerifiedFact:
     their own opinion), and the names respelled in ``text`` — never in
     ``quote``."""
     attributed_to: str | None = None
+    """Sprint D2 — who the sentence is about, verified like an owner."""
+    subject: str | None = None
     corrections: tuple[Correction, ...] = ()
     """F2 — ``text`` is its quote copied: a real quote, kept to be cited,
     never rendered as a line of its own."""
@@ -202,7 +207,12 @@ class VerifiedFact:
         its text, so a copied text does not matter there."""
         if self.figure is not None or self.person is not None:
             return False
-        return self.copied or FIRST_PERSON in self.flags or DESCRIPTIVE in self.flags
+        return (
+            self.copied
+            or FIRST_PERSON in self.flags
+            or DESCRIPTIVE in self.flags
+            or SUBJECT_UNRESOLVED in self.flags
+        )
 
     @property
     def salient(self) -> bool:
@@ -694,6 +704,8 @@ class VerifyStats:
     # F3 amendment (r03): an "introduction" that introduces nobody, with
     # real words behind it, is kept as a key point.
     introductions_demoted: int = 0
+    # Sprint D2 — texts left opening with a pronoun (evidence only).
+    subject_unresolved: int = 0
     introduction_fields_cleared: int = 0
     contact_steps: int = 0
 
@@ -904,10 +916,17 @@ def verify_facts(
         )
         text, corrections, marked = _correct(text, glossary, people, stats, recording_names)
 
+        # Sprint D2 — the subject the model named for a sentence that would
+        # open with a pronoun, accepted by the owner rule over the window
+        # (whose overlap turn usually holds the antecedent).
+        subject = resolve_subject(fact.subject, window=window, known=people)
+
         # The restatement must mean what was said: enough shared content,
-        # and no name the words behind it do not have.
+        # and no name the words behind it do not have (or its verified subject).
         said = f"{fact.quote} {turn.text}"
         known = people | {g.term for g in glossary} | {c.canonical for c in corrections}
+        if subject:
+            known = known | {subject}
         paraphrase_flags: list[str] = []
         if not by_payload and (
             support.support_ratio(text, said, language) < MIN_TEXT_SUPPORT
@@ -973,6 +992,9 @@ def verify_facts(
             flags.append(COPIED)
         if corrections:
             flags.append(ENTITY_CORRECTED)
+        if not by_payload and support.pronoun_initial(text, language):
+            flags.append(SUBJECT_UNRESOLVED)
+            stats.subject_unresolved += 1
         out.append(
             VerifiedFact(
                 kind=kind,
@@ -999,6 +1021,7 @@ def verify_facts(
                 side=side,
                 certainty=fact.certainty,
                 attributed_to=attributed,
+                subject=subject,
                 corrections=tuple(corrections),
                 copied=copied,
                 figure=figure,
@@ -1484,6 +1507,13 @@ def accept_name(proposed: str | None, *, window: Window, known: frozenset[str]) 
     return None
 
 
+def resolve_subject(proposed: str | None, *, window: Window, known: frozenset[str]) -> str | None:
+    """Sprint D2 — a subject is a person or thing somebody named: the
+    owner rule, and never a speaker label."""
+    name = accept_name(proposed, window=window, known=known)
+    return support.real_name(name)
+
+
 def _attribute(
     fact: schema.Fact, turn: Turn, window: Window, people: frozenset[str], stats: VerifyStats
 ) -> tuple[str | None, list[str]]:
@@ -1494,8 +1524,9 @@ def _attribute(
         return actor, []
     if fact.certainty not in support.UNSURE_CERTAINTIES:
         return None, []
-    if turn.clip or not turn.speaker_name:
-        # Quoted, not present — or not named yet. No actor is invented.
+    if turn.clip or not support.real_name(turn.speaker_name):
+        # Quoted, not present — or not named yet ("Speaker 1" is a label,
+        # not a person). No actor is invented.
         stats.attribution_missing += 1
         return None, [ATTRIBUTION_MISSING]
     stats.attribution_speaker += 1

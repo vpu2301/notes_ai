@@ -11,8 +11,6 @@ amendment after r03, §2.6 and §2.9).
 * :func:`chapters` — when the topics pass fails on a long recording, the
   facts grouped by time, headed by their first timestamp and the name the
   span mentions most.
-* :func:`reduce_blocks` — a long recording's facts cut into time-contiguous
-  blocks for the two-stage topics pass (A-12).
 
 Pure. Facts and values in, strings and structures out.
 """
@@ -57,7 +55,7 @@ TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
         "sales_call": "Продажний дзвінок",
         "interview": "Інтерв'ю",
         "one_on_one": "Розмова один на один",
-        "podcast_broadcast": "Випуск подкасту",
+        "podcast_broadcast": "Епізод подкасту",
         "lecture_webinar": "Лекція",
         "voice_memo": "Голосова нотатка",
         "presentation_demo": "Презентація",
@@ -98,8 +96,6 @@ SPAN_MAX_MS: Final = 3 * 60_000
 # A name said across most of the recording is its subject, not what one
 # part of it is about: it does not head a chapter.
 TITLE_NAME_MAX_SPAN_SHARE: Final = 0.5
-REDUCE_MAX_BLOCKS: Final = 8
-REDUCE_MIN_BLOCK_FACTS: Final = 4
 
 
 def _pick(table: Mapping[str, object], language: str) -> object:
@@ -302,14 +298,3 @@ def chapters(
             )
         )
     return out
-
-
-def reduce_blocks(facts: list[VerifiedFact]) -> list[list[VerifiedFact]]:
-    """A-12: time-contiguous blocks of ≥ 4 facts, at most 8, for the
-    two-stage topics pass."""
-    blocks = _spans(facts, REDUCE_MIN_BLOCK_FACTS)
-    while len(blocks) > REDUCE_MAX_BLOCKS:
-        # Merge the smallest adjacent pair.
-        k = min(range(len(blocks) - 1), key=lambda i: len(blocks[i]) + len(blocks[i + 1]))
-        blocks[k : k + 2] = [blocks[k] + blocks[k + 1]]
-    return blocks

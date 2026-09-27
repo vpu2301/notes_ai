@@ -190,7 +190,9 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     # D1 — no note below the document standard is written: lint, repair,
     # fall back, record (stats.lint). D2's regeneration hook is not merged,
     # so nothing is regenerated. Never raises.
-    document = await doclint.enforce(document, known=frozenset(known_people))
+    document = await doclint.enforce(
+        document, regenerate=document.regenerator, known=frozenset(known_people)
+    )
 
     # ── Write #1: what the reader came for ──────────────────────────
     items_sections = [s for s in document.sections if s.role in ITEM_ROLES]
@@ -440,6 +442,8 @@ _ROW_KIND: Final[dict[str, str]] = {
     "framing": "framing",
     "bullet": "topic_bullet",
     "date": "date",
+    # Sprint D2 T2 — a quote sub-point is a topic bullet row (no migration).
+    "quote": "topic_bullet",
 }
 # Least sure last: a line resting on several facts is as sure as its
 # weakest one.

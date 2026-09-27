@@ -56,8 +56,9 @@ FACT_KINDS: Final[tuple[str, ...]] = (
 # cap from its length (Q2: 8–24), so this is a default, not a ceiling.
 MAX_FACTS_PER_WINDOW: Final = 12
 MAX_FACT_CHARS: Final = 240
+MAX_SUBJECT_CHARS: Final = 60
 MAX_TOPIC_TITLE_CHARS: Final = 80
-MAX_SUMMARY_SENTENCES: Final = 5
+MAX_SUMMARY_SENTENCES: Final = 6  # the standard §2: 3–6
 MIN_TOPICS: Final = 2
 # Fewer verified facts than this and the conversation is one list.
 MIN_FACTS_FOR_TOPICS: Final = 5
@@ -126,6 +127,10 @@ class Fact(BaseModel):
     """Q4 — who holds this position: a speaker, or a person or organisation
     the speaker reports. Verified like an owner; null for a plain fact."""
     attributed_to: str | None = None
+    """Sprint D2 — who the sentence is about when ``text`` would otherwise
+    open with a pronoun ("he is annoyed …" → "Marek Quill"). Verified like
+    an owner, over the window."""
+    subject: str | None = Field(default=None, max_length=MAX_SUBJECT_CHARS)
     """F3 — a `figure`: the quantity (`name`), the number as spoken
     (`value`), its `unit` and the speaker's own `qualifier`. An
     `introduction`: the person (`name`), `role`, `organisation` and a
@@ -186,8 +191,11 @@ MAX_CHILDREN: Final = 3
 class SubPoint(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    text: str = Field(max_length=MAX_FACT_CHARS)
+    text: str = Field(default="", max_length=MAX_FACT_CHARS)
     fact_ids: list[str] = Field(default_factory=list)
+    # Sprint D2 T2 — a quote sub-point names the fact whose words it is;
+    # code writes it from that fact's quote, never from `text`.
+    quote_of: str | None = None
 
 
 class TopicBullet(BaseModel):
@@ -253,6 +261,7 @@ def extract_schema(
         "turn": {"type": "integer"},
         "certainty": {"type": ["string", "null"], "enum": [*CERTAINTIES, None]},
         "attributed_to": {"type": ["string", "null"], "maxLength": 60},
+        "subject": {"type": ["string", "null"], "maxLength": MAX_SUBJECT_CHARS},
     }
     if carried_items:
         # A completion may only point at an item we already had, by its
@@ -580,6 +589,74 @@ BLOCK_TOPIC_SCHEMA: Final[dict[str, Any]] = {
             **REDUCE_TOPICS_SCHEMA["properties"]["topics"],
             "maxItems": 1,
             "minItems": 1,
+        }
+    },
+}
+
+
+# ── Sprint D2: one block of the recording, and heading merges ───────
+
+MIN_BLOCK_HEADING_CHARS: Final = 3
+MAX_BLOCK_BULLETS: Final = 6
+
+
+class BlockOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    heading: str = Field(default="", max_length=MAX_TOPIC_TITLE_CHARS)
+    bullets: list[TopicBullet] = Field(default_factory=list)
+
+
+class MergeOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    merges: list[list[int]] = Field(default_factory=list)
+
+
+_CHILD_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["text", "fact_ids"],
+    "properties": {
+        "text": {"type": "string", "maxLength": MAX_FACT_CHARS},
+        "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "quote_of": {"type": ["string", "null"]},
+    },
+}
+BLOCK_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["heading", "bullets"],
+    "properties": {
+        "heading": {"type": "string", "maxLength": MAX_TOPIC_TITLE_CHARS},
+        "bullets": {
+            "type": "array",
+            "maxItems": MAX_BLOCK_BULLETS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "fact_ids"],
+                "properties": {
+                    "text": {"type": "string", "maxLength": MAX_FACT_CHARS},
+                    "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                    "children": {
+                        "type": "array",
+                        "maxItems": MAX_CHILDREN,
+                        "items": _CHILD_SCHEMA,
+                    },
+                },
+            },
+        },
+    },
+}
+MERGE_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["merges"],
+    "properties": {
+        "merges": {
+            "type": "array",
+            "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer"}},
         }
     },
 }

@@ -332,12 +332,21 @@ def _names(text: str, ctx: LintContext) -> list[str]:
     a name is two or more capitalised words in a row, an acronym, or a name
     the recording knows; elsewhere any capitalised non-initial word."""
     if ctx.language == "de":
-        out = [m.group(0) for m in _CAPITAL_RUN.finditer(text)]
+        out = support.capital_runs(text)
         out += _ACRONYM.findall(text)
         out += support.entities_in(text, ctx.language, ctx.known)
     else:
         out = support.names_in(text)
     return list(dict.fromkeys(out))
+
+
+def unsupported_names(
+    text: str, evidence: str, language: str, known: frozenset[str] = frozenset()
+) -> list[str]:
+    """Names in a heading or title that the evidence does not say — German
+    read by runs and acronyms (every German noun is capitalised)."""
+    ctx = LintContext(language=language, speech_ms=0, known=known)
+    return [n for n in _names(text, ctx) if not _supported(n, evidence)]
 
 
 def _supported(name: str, evidence: str) -> bool:
@@ -739,6 +748,14 @@ def _pair(sections: Sequence[RenderedSection], a: int, b: int) -> bool:
 # ── repair ──────────────────────────────────────────────────────────
 
 
+def has_label(text: str) -> bool:
+    return bool(_LABEL.search(text))
+
+
+def text_of(section: RenderedSection, lines: Sequence[Line]) -> str:
+    return _text_of(section, lines)
+
+
 def _text_of(section: RenderedSection, lines: Sequence[Line]) -> str:
     if section.section_key == roles.OVERVIEW_KEY:
         first = [ln.text for ln in lines if ln.kind in ("framing", "presenter")]
@@ -815,7 +832,7 @@ def _drop_lines(s: RenderedSection, ctx: LintContext, done: Counter[str]) -> Ren
     parent_tokens: frozenset[str] = frozenset()
     voice = _FIRST_PERSON.get(ctx.language, _FIRST_PERSON["en"])
     for ln in s.lines:
-        child = _is_bullet(ln) and _is_child(ln)
+        child = (_is_bullet(ln) or ln.kind == "quote") and _is_child(ln)
         if child:
             if dropped_parent:
                 continue
@@ -974,7 +991,7 @@ def _fallback_heading(s: RenderedSection, ctx: LintContext) -> str:
     name = overview._top_name(facts, ctx.language, ctx.known)
     if not name:
         # German names the recording does not know: runs of capitalised words.
-        runs = Counter(m.group(0) for f in facts for m in _CAPITAL_RUN.finditer(f.text))
+        runs = Counter(run for f in facts for run in support.capital_runs(f.text))
         name = runs.most_common(1)[0][0] if runs else ""
     stamp = overview.mmss(min(f.start_ms for f in facts))
     return f"{stamp} — {name}" if name else stamp
@@ -1263,6 +1280,10 @@ def context_of(
     orientation = (document.brief or {}).get("orientation") or {}
     names = set(known) | set(orientation.get("names") or [])
     names |= {f.person.name for f in document.facts if getattr(f, "person", None)}
+    # Sprint D2 — a verified subject or holder is a name.
+    names |= {
+        n for f in document.facts for n in (getattr(f, "subject", None), f.attributed_to) if n
+    }
     names |= {n.split(" (")[0] for n in orientation.get("guests") or []}
     names |= set(orientation.get("speakers") or [])
     return LintContext(
@@ -1306,6 +1327,8 @@ async def enforce(
             if fresh:
                 sections = list(fresh)
                 regenerated = len(requests)
+                # The hook may have added facts: the lint reads them too.
+                ctx = context_of(document, known=known, title=title)
         repaired, done = repair(sections, ctx)
         report = LintReport(findings, repaired, done, check(repaired, ctx), regenerated)
         document.sections = report.repaired

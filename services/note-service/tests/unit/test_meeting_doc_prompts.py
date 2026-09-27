@@ -47,6 +47,7 @@ PINNED: dict[str, str] = {
     "2026-10-19": "7145b51eb8abe1ee535a7a6b35773879b0e860a93ff16a44c05510b8b264c33f",  # F3 amendment: scene example, specific claims
     "2026-10-20": "847a3d2c44452868a551f8752f9d54c199f3d756ca8cfd1914f1eb133a34533a",  # F3 amendment: block headings, summary skeleton
     "2026-10-21": "61f351fc9b999eb4463868fc93fb4573c4931353ebf766f3364b0fbe04afc4f3",  # document standard §1: title 30–80 characters, one colon
+    "2026-10-22": "a2bde109721df2d6b242a5249d9be3a1b39b7184e8d41e0ab27b980f14d3a354",  # Sprint D2: blocks, phase headings, quote children, subjects, merges, summary over blocks
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")

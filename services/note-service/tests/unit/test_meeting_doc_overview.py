@@ -51,7 +51,7 @@ def _recording(turns: int, *, voices: tuple[str, ...] = ("SPEAKER_1", "SPEAKER_2
     return {"language": "de", "transcript": transcript}
 
 
-def _run(meeting: dict, provider: ScriptedProvider) -> pipeline.DocumentResult:
+def _run(meeting: dict, provider: ScriptedProvider, **kw: Any) -> pipeline.DocumentResult:
     return asyncio.run(
         pipeline.run(
             as_result(meeting),
@@ -59,12 +59,14 @@ def _run(meeting: dict, provider: ScriptedProvider) -> pipeline.DocumentResult:
             role_by_key={},
             language="de",
             meeting_date=date(2026, 9, 22),
+            **kw,
         )
     )
 
 
 FAIL_ALL: dict[str, Any] = {
-    "topics": lambda facts: {"topics": []},
+    # Sprint D2: every block's call answers nothing usable.
+    "block": lambda facts: {"heading": "", "bullets": []},
     "summary": lambda facts: {"summary": []},
 }
 
@@ -185,15 +187,6 @@ def test_a_chapter_writes_a_fact_that_names_nothing_only_when_nothing_else_does(
     assert len(bullets) == 3
 
 
-def test_reduce_blocks_are_contiguous_and_bounded() -> None:
-    facts = [_vf(f"Claim {n}", n * 20_000) for n in range(90)]  # 30 minutes, one window
-    blocks = overview.reduce_blocks(facts)
-    assert 2 <= len(blocks) <= overview.REDUCE_MAX_BLOCKS
-    assert all(len(b) >= overview.REDUCE_MIN_BLOCK_FACTS for b in blocks)
-    flat = [f for b in blocks for f in b]
-    assert flat == sorted(facts, key=lambda f: f.start_ms)
-
-
 # ── The pipeline ────────────────────────────────────────────────────
 
 
@@ -207,29 +200,35 @@ def test_every_model_pass_failing_still_writes_prose_and_chapters() -> None:
     document = _run(_recording(40), ScriptedProvider(overrides=FAIL_ALL))  # 13 minutes
     assert document.stats["summary_ladder"] == "composed"
     assert document.stats["topics_fallback"] == "chapters"
-    assert document.stats["topics_failure"] in ("too_few_topics", "all_bullets_unsupported")
+    assert document.stats["block_chapters"] == document.stats["blocks"] >= 3
     top = document.sections[0]
     paragraphs = top.text.split("\n\n")
     assert len(paragraphs) == 2
     assert len(paragraphs[1].splitlines()) >= 3
     assert all(line.fact_ids for line in top.lines)
     assert _bullets_above_first_heading(document) == 0
-    # A chapter whose facts the composed prose already says gives its
-    # remaining bullets to the next one (render's redundancy rule).
     chapters = [s for s in document.sections if s.role == roles.TOPICS]
     assert len(chapters) >= 2
     assert all(re.match(r"^\d\d:\d\d( — .+)?$", s.title or "") for s in chapters)
 
 
-def test_a_short_recording_is_not_chaptered() -> None:
+def test_a_failed_block_is_its_chapter_at_any_length() -> None:
+    """Sprint D2 T1 supersedes §2.6's ten-minute rule: a block whose call
+    fails twice renders its facts by time under its name and time."""
     document = _run(_recording(20), ScriptedProvider(overrides=FAIL_ALL))  # under 7 minutes
-    assert document.stats["topics_fallback"] is None
-    assert not [s for s in document.sections if s.role == roles.TOPICS]
+    assert document.stats["block_calls"] == 2 * document.stats["blocks"]
     assert _bullets_above_first_heading(document) == 0
 
 
 def test_the_model_summary_is_the_second_paragraph_and_speakers_stay_code() -> None:
-    document = _run(_recording(12, voices=("SPEAKER_1",)), ScriptedProvider())
+    from note_service.domain.meeting_doc import types
+
+    document = _run(
+        _recording(12, voices=("SPEAKER_1",)),
+        ScriptedProvider(),
+        family=types.family_for_recording_type("podcast_broadcast"),
+        recording_type="podcast_broadcast",
+    )
     assert document.stats["summary_ladder"] == "model"
     top = document.sections[0]
     first, second = top.text.split("\n\n")
@@ -239,35 +238,39 @@ def test_the_model_summary_is_the_second_paragraph_and_speakers_stay_code() -> N
     ] * len(second.splitlines())
 
 
+def test_a_meeting_names_nobody_by_role() -> None:
+    """Decision 5: a meeting has participants, named only when verified."""
+    document = _run(_recording(12, voices=("SPEAKER_1",)), ScriptedProvider())
+    assert "Erzähler" not in document.sections[0].text
+
+
 def test_two_unnamed_voices_sharing_the_talk_are_not_a_narrator() -> None:
     document = _run(_recording(12), ScriptedProvider())
     assert "Erzähler" not in document.sections[0].text
 
 
-def test_a_long_recording_asks_for_topics_block_by_block_and_merges_same_headings() -> None:
+def test_a_long_recording_asks_block_by_block_and_merges_only_within_the_band() -> None:
     def block(facts: list[tuple[str, str, str]]) -> dict:
         found = [m[1] for _i, _k, t in facts if (m := re.search(r"traf (.+?) in", t))]
         name = max(set(found), key=found.count) if found else "Daten"
         return {
-            "topics": [
-                {
-                    "title": f"{name} und die Investoren",
-                    "fact_ids": [i for i, _k, _t in facts],
-                    "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[:3]],
-                }
-            ]
+            "heading": f"{name} und die Investoren in Kalifornien",
+            "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[:3]],
         }
 
-    provider = ScriptedProvider(overrides={"topics": block})
-    document = _run(_recording(100), provider)  # 33 minutes, > 40 facts
-    assert len(document.facts) > pipeline.TWO_STAGE_MIN_FACTS
-    calls = [c for c in provider.calls if c[0] == "topics"]
-    assert 2 <= len(calls) <= overview.REDUCE_MAX_BLOCKS
+    def merge(_facts: list) -> dict:
+        return {"merges": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]]}
+
+    provider = ScriptedProvider(overrides={"block": block, "merge": merge})
+    document = _run(_recording(100), provider)  # 33 minutes
+    calls = [c for c in provider.calls if c[0] == "block"]
+    assert len(calls) == document.stats["blocks"] >= 6
+    assert [c for c in provider.calls if c[0] == "merge"]
     assert document.stats["topics_fallback"] is None
     titles = [s.title for s in document.sections if s.role == roles.TOPICS]
-    assert len(titles) >= 2
-    # Neighbouring blocks with the same heading are one topic.
-    assert all(a != b for a, b in zip(titles, titles[1:], strict=False))
+    # Every proposed merge would have gone under the band: most are refused.
+    assert document.stats["merges_refused"] >= 1
+    assert len(titles) >= 6
 
 
 # ── §2.10 the support gate per language ─────────────────────────────
@@ -335,6 +338,7 @@ def test_introductions_sit_in_the_first_paragraph_and_never_read_as_turns() -> N
 
 
 def test_default_speaker_names_are_nobody() -> None:
+    from note_service.domain.meeting_doc import compose, roles_table
     from note_service.domain.meeting_doc.windows import Turn
 
     turns = [
@@ -342,9 +346,18 @@ def test_default_speaker_names_are_nobody() -> None:
         Turn(1, "UNKNOWN", "UNKNOWN", "Werbung", 50_000, 52_000),
         Turn(2, "SPEAKER_2", "Speaker 2", "Antwort", 52_000, 60_000),
     ]
-    assert pipeline._speakers(turns, [], "de") == ["Erzähler/in"]
-    named = [*turns, Turn(3, "SPEAKER_3", "Ada Lovelace", "Hallo", 60_000, 61_000)]
-    assert pipeline._speakers(named, [], "de") == ["Ada Lovelace"]
+    table = roles_table.build(turns, [], "podcast_broadcast")
+    assert compose.speakers_of(table, "de") == (["Erzähler/in"], [])
+    named = [
+        *turns,
+        *(
+            Turn(3 + n, "SPEAKER_3", "Ada Lovelace", "Hallo", 60_000 + n, 61_000 + n)
+            for n in range(3)
+        ),
+    ]
+    table = roles_table.build(named, [], "meeting")
+    assert "Ada Lovelace" in compose.speakers_of(table, "de")[0]
+    assert all("Speaker" not in s for s in compose.speakers_of(table, "de")[0])
 
 
 def test_composed_prose_passes_over_a_part_that_names_nothing() -> None:

@@ -117,6 +117,11 @@ class Gold(_Model):
     figures: list[GoldFigure] = Field(default_factory=list)
     presenter: GoldPresenter | None = None
     contact: list[str] = Field(default_factory=list)
+    # Sprint D2 — who each voice is (label → narrator | host | guest |
+    # interviewee | participant | clip | advert).
+    roles: dict[str, Literal[
+        "narrator", "host", "guest", "interviewee", "participant", "clip", "advert"
+    ]] = Field(default_factory=dict)  # fmt: skip
 
 
 class Meeting(_Model):

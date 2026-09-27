@@ -52,6 +52,8 @@ def step_of(schema: dict[str, Any] | None) -> str:
     for key in (
         "facts",
         "conversation_type",
+        "heading",
+        "merges",
         "topics",
         "summary",
         "corrections",
@@ -66,6 +68,8 @@ def step_of(schema: dict[str, Any] | None) -> str:
                 "conversation_type": "context",
                 "corrections": "entities",
                 "recording_type": "classify",
+                "heading": "block",
+                "merges": "merge",
             }.get(key, key)
     return "unknown"
 
@@ -176,6 +180,20 @@ class ScriptedProvider:
                 if group
             ]
         }
+
+    def _block(self, _prompt: str, facts: list[tuple[str, str, str]]) -> dict[str, Any]:
+        """Sprint D2 — one block: a heading from its first fact's words and
+        its first facts as bullets."""
+        if not facts:
+            return {"heading": "", "bullets": []}
+        heading = " ".join(facts[0][2].split()[:5])
+        return {
+            "heading": heading,
+            "bullets": [{"text": text, "fact_ids": [fid]} for fid, _k, text in facts[:4]],
+        }
+
+    def _merge(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
+        return {"merges": []}
 
     def _figures(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
         return {"figures": []}

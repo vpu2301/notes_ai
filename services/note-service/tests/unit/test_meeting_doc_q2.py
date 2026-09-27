@@ -307,7 +307,7 @@ def _meeting_with(
     summary=None, topics=None, context=None
 ) -> tuple[pipeline.DocumentResult, ScriptedProvider]:  # noqa: ANN001
     overrides = {
-        k: v for k, v in (("summary", summary), ("topics", topics), ("context", context)) if v
+        k: v for k, v in (("summary", summary), ("block", topics), ("context", context)) if v
     }
     provider = ScriptedProvider(overrides=overrides)
     return _run(load_fixture("m06_de_news_podcast"), provider), provider
@@ -353,36 +353,24 @@ def test_three_failures_in_five_retry_strictly_then_fall_back_to_key_facts() -> 
 
 
 def test_a_topic_left_with_one_bullet_is_not_a_topic() -> None:
-    def topics(facts):  # noqa: ANN001, ANN202
+    """Sprint D2: a block whose answer keeps one supported bullet (the other
+    invented) is asked again, then written as its chapter — the model's
+    heading for it never appears."""
+
+    def block(facts):  # noqa: ANN001, ANN202
         return {
-            "topics": [
-                {
-                    "title": "Rente",
-                    "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[:2]],
-                },
-                {
-                    "title": "Häfen",
-                    "bullets": [{"text": t, "fact_ids": [i]} for i, _k, t in facts[2:4]],
-                },
-                {
-                    "title": "Erfunden",
-                    "bullets": [
-                        {"text": facts[4][2], "fact_ids": [facts[4][0]]},
-                        {"text": "Der Kanzler tritt zurück", "fact_ids": [facts[4][0]]},
-                    ],
-                },
-            ]
+            "heading": "Erfundenes über den Kanzler",
+            "bullets": [
+                {"text": facts[0][2], "fact_ids": [facts[0][0]]},
+                {"text": "Der Kanzler tritt zurück", "fact_ids": [facts[0][0]]},
+            ],
         }
 
-    def summary(facts):  # noqa: ANN001, ANN202
-        # About a fact no topic uses: since Q3 a bullet the summary already
-        # says is not written again, which would empty the topics here.
-        fid, _k, text = facts[6]
-        return {"summary": [{"sentence": text, "fact_ids": [fid]}]}
-
-    document, _ = _meeting_with(topics=topics, summary=summary)
-    titles = [s.title for s in document.sections if s.role == roles.TOPICS]
-    assert titles == ["Rente", "Häfen"]
+    document, provider = _meeting_with(topics=block)
+    titles = [s.title or "" for s in document.sections if s.role == roles.TOPICS]
+    assert "Erfundenes über den Kanzler" not in titles
+    assert document.stats["block_calls"] == 2 * document.stats["blocks"]
+    assert all("Kanzler tritt zurück" not in line.text for _key, line in document.lines)
 
 
 def test_the_november_sentence_never_reaches_the_note_of_m06() -> None:

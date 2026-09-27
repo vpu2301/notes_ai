@@ -15,6 +15,8 @@ before Q3.
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Sequence
 from typing import Any, Final
 
 from . import prompts
@@ -32,6 +34,8 @@ SOURCE_USER: Final = "user"
 SOURCE_CLASSIFIER: Final = "classifier"
 SOURCE_RULE: Final = "rule"
 SOURCE_TEMPLATE: Final = "template"
+# Sprint D2 decision 6 — code cues settled a close call.
+SOURCE_CUES: Final = "cues"
 
 # The order the model sees the types in. Not the table's order: a small
 # model picks the first option when unsure, and "meeting" first labelled
@@ -118,3 +122,49 @@ async def classify(
     if said is None:
         return "meeting", SOURCE_TEMPLATE
     return said, SOURCE_CLASSIFIER
+
+
+# ── Sprint D2 decision 6 — lecture or podcast, settled by cues ──────
+
+PODCAST: Final = "podcast_broadcast"
+LECTURE: Final = "lecture_webinar"
+CUE_PAIR: Final = frozenset({PODCAST, LECTURE})
+_SHOW_WORDS: Final = re.compile(
+    r"\b(?:podcast|folge|episode|епізод|подкаст|випуск)\b", re.IGNORECASE
+)
+_SLIDE_WORDS: Final = re.compile(
+    r"\b(?:folie|folien|slide|slides|nächstes kapitel|next slide|слайд\w*)\b", re.IGNORECASE
+)
+
+
+def type_cues(
+    turns: Sequence[Any], table: Any, adverts: Sequence[tuple[int, int]] = ()
+) -> tuple[str | None, dict[str, Any]]:
+    """``(podcast_broadcast | lecture_webinar | None, the cues)``.
+
+    Podcast: a show word or jingle, a guest interview, sound-bite clips, an
+    advert break. Lecture: one voice with no guest and no clips, slide
+    vocabulary. More cues win; a tie is None — the classifier stands."""
+    from .roles_table import ADVERT, CLIP, GUEST, INTERVIEWEE
+
+    text = " ".join(t.text for t in turns)
+    roles = [s.role for s in table.speakers.values()]
+    podcast = {
+        "show": bool(_SHOW_WORDS.search(text)),
+        "guest": any(r in (GUEST, INTERVIEWEE) for r in roles),
+        "clips": CLIP in roles,
+        "advert": bool(adverts),
+    }
+    voices = [r for r in roles if r not in (CLIP, ADVERT)]
+    lecture = {
+        "single_voice": len(voices) == 1 and not podcast["guest"] and not podcast["clips"],
+        "slides": bool(_SLIDE_WORDS.search(text)),
+    }
+    p_score, l_score = sum(podcast.values()), sum(lecture.values())
+    verdict = PODCAST if p_score > l_score else LECTURE if l_score > p_score else None
+    cues = {
+        "podcast": sorted(k for k, v in podcast.items() if v),
+        "lecture": sorted(k for k, v in lecture.items() if v),
+        "verdict": verdict or "tie",
+    }
+    return verdict, cues

@@ -176,6 +176,8 @@ LINE_KINDS: Final[frozenset[str]] = frozenset(
         "agenda",
         "note",
         "heading",
+        # Sprint D2 T2 — a quote sub-point, written by code from its fact.
+        "quote",
     }
 )
 _LINE_KIND_OF_FACT: Final[dict[str, str]] = {
@@ -577,7 +579,20 @@ def render_sections(
             bullet = patch_claim(bullet.strip(), own_facts, language)
             parent_line = Line(f"- {bullet}", "bullet", _ids(own_facts))
             topic_lines.append(parent_line)
-            for child_text, child_ids in children[:MAX_CHILDREN]:
+            for entry in children[:MAX_CHILDREN]:
+                child_text, child_ids = entry[0], entry[1]
+                if len(entry) > 2 and entry[2] == "quote":
+                    # Sprint D2 T2 — a quote sub-point, written by code from
+                    # its fact's own quote: rendered as it is, never patched.
+                    quoted = [by_id[i] for i in child_ids if i in by_id]
+                    if not quoted:
+                        continue
+                    rendered |= set(_ids(quoted))
+                    cited.extend(f for f in quoted if f not in cited)
+                    topic_lines.append(
+                        Line(f"  - {child_text}", "quote", _ids(quoted), parent=parent_line.text)
+                    )
+                    continue
                 child = _bullet_text(child_text, child_ids, by_id)
                 if child is None or not child[1]:
                     continue

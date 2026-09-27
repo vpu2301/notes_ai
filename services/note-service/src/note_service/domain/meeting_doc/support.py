@@ -869,3 +869,57 @@ def specificity(
         + (1 if has_date else 0)
         + len(_QUOTED.findall(body))
     )
+
+
+# ── Sprint D2: subjects ─────────────────────────────────────────────
+
+PRONOUN_SUBJECTS: Final[dict[str, frozenset[str]]] = {
+    "en": frozenset({"he", "she", "it", "they", "him", "her", "his", "their", "them"}),
+    "de": frozenset({"er", "sie", "es", "ihm", "ihn", "ihr", "sein", "seine", "ihre"}),
+    "uk": frozenset({"він", "вона", "воно", "вони", "його", "її", "їх", "йому", "їй"}),
+}
+# "Es gibt …", "It is …": an expletive, not a subject.
+EXPLETIVE_NEXT: Final = frozenset(
+    {"gibt", "ist", "war", "sind", "waren", "geht", "wird", "is", "was", "has", "seems"}
+)
+_CONNECTIVE_LEAD: Final = re.compile(r"^[^—]{1,20}—\s+")
+_DEFAULT_SPEAKER: Final = re.compile(
+    r"(?i)^(?:speaker[ _]?\d+|unknown(?: speaker)?|sprecher(?:in)? \d+|SPEAKER_\d+)$"
+)
+
+
+def pronoun_initial(text: str, language: str) -> bool:
+    """The sentence's subject is a bare pronoun (after a connective)."""
+    words = _CONNECTIVE_LEAD.sub("", _body(text).strip()).split()
+    if not words:
+        return False
+    first = words[0].strip(",.;:\"'„“«").casefold()
+    following = words[1].casefold() if len(words) > 1 else ""
+    pronouns = PRONOUN_SUBJECTS.get(language, PRONOUN_SUBJECTS["en"])
+    return first in pronouns and not (first in ("es", "it") and following in EXPLETIVE_NEXT)
+
+
+def real_name(name: str | None) -> str | None:
+    """A person's name — never a diarizer label or a default name."""
+    name = (name or "").strip()
+    return name if name and not _DEFAULT_SPEAKER.match(name) else None
+
+
+_CAPITAL_RUN: Final = re.compile(
+    r"(?<![\w-])[A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+(?:\s+[A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+)+"
+)
+
+
+def capital_runs(text: str) -> list[str]:
+    """Two or more capitalised words in a row ("Peter Thiel", "Total
+    Information Awareness") — a sentence's capitalised first word is not
+    part of a name ("Im Jahr" is not one)."""
+    out = []
+    for match in _CAPITAL_RUN.finditer(text):
+        words = match.group(0).split()
+        before = text[: match.start()].rstrip()
+        if not before or before[-1] in _OPENERS:
+            words = words[1:]
+        if len(words) >= 2:
+            out.append(" ".join(words))
+    return out

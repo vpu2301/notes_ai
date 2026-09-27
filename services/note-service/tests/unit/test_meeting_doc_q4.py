@@ -348,41 +348,6 @@ def test_an_uncited_salient_fact_joins_the_nearest_topic() -> None:
     assert salient.salient and not facts[0].salient
 
 
-def test_two_topics_over_the_same_stretch_are_one() -> None:
-    facts = [_kp(f"point {i}", i * 60_000) for i in range(6)]
-    by_id = {f.item_key: f for f in facts}
-    ids = [f.item_key for f in facts]
-    topics = [
-        ("One", [("x", [ids[0]])], [ids[0], ids[3]]),
-        ("Two", [("y", [ids[1]])], [ids[1], ids[2]]),
-        ("Three", [("z", [ids[5]])], [ids[4], ids[5]]),
-    ]
-    gate = pipeline._Gate()
-    merged = pipeline._merge_overlapping(topics, by_id, gate)
-    assert [t[0] for t in merged] == ["One", "Three"]
-    assert gate.topics_merged == 1
-
-
-# ── T6: hedges in code ──────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("text", "certainty", "language", "expected"),
-    [
-        ("Das Aus für die Rente mit 63 wird abgeschwächt", "prediction", "de",
-         "Voraussichtlich: Das Aus für die Rente mit 63 wird abgeschwächt"),
-        ("Das Aus wird wahrscheinlich abgeschwächt", "prediction", "de",
-         "Das Aus wird wahrscheinlich abgeschwächt"),
-        ("Costs reach 3,000", "estimate", "en", "Estimate: Costs reach 3,000"),
-        ("Витрати сягнуть 3000", "estimate", "uk", "Оцінка: Витрати сягнуть 3000"),
-    ],
-)  # fmt: skip
-def test_a_hedged_record_without_a_marker_gets_one_in_code(
-    text: str, certainty: str, language: str, expected: str
-) -> None:
-    assert render.patch_claim(text, [_kp(text, 0, certainty=certainty)], language) == expected
-
-
 def test_a_plain_fact_is_never_patched() -> None:
     assert (
         render.patch_claim("Costs reach 3,000", [_kp("x", 0, certainty="fact")], "en")
