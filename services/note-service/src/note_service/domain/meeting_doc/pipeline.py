@@ -516,6 +516,7 @@ async def run(
         "figures_dropped_name": stats.figures_dropped_name,
         "qualifiers_cleared": stats.qualifiers_cleared,
         "introductions_kept": stats.introductions_kept,
+        "introductions_demoted": stats.introductions_demoted,
         "introduction_fields_cleared": stats.introduction_fields_cleared,
         "contact_steps": stats.contact_steps,
         "example_echo_dropped": gate.counts["example"],

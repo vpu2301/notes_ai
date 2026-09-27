@@ -67,6 +67,20 @@ bullets.
   (`unsupported|number|name|example`); the F2 outcomes have their own alert,
   `NoteGenerationCopiedFacts`.
 
+## Amendment after regression case r03 (2026-09-26)
+
+- **Scenery is evidence (A-5).** A line whose verb is a perception or scene verb, whose
+  subject is generic ("Menschen", "Rauch", "camera") and which names, counts and dates
+  nothing is `descriptive`. It is stored as evidence and never rendered
+  (`stats.facts_descriptive`, gate reason `descriptive`). The extraction prompt has one
+  Quillhaven example of each side.
+- **Specificity decides what renders (A-13).** `support.specificity` counts named things,
+  numbers, dates and quoted terms. The code that writes without a model uses it: a chapter
+  drops a fact with specificity 0 when anything beside it has more, and composed prose passes
+  over a part of the recording that has none. The extraction and block prompts ask for one
+  specific claim per fact or bullet. Model-written topic bullets are not dropped for it: that
+  broke Q3's topic rules.
+
 ## Consequences
 
 - A note can get shorter: a meeting of small talk writes nothing ("Nothing worth writing was

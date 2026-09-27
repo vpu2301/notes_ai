@@ -110,7 +110,9 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
 
 # The schema's field name written into a sentence ("… fifty-eight feet
 # fact_ids:.") — a small model's echo of the answer shape, never words.
-_FIELD_LABEL: Final = re.compile(r"\s*[(\[]?\s*\bfact_?ids\b\s*[:=]?\s*[)\]]?", re.IGNORECASE)
+# "fact_ids:", "fact_id:", "(fact ids" — a schema field name echoed into
+# a line, whole or cut off (Gemma 3 4B on r03, 2026-09-27).
+_FIELD_LABEL: Final = re.compile(r"\s*[(\[]?\s*\bfact[_ ]?ids?\b\s*[:=]?\s*[)\]]?", re.IGNORECASE)
 
 
 def strip_inline_ids(text: str) -> tuple[str, list[str]]:

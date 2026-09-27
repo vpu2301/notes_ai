@@ -872,3 +872,55 @@ def test_a_name_the_recording_says_often_corrects_a_near_miss_and_nothing_else()
     assert (
         entities.correct("Peter Tiers gründet", recording_names=names)[0] == "Peter Tiers gründet"
     )
+
+
+# ── r03 on the stack model (2026-09-27): a window filed as introductions ──
+
+
+def test_an_introduction_that_introduces_nobody_is_a_key_point() -> None:
+    """Told that one line holds an introduction, Gemma 3 4B filed every
+    fact of r03's second window as one, each with its line header in the
+    text. The words were said; only the kind was wrong."""
+    line = "Das Startkapital für Palantir kommt von Thiel selbst."
+    stats = verify.VerifyStats()
+    [fact] = _verify(
+        [
+            schema.Fact(
+                kind=schema.INTRODUCTION,
+                text="Speaker 1 (07:37): Thiel gibt Palantir das Startkapital",
+                quote=f"[72] Speaker 1 (07:37): {line}",
+                turn=0,
+                name="Speaker 1",
+            )
+        ],
+        _window("Damals liegen die Informationen verstreut.", line, speaker="Speaker 1"),
+        stats=stats,
+        language="de",
+    )
+    assert fact.kind == schema.KEY_POINT and fact.person is None
+    assert fact.text == "Thiel gibt Palantir das Startkapital"
+    assert stats.introductions_demoted == 1 and stats.introductions_kept == 0
+
+
+def test_a_turn_header_without_its_bracket_is_stripped_but_a_year_is_not() -> None:
+    assert verify.strip_turn_header("Speaker 1 (06:47): Damals liegen") == "Damals liegen"
+    assert verify.strip_turn_header("[3] Anna (00:12): hi") == "hi"
+    assert verify.strip_turn_header("Budget (2026): fixed") == "Budget (2026): fixed"
+    assert verify.strip_turn_header("Mitchell (Pardo dealer): hi") == "Mitchell (Pardo dealer): hi"
+
+
+def test_a_line_with_its_header_echoed_is_still_a_copy() -> None:
+    line = "Das Startkapital für Palantir kommt von Thiel selbst."
+    [fact] = _verify(
+        [
+            schema.Fact(
+                kind=schema.KEY_POINT,
+                text=f"Speaker 1 (07:37): {line}",
+                quote=f"[72] Speaker 1 (07:37): {line}",
+                turn=0,
+            )
+        ],
+        _window("Damals liegen die Informationen verstreut.", line, speaker="Speaker 1"),
+        language="de",
+    )
+    assert fact.copied and fact.evidence_only

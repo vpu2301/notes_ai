@@ -93,6 +93,72 @@ proposes, code verifies":
 Result on the stack model, one run each (model output varies run to run):
 `docs/eval/i3-stack-model-2026-09-26.md`.
 
+## Amendment after regression case r03 (2026-09-26/27)
+
+r03 is a 11-minute German podcast on Palantir with a trailer at the start. The note called
+the trailer's voice the presenter, made a "Technische Daten" table from "Zwanzig Jahre" and
+"Eine Software", wrote scenery as key points, and rendered no headings. Fourteen issues,
+A-1 to A-14, changed these rules:
+
+- **A-1 · presenter gating.** An introduction is a `presenter` only when the voice is the
+  dominant speaker (≥ 15 % of speech, ≥ 3 turns) and no broadcast cue ("präsentiert von",
+  "jetzt im Kino", …) follows within 20 s. Any other voice with ≥ 3 turns is a `guest`
+  ("Gast: Felix Holtermann, Büroleiter beim Handelsblatt"). Anybody else is a `clip` and gets
+  no line.
+- **A-2 · adverts are exclusions.** A run of turns with an advert cue is cut before windowing
+  as `Exclusion(reason="advertisement")`, then windows are rebuilt (`stats.adverts_cut`).
+- **A-3 · figure validity.** An article is not the number one ("Eine Software"). A value of
+  one needs an explicit "one"/"eins". A unit word, a digit or a number word is not a name.
+  A bare year and a product designation are not quantities. With no unit, a quantity noun
+  must be said.
+- **A-4 · tables only where a table belongs.** Figures form a block only in a
+  `presentation_demo` or `lecture_webinar`, or when three or more give two measured
+  quantities. Anywhere else they stay rows under the statements that say them.
+- **A-7 · micro-turns.** A turn of ≤ 3 words and ≤ 1.5 s between two turns of one speaker joins
+  them (`stats.microturns_merged`). The diarizer's output is untouched.
+- **A-8 · the recording's own names.** A capitalised word said ≥ 3 times is a name the
+  recording spells. A once-said word one letter away is corrected to it ("Carp" → "Karp").
+- **A-6 · chapters.** A recording over 10 minutes whose topics fail is chaptered by time.
+  Spans are one window and at most 3 minutes, of ≥ 3 facts. Each is headed "mm:ss — Name" by
+  the name that span says most and that more than half the spans do not say
+  (`stats.topics_fallback = "chapters"`).
+- **A-10 · the overview is prose.** Paragraph 1 is composed by code: type, subject (or the
+  model's framing when the gate passes it), speakers, guest and themes. Presenter and guest
+  lines belong to paragraph 1. Paragraph 2 comes from a ladder: the model's summary, then a
+  strict retry with a skeleton of fact ids, then composed prose with connectives
+  (`stats.summary_ladder`). The key-point list is gone. A single topic keeps its heading.
+- **A-11 · the support gate per language.** A claim word also counts as supported when it
+  shares six letters in a row with an evidence word. Thresholds are en 0.5, de 0.4, uk 0.4.
+- **A-12 · two-stage topics.** Over 40 facts, topics are asked block by block (≤ 8 blocks of
+  ≥ 4 facts). Neighbouring same headings (Jaccard ≥ 0.6) merge in code. A failure is
+  recorded as `stats.topics_failure`.
+- **A-5, A-13 · scenery and specificity** are F2 rules; see ADR-0063.
+- **A-14 · phase headings.** The block prompt asks for a noun phrase naming the part of the
+  story.
+
+### Deviations from the amendment
+
+- **Overview wording has no colons.** The amendment's example reads "Sprecher: Erzähler; Gast:
+  …; Themen: …". A "Label: text" line is what `client_view.looks_like_transcript` and the
+  shared page take for a transcript turn, so paragraph 1 reads "Es sprechen Erzähler/in und
+  als Gast Felix Holtermann (Handelsblatt). Themen sind …". Connectives use a dash
+  ("Zunächst — …") so German word order is untouched.
+- **`unit_lost` replaces a unit fill.** A unit said after the value but missing from the
+  figure drops it (`figures_dropped_unit_lost`); code does not fill the unit in.
+- **Headings merge in code**, not with a third model call over the headings.
+- **"Tiers" is not flagged `(?)`.** A-8 corrects only within one letter; a word it cannot
+  place stays as said. The Corrections panel remains the way to fix it.
+- **Chapters are also split by time**, not only by window: one 4B window can hold ten minutes.
+- **"Erzähler/in" needs one voice with ≥ 60 % of the talk.** Two unnamed voices sharing it are
+  not called a narrator. "Speaker 2" and "UNKNOWN" are never listed as speakers.
+- **The thresholds are provisional.** They are the amendment's expected values. They have not
+  been calibrated: that needs a judge stronger than the model under test on
+  `eval/notes/v2`. `scripts/eval/support_calibration.py` reads `notes_eval --judge-lines`.
+- **The r03 checklist's `sprint`** is a map from check to "F3-amendment", as the checker
+  reads it. It also forbids the five claims the other product invented (§5).
+- The workspace hint for r03 was cleaned by hand (Moderator, Gregor Gysi and five role labels
+  soft-deleted). The bucket upload of r03 is not done from here.
+
 ## Consequences
 
 - A walkthrough's note leads with who presented and carries its specifications with a source per
@@ -101,4 +167,4 @@ Result on the stack model, one run each (model output varies run to run):
 - Gates (`notes_scoring.f3_gates`): figure value accuracy 1.0, recall ≥ 0.85, qualifier
   preservation 1.0, presenter ≥ 0.9 — on files whose gold has them.
 
-`PROMPT_VERSION` 2026-10-14.
+`PROMPT_VERSION` 2026-10-14; after the r03 amendment 2026-10-20.

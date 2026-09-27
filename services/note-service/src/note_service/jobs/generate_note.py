@@ -322,6 +322,11 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "speech_ms": document.stats.get("speech_ms", 0),
             "noise_overridden": document.stats.get("noise_overridden", 0),
             "summary_fallback": document.stats.get("summary_fallback"),
+            # F3 amendment after r03 — outcomes, never content.
+            "summary_ladder": document.stats.get("summary_ladder"),
+            "topics_fallback": document.stats.get("topics_fallback"),
+            "topics_failure": document.stats.get("topics_failure"),
+            "adverts_cut": document.stats.get("adverts_cut", 0),
             "prompt_version": document.stats.get("prompt_version"),
         },
     )

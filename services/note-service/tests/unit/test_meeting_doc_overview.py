@@ -357,3 +357,14 @@ def test_composed_prose_passes_over_a_part_that_names_nothing() -> None:
     ]
     out = overview.composed_sentences(facts, language="en", known=frozenset(NAMES))
     assert [ids[0] for _s, ids in out] == [f.item_key for f in facts[2:]]
+
+
+def test_an_echoed_field_name_never_reaches_a_line() -> None:
+    from note_service.domain.meeting_doc import render
+
+    for echoed in (
+        "Nach 9-11 steht das Land unter Schock. (fact_id:",
+        "Nach 9-11 steht das Land unter Schock. fact_ids:",
+        "Nach 9-11 steht das Land unter Schock. (fact ids)",
+    ):
+        assert render.strip_inline_ids(echoed)[0] == "Nach 9-11 steht das Land unter Schock."

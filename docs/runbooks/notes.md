@@ -370,9 +370,13 @@ still complete; the model is drifting.
 Summary Engine v2 (Q2). Every summary sentence, topic bullet and framing
 sentence passes a support gate against the facts it cites (`meeting_doc/
 support.py`); a failing line is dropped, and a summary where more than
-30 % fail is retried once strictly, then replaced by key-fact bullets
-(`stats.summary_fallback = "key_facts"`). A fifth of lines failing means
-notes are getting thinner, not wrong. Break it down by reason:
+30 % fail is retried once strictly with a skeleton of fact ids, then
+composed by code from the most specific facts (`stats.summary_ladder`:
+`model` / `strict` / `composed`; F3 amendment after r03). The overview is
+never a key-point list. The gate's threshold is per language
+(`support.LINE_SUPPORT_BY_LANGUAGE`, en 0.5, de/uk 0.4, provisional until
+calibrated with `scripts/eval/support_calibration.py`). A fifth of lines
+failing means notes are getting thinner, not wrong. Break it down by reason:
 
 ```sql
 SELECT prompt_version, backend,
@@ -380,7 +384,7 @@ SELECT prompt_version, backend,
        sum((stats->'lines_unsupported'->>'number')::int) AS number,
        sum((stats->'lines_unsupported'->>'unsupported')::int) AS unsupported,
        sum((stats->'lines_unsupported'->>'example')::int) AS example,
-       count(*) FILTER (WHERE stats->>'summary_fallback' = 'key_facts') AS fallbacks
+       count(*) FILTER (WHERE stats->>'summary_ladder' = 'composed') AS composed
 FROM note_generations WHERE created_at > now() - interval '6 hours'
 GROUP BY 1, 2;
 ```
@@ -444,6 +448,35 @@ GROUP BY 1, 2;
 Two rows for one quantity are a conflict the speaker made (both flagged
 `figure_conflict`), never averaged. A converted value (feet said, metres
 written) is dropped by design.
+
+### overview-and-topics
+
+F3 amendment after r03 (ADR-0064). Every note opens with two paragraphs of
+prose: what the recording is (code) and what it says (the summary ladder).
+Headings come from the topics pass; over 40 facts it runs block by block.
+When it fails on a recording over 10 minutes, the note is chaptered by time
+("07:40 — Alex Karp") instead. Nightly gates: `composed` ≤ 5 % of notes,
+`topics_failure` ≤ 5 % of podcasts and lectures.
+
+```sql
+SELECT prompt_version, backend,
+       count(*) FILTER (WHERE stats->>'summary_ladder' = 'composed') AS composed,
+       count(*) FILTER (WHERE stats->>'topics_fallback' = 'chapters') AS chaptered,
+       count(*) FILTER (WHERE stats->>'topics_failure' = 'provider_error') AS provider_error,
+       count(*) FILTER (WHERE stats->>'topics_failure' = 'schema_invalid') AS schema_invalid,
+       count(*) FILTER (WHERE stats->>'topics_failure' = 'too_few_topics') AS too_few,
+       count(*) FILTER (WHERE stats->>'topics_failure' = 'all_bullets_unsupported') AS unsupported,
+       sum((stats->>'adverts_cut')::int) AS adverts_cut,
+       count(*) AS notes
+FROM note_generations WHERE created_at > now() - interval '1 day'
+GROUP BY 1, 2;
+```
+
+`provider_error` or `schema_invalid` is the backend. `all_bullets_unsupported`
+rising with `composed` is the support gate: check the language, then the
+calibration. An advert that reached a note means a cue is missing from
+`windows.AD_CUES`; a presenter line naming a trailer voice means the
+dominant-speaker rule (`pipeline.PRESENTER_MIN_SHARE`) did not hold.
 
 ### Deploying the engine (Summary Engine v2)
 

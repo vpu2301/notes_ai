@@ -691,6 +691,9 @@ class VerifyStats:
     figures_dropped_name: int = 0
     qualifiers_cleared: int = 0
     introductions_kept: int = 0
+    # F3 amendment (r03): an "introduction" that introduces nobody, with
+    # real words behind it, is kept as a key point.
+    introductions_demoted: int = 0
     introduction_fields_cleared: int = 0
     contact_steps: int = 0
 
@@ -698,7 +701,12 @@ class VerifyStats:
 # The window shows each turn as "[3] Anna (00:12): …". A small model
 # sometimes copies that header — often with the numbers left blank,
 # "[] Anna (:): …" — into `text`, which is meant to be the claim alone.
-_TURN_HEADER: Final = re.compile(r"^\s*\[\d*\]\s*[^\[\]():\n]{0,80}?\s*\(\d{0,2}:?\d{0,2}\):\s*")
+# Or without the bracket — "Speaker 1 (06:47): …" (Gemma 3 4B on r03); that
+# form needs a real mm:ss, so "Budget (2026): …" is left alone.
+_TURN_HEADER: Final = re.compile(
+    r"^\s*(?:\[\d*\]\s*[^\[\]():\n]{0,80}?\s*\(\d{0,2}:?\d{0,2}\)"
+    r"|[^\[\]():\n]{1,40}?\s*\(\d{1,2}:\d{2}\)):\s*"
+)
 
 
 def strip_turn_header(text: str) -> str:
@@ -814,10 +822,14 @@ def verify_facts(
                 spoken, language=language, context=f"{turn.text} {following}"
             )
             if person is None:
-                stats.dropped_quote += 1
-                continue
-            stats.introduction_fields_cleared += cleared
-            stats.introductions_kept += 1
+                # The words were said; only the kind is wrong. A small
+                # model told one line holds an introduction files a whole
+                # window under it (r03, 2026-09-27).
+                kind = schema.KEY_POINT
+                stats.introductions_demoted += 1
+            else:
+                stats.introduction_fields_cleared += cleared
+                stats.introductions_kept += 1
         elif kind == schema.NEXT_STEP:
             # Addressed to the listener ("email me", "leave a comment") it is
             # the recording's call to action; otherwise a plain point.
@@ -829,7 +841,9 @@ def verify_facts(
         # F2 — a copy is evidence, not a statement, whatever its kind. A
         # copied decision is not a decision (it is somebody's words filed
         # as an outcome) and is also not rendered.
-        copied = is_copied(fact.text, fact.quote)
+        # Without an echoed line header: "Speaker 1 (07:37): <the line>" is
+        # still the line.
+        copied = is_copied(strip_turn_header(fact.text), fact.quote)
         if kind == schema.DECISION and (
             not is_decision(fact.quote, turn=turn, window=window) or copied
         ):
