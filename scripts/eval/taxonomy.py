@@ -76,6 +76,9 @@ CHECK_CODES: Final[dict[str, tuple[str, ...]]] = {
     "guest_line": ("F-ROLE",),
     "chapters_min": ("D-STRUCT",),
     "overview": ("D-ORIENT",),
+    # "lint": {"D-STRUCT": 0} — one check per code, named lint[D-STRUCT];
+    # its code is the one in brackets.
+    "lint": (),
 }
 
 # notes_scoring / notes_eval metric → codes.
@@ -113,6 +116,29 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "unspecific_bullet_rate": ("D-SPEC",),
     "words_per_minute": ("D-VOL",),
     "headings_per_10_min": ("D-STRUCT",),
+    # D1 document lint (meeting_doc/lint.py)
+    "lint_findings": (
+        "D-ORIENT",
+        "D-STRUCT",
+        "D-HEAD",
+        "D-SPEC",
+        "D-VOL",
+        "D-REF",
+        "D-LABEL",
+        "D-LANG",
+        "D-FORM",
+    ),
+    "lint_clean_rate": (
+        "D-ORIENT",
+        "D-STRUCT",
+        "D-HEAD",
+        "D-SPEC",
+        "D-VOL",
+        "D-REF",
+        "D-LABEL",
+        "D-LANG",
+        "D-FORM",
+    ),
     # The judge column
     "judge_unsupported_rate": ("F-INV", "F-DIST"),
     "judge_problems": ("F-INV", "F-DIST", "F-NUM", "F-ATTR"),
@@ -142,4 +168,6 @@ def check_codes(name: str, checklist: dict | None = None) -> tuple[str, ...]:
     if own:
         return tuple(own)
     family = name.split("[", 1)[0].split(".", 1)[0]
+    if family == "lint" and "[" in name:
+        return (name[name.index("[") + 1 : name.rindex("]")],)
     return CHECK_CODES.get(family, ())

@@ -8,7 +8,8 @@
   "guest_line": "F3-amendment",
   "chapters_min": "F3-amendment",
   "overview": "F3-amendment",
-  "every_line_cited": "F3-amendment"
+  "every_line_cited": "F3-amendment",
+  "lint": "D1"
  },
  "recording_type": "podcast_broadcast",
  "must_not_contain": [
@@ -158,5 +159,13 @@
    "F-NUM",
    "F-COV"
   ]
+ },
+ "lint": {
+  "D-ORIENT": 0,
+  "D-STRUCT": 0,
+  "D-HEAD": 0,
+  "D-LABEL": 0,
+  "D-FORM": 0,
+  "D-REF": 0
  }
 }

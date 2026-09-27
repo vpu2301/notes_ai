@@ -508,6 +508,9 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # Error taxonomy detectors (docs/eval/error-taxonomy.md).
     names = {*known_names, *(e["canonical"] for e in gold.get("entities", []))}
     row.update(score_taxonomy(meeting, produced, content, names))
+    linted = lint_produced(meeting, produced)
+    if linted is not None:
+        row["lint"] = linted.by_code()
 
     # Checklists, by index.
     row["must_contain_failed"] = [
@@ -741,6 +744,56 @@ def score_taxonomy(
     return out
 
 
+def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> Any:
+    """D1 — the engine's own document lint over a produced note (the
+    pipeline arm's sections and lines), so eval and production count the
+    same findings. None when the arm writes no sections."""
+    from note_service.domain.meeting_doc import lint
+
+    if "sections" not in produced:
+        return None
+    by_key: dict[str, list[Any]] = {}
+    for ln in produced.get("lines", []):
+        by_key.setdefault(ln.get("section_key", ""), []).append(
+            lint.LintLine(
+                text=ln["text"],
+                kind=ln.get("kind", ""),
+                fact_ids=tuple(ln.get("fact_ids") or ()),
+                child=bool(ln.get("parent")),
+                has_date=bool(ln.get("dates")),
+            )
+        )
+    sections = [
+        lint.LintSection(
+            section_key=sec["section_key"],
+            role=sec.get("role", ""),
+            title=sec.get("title"),
+            text=sec.get("text", ""),
+            lines=tuple(by_key.get(sec["section_key"], ())),
+        )
+        for sec in produced["sections"]
+    ]
+    turns = meeting.get("transcript", [])
+    duration = (turns[-1]["t_end_ms"] - turns[0]["t_start_ms"]) if turns else 0
+    gold = meeting.get("gold") or {}
+    known = frozenset(
+        w
+        for name in [
+            *gold.get("name_candidates", []),
+            *(gold.get("speakers") or {}).values(),
+            *(e["canonical"] for e in gold.get("entities", [])),
+        ]
+        for w in [name, *name.split()]
+    )
+    return lint.lint(
+        sections,
+        language=meeting.get("language", "en"),
+        duration_ms=duration,
+        fact_start_ms={f["item_key"]: f.get("start_ms", 0) for f in produced.get("facts", [])},
+        known=known,
+    )
+
+
 _PAIRS = (
     "unresolved_subject",
     "unspecific_bullets",
@@ -779,6 +832,8 @@ def aggregate(
     thirds = {k: [0, 0] for k in ("1", "2", "3")}
     excluded = [0, 0]
     invented = echo = labels = 0
+    lint_codes: dict[str, int] = {}
+    linted_docs = lint_clean = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     by_type: dict[str, list[int]] = {}
     for n, row in enumerate(rows):
@@ -796,6 +851,11 @@ def aggregate(
         invented += int(row.get("invented_claims") or 0)
         echo += int(row.get("example_echo") or 0)
         labels += int(row.get("label_lines") or 0)
+        if "lint" in row:
+            linted_docs += 1
+            lint_clean += 0 if row["lint"] else 1
+            for code, n in row["lint"].items():
+                lint_codes[code] = lint_codes.get(code, 0) + int(n)
         for key in f2:
             f2[key] += int(row.get(key) or 0)
         kind = (types or [None] * len(rows))[n] or "unlabelled"
@@ -838,6 +898,9 @@ def aggregate(
         "words_per_minute": (
             sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
         ),
+        # D1 lint: findings by code, and the share of notes with none.
+        "lint_findings": dict(sorted(lint_codes.items())),
+        "lint_clean_rate": (lint_clean / linted_docs) if linted_docs else None,
         "headings_per_10_min": (
             sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
         ),

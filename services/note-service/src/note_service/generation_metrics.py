@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from opentelemetry import metrics
 
+from .domain.meeting_doc.lint import RULES as _LINT_CODE
+
 _meter = metrics.get_meter("mdx.note.generation")
 
 generations = _meter.create_counter(
@@ -86,6 +88,12 @@ restate = _meter.create_counter(
     description="Windows asked once more to restate copied facts (labels: outcome = improved|unchanged)",
     unit="1",
 )
+# D1 — what the document lint found (docs/eval/error-taxonomy.md).
+lint_findings = _meter.create_counter(
+    "mdx_note_generation_lint_total",
+    description="Document lint findings (labels: code = D-*, rule = meeting_doc.lint.RULES)",
+    unit="1",
+)
 excluded_share = _meter.create_histogram(
     "mdx_note_generation_excluded_share",
     description="Share of speech time left out of a generation as noise (0..1)",
@@ -149,6 +157,11 @@ def record_document(stats: dict, *, backend: str) -> None:
             restate.add(int(n), {"outcome": outcome})
     if stats.get("redundant_lines"):
         redundant_lines.add(int(stats["redundant_lines"]))
+    # D1 — lint findings by taxonomy code and rule (closed vocabularies:
+    # meeting_doc.lint.RULES).
+    for rule, n in (stats.get("lint_rules") or {}).items():
+        if n:
+            lint_findings.add(int(n), {"rule": rule, "code": _LINT_CODE.get(rule, "other")})
     speech = int(stats.get("speech_ms", 0))
     if speech > 0:
         excluded_share.record(int(stats.get("excluded_ms", 0)) / speech, {"backend": backend})

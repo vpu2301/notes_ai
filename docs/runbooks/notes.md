@@ -478,6 +478,19 @@ calibration. An advert that reached a note means a cue is missing from
 `windows.AD_CUES`; a presenter line naming a trailer voice means the
 dominant-speaker rule (`pipeline.PRESENTER_MIN_SHARE`) did not hold.
 
+### document-lint
+
+D1 (ADR-0065). Every generation is linted for form; findings are counted by
+taxonomy code and rule, never with text. A code climbing after a deploy
+points at the prompt or the render; see the rule table in ADR-0065.
+
+```sql
+SELECT prompt_version, key AS code, sum(value::int) AS findings, count(*) AS notes
+FROM note_generations, jsonb_each_text(stats->'lint')
+WHERE created_at > now() - interval '1 day'
+GROUP BY 1, 2 ORDER BY 3 DESC;
+```
+
 ### Deploying the engine (Summary Engine v2)
 
 **Migrate first, then the workers.** Order (Q6 T5):

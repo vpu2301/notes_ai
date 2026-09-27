@@ -87,5 +87,9 @@ Every regression assertion, scorer and PR label references a code. The weekly qu
   The job's headline flags a code whose dismiss share rose two weeks running.
 - **PR labels.** The pull-request template asks for the codes a change addresses.
 
-Not built here: the D1 lint and the D2 sprint items (T1 volume budget, T2 phase headings in
-full, T3 subject and narrator rule, T4 role table). Their work orders are not in the repo.
+- **D1 lint.** `meeting_doc/lint.py` (ADR-0065) runs on every generation and in the eval.
+  It writes `stats.lint` by code and the metric `mdx_note_generation_lint_total{code, rule}`.
+  A checklist caps findings per code with `"lint"`.
+
+Not built here: the D2 sprint items (T1 volume budget, T2 phase headings in full, T3 subject
+and narrator rule, T4 role table). Their work orders are not in the repo.

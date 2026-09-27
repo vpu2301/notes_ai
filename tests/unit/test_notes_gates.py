@@ -69,6 +69,8 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "overview",
         # docs/eval/error-taxonomy.md — codes pinned per check
         "codes",
+        # D1 lint: findings allowed per code
+        "lint",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
     assert {f.name for f in files} >= {
@@ -619,3 +621,32 @@ def test_the_taxonomy_detectors() -> None:
     summary = notes_scoring.aggregate([row])
     assert summary["headings_per_10_min"] == 1.0
     assert summary["unspecific_bullet_rate"] == 2 / 3
+
+
+def test_the_lint_check_reads_the_engine_lint_per_code() -> None:
+    checklist = {"id": "x", "lint": {"D-ORIENT": 0, "D-VOL": 0}}
+    meeting = {
+        "language": "en",
+        "transcript": [{"t_start_ms": 0, "t_end_ms": 60_000, "text": "x", "speaker": "S"}],
+    }
+    produced = {
+        "sections": [{"section_key": "gen:x", "role": "topics", "title": "Pricing", "text": ""}],
+        "lines": [
+            {
+                "section_key": "gen:x",
+                "kind": "bullet",
+                "text": "- Acme pays 5 dollars",
+                "fact_ids": ["a"],
+            },
+            {
+                "section_key": "gen:x",
+                "kind": "bullet",
+                "text": "- Acme pays 6 dollars",
+                "fact_ids": ["a"],
+            },
+        ],
+        "facts": [],
+    }
+    results = {n: ok for n, ok, _s in notes_assert.check(checklist, produced, meeting)}
+    assert results == {"lint[D-ORIENT]": False, "lint[D-VOL]": True}  # no overview
+    assert taxonomy.check_codes("lint[D-ORIENT]") == ("D-ORIENT",)

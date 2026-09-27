@@ -218,6 +218,14 @@ def check(
         add("chapters_min", len(headed) >= int(checklist["chapters_min"]), "chapters_min")
     if "overview" in checklist:
         add_overview(checklist["overview"], produced, add)
+    # D1 — at most this many lint findings per taxonomy code.
+    if checklist.get("lint") and meeting is not None:
+        from notes_scoring import lint_produced
+
+        linted = lint_produced(meeting, produced)
+        found = linted.by_code() if linted is not None else None
+        for code, limit in sorted(checklist["lint"].items()):
+            add(f"lint[{code}]", found is not None and found.get(code, 0) <= int(limit), "lint")
     for i, topic in enumerate(checklist.get("topics", [])):
         under = [
             ln

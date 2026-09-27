@@ -32,6 +32,7 @@ from typing import Any, Final, Protocol
 
 from . import (
     entities,
+    lint,
     numbers,
     overview,
     prompts,
@@ -481,6 +482,15 @@ async def run(
         figure_tables=tables,
         recording_names=gate.known,
     )
+    # D1 — the document lint: what is wrong with the note's form, by
+    # taxonomy code. Counts only; it rewrites nothing.
+    linted = lint.lint(
+        lint.from_rendered(out.sections),
+        language=language,
+        duration_ms=duration,
+        fact_start_ms={f.item_key: f.start_ms for f in document_facts},
+        known=gate.known,
+    )
     thirds = windows.thirds(built)
     by_third = [0, 0, 0]
     for fact in document_facts:
@@ -571,6 +581,8 @@ async def run(
         "topics_merged": gate.topics_merged,
         "lines_by_third": _lines_by_third(out.sections, document_facts, thirds),
         "lines_total": sum(len(s.lines) for s in out.sections),
+        "lint": linted.by_code(),
+        "lint_rules": linted.by_rule(),
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,
