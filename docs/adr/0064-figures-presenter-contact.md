@@ -151,6 +151,9 @@ A-1 to A-14, changed these rules:
 - **Chapters are also split by time**, not only by window: one 4B window can hold ten minutes.
 - **"Erzähler/in" needs one voice with ≥ 60 % of the talk.** Two unnamed voices sharing it are
   not called a narrator. "Speaker 2" and "UNKNOWN" are never listed as speakers.
+- **F2 wins over "always two paragraphs".** When every fact is a copy, no statement is left
+  for paragraph 2 and it is not written: a transcript sentence is never a line. On r03 with
+  Gemma 3 4B that happens (`docs/eval/r03-amendment-2026-09-27.md`). Open for a product decision.
 - **The thresholds are provisional.** They are the amendment's expected values. They have not
   been calibrated: that needs a judge stronger than the model under test on
   `eval/notes/v2`. `scripts/eval/support_calibration.py` reads `notes_eval --judge-lines`.

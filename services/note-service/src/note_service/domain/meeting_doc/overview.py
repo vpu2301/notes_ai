@@ -25,7 +25,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from . import support
-from .verify import VerifiedFact, _has_date_word
+from .verify import PARAPHRASE_UNSUPPORTED, VerifiedFact, _has_date_word
 
 # What the recording is, per language (Q3's recording types).
 TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
@@ -173,7 +173,14 @@ def composed_sentences(
     joined by connectives, each citing its fact. The key facts the context
     pass named come first; otherwise the most specific fact of each part of
     the recording."""
-    usable = [f for f in facts if not f.evidence_only and f.figure is None and f.person is None]
+    usable = [
+        f
+        for f in facts
+        if not f.evidence_only
+        and f.figure is None
+        and f.person is None
+        and PARAPHRASE_UNSUPPORTED not in f.flags
+    ]
     if not usable:
         return []
     by_id = {f.item_key: f for f in usable}

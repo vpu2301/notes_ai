@@ -913,7 +913,10 @@ def verify_facts(
             support.support_ratio(text, said, language) < MIN_TEXT_SUPPORT
             or support.new_names(text, said, known)
         ):
-            if kind in _STRICT_KINDS or _NUMBER.search(text):
+            # A number the model gave and nobody said was removed above; the
+            # rest of such a line is as unsupported as the number was
+            # ("Fast Menschen sterben" from a line about the second plane).
+            if kind in _STRICT_KINDS or _NUMBER.search(text) or number_flags:
                 stats.dropped_paraphrase += 1
                 continue
             paraphrase_flags = [PARAPHRASE_UNSUPPORTED]

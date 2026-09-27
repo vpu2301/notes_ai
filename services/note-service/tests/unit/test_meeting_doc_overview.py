@@ -368,3 +368,12 @@ def test_an_echoed_field_name_never_reaches_a_line() -> None:
         "Nach 9-11 steht das Land unter Schock. (fact ids)",
     ):
         assert render.strip_inline_ids(echoed)[0] == "Nach 9-11 steht das Land unter Schock."
+
+
+def test_composed_prose_never_uses_a_fact_its_words_do_not_carry() -> None:
+    from note_service.domain.meeting_doc.verify import PARAPHRASE_UNSUPPORTED
+
+    facts = [_vf(f"Palantir hires {n + 10} people in {2000 + n}", n * 60_000) for n in range(4)]
+    facts[0] = dataclasses.replace(facts[0], flags=(PARAPHRASE_UNSUPPORTED,))
+    out = overview.composed_sentences(facts, language="en")
+    assert facts[0].item_key not in {ids[0] for _s, ids in out}

@@ -924,3 +924,21 @@ def test_a_line_with_its_header_echoed_is_still_a_copy() -> None:
         language="de",
     )
     assert fact.copied and fact.evidence_only
+
+
+def test_a_line_whose_number_was_never_said_and_whose_words_were_not_either_is_dropped() -> None:
+    stats = verify.VerifyStats()
+    kept = _verify(
+        [
+            schema.Fact(
+                kind=schema.KEY_POINT,
+                text="Fast 3000 Menschen sterben.",
+                quote="Keine 20 Minuten später fliegt ein zweites Flugzeug in den Nachbarturm.",
+                turn=1,
+            )
+        ],
+        _window("Keine 20 Minuten später fliegt ein zweites Flugzeug in den Nachbarturm."),
+        stats=stats,
+        language="de",
+    )
+    assert kept == [] and stats.dropped_paraphrase == 1
