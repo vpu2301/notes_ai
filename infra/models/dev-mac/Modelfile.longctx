@@ -1,0 +1,14 @@
+# Long-context variant of the dev-Mac chat model (Sprint L1 T1).
+#
+# Used ONLY by the eval's single-pass arm, which hands a whole transcript to
+# the model in one prompt:
+#
+#   DEV_MAC_CHAT_MODEL=notes-chat-long DEV_MAC_CONTEXT=32768 make dev-model ARGS=chat
+#   DEV_MAC_CHAT_MODEL=notes-chat-long DEV_MAC_CONTEXT=32768 \
+#       make eval-notes BACKEND=dev_mac ARM=single_pass
+#
+# 32K of q8_0 KV cache costs ~3 GiB on top of the weights: `make dev-model`
+# refuses a base model that does not fit the memory budget with it.
+FROM gemma3:4b
+PARAMETER num_ctx 32768
+PARAMETER temperature 0

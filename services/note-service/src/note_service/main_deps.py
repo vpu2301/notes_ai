@@ -29,6 +29,7 @@ from .domain.diff_cache import DiffCache
 from .domain.draft_audit_buffer import DraftAuditBuffer
 from .domain.google_calendar import GoogleCalendarClient
 from .domain.ics_calendar import IcsFeedClient
+from .domain.model_routing import load_registry, probe_chat
 from .domain.public_rate_limit import PublicRateLimiter
 from .domain.recipient_mail import ShareMailCaps
 from .domain.search_audit_buffer import SearchAuditBuffer
@@ -82,6 +83,11 @@ class ServiceState:
     # for a minute; the settings route invalidates it on write so a tier
     # change takes effect while the admin is still on the page.
     workspace_model_settings: Any
+    # Sprint L2 — the one registry this process routes with: loaded with the
+    # settings source above, probed once at startup; in dev the fallback
+    # (the Mac) is chosen here when the API key is missing or the API does
+    # not answer. None when config/models.yaml cannot be loaded at all.
+    model_registry: Any
     clips_store: EncryptedObjectStore
     clip_rate_limiter: ClipRateLimiter
     # Sprint 15: aggregated search.expanded audit (ADR-0038).
@@ -264,6 +270,9 @@ async def build_state() -> ServiceState:
         redirect_uri=settings.google_calendar_redirect_uri,
     )
 
+    workspace_model_settings = WorkspaceSettings(app_pool)
+    model_registry = await _model_registry(workspace_model_settings)
+
     return ServiceState(
         jwks_cache=jwks_cache,
         app_pool=app_pool,
@@ -278,7 +287,8 @@ async def build_state() -> ServiceState:
         audio_store=audio_store,
         transcripts_store=transcripts_store,
         job_queue=JobQueue(app_pool),
-        workspace_model_settings=WorkspaceSettings(app_pool),
+        workspace_model_settings=workspace_model_settings,
+        model_registry=model_registry,
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
         email_provider=email_provider,
@@ -303,6 +313,27 @@ async def build_state() -> ServiceState:
         clips_created_metric=clips_created_metric,
         clip_pipeline_latency_metric=clip_pipeline_latency_metric,
     )
+
+
+async def _model_registry(workspace_model_settings: Any) -> Any:
+    """Load `config/models.yaml` and probe the chat backend once (Sprint L2).
+
+    A registry that cannot load (no models.yaml on this deployment) is
+    None — the routes that need one say so on first use, as before. A
+    probe that fails on staging/prod raises: the process refuses to boot
+    rather than write notes with a processor nobody chose.
+    """
+    try:
+        registry = load_registry(workspace_model_settings)
+    except Exception:  # noqa: BLE001
+        logger.warning("models.registry_unavailable", exc_info=True)
+        return None
+    if settings.testing:
+        return registry
+    await probe_chat(registry)
+    for active in registry.active_overrides():
+        logger.info("models.route", extra=active.log_fields())
+    return registry
 
 
 async def teardown_state(state: ServiceState) -> None:

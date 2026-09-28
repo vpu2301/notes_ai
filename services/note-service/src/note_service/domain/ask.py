@@ -115,13 +115,16 @@ class NoteAsker:
         max_tokens: int,
         max_chars: int,
         settings_source: Any = None,
+        registry: Registry | None = None,
     ) -> None:
         self._config_path = config_path
         self._env = env
         self._environ = environ
         self._max_tokens = max_tokens
         self._max_chars = max_chars
-        self._registry: Registry | None = None
+        # Sprint L2: the process's registry when the service built one at
+        # startup (probed, with the dev fallback decided); else lazy as before.
+        self._registry: Registry | None = registry
         self._providers: dict[str, ChatProvider] = {}
         # Sprint 37: "Ask" follows the workspace's tier for free — same
         # registry, same settings table. A workspace that pays for the

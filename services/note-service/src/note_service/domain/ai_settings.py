@@ -181,6 +181,45 @@ async def month_to_date_cents(conn: asyncpg.Connection, *, tenant_id: UUID) -> i
     return int(total or 0)
 
 
+# What each operation's processor actually does with the data, in words a
+# customer can check against their own DPA. Sprint L2 adds the short calls.
+PURPOSES: Final[dict[str, str]] = {
+    "transcribe": "turning your recordings into text",
+    "summarize": "writing your meeting notes",
+    "understand": "answering questions about a note",
+    "embed": "search",
+    "classify": "recognising what kind of recording it is",
+    "title": "naming your notes",
+    "entities": "correcting names in your notes",
+}
+
+
+def required_processors(registry: Any) -> list[Processor]:
+    """Every processor a workspace on this environment can be routed to.
+
+    Read from the registry (the same object that routes the calls), never
+    from a list in the code: purposes and tiers come from the routing
+    table itself, so a new route cannot appear without appearing here.
+    With Sprint L2's dev override the list is what the process actually
+    resolves to — Mistral AI (EU) with the key, this machine without.
+    """
+    merged: dict[tuple[str, str], Processor] = {}
+    for info, operation, tier in registry.processor_routes():
+        name, region = (info.name or ""), (info.region or "")
+        if not name:
+            continue
+        key = (name.casefold(), region.casefold())
+        found = merged.get(key)
+        purposes = set(found.purposes if found else ())
+        tiers = set(found.tiers if found else ())
+        purposes.add(PURPOSES.get(operation, operation))
+        tiers.add(tier)
+        merged[key] = Processor(
+            name=name, region=region, purposes=tuple(sorted(purposes)), tiers=tuple(sorted(tiers))
+        )
+    return list(merged.values())
+
+
 # ── The rules (pure) ────────────────────────────────────────────────
 
 

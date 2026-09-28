@@ -37,6 +37,12 @@ from typing import Any, Final
 # German cost more characters per token than English, so the cap is in
 # characters and deliberately conservative.
 MAX_WINDOW_CHARS: Final = 6_000
+# Sprint L2 — a backend with a long context (128K: the hosted API) takes
+# windows of 16 000 characters; anything up to 32K keeps today's size. The
+# threshold sits between the two so a 32K local model never gets the
+# large window by rounding.
+LARGE_CONTEXT_TOKENS: Final = 65_536
+LARGE_WINDOW_CHARS: Final = 16_000
 # A single turn past this is a monologue; it is split at sentence ends.
 # Small enough that a window holds at least two pieces, so the overlap
 # carries real context rather than a window of one piece and nothing else.
@@ -290,6 +296,12 @@ def mark_clips(turns: list[Turn]) -> list[Turn]:
     if not clips:
         return turns
     return [replace(t, clip=True) if t.speaker_label in clips else t for t in turns]
+
+
+def window_chars(context_window: int | None) -> int:
+    """The window size for a backend's context: 16 000 characters at 128K,
+    6 000 at 32K and below (Sprint L2 T5)."""
+    return LARGE_WINDOW_CHARS if (context_window or 0) >= LARGE_CONTEXT_TOKENS else MAX_WINDOW_CHARS
 
 
 def build_windows(

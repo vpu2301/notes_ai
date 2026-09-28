@@ -51,8 +51,11 @@ class _Providers:
     for finding out that it is missing.
     """
 
-    def __init__(self, settings_source: Any = None) -> None:
-        self._registry: Registry | None = None
+    def __init__(self, settings_source: Any = None, registry: Registry | None = None) -> None:
+        # Sprint L2: the process's one registry — built and probed by
+        # `build_state()`, so the fallback chosen at startup is the one
+        # every job here routes through.
+        self._registry: Registry | None = registry
         self._cache: dict[str, Any] = {}
         self._shadow_cache: dict[str, Any] = {}
         # Sprint 37: what the workspace's admin chose, and acknowledged.
@@ -60,19 +63,15 @@ class _Providers:
         # answers from a cache that `warm()` fills before each job.
         self._settings = settings_source
 
-    def _resolve(self, workspace_id: str) -> Any:
+    def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
         if self._registry is None:
+            from .domain.model_routing import load_registry
+
             # `validate=False` for the same reason `ask.py` uses it: an
             # unrelated (ASR) misconfiguration must not stop notes being
             # written.
-            self._registry = Registry.load(
-                settings.models_config,
-                env=settings.registry_env(),
-                environ=settings.registry_environ(),
-                validate=False,
-                settings_source=(self._settings.cached if self._settings is not None else None),
-            )
-        return self._registry.resolve(workspace_id, "summarize")
+            self._registry = load_registry(self._settings)
+        return self._registry.resolve(workspace_id, operation)
 
     async def shadow(self, workspace_id: str) -> Any:
         """The candidate backend for this workspace, or None.
@@ -124,13 +123,19 @@ class _Providers:
         if self._settings is not None:
             await self._settings.refresh(tenant_id)
 
-    async def get(self, workspace_id: str) -> Any:
-        resolved = self._resolve(workspace_id)
+    async def get(self, workspace_id: str, operation: str = "summarize") -> Any:
+        """The provider for one operation; one instance per backend name,
+        so the large and the small model are two providers and two
+        operations on the same backend share one."""
+        resolved = self._resolve(workspace_id, operation)
         provider = self._cache.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)
             self._cache[resolved.name] = provider
-            logger.info("note_worker.provider_ready", extra=resolved.log_fields())
+            logger.info(
+                "note_worker.provider_ready",
+                extra={"operation": operation, **resolved.log_fields()},
+            )
         return provider
 
     def backend_of(self, workspace_id: str) -> tuple[str, int]:
@@ -167,11 +172,15 @@ async def run() -> None:
     jobs_pool = state.app_pool
     transcripts = state.transcripts_store
 
-    providers = _Providers(state.workspace_model_settings)
+    providers = _Providers(
+        state.workspace_model_settings, registry=getattr(state, "model_registry", None)
+    )
     deps = GenerationDeps(
         app_pool=app_pool,
         transcripts_store=transcripts,
         provider_for=providers.get,
+        # Sprint L2: classify/title/entities resolve on their own routing row.
+        operation_provider_for=providers.get,
         shadow_provider_for=providers.shadow,
         entity_model_tier=settings.note_entity_model_tier,
         shadow_percent=(

@@ -47,6 +47,7 @@ from ..domain.meeting_doc import agenda as agenda_rules
 from ..domain.meeting_doc import user_notes as user_notes_rules
 from ..domain.repository import get_template
 from ..notifications import emit_budget_reached
+from . import ai_settings as ai_settings_router
 from .notes_from_transcript import (
     _PROSE_HOMES,
     TEMPLATE_LANGUAGE_FALLBACK,
@@ -602,10 +603,17 @@ async def attach_transcript(
                     transcript=result,
                     reason="auto",
                     transcript_rev=int(result.get("result_rev") or 1),
+                    required_processors=ai_settings_router.required_processors(),
                 )
             except generation_service.GenerationDisabledError:
                 # The workspace turned it off. Not an error.
                 pass
+            except generation_service.ProcessorUnacknowledgedError:
+                # Sprint L2: nobody agreed to a processor in the data path;
+                # the generation view says so, the capture is still ready.
+                logger.info(
+                    "meeting.generation_blocked", extra={"reason": "processor_unacknowledged"}
+                )
             except generation_service.BudgetExceededError as exc:
                 budget_crossed = (exc.spent, exc.budget)
             except Exception:  # noqa: BLE001

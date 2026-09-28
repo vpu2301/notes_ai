@@ -31,6 +31,7 @@ def build_chat_provider(resolved: ResolvedBackend) -> ChatProvider:
             context_window=cfg.context_window,
             max_concurrency=cfg.max_concurrency,
             request_overrides=cfg.request_overrides,
+            small_model=cfg.small_model,
         )
     if resolved.kind == "recorded":
         return RecordedChatProvider(

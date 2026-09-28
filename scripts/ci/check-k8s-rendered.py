@@ -32,7 +32,9 @@ CHART = ROOT / "infra" / "k8s" / "notes"
 FORBIDDEN_LITERALS = ["dev-secret-change-in-prod", "dev-password"]
 TRUTHY_FLAGS = re.compile(
     r"(MD_OBJECT_STORE_DISABLED|MDX_DEMO_MODE|AUTH_BYPASS_DEV)"
-    r"\W+['\"]?(true|1|yes|on)['\"]?",
+    r"\W+['\"]?(true|1|yes|on)['\"]?"
+    # Sprint L2: the dev-only chat switch, set to anything, is a violation.
+    r"|MDX_DEV_[A-Z0-9_]+\W+['\"]?[A-Za-z0-9_]+",
     re.IGNORECASE,
 )
 

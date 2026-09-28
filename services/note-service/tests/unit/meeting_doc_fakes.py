@@ -53,6 +53,7 @@ def step_of(schema: dict[str, Any] | None) -> str:
         "facts",
         "conversation_type",
         "heading",
+        "bullets",
         "merges",
         "topics",
         "summary",
@@ -69,6 +70,7 @@ def step_of(schema: dict[str, Any] | None) -> str:
                 "corrections": "entities",
                 "recording_type": "classify",
                 "heading": "block",
+                "bullets": "block",
                 "merges": "merge",
             }.get(key, key)
     return "unknown"

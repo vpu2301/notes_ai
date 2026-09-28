@@ -41,11 +41,18 @@ from .protocols import (
     ShouldCancel,
 )
 from .recorded import RecordedChatProvider
-from .registry import Capabilities, Registry, ResolvedBackend, WorkspaceModelSettings
+from .registry import (
+    ActiveOverride,
+    Capabilities,
+    Registry,
+    ResolvedBackend,
+    WorkspaceModelSettings,
+)
 from .usage import UsageRecord, UsageSink, emit, set_usage_sink
 
 __all__ = [
     "ASRProvider",
+    "ActiveOverride",
     "BackendConfig",
     "Capabilities",
     "ChatProvider",

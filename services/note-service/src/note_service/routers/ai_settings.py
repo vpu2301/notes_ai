@@ -39,14 +39,10 @@ router = APIRouter(prefix="/v1/ai", tags=["ai"])
 
 _ADMIN_ROLES = frozenset({"tenant_admin"})
 
-# What each operation's processor actually does with the data, in words a
-# customer can check against their own DPA.
-PURPOSES: dict[str, str] = {
-    "transcribe": "turning your recordings into text",
-    "summarize": "writing your meeting notes",
-    "understand": "answering questions about a note",
-    "embed": "search",
-}
+# What each operation's processor does with the data lives with the rules
+# (`domain/ai_settings.PURPOSES`) since Sprint L2, so the generation gate
+# and this page read one table.
+PURPOSES = rules.PURPOSES
 
 
 class ProcessorView(BaseModel):
@@ -61,6 +57,23 @@ class ProcessorView(BaseModel):
     """Which tiers route to it (`standard`, `premium`)."""
     tiers: list[str] = []
     acknowledged: bool
+
+
+class WriterView(BaseModel):
+    """Sprint L2 — who writes the notes on this deployment right now, and
+    whether that is the configured primary or its fallback."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str
+    model_id: str | None = None
+    processor: str | None = None
+    region: str | None = None
+    primary: str
+    fallback: str | None = None
+    """None while the primary is in use; else `missing_env`, `forced` or
+    `probe_failed` — why the fallback is writing."""
+    reason: str | None = None
 
 
 class SettingsView(BaseModel):
@@ -82,6 +95,11 @@ class SettingsView(BaseModel):
     """Whether this plan may choose the premium tier at all."""
     may_choose_premium: bool
     can_edit: bool
+    """Sprint L2 — the backend writing notes on this deployment (the large
+    model), and `small` the one behind classification, titles and names.
+    None where nothing is routed."""
+    writer: WriterView | None = None
+    small_writer: WriterView | None = None
 
 
 class AcknowledgedProcessor(BaseModel):
@@ -112,37 +130,51 @@ def _required_processors() -> list[rules.Processor]:
     without appearing here.
     """
     try:
-        from models import Registry
-
-        registry = Registry.load(
-            app_settings.models_config,
-            env=app_settings.registry_env(),
-            environ=app_settings.registry_environ(),
-            validate=False,
-        )
-        merged: dict[tuple[str, str], rules.Processor] = {}
-        for info, operation, tier in registry.processor_routes():
-            name, region = (info.name or ""), (info.region or "")
-            if not name:
-                continue
-            key = (name.casefold(), region.casefold())
-            found = merged.get(key)
-            purposes = set(found.purposes if found else ())
-            tiers = set(found.tiers if found else ())
-            purposes.add(PURPOSES.get(operation, operation))
-            tiers.add(tier)
-            merged[key] = rules.Processor(
-                name=name,
-                region=region,
-                purposes=tuple(sorted(purposes)),
-                tiers=tuple(sorted(tiers)),
-            )
-        return list(merged.values())
+        return rules.required_processors(_registry())
     except Exception:  # noqa: BLE001
         # No registry on this deployment (a dev Mac with no model
         # config). An empty list is honest: nothing is routed anywhere.
         logger.warning("ai_settings.registry_unavailable", exc_info=True)
         return []
+
+
+# The other routers read the same list before starting a generation
+# (Sprint L2): a processor nobody agreed to blocks the run before a byte
+# leaves the laptop.
+def required_processors() -> list[rules.Processor]:
+    return _required_processors()
+
+
+def _registry() -> Any:
+    """The process's registry (probed at startup, fallback decided) when the
+    service built one; else a fresh load — so the page and the router read
+    the same object either way."""
+    registry = getattr(get_state(), "model_registry", None)
+    if registry is not None:
+        return registry
+    from models import Registry
+
+    return Registry.load(
+        app_settings.models_config,
+        env=app_settings.registry_env(),
+        environ=app_settings.registry_environ(),
+        validate=False,
+    )
+
+
+def _writers() -> tuple[WriterView | None, WriterView | None]:
+    """Sprint L2 — the "Notes are written by" line, from the registry."""
+    try:
+        from ..domain.model_routing import describe
+
+        described = describe(_registry())
+    except Exception:  # noqa: BLE001
+        logger.warning("ai_settings.writer_unavailable", exc_info=True)
+        return None, None
+    if not described:
+        return None, None
+    small = described.pop("small", None)
+    return WriterView(**described), (WriterView(**small) if small else None)
 
 
 async def _plan(conn: Any, tenant_id: UUID) -> tuple[str, dict[str, Any]]:
@@ -168,6 +200,7 @@ def _view(
 ) -> SettingsView:
     provider, tier, unacknowledged = rules.effective(row, processors)
     agreed = row.acknowledged_keys
+    writer, small_writer = _writers()
     return SettingsView(
         provider=row.provider,
         tier=row.tier,
@@ -198,6 +231,8 @@ def _view(
         budget_cents=budget,
         may_choose_premium=rules.may_choose_premium(plan),
         can_edit=bool(_ADMIN_ROLES & set(claims.roles)),
+        writer=writer,
+        small_writer=small_writer,
     )
 
 

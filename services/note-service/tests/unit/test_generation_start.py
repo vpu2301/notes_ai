@@ -44,7 +44,7 @@ async def test_snapshot_aad_row_id_and_job_payload_agree(monkeypatch: pytest.Mon
         assert kw["generation_id"] is not None
         return kw["generation_id"]
 
-    async def _allowed(conn: Any, *, tenant_id: UUID) -> None:
+    async def _allowed(conn: Any, *, tenant_id: UUID, **_kw) -> None:
         return None
 
     monkeypatch.setattr(gen_repo, "create", _create)

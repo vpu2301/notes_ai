@@ -74,10 +74,15 @@ class GenerationDeps:
         shadow_provider_for: Any = None,
         shadow_percent: int = 0,
         entity_model_tier: bool = False,
+        operation_provider_for: Any = None,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
         self.provider_for = provider_for
+        # Sprint L2: `(workspace_id, operation) -> provider` for the short
+        # calls (classify, title, entities), routed on their own rows. None
+        # means every call goes to the writing model, as before.
+        self.operation_provider_for = operation_provider_for
         self.audit_writer = audit_writer
         # Sprint 37 B-1: a candidate backend running beside the real one
         # on a sample of meetings, whose output is thrown away. This is
@@ -131,6 +136,9 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         return await _fail(deps, tenant_id, generation_id, "snapshot_unreadable")
 
     provider = await deps.provider_for(str(tenant_id))
+    classify_provider = await _operation_provider(deps, tenant_id, "classify", provider)
+    title_provider = await _operation_provider(deps, tenant_id, "title", provider)
+    entity_provider = await _operation_provider(deps, tenant_id, "entities", provider)
     language = str(result.get("language") or "en")
     # Relative dates resolve against the day it was RECORDED (Q3): a note
     # made from an upload days later is not "today" in its own words.
@@ -142,9 +150,12 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     turns = windows.turns_from_result(result)
     # F3 amendment: classify what the pipeline will read — adverts cut.
     turns = windows.prepare_turns(turns).turns
-    built = windows.build_windows(turns)
+    # L2 T5: the window size follows the writing model's context.
+    built = windows.build_windows(
+        turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
+    )
     recording_type, recording_source = await _recording_type(
-        provider,
+        classify_provider,
         meeting=meeting,
         template_family=template_family,
         built=built,
@@ -164,7 +175,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         generation_id=generation_id,
         requested_by=generation.requested_by,
         result=result,
-        provider=provider,
+        provider=title_provider,
         language=language,
     )
 
@@ -186,6 +197,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         name_candidates=known_people,
         glossary=glossary,
         entity_model_tier=deps.entity_model_tier,
+        entity_provider=entity_provider,
     )
     # D1 — no note below the document standard is written: lint, repair,
     # fall back, record (stats.lint). D2's regeneration hook is not merged,
@@ -355,6 +367,21 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         "sections_suggested": suggested,
         "facts": len(document.facts),
     }
+
+
+async def _operation_provider(
+    deps: GenerationDeps, tenant_id: UUID, operation: str, default: Any
+) -> Any:
+    """The provider routed for one short operation (Sprint L2), else the
+    writing model's. A routing problem for a side call never stops the
+    note: it falls back to `default` and says so."""
+    if deps.operation_provider_for is None:
+        return default
+    try:
+        return await deps.operation_provider_for(str(tenant_id), operation)
+    except Exception:  # noqa: BLE001
+        logger.warning("note_generate.operation_provider_failed", extra={"operation": operation})
+        return default
 
 
 async def _name_note(

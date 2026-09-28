@@ -115,6 +115,40 @@ class Totals:
     windows_failed: int = 0
 
 
+class _TokenTally:
+    """Sums the provider's usage records for one meeting (Sprint L2).
+
+    The pipeline arm makes dozens of calls per meeting through the shared
+    provider; the only place their token counts meet is the usage sink the
+    ledger listens to. Installed per meeting, uninstalled after — the log
+    sink comes back between meetings."""
+
+    def __init__(self) -> None:
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.calls = 0
+
+    @classmethod
+    def install(cls) -> _TokenTally:
+        from models import set_usage_sink
+
+        tally = cls()
+
+        def sink(record: Any) -> None:
+            if getattr(record, "ok", True):
+                tally.calls += 1
+                tally.input_tokens += int(getattr(record, "input_tokens", 0) or 0)
+                tally.output_tokens += int(getattr(record, "output_tokens", 0) or 0)
+
+        set_usage_sink(sink)
+        return tally
+
+    def uninstall(self) -> None:
+        from models import set_usage_sink
+
+        set_usage_sink(None)
+
+
 def transcript_text(meeting: dict[str, Any]) -> str:
     return " ".join(t["text"] for t in meeting["transcript"])
 
@@ -246,12 +280,18 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     template_family = types.family_for_type(meeting_type)
     result = as_asr_result(meeting)
     started = time.monotonic()
+    # L2 — every model call of this meeting, counted through the provider's
+    # usage records (the ledger's own source), so the cost column is real.
+    tokens = _TokenTally.install()
     # Q3: the worker's own decision — the author's type, a specific
     # template, or the classifier on the opening windows (a model call).
     turns = windows.turns_from_result(result)
     # F3 amendment: classify what the pipeline will read — adverts cut.
     turns = windows.prepare_turns(turns).turns
-    built = windows.build_windows(turns)
+    # L2 T5: the window size follows the backend's context, as in the worker.
+    built = windows.build_windows(
+        turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
+    )
     recording_type, source = await _recording_type(
         provider,
         meeting=SimpleNamespace(meeting_type=meeting_type, calendar_context={}),
@@ -286,11 +326,15 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         regenerate=document.regenerator,
         known=frozenset({*(gold.get("speakers") or {}).values()}),
     )
+    tokens.uninstall()
     if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
         raise EngineBlindError(meeting["id"])
     titles = {s.section_key: s.title for s in document.sections}
     return {
         "seconds": time.monotonic() - started,
+        "input_tokens": tokens.input_tokens,
+        "output_tokens": tokens.output_tokens,
+        "model_calls": tokens.calls,
         "lines": [
             {
                 "section_key": key,
@@ -519,6 +563,35 @@ def score(meeting: dict[str, Any], produced: dict[str, Any], totals: Totals) -> 
     return row
 
 
+def cost_summary(backend: str, totals: Totals, hours: float) -> dict[str, Any]:
+    """``cost_cents`` and ``cost_cents_per_meeting_hour`` from the token
+    totals at the rates the ledger uses; None when the backend is unpriced."""
+    try:
+        from jobs import CostTable
+        from models import UsageRecord
+
+        table = CostTable.load(REPO / "config" / "model_costs.yaml")
+        if not table.is_priced(backend):
+            return {"cost_cents": None, "cost_cents_per_meeting_hour": None}
+        cents = table.estimate_cents(
+            UsageRecord(
+                backend=backend,
+                model_id="",
+                operation="eval",
+                ok=True,
+                latency_ms=0,
+                input_tokens=totals.input_tokens,
+                output_tokens=totals.output_tokens,
+            )
+        )
+    except Exception:  # noqa: BLE001 — a missing cost table is a null column
+        return {"cost_cents": None, "cost_cents_per_meeting_hour": None}
+    return {
+        "cost_cents": round(cents, 2),
+        "cost_cents_per_meeting_hour": round(cents / hours, 2) if hours else None,
+    }
+
+
 def summarise(totals: Totals, hours: float) -> dict[str, Any]:
     def f1(p: float | None, r: float | None) -> float | None:
         return (2 * p * r / (p + r)) if (p and r) else None
@@ -662,6 +735,13 @@ _STAT_KEYS = (
     "lines_total",
     "recording_type",
     "recording_type_source",
+    # Sprint D2 / L1 — the funnel and the profile, per meeting.
+    "blocks",
+    "block_chapters",
+    "block_calls",
+    "windows_restated",
+    "summary_ladder",
+    "small_model_profile",
 )
 
 
@@ -700,6 +780,7 @@ async def main(
     save_notes: Path | None = None,
     f2_baseline: Path | None = None,
     judge_lines: Path | None = None,
+    label: str | None = None,
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
@@ -758,6 +839,9 @@ async def main(
             row.update(audit)
             row["windows"] = produced["windows"]
             row["lines"] = len(produced["lines"])
+            # L1 — what a reader gets: sections written, bullets rendered.
+            row["sections"] = len(produced.get("sections") or [])
+            row["bullets"] = sum(1 for ln in produced["lines"] if ln.get("kind") == "bullet")
             stats = produced.get("stats") or {}
             row["stats"] = {k: stats[k] for k in _STAT_KEYS if k in stats}
             if judge_ok:
@@ -790,6 +874,9 @@ async def main(
             )
         hours = totals.audio_seconds / 3600.0
         summary = summarise(totals, hours)
+        # L2 — what this run would have cost at config/model_costs.yaml's
+        # rates (the ledger's own arithmetic), per meeting-hour.
+        summary.update(cost_summary(resolved.name, totals, hours))
         summary.update(aggregate(audit_rows, types=types))
         summary["meetings_scored"] = len(audit_rows)
         summary["meetings_failed"] = sum(1 for r in rows if r.get("failed"))
@@ -818,6 +905,11 @@ async def main(
         "processor": resolved.processor.model_dump() if resolved.processor else None,
         "judge_model_id": judge_model,
         "corpus": str(corpus.relative_to(REPO)) if corpus.is_relative_to(REPO) else corpus.name,
+        # Sprint L1 — the profile and context the engine ran under, so a
+        # bake-off row can be traced to its configuration.
+        "small_model_profile": bool(resolved.caps.small_model),
+        "context_window": resolved.caps.context_window,
+        "label": label,
         "meetings": len(meetings),
         "runs": all_runs,
         # docs/eval/error-taxonomy.md — which defect each metric measures.
@@ -840,7 +932,7 @@ async def main(
         report["f2_gates"] = gates
         for name, ok in gates.items():
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")
-    path = write_report(f"notes-{arm}", resolved.name, report)
+    path = write_report(f"notes-{arm}", resolved.name, report, suffix=f"-{label}" if label else "")
     print(f"wrote {path}")
     # A hallucinated quote is a failed run, not a lower score: the whole
     # design says a fact without verbatim words does not reach the page.
@@ -879,6 +971,11 @@ if __name__ == "__main__":
         help="append every judged line (ratio, rules, verdict) as JSONL for "
         "support_calibration.py (must be under scripts/eval/local/)",
     )
+    ap.add_argument(
+        "--label",
+        default=None,
+        help="suffix for the report file name (the local bake-off writes one report per candidate)",
+    )
     args = ap.parse_args()
     ENTITY_MODEL_TIER = args.entity_model_tier
     sys.exit(
@@ -892,6 +989,7 @@ if __name__ == "__main__":
                 args.save_notes,
                 args.f2_baseline,
                 args.judge_lines,
+                args.label,
             )
         )
     )

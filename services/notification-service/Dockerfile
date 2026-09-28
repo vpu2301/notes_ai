@@ -13,6 +13,10 @@ RUN apt-get update \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
 RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
+# PyPI fetches share the link with the torch wheels of the ASR images when
+# `docker compose build` runs everything at once; bump uv's 30s default so a
+# slow index response doesn't fail the build.
+ENV UV_HTTP_TIMEOUT=600
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/

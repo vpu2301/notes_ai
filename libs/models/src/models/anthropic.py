@@ -20,6 +20,7 @@ class AnthropicProvider:
     """Satisfies ``ChatProvider`` structurally; every entry point raises."""
 
     backend = "anthropic"
+    small_model = False
 
     def __init__(self, *, model_id: str) -> None:
         self.model_id = model_id

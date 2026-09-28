@@ -15,6 +15,58 @@ Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 | Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_DIAR_ENDPOINT_URL`, `MDX_DIAR_SERVER_TOKEN`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
 | Egress | `scripts/k8s/egress-allowlist.sh`, `workers-egress-allowlist` NetworkPolicy |
 | Dev Mac | `docs/dev/models-on-mac.md`, `make dev-model` |
+| Mistral AI (EU) | `mistral_eu` / `mistral_eu_small` in `config/models.yaml`; `MISTRAL_API_KEY` (dev: `.env.local`; staging/prod: the `mdx-model-api` secret, M2) — §mistral-account |
+
+## mistral-account
+
+Sprint L2 makes Mistral's EU-hosted API the dev default for writing notes
+(`mistral_eu`, Mistral Large 3) and for the short calls (`mistral_eu_small`,
+Mistral Small 4); M2 rolls it to staging/prod. Nothing about the account
+lives in the repo but this text.
+
+1. **Organisation.** Create a Mistral AI organisation on the
+   pay-as-you-go plan (console → Organisation). Billing owner: the
+   company; contact: the founder. Region: the API is EU-hosted; the DPA
+   is the Mistral AI Data Processing Addendum for the API — file the
+   signed reference in the vendor register next to the HF one.
+2. **Training opt-out.** Organisation → Privacy: turn *off* "improve
+   Mistral's models with my data" (the default for API traffic is off;
+   confirm and screenshot for the register).
+3. **Zero data retention.** Request ZDR for the organisation through
+   Mistral support (Enterprise / ZDR form) and attach the DPA reference.
+   We make **stateless calls only** — `/v1/chat/completions` with no
+   `store`, no conversations, no batch, no files — so ZDR costs no
+   feature. Until the confirmation arrives the API's standard 30-day
+   abuse-monitoring retention applies; record the date of the request and
+   of the confirmation here.
+4. **Keys.** One key per **person** for dev (name it after the person;
+   `.env.local` only, gitignored, never in compose files or values);
+   later one key per **environment** (staging, prod) in the
+   `mdx-model-api` secret — M2. Rotate by creating the new key first,
+   then deleting the old; `models.route` on restart shows the process
+   still resolves `mistral_eu`.
+5. **Spend cap.** Set the organisation's monthly limit to **3× the
+   projected spend**: at the L2 estimate (Large 3 at $0.50/$1.50 per 1M,
+   ≈ 60k input + 12k output tokens per meeting-hour through the pipeline)
+   that is about $0.05 per meeting-hour, so 100 meeting-hours/month ≈ $5
+   → cap $15 in dev; recompute from `model_usage_monthly` before the M2
+   flip. A hit cap surfaces as `rate_limited` — jobs retry with backoff
+   and the alert (M2) fires.
+6. **Egress.** Dev has no allowlist. Staging/prod add `api.mistral.ai:443`
+   to `scripts/k8s/egress-allowlist.sh` in M2; until then a staging
+   process that resolves `mistral_eu` cannot reach it and refuses to boot
+   on the startup probe — by design.
+7. **Pins.** `mistral-large-2512` and `mistral-small-2603` are dated ids
+   (never `-latest`); a version change is a PR that updates
+   `config/models.yaml`, `docs/models/PINS.md` and `config/model_costs.yaml`
+   and re-runs `make eval-notes BACKEND=mistral_eu` — §pin-upgrade.
+
+Fallback behaviour (dev only): no key → `models.override_fallback
+reason=missing_env` and the local model writes; API not answering the
+5-second startup probe → `reason=probe_failed`; `MDX_DEV_CHAT_BACKEND=dev_mac`
+→ `reason=forced`. The AI-settings page shows "Notes are written by: …"
+from the same registry object. Staging/prod never fall back: a missing key
+or a failed probe is a `ConfigError` and the process does not start.
 
 ## warming-too-long
 

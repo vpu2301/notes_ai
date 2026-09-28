@@ -242,8 +242,13 @@ def extract_schema(
     judgement_fields: tuple[str, ...] = (),
     carried_items: int = 0,
     max_facts: int = MAX_FACTS_PER_WINDOW,
+    noise: bool = True,
 ) -> dict[str, Any]:
     """The extraction schema for ONE family.
+
+    ``noise=False`` (Sprint L1, the small-model profile) drops the ``noise``
+    field: exclusions then come from the language tag and code alone, and
+    the model has one less list to fill.
 
     Built per call rather than fixed, because the enum is the main lever
     on a small model's accuracy: a sales call chooses between ten kinds
@@ -289,10 +294,10 @@ def extract_schema(
             "type": ["string", "null"],
             "enum": [*judgement_fields, None],
         }
-    return {
+    out: dict[str, Any] = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["topic_title", "facts", "noise"],
+        "required": ["topic_title", "facts"],
         "properties": {
             "topic_title": {"type": "string", "maxLength": MAX_TOPIC_TITLE_CHARS},
             "facts": {
@@ -305,21 +310,24 @@ def extract_schema(
                     "properties": properties,
                 },
             },
-            "noise": {
-                "type": "array",
-                "maxItems": MAX_NOISE_PER_WINDOW,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["turn", "reason"],
-                    "properties": {
-                        "turn": {"type": "integer"},
-                        "reason": {"type": "string", "enum": list(NOISE_REASONS)},
-                    },
-                },
-            },
         },
     }
+    if noise:
+        out["required"].append("noise")
+        out["properties"]["noise"] = {
+            "type": "array",
+            "maxItems": MAX_NOISE_PER_WINDOW,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["turn", "reason"],
+                "properties": {
+                    "turn": {"type": "integer"},
+                    "reason": {"type": "string", "enum": list(NOISE_REASONS)},
+                },
+            },
+        }
+    return out
 
 
 EXTRACT_SCHEMA: Final[dict[str, Any]] = extract_schema()
@@ -613,6 +621,14 @@ class MergeOut(BaseModel):
     merges: list[list[int]] = Field(default_factory=list)
 
 
+class HeadingOut(BaseModel):
+    """Sprint L1 — the small-model profile's heading-only block call."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    heading: str = Field(default="", max_length=MAX_TOPIC_TITLE_CHARS)
+
+
 _CHILD_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "additionalProperties": False,
@@ -644,6 +660,34 @@ BLOCK_SCHEMA: Final[dict[str, Any]] = {
                         "maxItems": MAX_CHILDREN,
                         "items": _CHILD_SCHEMA,
                     },
+                },
+            },
+        },
+    },
+}
+# Sprint L1 T2 — the small-model profile: a heading in one call, flat bullets
+# (no children) in another, so each answer has one job.
+HEADING_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["heading"],
+    "properties": {"heading": {"type": "string", "maxLength": MAX_TOPIC_TITLE_CHARS}},
+}
+BLOCK_BULLETS_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["bullets"],
+    "properties": {
+        "bullets": {
+            "type": "array",
+            "maxItems": MAX_BLOCK_BULLETS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "fact_ids"],
+                "properties": {
+                    "text": {"type": "string", "maxLength": MAX_FACT_CHARS},
+                    "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                 },
             },
         },

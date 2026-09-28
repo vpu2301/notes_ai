@@ -115,3 +115,34 @@ def test_repo_config_file_parses_in_every_env(tmp_path: object) -> None:
         "anthropic",
     }
     assert loaded.config.backends["hosted_eu"].enabled is False
+
+
+def test_small_model_is_a_backend_field_off_by_default() -> None:
+    """Sprint L1 T2: `small_model` is read by the document engine's profile.
+    Only a backend that says so has it; the hosted ones never do."""
+    cfg = base_config()
+    cfg["backends"]["dev_mac"]["small_model"] = "${DEV_MAC_SMALL_MODEL:-true}"
+    cfg["backends"]["dev_mac"]["context_window"] = "${DEV_MAC_CONTEXT:-16384}"
+    loaded = parse_config(cfg, environ=STAGING_ENV, source="t")
+    assert loaded.config.backends["dev_mac"].small_model is True
+    assert loaded.config.backends["dev_mac"].context_window == 16384
+    assert loaded.config.backends["hf_eu"].small_model is False
+    off = parse_config(
+        cfg, environ={"DEV_MAC_SMALL_MODEL": "false", "DEV_MAC_CONTEXT": "32768"}, source="t"
+    )
+    assert off.config.backends["dev_mac"].small_model is False
+    assert off.config.backends["dev_mac"].context_window == 32768
+
+
+def test_the_repo_models_yaml_marks_only_dev_mac_as_small() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    repo = Path(__file__).resolve().parents[4]
+    raw = yaml.safe_load((repo / "config" / "models.yaml").read_text("utf-8"))
+    loaded = parse_config(raw, environ={}, source="config/models.yaml")
+    small = {name for name, b in loaded.config.backends.items() if b.small_model}
+    assert small == {"dev_mac"}
+    assert loaded.config.backends["dev_mac"].context_window == 16384
+    assert loaded.config.backends["dev_mac"].timeout_seconds == 900

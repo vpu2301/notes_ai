@@ -83,6 +83,7 @@ def get_asker() -> NoteAsker:
             max_tokens=settings.ask_max_tokens,
             max_chars=settings.ask_context_chars,
             settings_source=getattr(get_state(), "workspace_model_settings", None),
+            registry=getattr(get_state(), "model_registry", None),
         )
     return _asker
 

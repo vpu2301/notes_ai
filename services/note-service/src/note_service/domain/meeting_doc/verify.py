@@ -715,8 +715,11 @@ class VerifyStats:
 # "[] Anna (:): …" — into `text`, which is meant to be the claim alone.
 # Or without the bracket — "Speaker 1 (06:47): …" (Gemma 3 4B on r03); that
 # form needs a real mm:ss, so "Budget (2026): …" is left alone.
+# "[4] Wren (03:10):" as the window renders it; also "[4]: Wren (03:10):" —
+# a small model under the one-example profile (L1) puts a colon after the
+# bracket. The words after the header are verified exactly as before.
 _TURN_HEADER: Final = re.compile(
-    r"^\s*(?:\[\d*\]\s*[^\[\]():\n]{0,80}?\s*\(\d{0,2}:?\d{0,2}\)"
+    r"^\s*(?:\[\d*\]:?\s*[^\[\]():\n]{0,80}?\s*\(\d{0,2}:?\d{0,2}\)"
     r"|[^\[\]():\n]{1,40}?\s*\(\d{1,2}:\d{2}\)):\s*"
 )
 

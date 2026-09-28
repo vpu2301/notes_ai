@@ -694,7 +694,11 @@ export interface FromTranscriptResponse {
   /** Sprint 33: present when the engine is writing this note. */
   generation?: { id: string; status: string } | null;
   /** Sprint 37: why there is no generation, when there is none. */
-  generation_blocked?: "generation_disabled" | "budget_exceeded" | null;
+  generation_blocked?:
+    | "generation_disabled"
+    | "budget_exceeded"
+    | "processor_unacknowledged"
+    | null;
 }
 
 // ── series, carry-over and the client version (Sprint 36) ─────────────
@@ -1301,6 +1305,19 @@ export interface AiProcessor {
   acknowledged: boolean;
 }
 
+/** Sprint L2 — the backend writing notes on this deployment, and whether
+ *  it is the configured primary or its fallback (`reason` set). */
+export interface AiWriter {
+  backend: string;
+  model_id: string | null;
+  processor: string | null;
+  region: string | null;
+  primary: string;
+  fallback: string | null;
+  /** null while the primary is in use; else missing_env | forced | probe_failed. */
+  reason: string | null;
+}
+
 export interface AiSettings {
   provider: string;
   tier: string;
@@ -1315,6 +1332,9 @@ export interface AiSettings {
   budget_cents: number;
   may_choose_premium: boolean;
   can_edit: boolean;
+  /** Sprint L2 — who writes notes right now (null where nothing is routed). */
+  writer?: AiWriter | null;
+  small_writer?: AiWriter | null;
 }
 
 export interface AiSettingsUpdate {

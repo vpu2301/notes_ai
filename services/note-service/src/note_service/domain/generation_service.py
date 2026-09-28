@@ -97,6 +97,7 @@ async def start(
     transcript_rev: int = 1,
     enforce_limit: bool = False,
     priority: int | None = None,
+    required_processors: list[Any] | None = None,
 ) -> tuple[UUID, str]:
     """Snapshot, row, job. Returns ``(generation_id, status)``.
 
@@ -111,7 +112,7 @@ async def start(
     # Sprint 37: the workspace's own settings decide whether this runs at
     # all, and what it may cost. Checked HERE rather than in the worker so
     # a workspace over budget never queues work it cannot pay for.
-    await check_allowed(conn, tenant_id=tenant_id)
+    await check_allowed(conn, tenant_id=tenant_id, required_processors=required_processors)
 
     generation_id = uuid4()
     job_id = uuid4()
@@ -168,17 +169,28 @@ async def start(
     return stored_id, gen_repo.QUEUED
 
 
-async def check_allowed(conn: asyncpg.Connection, *, tenant_id: UUID) -> None:
+async def check_allowed(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    required_processors: list[Any] | None = None,
+) -> None:
     """Raise when this workspace may not generate right now.
 
-    Two reasons, both the workspace's own choice or its plan's: the admin
-    turned generation off, or the month's budget is spent. Neither is a
-    fault in the note — the note is fine, and the caller says which it is
-    rather than leaving a spinner that never resolves.
+    Three reasons, all the workspace's own choice or its plan's: the admin
+    turned generation off, a processor in the data path has not been
+    agreed to (`required_processors`, from the registry — Sprint L2), or
+    the month's budget is spent. None is a fault in the note — the note is
+    fine, and the caller says which it is rather than leaving a spinner
+    that never resolves.
     """
     row = await ai_settings.fetch(conn, tenant_id=tenant_id)
     if not row.generation_enabled:
         raise GenerationDisabledError
+    if required_processors:
+        missing = ai_settings.missing_acknowledgement(row, required_processors, None)
+        if missing:
+            raise ProcessorUnacknowledgedError(missing)
 
     record = await conn.fetchrow("SELECT plan_limits FROM tenants WHERE id = $1", tenant_id)
     limits = record["plan_limits"] if record is not None else None
@@ -188,3 +200,17 @@ async def check_allowed(conn: asyncpg.Connection, *, tenant_id: UUID) -> None:
     spent = await ai_settings.month_to_date_cents(conn, tenant_id=tenant_id)
     if spent >= budget:
         raise BudgetExceededError(spent, budget)
+
+
+class ProcessorUnacknowledgedError(Exception):
+    """A processor in this environment's data path that no admin of this
+    workspace has agreed to (Sprint L2: Mistral AI (EU) is a new identity).
+
+    Nothing is sent anywhere until they do: the create call answers
+    `generation_blocked: processor_unacknowledged` and the Data page shows
+    the dialog. `processors` is the list to show, by (name, region).
+    """
+
+    def __init__(self, processors: list[Any]) -> None:
+        super().__init__("processor_unacknowledged")
+        self.processors = processors

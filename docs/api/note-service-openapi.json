@@ -1725,7 +1725,8 @@
               {
                 "enum": [
                   "generation_disabled",
-                  "budget_exceeded"
+                  "budget_exceeded",
+                  "processor_unacknowledged"
                 ],
                 "type": "string"
               },
@@ -4027,9 +4028,29 @@
             "title": "Provider",
             "type": "string"
           },
+          "small_writer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WriterView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tier": {
             "title": "Tier",
             "type": "string"
+          },
+          "writer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WriterView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5690,6 +5711,81 @@
           "visibility"
         ],
         "title": "VisibilityRequest",
+        "type": "object"
+      },
+      "WriterView": {
+        "additionalProperties": false,
+        "description": "Sprint L2 \u2014 who writes the notes on this deployment right now, and\nwhether that is the configured primary or its fallback.",
+        "properties": {
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "string"
+          },
+          "processor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processor"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          }
+        },
+        "required": [
+          "backend",
+          "primary"
+        ],
+        "title": "WriterView",
         "type": "object"
       }
     }

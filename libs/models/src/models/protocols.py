@@ -46,6 +46,9 @@ class ChatProvider(Protocol):
 
     backend: str
     model_id: str
+    # Sprint L1: True when the backend is a small local model the document
+    # engine should give simpler work to (config/models.yaml `small_model`).
+    small_model: bool
 
     async def complete(
         self,

@@ -41,6 +41,7 @@ from ..domain import notes_repository as repo
 from ..domain.field_extraction_client import extract_fields
 from ..domain.repository import get_template
 from ..notifications import emit_budget_reached
+from . import ai_settings as ai_settings_router
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,9 @@ class FromTranscriptResponse(BaseModel):
     # Sprint 37 — why no generation, when there is none. The client says
     # "your workspace has turned this off" instead of showing a note that
     # looks like it is still thinking.
-    generation_blocked: Literal["generation_disabled", "budget_exceeded"] | None = None
+    generation_blocked: (
+        Literal["generation_disabled", "budget_exceeded", "processor_unacknowledged"] | None
+    ) = None
 
 
 class GenerationStub(BaseModel):
@@ -471,12 +474,18 @@ async def create_note_from_transcript(
                     transcript=result,
                     reason="auto",
                     transcript_rev=int(result.get("result_rev") or 1),
+                    required_processors=ai_settings_router.required_processors(),
                 )
             except generation_service.GenerationDisabledError:
                 # The workspace turned it off. Not an error, and not
                 # worth a stack trace on every upload.
                 generation_id = None
                 generation_blocked = "generation_disabled"
+            except generation_service.ProcessorUnacknowledgedError:
+                # Sprint L2: a processor in the data path nobody agreed to.
+                # The Data page shows the dialog; nothing was sent.
+                generation_id = None
+                generation_blocked = "processor_unacknowledged"
             except generation_service.BudgetExceededError as exc:
                 generation_id = None
                 generation_blocked = "budget_exceeded"

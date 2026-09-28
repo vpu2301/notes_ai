@@ -16,7 +16,11 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-CONTEXT_PROBE_TOKENS = 20_000
+# Sprint L1: the probe is sized from the backend's own `context_window`
+# (16K by default, 32K for notes-chat-long) — 60 % of it, so a server that
+# honours the Modelfile passes and one truncating to 4K fails.
+PROBE_SHARE = 0.6
+FILLER_TOKENS_PER_LINE = 14
 
 
 async def main() -> int:
@@ -44,29 +48,32 @@ async def main() -> int:
         r = await chat.complete('Reply with JSON: {"ok": true, "n": 3}', schema, max_tokens=32)
         assert r.json == {"ok": True, "n": 3}, r.text
         print(f"  ✓ chat: structured output mode '{r.structured_mode}' works")
-        # ~20k tokens of filler (≈ 4 chars/token); marker at the START.
+        # Filler worth PROBE_SHARE of the context window (≈ 14 tokens per
+        # line); marker at the START, where a truncating server loses it.
+        context = chat_backend.caps.context_window
+        probe_tokens = int(context * PROBE_SHARE)
         marker = "ZEBRA-7741"
         filler = " ".join(
             f"line {i}: the quarterly review covered revenue, hiring and the roadmap."
-            for i in range(1, 1400)
+            for i in range(1, max(2, probe_tokens // FILLER_TOKENS_PER_LINE))
         )
         prompt = f"The secret code is {marker}.\n\n{filler}\n\nWhat is the secret code? Reply with the code only."
         t0 = time.monotonic()
         r = await chat.complete(prompt, None, max_tokens=16)
         secs = time.monotonic() - t0
-        if r.input_tokens and r.input_tokens < 12_000:
+        if r.input_tokens and r.input_tokens < probe_tokens * 0.6:
             print(
-                f"  ✗ chat: server reported only {r.input_tokens} prompt tokens for a ~{CONTEXT_PROBE_TOKENS}-token probe — the context window is truncating (runbook step 2: num_ctx)"
+                f"  ✗ chat: server reported only {r.input_tokens} prompt tokens for a ~{probe_tokens}-token probe — the context window is truncating (runbook step 2: num_ctx {context})"
             )
             failures += 1
         elif marker not in r.text:
             print(
-                f"  ✗ chat: marker lost in a ~{CONTEXT_PROBE_TOKENS}-token prompt (got {r.text.strip()[:40]!r}); context too small (runbook step 2: num_ctx ≥ 32768)"
+                f"  ✗ chat: marker lost in a ~{probe_tokens}-token prompt (got {r.text.strip()[:40]!r}); context too small (runbook step 2: num_ctx ≥ {context})"
             )
             failures += 1
         else:
             print(
-                f"  ✓ chat: 20k-token context probe ok ({r.input_tokens} prompt tokens, {secs:.0f}s)"
+                f"  ✓ chat: {probe_tokens // 1000}k-token context probe ok ({r.input_tokens} prompt tokens, {secs:.0f}s; context_window {context})"
             )
     except ProviderError as exc:
         hint = (

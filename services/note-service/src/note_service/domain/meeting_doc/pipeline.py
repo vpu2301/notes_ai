@@ -79,6 +79,17 @@ RESTATE_MIN_FACTS: Final = 1
 # words is the parent again, not an elaboration.
 CHILD_RESTATES_JACCARD: Final = 0.6
 
+# Sprint L1 T2 — the small-model profile (config/models.yaml `small_model`):
+# a fixed twelve facts per window instead of the density rule, one
+# extraction example, no `noise` field, reduce calls over at most fifteen
+# facts with the heading asked separately and no sub-points, the strict
+# summary rung first, and a schema-echo retry after a malformed answer.
+# Verification is untouched: the profile changes what the model is asked,
+# never what code accepts.
+SMALL_MODEL_MAX_FACTS: Final = 12
+SMALL_MODEL_REDUCE_FACTS: Final = 15
+HEADING_MAX_TOKENS: Final = 120
+
 # A topic bullet with its sub-points: ``(text, fact ids, [(text, ids)])``.
 # A sub-point: ``(text, fact ids)``, or ``(text, fact ids, "quote")`` for a
 # quote written by code from its fact (Sprint D2 T2).
@@ -91,6 +102,9 @@ Topics = list[tuple[str, list[Bullet], list[str]]]
 class ChatLike(Protocol):
     backend: str
     model_id: str
+    # True for a small local model (the fallback path): the engine applies
+    # its small-model profile. Providers without the attribute are capable.
+    small_model: bool
 
     async def complete(
         self,
@@ -101,6 +115,12 @@ class ChatLike(Protocol):
         temperature: float = 0.0,
         system: str | None = None,
     ) -> Any: ...
+
+
+def small_model(provider: ChatLike) -> bool:
+    """Whether the profile applies: the backend says so (``small_model`` on
+    the resolved backend); a provider without the attribute is capable."""
+    return bool(getattr(provider, "small_model", False))
 
 
 @dataclass(slots=True)
@@ -170,8 +190,14 @@ async def run(
     recording_type_source: str | None = None,
     glossary: tuple[Any, ...] = (),
     entity_model_tier: bool = False,
+    entity_provider: ChatLike | None = None,
 ) -> DocumentResult:
     """Build a document from an ASR result.
+
+    ``entity_provider`` (Sprint L2) answers the entity tier when it is
+    routed to another backend than the writing model; ``provider`` by
+    default. ``provider.context_window`` sizes the windows and budgets
+    (:func:`sizes_for`): today's values up to 32K, larger ones on 128K.
 
     ``family`` (Sprint 36) decides which fact kinds this call may return
     and where each lands; ``carried`` is ``[(item_key, text)]`` for the
@@ -179,6 +205,8 @@ async def run(
     mark done — by their NUMBER in this list, never by free text.
     """
     family = family or types.FALLBACK
+    small = small_model(provider)
+    sizes = sizes_for(provider)
     kinds = types.fact_kinds(family)
     # `user_point` is the author's own; the engine never proposes one.
     offered = tuple(k for k in kinds if k != "user_point")
@@ -198,7 +226,9 @@ async def run(
         built = None
     # The worker builds the windows once, to classify the recording from
     # the first of them before extraction (Q3), and hands them in.
-    built = built if built is not None else windows.build_windows(turns)
+    built = (
+        built if built is not None else windows.build_windows(turns, max_chars=sizes.window_chars)
+    )
     meeting_date = meeting_date or date.today()
     out = DocumentResult(
         windows_total=len(built), backend=provider.backend, model_id=provider.model_id
@@ -230,12 +260,14 @@ async def run(
         return [t.number for t in window.turns if verify.calls_to_action(t.text, language)] or None
 
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
-        budget = fact_budget(window)
+        # The profile: a fixed twelve, not the density rule (Q2).
+        budget = SMALL_MODEL_MAX_FACTS if small else fact_budget(window, sizes.max_facts_budget)
         window_schema = schema.extract_schema(
             offered,
             judgement_fields=family.judgement_fields,
             carried_items=len(carried),
             max_facts=budget,
+            noise=not small,
         )
         async with semaphore:
             return window, await _extract(
@@ -248,6 +280,7 @@ async def run(
                 max_tokens=extract_tokens(budget),
                 introduction_lines=hints(window),
                 contact_lines=contact_hints(window),
+                small=small,
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
@@ -362,11 +395,13 @@ async def run(
                     judgement_fields=family.judgement_fields,
                     carried_items=len(carried),
                     max_facts=again_budget,
+                    noise=not small,
                 ),
                 carried=carried,
                 max_facts=again_budget,
                 max_tokens=extract_tokens(again_budget),
                 system_suffix=prompts.restate_suffix(language),
+                small=small,
             )
             second = check(again.facts, window, verify.VerifyStats()) if again else []
             kept, replaced = restated(kept, second)
@@ -424,6 +459,7 @@ async def run(
             | introduced
             | rec_names
         ),
+        reduce_tokens=sizes.reduce_max_tokens,
     )
 
     if document_facts:
@@ -434,7 +470,7 @@ async def run(
         # model once — before anything is written from the facts.
         people = gate.known | {g.term for g in glossary if getattr(g, "kind", "") == "person"}
         renamed = await _model_names(
-            provider,
+            entity_provider or provider,
             document_facts,
             brief,
             people=frozenset(people),
@@ -461,7 +497,15 @@ async def run(
         parts = compose.blocks(document_facts, minutes, topic_titles)
         budget = compose.VolumeBudget(minutes, len(parts))
         topics = await _reduce_blocks(
-            provider, parts, language, budget, brief=brief, gate=gate, table=table, minutes=minutes
+            provider,
+            parts,
+            language,
+            budget,
+            brief=brief,
+            gate=gate,
+            table=table,
+            minutes=minutes,
+            small=small,
         )
         if topics:
             # Q4 — an uncited fact with a number, a date or a holder is kept.
@@ -475,13 +519,14 @@ async def run(
             gate=gate,
             headings=[t[0] for t in topics or []],
             skeleton_ids=[f.item_key for f in tops],
+            small=small,
         )
     topics_fallback: str | None = "chapters" if gate.block_chapters else None
     # T5 ladder rung 3 — the summary is prose, always: composed from the most
-    # specific fact of each block when both model rungs failed.
-    ladder = "model" if summary else None
-    if summary and gate.retries:
-        ladder = "strict"
+    # specific fact of each block when both model rungs failed. Which model
+    # rung wrote it is the gate's record (the profile runs them in the other
+    # order).
+    ladder = gate.summary_rung if summary else None
     if document_facts and not summary:
         summary = (
             overview.composed_sentences(
@@ -677,6 +722,11 @@ async def run(
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,
+        # Sprint L1 — whether the small-model profile shaped this run.
+        "small_model_profile": small,
+        # Sprint L2 — the budgets this run used (from the backend's context).
+        "window_chars": sizes.window_chars,
+        "context_window": sizes.context_window,
     }
 
     async def regenerate(
@@ -694,7 +744,9 @@ async def run(
         for window in built:
             if window.index not in targets:
                 continue
-            allowance = fact_budget(window)
+            allowance = (
+                SMALL_MODEL_MAX_FACTS if small else fact_budget(window, sizes.max_facts_budget)
+            )
             again = await _extract(
                 provider,
                 window,
@@ -704,11 +756,13 @@ async def run(
                     judgement_fields=family.judgement_fields,
                     carried_items=len(carried),
                     max_facts=allowance,
+                    noise=not small,
                 ),
                 carried=carried,
                 max_facts=allowance,
                 max_tokens=extract_tokens(allowance),
                 system_suffix=prompts.subject_suffix(language),
+                small=small,
             )
             if again is None:
                 continue
@@ -821,11 +875,41 @@ def restated(
     return out, replaced
 
 
-def fact_budget(window: Window) -> int:
+def fact_budget(window: Window, max_budget: int | None = None) -> int:
     """How many facts a window may carry: one per ~250 characters, between
-    8 and 24. A dense news passage holds far more than twelve points, and
-    a cap below that is how the audit's note lost most of a story."""
-    return min(MAX_FACTS_BUDGET, max(MIN_FACTS_BUDGET, len(window.text) // 250))
+    8 and 24 (the cap scales with the window on a long-context backend).
+    A dense news passage holds far more than twelve points, and a cap
+    below that is how the audit's note lost most of a story."""
+    cap = MAX_FACTS_BUDGET if max_budget is None else max_budget
+    return min(cap, max(MIN_FACTS_BUDGET, len(window.text) // 250))
+
+
+@dataclass(frozen=True, slots=True)
+class Sizes:
+    """Sprint L2 T5 — the size constants for one backend's context."""
+
+    context_window: int
+    window_chars: int
+    extract_max_tokens: int
+    reduce_max_tokens: int
+    max_facts_budget: int
+
+
+def sizes_for(provider: ChatLike | None, context_window: int | None = None) -> Sizes:
+    """Today's values on 32K and below; on a long context (≥ 64K, the
+    hosted API's 128K) windows of 16 000 characters, budgets scaled with
+    them. The composition pass (M1 T3) is not merged, so nothing else
+    changes with the context yet."""
+    context = context_window or int(getattr(provider, "context_window", 0) or 0) or 32_768
+    chars = windows.window_chars(context)
+    scale = chars / windows.MAX_WINDOW_CHARS
+    return Sizes(
+        context_window=context,
+        window_chars=chars,
+        extract_max_tokens=round(EXTRACT_MAX_TOKENS * scale),
+        reduce_max_tokens=round(REDUCE_MAX_TOKENS * (1 + (scale - 1) / 2)),
+        max_facts_budget=round(MAX_FACTS_BUDGET * scale),
+    )
 
 
 def extract_tokens(max_facts: int) -> int:
@@ -1041,6 +1125,10 @@ class _Gate:
         )
     )
     retries: int = 0
+    """Sprint L1 — the rung that wrote the summary: ``model`` or ``strict``."""
+    summary_rung: str | None = None
+    """Sprint L2 — the output budget of a reduce call on this backend."""
+    reduce_tokens: int = REDUCE_MAX_TOKENS
     salient_appended: int = 0
     topics_merged: int = 0
     """F2 — sub-points that restated their parent; openers dropped."""
@@ -1169,10 +1257,13 @@ async def _extract(
     system_suffix: str | None = None,
     introduction_lines: list[int] | None = None,
     contact_lines: list[int] | None = None,
+    small: bool = False,
 ) -> schema.ExtractOut | None:
     """One window. ``None`` when the model could not answer in shape.
     ``system_suffix`` (F2) is the rule the last answer broke;
-    ``introduction_lines`` (F3) the lines code found an introduction in."""
+    ``introduction_lines`` (F3) the lines code found an introduction in.
+    ``small`` (L1) is the profile: one example, no noise rule, and the
+    retry after a malformed answer carries the schema."""
     prompt = prompts.extract_prompt(
         window.render(),
         language,
@@ -1180,15 +1271,17 @@ async def _extract(
         max_facts=max_facts,
         introduction_lines=introduction_lines,
         contact_lines=contact_lines,
+        one_shot=small,
     )
-    system = prompts.extract_system(language)
+    system = prompts.extract_system(language, noise=not small)
     if system_suffix:
         system = f"{system}\n\n{system_suffix}"
+    used_schema = extract_schema or schema.EXTRACT_SCHEMA
     for attempt in range(EXTRACT_ATTEMPTS):
         try:
             answer = await provider.complete(
                 prompt,
-                extract_schema or schema.EXTRACT_SCHEMA,
+                used_schema,
                 max_tokens=max_tokens,
                 temperature=0.0,
                 system=system,
@@ -1200,6 +1293,16 @@ async def _extract(
                 prompt = f"{prompt}\n\n{prompts.quote_reminder(language)}"
                 continue
             return extracted
+        except ValueError:  # SCHEMA_INVALID: not JSON, or not this shape
+            if attempt + 1 >= EXTRACT_ATTEMPTS:
+                logger.warning(
+                    "meeting_doc.window_failed",
+                    extra={"window": window.index},
+                    exc_info=True,
+                )
+                return None
+            if small:
+                prompt = f"{prompt}\n\n{prompts.schema_echo(language, used_schema)}"
         except Exception:  # noqa: BLE001 — one window must not stop a meeting
             if attempt + 1 >= EXTRACT_ATTEMPTS:
                 logger.warning(
@@ -1426,7 +1529,7 @@ async def _context(
         answer = await provider.complete(
             block,
             schema.REDUCE_CONTEXT_SCHEMA,
-            max_tokens=REDUCE_MAX_TOKENS,
+            max_tokens=gate.reduce_tokens,
             temperature=0.0,
             system=prompts.context_system(language),
         )
@@ -1515,14 +1618,64 @@ async def _reduce_block(
     brief: Brief | None,
     gate: _Gate,
     table: roles_table.RolesTable,
+    small: bool = False,
 ) -> tuple[str, list[Bullet], list[str]] | None:
     """One block: a phase heading and its bullets, gated line by line —
     the support gate, a subject that is not a pronoun, specificity — kept
     to the budget by specificity and written in time order. A call that
     fails twice, or leaves fewer than two bullets, is the block's chapter:
-    its statements by time under its name and first time."""
+    its statements by time under its name and first time.
+
+    ``small`` (L1): the heading and the bullets are separate calls over at
+    most fifteen facts each, without sub-points."""
     facts = list(block.facts)
     by_id = {f.item_key: f for f in facts}
+    if small:
+        heading, bullets, parsed_any = await _block_small(
+            provider, facts, by_id, language, budget, brief=brief, gate=gate, table=table
+        )
+    else:
+        heading, bullets, parsed_any = await _block_capable(
+            provider, facts, by_id, language, budget, brief=brief, gate=gate, table=table
+        )
+    if len(bullets) < MIN_BULLETS_PER_TOPIC:
+        if parsed_any and not bullets:
+            gate.block_failures["all_bullets_unsupported"] += 1
+        chapter = _block_chapter(facts, language, gate, budget)
+        if chapter is None:
+            return None
+        gate.block_chapters += 1
+        return chapter
+    if not heading:
+        heading = compose.fallback_heading(facts, language, gate.people)
+        gate.headings_fallback += 1
+
+    # Within the budget, the most specific first; then in time order.
+    def first_start(bullet: Bullet) -> int:
+        return min((by_id[i].start_ms for i in bullet[1] if i in by_id), default=0)
+
+    kept = sorted(
+        bullets,
+        key=lambda b: -support.specificity(b[0], language, known=gate.known),
+    )[: budget.bullets_per_block]
+    kept.sort(key=first_start)
+    cited = [i for _t, ids, _c in kept for i in ids]
+    return heading, kept, list(dict.fromkeys([*cited, *by_id]))
+
+
+async def _block_capable(
+    provider: ChatLike,
+    facts: list[VerifiedFact],
+    by_id: dict[str, VerifiedFact],
+    language: str,
+    budget: compose.VolumeBudget,
+    *,
+    brief: Brief | None,
+    gate: _Gate,
+    table: roles_table.RolesTable,
+) -> tuple[str, list[Bullet], bool]:
+    """Heading and bullets in one call, retried once when the heading is
+    refused. ``(heading, bullets, whether any answer parsed)``."""
     listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     system = prompts.block_system(language, budget.bullets_per_block)
     heading = ""
@@ -1534,7 +1687,7 @@ async def _reduce_block(
             answer = await provider.complete(
                 _with_brief(listing, brief, language),
                 schema.BLOCK_SCHEMA,
-                max_tokens=REDUCE_MAX_TOKENS,
+                max_tokens=gate.reduce_tokens,
                 temperature=0.0,
                 system=system,
             )
@@ -1559,29 +1712,102 @@ async def _reduce_block(
         if attempt == 0 and not heading:
             gate.headings_retried += 1
             system = f"{system}\n\n{prompts.heading_retry(language)}"
-    if len(bullets) < MIN_BULLETS_PER_TOPIC:
-        if parsed_any and not bullets:
-            gate.block_failures["all_bullets_unsupported"] += 1
-        chapter = _block_chapter(facts, language, gate, budget)
-        if chapter is None:
+    return heading, bullets, parsed_any
+
+
+async def _small_call(
+    provider: ChatLike,
+    prompt: str,
+    json_schema: dict[str, Any],
+    model: type[Any],
+    system: str,
+    language: str,
+    gate: _Gate,
+    *,
+    max_tokens: int = REDUCE_MAX_TOKENS,
+) -> Any | None:
+    """One reduce call under the profile: a malformed answer is asked once
+    more with the schema echoed into the prompt; a provider error is not."""
+    for _attempt in range(BLOCK_ATTEMPTS):
+        gate.block_calls += 1
+        try:
+            answer = await provider.complete(
+                prompt, json_schema, max_tokens=max_tokens, temperature=0.0, system=system
+            )
+            return model.model_validate_json(_json_of(answer))
+        except ValueError:
+            gate.block_failures["schema_invalid"] += 1
+            logger.warning("meeting_doc.block_failed", exc_info=True)
+            prompt = f"{prompt}\n\n{prompts.schema_echo(language, json_schema)}"
+        except Exception:  # noqa: BLE001 — one block must not cost the note
+            gate.block_failures["provider_error"] += 1
+            logger.warning("meeting_doc.block_failed", exc_info=True)
             return None
-        gate.block_chapters += 1
-        return chapter
-    if not heading:
-        heading = compose.fallback_heading(facts, language, gate.people)
-        gate.headings_fallback += 1
+    return None
 
-    # Within the budget, the most specific first; then in time order.
-    def first_start(bullet: Bullet) -> int:
-        return min((by_id[i].start_ms for i in bullet[1] if i in by_id), default=0)
 
-    kept = sorted(
-        bullets,
-        key=lambda b: -support.specificity(b[0], language, known=gate.known),
-    )[: budget.bullets_per_block]
-    kept.sort(key=first_start)
-    cited = [i for _t, ids, _c in kept for i in ids]
-    return heading, kept, list(dict.fromkeys([*cited, *by_id]))
+async def _block_small(
+    provider: ChatLike,
+    facts: list[VerifiedFact],
+    by_id: dict[str, VerifiedFact],
+    language: str,
+    budget: compose.VolumeBudget,
+    *,
+    brief: Brief | None,
+    gate: _Gate,
+    table: roles_table.RolesTable,
+) -> tuple[str, list[Bullet], bool]:
+    """The profile's reduce: bullets over at most ``SMALL_MODEL_REDUCE_FACTS``
+    facts per call, no sub-points; then the heading, alone, over the block's
+    first facts, retried once when refused."""
+    chunks = [
+        facts[k : k + SMALL_MODEL_REDUCE_FACTS]
+        for k in range(0, len(facts), SMALL_MODEL_REDUCE_FACTS)
+    ]
+    per_call = max(MIN_BULLETS_PER_TOPIC, -(-budget.bullets_per_block // max(1, len(chunks))))
+    bullets: list[Bullet] = []
+    parsed_any = False
+    for chunk in chunks:
+        listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in chunk])
+        parsed = await _small_call(
+            provider,
+            _with_brief(listing, brief, language),
+            schema.BLOCK_BULLETS_SCHEMA,
+            schema.BlockOut,
+            prompts.block_bullets_system(language, per_call),
+            language,
+            gate,
+        )
+        if parsed is None:
+            continue
+        parsed_any = True
+        bullets.extend(_block_bullets(parsed, by_id, language, gate, table))
+    heading = ""
+    listing = prompts.facts_block(
+        [(f.item_key, f.kind, f.text, f.start_ms) for f in chunks[0]] if chunks else []
+    )
+    system = prompts.block_heading_system(language)
+    for attempt in range(BLOCK_ATTEMPTS):
+        parsed = await _small_call(
+            provider,
+            _with_brief(listing, brief, language),
+            schema.HEADING_SCHEMA,
+            schema.HeadingOut,
+            system,
+            language,
+            gate,
+            max_tokens=HEADING_MAX_TOKENS,
+        )
+        if parsed is None:
+            break
+        candidate = parsed.heading.strip().rstrip(":.!?").strip()
+        if candidate and not _heading_faults(candidate, facts, gate):
+            heading = candidate
+            break
+        if attempt == 0:
+            gate.headings_retried += 1
+            system = f"{system}\n\n{prompts.heading_retry(language)}"
+    return heading, bullets, parsed_any
 
 
 def _block_bullets(
@@ -1688,6 +1914,7 @@ async def _reduce_blocks(
     gate: _Gate,
     table: roles_table.RolesTable,
     minutes: float,
+    small: bool = False,
 ) -> Topics | None:
     """Every block in parallel (a few at a time), then one tiny call over
     the headings for merges, applied only while the section band holds."""
@@ -1696,7 +1923,14 @@ async def _reduce_blocks(
     async def one(block: compose.Block) -> tuple[str, list[Bullet], list[str]] | None:
         async with semaphore:
             return await _reduce_block(
-                provider, block, language, budget, brief=brief, gate=gate, table=table
+                provider,
+                block,
+                language,
+                budget,
+                brief=brief,
+                gate=gate,
+                table=table,
+                small=small,
             )
 
     results = await asyncio.gather(*(one(b) for b in parts))
@@ -1853,6 +2087,7 @@ async def _summary(
     gate: _Gate | None = None,
     headings: list[str] | None = None,
     skeleton_ids: list[str] | None = None,
+    small: bool = False,
 ) -> list[tuple[str, list[str]]] | None:
     """``[(sentence, the fact ids it rests on)]``, or None.
 
@@ -1863,19 +2098,33 @@ async def _summary(
     Every sentence passes the gate or is dropped. When more than
     ``SUMMARY_FAIL_SHARE`` of an answer fails, the model is asked once
     more with the strict suffix ("use the wording of the facts"); failing
-    that too, there is no summary and the overview is written by code."""
+    that too, there is no summary and the overview is written by code.
+
+    ``small`` (L1) runs the rungs in the other order: the strict skeleton
+    first — a small model writes best when told which facts and in what
+    order — and the free rung only when that fails."""
     gate = gate or _Gate(language=language)
     block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     by_id = {f.item_key: f for f in facts}
-    system = prompts.summary_system(language)
+    base = prompts.summary_system(language)
     if headings:
-        system = f"{system}\n\n{prompts.summary_blocks(headings, language)}"
-    for attempt in range(2):
+        base = f"{base}\n\n{prompts.summary_blocks(headings, language)}"
+    # Rung 2's skeleton: the facts to use, in time order, one sentence per
+    # one or two of them.
+    if skeleton_ids:
+        groups = [[i] for i in skeleton_ids][: schema.MAX_SUMMARY_SENTENCES + 1]
+    else:
+        ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
+        groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
+    strict = f"{base}\n\n{prompts.strict_suffix(language)}\n{prompts.skeleton(groups, language)}"
+    rungs = ("strict", "model") if small else ("model", "strict")
+    for attempt, rung in enumerate(rungs):
+        system = strict if rung == "strict" else base
         try:
             answer = await provider.complete(
                 _with_brief(block, brief, language),
                 schema.REDUCE_SUMMARY_SCHEMA,
-                max_tokens=REDUCE_MAX_TOKENS,
+                max_tokens=gate.reduce_tokens,
                 temperature=0.0,
                 system=system,
             )
@@ -1901,19 +2150,9 @@ async def _summary(
         if (answered and failed / answered > SUMMARY_FAIL_SHARE) or not answered:
             if attempt == 0:
                 gate.retries += 1
-                # Rung 2: the facts to use, in time order, one sentence per
-                # one or two of them.
-                if skeleton_ids:
-                    groups = [[i] for i in skeleton_ids][: schema.MAX_SUMMARY_SENTENCES + 1]
-                else:
-                    ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
-                    groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
-                system = (
-                    f"{system}\n\n{prompts.strict_suffix(language)}\n"
-                    f"{prompts.skeleton(groups, language)}"
-                )
                 continue
             return None
+        gate.summary_rung = rung
         return out[: schema.MAX_SUMMARY_SENTENCES] or None
     return None
 

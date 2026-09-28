@@ -249,6 +249,87 @@ async def _seed_dev_device(conn: asyncpg.Connection) -> None:
     print(f"-- dev room device: {DEV_DEVICE_ID} (tenant A, secret in the runbook)")
 
 
+# ── Sprint L2: the dev workspaces acknowledge the dev processors ──────
+# A workspace is only ever routed to a processor its admin acknowledged by
+# (name, region). The dev routing (config/models.yaml, ENV=dev) reaches
+# Mistral AI (EU) with a key and this machine without one; both are
+# acknowledged for the seeded tenants so `make dev-up && make seed` writes
+# notes either way. Real workspaces always see the dialog.
+DEV_TENANTS = (
+    "00000000-0000-0000-0000-00000000000a",
+    "00000000-0000-0000-0000-00000000000b",
+)
+SEED_ACTOR = "0a000000-0000-0000-0000-00000000000a"  # admin@tenant-a
+
+
+def _dev_processors() -> list[dict[str, str]]:
+    """Every processor the dev routing can reach, from the registry itself —
+    with a placeholder key so the primary resolves even on a machine that
+    has none yet. Never typed: a processor list that can drift from the
+    routing is the failure the Data page exists to prevent."""
+    sys.path.insert(0, str(REPO_ROOT / "libs" / "models" / "src"))
+    from models import Registry
+
+    environ = {**os.environ, "MISTRAL_API_KEY": os.environ.get("MISTRAL_API_KEY") or "seed"}
+    registry = Registry.load(
+        REPO_ROOT / "config" / "models.yaml", env="dev", environ=environ, validate=False
+    )
+    seen: dict[tuple[str, str], dict[str, str]] = {}
+    for info in registry.processors_for_env():
+        seen[(info.name.casefold(), info.region.casefold())] = {
+            "name": info.name,
+            "region": info.region,
+        }
+    return list(seen.values())
+
+
+async def _seed_ai_processors(conn: asyncpg.Connection) -> None:
+    from datetime import UTC, datetime
+
+    try:
+        processors = _dev_processors()
+    except Exception as exc:  # noqa: BLE001 — a missing models.yaml is not a seed failure
+        print(f"-- ai processors: skipped ({type(exc).__name__})")
+        return
+    if not processors:
+        print("-- ai processors: nothing routed in dev")
+        return
+    when = datetime.now(UTC).isoformat()
+    for tenant in DEV_TENANTS:
+        row = await conn.fetchrow(
+            "SELECT acknowledged_processors FROM workspace_model_settings WHERE tenant_id = $1",
+            tenant,
+        )
+        current = row["acknowledged_processors"] if row else []
+        current = json.loads(current) if isinstance(current, str) else list(current or [])
+        known = {
+            (str(p.get("name", "")).casefold(), str(p.get("region", "")).casefold())
+            for p in current
+        }
+        added = [
+            {**p, "acknowledged_by": SEED_ACTOR, "acknowledged_at": when}
+            for p in processors
+            if (p["name"].casefold(), p["region"].casefold()) not in known
+        ]
+        if not added and row:
+            continue
+        await conn.execute(
+            """
+            INSERT INTO workspace_model_settings
+                (tenant_id, provider, tier, generation_enabled, acknowledged_processors, updated_by)
+            VALUES ($1, 'platform', 'standard', true, $2::jsonb, $3)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                acknowledged_processors = EXCLUDED.acknowledged_processors,
+                updated_by = EXCLUDED.updated_by
+            """,
+            tenant,
+            json.dumps([*current, *added]),
+            SEED_ACTOR,
+        )
+    names = ", ".join(f"{p['name']} ({p['region']})" for p in processors)
+    print(f"-- ai processors acknowledged for the dev tenants: {names}")
+
+
 async def main() -> int:
     print(f"Seeding {DB_NAME} on {DB_HOST}:{DB_PORT}…")
     conn = await asyncpg.connect(DSN)
@@ -258,6 +339,7 @@ async def main() -> int:
         await _seed_voice_commands(conn)
         await _seed_autocomplete(conn)
         await _seed_dev_device(conn)
+        await _seed_ai_processors(conn)
     finally:
         await conn.close()
     print("Seed complete.")

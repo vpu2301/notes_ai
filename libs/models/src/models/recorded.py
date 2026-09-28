@@ -25,6 +25,8 @@ def cassette_key(model_id: str, prompt: str, schema: JsonSchema | None, system: 
 
 
 class RecordedChatProvider:
+    small_model = False
+
     def __init__(
         self, *, backend: str, cassette_dir: str | Path, model_id: str = "recorded"
     ) -> None:

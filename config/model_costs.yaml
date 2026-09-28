@@ -18,6 +18,13 @@ backends:
   hf_eu:          { input_cents_per_1k: 0.08, output_cents_per_1k: 0.83, cold_start_cents: 6 }
   # nvidia-t4 x1 ≈ €0.50/h; whisper-large-v3-turbo ≈ 0.05× realtime on T4 → 1200 audio-min/h
   hf_eu_asr:      { audio_cents_per_minute: 0.04, cold_start_cents: 4 }
+  # Sprint L2 — Mistral AI (EU) list prices, Standard tier, read from
+  # docs.mistral.ai/inference/pricing on 2026-09-27 (USD per 1M tokens:
+  # Large 3 $0.50 in / $1.50 out; Small 4 $0.15 / $0.60). Recorded here in
+  # cents per 1k at 1 USD ≈ 1 EUR; DEP-S6 replaces list prices with
+  # invoiced ones. Cached input is billed at 10 % (not modelled).
+  mistral_eu:        { input_cents_per_1k: 0.05, output_cents_per_1k: 0.15 }
+  mistral_eu_small:  { input_cents_per_1k: 0.015, output_cents_per_1k: 0.06 }
   # Sprint 37 bake-off candidates. Eval-only backends, but they are
   # metered like any other: "cheapest candidate that passes every gate" is
   # the pre-registered decision rule, and a rule needs numbers. Rates are

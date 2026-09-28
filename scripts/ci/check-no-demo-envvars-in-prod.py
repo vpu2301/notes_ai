@@ -34,6 +34,11 @@ TRUTHY = re.compile(
     r"(?P<flag>" + "|".join(FLAGS) + r")\s*[:=]\s*['\"]?(true|1|yes|on)['\"]?",
     re.IGNORECASE,
 )
+# Sprint L2: `MDX_DEV_*` switches (MDX_DEV_CHAT_BACKEND names the chat
+# backend instead of the routing's primary) are dev-only by contract; set
+# to any non-empty literal in a production-looking config they are a
+# violation. `${VAR:-}` pass-throughs (compose) are not literals.
+DEV_ONLY = re.compile(r"(?P<flag>MDX_DEV_[A-Z0-9_]+)\s*[:=]\s*['\"]?(?!\$\{)[A-Za-z0-9_.:/-]+")
 PROD_ENV = re.compile(r"ENVIRONMENT\s*[:=]\s*['\"]?(production|prod|staging)['\"]?", re.IGNORECASE)
 PRODISH_PATH = re.compile(r"(prod|production|staging|release)", re.IGNORECASE)
 
@@ -62,7 +67,7 @@ def scan() -> list[str]:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        m = TRUTHY.search(text)
+        m = TRUTHY.search(text) or DEV_ONLY.search(text)
         if not m:
             continue
         flag = m.group("flag")
@@ -80,7 +85,7 @@ def main() -> int:
     if violations:
         print(
             "check-no-demo-envvars-in-prod: demo/dev escape hatches "
-            "(MD_OBJECT_STORE_DISABLED, MDX_DEMO_MODE, DEMO_*, AUTH_BYPASS_DEV) "
+            "(MD_OBJECT_STORE_DISABLED, MDX_DEMO_MODE, DEMO_*, AUTH_BYPASS_DEV, MDX_DEV_*) "
             "must NEVER be enabled in production configs:",
             file=sys.stderr,
         )

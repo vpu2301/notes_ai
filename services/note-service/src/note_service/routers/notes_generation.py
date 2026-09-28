@@ -30,6 +30,7 @@ from ..domain import access, generation_service
 from ..domain import generation_repository as gen_repo
 from ..domain import notes_repository as repo
 from ..notifications import emit_budget_reached
+from . import ai_settings as ai_settings_router
 from .notes_from_transcript import _fetch_transcript
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,7 @@ async def regenerate(
                 reason="regenerate",
                 transcript_rev=int(transcript.get("result_rev") or 1),
                 enforce_limit=True,
+                required_processors=ai_settings_router.required_processors(),
             )
         except generation_service.GenerationBusyError:
             raise HTTPException(
@@ -301,6 +303,17 @@ async def regenerate(
                 detail={
                     "code": "generation_disabled",
                     "detail": "this workspace has turned automatic note writing off",
+                },
+            ) from None
+        except generation_service.ProcessorUnacknowledgedError as exc:
+            # Sprint L2 — the list in the error is what the client shows
+            # in the dialog, from the same registry the router uses.
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "processor_unacknowledged",
+                    "detail": "a workspace admin has to agree to who processes your meetings",
+                    "processors": [{"name": p.name, "region": p.region} for p in exc.processors],
                 },
             ) from None
         except generation_service.BudgetExceededError as exc:

@@ -59,9 +59,15 @@ class OpenAICompatibleChatProvider:
         client: httpx.AsyncClient | None = None,
         sleep: SleepFn | None = None,
         request_overrides: dict[str, Any] | None = None,
+        small_model: bool = False,
     ) -> None:
         self.backend = backend
-        self.request_overrides: dict[str, Any] = dict(request_overrides or {})
+        # An override interpolated to "" (an unset ${VAR:-}) is not sent.
+        self.request_overrides: dict[str, Any] = {
+            k: v for k, v in (request_overrides or {}).items() if v not in ("", None)
+        }
+        # Sprint L1: read by the document engine's small-model profile.
+        self.small_model = small_model
         self.model_id = model_id
         self.base_url = base_url.rstrip("/")
         self.context_window = context_window

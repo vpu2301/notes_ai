@@ -504,6 +504,16 @@ services:
       # Where the mailed links point. Must be the origin the SPA is
       # actually served from, or every shared note 404s.
       MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
+      # ── Who writes the notes (Sprint L2, config/models.yaml) ────────
+      # With the key: Mistral's EU API (large model writes, small model
+      # classifies/names). Without it, or with MDX_DEV_CHAT_BACKEND=dev_mac,
+      # this Mac's Ollama — the startup log says which and why
+      # (`models.route` / `models.override_fallback`). The key is read from
+      # .env.local only; never write a value here.
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
+      MISTRAL_API_URL: "${MISTRAL_API_URL:-https://api.mistral.ai/v1}"
+      MDX_DEV_CHAT_BACKEND: "${MDX_DEV_CHAT_BACKEND:-}"
+      DEV_MAC_CONTEXT: "${DEV_MAC_CONTEXT:-16384}"
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
@@ -539,9 +549,11 @@ services:
   # generation that fails only in the worker.
   #
   # No port and no healthcheck: it serves no HTTP. In dev the chat
-  # backend it resolves is `dev_mac` — the Mac's Ollama on :11434 (see
-  # config/models.yaml). With nothing listening there, a generation
-  # fails with a model error and the note keeps the transcript it had.
+  # backend it resolves is Mistral's EU API when MISTRAL_API_KEY is set
+  # and `dev_mac` — the Mac's Ollama on :11434 — otherwise (Sprint L2;
+  # see config/models.yaml). With nothing listening there either, a
+  # generation fails with a model error and the note keeps the transcript
+  # it had.
   note-worker:
     build:
       context: .

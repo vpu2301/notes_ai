@@ -641,6 +641,8 @@ struct GenerationView: Decodable, Sendable {
             return "This workspace has used its AI budget for the month, so this note was not written up."
         case "generation_disabled":
             return "Automatic note writing is off for this workspace."
+        case "processor_unacknowledged":
+            return "A workspace admin has to agree to who processes your meetings before notes are written."
         case "no_snapshot", "snapshot_unreadable":
             return "The recording could not be read when the note was written."
         case "model_unavailable":

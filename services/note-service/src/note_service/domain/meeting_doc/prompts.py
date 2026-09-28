@@ -25,9 +25,9 @@ a result.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
-PROMPT_VERSION: Final = "2026-10-22"
+PROMPT_VERSION: Final = "2026-10-23"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -177,6 +177,28 @@ CONVERSATION_TYPES: Final[dict[str, str]] = {
 
 _EN, _DE, _UK = EXAMPLES["en"], EXAMPLES["de"], EXAMPLES["uk"]
 
+# The extraction rule for the `noise` field — its own table so the small-model
+# profile (Sprint L1 T2) can leave it out together with the field: exclusions
+# then come from I2's language tag and the code-side checks alone.
+_NOISE_RULE: Final[dict[str, str]] = {
+    "en": (
+        "- List in `noise` the turns that are clearly not part of this conversation — "
+        "background speech, another language, a transcription artifact, a duplicated "
+        "passage, an unrelated fragment — with the reason. Take no facts from them.\n"
+    ),
+    "de": (
+        "- In `noise` die Redebeiträge nennen, die eindeutig nicht zu diesem Gespräch "
+        "gehören — Hintergrundgespräch, andere Sprache, Transkriptionsartefakt, "
+        "doppelte Passage, unzusammenhängendes Fragment — mit dem Grund. Daraus keine "
+        "Fakten nehmen.\n"
+    ),
+    "uk": (
+        "- У `noise` перелічи репліки, що явно не належать до цієї розмови — фонова "
+        "мова, інша мова, артефакт транскрипції, повторений уривок, непов'язаний "
+        "фрагмент — із причиною. Не бери з них фактів.\n"
+    ),
+}
+
 EXTRACT_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "You read one part of a meeting transcript and list what was said, as typed "
@@ -226,9 +248,7 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "- `next_step`: what the listener is asked to do (write, call, comment, visit).\n"
         "- The examples in these instructions are about an invented company. Never copy "
         "a name or a sentence from them.\n"
-        "- List in `noise` the turns that are clearly not part of this conversation — "
-        "background speech, another language, a transcription artifact, a duplicated "
-        "passage, an unrelated fragment — with the reason. Take no facts from them.\n"
+        f"{_NOISE_RULE['en']}"
         "- Never describe the transcript, the notes or how they were made.\n"
         "- Answer in the same language as the transcript."
     ),
@@ -285,10 +305,7 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "kommentieren, besuchen).\n"
         "- Die Beispiele in diesen Anweisungen handeln von einer erfundenen Firma. Nie "
         "einen Namen oder Satz daraus übernehmen.\n"
-        "- In `noise` die Redebeiträge nennen, die eindeutig nicht zu diesem Gespräch "
-        "gehören — Hintergrundgespräch, andere Sprache, Transkriptionsartefakt, "
-        "doppelte Passage, unzusammenhängendes Fragment — mit dem Grund. Daraus keine "
-        "Fakten nehmen.\n"
+        f"{_NOISE_RULE['de']}"
         "- Nie das Transkript, die Notizen oder ihre Entstehung beschreiben.\n"
         "- Antworte in der Sprache des Transkripts."
     ),
@@ -340,9 +357,7 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
         "прокоментувати, відвідати).\n"
         "- Приклади в цих інструкціях стосуються вигаданої компанії. Ніколи не копіюй "
         "з них імен чи речень.\n"
-        "- У `noise` перелічи репліки, що явно не належать до цієї розмови — фонова "
-        "мова, інша мова, артефакт транскрипції, повторений уривок, непов'язаний "
-        "фрагмент — із причиною. Не бери з них фактів.\n"
+        f"{_NOISE_RULE['uk']}"
         "- Ніколи не описуй стенограму, нотатки чи те, як їх зроблено.\n"
         "- Відповідай мовою стенограми."
     ),
@@ -580,6 +595,34 @@ REDUCE_CONTEXT_SYSTEM: Final[dict[str, str]] = {
 }
 
 
+# Sprint L1 T2 — the small-model profile shows ONE example: the mistake that
+# costs the most trust (a proposal filed as a decision). Fewer examples for a
+# small model: the 2026-09-22 audit's echo was a copied example, and every
+# example is one more thing a 4B model may copy.
+_EXTRACT_SHOT_ONE: Final[dict[str, str]] = {
+    "en": (
+        "Example of the mistake to avoid (an invented company — never copy from it):\n"
+        f"  [4] Wren (03:10): {_EN['shot_proposal']}\n"
+        f"  [5] Osric (03:18): {_EN['shot_hold']}\n"
+        '  → kind "key_point" (NOT "decision" — Osric did not agree)'
+    ),
+    "de": (
+        "Beispiel für den Fehler, der zu vermeiden ist (eine erfundene Firma — nie "
+        "daraus übernehmen):\n"
+        f"  [4] Wren (03:10): {_DE['shot_proposal']}\n"
+        f"  [5] Osric (03:18): {_DE['shot_hold']}\n"
+        '  → kind "key_point" (NICHT "decision" — Osric hat nicht zugestimmt)'
+    ),
+    "uk": (
+        "Приклад помилки, якої слід уникати (вигадана компанія — нічого з неї не "
+        "копіюй):\n"
+        f"  [4] Врен (03:10): {_UK['shot_proposal']}\n"
+        f"  [5] Остап (03:18): {_UK['shot_hold']}\n"
+        '  → kind "key_point" (НЕ "decision" — Остап не погодився)'
+    ),
+}
+
+
 def _pick(table: dict[str, str], language: str) -> str:
     return table.get(language, table["en"])
 
@@ -588,8 +631,13 @@ def guard(language: str) -> str:
     return _pick(_GUARD, language)
 
 
-def extract_system(language: str) -> str:
-    return f"{_pick(EXTRACT_SYSTEM, language)}\n\n{guard(language)}"
+def extract_system(language: str, *, noise: bool = True) -> str:
+    """``noise=False`` (the small-model profile) leaves out the rule for a
+    field the schema then does not have."""
+    text = _pick(EXTRACT_SYSTEM, language)
+    if not noise:
+        text = text.replace(_pick(_NOISE_RULE, language), "")
+    return f"{text}\n\n{guard(language)}"
 
 
 _CARRIED_HEADING: Final[dict[str, str]] = {
@@ -760,16 +808,18 @@ def extract_prompt(
     max_facts: int | None = None,
     introduction_lines: list[int] | None = None,
     contact_lines: list[int] | None = None,
+    one_shot: bool = False,
 ) -> str:
     """The window, and — for a meeting in a series — what is still open
-    from last time, as a NUMBERED list.
+    from last time, as a NUMBERED list. ``one_shot`` (the small-model
+    profile) shows one example instead of the four.
 
     Numbered because a number is all the model may point at: `refers_to`
     is an integer bounded by the schema, so a completion can only ever
     refer to a task we already had. It cannot invent one, and it cannot
     name one in free text that we would then have to match.
     """
-    parts = [_pick(_EXTRACT_SHOTS, language)]
+    parts = [_pick(_EXTRACT_SHOT_ONE if one_shot else _EXTRACT_SHOTS, language)]
     if max_facts:
         # The window's own budget (Q2): a dense passage is allowed more.
         parts.append(_pick(_BUDGET, language).format(n=max_facts))
@@ -883,6 +933,86 @@ SUMMARY_BLOCKS: Final[dict[str, str]] = {
 def block_system(language: str, bullets: int = 4) -> str:
     text = _pick(BLOCK_SYSTEM, language).replace("{bullets}", str(bullets))
     return f"{text}\n\n{guard(language)}"
+
+
+# Sprint L1 T2 — the small-model profile asks for a block's heading and its
+# bullets in two calls, each with one job and a flat schema (no children).
+BLOCK_HEADING_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "These facts are one part of a recording, in time order. Return a `heading` for "
+        "this part only: a noun phrase of 3 to 8 words naming what it is about — a phase, "
+        "an event, a person, a decision — with the date when it is about an event "
+        f"('{_EN['heading_event']}', '{_EN['heading_phase']}'). Never a generic label "
+        "(Discussion, Introduction, Summary, Other, Topics), never a question. Use only "
+        "the facts given; add nothing."
+    ),
+    "de": (
+        "Diese Fakten sind ein Teil einer Aufnahme, in zeitlicher Reihenfolge. Gib nur "
+        "eine `heading` für diesen Teil zurück: eine Nominalphrase aus 3 bis 8 Wörtern, "
+        "die sagt, worum es geht — eine Phase, ein Ereignis, eine Person, eine "
+        f"Entscheidung — mit Datum, wenn es um ein Ereignis geht („{_DE['heading_event']}“, "
+        f"„{_DE['heading_phase']}“). Nie eine allgemeine Bezeichnung (Diskussion, "
+        "Einleitung, Zusammenfassung, Weitere Punkte, Themen), nie eine Frage. Nur die "
+        "gegebenen Fakten; nichts hinzufügen."
+    ),
+    "uk": (
+        "Ці факти — одна частина запису, у часовому порядку. Поверни лише `heading` для "
+        "цієї частини: іменникову фразу з 3–8 слів, що називає, про що вона — етап, подія, "
+        f"людина, рішення — з датою, якщо йдеться про подію («{_UK['heading_event']}», "
+        f"«{_UK['heading_phase']}»). Ніколи не загальна назва (Обговорення, Вступ, "
+        "Підсумок, Інше, Теми), ніколи не питання. Лише надані факти; нічого не додавай."
+    ),
+}
+BLOCK_BULLETS_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "These facts are one part of a recording, in time order. Write {bullets} `bullets` "
+        "for this part only. Each is one specific claim — who or what, and the number, "
+        "date or name that makes it checkable — in the third person, citing its facts in "
+        "`fact_ids`. Its subject is a name or a definite noun, never a pronoun. Use only "
+        "the facts given; add nothing; never copy what somebody said word for word."
+    ),
+    "de": (
+        "Diese Fakten sind ein Teil einer Aufnahme, in zeitlicher Reihenfolge. Schreibe "
+        "{bullets} `bullets` nur für diesen Teil. Jeder ist eine konkrete Aussage — wer "
+        "oder was, und Zahl, Datum oder Name, die sie prüfbar machen — in der dritten "
+        "Person, mit den Fakten in `fact_ids`. Das Subjekt ist ein Name oder ein bestimmtes "
+        "Nomen, nie ein Pronomen. Nur die gegebenen Fakten; nichts hinzufügen; nie "
+        "wörtlich übernehmen, was jemand gesagt hat."
+    ),
+    "uk": (
+        "Ці факти — одна частина запису, у часовому порядку. Напиши {bullets} `bullets` "
+        "лише для цієї частини. Кожен — одне конкретне твердження (хто чи що, і число, "
+        "дата чи назва, що роблять його перевірюваним), у третій особі, з фактами в "
+        "`fact_ids`. Підмет — ім'я або конкретний іменник, ніколи займенник. Лише надані "
+        "факти; нічого не додавай; ніколи не копіюй дослівно."
+    ),
+}
+# The one retry after an answer that did not parse: the shape, spelled out.
+SCHEMA_ECHO: Final[dict[str, str]] = {
+    "en": "Your last answer did not match the required shape. Answer with one JSON object "
+    "of exactly this schema and nothing else:",
+    "de": "Deine letzte Antwort hatte nicht die verlangte Form. Antworte mit genau einem "
+    "JSON-Objekt nach diesem Schema und sonst nichts:",
+    "uk": "Твоя остання відповідь не мала потрібної форми. Відповідай одним JSON-об'єктом "
+    "точно за цією схемою і нічим іншим:",
+}
+
+
+def block_heading_system(language: str) -> str:
+    return f"{_pick(BLOCK_HEADING_SYSTEM, language)}\n\n{guard(language)}"
+
+
+def block_bullets_system(language: str, bullets: int = 4) -> str:
+    text = _pick(BLOCK_BULLETS_SYSTEM, language).replace("{bullets}", str(bullets))
+    return f"{text}\n\n{guard(language)}"
+
+
+def schema_echo(language: str, json_schema: dict[str, Any]) -> str:
+    """Appended to the prompt of the retry after ``SCHEMA_INVALID`` under
+    the small-model profile: the schema the answer has to match."""
+    import json
+
+    return f"{_pick(SCHEMA_ECHO, language)}\n{json.dumps(json_schema, ensure_ascii=False)}"
 
 
 def heading_retry(language: str) -> str:
@@ -1249,6 +1379,12 @@ def fingerprint() -> str:
         "brief": _BRIEF_LABELS,
         # Sprint D2 — blocks, their headings, merges, the subject retry.
         "block": BLOCK_SYSTEM,
+        # Sprint L1 — the small-model profile's variants.
+        "noise_rule": _NOISE_RULE,
+        "shot_one": _EXTRACT_SHOT_ONE,
+        "block_heading": BLOCK_HEADING_SYSTEM,
+        "block_bullets": BLOCK_BULLETS_SYSTEM,
+        "schema_echo": SCHEMA_ECHO,
         "heading_retry": HEADING_RETRY,
         "merge": MERGE_SYSTEM,
         "subject_suffix": SUBJECT_SUFFIX,
@@ -1264,6 +1400,8 @@ def fingerprint() -> str:
             "classify": _classify_schema(),
             "entity": schema.ENTITY_SCHEMA,
             "block": schema.BLOCK_SCHEMA,
+            "block_heading": schema.HEADING_SCHEMA,
+            "block_bullets": schema.BLOCK_BULLETS_SCHEMA,
             "merge": schema.MERGE_SCHEMA,
             "title": _title_prompt_schema(),
         },

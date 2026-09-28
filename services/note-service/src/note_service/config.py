@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     # Registry env name: dev | test | staging | prod. Derived from
     # ENVIRONMENT when unset (development→dev, production→prod).
     models_env: str = Field(default="", alias="ENV")
+    # Sprint L2 — dev only: name the chat backend instead of the env
+    # override's primary (`MDX_DEV_CHAT_BACKEND=dev_mac` forces the local
+    # model). The registry ignores it outside dev/test, and
+    # check-no-demo-envvars-in-prod refuses it in a production config.
+    dev_chat_backend: str = Field(default="", alias="MDX_DEV_CHAT_BACKEND")
     ask_max_tokens: int = Field(default=700, alias="MDX_ASK_MAX_TOKENS")
     # How much of the note + transcript goes into the prompt (characters).
     ask_context_chars: int = Field(default=60_000, alias="MDX_ASK_CONTEXT_CHARS")

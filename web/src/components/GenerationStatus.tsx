@@ -12,6 +12,8 @@ const REASONS: Record<string, string> = {
   budget_exceeded:
     "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
   generation_disabled: "Automatic note writing is off for this workspace.",
+  processor_unacknowledged:
+    "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data.",
   no_snapshot: "The recording could not be read when the note was written.",
   snapshot_unreadable: "The recording could not be read when the note was written.",
   model_unavailable: "The model was unavailable. Try writing the note again.",
@@ -49,7 +51,7 @@ export function GenerationStatus({
   onView,
 }: {
   noteId: string;
-  blocked?: "generation_disabled" | "budget_exceeded" | null;
+  blocked?: "generation_disabled" | "budget_exceeded" | "processor_unacknowledged" | null;
   canGenerate?: boolean;
   canRegenerate?: boolean;
   onFinished?: () => void;

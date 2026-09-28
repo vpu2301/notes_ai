@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getAiSettings, putAiSettings } from "../../api/aiSettings";
 import { errorMessage } from "../../api/http";
-import type { AiProcessor, AiSettings } from "../../api/types";
+import type { AiProcessor, AiSettings, AiWriter } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/Toaster";
 
@@ -66,6 +66,18 @@ export function DataSettingsPage() {
 
   const overBudget = settings.month_to_date_cents >= settings.budget_cents;
   const downgraded = settings.effective_tier !== settings.tier;
+  // Sprint L2 — who is writing right now, in one line: the processor when
+  // it is a company, "the local model" when it is this machine.
+  const writerName = (w: AiWriter | null | undefined): string =>
+    !w ? "" : w.processor && w.region !== "local" ? `${w.processor} (${w.region})` : "the local model";
+  const writer = settings.writer ?? null;
+  const fallbackName = writer?.fallback
+    ? writer.fallback === writer.backend
+      ? null
+      : writer.fallback === "dev_mac"
+        ? "the local model"
+        : writer.fallback
+    : null;
 
   return (
     <div className="settings-stack">
@@ -82,7 +94,20 @@ export function DataSettingsPage() {
             Nothing is routed anywhere in this environment: notes are not written automatically
             here.
           </p>
-        ) : (
+        ) : writer ? (
+          <p className="help" data-testid="ai-writer">
+            Notes are written by: <strong>{writerName(writer)}</strong>
+            {writer.model_id ? ` · ${writer.model_id}` : ""}
+            {fallbackName ? ` · fallback: ${fallbackName}` : ""}
+            {writer.reason
+              ? ` — the fallback is in use (${writer.reason.replace("_", " ")})`
+              : ""}
+            {settings.small_writer && settings.small_writer.backend !== writer.backend
+              ? `. Titles and names: ${writerName(settings.small_writer)}.`
+              : ""}
+          </p>
+        ) : null}
+        {settings.processors.length > 0 && (
           <table className="data-table">
             <thead>
               <tr>

@@ -17,9 +17,18 @@ backends:
     enabled_in_envs: [dev]
     models: { chat: "${DEV_MAC_CHAT_MODEL:-notes-chat}" }
     structured_output: json_schema
-    context_window: 32768
+    # Sprint L1: 16K is what infra/models/dev-mac/Modelfile bakes; the
+    # single-pass eval arm sets DEV_MAC_CONTEXT=32768 with notes-chat-long.
+    context_window: ${DEV_MAC_CONTEXT:-16384}
     max_concurrency: 1
-    timeout_seconds: 600
+    timeout_seconds: 900
+    # Sprint L1 T2: the engine gives a small local model simpler work
+    # (meeting_doc small-model profile). Off for every hosted backend.
+    small_model: ${DEV_MAC_SMALL_MODEL:-true}
+    # Ollama's /v1 route honours `reasoning_effort`: `none` keeps a
+    # reasoning family (Qwen3) from spending the budget on <think>; a
+    # non-reasoning family (Gemma) ignores it. Empty = not sent.
+    request_overrides: { reasoning_effort: "${DEV_MAC_REASONING_EFFORT:-none}" }
     processor: { name: "Developer machine", region: "local" }
 
   dev_mac_asr:
@@ -30,6 +39,37 @@ backends:
     models: { asr: "${DEV_MAC_ASR_MODEL:-whisper-large-v3-turbo}" }
     timeout_seconds: 3600
     processor: { name: "Developer machine", region: "local" }
+
+  # ── Mistral AI, EU-hosted API (Sprint L2: the dev default; M2 flips
+  # staging/prod). Two backends, one key: the large model writes
+  # (understand/summarize), the small one classifies, names and corrects
+  # (classify/title/entities). Ids are pinned to a dated version — never a
+  # `-latest` alias — and recorded in docs/models/PINS.md. Prices in
+  # config/model_costs.yaml. Zero data retention + training opt-out are
+  # account settings (docs/runbooks/model-backends.md §mistral-account).
+  mistral_eu:
+    kind: openai_compat
+    base_url: ${MISTRAL_API_URL:-https://api.mistral.ai/v1}
+    auth: bearer:${MISTRAL_API_KEY}
+    enabled_in_envs: [dev, staging, prod]
+    models: { chat: "${MISTRAL_LARGE_PIN:-mistral-large-2512}" }
+    structured_output: probe
+    context_window: 131072
+    max_concurrency: 8
+    timeout_seconds: 120
+    processor: { name: "Mistral AI", region: "EU" }
+
+  mistral_eu_small:
+    kind: openai_compat
+    base_url: ${MISTRAL_API_URL:-https://api.mistral.ai/v1}
+    auth: bearer:${MISTRAL_API_KEY}
+    enabled_in_envs: [dev, staging, prod]
+    models: { chat: "${MISTRAL_SMALL_PIN:-mistral-small-2603}" }
+    structured_output: probe
+    context_window: 131072
+    max_concurrency: 8
+    timeout_seconds: 60
+    processor: { name: "Mistral AI", region: "EU" }
 
   # ── Hugging Face Inference Endpoints, EU region (beta default) ─────────
   hf_eu:
@@ -197,12 +237,31 @@ backends:
     cassette_dir: ${MODELS_CASSETTE_DIR:-tests/fixtures/eval/cassettes}
 
 # operation -> tier -> backend. `premium` flips to hosted_eu at gate H0 by PR.
+# These rows are what staging/prod run (dev is overridden below); M2 T7
+# flips understand/summarize to mistral_eu and classify/title/entities to
+# mistral_eu_small there, after the acknowledgement rollout.
 routing:
   understand: { standard: hf_eu,     premium: hf_eu }
   summarize:  { standard: hf_eu,     premium: hf_eu }
+  classify:   { standard: hf_eu,     premium: hf_eu }
+  title:      { standard: hf_eu,     premium: hf_eu }
+  entities:   { standard: hf_eu,     premium: hf_eu }
   asr:        { standard: hf_eu_asr, premium: hf_eu_asr }
 
 # Per-environment override of an operation *kind*, applied before routing.
+# Sprint L2: dev chat is Mistral by default with the Mac as the fallback —
+# taken when MISTRAL_API_KEY is unset (missing_env), when the service's
+# MDX_DEV_CHAT_BACKEND names another backend (forced), or when the API does
+# not answer the startup probe (probe_failed). An override may name an
+# operation as well as a kind: the short operations (classify/title/
+# entities) go to the small model, and to dev_mac when the fallback is
+# active, so a laptop without the key still names its notes.
 env_overrides:
-  dev:  { chat: dev_mac,  asr: dev_mac_asr, diarization: dev_mac_diar }
+  dev:
+    chat: { primary: mistral_eu, fallback: dev_mac }
+    classify: { primary: mistral_eu_small, fallback: dev_mac }
+    title: { primary: mistral_eu_small, fallback: dev_mac }
+    entities: { primary: mistral_eu_small, fallback: dev_mac }
+    asr: dev_mac_asr
+    diarization: dev_mac_diar
   test: { chat: recorded, asr: inproc_cpu_asr }

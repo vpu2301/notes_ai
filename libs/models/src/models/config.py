@@ -32,6 +32,11 @@ OperationKind = Literal["chat", "asr", "embed", "diarization"]
 OPERATION_KINDS: dict[str, OperationKind] = {
     "understand": "chat",
     "summarize": "chat",
+    # Sprint L2 — the short calls around a generation, routed on their own
+    # so a small hosted model can take them while a large one writes.
+    "classify": "chat",
+    "title": "chat",
+    "entities": "chat",
     "asr": "asr",
     "embed": "embed",
 }
@@ -78,6 +83,10 @@ class BackendConfig(BaseModel):
     max_concurrency: int = Field(default=1, ge=1)
     cold_start_seconds: int = Field(default=0, ge=0)
     timeout_seconds: float = Field(default=120.0, gt=0)
+    # Sprint L1 T2: a small local model gets simpler work from the document
+    # engine (fewer facts per window, one example, no noise field, smaller
+    # reduce calls, the strict summary rung first). Only dev_mac sets it.
+    small_model: bool = False
     processor: ProcessorInfo | None = None
     cassette_dir: str | None = None  # kind=recorded only
     # Extra OpenAI-API fields merged into every chat request, e.g.
@@ -112,13 +121,38 @@ class BackendConfig(BaseModel):
         return self.models.get(kind)
 
 
+class OverrideSpec(BaseModel):
+    """Sprint L2 — an env override with a fallback: ``{primary, fallback}``.
+
+    The primary is used when its ``${VAR}``s resolve and, in dev, when its
+    probe answers; otherwise the fallback (dev/test only — staging and prod
+    refuse to boot as before, so no processor changes silently where a
+    workspace acknowledged one)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    primary: str
+    fallback: str | None = None
+
+
+OverrideValue = str | OverrideSpec
+
+
+def override_targets(value: OverrideValue) -> list[str]:
+    """Every backend an override may land on (validation walks all of them)."""
+    if isinstance(value, str):
+        return [value]
+    return [value.primary, *([value.fallback] if value.fallback else [])]
+
+
 class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
     backends: dict[str, BackendConfig]
     routing: dict[str, dict[str, str]]  # operation -> tier -> backend name
-    env_overrides: dict[str, dict[str, str]] = Field(default_factory=dict)  # env -> kind -> backend
+    # env -> kind (or operation, Sprint L2) -> backend name or {primary, fallback}.
+    env_overrides: dict[str, dict[str, OverrideValue]] = Field(default_factory=dict)
 
     @field_validator("routing")
     @classmethod
@@ -131,14 +165,17 @@ class ModelsConfig(BaseModel):
     @field_validator("env_overrides")
     @classmethod
     def _known_override_keys(
-        cls, overrides: dict[str, dict[str, str]]
-    ) -> dict[str, dict[str, str]]:
+        cls, overrides: dict[str, dict[str, OverrideValue]]
+    ) -> dict[str, dict[str, OverrideValue]]:
         for env, by_kind in overrides.items():
             if env not in KNOWN_ENVS:
                 raise ValueError(f"env_overrides: unknown env {env!r}")
             for kind in by_kind:
-                if kind not in ("chat", "asr", "embed", "diarization"):
-                    raise ValueError(f"env_overrides.{env}: unknown kind {kind!r}")
+                if (
+                    kind not in ("chat", "asr", "embed", "diarization")
+                    and kind not in OPERATION_KINDS
+                ):
+                    raise ValueError(f"env_overrides.{env}: unknown kind or operation {kind!r}")
         return overrides
 
 
@@ -251,17 +288,19 @@ def _check_static_invariants(config: ModelsConfig, source: str) -> None:
                     f"{source}: routing.{op}.{tier} -> {target!r} is a {actual} backend, operation needs {expected}",
                 )
     for env, by_kind in config.env_overrides.items():
-        for kind, target in by_kind.items():
-            if target not in config.backends:
-                raise ConfigError(
-                    "unknown_backend",
-                    f"{source}: env_overrides.{env}.{kind} -> {target!r} is not a backend",
-                )
-            if BACKEND_KIND_FOR[config.backends[target].kind] != kind:
-                raise ConfigError(
-                    "kind_mismatch",
-                    f"{source}: env_overrides.{env}.{kind} -> {target!r} is not a {kind} backend",
-                )
+        for key, value in by_kind.items():
+            kind = OPERATION_KINDS.get(key, key)  # an operation key resolves through its kind
+            for target in override_targets(value):
+                if target not in config.backends:
+                    raise ConfigError(
+                        "unknown_backend",
+                        f"{source}: env_overrides.{env}.{kind} -> {target!r} is not a backend",
+                    )
+                if BACKEND_KIND_FOR[config.backends[target].kind] != kind:
+                    raise ConfigError(
+                        "kind_mismatch",
+                        f"{source}: env_overrides.{env}.{key} -> {target!r} is not a {kind} backend",
+                    )
 
 
 def load_config(path: str | Path, *, environ: Mapping[str, str]) -> LoadedConfig:

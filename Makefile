@@ -1,4 +1,4 @@
-.PHONY: smoke-ios eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: smoke-ios eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -82,10 +82,13 @@ dev-model: $(if $(ARGS),,dev-up) ## Start the docker stack + model servers on th
 eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
 	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
 
-eval-notes: ## Gold-set eval of the document engine: `make eval-notes BACKEND=dev_mac [ARM=pipeline|single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>]`
+eval-notes: ## Gold-set eval of the document engine: `make eval-notes BACKEND=dev_mac [ARM=pipeline|single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>] [LABEL=qwen3-8b]`
 	uv run --project services/note-service --with pyyaml python scripts/eval/notes_eval.py \
 	    --backend $(BACKEND) --arm $(or $(ARM),pipeline) --runs $(or $(RUNS),1) \
-	    $(if $(CORPUS),--corpus $(CORPUS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save-notes $(SAVE),)
+	    $(if $(CORPUS),--corpus $(CORPUS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save-notes $(SAVE),) $(if $(LABEL),--label $(LABEL),)
+
+local-bakeoff: ## Sprint L1: every local candidate on a corpus → docs/eval/notes-local-bakeoff-<date>.md: `make local-bakeoff [CORPUS=tests/fixtures/eval/notes] [CANDIDATES="gemma3:4b qwen3:8b"]`
+	@bash scripts/dev/local-bakeoff.sh $(if $(CORPUS),--corpus $(CORPUS),) $(if $(CANDIDATES),--candidates "$(CANDIDATES)",)
 
 eval-notes-assert: ## Regression checklists (r01 = the 2026-09-22 audit, m06 = its synthetic twin): `make eval-notes-assert BACKEND=dev_mac [CORPUS=eval/notes/v2]`
 	uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py \
