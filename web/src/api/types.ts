@@ -255,6 +255,26 @@ export interface TenantSummary {
   my_role: string;
 }
 
+/** `POST /auth/token` — an access token for another of my workspaces. */
+export interface WorkspaceToken {
+  access_token: string;
+  expires_in: number;
+  tenant_id: string;
+  roles: string[];
+}
+
+/** `GET /tenants/{id}/members` row (`MemberOut`). */
+export interface TenantMember {
+  user_sub: string;
+  role: string;
+  status: string;
+  email: string | null;
+  display_name: string | null;
+  platform_role: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── note-service: templates ────────────────────────────────────────────
 
 export type FieldType =

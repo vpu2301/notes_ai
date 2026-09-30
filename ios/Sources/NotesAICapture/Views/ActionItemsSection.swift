@@ -23,7 +23,7 @@ struct ActionItemsSection: View {
                     }
                     Spacer()
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.dsSymbol(12, .semibold))
                         .foregroundStyle(DS.muted)
                 }
             }

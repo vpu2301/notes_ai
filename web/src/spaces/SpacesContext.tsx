@@ -12,7 +12,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import * as spacesApi from "../api/spaces";
 import type { Space } from "../api/types";
 import { useToast } from "../components/Toaster";
@@ -53,7 +53,7 @@ export function SpacesProvider({ children }: { children: ReactNode }) {
       setSpaces(await spacesApi.listSpaces());
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setLoading(false);
     }
@@ -80,7 +80,7 @@ export function SpacesProvider({ children }: { children: ReactNode }) {
         setSpaces((prev) => [...prev, space]);
         return space;
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         return null;
       }
     },
@@ -95,7 +95,7 @@ export function SpacesProvider({ children }: { children: ReactNode }) {
       try {
         await spacesApi.renameSpace(id, trimmed);
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         await refresh();
       }
     },
@@ -108,7 +108,7 @@ export function SpacesProvider({ children }: { children: ReactNode }) {
       try {
         await spacesApi.deleteSpace(id);
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         await refresh();
       }
     },
@@ -126,7 +126,7 @@ export function SpacesProvider({ children }: { children: ReactNode }) {
       try {
         await spacesApi.fileNote(noteId, spaceId);
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         await refresh();
       }
     },

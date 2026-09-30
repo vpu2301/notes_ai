@@ -20,7 +20,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    enum Tab: Hashable { case notes, transcript }
+    enum Tab: Hashable { case notes, transcript, clientVersion }
 
     let noteId: String
     /// Given by the caller (a recording made here) or learnt from the
@@ -71,13 +71,22 @@ final class NoteViewModel: ObservableObject {
 
     var blocks: [NoteBlock] { blocks(editable: editable) }
 
+    /// The blocks of the content on screen: an old version when one is
+    /// being read (never editable), else the note as it stands.
+    var shownBlocks: [NoteBlock] {
+        if let viewing { return blocks(editable: false, content: viewing.content) }
+        return blocks
+    }
+
     /// Structure follows content. A block is shown when it has text.
     /// While editable, three kinds of empty block are shown too, because
     /// there is no other way to put something in them: the pad; a typed
     /// field (its picker is the only way to set it); and, on a template
     /// without a pad (the older, form-shaped ones), the template's own
     /// free-text fields. A dialogue-shaped section is the transcript.
-    func blocks(editable: Bool) -> [NoteBlock] {
+    func blocks(editable: Bool) -> [NoteBlock] { blocks(editable: editable, content: content) }
+
+    func blocks(editable: Bool, content: NoteContent?) -> [NoteBlock] {
         let byId = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let hasPad = byId[Self.padKey] != nil
         var out: [NoteBlock] = []
@@ -125,7 +134,28 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var generationKnown = false
     @Published private(set) var generating = false
     @Published private(set) var generationError: String?
+    /// The code behind `generationError`, when the server gave one: the
+    /// view offers a way to the setting for the codes that have one.
+    @Published private(set) var generationErrorCode: String?
     var generationPollInterval: Duration = .seconds(2)
+
+    // Q5: the rows behind the note, the detail level, and the names to check.
+    @Published private(set) var generatedRows: [GeneratedItem] = []
+    @Published private(set) var detail: DetailLevel = .standard
+    @Published private(set) var correctionBusy: String?
+    @Published private(set) var correctionDone: [String: String] = [:]
+    @Published var correctionError: String?
+    // Sprint 36: carry-over and the client version.
+    @Published private(set) var carried: CarriedView?
+    @Published private(set) var carriedBusy: String?
+    @Published private(set) var clientVersion: ClientVersion?
+    @Published private(set) var clientCheck: ClientVersionCheck?
+    @Published private(set) var clientVersionError: String?
+    @Published private(set) var clientVersionLoading = false
+    // History: the list, and the old version being read, if any.
+    @Published private(set) var history: [NoteVersionSummary]?
+    @Published private(set) var historyLoading = false
+    @Published private(set) var viewing: NoteVersionDetail?
     private var generationTask: Task<Void, Never>?
 
     /// *Generate Summary* lives in exactly one place: the Notes tab of a
@@ -231,6 +261,10 @@ final class NoteViewModel: ObservableObject {
         self.noteId = noteId
         self.jobId = jobId
         self.api = api
+        if let stored = UserDefaults.standard.string(forKey: Self.detailKey(noteId)),
+           let level = DetailLevel(rawValue: stored) {
+            detail = level
+        }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             Task { @MainActor in self?.online = satisfied }
@@ -274,6 +308,14 @@ final class NoteViewModel: ObservableObject {
             if jobId == nil, let job = envelope.sourceJobId { jobId = job }
             await loadGeneration()
             version = envelope.currentVersionNumber
+            await loadGeneratedItems()
+            await loadCarried()
+            // A reload is the note moving on: whatever was being compared
+            // against is stale, and the client version is rebuilt on demand.
+            viewing = nil
+            history = nil
+            clientVersion = nil
+            clientCheck = nil
             saveState = .saved
             conflict = false
             if let templateId = envelope.content?.templateId,
@@ -321,12 +363,21 @@ final class NoteViewModel: ObservableObject {
         generating = true
         generationError = nil
         defer { generating = false }
+        generationErrorCode = nil
         do {
             try await api.regenerate(noteId: noteId)
             await loadGeneration()
         } catch {
-            generationError = error.localizedDescription
+            generationError = AuthCopy.message(for: error)
+            generationErrorCode = (error as? APIError)?.code
         }
+    }
+
+    /// The failure at hand is the processor gate: an admin can lift it on
+    /// the Data & AI settings tab, so the view offers the way there.
+    var generationNeedsProcessorAcknowledgement: Bool {
+        generationErrorCode == "processor_unacknowledged"
+            || (generation?.status == "failed" && generation?.errorKind == "processor_unacknowledged")
     }
 
     /// Poll while the engine writes; when it stops, show what it wrote.
@@ -1539,4 +1590,229 @@ final class NoteViewModel: ObservableObject {
 extension String {
     fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
     fileprivate var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+
+// MARK: - The evidence behind the note (Summary Engine v2, Q5)
+
+extension NoteViewModel {
+    /// Short: the overview. Standard: the note as written. Detailed: plus
+    /// the verified facts no line used, under their topic. A view — never
+    /// an edit, never a model call.
+    enum DetailLevel: String, CaseIterable {
+        case short, standard, detailed
+
+        var label: String {
+            switch self {
+            case .short: return "Short"
+            case .standard: return "Standard"
+            case .detailed: return "Detailed"
+            }
+        }
+    }
+
+    static func detailKey(_ noteId: String) -> String { "note-detail:\(noteId)" }
+
+    /// The rows behind a generated note, by line key. Loaded once per note
+    /// version — a note has well under 200 lines, so one request is the
+    /// whole cost. Empty for a note nobody generated, and for rows written
+    /// before Q5: those lines simply have no evidence to open.
+    func loadGeneratedItems() async {
+        guard jobId != nil || generation != nil else {
+            generatedRows = []
+            return
+        }
+        generatedRows = (try? await api.generatedItems(noteId: noteId)) ?? []
+    }
+
+    /// Evidence and the detail toggle only for the note as it stands, and
+    /// only when the engine wrote it (it has rows).
+    var generated: Bool { viewing == nil && !generatedRows.isEmpty }
+
+    var rowsByKey: [String: GeneratedItem] {
+        Dictionary(generatedRows.map { ($0.itemKey, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The row a displayed line came from, by the server's own key rule.
+    func row(forLine raw: String) -> GeneratedItem? {
+        rowsByKey[GeneratedLineKey.of(raw)]
+    }
+
+    /// The blocks to draw, by detail level: Short keeps the overview only.
+    var visibleBlocks: [NoteBlock] {
+        let all = shownBlocks
+        guard generated, detail == .short else { return all }
+        let overview = all.filter { $0.key == "gen:overview" }
+        return overview.isEmpty ? all : overview
+    }
+
+    /// The fact rows no displayed line is, grouped by the section they
+    /// belong under — what "Detailed" adds.
+    var alsoSaid: [String: [GeneratedItem]] {
+        guard generated, detail == .detailed else { return [:] }
+        var shown = Set<String>()
+        for section in content?.sections ?? [] {
+            for line in (section.text ?? "").split(separator: "\n", omittingEmptySubsequences: true) {
+                let raw = String(line)
+                if !raw.trimmingCharacters(in: .whitespaces).isEmpty { shown.insert(GeneratedLineKey.of(raw)) }
+            }
+        }
+        let cited = Set(generatedRows.flatMap { $0.cites ?? [] }.filter { shown.contains($0) })
+        var out: [String: [GeneratedItem]] = [:]
+        for row in generatedRows {
+            guard row.placement == "suggested", !shown.contains(row.itemKey), !cited.contains(row.itemKey)
+            else { continue }
+            out[row.sectionKey, default: []].append(row)
+        }
+        return out
+    }
+
+    func setDetail(_ level: DetailLevel) {
+        detail = level
+        UserDefaults.standard.set(level.rawValue, forKey: Self.detailKey(noteId))
+    }
+
+    // ── names the engine respelled ─────────────────────────────────
+
+    struct Respelling: Identifiable, Equatable {
+        let itemKey: String
+        let surface: String
+        let canonical: String
+        let source: String
+
+        var id: String { "\(surface)→\(canonical)" }
+    }
+
+    /// The names the engine respelled in this generation, once each, and
+    /// the names it doubted ("Emil (?)").
+    var corrections: (fixed: [Respelling], doubted: [String]) {
+        var fixed: [Respelling] = []
+        var seen = Set<String>()
+        var doubted: [String] = []
+        var seenDoubt = Set<String>()
+        for row in generatedRows {
+            for c in row.corrections ?? [] {
+                let id = "\(c.surface)→\(c.canonical)"
+                if seen.insert(id).inserted {
+                    fixed.append(Respelling(itemKey: row.itemKey, surface: c.surface,
+                                            canonical: c.canonical, source: c.source))
+                }
+            }
+            for name in Self.doubtedNames(in: row.text) where seenDoubt.insert(name).inserted {
+                doubted.append(name)
+            }
+        }
+        return (fixed, doubted)
+    }
+
+    private nonisolated static let marked = try? NSRegularExpression(
+        pattern: #"([\p{Lu}][\w'’-]+(?:\s[\p{Lu}][\w'’-]+)?) \(\?\)"#)
+
+    nonisolated static func doubtedNames(in text: String) -> [String] {
+        guard let marked else { return [] }
+        let ns = text as NSString
+        return marked.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 1)) }
+    }
+
+    /// Accept: the name becomes a workspace glossary term with the heard
+    /// spelling as a mishearing. Reject: the line goes back to what the
+    /// recording heard. Nothing is learned without a person saying so.
+    func correct(_ respelling: Respelling, accept: Bool) async {
+        correctionBusy = respelling.id
+        correctionError = nil
+        defer { correctionBusy = nil }
+        do {
+            if accept {
+                _ = try await api.rememberTerm(respelling.canonical, kind: .person, heardAs: [respelling.surface])
+            }
+            try await api.correctName(noteId: noteId, itemKey: respelling.itemKey,
+                                      expectedVersion: version, accept: accept,
+                                      surface: respelling.surface, canonical: respelling.canonical,
+                                      source: respelling.source)
+            correctionDone[respelling.id] = accept ? "Added to the glossary" : "Put back as heard"
+            if !accept { await load() }
+        } catch {
+            correctionError = AuthCopy.message(for: error)
+        }
+    }
+
+    // ── still open from the last meeting (Sprint 36) ────────────────
+
+    func loadCarried() async {
+        // No series, or the previous note is no longer readable. Either
+        // way there is simply nothing to show.
+        carried = try? await api.carried(noteId: noteId)
+    }
+
+    var carriedItems: [CarriedItem] { (carried?.items ?? []).filter { $0.state != "dropped" } }
+
+    /// Optimistic: ticking a box should feel like ticking a box.
+    func setCarried(_ item: CarriedItem, state: String) async {
+        guard var view = carried, let idx = view.items.firstIndex(where: { $0.itemKey == item.itemKey })
+        else { return }
+        let before = carried
+        carriedBusy = item.itemKey
+        view.items[idx].state = state
+        carried = view
+        defer { carriedBusy = nil }
+        do {
+            try await api.setCarriedState(noteId: noteId, itemKey: item.itemKey, state: state)
+        } catch {
+            carried = before
+            actionError = AuthCopy.message(for: error)
+        }
+    }
+
+    // ── the client version (Sprint 36) ─────────────────────────────
+
+    /// A 1:1 or an interview debrief has no client version at all, and the
+    /// server says so with a 409 rather than an empty document.
+    func loadClientVersion() async {
+        guard clientVersion == nil, !clientVersionLoading else { return }
+        clientVersionLoading = true
+        clientVersionError = nil
+        defer { clientVersionLoading = false }
+        do {
+            async let version = api.clientVersion(noteId: noteId)
+            async let check = api.clientVersionCheck(noteId: noteId)
+            clientVersion = try await version
+            clientCheck = try? await check
+        } catch {
+            clientVersionError = AuthCopy.message(for: error)
+        }
+    }
+
+    // ── history ─────────────────────────────────────────────────────
+
+    func toggleHistory() async {
+        if history != nil {
+            history = nil
+            viewing = nil
+            return
+        }
+        historyLoading = true
+        defer { historyLoading = false }
+        do {
+            history = try await api.versions(noteId: noteId, purpose: readPurpose)
+        } catch {
+            actionError = AuthCopy.message(for: error)
+        }
+    }
+
+    /// Read one old version. The editor is not touched: an old version is
+    /// read-only, and "Back to current" is the only way out.
+    func view(version number: Int) async {
+        guard number != viewing?.versionNumber else { return }
+        do {
+            viewing = try await api.version(noteId: noteId, number: number, purpose: readPurpose)
+        } catch {
+            actionError = AuthCopy.message(for: error)
+        }
+    }
+
+    func backToCurrent() { viewing = nil }
+
+    /// Reading an old version, or a cancelled note: nothing can be typed.
+    var editableNow: Bool { editable && viewing == nil }
 }

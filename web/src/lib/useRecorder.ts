@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "./errorCopy";
 import type { ChannelLayout } from "../api/types";
 
 export const LEVEL_BARS = 28;
@@ -232,7 +232,7 @@ export function useRecorder(
       onError(
         err instanceof DOMException && err.name === "NotAllowedError"
           ? "Microphone access was denied — allow it in the browser and try again."
-          : errorMessage(err),
+          : messageFor(err),
       );
     }
   }, [cleanup, onDone, onError]);

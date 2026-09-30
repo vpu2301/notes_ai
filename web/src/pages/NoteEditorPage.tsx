@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   dismissNameSuggestion,
@@ -9,7 +10,7 @@ import {
   setSpeakerNames,
   undoSpeakerEdit,
 } from "../api/asr";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
 import {
   deleteNote,
   downloadPdf,
@@ -454,7 +455,7 @@ function TextTranscriptView({
         const text = block.spans.map((s) => s.text).join("");
         if (!block.speaker) {
           return (
-            <p key={i} className="turn-text" style={{ gridColumn: "1 / -1" }}>
+            <p key={`${i}-${text.slice(0, 24)}`} className="turn-text" style={{ gridColumn: "1 / -1" }}>
               {text}
             </p>
           );
@@ -462,7 +463,7 @@ function TextTranscriptView({
         const name = block.speaker;
         const isEditing = editing !== null && editing.name === name;
         return (
-          <div key={i} className="turn">
+          <div key={`${i}-${name}`} className="turn">
             <span className="speaker-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
               {speakerInitials(name)}
             </span>
@@ -715,7 +716,7 @@ export function TranscriptView({
       onSpeakersMerged?.(fromName, res.speaker_names[into] ?? defaultSpeakerName(into));
       await reload();
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setSaving(false);
     }
@@ -762,7 +763,7 @@ export function TranscriptView({
         load(r);
         onSpeakersRelabelled?.({ kind: "rerun", before, after: turnsToNoteText(r.turns ?? [], r.speaker_names ?? {}) });
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
       }
     } catch (err) {
       if (err instanceof ApiError && err.code === "stale_result_rev") {
@@ -835,7 +836,7 @@ export function TranscriptView({
         setResult(r);
         setNames(r.speaker_names ?? {});
       })
-      .catch((err) => !cancelled && setError(errorMessage(err)));
+      .catch((err) => !cancelled && setError(messageFor(err)));
     return () => {
       cancelled = true;
     };
@@ -901,7 +902,7 @@ export function TranscriptView({
       setResult((r) => (r ? { ...r, speaker_name_sources: { ...(r.speaker_name_sources ?? {}), [label]: source } } : r));
       onSpeakerRenamed?.(from, merged[label] ?? to);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setSaving(false);
     }
@@ -1169,7 +1170,7 @@ export function TranscriptView({
         const here = openSuggestions.filter((sg) => turnOfSuggestion(turns, sg) === i);
         return (
           <div
-            key={i}
+            key={t.segment_indices?.[0] ?? `${t.start_ms}-${i}`}
             ref={(el) => {
               turnRefs.current[i] = el;
             }}
@@ -1390,6 +1391,7 @@ export function NoteEditorPage() {
   const [note, setNote] = useState<NoteEnvelope | null>(null);
   const [sections, setSections] = useState<TemplateSection[] | null>(null);
   const [content, setContent] = useState<NoteContent | null>(null);
+  useDocumentTitle(content?.title || (note ? "Untitled note" : "Note"));
   /** The template's display name, for the meta row; null when it could not be read. */
   const [templateName, setTemplateName] = useState<string | null>(null);
   /** Q3: what the latest generation took the recording to be. */
@@ -1499,7 +1501,7 @@ export function NoteEditorPage() {
         setSections([]);
       }
     } catch (err) {
-      setLoadError(errorMessage(err));
+      setLoadError(messageFor(err));
     }
   }, [noteId]);
 
@@ -1547,7 +1549,7 @@ export function NoteEditorPage() {
         setSaveState("error");
       } else {
         setSaveState("error");
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
       }
     }
   }, [noteId, toast]);
@@ -1679,7 +1681,7 @@ export function NoteEditorPage() {
     try {
       saveBlob(await downloadPdf(noteId, readPurpose ? "export" : undefined), `${fileBase()}.pdf`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     }
   };
 
@@ -1706,7 +1708,7 @@ export function NoteEditorPage() {
       toast.success("Note deleted");
       navigate("/", { replace: true });
     } catch (err) {
-      setActionError(errorMessage(err));
+      setActionError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -1720,7 +1722,7 @@ export function NoteEditorPage() {
       try {
         setVersions(await listVersions(noteId, readPurpose ?? undefined));
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         setVersions([]);
       }
     }
@@ -1731,7 +1733,7 @@ export function NoteEditorPage() {
     try {
       setViewing(await getVersion(noteId, v.version_number, readPurpose ?? undefined));
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     }
   };
 

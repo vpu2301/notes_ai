@@ -16,12 +16,12 @@ struct WorkspaceChip: View {
             Button { picking = true } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "building.2")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.dsSymbol(11, .semibold))
                     Text(active.title)
                         .font(.ds(12.5, .semibold))
                         .lineLimit(1)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.dsSymbol(9, .semibold))
                 }
                 .foregroundStyle(DS.accentText)
                 .padding(.horizontal, 10)
@@ -110,7 +110,7 @@ struct WorkspacePicker: View {
                     ProgressView().controlSize(.small)
                 } else if isActive {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.dsSymbol(14, .semibold))
                         .foregroundStyle(DS.accentText)
                 }
             }

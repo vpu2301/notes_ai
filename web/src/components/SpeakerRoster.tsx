@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJob, rediarize, resetSpeakerEdits, setSpeakerNames, undoRediarize } from "../api/asr";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
 import { messageFor } from "../lib/errorCopy";
 import type { DiarizationStatus, NameSuggestion, SpeakerNameSource, SpeakerSide, SpeakerStat } from "../api/types";
 import { defaultSpeakerName } from "../api/types";
@@ -109,7 +109,7 @@ const RELABEL_COPY: Record<string, string> = {
 
 export function relabelError(err: unknown): string {
   if (err instanceof ApiError && err.code && RELABEL_COPY[err.code]) return RELABEL_COPY[err.code]!;
-  return errorMessage(err);
+  return messageFor(err);
 }
 
 /**
@@ -622,7 +622,7 @@ function useRelabel(jobId: string, onRelabelled?: (kind: "rerun" | "undo") => Pr
       try {
         await reload.current?.("rerun");
       } catch (err) {
-        setError(errorMessage(err));
+        setError(messageFor(err));
       }
       setOutcome("done");
     } else if (watching.current && next === "failed") {

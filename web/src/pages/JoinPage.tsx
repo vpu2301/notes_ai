@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { captureLead, signupConfig } from "../api/auth";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { Banner, LoginShell } from "./auth/LoginShell";
 import { SignupPage } from "./auth/SignupPage";
 
+import { REF_KEY } from "../lib/storageKeys";
+
 /** Where the shared page's CTA parks its referral code for Sprint 21's `/signup`. */
-export const REF_STORAGE_KEY = "klarnote.ref";
+export const REF_STORAGE_KEY = REF_KEY;
 
 /**
  * `/join` — the fake door behind "Create your own workspace free".
@@ -65,7 +67,7 @@ export function JoinPage() {
       await captureLead(email.trim(), ref);
       setDone(true);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -124,7 +126,7 @@ export function JoinPage() {
         />
         <span>
           I agree to be contacted about my workspace. See the{" "}
-          <a href="/privacy" target="_blank" rel="noreferrer">
+          <a href="/s/privacy" target="_blank" rel="noreferrer">
             privacy notice
           </a>
           .

@@ -19,6 +19,9 @@ struct HomeView: View {
     @State private var renameDraft = ""
     /// True while the search field holds the keyboard — see `searchBar`.
     @State private var searching = false
+    /// "Upload a recording…" from the + menu.
+    @State private var pickingFile = false
+    @State private var creatingBlank = false
 
     init(calendar: CalendarService, google: GoogleCalendarService) {
         self.calendar = calendar
@@ -26,6 +29,10 @@ struct HomeView: View {
     }
 
     var body: some View {
+        dialogs(page)
+    }
+
+    private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
@@ -71,7 +78,22 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) {
                 DSWordmark(size: 15)
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // The + menu is the one place a note starts without a
+                // recording: blank, from a template, or from a file.
+                DSMenu(items: newItems) {
+                    if creatingBlank {
+                        ProgressView().controlSize(.small).frame(width: 34, height: 34)
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.dsSymbol(16, .semibold))
+                            .foregroundStyle(DS.text3)
+                            .frame(width: 34, height: 34)
+                            .contentShape(Rectangle())
+                            .accessibilityLabel("New")
+                    }
+                }
+                NotificationBell(model: app.notifications) { app.notificationsPresented = true }
                 DSMenu(items: accountItems) {
                     DSAvatar(name: app.email.isEmpty ? "?" : app.email, size: 30)
                 }
@@ -98,6 +120,22 @@ struct HomeView: View {
         .onChange(of: app.path.isEmpty) { _, home in
             // Back from a note: its title or snippet may have changed.
             if home { Task { await app.refreshNotes() } }
+        }
+    }
+
+    /// The page's alerts and pickers, kept apart from the page so the
+    /// compiler has two expressions to check instead of one long one.
+    private func dialogs(_ page: some View) -> some View {
+        page
+        .fileImporter(isPresented: $pickingFile, allowedContentTypes: [.audio]) { result in
+            if case .success(let url) = result { capture.uploadFile(url) }
+        }
+        .alert("Couldn't create the note", isPresented: Binding(
+            get: { app.creationError != nil }, set: { if !$0 { app.creationError = nil } }
+        )) {
+            Button("OK") { app.creationError = nil }
+        } message: {
+            Text(app.creationError ?? "")
         }
         .alert("Move this note to the trash?", isPresented: Binding(
             get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }
@@ -195,10 +233,25 @@ struct HomeView: View {
         return count == 0 ? nil : "\(count) connected"
     }
 
+    private func newItems() -> [DSMenuItem] {
+        let busy = creatingBlank || capture.isRecording || capture.phase.isBusy
+        return [
+            .item("Blank note", symbol: "doc", disabled: creatingBlank) {
+                creatingBlank = true
+                Task {
+                    if let id = await app.createBlankNote() { app.openNote(id) }
+                    creatingBlank = false
+                }
+            },
+            .item("New from template…", symbol: "doc.text") { app.newNotePresented = true },
+            .separator,
+            .item("Upload a recording…", symbol: "arrow.up.doc", disabled: busy) { pickingFile = true },
+        ]
+    }
+
     private func accountItems() -> [DSMenuItem] {
-        [
-            .header(app.email.isEmpty ? "Not signed in" : app.email,
-                    hint: URL(string: app.settings.authBaseURL)?.host()),
+        var items: [DSMenuItem] = [
+            .header(app.email.isEmpty ? "Not signed in" : app.email, hint: app.activeWorkspace?.title),
             .separator,
             .item("Settings…", symbol: "gearshape") {
                 app.settingsTab = .general
@@ -210,12 +263,16 @@ struct HomeView: View {
                 app.settingsTab = .account
                 app.settingsPresented = true
             },
-            .item("Clear finished meetings", symbol: "checkmark.circle") { app.clearFinishedRecents() },
-            .separator,
-            .item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
-                Task { await app.signOut() }
-            },
         ]
+        if app.canManageMembers {
+            items.append(.item("Invite people…", symbol: "person.badge.plus") { app.invitePresented = true })
+        }
+        items.append(.item("Clear finished meetings", symbol: "checkmark.circle") { app.clearFinishedRecents() })
+        items.append(.separator)
+        items.append(.item("Sign out", symbol: "rectangle.portrait.and.arrow.right", danger: true) {
+            Task { await app.signOut() }
+        })
+        return items
     }
 
     // MARK: - Coming up (calendar)
@@ -382,7 +439,7 @@ private struct SpacesBar: View {
                 }
                 Button(action: add) {
                     Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.dsSymbol(13, .semibold))
                         .foregroundStyle(DS.text3)
                         .frame(width: 34, height: 34)
                         .background(Circle().fill(DS.surface))
@@ -401,7 +458,7 @@ private struct SpacesBar: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsSymbol(12, .medium))
                     .foregroundStyle(on ? DS.inkText : DS.text3)
                 Text(title)
                     .font(.ds(14, .medium))
@@ -460,7 +517,7 @@ private struct NoteRow: View {
                                     .padding(.vertical, 2)
                                     .background(Capsule().fill(DS.surface2))
                             }
-                            Text(note.snippet.isEmpty ? note.code : note.snippet)
+                            Text(note.snippet.isEmpty ? "No summary yet" : note.snippet)
                                 .font(.dsMeta)
                                 .foregroundStyle(DS.muted)
                                 .lineLimit(1)
@@ -559,17 +616,17 @@ private struct AccessPill: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: access.symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.dsSymbol(11, .semibold))
             if expanded {
                 Text(access.label)
                     .font(.ds(12.5, .medium))
                     .lineLimit(1)
                 if access.hasPublicLink {
                     Image(systemName: "globe")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.dsSymbol(11, .semibold))
                 }
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8.5, weight: .bold))
+                    .font(.dsSymbol(8.5, .bold))
                     .opacity(0.75)
             }
         }
@@ -621,17 +678,25 @@ private struct CaptureRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            DSMenu(dim: true) {
-                [
-                    .item("Copy job ID", symbol: "number") { copyToPasteboard(capture.jobId) },
-                    .separator,
-                    .item("Remove from list", symbol: "trash", danger: true) {
-                        app.removeRecents(jobIds: [capture.jobId])
-                    },
-                ]
-            }
-            .padding(.trailing, 6)
+            DSMenu(dim: true, items: menuItems)
+                .padding(.trailing, 6)
         }
+    }
+
+    private func menuItems() -> [DSMenuItem] {
+        var items: [DSMenuItem] = [
+            .item("Copy job ID", symbol: "number") { copyToPasteboard(capture.jobId) },
+            .separator,
+        ]
+        if capture.status == .queued || capture.status == .running {
+            items.append(.item("Cancel transcription", symbol: "xmark.circle", danger: true) {
+                Task { await app.cancelCapture(jobId: capture.jobId) }
+            })
+        }
+        items.append(.item("Remove from list", symbol: "trash", danger: true) {
+            app.removeRecents(jobIds: [capture.jobId])
+        })
+        return items
     }
 }
 
@@ -720,7 +785,7 @@ private struct ComingUpCard: View {
             dashed {
                 VStack(spacing: 12) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
+                        .font(.dsSymbol(26, .light))
                         .foregroundStyle(DS.muted)
                     Text("See your next meetings here and start a note from one.")
                         .font(.dsBody)
@@ -756,7 +821,7 @@ private struct ComingUpCard: View {
             dashed {
                 VStack(spacing: 10) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
+                        .font(.dsSymbol(26, .light))
                         .foregroundStyle(DS.muted)
                     Text(google.loading && google.events.isEmpty ? "Loading…" : "No upcoming events")
                         .font(.dsBody)
@@ -901,7 +966,7 @@ private struct ComingUpRow: View {
                                      calendar: item.meetingCalendar)
                 } label: {
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.dsSymbol(13, .semibold))
                         .foregroundStyle(DS.inkText)
                         .frame(width: 34, height: 34)
                         .background(Circle().fill(DS.ink))

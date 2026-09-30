@@ -100,6 +100,21 @@ final class AppState: ObservableObject {
     /// The "Invite people" sheet in the main window.
     @Published var invitePresented = false
 
+    /// The "New from template…" sheet in the main window.
+    @Published var templatePickerPresented = false
+    /// A sentence about an action from the sidebar that did not work; the
+    /// window shows it once as an alert.
+    @Published var actionNotice: String?
+    /// A note being made by hand (blank or from a template).
+    @Published private(set) var creatingNote = false
+
+    // ── notifications (the bell) ─────────────────────────────────────
+    @Published var unreadNotifications = 0
+    @Published var notificationFeed: [NotificationItem] = []
+    @Published var notificationsLoading = false
+    @Published var notificationsError: String?
+    var notificationTask: Task<Void, Never>?
+
     func showInvite() {
         invitePresented = true
         NotificationCenter.default.post(name: .openMainWindow, object: nil)
@@ -870,6 +885,87 @@ final class AppState: ObservableObject {
     }
 
     @Published private(set) var drafting: Set<String> = []
+
+    // MARK: - A note by hand (blank, or from a template)
+
+    /// The template a bare "new note" starts from: meeting notes, English
+    /// first (`web/src/lib/createBlankNote.ts`).
+    nonisolated static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
+        let live = list.filter { !$0.isArchived }
+        return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
+            ?? live.first { $0.code.hasPrefix("meeting_notes") }
+            ?? live.first
+    }
+
+    /// Every template the workspace offers, live ones only.
+    func templates() async throws -> [TemplateSummary] {
+        if templateCache == nil { templateCache = try await api.fetchTemplates() }
+        return (templateCache ?? []).filter { !$0.isArchived }
+    }
+
+    /// A note from the default template, opened at once.
+    func createBlankNote() async {
+        guard !creatingNote else { return }
+        creatingNote = true
+        defer { creatingNote = false }
+        do {
+            guard let template = Self.defaultTemplate(try await templates()) else {
+                actionNotice = "Your workspace has no note templates yet."
+                return
+            }
+            try await create(fromTemplate: template.id)
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
+
+    /// A note from the chosen template, opened at once.
+    func createNote(fromTemplate id: String) async {
+        guard !creatingNote else { return }
+        creatingNote = true
+        defer { creatingNote = false }
+        do {
+            try await create(fromTemplate: id)
+            templatePickerPresented = false
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
+
+    private func create(fromTemplate id: String) async throws {
+        // The full definition, so sections seed from their defaults.
+        let detail = try await api.fetchTemplate(id: id)
+        let created = try await api.createNote(content: detail.blankContent())
+        await refreshNotes()
+        openNote(created.id)
+    }
+
+    /// A recording made elsewhere, sent through the same pipeline as one
+    /// made here. The file is copied first: the pipeline deletes what it
+    /// uploads, and the original is the person's.
+    func uploadRecording() {
+        let panel = NSOpenPanel()
+        panel.title = "Upload a recording"
+        panel.prompt = "Upload"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio, .mpeg4Audio, .mp3, .wav, .aiff, .movie, .mpeg4Movie]
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        capture.upload(fileURL: url)
+        NotificationCenter.default.post(name: .openMainWindow, object: nil)
+    }
+
+    /// Stop a transcription that has not finished. The recents row says
+    /// "Cancelled" at once; the pipeline following the job sees the same.
+    func cancelCapture(jobId: String) async {
+        do {
+            try await api.cancelJob(id: jobId)
+            updateRecent(jobId: jobId, status: .cancelled)
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
 
     // MARK: - Opening notes
 

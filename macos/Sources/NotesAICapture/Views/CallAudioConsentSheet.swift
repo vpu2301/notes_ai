@@ -11,7 +11,7 @@ struct CallAudioConsentSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Image(systemName: "headphones")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.dsIcon(20, .semibold))
                     .foregroundStyle(DS.accentText)
                 Text("Record call audio?")
                     .font(.dsDisplay(18, .medium))
@@ -37,7 +37,7 @@ struct CallAudioConsentSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: DS.radius).fill(DS.sidebar))
+                    .background(RoundedRectangle(cornerRadius: DS.radius, style: .continuous).fill(DS.sidebar))
             }
             Link("About recording other participants", destination: CallAudioConsent.helpURL)
                 .font(.dsMeta)

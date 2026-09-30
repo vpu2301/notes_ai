@@ -284,7 +284,7 @@ struct NewMeetingButton: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.dsSymbol(13, .semibold))
                 Text("New meeting")
             }
         }
@@ -385,7 +385,7 @@ struct CaptureBar: View {
             }
             .overlay(alignment: .trailing) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.dsSymbol(12, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .frame(height: 22)

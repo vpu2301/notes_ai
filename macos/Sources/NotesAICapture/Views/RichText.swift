@@ -47,6 +47,10 @@ enum RichBlockKind: Equatable {
 struct RichBlock: Identifiable, Equatable {
     let id: Int
     let kind: RichBlockKind
+    /// The source line of a paragraph or list item, markup and all — what
+    /// the evidence behind a generated line is keyed by (Q5). Nil for the
+    /// other kinds.
+    var raw: String? = nil
 }
 
 // MARK: - Parser
@@ -72,9 +76,12 @@ enum RichText {
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
         // The patterns are literals in this file; one that does not compile
-        // is a bug to fix here, not a condition to handle at run time.
-        // swiftlint:disable:next force_try
-        try! NSRegularExpression(pattern: pattern)
+        // is a bug to fix here, not a condition to handle at run time —
+        // named as such, rather than left to a force-try in view code.
+        guard let compiled = try? NSRegularExpression(pattern: pattern) else {
+            preconditionFailure("RichText: pattern does not compile: \(pattern)")
+        }
+        return compiled
     }
 
     /// Split one line into runs, marking code, bold and italic.
@@ -143,9 +150,9 @@ enum RichText {
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
-        var kinds: [RichBlockKind] = []
+        var kinds: [(kind: RichBlockKind, raw: String?)] = []
         var para: [String] = []
-        var items: [RichListItem] = []
+        var items: [(item: RichListItem, raw: String)] = []
         /// Indent columns seen so far in the open list, innermost last.
         var columns: [Int] = []
 
@@ -154,11 +161,11 @@ enum RichText {
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
             para = []
-            if !body.isEmpty { kinds.append(.paragraph(spans: spans(body))) }
+            if !body.isEmpty { kinds.append((.paragraph(spans: spans(body)), body)) }
         }
 
         func flushList() {
-            kinds.append(contentsOf: items.map { RichBlockKind.item($0) })
+            kinds.append(contentsOf: items.map { (RichBlockKind.item($0.item), $0.raw) })
             items = []
             columns = []
         }
@@ -176,11 +183,11 @@ enum RichText {
             return min(columns.count - 1, maxDepth)
         }
 
-        func push(_ item: RichListItem, at column: Int) {
+        func push(_ item: RichListItem, at column: Int, raw: String) {
             flushPara()
             var item = item
             item.depth = depth(for: column)
-            items.append(item)
+            items.append((item, raw))
         }
 
         var i = 0
@@ -202,16 +209,16 @@ enum RichText {
                 }
                 let body = block.filter { matches(tableSep, $0) == nil }
                 if let header = body.first {
-                    kinds.append(.table(
+                    kinds.append((.table(
                         head: cells(header).map(spans),
-                        rows: body.dropFirst().map { cells($0).map(spans) }))
+                        rows: body.dropFirst().map { cells($0).map(spans) }), nil))
                 }
                 continue
             }
 
             if matches(rule, line) != nil {
                 flush()
-                kinds.append(.rule)
+                kinds.append((.rule, nil))
                 i += 1
                 continue
             }
@@ -219,27 +226,27 @@ enum RichText {
             if let m = matches(heading, line), let hashes = m[1], let body = m[2] {
                 flush()
                 // h1/h2 belong to the document chrome, so the body starts at h3.
-                kinds.append(.heading(level: min(hashes.count + 2, 4), spans: spans(body)))
+                kinds.append((.heading(level: min(hashes.count + 2, 4), spans: spans(body)), nil))
                 i += 1
                 continue
             }
 
             if let m = matches(check, line), let box = m[2], let body = m[3] {
                 push(RichListItem(spans: spans(body), depth: 0, ordered: false, done: box.lowercased() == "x"),
-                     at: indent(of: m[1] ?? ""))
+                     at: indent(of: m[1] ?? ""), raw: line)
                 i += 1
                 continue
             }
 
             if let m = matches(bullet, line), let body = m[2] {
-                push(RichListItem(spans: spans(body), depth: 0, ordered: false), at: indent(of: m[1] ?? ""))
+                push(RichListItem(spans: spans(body), depth: 0, ordered: false), at: indent(of: m[1] ?? ""), raw: line)
                 i += 1
                 continue
             }
 
             if let m = matches(ordered, line), let body = m[3] {
                 push(RichListItem(spans: spans(body), depth: 0, ordered: true, number: Int(m[2] ?? "")),
-                     at: indent(of: m[1] ?? ""))
+                     at: indent(of: m[1] ?? ""), raw: line)
                 i += 1
                 continue
             }
@@ -252,14 +259,15 @@ enum RichText {
                     i += 1
                 }
                 flush()
-                kinds.append(.quote(spans: spans(body.joined(separator: " "))))
+                kinds.append((.quote(spans: spans(body.joined(separator: " "))), nil))
                 continue
             }
 
             // A continuation line under an open list belongs to its last item.
             if !items.isEmpty, line.first == " " || line.first == "\t" {
-                items[items.count - 1].spans.append(
+                items[items.count - 1].item.spans.append(
                     RichSpan(text: " " + line.trimmingCharacters(in: .whitespaces)))
+                items[items.count - 1].raw += " " + line.trimmingCharacters(in: .whitespaces)
                 i += 1
                 continue
             }
@@ -270,7 +278,7 @@ enum RichText {
         }
 
         flush()
-        return kinds.enumerated().map { RichBlock(id: $0.offset, kind: $0.element) }
+        return kinds.enumerated().map { RichBlock(id: $0.offset, kind: $0.element.kind, raw: $0.element.raw) }
     }
 
     /// A one-line preview of a body — the first line with words in it,
@@ -302,6 +310,9 @@ struct RichTextView: View {
     var size: CGFloat = 13.5
     /// Shown in place of an empty body.
     var placeholder: String = "Nothing entered."
+    /// Q5: drawn at the end of each paragraph and list item, from its
+    /// source line — the evidence chip. Nil draws nothing.
+    var lineExtra: ((String) -> AnyView?)? = nil
 
     private var blocks: [RichBlock] { RichText.parse(text) }
 
@@ -323,8 +334,16 @@ struct RichTextView: View {
 
     @ViewBuilder
     private func row(_ block: RichBlock, after previous: RichBlockKind?) -> some View {
-        content(block.kind)
+        if let raw = block.raw, let extra = lineExtra?(raw) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                content(block.kind)
+                extra
+            }
             .padding(.top, gap(before: block.kind, after: previous))
+        } else {
+            content(block.kind)
+                .padding(.top, gap(before: block.kind, after: previous))
+        }
     }
 
     /// The rhythm of the document: tight between the items of one list,

@@ -7,13 +7,45 @@ struct BackendSettings: Codable, Equatable, Sendable {
     var asrBaseURL: String
     var noteBaseURL: String
     var webAppURL: String
+    /// notification-service — the bell in the sidebar. Added after the
+    /// other four, so a settings blob saved without it still decodes.
+    var notificationBaseURL: String
+
+    init(authBaseURL: String, asrBaseURL: String, noteBaseURL: String, webAppURL: String,
+         notificationBaseURL: String = BackendSettings.default.notificationBaseURL) {
+        self.authBaseURL = authBaseURL
+        self.asrBaseURL = asrBaseURL
+        self.noteBaseURL = noteBaseURL
+        self.webAppURL = webAppURL
+        self.notificationBaseURL = notificationBaseURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        authBaseURL = try c.decode(String.self, forKey: .authBaseURL)
+        asrBaseURL = try c.decode(String.self, forKey: .asrBaseURL)
+        noteBaseURL = try c.decode(String.self, forKey: .noteBaseURL)
+        webAppURL = try c.decode(String.self, forKey: .webAppURL)
+        notificationBaseURL = try c.decodeIfPresent(String.self, forKey: .notificationBaseURL)
+            ?? Self.default.notificationBaseURL
+    }
 
     static let `default` = BackendSettings(
         authBaseURL: "http://localhost:8000",
         asrBaseURL: "http://localhost:8001",
         noteBaseURL: "http://localhost:8006",
-        webAppURL: "http://localhost:5173"
+        webAppURL: "http://localhost:5173",
+        notificationBaseURL: "http://localhost:8004"
     )
+}
+
+/// The one place the product's public addresses live. There is no public
+/// docs site in the repo yet; these are the addresses the pages are
+/// expected at and must be published before release (see macos/README.md).
+enum Product {
+    static let site = URL(string: "https://notes.ai")!
+    static let helpSite = site.appending(path: "help")
+    static func help(_ slug: String) -> URL { helpSite.appending(path: slug) }
 }
 
 // MARK: - Auth (auth-service)
@@ -319,11 +351,24 @@ struct TranscriptionJob: Decodable, Sendable {
 
 // MARK: - Templates & notes (note-service)
 
-struct TemplateSummary: Decodable, Sendable {
+struct TemplateSummary: Decodable, Sendable, Identifiable {
     let id: String
     let code: String
     let name: String
     let language: String
+    /// Grouping for the template picker; older servers send neither.
+    var category: String? = nil
+    var status: String? = nil
+
+    enum CodingKeys: String, CodingKey { case id, code, name, language, category, status }
+
+    var isArchived: Bool { status == "archived" }
+}
+
+/// `POST /v1/notes` — a note made from a template, by hand.
+struct NoteCreatedResponse: Decodable, Sendable {
+    let id: String
+    let code: String
 }
 
 struct FromTranscriptRequest: Encodable, Sendable {
@@ -642,7 +687,7 @@ struct GenerationView: Decodable, Sendable {
         case "generation_disabled":
             return "Automatic note writing is off for this workspace."
         case "processor_unacknowledged":
-            return "A workspace admin has to agree to who processes your meetings before notes are written."
+            return GenerationCopy.processorUnacknowledged
         case "no_snapshot", "snapshot_unreadable":
             return "The recording could not be read when the note was written."
         case "model_unavailable":
@@ -1016,11 +1061,25 @@ struct TemplateSectionDef: Decodable, Sendable, Identifiable {
     let required: Bool?
     let minChars: Int?
     let order: Int?
+    /// What a section starts with in a note made from the template.
+    var defaultContent: String? = nil
+
+    init(id: String, name: String, fieldType: String?, required: Bool?, minChars: Int?, order: Int?,
+         defaultContent: String? = nil) {
+        self.id = id
+        self.name = name
+        self.fieldType = fieldType
+        self.required = required
+        self.minChars = minChars
+        self.order = order
+        self.defaultContent = defaultContent
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, name, required, order
         case fieldType = "field_type"
         case minChars = "min_chars"
+        case defaultContent = "default_content"
     }
 
     var isFreeText: Bool { fieldType == nil || fieldType == "free_text" }
@@ -1034,10 +1093,21 @@ struct TemplateDetail: Decodable, Sendable {
     let id: String
     let name: String
     let schemaJsonb: Definition
+    var schemaVersion: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case schemaJsonb = "schema_jsonb"
+        case schemaVersion = "schema_version"
+    }
+
+    /// The content a fresh note starts with: every section, in order,
+    /// seeded from the template's defaults (`web/src/lib/createBlankNote.ts`).
+    func blankContent() -> NoteContent {
+        let sections = schemaJsonb.sections
+            .sorted { ($0.order ?? 0) < ($1.order ?? 0) }
+            .map { NoteSection(sectionKey: $0.id, text: $0.defaultContent ?? "", fieldSpecificMetadata: [:]) }
+        return NoteContent(templateId: id, templateSchemaVersion: schemaVersion ?? 1, title: "", sections: sections)
     }
 }
 
@@ -2424,5 +2494,348 @@ struct AISettings: Decodable, Equatable, Sendable {
         case budgetCents = "budget_cents"
         case mayChoosePremium = "may_choose_premium"
         case canEdit = "can_edit"
+    }
+}
+
+
+// MARK: - Generation copy (shared by the status line and the error map)
+
+/// A sentence per closed-vocabulary reason (`GenerationStatus.tsx` REASONS).
+/// The API never sends prose a person should read.
+enum GenerationCopy {
+    static let processorUnacknowledged =
+        "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI."
+    static let budgetExceeded =
+        "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched."
+    static let generationDisabled = "Automatic note writing is off for this workspace."
+    static let modelUnavailable = "The model was unavailable. Try writing the note again."
+    static let recordingUnreadable = "The recording could not be read when the note was written."
+    static let inProgress = "This note is already being written."
+    static let tooMany = "This note has been rewritten too many times today. Try again tomorrow."
+    static let noTranscript = "This note was not made from a recording, so there is nothing to write it from."
+    static let cancelled = "This note was cancelled, so it cannot be written again."
+}
+
+// MARK: - The client version (Sprint 36)
+
+/// One section as an outside recipient sees it.
+struct ClientSection: Decodable, Sendable, Identifiable {
+    let sectionKey: String
+    let role: String
+    let name: String
+    let text: String
+
+    var id: String { sectionKey }
+
+    enum CodingKeys: String, CodingKey {
+        case role, name, text
+        case sectionKey = "section_key"
+    }
+}
+
+/// Exactly what an external surface renders — the preview and the shared
+/// page call the same builder, so they cannot differ.
+struct ClientVersion: Decodable, Sendable {
+    let available: Bool
+    let reason: String?
+    let title: String
+    let sections: [ClientSection]
+    let hiddenLines: Int
+    let hiddenSections: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case available, reason, title, sections
+        case hiddenLines = "hidden_lines"
+        case hiddenSections = "hidden_sections"
+    }
+}
+
+struct ChecklistItem: Decodable, Sendable, Identifiable {
+    let code: String
+    let detail: String
+    let count: Int
+
+    var id: String { code }
+}
+
+/// Warnings, never blockers: the author decides.
+struct ClientVersionCheck: Decodable, Sendable {
+    let available: Bool
+    let warnings: [ChecklistItem]
+    let isEmpty: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case available, warnings
+        case isEmpty = "is_empty"
+    }
+}
+
+// MARK: - The evidence behind a generated line (Summary Engine v2, Q5)
+
+struct NameCorrection: Decodable, Equatable, Sendable {
+    let surface: String
+    let canonical: String
+    let source: String
+}
+
+struct DateMention: Decodable, Equatable, Sendable {
+    let text: String
+    let date: String
+    let time: String?
+    let direction: String
+}
+
+struct FigureFields: Decodable, Equatable, Sendable {
+    let name: String
+    let value: String
+    let unit: String
+    let qualifier: String
+}
+
+/// One line the engine wrote, with the words that prove it.
+struct GeneratedItem: Decodable, Sendable, Identifiable {
+    let itemKey: String
+    let kind: String
+    let sectionKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    let dueDate: String?
+    let quote: String
+    let startMs: Int
+    let endMs: Int
+    let speakerLabel: String?
+    let speakerName: String?
+    let placement: String
+    /// Q5: the facts this line rests on (their item keys).
+    var cites: [String]? = nil
+    /// fact | estimate | prediction | opinion | proposal | allegation.
+    var certainty: String? = nil
+    /// Q5: whose position it is.
+    var attributedTo: String? = nil
+    var parentKey: String? = nil
+    var figure: FigureFields? = nil
+    /// Q5: names the engine respelled in this line — the quote keeps what was heard.
+    var corrections: [NameCorrection]? = nil
+    var mentions: [DateMention]? = nil
+
+    var id: String { itemKey }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, text, quote, placement, cites, certainty, figure, corrections, mentions
+        case itemKey = "item_key"
+        case sectionKey = "section_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case dueDate = "due_date"
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case speakerLabel = "speaker_label"
+        case speakerName = "speaker_name"
+        case attributedTo = "attributed_to"
+        case parentKey = "parent_key"
+    }
+
+    /// What a line's certainty is called on its chip. A plain fact has none.
+    static let certaintyLabels: [String: String] = [
+        "prediction": "Forecast",
+        "estimate": "Estimate",
+        "opinion": "Opinion",
+        "proposal": "Proposal",
+        "allegation": "Allegation",
+    ]
+
+    /// "Forecast · Reinbold" — or nil for a plain fact.
+    var chipLabel: String? {
+        guard let certainty, let label = Self.certaintyLabels[certainty] else { return nil }
+        let holder = attributedTo?.split(whereSeparator: \.isWhitespace).last.map(String.init)
+        return holder.map { "\(label) · \($0)" } ?? label
+    }
+
+    /// The names actually changed (the engine records a no-op too).
+    var respelled: [NameCorrection] { (corrections ?? []).filter { $0.canonical != $0.surface } }
+
+    /// mm:ss of the moment the words were said.
+    var timeText: String { formatElapsed(ms: startMs) }
+}
+
+/// Accept or reject a name the engine respelled (Q5).
+struct CorrectNameRequest: Encodable, Sendable {
+    let expectedVersion: Int
+    /// correction_accepted | correction_rejected
+    let action: String
+    let surface: String
+    let canonical: String
+    let source: String?
+    var reason: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case action, surface, canonical, source, reason
+        case expectedVersion = "expected_version"
+    }
+}
+
+struct CorrectNameResponse: Decodable, Sendable {
+    let itemKey: String
+    let versionNumber: Int
+    let line: String?
+
+    enum CodingKeys: String, CodingKey {
+        case line
+        case itemKey = "item_key"
+        case versionNumber = "version_number"
+    }
+}
+
+// MARK: - Carry-over from the previous meeting (Sprint 36)
+
+/// An item brought forward from the previous meeting in this series.
+struct CarriedItem: Decodable, Equatable, Sendable, Identifiable {
+    let itemKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    /// open | done_mentioned | done_marked | dropped. `done_mentioned` is
+    /// the recording saying so, with a quote; `done_marked` is the author
+    /// ticking it. Only the engine may claim the first.
+    var state: String
+    var doneQuote: String? = nil
+    var doneSpeaker: String? = nil
+
+    var id: String { itemKey }
+    var isDone: Bool { state == "done_marked" || state == "done_mentioned" }
+
+    enum CodingKeys: String, CodingKey {
+        case text, state
+        case itemKey = "item_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case doneQuote = "done_quote"
+        case doneSpeaker = "done_speaker"
+    }
+}
+
+struct CarriedView: Decodable, Sendable {
+    var items: [CarriedItem]
+    let fromNoteId: String?
+    let fromNoteCode: String?
+    let fromDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case fromNoteId = "from_note_id"
+        case fromNoteCode = "from_note_code"
+        case fromDate = "from_date"
+    }
+
+    /// "12 Sep", or "last time" when the previous note has no date.
+    var fromDateText: String {
+        guard let fromDate else { return "last time" }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        guard let date = iso.date(from: fromDate) ?? plain.date(from: fromDate) ?? day.date(from: fromDate)
+        else { return "last time" }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+}
+
+// MARK: - History (versions)
+
+struct NoteVersionSummary: Decodable, Sendable, Identifiable {
+    let id: String
+    let versionNumber: Int
+    let createdBy: String
+    let createdAt: Date
+    let isAmendment: Bool
+    let amendmentType: String?
+    let amendmentReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case versionNumber = "version_number"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case isAmendment = "is_amendment"
+        case amendmentType = "amendment_type"
+        case amendmentReason = "amendment_reason"
+    }
+}
+
+struct NoteVersionDetail: Decodable, Sendable {
+    let id: String
+    let versionNumber: Int
+    let createdAt: Date
+    let content: NoteContent
+    let renderedText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content
+        case versionNumber = "version_number"
+        case createdAt = "created_at"
+        case renderedText = "rendered_text"
+    }
+}
+
+// MARK: - Notifications (notification-service)
+
+struct NotificationItem: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let category: String
+    let title: String
+    let bodyText: String
+    let deepLink: String
+    let resourceType: String
+    let resourceId: String?
+    let severity: String
+    var readAt: String?
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, title, severity
+        case bodyText = "body_text"
+        case deepLink = "deep_link"
+        case resourceType = "resource_type"
+        case resourceId = "resource_id"
+        case readAt = "read_at"
+        case createdAt = "created_at"
+    }
+
+    var isUnread: Bool { readAt == nil }
+
+    /// The note a deep link points at (`/notes/<id>`), when it does.
+    var noteId: String? {
+        let parts = deepLink.split(separator: "/").map(String.init)
+        guard let at = parts.firstIndex(of: "notes"), at + 1 < parts.count else { return nil }
+        let id = parts[at + 1].split(whereSeparator: { "?#".contains($0) }).first.map(String.init) ?? ""
+        return id.isEmpty ? nil : id
+    }
+}
+
+struct NotificationFeed: Decodable, Sendable {
+    let items: [NotificationItem]
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case unreadCount = "unread_count"
+    }
+}
+
+struct UnreadCount: Decodable, Sendable {
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey { case unreadCount = "unread_count" }
+}
+
+struct NotificationReadResult: Decodable, Sendable {
+    let updated: Int
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case updated
+        case unreadCount = "unread_count"
     }
 }

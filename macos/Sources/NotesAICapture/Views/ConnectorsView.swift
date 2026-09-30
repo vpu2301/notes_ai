@@ -103,7 +103,7 @@ struct ConnectorsView: View {
         case .some(false) where !google.isConnected:
             return google.linkAvailable
                 ? "Google sign-in is not set up on this server — add a calendar by its private iCal address instead."
-                : "Not set up on this server (GOOGLE_CALENDAR_CLIENT_ID)."
+                : "Google Calendar isn't set up for this workspace. Ask whoever runs it."
         default:
             if google.isConnected { return "Next 7 days on the home page, here and in the web app." }
             return google.linkAvailable
@@ -243,7 +243,7 @@ struct ConnectorsView: View {
                 : "\(shown) of \(calendar.calendars.count) calendars · next 7 days on the home page"
         case .notAsked: return "Calendars from System Settings › Internet Accounts, on this Mac only."
         case .denied: return "Access is off for Notes AI in System Settings."
-        case .unavailable: return "Needs the .app bundle (scripts/make-app.sh)."
+        case .unavailable: return "Calendar access isn't available in this version."
         }
     }
 
@@ -253,7 +253,7 @@ struct ConnectorsView: View {
         case .granted: DSChip(text: "Connected", tint: DS.ok, soft: DS.okSoft)
         case .notAsked: DSChip(text: "Not connected", tint: DS.muted, soft: DS.surface2)
         case .denied: DSChip(text: "Off", tint: DS.warn, soft: DS.warnSoft)
-        case .unavailable: DSChip(text: "Dev build", tint: DS.muted, soft: DS.surface2)
+        case .unavailable: DSChip(text: "Unavailable", tint: DS.muted, soft: DS.surface2)
         }
     }
 
@@ -493,11 +493,11 @@ private struct ConnectorGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .medium))
+            .font(.dsIconLg)
             .foregroundStyle(DS.accentText)
             .frame(width: 30, height: 30)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(DS.accentSoft)
             )
     }

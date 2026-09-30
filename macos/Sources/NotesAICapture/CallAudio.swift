@@ -12,10 +12,10 @@ struct CallAudioConsent {
     static let versionKey = "callAudioConsentVersion"
     static let acceptedAtKey = "callAudioConsentAcceptedAt"
 
-    /// The help page the notice and Settings link to. There is no public
-    /// docs site in the repo yet; this is the address the page is expected
-    /// at and must be published before release (see macos/README.md).
-    static let helpURL = URL(string: "https://notes.ai/help/recording-call-audio")!
+    /// The help page the notice and Settings link to — on the product's
+    /// help site (`Product.helpSite`), which is the one place its address
+    /// lives.
+    static let helpURL = Product.help("recording-call-audio")
 
     /// A sentence the person can say at the start of a call.
     static let suggestedSentence =

@@ -20,7 +20,10 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    enum Tab: Hashable { case notes, transcript }
+    enum Tab: Hashable { case notes, transcript, client }
+
+    /// Q5: how much of a generated note to show. A view, never an edit.
+    enum DetailLevel: String, CaseIterable { case short, standard, detailed }
 
     /// A file handed to the share sheet (PDF, Markdown).
     struct ShareItem: Identifiable {
@@ -94,7 +97,7 @@ final class NoteViewModel: ObservableObject {
             let heading: String? = key == Self.padKey ? nil : (def?.name ?? title?.trimmed.nonEmpty)
             out.append(NoteBlock(key: key, title: heading, def: def))
         }
-        for section in content?.sections ?? [] {
+        for section in shownContent?.sections ?? [] {
             let text = (section.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty, TranscriptText.isTranscript(text) { continue }
             let def = byId[section.sectionKey]
@@ -133,6 +136,9 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var generationKnown = false
     @Published private(set) var generating = false
     @Published private(set) var generationError: String?
+    /// The code behind `generationError`, when the server sent one —
+    /// `processor_unacknowledged` gets a button to Settings › Data & AI.
+    @Published private(set) var generationErrorCode: String?
     var generationPollInterval: Duration = .seconds(2)
     private var generationTask: Task<Void, Never>?
 
@@ -259,7 +265,49 @@ final class NoteViewModel: ObservableObject {
         let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
         return name.isEmpty ? "A colleague's note" : "\(name)'s note"
     }
-    var editable: Bool { isDraft }
+    /// A note is editable while it is a draft and the reader is looking
+    /// at it as it stands — an old version is a record.
+    var editable: Bool { isDraft && viewing == nil }
+
+    // MARK: - History
+
+    /// Every version, newest first; loaded when the sheet asks.
+    @Published private(set) var versions: [NoteVersionSummary] = []
+    @Published private(set) var versionsLoading = false
+    @Published private(set) var versionsError: String?
+    /// An old version being read. The document shows its content, read
+    /// only; nil is the note as it stands.
+    @Published private(set) var viewing: NoteVersionDetail?
+    @Published private(set) var viewingLoading = false
+
+    /// What the document shows: the version being read, else the draft.
+    var shownContent: NoteContent? { viewing?.content ?? content }
+
+    func loadVersions() async {
+        versionsLoading = true
+        versionsError = nil
+        defer { versionsLoading = false }
+        do {
+            versions = try await api.versions(noteId: noteId, purpose: readPurpose)
+                .sorted { $0.versionNumber > $1.versionNumber }
+        } catch {
+            versionsError = AuthCopy.message(for: error)
+        }
+    }
+
+    /// Read one version. The current one closes the history view.
+    func view(version number: Int) async {
+        if number == version { viewing = nil; return }
+        viewingLoading = true
+        defer { viewingLoading = false }
+        do {
+            viewing = try await api.version(noteId: noteId, number: number, purpose: readPurpose)
+        } catch {
+            actionError = AuthCopy.message(for: error)
+        }
+    }
+
+    func backToCurrent() { viewing = nil }
 
     // MARK: - Load
 
@@ -280,6 +328,8 @@ final class NoteViewModel: ObservableObject {
             content = envelope.content
             if jobId == nil, let job = envelope.sourceJobId { jobId = job }
             await loadGeneration()
+            await loadGeneratedRows()
+            await loadCarried()
             version = envelope.currentVersionNumber
             saveState = .saved
             conflict = false
@@ -327,13 +377,24 @@ final class NoteViewModel: ObservableObject {
         guard !generating else { return }
         generating = true
         generationError = nil
+        generationErrorCode = nil
         defer { generating = false }
         do {
             try await api.regenerate(noteId: noteId)
             await loadGeneration()
         } catch {
-            generationError = error.localizedDescription
+            // Never the server's `detail`: the sentence for every code the
+            // engine can answer with lives in `AuthCopy`, and an unknown
+            // one gets a generic line with a reference.
+            generationError = AuthCopy.message(for: error)
+            generationErrorCode = AuthCopy.code(of: error)
         }
+    }
+
+    /// The failure needs a workspace admin on Settings › Data & AI.
+    var generationNeedsAcknowledgement: Bool {
+        generationErrorCode == "processor_unacknowledged"
+            || (generation?.needsProcessorAcknowledgement ?? false)
     }
 
     /// Poll while the engine writes; when it stops, show what it wrote.
@@ -1178,6 +1239,199 @@ final class NoteViewModel: ObservableObject {
 
     /// The server sees the last few turns for context; it caps the thread.
     private static let historyLimit = 12
+
+    // MARK: - The client version (Sprint 36)
+
+    @Published private(set) var clientVersion: ClientVersion?
+    @Published private(set) var clientCheck: ClientVersionCheck?
+    @Published private(set) var clientVersionLoading = false
+    /// A 1:1 or an interview has no client version at all; the server
+    /// says so with a 409 and this is the sentence for it.
+    @Published private(set) var clientVersionNotice: String?
+
+    func loadClientVersion(force: Bool = false) async {
+        guard force || (clientVersion == nil && clientVersionNotice == nil) else { return }
+        clientVersionLoading = true
+        defer { clientVersionLoading = false }
+        do {
+            clientVersion = try await api.clientVersion(noteId: noteId)
+            clientCheck = try? await api.clientVersionCheck(noteId: noteId)
+            clientVersionNotice = nil
+        } catch APIError.http(status: 409, problem: _) {
+            clientVersion = nil
+            clientVersionNotice = "This kind of note has no client version: a 1:1, an interview or a debrief is for the workspace only."
+        } catch {
+            clientVersion = nil
+            clientVersionNotice = AuthCopy.message(for: error)
+        }
+    }
+
+    // MARK: - Evidence, detail and corrections (Summary Engine v2, Q5)
+
+    /// The rows behind the generated note, by line key. Empty for a note
+    /// nobody generated, and for rows written before Q5.
+    @Published private(set) var generatedRows: [GeneratedItem] = []
+    @Published private(set) var rowsByKey: [String: GeneratedItem] = [:]
+    /// Short / Standard / Detailed, remembered per note on this phone.
+    @Published var detail: DetailLevel = .standard {
+        didSet { UserDefaults.standard.set(detail.rawValue, forKey: Self.detailKey(noteId)) }
+    }
+    /// The row whose evidence sheet is open.
+    @Published var evidenceRow: GeneratedItem?
+    /// Corrections acted on in this view: id → what happened.
+    @Published private(set) var correctionOutcomes: [String: String] = [:]
+    @Published private(set) var correctionBusy: String?
+    @Published var correctionError: String?
+
+    nonisolated static func detailKey(_ noteId: String) -> String { "note-detail:\(noteId)" }
+
+    /// Evidence and the detail toggle only for the note as it stands, and
+    /// only when the engine wrote it (it has rows).
+    var isGenerated: Bool { viewing == nil && !generatedRows.isEmpty }
+
+    func loadGeneratedRows() async {
+        let stored = UserDefaults.standard.string(forKey: Self.detailKey(noteId))
+        if let stored, let level = DetailLevel(rawValue: stored), level != detail { detail = level }
+        // A note nobody generated answers with an empty list or a 404;
+        // either way the lines simply have no evidence to open.
+        let rows = (try? await api.generatedItems(noteId: noteId)) ?? []
+        generatedRows = rows
+        rowsByKey = Dictionary(rows.map { ($0.itemKey, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The row behind a displayed line, marker and all — or nil.
+    func row(forLine raw: String) -> GeneratedItem? {
+        guard isGenerated else { return nil }
+        return rowsByKey[GeneratedLineKey.lineKey(raw)]
+    }
+
+    /// The statements a row rests on, beyond the first (`and N more`).
+    func supportingRows(of row: GeneratedItem) -> [GeneratedItem] {
+        (row.cites ?? []).dropFirst().compactMap { rowsByKey[$0] }
+    }
+
+    /// The fact rows no displayed line is, grouped by the section they
+    /// belong under — what "Detailed" adds (`uncitedBySection`).
+    var alsoSaidBySection: [String: [GeneratedItem]] {
+        guard isGenerated, detail == .detailed else { return [:] }
+        var shown = Set<String>()
+        for section in shownContent?.sections ?? [] {
+            for line in (section.text ?? "").split(separator: "\n", omittingEmptySubsequences: false)
+            where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                shown.insert(GeneratedLineKey.lineKey(String(line)))
+            }
+        }
+        let cited = Set(generatedRows.flatMap { $0.cites ?? [] }.filter { shown.contains($0) })
+        var out: [String: [GeneratedItem]] = [:]
+        for row in generatedRows {
+            guard row.placement == "suggested", !shown.contains(row.itemKey), !cited.contains(row.itemKey)
+            else { continue }
+            out[row.sectionKey, default: []].append(row)
+        }
+        return out
+    }
+
+    /// The names the engine respelled in this generation, once each.
+    struct NameCorrection: Identifiable, Equatable {
+        let itemKey: String
+        let surface: String
+        let canonical: String
+        let source: String?
+        var id: String { "\(surface)→\(canonical)" }
+    }
+
+    var nameCorrections: [NameCorrection] {
+        guard isGenerated else { return [] }
+        var seen = Set<String>()
+        var out: [NameCorrection] = []
+        for row in generatedRows {
+            for c in row.corrections ?? [] {
+                let fix = NameCorrection(itemKey: row.itemKey, surface: c.surface, canonical: c.canonical,
+                                         source: c.source)
+                if seen.insert(fix.id).inserted { out.append(fix) }
+            }
+        }
+        return out
+    }
+
+    /// The names it doubted — "Emil (?)".
+    var doubtedNames: [String] {
+        guard isGenerated else { return [] }
+        var out: [String] = []
+        for row in generatedRows {
+            for name in Self.doubted(in: row.text) where !out.contains(name) { out.append(name) }
+        }
+        return out
+    }
+
+    nonisolated static func doubted(in text: String) -> [String] {
+        GeneratedLineKey.doubtedNames(in: text)
+    }
+
+    /// Accept: the name becomes a workspace glossary term with the heard
+    /// spelling as a mishearing. Reject: the line goes back to what the
+    /// recording heard. Nothing is learned without a person saying so.
+    func act(on fix: NameCorrection, accept: Bool) async {
+        correctionBusy = fix.id
+        correctionError = nil
+        defer { correctionBusy = nil }
+        do {
+            if accept {
+                _ = try await api.rememberTerm(fix.canonical, kind: .person, heardAs: [fix.surface],
+                                               noteId: noteId)
+            }
+            let request = NameCorrectionRequest(
+                expectedVersion: version,
+                action: accept ? "correction_accepted" : "correction_rejected",
+                surface: fix.surface, canonical: fix.canonical, source: fix.source,
+                reason: accept ? nil : "wrong_name")
+            try await api.correctName(noteId: noteId, itemKey: fix.itemKey, request: request)
+            correctionOutcomes[fix.id] = accept ? "Added to the glossary" : "Put back as heard"
+            if !accept, saveState == .saved { await load() }
+        } catch {
+            correctionError = AuthCopy.message(for: error)
+        }
+    }
+
+    /// Open the transcript where a row's quote was said.
+    func showInTranscript(_ row: GeneratedItem) async {
+        evidenceRow = nil
+        tab = .transcript
+        await loadTranscript()
+        await seekTranscript(to: row.startMs)
+    }
+
+    // MARK: - Carry-over (Sprint 36)
+
+    /// "Still open from 12 Sep" — the previous meeting's unfinished
+    /// business. Nil when there is no series, or the previous note is no
+    /// longer readable: either way there is nothing to show.
+    @Published private(set) var carried: CarriedView?
+    @Published private(set) var carriedBusy: String?
+
+    var carriedItems: [CarriedItem] { (carried?.items ?? []).filter { $0.state != "dropped" } }
+
+    func loadCarried() async {
+        carried = try? await api.carried(noteId: noteId)
+    }
+
+    /// Optimistic: ticking a box should feel like ticking a box.
+    func setCarried(_ item: CarriedItem, state: String) async {
+        guard var view = carried else { return }
+        let before = view
+        if let index = view.items.firstIndex(where: { $0.itemKey == item.itemKey }) {
+            view.items[index].state = state
+        }
+        carried = view
+        carriedBusy = item.itemKey
+        defer { carriedBusy = nil }
+        do {
+            try await api.setCarriedState(noteId: noteId, itemKey: item.itemKey, state: state)
+        } catch {
+            carried = before
+            actionError = AuthCopy.message(for: error)
+        }
+    }
 
     func ask(_ question: String) async {
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)

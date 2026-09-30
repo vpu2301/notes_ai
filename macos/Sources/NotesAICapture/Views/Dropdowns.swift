@@ -93,7 +93,7 @@ private struct DSMenuRow: View {
             HStack(spacing: 9) {
                 if let symbol = item.symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.dsIconMd)
                         .frame(width: 16)
                 }
                 Text(item.title)
@@ -102,7 +102,7 @@ private struct DSMenuRow: View {
                 Spacer(minLength: 12)
                 if item.checked {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.dsIcon(10, .bold))
                         .foregroundStyle(DS.accentText)
                 } else if let hint = item.hint {
                     Text(hint)
@@ -114,7 +114,7 @@ private struct DSMenuRow: View {
             .padding(.horizontal, 8)
             .frame(height: 28)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(hover ? (item.danger ? DS.dangerSoft : DS.surface2) : .clear)
             )
             .contentShape(Rectangle())
@@ -179,12 +179,13 @@ struct DSMoreLabel: View {
             .foregroundStyle(hover ? DS.text1 : (dim ? DS.muted : DS.text3))
             .frame(width: 26, height: 26)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(hover ? DS.surface2 : .clear)
             )
             .contentShape(Rectangle())
             .onHover { hover = $0 }
             .help("More actions")
+            .accessibilityLabel("More actions")
     }
 }
 
@@ -213,7 +214,7 @@ struct DSSelect<T: Hashable>: View {
             HStack(spacing: 7) {
                 if let symbol = current?.symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 11.5, weight: .medium))
+                        .font(.dsIcon(11.5))
                         .foregroundStyle(DS.text3)
                 }
                 Text(current?.label ?? "—")
@@ -222,7 +223,7 @@ struct DSSelect<T: Hashable>: View {
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.dsIcon(9, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .padding(.leading, 10)

@@ -6,7 +6,7 @@ import React, {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import {
   createLink,
   createPublicLink,
@@ -130,7 +130,7 @@ export function ShareDialog({
     let live = true;
     getSharing(noteId)
       .then((v) => live && setView(v))
-      .catch((err) => live && setError(errorMessage(err)));
+      .catch((err) => live && setError(messageFor(err)));
     return () => {
       live = false;
     };
@@ -152,7 +152,7 @@ export function ShareDialog({
         setView(await work());
         if (done) toast.success(done);
       } catch (err) {
-        setError(errorMessage(err));
+        setError(messageFor(err));
       } finally {
         setBusy(false);
       }
@@ -240,7 +240,7 @@ export function ShareDialog({
         toast.success(only ? `Sent to ${only.email}` : `Sent to ${sent.length} people`);
       }
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -318,7 +318,7 @@ export function ShareDialog({
       setView(await getSharing(noteId));
       toast.success(send ? (link.delivery_status === "sent" ? `Sent to ${email}` : "Link created, but the e-mail did not go out") : "Link created");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -332,7 +332,7 @@ export function ShareDialog({
       setView(await getSharing(noteId));
       toast.success(next.delivery_status === "sent" ? "Sent" : "The e-mail did not go out");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -347,7 +347,7 @@ export function ShareDialog({
       setView(await getSharing(noteId));
       toast.success("Link turned off");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }

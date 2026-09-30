@@ -276,7 +276,7 @@ private struct NoteRow: View {
                                 .background(Capsule().fill(DS.surface2))
                         }
                     }
-                    Text(note.snippet.isEmpty ? note.code : note.snippet)
+                    Text(note.snippet.isEmpty ? "No summary yet" : note.snippet)
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                         .lineLimit(1)
@@ -382,17 +382,17 @@ private struct AccessPill: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: access.symbol)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.dsIcon(10, .semibold))
             Text(access.label)
                 .font(.ds(12, .medium))
                 .lineLimit(1)
             if access.hasPublicLink {
                 Image(systemName: "globe")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.dsIcon(10, .semibold))
                     .help("A public link is on")
             }
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
+                .font(.dsIcon(8, .bold))
                 .opacity(0.75)
         }
         .foregroundStyle(access.isPublic ? DS.accentText : DS.text3)
@@ -442,16 +442,22 @@ private struct CaptureRow: View {
                     EmptyView()
                 }
                 DSMenu(width: 200, dim: true) {
-                    [
+                    var items: [DSMenuItem] = [
                         .item("Copy job ID", symbol: "number") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(capture.jobId, forType: .string)
                         },
-                        .separator,
-                        .item("Remove from list", symbol: "trash", danger: true) {
-                            app.removeRecents(jobIds: [capture.jobId])
-                        },
                     ]
+                    if capture.status == .queued || capture.status == .running {
+                        items.append(.item("Cancel transcription", symbol: "xmark.circle", danger: true) {
+                            Task { await app.cancelCapture(jobId: capture.jobId) }
+                        })
+                    }
+                    items.append(.separator)
+                    items.append(.item("Remove from list", symbol: "trash", danger: true) {
+                        app.removeRecents(jobIds: [capture.jobId])
+                    })
+                    return items
                 }
                 .opacity(hover ? 1 : 0)
             }
@@ -556,7 +562,7 @@ private struct ComingUpCard: View {
             dashed {
                 VStack(spacing: 10) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
+                        .font(.dsIcon(26, .light))
                         .foregroundStyle(DS.muted)
                     Text("See your next meetings here and start a note from one.")
                         .font(.dsBody)
@@ -593,7 +599,7 @@ private struct ComingUpCard: View {
             dashed {
                 VStack(spacing: 10) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
+                        .font(.dsIcon(26, .light))
                         .foregroundStyle(DS.muted)
                     Text(google.loading && google.events.isEmpty ? "Loading…" : "No upcoming events")
                         .font(.dsBody)
@@ -705,7 +711,7 @@ private struct ComingUpRow: View {
                     .monospacedDigit()
             }
             .frame(width: 96, alignment: .leading)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
+            Capsule()
                 .fill(item.color ?? DS.accent)
                 .frame(width: 3, height: 28)
             VStack(alignment: .leading, spacing: 2) {

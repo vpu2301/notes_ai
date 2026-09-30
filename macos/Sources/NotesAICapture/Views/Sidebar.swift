@@ -36,6 +36,7 @@ struct SidebarView: View {
                 Color.clear.frame(width: 62)
                 DSWordmark(size: 14)
                 Spacer(minLength: 4)
+                NotificationBell()
                 inviteButton
                 collapseButton
             }
@@ -45,7 +46,12 @@ struct SidebarView: View {
 
             VStack(spacing: 8) {
                 DSSearchField(text: $app.searchQuery, placeholder: "Search notes")
-                NewMeetingButton(fill: true, height: 34)
+                HStack(spacing: 6) {
+                    NewMeetingButton(fill: true, height: 34)
+                    // Web parity: a note that starts blank, from a template,
+                    // or from a recording made elsewhere. Here and nowhere else.
+                    NewNoteMenu()
+                }
                 navRow("Home", symbol: "house", on: app.selection == nil && app.selectedSpaceId == nil) {
                     app.selection = nil
                     app.selectedSpaceId = nil
@@ -66,6 +72,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(DSIconButtonStyle(size: 22))
                 .help("New space")
+                .accessibilityLabel("New space")
             }
             .padding(.leading, 22)
             .padding(.trailing, 12)
@@ -80,7 +87,7 @@ struct SidebarView: View {
                     if addingSpace {
                         HStack(spacing: 8) {
                             Image(systemName: "folder")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.dsIcon(12, .medium))
                                 .foregroundStyle(DS.text3)
                                 .frame(width: 16)
                             TextField("Space name", text: $newSpaceName)
@@ -155,6 +162,7 @@ struct SidebarView: View {
             }
             .scrollIndicators(.hidden)
 
+            NotificationBell()
             inviteButton
             DSDivider()
             DSMenu(width: 236, edge: .top, items: accountItems) {
@@ -170,7 +178,7 @@ struct SidebarView: View {
                             accent: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
+                .font(.dsIcon(13, .medium))
                 .foregroundStyle(accent ? DS.inkText : (on ? DS.text1 : DS.text3))
                 .frame(width: 32, height: 30)
                 .background(
@@ -185,6 +193,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     // MARK: - The two chrome icons
@@ -197,6 +206,7 @@ struct SidebarView: View {
         }
         .buttonStyle(DSIconButtonStyle(size: 24))
         .help(app.sidebarCollapsed ? "Expand sidebar (⌃⌘S)" : "Collapse sidebar (⌃⌘S)")
+        .accessibilityLabel(app.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
     }
 
     private var inviteButton: some View {
@@ -207,6 +217,7 @@ struct SidebarView: View {
         }
         .buttonStyle(DSIconButtonStyle(size: 24))
         .help("Invite people to this workspace")
+        .accessibilityLabel("Invite people to this workspace")
     }
 
     // MARK: - Spaces editing
@@ -227,7 +238,7 @@ struct SidebarView: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsIcon(12, .medium))
                     .frame(width: 16)
                 Text(title)
                     .font(.ds(13, .medium))
@@ -268,7 +279,7 @@ struct SidebarView: View {
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.dsIcon(9, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .padding(.horizontal, 10)
@@ -364,7 +375,7 @@ private struct SpaceRow: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: selected ? "folder.fill" : "folder")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsIcon(12, .medium))
                     .foregroundStyle(selected ? DS.accentText : DS.text3)
                     .frame(width: 16)
                 if renaming {

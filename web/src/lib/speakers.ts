@@ -3,12 +3,13 @@
  * the same across the editor, the shared page and the native apps (they
  * use the same palette and the same hash).
  */
-const TINTS = ["#4f7a5e", "#b5673c", "#8a6d2f", "#4a6d8c", "#7a5a8c", "#3f7f7a"];
+const TINT_COUNT = 6;
 
+/** A CSS colour for `--tint`: one of the `--speaker-N` tokens (tokens.css), which carry their own dark-mode values. */
 export function speakerTint(name: string): string {
   let h = 0;
-  for (const ch of name) h = (h + (ch.codePointAt(0) ?? 0)) % TINTS.length;
-  return TINTS[h] as string;
+  for (const ch of name) h = (h + (ch.codePointAt(0) ?? 0)) % TINT_COUNT;
+  return `var(--speaker-${h + 1})`;
 }
 
 export function speakerInitials(name: string): string {

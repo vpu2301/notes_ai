@@ -204,6 +204,10 @@ struct NoteView: View {
             })
         }
         items.append(.separator)
+        items.append(.item(model.history == nil ? "History" : "Hide history", symbol: "clock.arrow.circlepath",
+                           disabled: model.historyLoading) {
+            Task { await model.toggleHistory() }
+        })
         items.append(.item("Download PDF", symbol: "arrow.down.doc", disabled: model.busy) {
             Task { await model.exportPDF() }
         })
@@ -244,7 +248,7 @@ struct NoteView: View {
             ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         documentBody
-                        if !model.chat.isEmpty || model.asking || model.askError != nil {
+                        if model.viewing == nil, !model.chat.isEmpty || model.asking || model.askError != nil {
                             askThread
                                 .padding(.top, 36)
                         }
@@ -277,7 +281,11 @@ struct NoteView: View {
                 .frame(height: 96)
                 .allowsHitTesting(false)
                 .overlay(alignment: .bottom) {
-                    if model.selectedTurnIds.isEmpty { askBar } else { moveBar }
+                    if !model.selectedTurnIds.isEmpty {
+                        moveBar
+                    } else if model.viewing == nil {
+                        askBar
+                    }
                 }
         }
         .onChange(of: model.tab) { _, _ in model.endSelection() }
@@ -296,7 +304,7 @@ struct NoteView: View {
         .textFieldStyle(.plain)
         .font(.dsDisplay(30))
         .foregroundStyle(DS.text1)
-        .disabled(!model.editable)
+        .disabled(!model.editableNow)
         .padding(.bottom, 10)
 
         // The meta line is a row of pills, not a run of text: when it was
@@ -327,20 +335,47 @@ struct NoteView: View {
             .padding(.bottom, 16)
         }
 
-        if capture?.status == .complete || model.hasTranscript {
-            DSSegmentedPill(
-                options: [
-                    .init(NoteViewModel.Tab.notes, label: "Notes"),
-                    .init(NoteViewModel.Tab.transcript, label: "Transcript"),
-                ],
-                selection: $model.tab, height: 28)
-            .padding(.bottom, 20)
+        // Reading an old version: say so, and offer the way back. The
+        // tabs stay — the transcript and the client version are the
+        // note's, not the version's.
+        if let viewing = model.viewing {
+            HStack(spacing: 10) {
+                DSNotice(tone: .info, symbol: "clock.arrow.circlepath",
+                         text: "Reading version \(viewing.versionNumber) from \(formatDateTime(viewing.createdAt)). Nothing here can be edited.")
+                Button("Back to current") { model.backToCurrent() }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
+            }
+            .padding(.bottom, 16)
         }
+
+        if model.history != nil {
+            HistoryPanel(model: model)
+                .padding(.bottom, 16)
+        }
+
+        // Notes, the transcript when there is one, and what a client would
+        // see (Sprint 36) — the web's tabs, in the web's order.
+        DSSegmentedPill(options: tabOptions, selection: $model.tab, height: 28)
+            .padding(.bottom, 20)
+            .onChange(of: model.hasTranscript) { _, has in
+                if !has, model.tab == .transcript { model.tab = .notes }
+            }
 
         switch model.tab {
         case .notes: sections
         case .transcript: transcript
+        case .clientVersion: ClientVersionView(model: model)
         }
+    }
+
+    private var tabOptions: [DSSegmentedPill<NoteViewModel.Tab>.Option] {
+        var options: [DSSegmentedPill<NoteViewModel.Tab>.Option] = [.init(.notes, label: "Notes")]
+        if capture?.status == .complete || model.hasTranscript {
+            options.append(.init(.transcript, label: "Transcript"))
+        }
+        options.append(.init(.clientVersion, label: "Client version",
+                             help: "What someone outside the workspace sees"))
+        return options
     }
 
     /// The "filed in" pill. A note already in a space names it; one that
@@ -397,7 +432,7 @@ struct NoteView: View {
                 case .assistant:
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.dsIcon(12, .medium))
                             .foregroundStyle(DS.accentText)
                             .frame(width: 20, height: 20)
                         // An answer arrives as bullets and headings just as
@@ -409,7 +444,7 @@ struct NoteView: View {
             if model.asking {
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.dsIcon(12, .medium))
                         .foregroundStyle(DS.accentText)
                         .frame(width: 20, height: 20)
                     Text("Thinking…")
@@ -431,7 +466,7 @@ struct NoteView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsIcon(12, .medium))
                     .foregroundStyle(DS.accentText)
                 TextField("Ask about this note…", text: $askDraft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -441,7 +476,7 @@ struct NoteView: View {
                     .onSubmit { sendQuestion() }
                 Button { sendQuestion() } label: {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.dsIcon(12, .semibold))
                         .frame(width: 8)
                 }
                 .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 26))
@@ -518,7 +553,9 @@ struct NoteView: View {
                     DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
                              text: generation.wroteNothing
                                  ? GenerationView.nothingWrittenText : generation.failureText)
-                    if generation.errorKind != "budget_exceeded" {
+                    if generation.errorKind == "processor_unacknowledged" {
+                        dataSettingsButton
+                    } else if generation.errorKind != "budget_exceeded" {
                         Button("Try again") { Task { await model.generateSummary() } }
                             .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
                             .disabled(model.generating)
@@ -529,14 +566,32 @@ struct NoteView: View {
                 generationFacts(generation)
             }
             if let error = model.generationError {
-                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
+                HStack(alignment: .center, spacing: 10) {
+                    DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: error)
+                    if model.generationErrorCode == "processor_unacknowledged" { dataSettingsButton }
+                }
+            }
+            // Q5: how much of a generated note to show, and the names the
+            // engine respelled; Sprint 36: what the last meeting left open.
+            if model.generated {
+                DSSegmentedPill(
+                    options: NoteViewModel.DetailLevel.allCases.map { .init($0, label: $0.label) },
+                    selection: Binding(get: { model.detail }, set: { model.setDetail($0) }),
+                    height: 26)
+                .accessibilityLabel("How much to show")
+            }
+            if model.generated, model.editableNow {
+                CorrectionsPanelView(model: model)
+            }
+            if model.viewing == nil {
+                CarriedItemsView(model: model, readOnly: !model.editableNow)
             }
             if model.sections.isEmpty {
                 Text("This note's template has no sections.")
                     .font(.dsBody)
                     .foregroundStyle(DS.muted)
             }
-            if model.blocks.isEmpty, !model.sections.isEmpty {
+            if model.visibleBlocks.isEmpty, !model.sections.isEmpty {
                 Text(model.hasTranscript
                      ? "No notes yet — the transcript is under the other tab."
                      : "Nothing here yet.")
@@ -547,7 +602,9 @@ struct NoteView: View {
             // Structure follows content: one block per section the note
             // HAS, headed only when it has a title. Nothing is drawn for
             // being in the template.
-            ForEach(model.blocks) { block in
+            let shown = model.viewing?.content ?? model.content
+            let alsoSaid = model.alsoSaid
+            ForEach(model.visibleBlocks) { block in
                 VStack(alignment: .leading, spacing: 6) {
                     if let title = block.title, !title.isEmpty {
                         // A "#" hangs in the gutter so the document's outline
@@ -566,24 +623,65 @@ struct NoteView: View {
                     if block.isFreeText {
                         SectionField(
                             text: Binding(
-                                get: { model.content?.section(block.key).text ?? "" },
+                                get: { shown?.section(block.key).text ?? "" },
                                 set: { model.setSectionText(block.key, $0) }
                             ),
                             name: block.name,
                             placeholder: block.placeholder,
-                            editable: model.editable,
+                            editable: model.editableNow,
                             editing: Binding(
                                 get: { editingSection == block.key },
                                 set: { editingSection = $0 ? block.key : nil }
-                            ))
+                            ),
+                            lineExtra: lineExtra)
                     } else {
                         // Structured fields (choice, date, number) are edited in
                         // the web app; show the value read-only here.
-                        RichTextView(text: model.content?.section(block.key).text ?? "", size: DS.docText)
+                        RichTextView(text: shown?.section(block.key).text ?? "", size: DS.docText)
+                    }
+                    if let extra = alsoSaid[block.key], !extra.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Also said")
+                                .font(.dsMeta)
+                                .foregroundStyle(DS.muted)
+                            ForEach(extra) { row in
+                                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                    Circle().fill(DS.muted).frame(width: 4, height: 4).offset(y: -1)
+                                        .frame(width: 14, alignment: .leading)
+                                    Text(row.text)
+                                        .font(.ds(DS.docText))
+                                        .foregroundStyle(DS.text2)
+                                        .lineSpacing(3)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    LineEvidenceView(model: model, row: row)
+                                }
+                            }
+                        }
+                        .padding(.top, 6)
                     }
                 }
             }
         }
+    }
+
+    /// Q5: the chip and the quote behind a generated line, from the line's
+    /// own text — nothing positional, nothing to drift.
+    private var lineExtra: ((String) -> AnyView?)? {
+        guard model.generated else { return nil }
+        return { raw in
+            guard let row = model.row(forLine: raw) else { return nil }
+            return AnyView(LineEvidenceView(model: model, row: row))
+        }
+    }
+
+    /// The gate an admin lifts on the Data & AI tab: offered beside the
+    /// sentence that names it, and nowhere else.
+    private var dataSettingsButton: some View {
+        Button("Open Data & AI settings") {
+            app.settingsTab = .dataAI
+            app.settingsPresented = true
+        }
+        .buttonStyle(DSButtonStyle(kind: .secondary, size: 12, height: 26))
     }
 
     // MARK: - What the engine made of the recording (Q3)
@@ -935,18 +1033,19 @@ private struct SectionField: View {
     let placeholder: String
     let editable: Bool
     @Binding var editing: Bool
+    var lineExtra: ((String) -> AnyView?)? = nil
 
     @State private var hover = false
 
     var body: some View {
         if !editable {
-            RichTextView(text: text, size: DS.docText)
+            RichTextView(text: text, size: DS.docText, lineExtra: lineExtra)
         } else if editing || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             SectionEditor(text: $text, placeholder: placeholder, editable: true, focusNow: editing) {
                 editing = false
             }
         } else {
-            RichTextView(text: text, size: DS.docText)
+            RichTextView(text: text, size: DS.docText, lineExtra: lineExtra)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .background(
@@ -971,7 +1070,7 @@ private struct SectionField: View {
                     if hover {
                         Button { editing = true } label: {
                             Image(systemName: "pencil")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.dsIcon(11, .medium))
                         }
                         .buttonStyle(DSIconButtonStyle())
                         .help("Edit this section")
@@ -1078,10 +1177,10 @@ private struct SpeakerName: View {
                     .padding(.vertical, 2)
                     .frame(width: 200)
                     .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface)
+                        RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.surface)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                             .strokeBorder(DS.text3.opacity(0.6), lineWidth: 1)
                     )
                     .focused($focused)
@@ -1150,9 +1249,9 @@ private struct SpeakerName: View {
             }
             .frame(width: 200, alignment: .leading)
             .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface))
+            .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.surface))
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .strokeBorder(DS.text3.opacity(0.35), lineWidth: 1)
             )
             .onHover { overCompletions = $0 }
@@ -1174,15 +1273,7 @@ private struct SpeakerName: View {
 struct SpeakerAvatar: View {
     let name: String
 
-    private static let tints: [Color] = [
-        Color.ds("4f7a5e", "4f7a5e"), Color.ds("b5673c", "b5673c"), Color.ds("8a6d2f", "8a6d2f"),
-        Color.ds("4a6d8c", "4a6d8c"), Color.ds("7a5a8c", "7a5a8c"), Color.ds("3f7f7a", "3f7f7a"),
-    ]
-
-    private var tint: Color {
-        let h = name.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % Self.tints.count }
-        return Self.tints[h]
-    }
+    private var tint: Color { DS.speakerTint(name) }
 
     private var initials: String {
         let words = name.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -1222,8 +1313,8 @@ private struct TextSpeakerName: View {
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
                 .frame(width: 200)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.surface))
+                .overlay(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .strokeBorder(DS.text3.opacity(0.6), lineWidth: 1))
                 .focused($focused)
                 .onAppear { focused = true }
@@ -1262,7 +1353,7 @@ struct UncertainMarker: View {
 
     var body: some View {
         Text("?")
-            .font(.system(size: 9, weight: .bold))
+            .font(.dsIcon(9, .bold))
             .foregroundStyle(DS.inkText)
             .frame(width: 13, height: 13)
             .background(Circle().fill(DS.warn))

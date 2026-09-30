@@ -37,7 +37,7 @@ kbd {
 mark {
   background: var(--mark-bg);
   color: inherit;
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   padding: 0 2px;
 }
 
@@ -69,13 +69,19 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   background-image: var(--dots);
   background-size: var(--dots-size);
   background-position: 10px 10px;
+  pointer-events: none;
+  z-index: -1;
+}
+/* The light that sweeps the dot print, declared once for every print
+   (the sign-in / empty-state `.dotted` and the app's `.app-main`, shell.css).
+   The gradient has to live on the pseudo-element itself, not on :root,
+   because the angle is animated here and var() resolves where declared. */
+.dotted::before, .app-main::before {
   --dots-light: linear-gradient(var(--dots-light-angle), rgba(0, 0, 0, 0.28) 0%, #000 38%, #000 62%, rgba(0, 0, 0, 0.28) 100%);
   -webkit-mask-image: var(--dots-fade), var(--dots-light);
   mask-image: var(--dots-fade), var(--dots-light);
   -webkit-mask-composite: source-in;
   mask-composite: intersect;
-  pointer-events: none;
-  z-index: -1;
   animation: dots-light var(--dots-light-duration) linear infinite;
 }
 

@@ -109,7 +109,7 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsIcon(12, .medium))
                     .frame(width: 16)
                 Text(label)
                     .font(.ds(13, .medium))
@@ -328,7 +328,7 @@ struct SettingsView: View {
                         ForEach(others, id: \.id) { other in
                             HStack(spacing: 10) {
                                 DSAvatar(name: other.email.isEmpty ? "?" : other.email, size: 24)
-                                Text(other.email.isEmpty ? other.id : other.email)
+                                Text(other.email.isEmpty ? "Unknown account" : other.email)
                                     .font(.ds(13))
                                     .foregroundStyle(DS.text1)
                                     .lineLimit(1)
@@ -361,10 +361,14 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             localDataGroup
             group("Server addresses") {
-                labeledField("Auth", text: $app.settings.authBaseURL)
-                labeledField("ASR", text: $app.settings.asrBaseURL)
+                labeledField("Sign-in", text: $app.settings.authBaseURL)
+                labeledField("Audio", text: $app.settings.asrBaseURL)
                 labeledField("Notes", text: $app.settings.noteBaseURL)
+                labeledField("Alerts", text: $app.settings.notificationBaseURL)
                 labeledField("Web", text: $app.settings.webAppURL)
+                Text("Only change these if whoever runs your server asked you to.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
             }
         }
     }
@@ -397,7 +401,7 @@ struct SettingsView: View {
             Text(label)
                 .font(.ds(12.5))
                 .foregroundStyle(DS.text3)
-                .frame(width: 44, alignment: .leading)
+                .frame(width: 52, alignment: .leading)
             DSTextField(placeholder: label, text: text, mono: true)
         }
     }

@@ -586,6 +586,58 @@ actor APIClient {
         return try decode(RevokedOthers.self, from: data).revoked
     }
 
+    // MARK: - Workspace membership (auth-service /tenants)
+
+    /// The workspace this session is signed into, with the caller's role.
+    func currentTenant() async throws -> Tenant {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/current", method: "GET",
+                                  authorized: true)
+        return try decode(Tenant.self, from: data)
+    }
+
+    func tenantMembers(tenantId: String) async throws -> [TenantMember] {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "GET",
+                                  authorized: true)
+        return try decode(TenantMembersResponse.self, from: data).items
+    }
+
+    /// Add someone to the workspace. The server resolves the address to an
+    /// existing account: 404 when nobody signed up with it yet (invite them
+    /// by e-mail instead), 403 when the caller is not an owner/admin.
+    @discardableResult
+    func addTenantMember(tenantId: String, email: String, role: String) async throws -> TenantMember {
+        let body = try JSONSerialization.data(withJSONObject: ["email": email, "role": role])
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(TenantMember.self, from: data)
+    }
+
+    // MARK: - Notifications (notification-service)
+
+    func unreadNotifications() async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/unread-count",
+                                  method: "GET", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
+    func notifications(limit: Int = 15) async throws -> NotificationFeed {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications", method: "GET",
+                                  query: [("limit", String(limit))], authorized: true)
+        return try decode(NotificationFeed.self, from: data)
+    }
+
+    func markNotificationRead(id: String) async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/\(id)/read",
+                                  method: "POST", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
+    func markAllNotificationsRead() async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/read-all",
+                                  method: "POST", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
     // MARK: - Calendar connections (note-service, 0019)
 
     func calendarConnections() async throws -> CalendarConnectionsResponse {
@@ -690,6 +742,82 @@ actor APIClient {
         return try decode(FromTranscriptResponse.self, from: data)
     }
 
+
+    /// `POST /v1/notes` — a note typed from scratch (Blank note, New from
+    /// template), its sections pre-filled with the template's defaults.
+    func createNote(content: NoteContent) async throws -> NoteCreatedResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(CreateNoteRequest(content: content)),
+                                  authorized: true)
+        return try decode(NoteCreatedResponse.self, from: data)
+    }
+
+    // MARK: - History
+
+    func versions(noteId: String, purpose: ReadPurpose? = nil) async throws -> [NoteVersionSummary] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/versions", method: "GET",
+                                  query: purpose.map { [("purpose", $0.rawValue)] } ?? [], authorized: true)
+        return try decode([NoteVersionSummary].self, from: data)
+    }
+
+    func version(noteId: String, number: Int, purpose: ReadPurpose? = nil) async throws -> NoteVersionDetail {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/versions/\(number)",
+                                  method: "GET",
+                                  query: purpose.map { [("purpose", $0.rawValue)] } ?? [], authorized: true)
+        return try decode(NoteVersionDetail.self, from: data)
+    }
+
+    // MARK: - Series, carry-over and the client version (Sprint 36)
+
+    /// What is still open from the previous meeting in this series. 404
+    /// (no series) is the caller's to treat as "nothing to show".
+    func carried(noteId: String) async throws -> CarriedView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/carried", method: "GET",
+                                  authorized: true)
+        return try decode(CarriedView.self, from: data)
+    }
+
+    /// Tick a carried item off (`done_marked`), re-open it, or drop it.
+    @discardableResult
+    func setCarriedState(noteId: String, itemKey: String, state: String) async throws -> CarriedItem {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/carried/\(itemKey)",
+                                  method: "POST",
+                                  jsonBody: try JSONEncoder().encode(CarriedStateRequest(state: state)),
+                                  authorized: true)
+        return try decode(CarriedItem.self, from: data)
+    }
+
+    /// Exactly what a client would see. 409 for a 1:1 or an interview.
+    func clientVersion(noteId: String) async throws -> ClientVersion {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/client-version",
+                                  method: "GET", authorized: true)
+        return try decode(ClientVersion.self, from: data)
+    }
+
+    func clientVersionCheck(noteId: String) async throws -> ClientVersionCheck {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/client-version/check",
+                                  method: "GET", authorized: true)
+        return try decode(ClientVersionCheck.self, from: data)
+    }
+
+    // MARK: - Evidence (Summary Engine v2, Q5)
+
+    /// Every line the engine wrote, with the words that prove it — only
+    /// the run the reader is looking at.
+    func generatedItems(noteId: String) async throws -> [GeneratedItem] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generated-items",
+                                  method: "GET", query: [("generation", "current")], authorized: true)
+        return try decode([GeneratedItem].self, from: data)
+    }
+
+    /// Accept or reject a name the engine respelled.
+    @discardableResult
+    func correctName(noteId: String, itemKey: String, request: NameCorrectionRequest) async throws -> CorrectionResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items/by-key/\(itemKey)",
+                                  method: "PATCH", jsonBody: try JSONEncoder().encode(request),
+                                  authorized: true)
+        return try decode(CorrectionResponse.self, from: data)
+    }
 
     // MARK: - The live meeting note (Sprint 34, ADR-0055)
 
@@ -1205,6 +1333,12 @@ actor APIClient {
     func asrLimits() async throws -> AsrLimits {
         let data = try await send(base: \.asrBaseURL, path: "/asr/limits", method: "GET", authorized: true)
         return try decode(AsrLimits.self, from: data)
+    }
+
+    /// `DELETE /asr/jobs/{id}` — stop a transcription that is queued or
+    /// running. The job ends `cancelled`; the recording is not deleted.
+    func cancelJob(id: String) async throws {
+        _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(id)", method: "DELETE", authorized: true)
     }
 
     func jobStatus(id: String) async throws -> TranscriptionJob {

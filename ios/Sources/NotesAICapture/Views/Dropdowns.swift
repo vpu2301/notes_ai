@@ -178,7 +178,7 @@ struct DSSelect<T: Hashable>: View {
             HStack(spacing: 7) {
                 if let symbol = current?.symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.dsSymbol(12.5, .medium))
                         .foregroundStyle(DS.text3)
                 }
                 Text(current?.label ?? "—")
@@ -187,7 +187,7 @@ struct DSSelect<T: Hashable>: View {
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.dsSymbol(10, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .padding(.leading, 12)

@@ -124,20 +124,59 @@ enum AuthCopy {
             return "Confirm it is really you to continue."
         case "challenge_required":
             return "Ask for a new code before entering one."
+        // ── writing the note (Sprint 33/37, L2) ──────────────────────
+        // The same sentences `GenerationView.failureText` uses for a run
+        // that ended, so a refused start and a failed run read alike.
+        case "processor_unacknowledged":
+            return GenerationCopy.processorUnacknowledged
+        case "generation_disabled":
+            return GenerationCopy.generationDisabled
+        case "budget_exceeded":
+            return GenerationCopy.budgetExceeded
+        case "generation_in_progress":
+            return "This note is already being written. Give it a moment."
+        case "too_many_generations":
+            return "This note has been rewritten as often as it can be today. Try again tomorrow."
+        case "no_transcript":
+            return "This note was not made from a recording, so there is nothing to write it from."
+        case "note_cancelled":
+            return "This note was cancelled and cannot be written again."
+        case "no_snapshot", "snapshot_unreadable":
+            return GenerationCopy.recordingUnreadable
+        case "model_unavailable":
+            return GenerationCopy.modelUnavailable
+        case "object_store_not_configured":
+            return "Recordings cannot be read on this server right now. Try again later."
         default:
             return nil
         }
     }
 
+    /// A failure this app has no sentence for. One generic line and a
+    /// short reference — never the server's own wording, its code, or a
+    /// whole request id. The reference is the first eight characters of
+    /// the request id, which is what support looks a request up by.
     private static func unknown(status: Int, problem: Problem?) -> String {
-        var message = problem?.detail ?? problem?.title ?? "Something went wrong (HTTP \(status))."
-        if let code = problem?.code, !code.isEmpty {
-            message += " [\(code)]"
+        let base: String
+        switch status {
+        case 400...499: base = "That could not be done. Try again in a moment."
+        case 500...599: base = "The server had a problem. Try again in a moment."
+        default: base = "Something went wrong. Try again in a moment."
         }
-        if let requestId = problem?.requestId, !requestId.isEmpty {
-            message += "\nRequest id: \(requestId)"
-        }
-        return message
+        return withRef(base, problem: problem)
+    }
+
+    /// `message` with the correlation reference appended, for the cases
+    /// where somebody may have to quote it.
+    static func withRef(_ message: String, problem: Problem?) -> String {
+        guard let requestId = problem?.requestId, !requestId.isEmpty else { return message }
+        return "\(message) (ref \(requestId.prefix(8)))"
+    }
+
+    /// The code behind an error, when the server sent one.
+    static func code(of error: Error) -> String? {
+        guard case APIError.http(_, let problem) = error else { return nil }
+        return problem?.code
     }
 
     /// "in 45 seconds" / "in 3 minutes" — a countdown the person can act on.
@@ -147,4 +186,18 @@ enum AuthCopy {
         let minutes = Int((Double(seconds) / 60).rounded())
         return "in \(minutes) minutes"
     }
+}
+
+/// The sentences for a note that was not written, shared by the refused
+/// start (`POST /generation` → 409) and the finished-but-failed run
+/// (`GenerationView.failureText`), so the two cannot drift.
+enum GenerationCopy {
+    static let processorUnacknowledged =
+        "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI."
+    static let generationDisabled = "Automatic note writing is off for this workspace."
+    static let budgetExceeded =
+        "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched."
+    static let recordingUnreadable = "The recording could not be read when the note was written."
+    static let modelUnavailable = "The model was unavailable. Try writing the note again."
+    static let generic = "This note could not be written automatically."
 }

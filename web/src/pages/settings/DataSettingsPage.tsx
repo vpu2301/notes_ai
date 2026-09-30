@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getAiSettings, putAiSettings } from "../../api/aiSettings";
-import { errorMessage } from "../../api/http";
+import { messageFor } from "../../lib/errorCopy";
 import type { AiProcessor, AiSettings, AiWriter } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/Toaster";
@@ -33,7 +33,7 @@ export function DataSettingsPage() {
       setSettings(await getAiSettings());
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     }
   }, []);
 
@@ -51,7 +51,7 @@ export function DataSettingsPage() {
       setPendingTier(null);
       toast.success(done);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
       // Whatever was refused, the server's own view is the truth.
       await load();
     } finally {

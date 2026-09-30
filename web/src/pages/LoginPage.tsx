@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/http";
@@ -17,6 +18,7 @@ import { Banner, LoginShell, useCountdown } from "./auth/LoginShell";
  * only honest sentence, and it is the same sentence every time.
  */
 export function LoginPage() {
+  useDocumentTitle("Sign in");
   const { status, signInWithEmailCode } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { getClientVersion, getClientVersionCheck } from "../api/notes";
 import type { ClientVersion as ClientVersionData, ClientVersionCheck } from "../api/types";
 import { RichText } from "./RichText";
@@ -31,7 +31,7 @@ export function ClientVersionPanel({ noteId }: { noteId: string }) {
       setCheck(warnings);
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setLoading(false);
     }

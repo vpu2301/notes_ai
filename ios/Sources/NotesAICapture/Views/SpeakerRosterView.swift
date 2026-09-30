@@ -70,7 +70,7 @@ struct SpeakerRosterView: View {
                 HStack(alignment: .top, spacing: 8) {
                     DSNotice(tone: .info, symbol: "arrow.triangle.2.circlepath", text: notice)
                     Button { model.speakerNotice = nil } label: {
-                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                        Image(systemName: "xmark").font(.dsSymbol(11, .semibold))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DS.muted)
@@ -92,7 +92,7 @@ struct SpeakerRosterView: View {
                                     Task { await model.clearChannelName(label) }
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 10, weight: .semibold))
+                                        .font(.dsSymbol(10, .semibold))
                                         .frame(width: 28, height: 28)
                                         .frame(minWidth: 44, minHeight: 44)
                                         .contentShape(Rectangle())
@@ -111,7 +111,7 @@ struct SpeakerRosterView: View {
                         .disabled(!model.canResetSpeakerEdits || !model.canEditSpeakers)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.dsSymbol(14, .semibold))
                         .foregroundStyle(DS.muted)
                         .frame(width: 30, height: 30)
                         .frame(minWidth: 44, minHeight: 44)
@@ -212,7 +212,7 @@ struct SpeakerRosterView: View {
                 }
                 Spacer(minLength: 0)
                 Button { model.dismissRelabelResult() } label: {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "xmark").font(.dsSymbol(11, .semibold))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.muted)
@@ -247,7 +247,7 @@ struct SpeakerRosterView: View {
                 .frame(width: 24, height: 24)
             if let side = model.side(for: label) {
                 Image(systemName: side.symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.dsSymbol(11, .semibold))
                     .foregroundStyle(DS.muted)
                     .accessibilityLabel(side.accessibilityLabel)
             }

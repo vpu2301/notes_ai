@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClip, dateCalendarFile } from "../api/generation";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { GeneratedItem } from "../api/types";
 import { mmss } from "../lib/generation";
 
@@ -71,7 +72,7 @@ export function LineEvidence({
       const url = await createClip(noteId, row.start_ms - CLIP_PADDING_MS, row.end_ms + CLIP_PADDING_MS);
       await new Audio(url).play();
     } catch (err) {
-      setProblem(err instanceof ApiError && err.status === 410 ? "Recording no longer available" : errorMessage(err));
+      setProblem(err instanceof ApiError && err.status === 410 ? "Recording no longer available" : messageFor(err));
     } finally {
       setPlaying(false);
     }
@@ -87,7 +88,7 @@ export function LineEvidence({
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setProblem(errorMessage(err));
+      setProblem(messageFor(err));
     }
   };
 

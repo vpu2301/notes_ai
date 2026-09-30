@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import {
   downloadSharedPdf,
   getSharedNote,
@@ -70,7 +71,7 @@ export function SharedNotePage() {
       await requestSharedVerification(token);
       setCodeSent(true);
     } catch (err) {
-      setCodeError(errorMessage(err));
+      setCodeError(messageFor(err));
     }
   };
 
@@ -84,7 +85,7 @@ export function SharedNotePage() {
     } catch (err) {
       const c = err instanceof ApiError ? err.code : undefined;
       setCodeError(
-        c === "code_invalid" ? t.codeWrong : c === "code_expired" || c === "too_many_attempts" ? t.codeExpired : errorMessage(err),
+        c === "code_invalid" ? t.codeWrong : c === "code_expired" || c === "too_many_attempts" ? t.codeExpired : messageFor(err),
       );
     } finally {
       setBusy(false);
@@ -96,7 +97,7 @@ export function SharedNotePage() {
       await reportShared(token, reason);
       setReported(true);
     } catch (err) {
-      setError({ message: errorMessage(err), gone: false });
+      setError({ message: messageFor(err), gone: false });
     } finally {
       setReporting(false);
     }
@@ -111,7 +112,7 @@ export function SharedNotePage() {
       .catch((err) => {
         if (!live) return;
         const gone = err instanceof ApiError && err.status === 404;
-        setError({ message: gone ? "This link is no longer valid." : errorMessage(err), gone });
+        setError({ message: gone ? "This link is no longer valid." : messageFor(err), gone });
       });
     return () => {
       live = false;
@@ -130,7 +131,7 @@ export function SharedNotePage() {
     try {
       saveBlob(await downloadSharedPdf(token), `${safeFilename(note.title, note.code)}.pdf`);
     } catch (err) {
-      setError({ message: errorMessage(err), gone: false });
+      setError({ message: messageFor(err), gone: false });
     } finally {
       setBusy(false);
     }
@@ -164,6 +165,9 @@ export function SharedNotePage() {
                 className="shared-logo"
                 src={sharedLogoUrl(token)}
                 alt=""
+                width={28}
+                height={28}
+                decoding="async"
                 onError={() => setLogoFailed(true)}
               />
             ) : (

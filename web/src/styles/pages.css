@@ -94,10 +94,10 @@
   font-family: var(--mono);
   font-size: calc(20px * var(--fs));
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: var(--text-1);
   background: var(--surface);
   border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   transition: border-color .12s ease, box-shadow .12s ease;
 }
 .code-input input:hover:not(:focus):not(:disabled) { border-color: var(--line-hover); }
@@ -254,6 +254,8 @@ section:first-of-type > .tpl-cat { margin-top: 0; }
    meeting stage keeps the smaller one, where it shares a row. */
 .doc > .title-input { font-size: calc(32px * var(--fs)); }
 .title-input:focus { outline: none; box-shadow: none; }
+/* No frame on the title, so the focus cue is a hairline underneath it. */
+.title-input:focus-visible { box-shadow: 0 1px 0 0 var(--line-active); }
 /* A meeting's title is a sentence, not a label — it wraps onto a second
    line rather than running off the right edge. */
 textarea.title-input { resize: none; overflow: hidden; display: block; }
@@ -430,7 +432,7 @@ ol.rt-list > li::before {
 .rt-list li.task > .box {
   position: absolute; left: calc(-19px * var(--density)); top: 0.32em;
   width: 13px; height: 13px; flex: none;
-  border: 1.5px solid var(--line-active); border-radius: 4px;
+  border: 1.5px solid var(--line-active); border-radius: var(--radius-2xs);
 }
 /* The tick is drawn from a rotated corner, not typed — it stays crisp at
    any text size and needs no glyph the reader's fonts might not have. */
@@ -523,6 +525,8 @@ ol.rt-list > li::before {
   color: var(--text-1);
 }
 .ask-input:focus { outline: none; box-shadow: none; }
+/* The bar around it lights up on focus-within; the field itself shows the moss caret. */
+.ask-input:focus-visible { caret-color: var(--accent); }
 .ask-input::placeholder { color: var(--muted); }
 .ask-send {
   flex: none;
@@ -940,7 +944,7 @@ ol.rt-list > li::before {
   font-size: calc(12px * var(--fs)); color: var(--text-3); font-variant-numeric: tabular-nums; line-height: 1.3;
 }
 .cu-day { font-size: calc(10.5px * var(--fs)); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
-.cu-bar { flex: none; width: 3px; height: 28px; border-radius: 2px; }
+.cu-bar { flex: none; width: 3px; height: 28px; border-radius: var(--radius-2xs); }
 .cu-actions { display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity var(--t) var(--ease); }
 .cu-row:hover .cu-actions, .cu-row:focus-within .cu-actions { opacity: 1; }
 .cu-actions .btn.ghost { color: var(--text-2); }
@@ -1004,14 +1008,14 @@ ol.rt-list > li::before {
 .pill {
   margin-left: calc(8px * var(--density));
   padding: 1px calc(7px * var(--density));
-  border-radius: 999px; background: var(--surface-2); color: var(--muted);
+  border-radius: var(--radius-pill); background: var(--surface-2); color: var(--muted);
   font-size: calc(10.5px * var(--fs)); font-weight: 500; vertical-align: middle;
 }
 
 /* ─── One-time secrets (recovery codes, device credentials) ─────────────── */
 .secret-once {
   border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--surface-2);
   padding: calc(12px * var(--density));
   display: flex; flex-direction: column; gap: calc(8px * var(--density));
@@ -1025,7 +1029,7 @@ ol.rt-list > li::before {
 }
 .secret-once-list code {
   font-family: var(--mono); font-size: calc(12px * var(--fs));
-  color: var(--text); user-select: all; word-break: break-all;
+  color: var(--text-1); user-select: all; word-break: break-all;
 }
 
 /* ─── TOTP enrolment ────────────────────────────────────────────────────── */
@@ -1041,27 +1045,27 @@ ol.rt-list > li::before {
 }
 .qr-frame {
   background: #fff; padding: calc(10px * var(--density));
-  border-radius: var(--radius-md); border: var(--hairline) solid var(--line);
+  border-radius: var(--radius); border: var(--hairline) solid var(--line);
   display: grid; place-items: center; flex: none; box-sizing: content-box;
 }
 .qr-frame svg { width: 100%; height: 100%; display: block; }
-.qr-fallback { color: #6b6560; font-size: calc(11.5px * var(--fs)); text-align: center; }
+.qr-fallback { color: var(--muted); font-size: calc(11.5px * var(--fs)); text-align: center; }
 
 /* ─── Shared Outcome Page (Sprint 19) ──────────────────────────────────── */
 .shared-bar { flex-wrap: wrap; gap: 10px; }
 .shared-sender { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.shared-logo { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; background: var(--surface); }
-.shared-logo-initials { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); }
+.shared-logo { width: 28px; height: 28px; border-radius: var(--radius-xs); object-fit: contain; background: var(--surface); }
+.shared-logo-initials { display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--muted); border: var(--hairline) solid var(--line); }
 .shared-status { display: inline-flex; align-items: center; gap: 8px; }
 .shared-product {
   padding: 8px 20px; text-align: center; font-size: calc(13px * var(--fs));
-  color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--line);
+  color: var(--muted); background: var(--surface); border-bottom: var(--hairline) solid var(--line);
 }
 .shared-cta { font-weight: 600; color: var(--accent); text-decoration: none; white-space: nowrap; }
 .shared-cta:hover { text-decoration: underline; }
 .shared-attendees { margin: 0 0 12px; color: var(--muted); }
 .shared-attendees .label { margin-right: 4px; }
-.shared-key { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); margin-bottom: 14px; }
+.shared-key { padding: 14px 16px; border: var(--hairline) solid var(--line); border-radius: var(--radius-lg); background: var(--surface); margin-bottom: 14px; }
 .shared-more { margin-top: 8px; }
 .shared-more > summary { cursor: pointer; color: var(--muted); font-size: calc(13px * var(--fs)); padding: 10px 0; min-height: 44px; display: flex; align-items: center; }
 .shared-more .doc-section { margin-top: 12px; }
@@ -1082,12 +1086,12 @@ ol.rt-list > li::before {
 .shared-item:first-child { border-top: 0; }
 .shared-item-glyph { font-size: 18px; line-height: 1.2; color: var(--muted); flex: none; }
 .shared-item.state-confirm .shared-item-glyph, .shared-item.state-done .shared-item-glyph { color: var(--accent); }
-.shared-item.state-dispute .shared-item-glyph { color: var(--danger, #b3261e); }
+.shared-item.state-dispute .shared-item-glyph { color: var(--danger); }
 .shared-item-body { flex: 1; min-width: 0; }
 .shared-item-text { display: block; }
 .shared-item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.chip.owner { background: var(--surface); border: 1px solid var(--line); }
-.chip.due.overdue { color: var(--danger, #b3261e); border-color: currentColor; }
+.chip.owner { background: var(--surface); border: var(--hairline) solid var(--line); }
+.chip.due.overdue { color: var(--danger); border-color: currentColor; }
 .shared-item-comment { margin: 6px 0 0; color: var(--muted); font-size: calc(13px * var(--fs)); white-space: pre-wrap; }
 .shared-item-actions { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
 .shared-item-actions .btn { min-height: 44px; }
@@ -1105,22 +1109,22 @@ ol.rt-list > li::before {
 .response-item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
 .response-list { list-style: none; margin: 10px 0 0 28px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .response { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.response-comment { flex-basis: 100%; margin: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; }
+.response-comment { flex-basis: 100%; margin: 0; padding: 8px 10px; background: var(--surface); border: var(--hairline) solid var(--line); border-radius: var(--radius-sm); white-space: pre-wrap; }
 .response-badge { margin-left: 8px; cursor: pointer; border: 0; }
 
 /* ─── Sharing stats (Sprint 22) ─────────────────────────────────────────── */
 .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0 24px; }
-.stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: var(--hairline) solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
 .stat-value { font-family: var(--display); font-size: calc(28px * var(--fs)); letter-spacing: -0.02em; }
 .chip.delivery-sent { color: var(--accent); }
-.chip.delivery-failed, .chip.delivery-suppressed { color: var(--danger, #b3261e); }
+.chip.delivery-failed, .chip.delivery-suppressed { color: var(--danger); }
 
 /* ─── Shared page: verification, changes, report (Sprint 23) ─────────── */
 .shared-key.changed, .shared-item.changed { box-shadow: inset 3px 0 0 var(--accent); }
 .shared-changes { align-items: center; }
 .shared-code .input { max-width: 180px; letter-spacing: 0.2em; font-size: 20px; }
 .shared-report .btn { margin: 2px; }
-.shared-preview { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; height: auto; padding: 10px 14px; }
+.shared-preview { border: var(--hairline) solid var(--line); border-radius: var(--radius); margin-bottom: 12px; height: auto; padding: 10px 14px; }
 .shared-privacy p { margin: 0 0 16px; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .shared-shell * { transition: none !important; animation: none !important; } }
 
@@ -1129,7 +1133,7 @@ ol.rt-list > li::before {
 .speaker-chips { display: flex; flex-wrap: wrap; gap: calc(6px * var(--density)); }
 .speaker-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px 3px 3px; border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 10px 3px 3px; border: var(--hairline) solid var(--line); border-radius: var(--radius-pill);
   background: var(--surface); color: var(--text-1);
   font-size: calc(12.5px * var(--fs)); cursor: pointer;
 }
@@ -1142,7 +1146,7 @@ ol.rt-list > li::before {
 .speaker-side { display: inline-flex; align-items: center; color: var(--muted); }
 .speaker-source { color: var(--muted); font-size: calc(11px * var(--fs)); }
 .speaker-chip-host { display: inline-flex; align-items: center; gap: 2px; }
-.speaker-chip-clear { width: 22px; height: 22px; border-radius: 999px; }
+.speaker-chip-clear { width: 22px; height: 22px; border-radius: var(--radius-pill); }
 
 /* ─── Speaker count (Sprint 29) ─────────────────────────────────────────── */
 .speaker-count { align-self: flex-start; font-size: calc(12.5px * var(--fs)); }
@@ -1226,7 +1230,7 @@ ol.rt-list > li::before {
 .speaker-roster .link-btn:focus-visible { box-shadow: none; }
 .speaker-roster .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .anchored-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.speaker-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 999px; }
+.speaker-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-pill); }
 
 /* ── Sprint 37: Settings › Data & AI ──────────────────────────────── */
 /* The processor table is the disclosure itself, so it reads as a table
@@ -1244,7 +1248,7 @@ ol.rt-list > li::before {
 .budget-form { display: flex; gap: calc(8px * var(--density)); align-items: flex-end; flex-wrap: wrap; }
 .budget-form .field { flex: 1 1 160px; }
 
-.meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter { height: 8px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
 .meter-fill { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 .meter-fill.over { background: var(--warn); }
 

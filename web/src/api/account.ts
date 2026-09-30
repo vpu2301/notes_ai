@@ -24,6 +24,7 @@ import type {
   SessionInfo,
   TenantSummary,
   TotpEnrolment,
+  WorkspaceToken,
 } from "./types";
 
 // ── sessions ──────────────────────────────────────────────────────────
@@ -108,6 +109,20 @@ export function deleteAccount(): Promise<AccountDeletion> {
 
 export function listTenants(): Promise<{ items: TenantSummary[] }> {
   return api<{ items: TenantSummary[] }>("auth", "/tenants");
+}
+
+/**
+ * Re-scope this session to `tenantId` (the switcher). The new access token
+ * comes back in the body and nothing rotates: the refresh cookie the
+ * browser holds is still the session's one credential. Native sessions
+ * only — a Keycloak-issued session answers `409 legacy_session`.
+ */
+export function activateWorkspace(tenantId: string): Promise<WorkspaceToken> {
+  return api<WorkspaceToken>("auth", "/auth/token", {
+    method: "POST",
+    json: { tenant_id: tenantId, activate: true },
+    credentials: true,
+  });
 }
 
 // ── room devices (IDX-B1b) ────────────────────────────────────────────

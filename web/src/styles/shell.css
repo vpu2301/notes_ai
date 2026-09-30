@@ -23,14 +23,10 @@
   background-image: var(--dots);
   background-size: var(--dots-size);
   background-position: 10px 10px;
-  --dots-light: linear-gradient(var(--dots-light-angle), rgba(0, 0, 0, 0.28) 0%, #000 38%, #000 62%, rgba(0, 0, 0, 0.28) 100%);
-  -webkit-mask-image: var(--dots-fade), var(--dots-light);
-  mask-image: var(--dots-fade), var(--dots-light);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  /* The light sweep (mask + animation) is declared once, for both dot
+     prints, in base.css. */
   pointer-events: none;
   z-index: 0;
-  animation: dots-light var(--dots-light-duration) linear infinite;
 }
 .app:has(.sb.collapsed) .app-main::before { left: 56px; }
 .app-main > * { position: relative; z-index: 1; }
@@ -85,7 +81,7 @@
 .sb-wordmark { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-wordmark .ai { color: var(--accent-text); }
 .sb-toggle {
-  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: var(--radius-xs); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--muted);
   transition: background .12s, color .12s;
@@ -421,6 +417,26 @@
 .sb-user-menu-item.danger:hover { background: var(--danger-soft); }
 .sb-user-menu-sep { height: var(--hairline); background: var(--line-2); margin: 4px 2px; }
 .sb-user-menu-hint { margin-left: auto; font-size: calc(11px * var(--fs)); color: var(--muted); }
+/* Workspace switcher inside the account menu: a label, one radio row per
+   workspace, the current one ticked. The mark is the same moss-tinted
+   circle as the avatar, smaller. */
+.sb-user-menu-label {
+  padding: calc(6px * var(--density)) calc(10px * var(--density)) calc(2px * var(--density));
+  font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.sb-user-menu-item .grow { flex: 1; min-width: 0; }
+.sb-user-menu-item .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-user-menu-item.current { color: var(--text-1); }
+.sb-user-menu-item.current svg { color: var(--accent-text); }
+.sb-user-menu-item:disabled { cursor: default; opacity: .7; }
+.sb-ws-mark {
+  width: 20px; height: 20px; flex: none;
+  border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-text);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: calc(9px * var(--fs)); font-weight: 600; letter-spacing: .02em;
+}
 
 /* ─── Topbar ────────────────────────────────────────────────────────────── */
 /* Part of the page, not a strip laid over it — transparent until the page

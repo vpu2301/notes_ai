@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelJob, listJobs } from "../api/asr";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "./errorCopy";
 import { attachTranscript, createFromTranscript, notesBySourceJob } from "../api/notes";
 import type { AsrJob } from "../api/types";
 import { dismiss, isDismissed, isMine, loadLinks, loadTitles, rememberLink } from "./captures";
@@ -129,7 +130,7 @@ export function useCaptures(
         // A 401 signs the user out via the http layer; anything else is
         // this job's problem and must be visible.
         if (!(err instanceof ApiError && err.status === 401)) {
-          setNoteErrors((e) => ({ ...e, [job.id]: errorMessage(err) }));
+          setNoteErrors((e) => ({ ...e, [job.id]: messageFor(err) }));
         }
         throw err;
       } finally {

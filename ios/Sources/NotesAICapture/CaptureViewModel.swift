@@ -185,6 +185,48 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
+    /// Upload a recording that already exists as a file (the + menu's
+    /// "Upload a recording…"). Same pipeline as a capture from Stop, with
+    /// no live note beside it: the note is drafted once the transcript is
+    /// in. The picked file is copied first — a security-scoped URL from
+    /// the file picker is not ours to keep.
+    func uploadFile(_ picked: URL) {
+        guard !recorder.isRecording, !phase.isBusy else { return }
+        let scoped = picked.startAccessingSecurityScopedResource()
+        defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
+        let copy = FileManager.default.temporaryDirectory
+            .appending(path: "upload-\(UUID().uuidString).\(picked.pathExtension.isEmpty ? "audio" : picked.pathExtension)")
+        do {
+            try FileManager.default.copyItem(at: picked, to: copy)
+        } catch {
+            phase = .failed("That file could not be read.")
+            return
+        }
+        reset()
+        let name = picked.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespaces)
+        title = name.isEmpty ? Self.defaultTitle() : name
+        let tenantId = app.tenantId
+        pipelineTask = Task {
+            vocabularyHint = try? await app.api.glossaryHint().hint
+            await process(fileURL: copy, meetingTitle: title, tenantId: tenantId, context: .upload,
+                          contentType: Self.contentType(of: copy))
+        }
+    }
+
+    /// The MIME type a picked file is uploaded as.
+    nonisolated static func contentType(of url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "wav": return "audio/wav"
+        case "m4a", "mp4", "aac": return "audio/mp4"
+        case "mp3": return "audio/mpeg"
+        case "ogg", "oga", "opus": return "audio/ogg"
+        case "webm": return "audio/webm"
+        case "caf": return "audio/x-caf"
+        case "aiff", "aif": return "audio/aiff"
+        default: return "audio/flac"
+        }
+    }
+
     // MARK: - The recording cap
 
     private func limitApproaching() {
@@ -270,7 +312,8 @@ final class CaptureViewModel: ObservableObject {
     private var boundTenantId: String?
 
     private func process(fileURL: URL, meetingTitle: String, tenantId: String?,
-                         context: CaptureContext, timing: CaptureTiming? = nil) async {
+                         context: CaptureContext, timing: CaptureTiming? = nil,
+                         contentType: String? = nil) async {
         // The recording is deleted only once the server has it. Every other
         // exit from this function — a failed upload, a lost session, the
         // app being killed mid-pipeline — moves it to `pending/` with a
@@ -288,7 +331,7 @@ final class CaptureViewModel: ObservableObject {
         do {
             phase = .uploading
             let job = try await app.api.submitJob(fileURL: fileURL,
-                                                  contentType: recorder.format.contentType,
+                                                  contentType: contentType ?? recorder.format.contentType,
                                                   language: language, diarize: diarize,
                                                   speakersExpected: speakersExpected,
                                                   context: context,

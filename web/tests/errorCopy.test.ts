@@ -70,9 +70,11 @@ describe("error copy", () => {
     }
   });
 
-  it("falls back to the server's detail for an unknown code", () => {
-    const err = new ApiError(400, { code: "brand_new_thing", detail: "Something specific" });
-    expect(messageFor(err)).toBe("Something specific");
+  it("never shows the server's detail for an unknown code", () => {
+    const err = new ApiError(400, { code: "brand_new_thing", detail: "internal wording" });
+    expect(messageFor(err)).not.toContain("internal wording");
+    expect(messageFor(err)).not.toContain("brand_new_thing");
+    expect(messageWithRef(new ApiError(404, { detail: "note not found" }, "0123abcd-0"))).toContain("ref 0123abcd");
   });
 
   it("never distinguishes a wrong password from an unknown account", () => {

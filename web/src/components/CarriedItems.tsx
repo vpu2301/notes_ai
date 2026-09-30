@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { getCarried, setCarriedState } from "../api/notes";
 import type { CarriedItem, CarriedView } from "../api/types";
 import { useToast } from "./Toaster";
@@ -55,7 +55,7 @@ export function CarriedItems({ noteId, readOnly = false }: { noteId: string; rea
       await setCarriedState(noteId, item.item_key, state);
     } catch (err) {
       setView(before);
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(null);
     }

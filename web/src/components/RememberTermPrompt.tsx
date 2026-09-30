@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { rememberTerm } from "../api/glossary";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { isVocabulary } from "../lib/glossaryRule";
 import { useToast } from "./Toaster";
 
@@ -48,7 +48,7 @@ export function RememberTermPrompt({
       toast.success(`We'll spell "${pending.term}" that way from now on`);
       onDone();
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }

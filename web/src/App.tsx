@@ -13,6 +13,7 @@ import { ReauthDialog } from "./components/ReauthDialog";
 import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
 import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
+import { MembersSettingsPage } from "./pages/settings/MembersSettingsPage";
 import { SecuritySettingsPage } from "./pages/settings/SecuritySettingsPage";
 import { SettingsLayout } from "./pages/settings/SettingsLayout";
 import { WorkspaceSettingsPage } from "./pages/settings/WorkspaceSettingsPage";
@@ -36,10 +37,9 @@ import { SpacesProvider } from "./spaces/SpacesContext";
  * to throw the old tree away. The key covers `SpacesProvider`'s cache and
  * `NotificationBell`'s poll along with every page.
  *
- * It is inert today: nothing can change `activeTenantId` yet, because
- * `POST /auth/token` (the workspace-scoped token exchange) does not exist —
- * see `docs/sprints/IDX-W2.md`. It is here so that the switcher, when B1/A2
- * land, is a list and a call rather than a hunt for stale state.
+ * The switcher in the account menu (`AppShell`) changes `activeTenantId`
+ * through `AuthContext.switchWorkspace` (`POST /auth/token`), and this key
+ * is what makes that one call enough.
  */
 function WorkspaceScope({ children }: { children: ReactNode }) {
   const { activeTenantId } = useAuth();
@@ -112,6 +112,8 @@ export function App() {
                 <Route index element={<Navigate to="/settings/account" replace />} />
                 <Route path="account" element={<AccountSettingsPage />} />
                 <Route path="security" element={<SecuritySettingsPage />} />
+                {/* Owners and admins; the API re-checks the role on every call. */}
+                <Route path="members" element={<MembersSettingsPage />} />
                 {/* Server-checked as well — see DevicesSettingsPage. */}
                 <Route path="devices" element={<DevicesSettingsPage />} />
                 {/* Sprint 23: branding + external sharing policy (admins). */}

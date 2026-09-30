@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { searchNotes } from "../api/notes";
 import type { SearchHit, SharingView } from "../api/types";
 import { AccessMenu, noteAccess, withSharing } from "../components/AccessBadge";
 import { ComingUp } from "../components/ComingUp";
 import { EmptyState } from "../components/EmptyState";
-import { FolderIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
+import { AlertIcon, FolderIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { SearchField } from "../components/SearchField";
 import { SkeletonRow } from "../components/Skeleton";
@@ -179,6 +180,8 @@ export function NotesPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** The list could not be read; the page says so in place instead of showing "nothing yet". */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [makingBlank, setMakingBlank] = useState(false);
   const debouncedQ = useDebouncedValue(q, 300);
   const navigate = useNavigate();
@@ -191,6 +194,7 @@ export function NotesPage() {
   const { spaceId } = useParams();
   const { spaces, spaceOf, loading: spacesLoading, file } = useSpaces();
   const space = spaces.find((s) => s.id === spaceId);
+  useDocumentTitle(space ? space.name : "Notes");
 
   // The space was deleted (here or on another device) — fall back to all notes.
   useEffect(() => {
@@ -203,6 +207,7 @@ export function NotesPage() {
       const controller = new AbortController();
       abortRef.current = controller;
       setLoading(true);
+      setLoadError(null);
       try {
         const limit = spaceId ? 100 : 25;
         const res = await searchNotes({ q: query, limit, signal: controller.signal });
@@ -220,15 +225,15 @@ export function NotesPage() {
         setNextCursor(cursor);
       } catch (err) {
         if (!controller.signal.aborted) {
-          setHits([]);
+          setHits(null);
           setNextCursor(null);
-          toast.error(errorMessage(err));
+          setLoadError(messageFor(err));
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [toast, spaceId],
+    [spaceId],
   );
 
   useEffect(() => {
@@ -248,7 +253,7 @@ export function NotesPage() {
       setHits((prev) => [...(prev ?? []), ...res.hits]);
       setNextCursor(res.next_cursor);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setLoadingMore(false);
     }
@@ -273,7 +278,7 @@ export function NotesPage() {
     try {
       navigate(`/notes/${await createBlankNote()}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
       setMakingBlank(false);
     }
   };
@@ -332,7 +337,7 @@ export function NotesPage() {
    * has to be right *before* the list has loaded.
    */
   const hasSomething = (hits?.length ?? 0) > 0 || (captures?.length ?? 0) > 0;
-  const firstUse = !searching && !spaceId && !hasSomething;
+  const firstUse = !searching && !spaceId && !hasSomething && !loadError;
 
   return (
     <div className="home">
@@ -393,9 +398,9 @@ export function NotesPage() {
                 onCreate={() =>
                   void createNote(c.job)
                     .then((id) => navigate(`/notes/${id}`))
-                    .catch((err) => toast.error(errorMessage(err)))
+                    .catch((err) => toast.error(messageFor(err)))
                 }
-                onCancel={() => void cancel(c.job).catch((err) => toast.error(errorMessage(err)))}
+                onCancel={() => void cancel(c.job).catch((err) => toast.error(messageFor(err)))}
                 onDismiss={() => dismissFailed(c.job)}
               />
             ))}
@@ -409,6 +414,19 @@ export function NotesPage() {
           <SkeletonRow />
           <SkeletonRow />
         </div>
+      )}
+
+      {!loading && loadError && (
+        <EmptyState
+          icon={<AlertIcon size={20} />}
+          title="Your notes could not be loaded"
+          message={loadError}
+          action={
+            <button className="btn" onClick={() => void runSearch(debouncedQ)}>
+              Try again
+            </button>
+          }
+        />
       )}
 
       {empty && !searching && spaceId && (

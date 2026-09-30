@@ -67,12 +67,14 @@ final class AuthCopyTests: XCTestCase {
         XCTAssertTrue(message.contains("not allowed to do that in this workspace"))
     }
 
-    /// A 403 that is NOT a role denial still says what the server said.
-    func testAnOtherForbiddenKeepsTheServersWording() {
+    /// A 403 that is NOT a role denial gets a fixed sentence: the server's
+    /// `detail` is written for logs and may change under the screen.
+    func testAnOtherForbiddenSaysSoWithoutTheServersWording() {
         let problem = Problem(title: "Forbidden", detail: "this note is private",
                               status: 403, code: nil)
-        XCTAssertEqual(AuthCopy.message(for: APIError.http(status: 403, problem: problem)),
-                       "this note is private")
+        let message = AuthCopy.message(for: APIError.http(status: 403, problem: problem))
+        XCTAssertEqual(message, "You do not have access to that.")
+        XCTAssertFalse(message.contains("this note is private"))
     }
 
     func testAWrongCodeSaysHowManyTriesAreLeft() {
@@ -89,12 +91,20 @@ final class AuthCopyTests: XCTestCase {
                           SessionLostReason.securityRevoked.message)
     }
 
-    func testAnUnknownCodeCarriesTheRequestId() {
+    func testAnUnknownCodeCarriesAReferenceAndNothingFromTheServer() {
         let message = AuthCopy.message(for: error("something_new", status: 500,
                                                   detail: "unexpected", requestId: "req-9"))
-        XCTAssertTrue(message.contains("unexpected"))
-        XCTAssertTrue(message.contains("something_new"))
-        XCTAssertTrue(message.contains("req-9"))
+        XCTAssertTrue(message.contains("req-9"), message)
+        XCTAssertFalse(message.contains("unexpected"), "the server's detail is for logs, not people")
+        XCTAssertFalse(message.contains("something_new"), "a machine code is not a sentence")
+        XCTAssertFalse(message.contains("Request id"), message)
+    }
+
+    func testAGenerationRefusalReadsAsASentence() {
+        let message = AuthCopy.message(for: error("processor_unacknowledged", status: 409,
+                                                  detail: "a workspace admin has to agree", requestId: "req-1"))
+        XCTAssertEqual(message, GenerationCopy.processorUnacknowledged)
+        XCTAssertTrue(message.hasSuffix("Settings › Data & AI."))
     }
 
     func testALockedAccountCountsDown() {

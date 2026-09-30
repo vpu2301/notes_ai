@@ -97,13 +97,18 @@ struct SignInView: View {
                          symbol: step == .password ? "key.fill" : "envelope.fill",
                          text: notice)
             }
+            #if DEBUG
+            // Which server a debug build talks to; a shipped build has one.
             if showServer { serverCard }
             footer
+            #endif
         }
         .onAppear {
             if email.isEmpty { email = app.email }
             host = app.settings.commonHost ?? ""
+            #if DEBUG
             if isPhysicalDevice, app.settings.pointsAtLocalhost { showServer = true }
+            #endif
             // Why the app is showing this screen, if it did not start here.
             if errorMessage == nil { errorMessage = app.signedOutNotice }
             hasSavedPassword = CredentialStore.hasSaved
@@ -273,7 +278,7 @@ struct SignInView: View {
                         if hasSavedPassword, let biometry = Biometrics.name {
                             Button { Task { await signInWithSavedPassword() } } label: {
                                 Image(systemName: Biometrics.symbol)
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.dsSymbol(20, .medium))
                             }
                             .buttonStyle(DSButtonStyle(kind: .secondary, height: DS.control))
                             .frame(width: DS.control)
@@ -353,7 +358,7 @@ struct SignInView: View {
 
     private var serverCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DSLabel("Server (your Mac's Wi‑Fi address)")
+            DSLabel("Server")
             HStack(spacing: 8) {
                 DSTextField(placeholder: "192.168.1.20 or my-mac.local", text: $host, mono: true)
                     .keyboardType(.URL)
@@ -372,7 +377,7 @@ struct SignInView: View {
                     .foregroundStyle(DS.dangerText)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("On the Mac: System Settings › Wi‑Fi › Details › IP address.")
+                Text("The address of the Notes AI server — a name or an IP address on your network.")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
             }
@@ -411,9 +416,9 @@ struct SignInView: View {
         switch error.code {
         case .cannotConnectToHost, .cannotFindHost, .timedOut, .networkConnectionLost, .dnsLookupFailed:
             if isPhysicalDevice, settings.pointsAtLocalhost {
-                return "Can't reach \(host) — on a phone, localhost is the phone itself. Enter your Mac's Wi‑Fi address below (the stack must be published with PUBLISH_HOST=0.0.0.0)."
+                return "Can't connect: the server address points at this phone itself. Enter the server's address in Settings."
             }
-            return "Can't reach \(host). Is the Notes AI server running, published on the network (PUBLISH_HOST=0.0.0.0), and is the phone on the same Wi‑Fi?"
+            return "Can't connect. Check your connection and try again."
         case .notConnectedToInternet:
             return "This phone is offline."
         case .appTransportSecurityRequiresSecureConnection:
@@ -528,7 +533,7 @@ struct SignInView: View {
             password = saved.password
             await signInWithPassword(fromKeychain: true)
         } catch {
-            errorMessage = "\(biometry) is not available: \(error.localizedDescription)"
+            errorMessage = "\(biometry) isn't available on this iPhone right now. Type your password instead."
         }
     }
 
@@ -667,7 +672,7 @@ struct LockedView: View {
         VStack(spacing: 18) {
             Spacer()
             Image(systemName: Biometrics.symbol)
-                .font(.system(size: 44, weight: .light))
+                .font(.dsSymbol(44, .light))
                 .foregroundStyle(DS.accentText)
             VStack(spacing: 6) {
                 Text("Notes AI is locked")

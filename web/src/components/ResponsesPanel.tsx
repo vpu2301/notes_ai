@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { clearResponse, setItemStatus } from "../api/notes";
 import type { ItemView, ResponseView, TemplateSection } from "../api/types";
 import { useToast } from "./Toaster";
@@ -34,7 +34,7 @@ export function ResponsesPanel({
       const next = await setItemStatus(noteId, item.id, item.status === "done" ? "open" : "done");
       onItems(items.map((i) => (i.id === item.id ? next : i)));
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(null);
     }
@@ -61,7 +61,7 @@ export function ResponsesPanel({
         ),
       );
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(null);
     }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { FIRST_RUN_KEY } from "../lib/storageKeys";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { submitJob, submitWithLayoutFallback } from "../api/asr";
 import { glossaryHint } from "../api/glossary";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import {
   languageName,
   type AsrLanguage,
@@ -60,7 +62,6 @@ const MEETING_TYPES: ReadonlyArray<readonly [MeetingType, string]> = [
  * matters, so there is now somewhere to type it — and it is the note
  * itself, autosaved, on every device, kept verbatim.
  */
-const FIRST_RUN_KEY = "klarnote.first_run_seen";
 /** Sprint I3: "also record this tab's audio" — a per-browser preference. */
 const SYSTEM_AUDIO_KEY = "notesai.capture.systemAudio";
 
@@ -74,6 +75,7 @@ export function MeetingPage() {
   // A calendar event's title arrives as ?title= from the home page's
   // "Start" button; otherwise the field starts empty.
   const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
+  useDocumentTitle(title.trim() || "New meeting");
   // Sprint 30: its invitees wait in sessionStorage under ?event= (names
   // never ride the URL). They bound the speaker count and are offered as
   // names when renaming speakers. Sprint 34: they also go on the note,
@@ -204,7 +206,7 @@ export function MeetingPage() {
         await note.attachJob(job.id);
         void refresh();
       } catch (err) {
-        toast.error(errorMessage(err));
+        toast.error(messageFor(err));
         setPhase("idle");
       }
     },
@@ -387,7 +389,7 @@ export function MeetingPage() {
               {job && (job.status === "queued" || job.status === "running") && (
                 <button
                   className="btn ghost sm"
-                  onClick={() => void cancel(job).catch((err) => toast.error(errorMessage(err)))}
+                  onClick={() => void cancel(job).catch((err) => toast.error(messageFor(err)))}
                 >
                   Cancel
                 </button>
@@ -396,7 +398,7 @@ export function MeetingPage() {
                 <button
                   className="btn primary sm"
                   onClick={() =>
-                    void createNote(job).catch((err) => toast.error(errorMessage(err)))
+                    void createNote(job).catch((err) => toast.error(messageFor(err)))
                   }
                 >
                   Try again

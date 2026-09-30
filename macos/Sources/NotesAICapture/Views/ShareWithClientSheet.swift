@@ -77,12 +77,18 @@ struct ShareWithClientSheet: View {
         .background(DS.bg)
     }
 
+    /// The note's title when it has one.
+    private var noteTitle: String? {
+        guard let title = model.content?.title?.trimmingCharacters(in: .whitespaces), !title.isEmpty else { return nil }
+        return title
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Share with client")
                 .font(.dsDisplay(17, .medium))
                 .foregroundStyle(DS.text1)
-            Text(model.content?.title?.isEmpty == false ? model.content!.title! : "Untitled note")
+            Text(noteTitle ?? "Untitled note")
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
                 .lineLimit(1)
@@ -238,7 +244,7 @@ struct ShareWithClientSheet: View {
         var parts = URLComponents()
         parts.scheme = "mailto"
         parts.path = address
-        let subject = model.content?.title?.isEmpty == false ? model.content!.title! : "Meeting notes"
+        let subject = noteTitle ?? "Meeting notes"
         parts.queryItems = [
             URLQueryItem(name: "subject", value: subject),
             URLQueryItem(name: "body", value: url.absoluteString),

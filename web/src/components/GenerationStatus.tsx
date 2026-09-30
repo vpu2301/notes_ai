@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { getGeneration, regenerate } from "../api/generation";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { GenerationView } from "../api/types";
 import { MAX_SHOWN_RANGES, excludedItems } from "../lib/generation";
 import { useToast } from "./Toaster";
@@ -13,7 +15,7 @@ const REASONS: Record<string, string> = {
     "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
   generation_disabled: "Automatic note writing is off for this workspace.",
   processor_unacknowledged:
-    "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data.",
+    "A workspace admin has to agree to who processes your meetings before notes are written.",
   no_snapshot: "The recording could not be read when the note was written.",
   snapshot_unreadable: "The recording could not be read when the note was written.",
   model_unavailable: "The model was unavailable. Try writing the note again.",
@@ -108,7 +110,15 @@ export function GenerationStatus({
   if (blocked) {
     return (
       <p className="banner banner-warn gen-status" role="status">
-        <span className="grow">{REASONS[blocked] ?? "This note was not written automatically."}</span>
+        <span className="grow">
+          {REASONS[blocked] ?? "This note was not written automatically."}
+          {blocked === "processor_unacknowledged" && (
+            <>
+              {" "}
+              <Link to="/settings/data">Settings › Data &amp; AI</Link>
+            </>
+          )}
+        </span>
       </p>
     );
   }
@@ -118,7 +128,10 @@ export function GenerationStatus({
       await regenerate(noteId);
       await load();
     } catch (err) {
-      toast.error(errorMessage(err));
+      // The closed vocabulary first (the same sentence the banner would
+      // show), the general copy for everything else — never the detail.
+      const code = err instanceof ApiError ? err.code : undefined;
+      toast.error((code && REASONS[code]) || messageFor(err));
     } finally {
       setBusy(false);
     }

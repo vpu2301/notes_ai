@@ -8,9 +8,12 @@ import Foundation
 /// sentence for the same failure on every screen, and `detail` is
 /// explicitly allowed to change.
 ///
-/// Anything unrecognised falls through to a generic line **with the
-/// request id**, which is the whole point of sending `X-Request-Id`: an
-/// unknown failure the person can quote is one somebody can look up.
+/// Anything unrecognised falls through to a generic line **with a short
+/// reference** taken from the request id, which is the whole point of
+/// sending `X-Request-Id`: an unknown failure the person can quote is one
+/// somebody can look up. The server's `detail` and its code never reach
+/// the screen — they are written for logs, not for the person in front of
+/// the Mac.
 enum AuthCopy {
     static func message(for error: Error) -> String {
         guard let apiError = error as? APIError else { return error.localizedDescription }
@@ -43,7 +46,7 @@ enum AuthCopy {
             if let detail = problem?.detail, detail.hasPrefix("deny:") {
                 return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access."
             }
-            return problem?.detail ?? "You do not have access to that."
+            return "You do not have access to that."
         case 423:
             // The Keycloak login path answers 423 with no code of its own.
             if let seconds = problem?.retryAfter {
@@ -135,20 +138,54 @@ enum AuthCopy {
             return "Confirm it is really you to continue."
         case "challenge_required":
             return "Ask for a new code before entering one."
+        // ── writing a note (Sprint 33/37, L2) ───────────────────────
+        // The same sentences the status line uses for a run that ended
+        // this way, so a refusal at the button and a failure after it
+        // read as one thing.
+        case "processor_unacknowledged":
+            return GenerationCopy.processorUnacknowledged
+        case "generation_disabled":
+            return GenerationCopy.generationDisabled
+        case "budget_exceeded":
+            return GenerationCopy.budgetExceeded
+        case "generation_in_progress":
+            return GenerationCopy.inProgress
+        case "too_many_generations":
+            return GenerationCopy.tooMany
+        case "no_transcript":
+            return GenerationCopy.noTranscript
+        case "note_cancelled":
+            return GenerationCopy.cancelled
+        case "model_unavailable":
+            return GenerationCopy.modelUnavailable
+        case "no_snapshot", "snapshot_unreadable":
+            return GenerationCopy.recordingUnreadable
+        case "no_client_version":
+            return "This kind of note has no client version — nothing in it is meant for someone outside the workspace."
         default:
             return nil
         }
     }
 
+    /// The one sentence for a failure this app cannot explain, plus a
+    /// short reference the person can quote. Nothing the server wrote
+    /// for its logs is repeated here.
     private static func unknown(status: Int, problem: Problem?) -> String {
-        var message = problem?.detail ?? problem?.title ?? "Something went wrong (HTTP \(status))."
-        if let code = problem?.code, !code.isEmpty {
-            message += " [\(code)]"
+        let base: String
+        switch status {
+        case 400..<500: base = "That request could not be completed."
+        case 500..<600: base = "The server ran into a problem."
+        default: base = "Something went wrong."
         }
-        if let requestId = problem?.requestId, !requestId.isEmpty {
-            message += "\nRequest id: \(requestId)"
-        }
-        return message
+        guard let ref = reference(problem?.requestId) else { return "\(base) Try again." }
+        return "\(base) Try again, or quote reference \(ref)."
+    }
+
+    /// The first eight characters of the request id — enough to find the
+    /// request in the logs, short enough to read out.
+    static func reference(_ requestId: String?) -> String? {
+        guard let requestId = requestId?.trimmingCharacters(in: .whitespaces), !requestId.isEmpty else { return nil }
+        return String(requestId.prefix(8))
     }
 
     /// "in 45 seconds" / "in 3 minutes" — a countdown the person can act on.

@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
+import { REF_KEY } from "../../lib/storageKeys";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as authApi from "../../api/auth";
 import { ApiError } from "../../api/http";
@@ -34,6 +36,7 @@ import { Banner, LoginShell, useCountdown } from "./LoginShell";
  * and `tests/signup.test.tsx` holds that line.
  */
 export function SignupPage() {
+  useDocumentTitle("Create your account");
   const { status, login, saveProfile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -365,7 +368,7 @@ const REF_RE = /^[a-z2-7]{12}$/;
 function readRef(fromQuery: string | null): string | null {
   const candidates = [fromQuery];
   try {
-    candidates.push(window.sessionStorage.getItem("klarnote.ref"));
+    candidates.push(window.sessionStorage.getItem(REF_KEY));
   } catch {
     /* private mode */
   }

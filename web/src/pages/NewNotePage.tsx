@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useNavigate } from "react-router-dom";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { createNote, getTemplate, listTemplates } from "../api/notes";
 import type { NoteContent, TemplateSummary } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
@@ -9,6 +10,7 @@ import { Skeleton } from "../components/Skeleton";
 import { useToast } from "../components/Toaster";
 
 export function NewNotePage() {
+  useDocumentTitle("New from template");
   const [templates, setTemplates] = useState<TemplateSummary[] | null>(null);
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -23,7 +25,7 @@ export function NewNotePage() {
       } catch (err) {
         if (!cancelled) {
           setTemplates([]);
-          toast.error(errorMessage(err));
+          toast.error(messageFor(err));
         }
       }
     })();
@@ -66,10 +68,10 @@ export function NewNotePage() {
         sections,
       };
       const created = await createNote(content);
-      toast.success(`Created ${created.code}`);
+      toast.success("Note created");
       navigate(`/notes/${created.id}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
       setCreatingId(null);
     }
   };

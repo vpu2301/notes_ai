@@ -302,18 +302,26 @@ struct SignInView: View {
 
     // MARK: - Footer (which server this is)
 
+    /// Release builds show nothing about the server here: the addresses
+    /// are shipped, and Settings › Advanced is where an operator changes
+    /// them. A debug build keeps the editor, because a developer's Mac
+    /// talks to a stack that moves.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            #if DEBUG
             if showServer {
                 VStack(alignment: .leading, spacing: 6) {
-                    serverField("Auth", text: $app.settings.authBaseURL)
-                    serverField("ASR", text: $app.settings.asrBaseURL)
+                    serverField("Sign-in", text: $app.settings.authBaseURL)
+                    serverField("Audio", text: $app.settings.asrBaseURL)
                     serverField("Notes", text: $app.settings.noteBaseURL)
+                    serverField("Alerts", text: $app.settings.notificationBaseURL)
                     serverField("Web", text: $app.settings.webAppURL)
                 }
                 .padding(.top, 2)
             }
+            #endif
             HStack {
+                #if DEBUG
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { showServer.toggle() }
                 } label: {
@@ -322,7 +330,8 @@ struct SignInView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.muted)
-                .help("The backend this Mac talks to")
+                .help("The backend this Mac talks to (debug builds only)")
+                #endif
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(DSButtonStyle(kind: .ghost, size: 11.5, height: 22))
@@ -336,7 +345,7 @@ struct SignInView: View {
             Text(label)
                 .font(.ds(11.5))
                 .foregroundStyle(DS.text3)
-                .frame(width: 40, alignment: .leading)
+                .frame(width: 46, alignment: .leading)
             DSTextField(placeholder: label, text: text, mono: true)
         }
     }

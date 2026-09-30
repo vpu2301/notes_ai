@@ -151,7 +151,7 @@ enum MCPOAuth {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "client_name": "Notes AI",
-            "client_uri": "https://notes.ai",
+            "client_uri": ProductLinks.site,
             "redirect_uris": [redirectURI],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],

@@ -117,7 +117,39 @@ const COPY: Record<string, string> = {
   too_many_speakers: "A transcript can have at most 8 speakers. Move these turns to someone already listed.",
   unknown_label: "That speaker is no longer in this transcript. Reload and try again.",
   name_candidates_invalid: "The invited people's names could not be used. Record without them, or try again.",
+
+  // ── note writing (Sprint 37 / L2) ─────────────────────────────────
+  // The same three sentences GenerationStatus shows in its banner, so a
+  // refused "Generate summary" reads the same as a run that never started.
+  processor_unacknowledged:
+    "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI.",
+  generation_disabled: "Automatic note writing is off for this workspace.",
+  budget_exceeded:
+    "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
+  generation_in_progress: "This note is already being written.",
+  too_many_generations: "This note has been rewritten as often as it can be today.",
+  no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
+  note_cancelled: "This note was cancelled and cannot be written again.",
+  // Sprint 36: a 1:1 or an interview debrief has no version for a client.
+  not_available_for_type: "A one-to-one and an interview debrief have no client version.",
 };
+
+/** The one sentence for a connection that never reached the server. */
+export const OFFLINE_COPY = "Can't connect. Check your connection and try again.";
+
+/** What an unmapped refusal says: by status, never the server's own words. */
+function fallbackFor(status: number): string {
+  if (status === 401) return "Incorrect email or password.";
+  if (status === 403) return "You are not allowed to do that here.";
+  if (status === 404) return "That could not be found. It may have been removed.";
+  if (status === 409 || status === 412) return "That changed in the meantime. Reload and try again.";
+  if (status === 413) return "That is too large to send.";
+  if (status === 422) return "Something in what you entered is not right. Check it and try again.";
+  if (status === 423) return "This account is temporarily locked. Try again shortly.";
+  if (status === 429) return "Too many attempts. Wait a moment and try again.";
+  if (status >= 500) return "The server had a problem. Try again in a moment.";
+  return "Something went wrong. Try again in a moment.";
+}
 
 /** True when the code has a written message (what the coverage test asks). */
 export function hasCopy(code: string): boolean {
@@ -125,21 +157,30 @@ export function hasCopy(code: string): boolean {
 }
 
 /**
- * The message to show. Falls back to the server's `detail` — which is at
- * least in English and about the right thing — rather than to a generic
- * apology that tells the user nothing.
+ * The message to show for any thrown value.
+ *
+ * A code with copy gets its sentence; a role denial gets the one about
+ * access; anything else gets a sentence for its status. The server's
+ * `detail` is never shown: it is written for a developer reading a log,
+ * and a raw "a workspace admin has to agree to who processes your
+ * meetings [processor_unacknowledged]" is exactly what this file exists
+ * to prevent. Somebody who has to quote the failure gets the ref from
+ * `messageWithRef`.
  */
 export function messageFor(err: unknown): string {
   if (!(err instanceof ApiError)) {
-    if (err instanceof TypeError) return "Cannot reach the server — is it running?";
-    return err instanceof Error ? err.message : "Something went wrong";
+    if (err instanceof TypeError) return OFFLINE_COPY;
+    if (err instanceof DOMException && err.name === "AbortError") return "That was cancelled.";
+    // A plain Error is one of ours (a guard in a hook, a validation
+    // sentence), written to be read.
+    return err instanceof Error && err.message ? err.message : "Something went wrong. Try again in a moment.";
   }
   const written = err.code ? COPY[err.code] : undefined;
   if (written) return written;
-  if (err.status === 401) return "Incorrect email or password.";
-  if (err.status === 423) return "This account is temporarily locked. Try again shortly.";
-  if (err.status >= 500) return "The server had a problem. Try again in a moment.";
-  return err.detail;
+  if (err.isRoleDenial) {
+    return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access.";
+  }
+  return fallbackFor(err.status);
 }
 
 /**

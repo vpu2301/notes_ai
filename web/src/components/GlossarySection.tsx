@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { forgetTerm, glossaryHint, listGlossary, rememberTerm } from "../api/glossary";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { GlossaryHint, GlossaryKind, GlossaryTerm } from "../api/types";
 import { isVocabulary } from "../lib/glossaryRule";
 import { relativeTime } from "../lib/time";
@@ -59,7 +60,7 @@ export function GlossarySection() {
       setHint(h);
       setError(null);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     }
   }, []);
 
@@ -83,7 +84,7 @@ export function GlossarySection() {
       await load();
     } catch (err) {
       if (isNotVocabularyError(err)) setAddError(NOT_VOCABULARY);
-      else toast.error(errorMessage(err));
+      else toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -101,7 +102,7 @@ export function GlossarySection() {
         /* the list already reflects the removal; the hint refreshes on the next load */
       }
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -121,7 +122,7 @@ export function GlossarySection() {
       <form className="glossary-add" onSubmit={(e) => void add(e)}>
         <input
           className="input"
-          placeholder="John Mayer"
+          placeholder="Olena Kovalenko"
           aria-label="Term"
           maxLength={80}
           value={term}

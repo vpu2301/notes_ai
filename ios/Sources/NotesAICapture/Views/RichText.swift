@@ -33,11 +33,16 @@ struct RichListItem: Equatable {
     var number: Int?
     /// Set only on checklist items.
     var done: Bool?
+    /// The source line, marker included — what a generated line's
+    /// evidence row is keyed by (Summary Engine v2, Q5).
+    var raw: String? = nil
 }
 
 enum RichBlockKind: Equatable {
     case heading(level: Int, spans: [RichSpan])
-    case paragraph(spans: [RichSpan])
+    /// `raw` is the source line when the paragraph was one line — the
+    /// only kind of paragraph a generated row can stand behind.
+    case paragraph(spans: [RichSpan], raw: String? = nil)
     case item(RichListItem)
     case quote(spans: [RichSpan])
     case rule
@@ -71,10 +76,14 @@ enum RichText {
     ].joined(separator: "|"))
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
-        // The patterns are literals in this file; one that does not compile
-        // is a bug to fix here, not a condition to handle at run time.
-        // swiftlint:disable:next force_try
-        try! NSRegularExpression(pattern: pattern)
+        do {
+            return try NSRegularExpression(pattern: pattern)
+        } catch {
+            // The patterns are literals in this file, compiled once; one
+            // that does not compile is a bug to fix here, not a condition
+            // to handle at run time.
+            preconditionFailure("invalid pattern in RichText: \(pattern)")
+        }
     }
 
     /// Split one line into runs, marking code, bold and italic.
@@ -150,11 +159,12 @@ enum RichText {
         var columns: [Int] = []
 
         func flushPara() {
-            let body = para.map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
+            let lines = para.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let body = lines.joined(separator: " ")
             para = []
-            if !body.isEmpty { kinds.append(.paragraph(spans: spans(body))) }
+            if !body.isEmpty {
+                kinds.append(.paragraph(spans: spans(body), raw: lines.count == 1 ? lines[0] : nil))
+            }
         }
 
         func flushList() {
@@ -225,20 +235,23 @@ enum RichText {
             }
 
             if let m = matches(check, line), let box = m[2], let body = m[3] {
-                push(RichListItem(spans: spans(body), depth: 0, ordered: false, done: box.lowercased() == "x"),
+                push(RichListItem(spans: spans(body), depth: 0, ordered: false, done: box.lowercased() == "x",
+                                  raw: line),
                      at: indent(of: m[1] ?? ""))
                 i += 1
                 continue
             }
 
             if let m = matches(bullet, line), let body = m[2] {
-                push(RichListItem(spans: spans(body), depth: 0, ordered: false), at: indent(of: m[1] ?? ""))
+                push(RichListItem(spans: spans(body), depth: 0, ordered: false, raw: line),
+                     at: indent(of: m[1] ?? ""))
                 i += 1
                 continue
             }
 
             if let m = matches(ordered, line), let body = m[3] {
-                push(RichListItem(spans: spans(body), depth: 0, ordered: true, number: Int(m[2] ?? "")),
+                push(RichListItem(spans: spans(body), depth: 0, ordered: true, number: Int(m[2] ?? ""),
+                                  raw: line),
                      at: indent(of: m[1] ?? ""))
                 i += 1
                 continue
@@ -279,7 +292,7 @@ enum RichText {
         for block in parse(text) {
             let runs: [RichSpan]
             switch block.kind {
-            case .heading(_, let spans), .paragraph(let spans), .quote(let spans): runs = spans
+            case .heading(_, let spans), .paragraph(let spans, _), .quote(let spans): runs = spans
             case .item(let item): runs = item.spans
             case .rule, .table: continue
             }
@@ -297,11 +310,22 @@ enum RichText {
 /// A note section, typeset. Headings, nested bullets, checklists, quotes
 /// and small tables come out as real structure instead of the raw `- `
 /// and `**…**` a plain string used to show.
+/// Something drawn at the end of one line, from its source text — the
+/// evidence of a generated line (Q5): a certainty chip, the names the
+/// engine respelled, and a way to open the words behind it.
+struct RichLineExtra {
+    var chip: String?
+    var names: [String] = []
+    var open: () -> Void
+}
+
 struct RichTextView: View {
     let text: String
     var size: CGFloat = 16
     /// Shown in place of an empty body.
     var placeholder: String = "Nothing entered."
+    /// The evidence behind a line, by its source text; nil for none.
+    var extra: ((String) -> RichLineExtra?)? = nil
 
     private var blocks: [RichBlock] { RichText.parse(text) }
 
@@ -352,13 +376,13 @@ struct RichTextView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .paragraph(let spans):
-            body(spans)
+        case .paragraph(let spans, let raw):
+            line(spans, raw: raw)
 
         case .item(let item):
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 marker(item)
-                body(item.spans)
+                line(item.spans, raw: item.raw)
             }
             .padding(.leading, CGFloat(item.depth) * 16)
 
@@ -401,6 +425,22 @@ struct RichTextView: View {
         }
     }
 
+    /// A line of the note, and — when the engine wrote it and can prove
+    /// it — the chips and the way to its evidence under it. The chips are
+    /// data from the row, drawn here: never words in the note a person
+    /// would have to edit around.
+    @ViewBuilder
+    private func line(_ spans: [RichSpan], raw: String?) -> some View {
+        if let raw, let extra = extra?(raw) {
+            VStack(alignment: .leading, spacing: 4) {
+                body(spans)
+                RichLineExtraView(extra: extra)
+            }
+        } else {
+            body(spans)
+        }
+    }
+
     private func body(_ spans: [RichSpan], color: Color = DS.text1) -> some View {
         Text(attributed(spans, size: size, weight: .regular))
             .font(.ds(size))
@@ -418,7 +458,7 @@ struct RichTextView: View {
     private func marker(_ item: RichListItem) -> some View {
         if let done = item.done {
             Image(systemName: done ? "checkmark.square.fill" : "square")
-                .font(.system(size: size - 1.5, weight: .regular))
+                .font(.dsSymbol(size - 1.5, .regular))
                 .foregroundStyle(done ? DS.accent : DS.text3)
                 .frame(width: 14, alignment: .leading)
         } else if item.ordered {
@@ -461,5 +501,37 @@ struct RichTextView: View {
             out.append(run)
         }
         return out
+    }
+}
+
+/// The chips under a generated line and the button to its evidence.
+struct RichLineExtraView: View {
+    let extra: RichLineExtra
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let chip = extra.chip {
+                DSChip(text: chip, tint: DS.text3, soft: DS.surface2)
+            }
+            ForEach(extra.names, id: \.self) { name in
+                DSChip(text: name, tint: DS.accentText, soft: DS.accentSoft)
+                    .accessibilityLabel("Name corrected to \(name)")
+            }
+            Button(action: extra.open) {
+                HStack(spacing: 3) {
+                    Image(systemName: "quote.opening")
+                        .font(.dsSymbol(10, .semibold))
+                    Text("Source")
+                        .font(.ds(12, .medium))
+                }
+                .foregroundStyle(DS.muted)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 24)
+                .background(Capsule().strokeBorder(DS.line, lineWidth: DS.hairline))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show where this came from")
+        }
     }
 }

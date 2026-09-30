@@ -64,9 +64,19 @@ enum DS {
     static let infoSoft     = Color.ds("4b6f9e", "8fb0dd", lightAlpha: 0.10, darkAlpha: 0.12)
 
     // Radii — rounder than the web's, the organic half of the look
+    static let radiusXs: CGFloat = 6
+    static let radiusSm: CGFloat = 9
     static let radius: CGFloat = 12
     static let radiusLg: CGFloat = 16
     static let radiusXl: CGFloat = 22
+
+    // Speaker tints: a stable function of the name picks one (same hash
+    // as the web and the Mac), so a person keeps their colour everywhere.
+    // Each is a light/dark pair, and none of them is orange.
+    static let speakerTints: [Color] = [
+        Color.ds("4f7a5e", "8fbf9c"), Color.ds("6b7f5a", "a6b892"), Color.ds("8a6d2f", "c9ad6b"),
+        Color.ds("4a6d8c", "8fb0d0"), Color.ds("7a5a8c", "b59fc7"), Color.ds("3f7f7a", "83bdb7"),
+    ]
 
     // Layout
     /// Page gutter on an iPhone.
@@ -104,8 +114,17 @@ extension Font {
     static func dsDisplay(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
         .custom(DSType.face(weight), size: size)
     }
+    /// SF Mono for codes and timers, scaled with Dynamic Type — a system
+    /// font given a point size is fixed, so the size is put through the
+    /// same metrics the text styles use.
     static func dsMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight, design: .monospaced)
+    }
+
+    /// A symbol (or a system-font glyph) at a design size, scaled with
+    /// Dynamic Type — for the `.font(.system(size:))` an icon used to get.
+    static func dsSymbol(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
+        .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight)
     }
 
     static let dsTitle   = Font.dsDisplay(26)
@@ -329,7 +348,7 @@ struct DSIconButtonStyle: ButtonStyle {
             .foregroundStyle(on ? DS.accentText : DS.text3)
             .frame(width: size, height: size)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(on ? DS.accentSoft : (configuration.isPressed ? DS.surface2 : .clear))
             )
             .contentShape(Rectangle())
@@ -471,10 +490,10 @@ struct DSSegmentedPill<T: Hashable>: View {
                     .frame(minHeight: height - 6)
                     .frame(maxWidth: .infinity)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: DS.radiusSm - 1, style: .continuous)
                             .fill(on ? DS.surface : .clear)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: DS.radiusSm - 1, style: .continuous)
                                     .strokeBorder(DS.line, lineWidth: on ? DS.hairline : 0)
                             )
                     )
@@ -490,7 +509,7 @@ struct DSSegmentedPill<T: Hashable>: View {
         }
         .padding(3)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.radius - 1, style: .continuous)
                 .fill(DS.surface2)
         )
     }
@@ -653,7 +672,7 @@ struct DSMetaPill: View {
         HStack(spacing: 5) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.dsSymbol(11.5))
                     .foregroundStyle(tone == .accent ? DS.accentText : DS.muted)
             }
             Text(text)

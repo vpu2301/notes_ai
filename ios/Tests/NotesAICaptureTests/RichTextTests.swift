@@ -13,7 +13,7 @@ final class RichTextTests: XCTestCase {
 
     private func spans(of block: RichBlock) -> [RichSpan] {
         switch block.kind {
-        case .heading(_, let spans), .paragraph(let spans), .quote(let spans): return spans
+        case .heading(_, let spans), .paragraph(let spans, _), .quote(let spans): return spans
         case .item(let item): return item.spans
         case .rule, .table: return []
         }

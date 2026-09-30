@@ -7,12 +7,47 @@ struct BackendSettings: Codable, Equatable, Sendable {
     var asrBaseURL: String
     var noteBaseURL: String
     var webAppURL: String
+    /// notification-service (the bell). Settings saved before it existed
+    /// decode without it and get the address derived from the others.
+    var notificationBaseURL: String
+
+    init(authBaseURL: String, asrBaseURL: String, noteBaseURL: String, webAppURL: String,
+         notificationBaseURL: String? = nil) {
+        self.authBaseURL = authBaseURL
+        self.asrBaseURL = asrBaseURL
+        self.noteBaseURL = noteBaseURL
+        self.webAppURL = webAppURL
+        self.notificationBaseURL = notificationBaseURL
+            ?? Self.derivedNotificationURL(from: noteBaseURL)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case authBaseURL, asrBaseURL, noteBaseURL, webAppURL, notificationBaseURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let note = try c.decode(String.self, forKey: .noteBaseURL)
+        self.init(authBaseURL: try c.decode(String.self, forKey: .authBaseURL),
+                  asrBaseURL: try c.decode(String.self, forKey: .asrBaseURL),
+                  noteBaseURL: note,
+                  webAppURL: try c.decode(String.self, forKey: .webAppURL),
+                  notificationBaseURL: try c.decodeIfPresent(String.self, forKey: .notificationBaseURL))
+    }
+
+    /// The notification service on the same host as note-service, on its
+    /// usual dev port — for settings written before the bell existed.
+    static func derivedNotificationURL(from noteBaseURL: String) -> String {
+        guard let (scheme, host) = parseHost(noteBaseURL) else { return "http://localhost:8004" }
+        return "\(scheme)://\(host):8004"
+    }
 
     static let `default` = BackendSettings(
         authBaseURL: "http://localhost:8000",
         asrBaseURL: "http://localhost:8001",
         noteBaseURL: "http://localhost:8006",
-        webAppURL: "http://localhost:5173"
+        webAppURL: "http://localhost:5173",
+        notificationBaseURL: "http://localhost:8004"
     )
 
     /// The dev stack on one machine: every service on its usual port of
@@ -24,7 +59,8 @@ struct BackendSettings: Codable, Equatable, Sendable {
             authBaseURL: "\(scheme)://\(host):8000",
             asrBaseURL: "\(scheme)://\(host):8001",
             noteBaseURL: "\(scheme)://\(host):8006",
-            webAppURL: "\(scheme)://\(host):5173"
+            webAppURL: "\(scheme)://\(host):5173",
+            notificationBaseURL: "\(scheme)://\(host):8004"
         )
     }
 
@@ -71,7 +107,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
 
     /// The host every address points at, when they agree; nil otherwise.
     var commonHost: String? {
-        let hosts = [authBaseURL, asrBaseURL, noteBaseURL, webAppURL]
+        let hosts = [authBaseURL, asrBaseURL, noteBaseURL, webAppURL, notificationBaseURL]
             .map { URL(string: $0.trimmingCharacters(in: .whitespaces))?.host() }
         guard let first = hosts.first ?? nil, hosts.allSatisfy({ $0 == first }) else { return nil }
         return first
@@ -508,11 +544,33 @@ struct TranscriptionJob: Decodable, Sendable {
 
 // MARK: - Templates & notes (note-service)
 
-struct TemplateSummary: Decodable, Sendable {
+struct TemplateSummary: Decodable, Sendable, Identifiable {
     let id: String
     let code: String
     let name: String
     let language: String
+    /// "active" | "archived"; absent from an older server.
+    var status: String?
+    var category: String?
+
+    /// The template a bare "new note" starts from: meeting notes, in the
+    /// asked-for language first (`web/src/lib/createBlankNote.ts`).
+    static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
+        let live = list.filter { $0.status != "archived" }
+        return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
+            ?? live.first { $0.code.hasPrefix("meeting_notes") }
+            ?? live.first
+    }
+}
+
+/// `POST /v1/notes` — a note typed from scratch, from a template.
+struct CreateNoteRequest: Encodable, Sendable {
+    let content: NoteContent
+}
+
+struct NoteCreatedResponse: Decodable, Sendable {
+    let id: String
+    let code: String
 }
 
 struct FromTranscriptRequest: Encodable, Sendable {
@@ -851,20 +909,18 @@ struct GenerationView: Decodable, Sendable {
     /// A sentence per reason. The API never sends prose.
     var failureText: String {
         switch errorKind {
-        case "budget_exceeded":
-            return "This workspace has used its AI budget for the month, so this note was not written up."
-        case "generation_disabled":
-            return "Automatic note writing is off for this workspace."
-        case "processor_unacknowledged":
-            return "A workspace admin has to agree to who processes your meetings before notes are written."
-        case "no_snapshot", "snapshot_unreadable":
-            return "The recording could not be read when the note was written."
-        case "model_unavailable":
-            return "The model was unavailable. Try writing the note again."
-        default:
-            return "This note could not be written automatically."
+        case "budget_exceeded": return GenerationCopy.budgetExceeded
+        case "generation_disabled": return GenerationCopy.generationDisabled
+        case "processor_unacknowledged": return GenerationCopy.processorUnacknowledged
+        case "no_snapshot", "snapshot_unreadable": return GenerationCopy.recordingUnreadable
+        case "model_unavailable": return GenerationCopy.modelUnavailable
+        default: return GenerationCopy.generic
         }
     }
+
+    /// The run ended because nobody agreed to a processor: the note view
+    /// offers the way to Settings › Data & AI beside the sentence.
+    var needsProcessorAcknowledgement: Bool { errorKind == "processor_unacknowledged" }
 
     static let nothingWrittenText =
         "Nothing could be written from this recording: no statement in it could be verified against the words that were said."
@@ -1230,11 +1286,25 @@ struct TemplateSectionDef: Decodable, Sendable, Identifiable {
     let required: Bool?
     let minChars: Int?
     let order: Int?
+    /// What a fresh note starts the section with.
+    var defaultContent: String?
+
+    init(id: String, name: String, fieldType: String?, required: Bool?, minChars: Int?, order: Int?,
+         defaultContent: String? = nil) {
+        self.id = id
+        self.name = name
+        self.fieldType = fieldType
+        self.required = required
+        self.minChars = minChars
+        self.order = order
+        self.defaultContent = defaultContent
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, name, required, order
         case fieldType = "field_type"
         case minChars = "min_chars"
+        case defaultContent = "default_content"
     }
 
     var isFreeText: Bool { fieldType == nil || fieldType == "free_text" }
@@ -1248,10 +1318,20 @@ struct TemplateDetail: Decodable, Sendable {
     let id: String
     let name: String
     let schemaJsonb: Definition
+    var schemaVersion: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case schemaJsonb = "schema_jsonb"
+        case schemaVersion = "schema_version"
+    }
+
+    /// The content a blank note starts with: every section in order, with
+    /// the template's default text (`createBlankNote.ts`).
+    func blankContent() -> NoteContent {
+        let sections = schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
+            .map { NoteSection(sectionKey: $0.id, text: $0.defaultContent ?? "", fieldSpecificMetadata: [:]) }
+        return NoteContent(templateId: id, templateSchemaVersion: schemaVersion ?? 1, title: "", sections: sections)
     }
 }
 
@@ -2501,4 +2581,414 @@ struct AISettings: Decodable, Equatable, Sendable {
         case mayChoosePremium = "may_choose_premium"
         case canEdit = "can_edit"
     }
+}
+
+// MARK: - Workspace membership (auth-service /tenants)
+
+/// The workspace the session is signed into (`GET /tenants/current`).
+/// Only the fields the invite sheet needs are decoded.
+struct Tenant: Decodable, Sendable {
+    let id: String
+    let name: String
+    let displayName: String
+    /// The caller's membership role: owner, admin, member, assistant, viewer.
+    let myRole: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case displayName = "display_name"
+        case myRole = "my_role"
+    }
+
+    var title: String { displayName.isEmpty ? name : displayName }
+
+    /// Only owners and admins may add members; the rest can send the link.
+    var canManageMembers: Bool { myRole == "owner" || myRole == "admin" }
+}
+
+struct TenantMember: Decodable, Sendable, Identifiable {
+    let userSub: String
+    let role: String
+    let status: String
+    let email: String?
+    let displayName: String?
+
+    var id: String { userSub }
+    var title: String {
+        let name = displayName?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !name.isEmpty { return name }
+        return email ?? "Member"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case role, status, email
+        case userSub = "user_sub"
+        case displayName = "display_name"
+    }
+}
+
+struct TenantMembersResponse: Decodable, Sendable {
+    let items: [TenantMember]
+}
+
+// MARK: - The client version (Sprint 36)
+
+struct ClientSection: Decodable, Sendable, Identifiable {
+    let sectionKey: String
+    let role: String
+    let name: String
+    let text: String
+
+    var id: String { sectionKey }
+
+    enum CodingKeys: String, CodingKey {
+        case role, name, text
+        case sectionKey = "section_key"
+    }
+}
+
+/// Exactly what an external surface renders — the preview, the shared
+/// page and the client PDF call the same builder, so they cannot differ.
+struct ClientVersion: Decodable, Sendable {
+    let available: Bool
+    let reason: String?
+    let title: String
+    let sections: [ClientSection]
+    let hiddenLines: Int
+    let hiddenSections: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case available, reason, title, sections
+        case hiddenLines = "hidden_lines"
+        case hiddenSections = "hidden_sections"
+    }
+}
+
+struct ChecklistItem: Decodable, Sendable, Identifiable {
+    let code: String
+    let detail: String
+    let count: Int
+
+    var id: String { code }
+}
+
+struct ClientVersionCheck: Decodable, Sendable {
+    let available: Bool
+    /// Warnings, never blockers: the author decides.
+    let warnings: [ChecklistItem]
+    let isEmpty: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case available, warnings
+        case isEmpty = "is_empty"
+    }
+}
+
+// MARK: - Carry-over from the previous meeting (Sprint 36)
+
+/// An item brought forward from the previous meeting in this series.
+struct CarriedItem: Decodable, Sendable, Identifiable, Equatable {
+    let itemKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    /// `done_mentioned` is the recording saying so, with a quote;
+    /// `done_marked` is the author ticking it. Only the engine may claim
+    /// the first.
+    var state: String
+    let doneQuote: String?
+    let doneSpeaker: String?
+
+    var id: String { itemKey }
+    var isDone: Bool { state == "done_marked" || state == "done_mentioned" }
+
+    enum CodingKeys: String, CodingKey {
+        case text, state
+        case itemKey = "item_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case doneQuote = "done_quote"
+        case doneSpeaker = "done_speaker"
+    }
+}
+
+struct CarriedView: Decodable, Sendable, Equatable {
+    var items: [CarriedItem]
+    let fromNoteId: String?
+    let fromNoteCode: String?
+    let fromDate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case fromNoteId = "from_note_id"
+        case fromNoteCode = "from_note_code"
+        case fromDate = "from_date"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decodeIfPresent([CarriedItem].self, forKey: .items) ?? []
+        fromNoteId = try c.decodeIfPresent(String.self, forKey: .fromNoteId)
+        fromNoteCode = try c.decodeIfPresent(String.self, forKey: .fromNoteCode)
+        // The date arrives as a day ("2026-09-12") or a full timestamp;
+        // either way it only labels the heading.
+        if let day = try? c.decodeIfPresent(Date.self, forKey: .fromDate) {
+            fromDate = day
+        } else if let raw = try? c.decodeIfPresent(String.self, forKey: .fromDate) {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            fromDate = f.date(from: String(raw.prefix(10)))
+        } else {
+            fromDate = nil
+        }
+    }
+}
+
+struct CarriedStateRequest: Encodable, Sendable {
+    let state: String
+}
+
+// MARK: - The rows behind a generated note (Summary Engine v2, Q5)
+
+/// One line the engine wrote, with the words that prove it. Every field
+/// the older rows lack decodes as nil, so a note written before Q5 still
+/// opens — its lines simply have no evidence to show.
+struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
+    struct Correction: Decodable, Sendable, Equatable {
+        let surface: String
+        let canonical: String
+        let source: String?
+    }
+
+    let itemKey: String
+    let kind: String
+    let sectionKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    let quote: String
+    let startMs: Int
+    let endMs: Int
+    let speakerLabel: String?
+    let speakerName: String?
+    let placement: String
+    /// Q5: the facts this line rests on (their item keys).
+    let cites: [String]?
+    /// fact | estimate | prediction | opinion | proposal | allegation
+    let certainty: String?
+    let attributedTo: String?
+    let parentKey: String?
+    let corrections: [Correction]?
+
+    var id: String { itemKey }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, text, quote, placement, cites, certainty, corrections
+        case itemKey = "item_key"
+        case sectionKey = "section_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case speakerLabel = "speaker_label"
+        case speakerName = "speaker_name"
+        case attributedTo = "attributed_to"
+        case parentKey = "parent_key"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        itemKey = try c.decode(String.self, forKey: .itemKey)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        sectionKey = try c.decodeIfPresent(String.self, forKey: .sectionKey) ?? ""
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        ownerLabel = try c.decodeIfPresent(String.self, forKey: .ownerLabel)
+        dueText = try c.decodeIfPresent(String.self, forKey: .dueText)
+        quote = try c.decodeIfPresent(String.self, forKey: .quote) ?? ""
+        startMs = try c.decodeIfPresent(Int.self, forKey: .startMs) ?? 0
+        endMs = try c.decodeIfPresent(Int.self, forKey: .endMs) ?? 0
+        speakerLabel = try c.decodeIfPresent(String.self, forKey: .speakerLabel)
+        speakerName = try c.decodeIfPresent(String.self, forKey: .speakerName)
+        placement = try c.decodeIfPresent(String.self, forKey: .placement) ?? ""
+        cites = try c.decodeIfPresent([String].self, forKey: .cites)
+        certainty = try c.decodeIfPresent(String.self, forKey: .certainty)
+        attributedTo = try c.decodeIfPresent(String.self, forKey: .attributedTo)
+        parentKey = try c.decodeIfPresent(String.self, forKey: .parentKey)
+        corrections = try c.decodeIfPresent([Correction].self, forKey: .corrections)
+    }
+
+    /// What a line's certainty is called on its chip. A plain fact has
+    /// no chip (`EvidencePopover.tsx` CERTAINTY_LABELS).
+    static let certaintyLabels: [String: String] = [
+        "prediction": "Forecast",
+        "estimate": "Estimate",
+        "opinion": "Opinion",
+        "proposal": "Proposal",
+        "allegation": "Allegation",
+    ]
+
+    /// "Forecast · Reinbold" — or nil for a plain fact.
+    var chipLabel: String? {
+        guard let certainty, let label = Self.certaintyLabels[certainty] else { return nil }
+        let holder = attributedTo?.split(whereSeparator: \.isWhitespace).last.map(String.init)
+        return holder.map { "\(label) · \($0)" } ?? label
+    }
+
+    /// The names the engine respelled in this line, as they now read.
+    var correctedNames: [String] {
+        (corrections ?? []).filter { $0.canonical != $0.surface }.map(\.canonical)
+    }
+}
+
+/// `PATCH /v1/notes/{id}/items/by-key/{key}` — accept or reject a name
+/// the engine respelled (Q5).
+struct NameCorrectionRequest: Encodable, Sendable {
+    let expectedVersion: Int
+    let action: String
+    let surface: String
+    let canonical: String
+    let source: String?
+    let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case action, surface, canonical, source, reason
+        case expectedVersion = "expected_version"
+    }
+}
+
+struct CorrectionResponse: Decodable, Sendable {
+    let itemKey: String
+    let versionNumber: Int
+    let line: String?
+
+    enum CodingKeys: String, CodingKey {
+        case line
+        case itemKey = "item_key"
+        case versionNumber = "version_number"
+    }
+}
+
+// MARK: - History (note versions)
+
+struct NoteVersionSummary: Decodable, Sendable, Identifiable {
+    let id: String
+    let versionNumber: Int
+    let createdBy: String
+    let createdAt: Date
+    let isAmendment: Bool
+    let amendmentType: String?
+    let amendmentReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case versionNumber = "version_number"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case isAmendment = "is_amendment"
+        case amendmentType = "amendment_type"
+        case amendmentReason = "amendment_reason"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        versionNumber = try c.decode(Int.self, forKey: .versionNumber)
+        createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy) ?? ""
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        isAmendment = try c.decodeIfPresent(Bool.self, forKey: .isAmendment) ?? false
+        amendmentType = try c.decodeIfPresent(String.self, forKey: .amendmentType)
+        amendmentReason = try c.decodeIfPresent(String.self, forKey: .amendmentReason)
+    }
+}
+
+struct NoteVersionDetail: Decodable, Sendable {
+    let id: String
+    let versionNumber: Int
+    let createdAt: Date
+    let content: NoteContent
+    let renderedText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content
+        case versionNumber = "version_number"
+        case createdAt = "created_at"
+        case renderedText = "rendered_text"
+    }
+}
+
+// MARK: - notification-service
+
+struct NotificationItem: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let category: String
+    let title: String
+    let bodyText: String
+    let deepLink: String
+    let resourceType: String
+    let resourceId: String?
+    let severity: String
+    var readAt: Date?
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, title, severity
+        case bodyText = "body_text"
+        case deepLink = "deep_link"
+        case resourceType = "resource_type"
+        case resourceId = "resource_id"
+        case readAt = "read_at"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        bodyText = try c.decodeIfPresent(String.self, forKey: .bodyText) ?? ""
+        deepLink = try c.decodeIfPresent(String.self, forKey: .deepLink) ?? ""
+        resourceType = try c.decodeIfPresent(String.self, forKey: .resourceType) ?? ""
+        resourceId = try c.decodeIfPresent(String.self, forKey: .resourceId)
+        severity = try c.decodeIfPresent(String.self, forKey: .severity) ?? "info"
+        readAt = try? c.decodeIfPresent(Date.self, forKey: .readAt)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    /// The note this is about, when it is about one.
+    var noteId: String? {
+        if resourceType == "note", let resourceId { return resourceId }
+        // "/notes/<id>" — the web's route, which the app can open too.
+        if let range = deepLink.range(of: "/notes/") {
+            let rest = deepLink[range.upperBound...]
+            let id = rest.split(whereSeparator: { "/?#".contains($0) }).first.map(String.init) ?? ""
+            return id.isEmpty ? nil : id
+        }
+        return nil
+    }
+}
+
+struct NotificationFeed: Decodable, Sendable {
+    let items: [NotificationItem]
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case unreadCount = "unread_count"
+    }
+}
+
+struct UnreadCount: Decodable, Sendable {
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case unreadCount = "unread_count"
+    }
+}
+
+/// Product links that are not a backend address.
+enum ProductLinks {
+    /// The public site — what an OAuth registration names as `client_uri`.
+    static let site = "https://notes.ai"
+    static let callAudioHelp = "https://notes.ai/help/recording-call-audio"
 }

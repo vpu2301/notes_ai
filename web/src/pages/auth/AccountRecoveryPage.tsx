@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Link } from "react-router-dom";
 import * as authApi from "../../api/auth";
 import { clearMailToken, mailToken } from "../../lib/mailLink";
@@ -19,6 +20,7 @@ import { ResetPasswordPage } from "./ResetPasswordPage";
  * actually mails.)
  */
 export function AccountRecoveryPage() {
+  useDocumentTitle("Account recovery");
   const [token] = useState(() => mailToken("/account-recovery"));
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [revoked, setRevoked] = useState(false);

@@ -1,5 +1,15 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
+
+const TAB_TITLES: Record<string, string> = {
+  account: "Account settings",
+  security: "Security settings",
+  data: "Data & AI settings",
+  members: "Members",
+  devices: "Room devices",
+  workspace: "Workspace settings",
+};
 
 /**
  * `/settings` — the account's own screens, inside the app shell.
@@ -12,13 +22,15 @@ import { useAuth } from "../../auth/AuthContext";
 export function SettingsLayout() {
   const { activeRole } = useAuth();
   const manages = activeRole === "owner" || activeRole === "admin";
+  const { pathname } = useLocation();
+  useDocumentTitle(TAB_TITLES[pathname.split("/")[2] ?? ""] ?? "Settings");
 
   return (
     <div className="page-h-stack">
       <div className="page-h">
         <div>
           <h1>Settings</h1>
-          <p className="sub">Your account, how you sign in, who processes your meetings, and the devices in this workspace.</p>
+          <p className="sub">Your account, how you sign in, who processes your meetings, and who is in this workspace.</p>
         </div>
       </div>
 
@@ -30,6 +42,7 @@ export function SettingsLayout() {
         {/* Every member, not only a manager: which companies process
             your employer's meetings is not admin-only information. */}
         <SettingsTab to="/settings/data" label="Data & AI" />
+        {manages && <SettingsTab to="/settings/members" label="Members" />}
         {manages && <SettingsTab to="/settings/devices" label="Room devices" />}
         {manages && <SettingsTab to="/settings/workspace" label="Workspace" />}
       </nav>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { getSharingPolicy, putSharingPolicy, revokeAllExternal } from "../../api/admin";
-import { errorMessage } from "../../api/http";
+import { messageFor } from "../../lib/errorCopy";
 import { getTenant, patchTenant, uploadLogo } from "../../api/tenants";
 import type { SharingPolicy, TenantProfile } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -42,7 +42,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
         setContactEmail(t.contact_email);
         setPolicy(p);
       })
-      .catch((err) => live && setError(errorMessage(err)));
+      .catch((err) => live && setError(messageFor(err)));
     return () => {
       live = false;
     };
@@ -56,7 +56,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
       setTenant(await patchTenant(tenantId, { display_name: displayName, legal_name: legalName, contact_email: contactEmail }));
       toast.success("Branding saved");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -74,7 +74,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
       setTenant(await uploadLogo(tenantId, file));
       toast.success("Logo updated — shared pages pick it up within a minute");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -89,7 +89,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
       setPolicy(await putSharingPolicy(policy));
       toast.success("Sharing policy saved");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -101,7 +101,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
       const r = await revokeAllExternal();
       toast.success(r.notes ? `Links on ${r.notes} note${r.notes === 1 ? "" : "s"} turned off` : "No live links to turn off");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
       setConfirmRevoke(false);

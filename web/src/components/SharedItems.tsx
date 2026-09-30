@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { ApiError, errorMessage } from "../api/http";
+import { ApiError } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { flagSection, respondToItem, unflagSection, withdrawItemResponse } from "../api/notes";
 import type { SharedItem } from "../api/types";
 import { CheckIcon, CloseIcon } from "./icons";
@@ -11,7 +12,7 @@ function tooMany(err: unknown): boolean {
 }
 
 function friendly(err: unknown): string {
-  return tooMany(err) ? "Too many actions — try again in a minute." : errorMessage(err);
+  return tooMany(err) ? "Too many actions — try again in a minute." : messageFor(err);
 }
 
 /** A 280-character "what's different?" box. Plain text in, plain text out. */

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { messageFor } from "../../lib/errorCopy";
@@ -26,6 +27,7 @@ import { Banner, LoginShell } from "./LoginShell";
  *    afterwards in Settings › Account.
  */
 export function WelcomePage() {
+  useDocumentTitle("Welcome");
   const { status, identity, saveProfile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -88,7 +90,7 @@ export function WelcomePage() {
           autoComplete="name"
           maxLength={120}
           autoFocus
-          placeholder="Alex Kim"
+          placeholder="Olena Kovalenko"
           value={value}
           // The guess is selected, not just typed in: somebody whose
           // address does not match their name replaces it with one key.

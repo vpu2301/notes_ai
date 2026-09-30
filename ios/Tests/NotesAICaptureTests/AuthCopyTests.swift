@@ -53,12 +53,28 @@ final class AuthCopyTests: XCTestCase {
                           SessionLostReason.securityRevoked.message)
     }
 
+    /// An unknown failure is one generic sentence plus a short reference —
+    /// never the server's own wording or its code, which are written for a
+    /// developer reading a log.
     func testAnUnknownCodeCarriesTheRequestId() {
         let message = AuthCopy.message(for: error("something_new", status: 500,
                                                   detail: "unexpected", requestId: "req-9"))
-        XCTAssertTrue(message.contains("unexpected"))
-        XCTAssertTrue(message.contains("something_new"))
+        XCTAssertFalse(message.contains("unexpected"))
+        XCTAssertFalse(message.contains("something_new"))
         XCTAssertTrue(message.contains("req-9"))
+        XCTAssertTrue(message.hasPrefix("The server had a problem."), message)
+    }
+
+    /// The codes the note engine answers with are written out, and the
+    /// processor one says where to go.
+    func testGenerationCodesAreWrittenOut() {
+        let message = AuthCopy.message(for: error("processor_unacknowledged", status: 409,
+                                                  detail: "a workspace admin has to agree"))
+        XCTAssertFalse(message.contains("a workspace admin has to agree"))
+        XCTAssertTrue(message.contains("Settings › Data & AI"))
+        XCTAssertEqual(AuthCopy.message(for: error("generation_disabled", status: 409)),
+                       GenerationCopy.generationDisabled)
+        XCTAssertEqual(AuthCopy.code(of: error("budget_exceeded", status: 409)), "budget_exceeded")
     }
 
     func testALockedAccountCountsDown() {

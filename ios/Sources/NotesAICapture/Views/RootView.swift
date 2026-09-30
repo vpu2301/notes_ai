@@ -73,6 +73,7 @@ struct RootView: View {
 struct MainView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack(path: $app.path) {
@@ -89,6 +90,20 @@ struct MainView: View {
         }
         .sheet(isPresented: $app.settingsPresented) {
             SettingsView()
+        }
+        .sheet(isPresented: $app.invitePresented) {
+            InviteView { app.invitePresented = false }
+        }
+        .sheet(isPresented: $app.newNotePresented) {
+            NewNoteSheet { app.newNotePresented = false }
+        }
+        .sheet(isPresented: $app.notificationsPresented) {
+            NotificationsSheet(model: app.notifications) { app.notificationsPresented = false }
+        }
+        // The bell's count, every half minute while the app is in front.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await app.notifications.poll()
         }
     }
 }

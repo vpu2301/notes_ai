@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { errorMessage } from "../api/http";
+import { listTenants } from "../api/account";
+import { ApiError } from "../api/http";
+import type { TenantSummary } from "../api/types";
 import * as notifApi from "../api/notifications";
 import type { NotificationItem } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/Toaster";
 import { createBlankNote } from "../lib/createBlankNote";
+import { messageFor } from "../lib/errorCopy";
 import { useDismiss } from "../lib/useDismiss";
 import { BrandMark } from "../components/BrandMark";
 import {
@@ -13,6 +16,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CheckIcon,
   FileTextIcon,
   LayersIcon,
   LogoutIcon,
@@ -110,7 +114,7 @@ function NewMenu({
   return (
     <div className={`sb-cta-split ${collapsed ? "collapsed" : ""}`} ref={ref}>
       {collapsed ? (
-        <button className="sb-cta" onClick={toggle} title="Create" aria-haspopup="menu" aria-expanded={open}>
+        <button className="sb-cta" onClick={toggle} title="Create" aria-label="Create" aria-haspopup="menu" aria-expanded={open}>
           <span className="sb-cta-icon">
             <MicIcon size={14} />
           </span>
@@ -129,6 +133,7 @@ function NewMenu({
             className={`sb-cta sb-cta-caret ${open ? "open" : ""}`}
             onClick={toggle}
             title="More ways to start"
+            aria-label="More ways to start"
             aria-haspopup="menu"
             aria-expanded={open}
           >
@@ -182,6 +187,80 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
   );
 }
 
+/**
+ * The workspaces this account belongs to, read when the menu first opens.
+ * `GET /tenants` rather than the memberships on `/auth/me`: the tenant
+ * list carries the display name and `is_active`, which is what the
+ * switcher shows, and it is the same call the Mac and iPhone apps make.
+ */
+function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
+  const { activeTenantId, canSwitchWorkspaces, switchWorkspace } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
+  // A `409 legacy_session` answers the question once: the switcher goes.
+  const [legacy, setLegacy] = useState(false);
+
+  useEffect(() => {
+    if (!canSwitchWorkspaces) return;
+    let live = true;
+    listTenants()
+      .then((r) => live && setTenants(r.items))
+      .catch(() => live && setTenants([]));
+    return () => {
+      live = false;
+    };
+  }, [canSwitchWorkspaces]);
+
+  if (!canSwitchWorkspaces || legacy || !tenants || tenants.length < 2) return null;
+
+  const pick = async (t: TenantSummary) => {
+    if (t.id === activeTenantId || switching) return;
+    setSwitching(t.id);
+    try {
+      await switchWorkspace(t.id);
+      onDone();
+      navigate("/");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "legacy_session") setLegacy(true);
+      toast.error(messageFor(err));
+    } finally {
+      setSwitching(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="sb-user-menu-label">Workspace</div>
+      {tenants.map((t) => {
+        const current = t.id === activeTenantId;
+        return (
+          <button
+            key={t.id}
+            className={`sb-user-menu-item ${current ? "current" : ""}`}
+            role="menuitemradio"
+            aria-checked={current}
+            disabled={switching !== null}
+            onClick={() => void pick(t)}
+          >
+            <span className="sb-ws-mark" aria-hidden="true">
+              {initialsOf(t.display_name || t.name)}
+            </span>
+            <span className="grow ellipsis">{t.display_name || t.name}</span>
+            {current ? (
+              <CheckIcon size={13} />
+            ) : (
+              switching === t.id && <span className="sb-user-menu-hint">Switching…</span>
+            )}
+          </button>
+        );
+      })}
+      <div className="sb-user-menu-sep" />
+    </>
+  );
+}
+
 function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
   // `identity`, not `db_user`: IDX-B2 deletes the per-tenant `users` row,
   // and `AuthContext` already reconciles whichever shape `/auth/me` sends.
@@ -221,6 +300,7 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
             {email && <span>{email}</span>}
           </div>
           <div className="sb-user-menu-sep" />
+          <WorkspaceSwitch onDone={close} />
           <button
             className="sb-user-menu-item"
             role="menuitem"
@@ -435,7 +515,7 @@ export function AppShell() {
     try {
       navigate(`/notes/${await createBlankNote()}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       blankInFlight.current = false;
     }

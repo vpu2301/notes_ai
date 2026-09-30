@@ -47,6 +47,39 @@ final class AppState: ObservableObject {
         settingsPresented = true
     }
 
+    /// Open Settings on Data & AI — from a note that could not be written
+    /// because nobody agreed to a processor yet.
+    func showDataAndAI() {
+        settingsTab = .dataAI
+        settingsPresented = true
+    }
+
+    /// The invite sheet (avatar menu › Invite people…).
+    @Published var invitePresented = false
+    /// "New from template…" (the + menu).
+    @Published var newNotePresented = false
+    /// The bell's feed.
+    @Published var notificationsPresented = false
+    /// A note could not be created; the home page shows it.
+    @Published var creationError: String?
+    /// The bell: unread count and the feed.
+    private(set) lazy var notifications = NotificationsModel(api: api)
+
+    /// Owners and admins may add members; everyone else can send the link
+    /// from Settings › Account's roster, so the menu item is theirs alone.
+    var canManageMembers: Bool {
+        if let role = activeWorkspace?.myRole { return role == "owner" || role == "admin" }
+        guard let tenantId, let membership = memberships.first(where: { $0.tenantId == tenantId }) else {
+            return false
+        }
+        return membership.role == "owner" || membership.role == "admin"
+    }
+
+    /// Where an invited colleague signs in — the web app's login page.
+    var inviteURL: URL? {
+        URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
+    }
+
     /// The pages pushed over the home page. Empty = home.
     @Published var path: [Selection] = []
 
@@ -392,6 +425,7 @@ final class AppState: ObservableObject {
     }
 
     private func clearSignedInState() {
+        notifications.forget()
         googleCalendar.reset()
         templateCache = nil
         notes = []
@@ -995,6 +1029,44 @@ final class AppState: ObservableObject {
         // ("meeting_notes", "meeting_notes_uk", …).
         let candidates = templates.filter { $0.code.hasPrefix("meeting_notes") }
         return candidates.first { $0.language == language }?.id
+    }
+
+    /// A note typed from scratch: the given template, or the meeting
+    /// template in the app's language (`createBlankNote.ts`). Returns the
+    /// new note's id, or nil after telling the home page why not.
+    func createBlankNote(templateId: String? = nil) async -> String? {
+        creationError = nil
+        do {
+            var id = templateId
+            if id == nil {
+                if templateCache == nil { templateCache = try await api.fetchTemplates() }
+                let language = capture.language == CaptureViewModel.autoLanguage ? "en" : capture.language
+                guard let template = TemplateSummary.defaultTemplate(templateCache ?? [], language: language) else {
+                    creationError = "Your workspace has no note templates yet."
+                    return nil
+                }
+                id = template.id
+            }
+            guard let id else { return nil }
+            let detail = try await api.fetchTemplate(id: id)
+            let created = try await api.createNote(content: detail.blankContent())
+            await refreshNotes()
+            return created.id
+        } catch {
+            creationError = AuthCopy.message(for: error)
+            return nil
+        }
+    }
+
+    /// Stop a transcription that is queued or running (Home, the meeting
+    /// page). The row says "Cancelled"; the recording is not deleted.
+    func cancelCapture(jobId: String) async {
+        do {
+            try await api.cancelJob(id: jobId)
+            updateRecent(jobId: jobId, status: .cancelled, errorMessage: "")
+        } catch {
+            creationError = AuthCopy.message(for: error)
+        }
     }
 
     // MARK: - Recent captures

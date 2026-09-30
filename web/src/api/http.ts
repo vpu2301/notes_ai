@@ -5,11 +5,26 @@
 
 import type { LoginResponse } from "./types";
 
+/**
+ * Where each service lives. A development build falls back to the dev
+ * stack's ports; a production build does not — a bundle shipped without
+ * its `VITE_*_BASE` values would otherwise call localhost from every
+ * visitor's browser and fail in a way that looks like an outage. Failing
+ * at startup with the variable's name is the honest version.
+ */
+function base(name: string, value: string | undefined, devDefault: string): string {
+  if (value) return value;
+  if (import.meta.env.PROD) {
+    throw new Error(`Notes AI is not configured: ${name} is missing from this build.`);
+  }
+  return devDefault;
+}
+
 export const BASES = {
-  auth: import.meta.env.VITE_AUTH_BASE ?? "http://localhost:8000",
-  asr: import.meta.env.VITE_ASR_BASE ?? "http://localhost:8001",
-  notification: import.meta.env.VITE_NOTIFICATION_BASE ?? "http://localhost:8004",
-  note: import.meta.env.VITE_NOTE_BASE ?? "http://localhost:8006",
+  auth: base("VITE_AUTH_BASE", import.meta.env.VITE_AUTH_BASE, "http://localhost:8000"),
+  asr: base("VITE_ASR_BASE", import.meta.env.VITE_ASR_BASE, "http://localhost:8001"),
+  notification: base("VITE_NOTIFICATION_BASE", import.meta.env.VITE_NOTIFICATION_BASE, "http://localhost:8004"),
+  note: base("VITE_NOTE_BASE", import.meta.env.VITE_NOTE_BASE, "http://localhost:8006"),
 } as const;
 
 export type ServiceBase = keyof typeof BASES;
@@ -93,7 +108,7 @@ export class ApiError extends Error {
    * A role denial from the permission gate. Its `detail` is a sentence
    * about the permission matrix — `deny: roles=['viewer'] cannot
    * 'note.write' on 'note'` — which is a fact about our vocabulary, not
-   * something to show a person; `errorMessage` swaps it for one they can
+   * something to show a person; `messageFor` swaps it for one they can
    * act on.
    */
   get isRoleDenial(): boolean {
@@ -397,17 +412,4 @@ export async function apiBlob(
     throw new ApiError(res.status, await parseProblem(res), rid);
   }
   return res.blob();
-}
-
-/** Best human message for any thrown value. */
-export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.isRoleDenial) {
-      return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access.";
-    }
-    return err.detail;
-  }
-  if (err instanceof TypeError) return "Cannot reach the server — is it running?";
-  if (err instanceof Error) return err.message;
-  return "Something went wrong";
 }

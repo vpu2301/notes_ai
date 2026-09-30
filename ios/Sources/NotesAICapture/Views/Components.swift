@@ -95,13 +95,13 @@ struct PipelineSteps: View {
                             .frame(width: 22, height: 22)
                         if state == .done {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.dsSymbol(10, .bold))
                                 .foregroundStyle(DS.ok)
                         } else if state == .active {
                             ProgressView().controlSize(.mini)
                         } else {
                             Image(systemName: step.1)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.dsSymbol(10, .medium))
                                 .foregroundStyle(DS.muted)
                         }
                     }
@@ -189,7 +189,7 @@ struct DSSkeleton: View {
     @State private var shimmer = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: DS.radiusXs, style: .continuous)
             .fill(DS.surface2)
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { correctName } from "../api/generation";
 import { rememberTerm } from "../api/glossary";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { GeneratedItem } from "../api/types";
 
 export interface NameCorrection {
@@ -72,7 +72,7 @@ export function CorrectionsPanel({
       setDone((d) => ({ ...d, [id]: accept ? "Added to the glossary" : "Put back as heard" }));
       if (!accept) onChanged();
     } catch (err) {
-      setProblem(errorMessage(err));
+      setProblem(messageFor(err));
     } finally {
       setBusy(null);
     }
