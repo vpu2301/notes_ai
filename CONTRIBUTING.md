@@ -30,6 +30,9 @@ feat(observability): add bootstrap() single entry point
 …why this matters / what changed at a slightly higher level…
 ```
 
+Authorship is human only. No `Co-Authored-By`, session or "generated with"
+trailers naming an AI assistant in commits, PR descriptions or documents.
+
 ## Pull requests
 
 - Open against `main`. Link the ticket / sprint task.
