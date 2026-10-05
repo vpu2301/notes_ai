@@ -145,3 +145,6 @@ NOTE_GENERATION_FAILED: Final = "note.generation_failed"  # error_kind
 # on the audit row).
 AI_SETTINGS_CHANGED: Final = "ai.settings_changed"  # tier, provider, generation_enabled
 AI_BUDGET_REACHED: Final = "ai.budget_reached"  # cents, budget_cents
+# Billing (0068): an admin moved the workspace to another plan.
+BILLING_PLAN_CHANGED: Final = "billing.plan_changed"  # from_plan, to_plan, provider
+BILLING_CODE_REDEEMED: Final = "billing.code_redeemed"  # from_plan, to_plan, days

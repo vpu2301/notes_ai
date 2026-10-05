@@ -26,8 +26,9 @@ import asyncio
 import dataclasses
 import logging
 import re
+import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final, Protocol
@@ -87,8 +88,26 @@ CHILD_RESTATES_JACCARD: Final = 0.6
 # Verification is untouched: the profile changes what the model is asked,
 # never what code accepts.
 SMALL_MODEL_MAX_FACTS: Final = 12
+# Sprint SQ2 T2 — under the profile a window's budget follows its length:
+# one fact per 500 characters, between 8 and SMALL_MODEL_MAX_FACTS.
+SMALL_MODEL_MIN_FACTS: Final = 8
+SMALL_MODEL_CHARS_PER_FACT: Final = 500
 SMALL_MODEL_REDUCE_FACTS: Final = 15
 HEADING_MAX_TOKENS: Final = 120
+
+# Sprint SQ2 T3 — the coverage guard. A third of the recording with at
+# least three minutes of speech whose facts per minute fall below 0.6 of
+# the best third's is read once more (its own turns, the coverage variant
+# of the extraction prompt). Still below 0.6 afterwards: the third is named
+# as missing (``coverage_gaps``) instead of a silently short note. The work
+# order retries below 0.5 and lints below 0.6, with the lint's regenerate
+# hook as the second chance; one threshold for both does the same work in
+# one place (the hook has nothing left to do) and leaves no third that is
+# reported missing without having been read again.
+COVERAGE_MIN_MINUTES: Final = 3.0
+COVERAGE_RETRY_SHARE: Final = 0.6
+COVERAGE_GAP_SHARE: Final = 0.6
+COVERAGE_WINDOW_BASE: Final = 1000
 
 # A topic bullet with its sub-points: ``(text, fact ids, [(text, ids)])``.
 # A sub-point: ``(text, fact ids)``, or ``(text, fact ids, "quote")`` for a
@@ -136,6 +155,10 @@ class DocumentResult:
     so the note can say WHICH minutes are missing instead of apologising
     in general."""
     failed_ranges: list[list[int]] = field(default_factory=list)
+    """SQ2 T3 — ``[[start_ms, end_ms]]`` of thirds that stayed thin after
+    the coverage retry; also in ``failed_ranges``, so the status line names
+    them."""
+    coverage_gaps: list[list[int]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
     backend: str | None = None
     model_id: str | None = None
@@ -163,13 +186,32 @@ class DocumentResult:
 
     @property
     def partial(self) -> bool:
-        return self.windows_failed > 0
+        return self.windows_failed > 0 or bool(self.coverage_gaps)
 
     @property
     def lines(self) -> list[tuple[str, render.Line]]:
         """``[(section_key, line)]`` — every written line of the document,
         in the order the sections are written."""
         return [(s.section_key, line) for s in self.sections for line in s.lines]
+
+
+MARKER_REASONS = frozenset({"music", "noise"})
+
+
+def transcript_markers(result: dict[str, Any]) -> list[verify.Exclusion]:
+    """Sprint TQ2 T4: the ASR result's non-speech markers the note lists —
+    music and noise, never silence. An unknown kind is read as noise."""
+    out: list[verify.Exclusion] = []
+    for item in result.get("noise") or []:
+        try:
+            start, end = int(item["start_ms"]), int(item["end_ms"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        kind = str(item.get("kind") or "noise")
+        if kind == "silence" or end <= start:
+            continue
+        out.append(verify.Exclusion(-1, start, end, kind if kind in MARKER_REASONS else "noise"))
+    return out
 
 
 async def run(
@@ -191,8 +233,13 @@ async def run(
     glossary: tuple[Any, ...] = (),
     entity_model_tier: bool = False,
     entity_provider: ChatLike | None = None,
+    retry_budget_s: float | None = None,
 ) -> DocumentResult:
     """Build a document from an ASR result.
+
+    ``retry_budget_s`` (SQ2 T3): past this many seconds since the start, the
+    coverage retry is skipped (``stats.coverage_retry_skipped``) and a thin
+    third is reported as a gap. ``None``: no limit.
 
     ``entity_provider`` (Sprint L2) answers the entity tier when it is
     routed to another backend than the writing model; ``provider`` by
@@ -204,6 +251,7 @@ async def run(
     items still open from the previous meeting, which the extractor may
     mark done — by their NUMBER in this list, never by free text.
     """
+    started = time.monotonic()
     family = family or types.FALLBACK
     small = small_model(provider)
     sizes = sizes_for(provider)
@@ -260,8 +308,8 @@ async def run(
         return [t.number for t in window.turns if verify.calls_to_action(t.text, language)] or None
 
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
-        # The profile: a fixed twelve, not the density rule (Q2).
-        budget = SMALL_MODEL_MAX_FACTS if small else fact_budget(window, sizes.max_facts_budget)
+        # The profile: 8–12 by length (SQ2 T2), not the density rule (Q2).
+        budget = small_budget(window) if small else fact_budget(window, sizes.max_facts_budget)
         window_schema = schema.extract_schema(
             offered,
             judgement_fields=family.judgement_fields,
@@ -284,12 +332,6 @@ async def run(
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
-    # Sprint D2 decision 1 — where the extractor saw a new topic begin.
-    topic_titles = {
-        window.index: (extracted.topic_title or "")
-        for window, extracted in extracted_windows
-        if extracted is not None
-    }
 
     # Noise first, across the whole recording: the model's flags are
     # checked by code, and the cap needs every window's exclusions.
@@ -326,7 +368,12 @@ async def run(
         key=lambda e: e.start_ms,
     )
     out.excluded = excluded
-    out.noise = sorted({(e.start_ms, e.reason) for e in excluded})
+    # Sprint TQ2 T4: music and noise the transcript marked (no lines, no
+    # speech) are listed with the passages left out, so the note says what
+    # the recording also held. Not in ``noise_ranges`` / ``excluded_ms``:
+    # those measure SPEECH set aside. Silence is not listed.
+    markers = transcript_markers(result)
+    out.noise = sorted({(e.start_ms, e.reason) for e in [*excluded, *markers]})
     out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
 
     # F3 amendment §2.8 — what the recording itself spells three times or more.
@@ -355,14 +402,37 @@ async def run(
 
     restate = {"improved": 0, "unchanged": 0}
     details_asked = 0
+    # Sprint SQ2 T1 — per window, numbers only: what the model returned,
+    # what verification kept, what survived the merge, whether it failed.
+    per_window: dict[int, dict[str, int]] = {
+        w.index: {
+            "index": w.index,
+            "start_ms": w.start_ms,
+            "end_ms": w.end_ms,
+            "chars": len(w.text),
+            "budget": small_budget(w) if small else fact_budget(w, sizes.max_facts_budget),
+            "facts_extracted": 0,
+            "facts_verified": 0,
+            "facts_kept_after_merge": 0,
+            "call_failed": 0,
+            # SQ2 — where in the window its verified facts were said:
+            # first half, second half (a model that reads only the head
+            # of a long window shows here, not in any third).
+            "facts_first_half": 0,
+            "facts_second_half": 0,
+        }
+        for w in built
+    }
     # F3 amendment §2.4 — a table is for a demonstration or a lecture.
     tables = recording_type is None or recording_type in TABLE_TYPES
     for window, extracted in extracted_windows:
         if extracted is None:
             out.windows_failed += 1
             out.failed_ranges.append([window.start_ms, window.end_ms])
+            per_window[window.index]["call_failed"] = 1
             continue
         out.windows_done += 1
+        per_window[window.index]["facts_extracted"] = len(extracted.facts)
         asked, twins = await _figure_details(
             provider, window, extracted, language, promote=schema.FIGURE in offered
         )
@@ -406,9 +476,121 @@ async def run(
             second = check(again.facts, window, verify.VerifyStats()) if again else []
             kept, replaced = restated(kept, second)
             restate["improved" if replaced else "unchanged"] += 1
+        per_window[window.index]["facts_verified"] = len(kept)
+        middle = (window.start_ms + window.end_ms) / 2
+        for fact in kept:
+            half = "facts_first_half" if fact.start_ms < middle else "facts_second_half"
+            per_window[window.index][half] += 1
+        verified.extend(kept)
+
+    # ── SQ2 T3 — the coverage guard ─────────────────────────────────
+    span_start, span_end = (turns[0].start_ms, turns[-1].end_ms) if turns else (0, 1)
+    bounds = [span_start + round((span_end - span_start) * k / 3) for k in range(4)]
+    third_minutes = [
+        sum(max(0, min(t.end_ms, bounds[k + 1]) - max(t.start_ms, bounds[k])) for t in turns)
+        / 60_000
+        for k in range(3)
+    ]
+
+    def rates(found: Sequence[VerifiedFact]) -> list[float]:
+        counts = [0, 0, 0]
+        for fact in found:
+            if fact.kind in (schema.COMPLETION, schema.JUDGEMENT):
+                continue
+            counts[windows.third_of(fact.start_ms, span_start, span_end) - 1] += 1
+        return [counts[k] / third_minutes[k] if third_minutes[k] else 0.0 for k in range(3)]
+
+    def thin(found: Sequence[VerifiedFact], share: float) -> list[int]:
+        per = rates(found)
+        best = max(per)
+        return [
+            k
+            for k in range(3)
+            if third_minutes[k] >= COVERAGE_MIN_MINUTES and (best == 0 or per[k] < share * best)
+        ]
+
+    coverage_retry: list[int] = []
+    coverage_retry_facts = 0
+    coverage_retry_skipped: str | None = None
+    retry_thirds = thin(verified, COVERAGE_RETRY_SHARE)
+    if (
+        retry_thirds
+        and retry_budget_s is not None
+        and (time.monotonic() - started > retry_budget_s)
+    ):
+        coverage_retry_skipped = "budget"
+        retry_thirds = []
+    retry_semaphore = asyncio.Semaphore(BLOCK_CONCURRENCY)
+
+    async def reread(k: int, window: Window) -> list[VerifiedFact]:
+        a, b = bounds[k], bounds[k + 1]
+        known_ids = [f.item_key for f in verified if a <= f.start_ms < b]
+        budget = small_budget(window) if small else fact_budget(window, sizes.max_facts_budget)
+        async with retry_semaphore:
+            again = await _extract(
+                provider,
+                window,
+                language,
+                schema.extract_schema(
+                    offered,
+                    judgement_fields=family.judgement_fields,
+                    carried_items=len(carried),
+                    max_facts=budget,
+                    noise=not small,
+                ),
+                carried=carried,
+                max_facts=budget,
+                max_tokens=extract_tokens(budget),
+                system_suffix=prompts.coverage_suffix(
+                    language, window.start_ms, window.end_ms, known_ids
+                ),
+                small=small,
+            )
+        if again is None:
+            return []
+        kept = check(again.facts, window, stats)
+        per_window[window.index] = {
+            "index": window.index,
+            "start_ms": window.start_ms,
+            "end_ms": window.end_ms,
+            "chars": len(window.text),
+            "budget": budget,
+            "facts_extracted": len(again.facts),
+            "facts_verified": len(kept),
+            "facts_kept_after_merge": 0,
+            "call_failed": 0,
+            "facts_first_half": 0,
+            "facts_second_half": 0,
+            "coverage_retry": 1,
+        }
+        middle = (window.start_ms + window.end_ms) / 2
+        for fact in kept:
+            half = "facts_first_half" if fact.start_ms < middle else "facts_second_half"
+            per_window[window.index][half] += 1
+        return kept
+
+    jobs = []
+    for k in retry_thirds:
+        third_turns = [t for t in turns if bounds[k] <= t.start_ms < bounds[k + 1]]
+        for i, window in enumerate(
+            windows.build_windows(third_turns, max_chars=sizes.window_chars)
+        ):
+            jobs.append(
+                reread(k, dataclasses.replace(window, index=COVERAGE_WINDOW_BASE + 100 * k + i))
+            )
+        coverage_retry.append(k + 1)
+    for kept in await asyncio.gather(*jobs):
+        coverage_retry_facts += len(kept)
         verified.extend(kept)
 
     facts = merge_rules.merge_facts(verified)
+    # Still thin after the retry (or with the retry skipped): named, never silent.
+    # The same rule the linter's ``coverage.thirds`` applies.
+    out.coverage_gaps = [[bounds[k], bounds[k + 1]] for k in thin(facts, COVERAGE_GAP_SHARE)]
+    out.failed_ranges.extend(out.coverage_gaps)
+    for fact in facts:
+        if fact.window_index in per_window:
+            per_window[fact.window_index]["facts_kept_after_merge"] += 1
     # Sprint D2 decision 5 — who each voice is to this recording, by code.
     table = roles_table.build(
         raw_turns,
@@ -446,6 +628,9 @@ async def run(
 
     topics: Topics | None = None
     tops: list[VerifiedFact] = []
+    parts: list[compose.Block] = []
+    segmentation: compose.Segmentation | None = None
+    blocks_merged = 0
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
@@ -494,7 +679,12 @@ async def run(
         # blocks, so it is written after them.
         excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
         minutes = max(0, speech_ms - excluded_speech) / 60_000
-        parts = compose.blocks(document_facts, minutes, topic_titles)
+        # SQ2 T4 — the parts come from the transcript (spoken cues, then
+        # lexical shifts), not from where the facts happen to fall.
+        segmentation = compose.segment(
+            turns, minutes, language, classify.structure_cues(turns, language)
+        )
+        parts, blocks_merged = compose.blocks_at(document_facts, segmentation)
         budget = compose.VolumeBudget(minutes, len(parts))
         topics = await _reduce_blocks(
             provider,
@@ -557,13 +747,14 @@ async def run(
     # model's framing replaces only its first clause.
     opening = ""
     if document_facts:
-        speakers, guests = compose.speakers_of(table, language)
+        speakers, guests, others = compose.speakers_of(table, language)
         show = compose.show_name(raw_turns)
         orientation: dict[str, Any] = {
             "subject": _gated_phrase(brief.subject if brief else "", document_facts, gate),
             "framing": brief.framing if brief else "",
             "speakers": speakers,
             "guests": guests,
+            "others": others,
             "themes": [
                 t
                 for t in compose.clean_themes(brief.themes if brief else [])
@@ -612,10 +803,27 @@ async def run(
         figure_tables=tables,
         recording_names=gate.known,
     )
-    thirds = windows.thirds(built)
+    # SQ2 T1 — thirds by TIME over the speech, not by window: one window
+    # (a short recording on a long-context backend) is not "the middle".
+    span = (turns[0].start_ms, turns[-1].end_ms) if turns else (0, 1)
+
+    def third(ms: int) -> int:
+        return windows.third_of(ms, *span)
+
     by_third = [0, 0, 0]
     for fact in document_facts:
-        by_third[thirds.get(fact.window_index, 1) - 1] += 1
+        by_third[third(fact.start_ms) - 1] += 1
+    by_id_all = {f.item_key: f for f in document_facts}
+    cited_ids = {
+        i
+        for _h, bullets, _ids in topics or []
+        for _t, ids, children in bullets
+        for i in [*ids, *(c for child in children for c in child[1])]
+        if i in by_id_all
+    }
+    cited_by_third = [0, 0, 0]
+    for key in cited_ids:
+        cited_by_third[third(by_id_all[key].start_ms) - 1] += 1
     excluded_ms = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
     out.stats = {
         "facts_kept": stats.kept,
@@ -677,8 +885,17 @@ async def run(
         "noise_overridden": overridden,
         "excluded_ms": excluded_ms,
         "speech_ms": speech_ms,
-        "excluded_ranges": [[e.start_ms, e.end_ms, e.reason] for e in excluded],
+        "excluded_ranges": [
+            [e.start_ms, e.end_ms, e.reason]
+            for e in sorted([*excluded, *markers], key=lambda x: x.start_ms)
+        ],
         "facts_by_third": by_third,
+        # SQ2 T3 — the coverage guard (numbers only).
+        "speech_minutes_by_third": [round(m, 2) for m in third_minutes],
+        "coverage_retry": coverage_retry,
+        "coverage_retry_facts": coverage_retry_facts,
+        "coverage_retry_skipped": coverage_retry_skipped,
+        "coverage_gaps": len(out.coverage_gaps),
         "key_points": len(brief.key_fact_ids) if brief else 0,
         "facts_dropped_owner": stats.dropped_owner,
         "facts_downgraded": stats.downgraded,
@@ -699,6 +916,7 @@ async def run(
         "attribution_set": {"model": stats.attribution_model, "speaker": stats.attribution_speaker},
         "attribution_missing": stats.attribution_missing,
         "salient_appended": gate.salient_appended,
+        "salient_skipped_full": gate.salient_skipped_full,
         "topics_merged": gate.topics_merged,
         # Sprint D2 — blocks, headings, roles, subjects.
         "blocks": gate.blocks,
@@ -717,7 +935,19 @@ async def run(
         "type_cues": type_cues,
         "narrator_reattributed": reattributed,
         "subject_unresolved": stats.subject_unresolved,
-        "lines_by_third": _lines_by_third(out.sections, document_facts, thirds),
+        "lines_by_third": _lines_by_third(out.sections, document_facts, third),
+        # Sprint SQ2 T1 — the diagnosis numbers (numbers only).
+        "windows": [per_window[k] for k in sorted(per_window)],
+        "reduce_input_facts": sum(len(b.facts) for b in parts),
+        "reduce_cited_facts": len(cited_ids),
+        "reduce_cited_by_third": cited_by_third,
+        "excluded_speech_ms": excluded_ms,
+        "blocks_planned": len(parts),
+        "blocks_source": segmentation.source if segmentation else None,
+        "blocks_boundaries": len(segmentation.boundaries) if segmentation else 0,
+        "blocks_merged_small": blocks_merged,
+        "blocks_rendered": len(topics or []),
+        "sections_rendered": len(out.sections),
         "lines_total": sum(len(s.lines) for s in out.sections),
         "language": language,
         "recording_type": recording_type,
@@ -745,7 +975,7 @@ async def run(
             if window.index not in targets:
                 continue
             allowance = (
-                SMALL_MODEL_MAX_FACTS if small else fact_budget(window, sizes.max_facts_budget)
+                small_budget(window) if small else fact_budget(window, sizes.max_facts_budget)
             )
             again = await _extract(
                 provider,
@@ -873,6 +1103,15 @@ def restated(
         else:
             out.append(fact)
     return out, replaced
+
+
+def small_budget(window: Window) -> int:
+    """SQ2 T2 — the small-model profile's facts for a window:
+    ``clamp(chars // 500, 8, 12)`` (a fixed twelve starved long windows)."""
+    return max(
+        SMALL_MODEL_MIN_FACTS,
+        min(SMALL_MODEL_MAX_FACTS, len(window.text) // SMALL_MODEL_CHARS_PER_FACT),
+    )
 
 
 def fact_budget(window: Window, max_budget: int | None = None) -> int:
@@ -1024,16 +1263,19 @@ def _mentions(text: str, surface: str) -> bool:
 
 
 def _lines_by_third(
-    sections: list[render.RenderedSection], facts: list[VerifiedFact], thirds: dict[int, int]
+    sections: list[render.RenderedSection],
+    facts: list[VerifiedFact],
+    third: Callable[[int], int],
 ) -> list[int]:
-    """Written lines per third of the recording, by their first cited fact."""
+    """Written lines per third of the recording, by the time of their first
+    cited fact (SQ2 T1: by time, not by window)."""
     by_id = {f.item_key: f for f in facts}
     out = [0, 0, 0]
     for section in sections:
         for line in section.lines:
             cited = [by_id[i] for i in line.fact_ids if i in by_id]
             if cited:
-                out[thirds.get(cited[0].window_index, 1) - 1] += 1
+                out[third(cited[0].start_ms) - 1] += 1
     return out
 
 
@@ -1130,6 +1372,7 @@ class _Gate:
     """Sprint L2 — the output budget of a reduce call on this backend."""
     reduce_tokens: int = REDUCE_MAX_TOKENS
     salient_appended: int = 0
+    salient_skipped_full: int = 0
     topics_merged: int = 0
     """F2 — sub-points that restated their parent; openers dropped."""
     children_restated: int = 0
@@ -1659,8 +1902,36 @@ async def _reduce_block(
         key=lambda b: -support.specificity(b[0], language, known=gate.known),
     )[: budget.bullets_per_block]
     kept.sort(key=first_start)
+    kept = introduce_first(kept, by_id)
     cited = [i for _t, ids, _c in kept for i in ids]
     return heading, kept, list(dict.fromkeys([*cited, *by_id]))
+
+
+def introduce_first(bullets: list[Bullet], by_id: dict[str, VerifiedFact]) -> list[Bullet]:
+    """SQ3 T3 — a bullet that introduces a person comes before any bullet
+    that names them ("wurde vorgestellt" before "beschrieb"); otherwise
+    the time order stands."""
+    out = list(bullets)
+    for bullet in bullets:
+        people = [
+            by_id[i].person.name
+            for i in bullet[1]
+            if i in by_id and by_id[i].person is not None and by_id[i].person.name
+        ]
+        if not people:
+            continue
+        here = out.index(bullet)
+        last_words = [p.split()[-1].casefold() for p in people]
+        earlier = [
+            n
+            for n, other in enumerate(out[:here])
+            if any(
+                re.search(rf"(?<!\w){re.escape(w)}(?!\w)", other[0].casefold()) for w in last_words
+            )
+        ]
+        if earlier:
+            out.insert(earlier[0], out.pop(here))
+    return out
 
 
 async def _block_capable(
@@ -2067,13 +2338,22 @@ def _append_salient(
         if fact.evidence_only:
             continue
 
+        # SQ2 — the topic nearest in time, while it has room under the
+        # standard's six points (a full topic keeps the fact as a fact: it
+        # never moves to a part of the recording it was not said in), and
+        # in recording order there.
         index = min(range(len(topics)), key=lambda k, f=fact: _distance(topics[k], f, by_id))
         title, bullets, ids = topics[index]
-        topics[index] = (
-            title,
-            [*bullets, (fact.text, [fact.item_key], [])],
-            [*ids, fact.item_key],
-        )
+        if len(bullets) >= compose.BULLETS[1]:
+            gate.salient_skipped_full += 1
+            continue
+
+        def first_said(bullet: Bullet) -> int:
+            return min((by_id[i].start_ms for i in bullet[1] if i in by_id), default=0)
+
+        new: Bullet = (fact.text, [fact.item_key], [])
+        placed = sorted([*bullets, new], key=first_said)
+        topics[index] = (title, placed, [*ids, fact.item_key])
         written.add(fact.item_key)
         gate.salient_appended += 1
 

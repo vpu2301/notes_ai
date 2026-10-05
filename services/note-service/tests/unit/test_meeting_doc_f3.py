@@ -321,18 +321,20 @@ def _intro(quote: str, **fields: Any) -> schema.Fact:
     return schema.Fact(kind=schema.INTRODUCTION, text="Introduction", quote=quote, turn=1, **fields)
 
 
-def test_the_walkthrough_introduction_is_the_presenter_line() -> None:
+def test_the_walkthrough_introduction_is_described_from_its_fields() -> None:
+    """SQ3 T1/T2: the presenter is named in paragraph 1's "With …" (see
+    test_the_walkthrough_end_to_end); no "Presenter: …" paragraph is
+    written, because a paragraph opening "<word>: " reads as a turn."""
     [fact] = _verify(
         [_intro(INTRO, name="Mitchell", role="a broker", organisation="Springbrook Marine Group",
                 qualifier="Pardo dealer for the Great Lakes")],
         _window(INTRO),
     )  # fmt: skip
-    sections = render.render_sections([fact], role_by_key=ROLE_BY_KEY, presenter_lines=True)
-    assert sections[0].lines[0].text == (
+    assert render.presenter_text(fact.person) == (
         "Presenter: Mitchell, broker with Springbrook Marine Group (Pardo dealer for the Great Lakes)"
     )
-    row = line_row(sections[0].lines[0], sections[0].section_key, "written", {fact.item_key: fact})
-    assert row is not None and row["kind"] == "introduction"
+    sections = render.render_sections([fact], role_by_key=ROLE_BY_KEY, presenter_lines=True)
+    assert all("Presenter:" not in line.text for s in sections for line in s.lines)
 
 
 def test_a_role_word_not_in_the_quote_is_cleared() -> None:
@@ -468,10 +470,11 @@ def test_the_walkthrough_end_to_end() -> None:
     first_extract = next(p for step, p, _s in provider.calls if step == "extract")
     assert "[0] contain an introduction" in first_extract
     text = "\n".join(s.text for s in document.sections)
+    # SQ3 T2: named once, in paragraph 1, from the same verified fields.
     assert (
-        "Presenter: Mitchell, broker with Springbrook Marine Group (Pardo dealer for the Great Lakes)"
-        in text
+        "Mitchell (broker with Springbrook Marine Group, Pardo dealer for the Great Lakes)" in text
     )
+    assert "Presenter:" not in text
     assert "| Beam | a little over 18.5 feet |" in text
     assert any(s.role == roles.CONTACT for s in document.sections)
     assert document.stats["figures_kept"] == 8 and document.stats["introductions_kept"] == 1

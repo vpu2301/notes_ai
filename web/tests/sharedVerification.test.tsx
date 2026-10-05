@@ -45,8 +45,10 @@ describe("shared page — Sprint 23", () => {
     expect(await screen.findByText("Verify it's you")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^confirm$/i })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /send me a code/i }));
-    await userEvent.type(await screen.findByLabelText(/^code$/i), "123456");
-    await userEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+    // Six boxes; the code is sent as soon as the sixth digit lands.
+    expect(await screen.findByRole("button", { name: /send a new code/i })).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("textbox")[0]!);
+    await userEvent.paste("123456");
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/verify") && c.body?.code === "123456")).toBe(true));
     expect(await screen.findByRole("button", { name: /^confirm$/i, hidden: false })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");

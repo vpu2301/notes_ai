@@ -26,10 +26,36 @@ NARRATOR: Final = "narrator"
 HOST: Final = "host"
 GUEST: Final = "guest"
 INTERVIEWEE: Final = "interviewee"
+# SQ3 T2 — a guest or participant introduced as an expert ("Experte",
+# "Analystin", "researcher"): a guest with a reason to be heard.
+EXPERT: Final = "expert"
 PARTICIPANT: Final = "participant"
 CLIP: Final = "clip"
 ADVERT: Final = "advert"
-ROLES: Final = (NARRATOR, HOST, GUEST, INTERVIEWEE, PARTICIPANT, CLIP, ADVERT)
+ROLES: Final = (NARRATOR, HOST, EXPERT, GUEST, INTERVIEWEE, PARTICIPANT, CLIP, ADVERT)
+# The order paragraph 1 lists who speaks (SQ3 T2).
+ROLE_RANK: Final[dict[str, int]] = {
+    HOST: 0,
+    NARRATOR: 0,
+    EXPERT: 1,
+    GUEST: 2,
+    INTERVIEWEE: 3,
+    PARTICIPANT: 4,
+}
+_EXPERT_WORDS: Final = re.compile(
+    r"\b(?:expert\w*|fachmann|fachfrau|analyst\w*|forscher\w*|wissenschaftler\w*"
+    r"|professor\w*|researcher|scientist|specialist|spezialist\w*"
+    r"|експерт\w*|аналітик\w*|дослідни\w*|науков\w*|професор\w*)",
+    re.IGNORECASE,
+)
+
+
+def expert_introduction(person: Person | None) -> bool:
+    """Introduced with an expert's role word (its role or organisation)."""
+    if person is None:
+        return False
+    return bool(_EXPERT_WORDS.search(f"{person.role} {person.organisation} {person.qualifier}"))
+
 
 CLIP_MAX_SHARE: Final = 0.05
 CLIP_MAX_TURNS: Final = 2
@@ -163,7 +189,10 @@ def build(
         elif label == dominant and (broadcast or interview):
             role = HOST if (fp >= HOSTING_FIRST_PERSON or interview) else NARRATOR
         elif person is not None and (share >= GUEST_MIN_SHARE or count[label] >= GUEST_MIN_TURNS):
-            role = INTERVIEWEE if interview else GUEST if broadcast else PARTICIPANT
+            if expert_introduction(person):
+                role = EXPERT
+            else:
+                role = INTERVIEWEE if interview else GUEST if broadcast else PARTICIPANT
         else:
             role = PARTICIPANT
         name = person.name if person is not None else names.get(label)
@@ -227,7 +256,7 @@ def standing(fact: VerifiedFact, table: RolesTable) -> str:
         if speaker.introduced_as is person or (
             speaker.introduced_as is not None and speaker.introduced_as.name == person.name
         ):
-            if speaker.role in (GUEST, INTERVIEWEE):
+            if speaker.role in (GUEST, INTERVIEWEE, EXPERT):
                 return "guest"
             if speaker.role in (HOST, NARRATOR) and person.self_introduction:
                 return "presenter"

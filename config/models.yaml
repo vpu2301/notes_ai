@@ -124,6 +124,42 @@ backends:
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
+  # ── ASR bake-off candidates (Sprint TQ4, ADR-0067) ─────────────────────
+  # Same rule as the chat candidates below: a candidate and the backend it
+  # would become are the same object, so winning is a routing change. ASR
+  # candidates are also enabled on staging — the worker's shadow run
+  # (MDX_ASR_SHADOW_BACKEND) is where an adopted arm earns its switch — but
+  # `routing` never names them until ADR-0067 is accepted.
+  cand_parakeet_asr:          # arm C: nvidia/parakeet-tdt-0.6b-v3 in deploy/asr-server (NeMo, T4)
+    kind: asr_http
+    base_url: ${CAND_PARAKEET_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    server_token: ${CAND_PARAKEET_SERVER_TOKEN:-}
+    enabled_in_envs: [dev, test, staging]
+    models: { asr: "${CAND_PARAKEET_MODEL_PIN:-nvidia/parakeet-tdt-0.6b-v3}" }
+    cold_start_seconds: 300
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_whisper_v3_asr:        # arm B: whisper-large-v3 (full), Speaches, fp16 T4
+    kind: asr_http
+    base_url: ${CAND_WHISPER_V3_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test, staging]
+    models: { asr: "${CAND_WHISPER_V3_MODEL_PIN:-Systran/faster-whisper-large-v3}" }
+    cold_start_seconds: 300
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  dev_mac_parakeet_asr:       # arm C on the Mac: deploy/asr-server, ONNX runtime, :8082
+    kind: asr_http
+    base_url: ${DEV_MAC_PARAKEET_URL:-http://host.docker.internal:8082}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { asr: "parakeet-tdt-0.6b-v3" }
+    timeout_seconds: 3600
+    processor: { name: "Developer machine", region: "local" }
+
   # ── bake-off candidates (Sprint 37 B-1) ────────────────────────────────
   # Eval only: `enabled_in_envs: [dev, test]` means the harness can reach
   # them and no customer workspace ever can, whatever `routing` says. They

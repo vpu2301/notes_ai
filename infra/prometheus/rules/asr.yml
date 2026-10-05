@@ -114,3 +114,22 @@ groups:
             {{ $value | humanizePercentage }} of the speech VAD heard in the last
             hour has no transcript. Look at mdx_asr_uncovered_speech_ms_total by
             cause and mdx_asr_second_pass_total. Runbook: docs/runbooks/asr-worker.md#coverage
+
+      # Sprint TQ3: the spelling unifier failing. The transcript is still
+      # served (as the artefact), but names stop being unified.
+      - alert: AsrEntityUnifyErrors
+        expr: |
+          sum(increase(mdx_asr_entity_unify_total{outcome="error"}[1h]))
+            /
+          sum(increase(mdx_asr_entity_unify_total[1h])) > 0.05
+        for: 15m
+        labels:
+          severity: warn
+          team: asr
+        annotations:
+          summary: "More than 5% of spelling-unifier runs failed over 1h"
+          description: |
+            {{ $value | humanizePercentage }} of entity_unify runs in the last hour
+            ended in error; those transcripts show their raw spellings. Look at
+            asr.entity_unify_failed in the asr-service logs (error class only).
+            Runbook: docs/runbooks/asr-worker.md#entity-unify

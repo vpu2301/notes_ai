@@ -375,3 +375,25 @@ async def test_a_good_title_still_lands_as_ai(store: _Store) -> None:
 )
 def test_unsupported(title: str, reason: str | None) -> None:
     assert note_title.unsupported(title, _result(ROADMAP)) == reason
+
+
+PISA = (
+    "Wir beide haben so häufig über Schulen, über Bildung, über die Frage geredet, "
+    "wie es weitergeht. Die Pisa-Studie zeigt wieder, dass das Bildungssystem nicht "
+    "funktioniert, es fehlen Lehrer an allen Schulen und die Politik schaut zu."
+)
+
+
+@pytest.mark.parametrize(
+    ("title", "reason"),
+    [
+        # German capitalises every noun: a topic word nobody said is not a name.
+        ("PISA-Studie: Bildungssystem in der Krise", None),
+        ("Bildungskrise und Lehrermangel nach der neuen PISA-Studie", None),
+        # A name nobody said is still refused, in German too.
+        ("Merkel und die PISA-Studie zum Bildungssystem", "unsupported"),
+        ("PISA-Studie: Interview mit Walzmann über Schulen", "unsupported"),
+    ],
+)
+def test_unsupported_german_nouns(title: str, reason: str | None) -> None:
+    assert note_title.unsupported(title, _result(PISA, "de"), language="de") == reason

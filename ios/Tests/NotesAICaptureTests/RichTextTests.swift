@@ -119,4 +119,28 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(runs.map(\.text), ["Вертикаль 1: ", "комунікаційна", " система"])
         XCTAssertEqual(flat(runs), "Вертикаль 1: комунікаційна система")
     }
+
+    /// Sprint SQ3 T1 — a generated line opening with a certainty word or
+    /// an older "Gast: X" line is plain text: these renderers have no
+    /// speaker rule for note text, so nothing is drawn as a turn and no
+    /// letter is doubled. The web twin is `web/tests/generatedSections.test.tsx`.
+    func testCertaintyWordsAndGuestLinesStayText() {
+        let phrases = [
+            "Voraussichtlich", "Schätzung", "Vorschlag", "Vorwurf", "Einschätzung",
+            "Expected", "Estimate", "Proposal", "Allegation", "Opinion",
+            "Очікувано", "Оцінка", "Пропозиція", "Звинувачення", "Думка",
+        ]
+        for phrase in phrases {
+            for line in ["\(phrase) — Iran griff 2023 an.", "\(phrase): Iran griff 2023 an."] {
+                let blocks = RichText.parse(line)
+                XCTAssertEqual(blocks.count, 1)
+                XCTAssertEqual(flat(spans(of: blocks[0])), line)
+            }
+            let bullet = RichText.parse("- \(phrase): Iran griff 2023 an.")
+            XCTAssertEqual(items(bullet).first.map { flat($0.spans) }, "\(phrase): Iran griff 2023 an.")
+        }
+        let legacy = RichText.parse("Podcast-Folge über Palantir.\n\nGast: Felix Holtermann")
+        XCTAssertEqual(legacy.count, 2)
+        XCTAssertEqual(flat(spans(of: legacy[1])), "Gast: Felix Holtermann")
+    }
 }

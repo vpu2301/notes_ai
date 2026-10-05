@@ -77,7 +77,9 @@ def test_small_model_extraction_asks_for_twelve_facts_one_example_and_no_noise()
     extract_schemas = [s for s in provider.schemas if step_of(s) == "extract"]
     assert extract_schemas
     for built in extract_schemas:
-        assert built["properties"]["facts"]["maxItems"] == pipeline.SMALL_MODEL_MAX_FACTS == 12
+        # SQ2 T2: 8–12 by the window's length, one per 500 characters.
+        cap = built["properties"]["facts"]["maxItems"]
+        assert pipeline.SMALL_MODEL_MIN_FACTS == 8 <= cap <= pipeline.SMALL_MODEL_MAX_FACTS == 12
         assert "noise" not in built["properties"]
         assert "noise" not in built["required"]
     for _step, prompt, system in (c for c in provider.calls if c[0] == "extract"):
@@ -155,7 +157,8 @@ def test_after_a_malformed_answer_the_small_model_is_shown_the_schema() -> None:
     assert second.startswith(first)
     echoed = second[len(first) :]
     assert prompts.SCHEMA_ECHO["de"] in echoed
-    assert '"maxItems": 12' in echoed and '"noise"' not in echoed
+    # SQ2 T2: a short window's budget is the floor, eight.
+    assert '"maxItems": 8' in echoed and '"noise"' not in echoed
 
 
 def test_a_capable_model_is_retried_without_the_echo() -> None:

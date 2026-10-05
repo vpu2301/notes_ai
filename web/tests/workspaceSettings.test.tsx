@@ -42,7 +42,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("workspace settings", () => {
   it("round-trips the policy and locks the CTA row on a free plan", async () => {
     const calls = server();
-    render(<MemoryRouter><ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/settings/workspace?view=sharing"]}><ToasterProvider><WorkspaceSettingsForm tenantId="t1" /></ToasterProvider></MemoryRouter>);
     const publicLinks = await screen.findByLabelText(/anyone with the link/i);
     expect(publicLinks).toBeChecked();
     expect(screen.queryByLabelText(/only finalized notes/i)).toBeNull();

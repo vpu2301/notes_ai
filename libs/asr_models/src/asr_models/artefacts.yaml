@@ -1,0 +1,112 @@
+# Known Whisper non-speech artefacts — Sprint TQ1 T3 (seed list), TR-02.
+#
+# Phrases Whisper-family decoders emit over music, jingles, silence and
+# room tone because their training data paired such audio with subtitle
+# credits and sign-offs. TQ1 only COUNTS them (`artefact_hits` in
+# scripts/eval/asr_eval.py); TQ2 wires the drop logic in the worker.
+#
+# Fields:
+#   text   the phrase as Whisper writes it. Compared after
+#          asr_models.artefacts.normalise (NFKC, casefold, punctuation and
+#          whitespace folded) against a whole segment's text.
+#   match  exact  — the segment is the phrase and nothing else
+#          prefix — the segment starts with the phrase (credit lines whose
+#                   tail varies: a name, a year, a broadcaster)
+#   drop   always       — nobody says this in a meeting (the TQ1 harness
+#                         counts a hit anywhere)
+#          if_nonspeech — people do say this ("Vielen Dank.", "Thank you.");
+#                         the harness counts a hit only inside gold
+#                         non-speech regions.
+#          The worker (TQ2 T3, asr_worker/guards.py) treats both alike: a hit
+#          is dropped only where VAD heard < 30 % speech or the decoder says
+#          no_speech ≥ 0.5; over speech it is kept and flagged
+#          (diagnostics.artefact_kept) — precision beats recall.
+#   seen   where we observed it ourselves (audit id), else omitted. The rest
+#          are seeded from public reports (openai/whisper discussions 1762,
+#          2363; arXiv 2501.11378) and are unverified on our audio.
+#
+# Content rule: phrases only. Never a customer's words.
+# Append only: diagnostics name a phrase by its position (``de:0``).
+version: 1
+languages:
+  de:
+    - { text: "Untertitelung des ZDF", match: prefix, drop: always, seen: [r04] }
+    - { text: "Untertitel im Auftrag des ZDF", match: prefix, drop: always }
+    - { text: "Untertitel der Amara.org-Community", match: prefix, drop: always }
+    - { text: "Untertitel von Stephanie Geiges", match: prefix, drop: always }
+    - { text: "Untertitelung im Auftrag des ZDF", match: prefix, drop: always }
+    - { text: "Untertitelung. BR", match: prefix, drop: always }
+    - { text: "Untertitelung des BR", match: prefix, drop: always }
+    - { text: "Untertitelung des NDR", match: prefix, drop: always }
+    - { text: "Untertitel: ARD Text", match: prefix, drop: always }
+    - { text: "Copyright WDR", match: prefix, drop: always }
+    - { text: "SWR", match: exact, drop: if_nonspeech }
+    - { text: "Vielen Dank fürs Zuschauen", match: exact, drop: always }
+    - { text: "Danke fürs Zuschauen", match: exact, drop: always }
+    - { text: "Vielen Dank für's Zuschauen", match: exact, drop: always }
+    - { text: "Abonniert den Kanal", match: prefix, drop: always }
+    - { text: "Bitte abonnieren Sie den Kanal", match: prefix, drop: always }
+    - { text: "Vielen Dank.", match: exact, drop: if_nonspeech, seen: [r04] }
+    - { text: "Danke.", match: exact, drop: if_nonspeech }
+    - { text: "Bis zum nächsten Mal.", match: exact, drop: if_nonspeech }
+    - { text: "Tschüss.", match: exact, drop: if_nonspeech }
+    - { text: "Musik", match: exact, drop: if_nonspeech }
+    - { text: "[Musik]", match: exact, drop: always }
+    - { text: "*Musik*", match: exact, drop: always }
+    - { text: "Applaus", match: exact, drop: if_nonspeech }
+  en:
+    - { text: "Thanks for watching", match: prefix, drop: always }
+    - { text: "Thank you for watching", match: prefix, drop: always }
+    - { text: "Thank you so much for watching", match: prefix, drop: always }
+    - { text: "Please subscribe to my channel", match: prefix, drop: always }
+    - { text: "Don't forget to like and subscribe", match: prefix, drop: always }
+    - { text: "Like and subscribe", match: prefix, drop: always }
+    - { text: "See you in the next video", match: prefix, drop: always }
+    - { text: "Subtitles by the Amara.org community", match: prefix, drop: always }
+    - { text: "Subtitles by", match: prefix, drop: always }
+    - { text: "Captions by", match: prefix, drop: always }
+    - { text: "Captioning by", match: prefix, drop: always }
+    - { text: "Closed captioning by", match: prefix, drop: always }
+    - { text: "Transcription by CastingWords", match: prefix, drop: always }
+    - { text: "Transcript by", match: prefix, drop: always }
+    - { text: "www.mooji.org", match: exact, drop: always }
+    - { text: "Thank you.", match: exact, drop: if_nonspeech }
+    - { text: "Thank you very much.", match: exact, drop: if_nonspeech }
+    - { text: "Bye.", match: exact, drop: if_nonspeech }
+    - { text: "you", match: exact, drop: if_nonspeech }
+    - { text: "[Music]", match: exact, drop: always }
+    - { text: "(music)", match: exact, drop: always }
+    - { text: "[BLANK_AUDIO]", match: exact, drop: always }
+    - { text: "[ Silence ]", match: exact, drop: always }
+    - { text: "[Applause]", match: exact, drop: always }
+    - { text: "♪", match: prefix, drop: always }
+  uk:
+    - { text: "Дякую за перегляд", match: prefix, drop: always }
+    - { text: "Дякуємо за перегляд", match: prefix, drop: always }
+    - { text: "Субтитри зроблені спільнотою Amara.org", match: prefix, drop: always }
+    - { text: "Субтитри створено спільнотою Amara.org", match: prefix, drop: always }
+    - { text: "Субтитри підготувала", match: prefix, drop: always }
+    - { text: "Редактор субтитрів", match: prefix, drop: always }
+    - { text: "Підписуйтесь на канал", match: prefix, drop: always }
+    - { text: "Підписуйтеся на наш канал", match: prefix, drop: always }
+    - { text: "Підписуйтесь на наш канал", match: prefix, drop: always }
+    - { text: "Ставте лайки", match: prefix, drop: always }
+    - { text: "Дякую за підписку", match: prefix, drop: always }
+    - { text: "До нових зустрічей", match: prefix, drop: if_nonspeech }
+    - { text: "Дякую за увагу.", match: exact, drop: if_nonspeech }
+    - { text: "Дякую.", match: exact, drop: if_nonspeech }
+    - { text: "Всім дякую.", match: exact, drop: if_nonspeech }
+    - { text: "До зустрічі.", match: exact, drop: if_nonspeech }
+    - { text: "Музика", match: exact, drop: if_nonspeech }
+    - { text: "[Музика]", match: exact, drop: always }
+    # Russian-language credits leak into Ukrainian decodes (the models share
+    # subtitle training data); they are artefacts on a uk recording too.
+    - { text: "Редактор субтитров", match: prefix, drop: always }
+    - { text: "Субтитры сделал", match: prefix, drop: always }
+    - { text: "Субтитры создавались сообществом Amara.org", match: prefix, drop: always }
+    - { text: "Спасибо за просмотр", match: prefix, drop: always }
+    - { text: "Продолжение следует", match: prefix, drop: always }
+    - { text: "Продовження далі", match: prefix, drop: if_nonspeech }
+    # Sprint TQ2 T3 additions (from the TQ2 review list, not customer text).
+    - { text: "Продовження слідує", match: prefix, drop: always }
+    - { text: "Субтитри створено", match: prefix, drop: always }

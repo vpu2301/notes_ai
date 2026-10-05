@@ -68,7 +68,14 @@ struct ActiveCaptureCard: View {
                 Button {
                     capture.toggleRecording()
                 } label: {
-                    Label("Stop", systemImage: "stop.fill")
+                    // The popover is too narrow for the word beside two
+                    // meters; the square says Stop on its own.
+                    if compact {
+                        Image(systemName: "stop.fill")
+                            .accessibilityLabel("Stop")
+                    } else {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
                 }
                 .buttonStyle(DSButtonStyle(kind: .rec, height: 28))
                 .keyboardShortcut(".", modifiers: .command)
@@ -85,12 +92,12 @@ struct ActiveCaptureCard: View {
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: compact ? 8 : 10) {
                 Text("People")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
-                PeoplePicker(height: 26)
-                    .frame(maxWidth: compact ? .infinity : 300)
+                PeoplePicker(height: compact ? 24 : 26, segmentPadding: compact ? 7 : 12)
+                    .frame(maxWidth: compact ? .infinity : 300, alignment: .leading)
             }
             MyNotesEditor(compact: compact)
             if let warning = capture.limitWarning {
@@ -103,10 +110,20 @@ struct ActiveCaptureCard: View {
 
     private func labelledMeter(_ title: String, level: Double) -> some View {
         HStack(spacing: 6) {
-            Text(title)
-                .font(.dsMeta)
-                .foregroundStyle(DS.muted)
-                .frame(width: 58, alignment: .leading)
+            // Compact (the popover) has no room for the words: a mic and a
+            // speaker say the same, with the name kept for hover and VoiceOver.
+            if compact {
+                Image(systemName: title == "You" ? "mic.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DS.muted)
+                    .frame(width: 14, alignment: .leading)
+                    .help(title)
+            } else {
+                Text(title)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .frame(width: 58, alignment: .leading)
+            }
             LevelMeter(level: level, active: true, segments: compact ? 12 : 18, height: 7)
         }
         .accessibilityElement(children: .combine)
@@ -247,6 +264,7 @@ struct ActiveCaptureCard: View {
 struct PeoplePicker: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var height: CGFloat = 30
+    var segmentPadding: CGFloat = 12
 
     var body: some View {
         DSSegmentedPill(
@@ -255,7 +273,8 @@ struct PeoplePicker: View {
                       help: $0.speakersExpected == nil ? "Let the recording decide" : nil)
             },
             selection: $capture.people,
-            height: height)
+            height: height,
+            segmentPadding: segmentPadding)
             .disabled(!capture.diarize)
             .opacity(capture.diarize ? 1 : 0.45)
             .help(capture.diarize ? "How many people are in the meeting"
@@ -323,6 +342,45 @@ struct MeetingTypePicker: View {
             .disabled(capture.isRecording || capture.phase.isBusy)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Kind of meeting")
+    }
+}
+
+/// The kind of meeting as a compact menu ("Auto ▾"), for the menu-bar
+/// popover where the pill would not fit.
+struct MeetingTypeMenu: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+
+    var body: some View {
+        DSMenu(width: 170, items: {
+            MeetingType.allCases.map { kind in
+                .item(kind.label, checked: kind == capture.meetingType) { capture.meetingType = kind }
+            }
+        }) {
+            HStack(spacing: 5) {
+                Text(capture.meetingType.label)
+                    .font(.ds(12.5, .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.dsIcon(9, .semibold))
+                    .foregroundStyle(DS.muted)
+            }
+            .fixedSize()
+            .foregroundStyle(DS.text1)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                    .fill(DS.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                            .strokeBorder(DS.line, lineWidth: DS.hairline)
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .disabled(capture.isRecording || capture.phase.isBusy)
+        .help("Kind of meeting")
+        .accessibilityLabel("Kind of meeting: \(capture.meetingType.label)")
     }
 }
 

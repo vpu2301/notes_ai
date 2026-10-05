@@ -245,10 +245,16 @@ def action_line(fact: VerifiedFact) -> str:
     """``- Anna: send the pricing proposal — by Tuesday``.
 
     The owner is omitted when we could not place one; an invented name
-    would be worse than a task nobody is holding yet.
+    would be worse than a task nobody is holding yet. A diarizer label
+    ("Speaker 3") is nobody's name either (SQ3 T2, D-LABEL): omitted.
     """
+    from .roles_table import real_name
+
     return "- " + line_rules.render_item(
-        marker="", owner=fact.owner_label, body=editorial(fact.text), due_text=fact.due_text
+        marker="",
+        owner=real_name(fact.owner_label),
+        body=editorial(fact.text),
+        due_text=fact.due_text,
     )
 
 
@@ -260,7 +266,9 @@ def plain_line(fact: VerifiedFact, language: str = "en") -> str:
     return f"- {patch_claim(editorial(fact.text), [fact], language)}"
 
 
-def patch_claim(text: str, facts: list[VerifiedFact], language: str = "en") -> str:
+def patch_claim(
+    text: str, facts: list[VerifiedFact], language: str = "en", *, paragraph: bool = False
+) -> str:
     """A record of an opinion, forecast, estimate, proposal or allegation
     says whose it is and that it is one (Q4) — in code, from the fact's own
     fields, never in words a model chose.
@@ -269,6 +277,11 @@ def patch_claim(text: str, facts: list[VerifiedFact], language: str = "en") -> s
       known and the line does not already name them;
     * ``Voraussichtlich: …`` when the line still carries no marker of its
       certainty (a holder's "laut" is one).
+
+    ``paragraph`` (SQ3 T1): a summary sentence or the framing is a
+    paragraph, and a paragraph that opens with ``<word>: `` is read as a
+    transcript turn by every client ("VVorwurf"), so it gets the dash form
+    ``Vorwurf — …``. Bullets are list items and keep the colon.
     """
     unsure = [f for f in facts if f.certainty in support.UNSURE_CERTAINTIES]
     if not unsure:
@@ -284,7 +297,8 @@ def patch_claim(text: str, facts: list[VerifiedFact], language: str = "en") -> s
         else:
             text = f"{text} — {support.ACCORDING_TO[lang]} {last}"
     if not support.has_marker(text, lang):
-        text = f"{phrases[fact.certainty]}: {text}"
+        joiner = " —" if paragraph else ":"
+        text = f"{phrases[fact.certainty]}{joiner} {text}"
     return text
 
 
@@ -696,11 +710,11 @@ def render_sections(
     if framing.strip():
         framed = editorial(strip_inline_ids(framing)[0])
         first_lines.append(Line(framed, "framing", _ids(key_facts) or _ids(facts)))
-    # F3 — who presented, for a broadcast or a presentation: part of the
-    # first paragraph, one line each, so the overview stays two paragraphs
-    # (and never reads as transcript turns — client_view.looks_like_transcript).
-    if presenter_lines:
-        first_lines.extend(_presenter_lines(grouped.get(schema.INTRODUCTION, []), language))
+    # SQ3 T1/T2 — who presented and who was a guest are named once, in the
+    # framing's "Es sprechen …" (compose.speakers_of). The F3 lines
+    # ("Gast: X", "Präsentiert von: …") are no longer written: a paragraph
+    # that opens "<word>: " reads as a transcript turn on every client.
+    del presenter_lines
     if first_lines:
         overview.append(("\n".join(line.text for line in first_lines), first_lines))
     summary_lines: list[Line] = []

@@ -1,0 +1,37 @@
+rule_files:
+  - ../asr.yml
+evaluation_interval: 30s
+tests:
+  - interval: 1m
+    name: one failed run in a hundred is quiet
+    input_series:
+      - series: 'mdx_asr_entity_unify_total{outcome="done"}'
+        values: "0+99x120"
+      - series: 'mdx_asr_entity_unify_total{outcome="error"}'
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: AsrEntityUnifyErrors
+        exp_alerts: []
+
+  - interval: 1m
+    name: one in ten failing fires after fifteen minutes
+    input_series:
+      - series: 'mdx_asr_entity_unify_total{outcome="done"}'
+        values: "0+9x120"
+      - series: 'mdx_asr_entity_unify_total{outcome="error"}'
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: AsrEntityUnifyErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              team: asr
+            exp_annotations:
+              summary: "More than 5% of spelling-unifier runs failed over 1h"
+              description: |
+                10% of entity_unify runs in the last hour
+                ended in error; those transcripts show their raw spellings. Look at
+                asr.entity_unify_failed in the asr-service logs (error class only).
+                Runbook: docs/runbooks/asr-worker.md#entity-unify

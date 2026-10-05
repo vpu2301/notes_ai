@@ -6,9 +6,17 @@ import type { SharingPolicy, TenantProfile } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { GlossarySection } from "../../components/GlossarySection";
+import { Segmented } from "../../components/Segmented";
 import { useToast } from "../../components/Toaster";
+import { useSettingsView } from "../../lib/useSettingsView";
 
 const PAID = new Set(["pro", "enterprise"]);
+
+const VIEWS = [
+  { value: "branding", label: "Branding" },
+  { value: "sharing", label: "Sharing" },
+  { value: "terms", label: "Names and terms" },
+] as const;
 
 /**
  * `/settings/workspace` — the first admin surface (Sprint 23): how the
@@ -25,23 +33,30 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [policy, setPolicy] = useState<SharingPolicy | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Branding's own load failure: shown on Branding, not over the other views.
+  const [brandingError, setBrandingError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [legalName, setLegalName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  const [view, setView] = useSettingsView(VIEWS);
 
+  // Each half loads on its own: a branding read that fails must not take
+  // the sharing policy down with it.
   useEffect(() => {
     let live = true;
-    Promise.all([getTenant(tenantId), getSharingPolicy()])
-      .then(([t, p]) => {
+    getTenant(tenantId)
+      .then((t) => {
         if (!live) return;
         setTenant(t);
         setDisplayName(t.display_name);
         setLegalName(t.legal_name);
         setContactEmail(t.contact_email);
-        setPolicy(p);
       })
+      .catch((err) => live && setBrandingError(messageFor(err)));
+    getSharingPolicy()
+      .then((p) => live && setPolicy(p))
       .catch((err) => live && setError(messageFor(err)));
     return () => {
       live = false;
@@ -112,16 +127,18 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
   const set = (patch: Partial<SharingPolicy>) => setPolicy((p) => (p ? { ...p, ...patch } : p));
 
   return (
-    <div className="settings-page" aria-label="Workspace settings">
-      {error && (
+    <div className="settings-stack" aria-label="Workspace settings">
+      <Segmented label="Workspace settings" options={VIEWS} value={view} onChange={setView} />
+
+      {view !== "terms" && (error || (view === "branding" && brandingError)) && (
         <div className="banner banner-danger" role="alert">
-          {error}
+          {error ?? brandingError}
         </div>
       )}
 
-      {tenant && (
-        <form className="settings-section" onSubmit={(e) => void saveBranding(e)} aria-label="Branding">
-          <h2>Branding</h2>
+      {view === "branding" && tenant && (
+        <form className="card pad settings-card" onSubmit={(e) => void saveBranding(e)} aria-label="Branding">
+          <h2 className="settings-h">Branding</h2>
           <p className="help">What recipients see at the top of a shared page and in the e-mail.</p>
           <div className="shared-bar shared-preview" aria-label="Preview">
             <span className="shared-logo shared-logo-initials">{tenant.has_logo ? "logo" : (displayName || "?").slice(0, 2).toUpperCase()}</span>
@@ -151,9 +168,9 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
         </form>
       )}
 
-      {policy && (
-        <form className="settings-section" onSubmit={(e) => void savePolicy(e)} aria-label="External sharing policy">
-          <h2>External sharing</h2>
+      {view === "sharing" && policy && (
+        <form className="card pad settings-card" onSubmit={(e) => void savePolicy(e)} aria-label="External sharing policy">
+          <h2 className="settings-h">External sharing</h2>
           <p className="help">How notes may leave this workspace. Applies to every member; links that already exist keep working until you turn them off below.</p>
           <label className="chk-row">
             <input type="checkbox" className="chk" checked={policy.external_links_enabled} disabled={busy} onChange={(e) => set({ external_links_enabled: e.target.checked })} />
@@ -197,7 +214,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
         </form>
       )}
 
-      <GlossarySection />
+      {view === "terms" && <GlossarySection />}
 
       {confirmRevoke && (
         <ConfirmDialog

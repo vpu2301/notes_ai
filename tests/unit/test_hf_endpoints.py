@@ -56,6 +56,10 @@ def test_committed_specs_validate_and_are_pinned() -> None:
         # are baked into our own image rather than served from the repo,
         # but the revision is still pinned and the rules below still hold.
         "notes-diar-staging",
+        # Sprint TQ4 bake-off candidates (ADR-0067): raised for the run,
+        # never named in routing until the rule adopts one.
+        "notes-asr-parakeet-staging",
+        "notes-asr-whisper-v3-staging",
     }
     for s in specs:
         assert hf._COMMIT.match(s["model"]["revision"]), (
@@ -86,7 +90,8 @@ def test_spec_rules(mutate: Any, match: str) -> None:
 
 
 def test_api_body_shape() -> None:
-    body = hf.to_api_body(hf.load_specs("staging")[1])  # chat.yaml sorts after asr.yaml
+    specs = {s["name"]: s for s in hf.load_specs("staging")}  # by name: more asr-*.yaml since TQ4
+    body = hf.to_api_body(specs["notes-chat-staging"])
     assert body["name"] == "notes-chat-staging"
     assert body["compute"]["scaling"] == {
         "minReplica": 0,
@@ -95,7 +100,7 @@ def test_api_body_shape() -> None:
     }
     assert body["model"]["task"] == "text-generation"
     assert body["model"]["image"]["tgi"]["maxTotalTokens"] == 32768
-    asr = hf.to_api_body(hf.load_specs("staging")[0])
+    asr = hf.to_api_body(specs["notes-asr-staging"])
     assert asr["model"]["image"]["custom"]["env"]["WHISPER__MODEL"].startswith("deepdml/")
 
 

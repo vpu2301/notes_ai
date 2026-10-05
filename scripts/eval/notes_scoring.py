@@ -377,10 +377,13 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     thirds = {1: Ratio(), 2: Ratio(), 3: Ratio()}
     missed: list[int] = []
     for i, fact in enumerate(gold.get("key_facts", [])):
-        _, best = best_match(fact, texts)
+        text = fact["text"] if isinstance(fact, dict) else fact
+        _, best = best_match(text, texts)
         hit = best >= MATCH_THRESHOLD
         recall.add(hit)
-        thirds[_third_of(meeting, fact)].add(hit)
+        # v3 names the third (from the transcript's timestamps); v2 infers it.
+        third = fact.get("third") if isinstance(fact, dict) else None
+        thirds[third if third in (1, 2, 3) else _third_of(meeting, text)].add(hit)
         if not hit:
             missed.append(i)
     row["key_fact_recall"] = recall.pair()
@@ -524,7 +527,131 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     row["must_not_contain_failed"] = [
         i for i, s in enumerate(gold.get("must_not_contain", [])) if _contains(everything, s)
     ]
+    row.update(score_sq1(meeting, produced))
+    row.update(score_sq2(meeting, produced))
+    row.update(score_sq3(produced, row))
     return row
+
+
+# ── Sprint SQ3: reads like a note ───────────────────────────────────
+
+# The web client's speaker rule (web/src/lib/richText.ts), verbatim.
+SPEAKER_TURN = re.compile(r"^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)")
+REDUNDANCY_BAR = 0.05
+
+
+def score_sq3(produced: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    """``speaker_shaped_lines`` — paragraph lines a client would draw as a
+    transcript turn (D-FORM); ``order_inversions`` — bullets in a section
+    whose first cited fact was said before the previous bullet's;
+    ``redundancy_ok`` — this note repeats itself on fewer than 5 % of lines."""
+    facts = {f["item_key"]: f for f in produced.get("facts", [])}
+    shaped = 0
+    inversions = 0
+    last: dict[str, int] = {}
+    for ln in produced.get("lines", []):
+        text = ln.get("text", "")
+        kind = ln.get("kind")
+        if kind not in ("bullet", "heading") and not text.lstrip().startswith(("-", "|", "#")):
+            shaped += 1 if SPEAKER_TURN.match(text.lstrip()) else 0
+        if kind == "bullet" and not ln.get("parent"):
+            starts = [facts[i]["start_ms"] for i in ln.get("fact_ids", []) if i in facts]
+            if starts:
+                key = ln.get("section_key") or ""
+                if key in last and min(starts) < last[key]:
+                    inversions += 1
+                last[key] = min(starts)
+    dup, total = row.get("redundancy") or [0, 0]
+    return {
+        "speaker_shaped_lines": shaped,
+        "order_inversions": inversions,
+        "redundancy_ok": int(not total or dup / total < REDUNDANCY_BAR),
+    }
+
+
+def sq3_gates(summary: dict[str, Any]) -> dict[str, bool]:
+    """Sprint SQ3 acceptance by code (the raters' rubric is separate)."""
+    out: dict[str, bool] = {}
+    checks = (
+        ("sq3_d_form_zero", "speaker_shaped_lines", lambda v: v == 0),
+        ("sq3_participant_precision_95pct", "participant_precision", lambda v: v >= 0.95),
+        ("sq3_participant_recall_90pct", "participant_recall", lambda v: v >= 0.90),
+        ("sq3_label_lines_zero", "label_lines", lambda v: v == 0),
+        ("sq3_filler_lines_zero", "filler_lines", lambda v: v == 0),
+        ("sq3_redundancy_ok_95pct", "redundancy_ok_rate", lambda v: v >= 0.95),
+        ("sq3_order_inversions_zero", "order_inversions", lambda v: v == 0),
+        ("sq3_title_ok_100pct", "title_ok", lambda v: v >= 1.0),
+    )
+    for name, key, ok in checks:
+        value = summary.get(key)
+        if value is not None:
+            out[name] = bool(ok(value))
+    return out
+
+
+# ── Sprint SQ2: the whole recording is in the note ──────────────────
+
+NEAR_EMPTY_LINES = 3  # fewer cited content lines than this is near-empty
+NEAR_EMPTY_FROM_MS = 2 * 60_000  # recordings shorter than this are not judged
+MIN_SECTION_BULLETS = 2
+
+
+def score_sq2(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any]:
+    """``one_bullet_sections`` — headed topic sections with fewer than two
+    points; ``near_empty`` — a recording of two minutes or more whose note
+    has fewer than three cited lines (1/0, None below two minutes)."""
+    roles_by_key = {s.get("section_key"): s.get("role") for s in produced.get("sections") or []}
+    points: dict[str, int] = {}
+    for line in produced.get("lines", []):
+        key = line.get("section_key")
+        if roles_by_key.get(key) != "topics":
+            continue
+        points.setdefault(key, 0)
+        if line.get("kind") == "bullet" and not line.get("parent"):
+            points[key] += 1
+    cited_lines = sum(
+        1
+        for ln in produced.get("lines", [])
+        if ln.get("fact_ids") and ln.get("kind") not in _NOT_CONTENT
+    )
+    turns = meeting.get("transcript") or []
+    span = (turns[-1]["t_end_ms"] - turns[0]["t_start_ms"]) if turns else 0
+    return {
+        "one_bullet_sections": sum(1 for n in points.values() if n < MIN_SECTION_BULLETS),
+        "near_empty": (int(cited_lines < NEAR_EMPTY_LINES) if span >= NEAR_EMPTY_FROM_MS else None),
+    }
+
+
+def sq2_gates(
+    summary: dict[str, Any],
+    *,
+    baseline_unsupported: float | None = None,
+    staging: bool = False,
+) -> dict[str, bool]:
+    """Sprint SQ2 acceptance on a corpus (01-quality-criteria §3 numbers):
+    recall ≥ 0.70, worst ÷ best third ≥ 0.80, sections within the band on
+    ≥ 90 %, near-empty notes ≤ 10 %, no section with fewer than two points,
+    unsupported no higher than the SQ1 baseline of the same arm; time
+    (≤ 300 s per meeting-hour at p95) only on staging."""
+    out: dict[str, bool] = {}
+    checks = (
+        ("sq2_key_fact_recall_70pct", "key_fact_recall", lambda v: v >= 0.70),
+        ("sq2_by_third_ratio_80pct", "by_third_ratio", lambda v: v >= 0.80),
+        ("sq2_sections_count_ok_90pct", "sections_count_ok", lambda v: v >= 0.90),
+        ("sq2_near_empty_10pct", "near_empty_rate", lambda v: v <= 0.10),
+        ("sq2_no_one_bullet_section", "one_bullet_sections", lambda v: v == 0),
+    )
+    for name, key, ok in checks:
+        value = summary.get(key)
+        if value is not None:
+            out[name] = bool(ok(value))
+    unsupported = summary.get("unsupported_rate")
+    if baseline_unsupported is not None and unsupported is not None:
+        out["sq2_unsupported_not_above_sq1"] = unsupported <= baseline_unsupported + 1e-9
+    p95 = summary.get("seconds_per_meeting_hour_p95")
+    if staging and p95 is not None:
+        out["sq2_p95_seconds_per_meeting_hour_300"] = p95 <= 300
+    return out
 
 
 # ── F2: statements, not quotes ──────────────────────────────────────
@@ -532,6 +659,161 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
 # Lines that are a task or an outcome: short by nature, phrased as said.
 _TASK_LINE_KINDS = frozenset({"action", "commitment_ours", "commitment_theirs", "decision"})
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+
+# ── Sprint SQ1: the criteria the summary track gates on ──────────────
+
+GENERIC_TITLE_WORDS = frozenset(
+    {
+        "meeting", "call", "sync", "notes", "podcast", "episode", "folge", "podcast-folge",
+        "besprechung", "meeting-notizen", "gespräch", "interview", "update",
+        "зустріч", "нарада", "розмова", "подкаст", "the", "a", "der", "die", "das", "weekly",
+        "wöchentlich", "team", "call:", "follow-up",
+    }
+)  # fmt: skip
+TITLE_MIN, TITLE_MAX = 30, 80
+PARTICIPANT_MIN_SHARE = 0.05
+
+
+def _surname(name: str) -> str:
+    parts = [p for p in name.split() if p[:1].isupper()]
+    return (parts[-1] if parts else name).casefold()
+
+
+def _orientation(produced: dict[str, Any]) -> str:
+    """What says who speaks: the orientation and roles sections, else the
+    first section (an older document has no roles)."""
+    sections = produced.get("sections") or []
+    picked = [s.get("text") or "" for s in sections if s.get("role") in ("orientation", "roles")]
+    if not picked and sections:
+        picked = [sections[0].get("text") or ""]
+    return "\n".join(picked)
+
+
+def _participants(gold: dict[str, Any], produced: dict[str, Any]) -> dict[str, list[int]]:
+    """SM-05: gold participants with ≥ 5 % of the speech or a role other
+    than plain participant, named in the orientation (recall); people the
+    orientation names who are not participants (precision). The universe of
+    people is the gold's — participants, candidates and person entities —
+    so a word that is not a name is never counted against precision."""
+    wanted = [
+        p for p in gold.get("participants") or []
+        if p.get("name") and (p.get("speech_share", 0) >= PARTICIPANT_MIN_SHARE or p.get("role") != "participant")
+    ]  # fmt: skip
+    if not wanted:
+        return {}
+    text = _orientation(produced).casefold()
+    named = {_surname(p["name"]) for p in wanted}
+    people = named | {
+        _surname(n) for n in gold.get("name_candidates") or []
+    } | {
+        _surname(e["canonical"]) for e in gold.get("entities") or [] if e.get("kind", "person") == "person"
+    }  # fmt: skip
+    mentioned = {n for n in people if n and re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text)}
+    return {
+        "participant_recall": [len(named & mentioned), len(named)],
+        "participant_precision": [len(named & mentioned), len(mentioned)],
+    }
+
+
+def _opinion_attribution(gold: dict[str, Any], texts: list[str]) -> list[int] | None:
+    """SM-06: of the gold opinions the note carries, those whose line names
+    their holder."""
+    facts = {f["id"]: f for f in gold.get("key_facts") or [] if isinstance(f, dict) and "id" in f}
+    ops = gold.get("opinions") or []
+    if not ops or not texts:
+        return None
+    hit = total = 0
+    for op in ops:
+        fact = facts.get(op.get("fact"))
+        if fact is None:
+            continue
+        index, best = best_match(fact["text"], texts)
+        if best < MATCH_THRESHOLD:
+            continue
+        total += 1
+        holder = _surname(op["holder"])
+        hit += 1 if re.search(rf"(?<!\w){re.escape(holder)}(?!\w)", texts[index].casefold()) else 0
+    return [hit, total] if total else None
+
+
+def filler_lines(lines: list[dict[str, Any]], *, cited_evidence: bool) -> int:
+    """SM-09: a line that adds no fact — its content words are a subset of
+    another line's, or (when lines cite facts) it cites none."""
+    sets = [words(ln["text"]) for ln in lines]
+    count = 0
+    for i, ln in enumerate(lines):
+        own = sets[i]
+        if not own:
+            continue
+        subset = any(j != i and own <= sets[j] and own != sets[j] for j in range(len(sets)))
+        uncited = cited_evidence and ln.get("kind") in COMPOSED and not ln.get("fact_ids")
+        count += 1 if subset or uncited else 0
+    return count
+
+
+def title_checks(produced: dict[str, Any], evidence: str) -> dict[str, Any]:
+    """TI-01, TI-03, TI-04 by code. TI-02 (names the whole recording) is the
+    raters' question and stays None here."""
+    title = (produced.get("title") or "").strip()
+    if not title:
+        return {}
+    ok_length = TITLE_MIN <= len(title) <= TITLE_MAX and title.count(":") <= 1
+    names = [w.strip(".,:;!?\"'()") for w in title.split()[1:] if w[:1].isupper()]
+    folded_evidence = evidence.casefold()
+    names_ok = all(n.casefold() in folded_evidence for n in names if len(n) > 2)
+    content = {w.casefold().strip(".,:;!?") for w in title.split()} - GENERIC_TITLE_WORDS
+    not_generic = any(len(w) > 2 for w in content)
+    return {
+        "title_ok": [int(ok_length and names_ok and not_generic), 1],
+        "title_length_ok": ok_length,
+        "title_names_supported": names_ok,
+        "title_not_generic": not_generic,
+    }
+
+
+def _faithfulness_vs_truth(
+    meeting: dict[str, Any], content: list[dict[str, Any]], asr_evidence: list[str]
+) -> dict[str, int]:
+    """SM-02b: lines checked against the human-corrected transcript too. A
+    name or number the ASR text has but the truth has not is the
+    transcript's error carried into the note (``propagated_from_asr``), not
+    the writer's invention."""
+    truth = [t["text"] for t in meeting.get("reference_transcript") or []]
+    if not truth:
+        return {}
+    propagated = invented = 0
+    for ln in content:
+        claim = _claim(ln)
+        wrong_vs_truth = invents(claim, truth)
+        if not wrong_vs_truth:
+            continue
+        if invents(claim, asr_evidence):
+            invented += 1
+        else:
+            propagated += 1
+    return {"propagated_from_asr": propagated, "invented_vs_truth": invented}
+
+
+def score_sq1(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any]:
+    gold = meeting.get("gold") or {}
+    lines = [ln for ln in produced.get("lines", []) if ln.get("text", "").strip()]
+    content = [ln for ln in lines if ln.get("kind") not in _NOT_CONTENT]
+    texts = [ln["text"] for ln in content]
+    asr = [t["text"] for t in meeting.get("transcript", [])]
+    row: dict[str, Any] = {}
+    row.update(_participants(gold, produced))
+    attribution = _opinion_attribution(gold, texts)
+    if attribution is not None:
+        row["opinion_attribution"] = attribution
+    row["filler_lines"] = filler_lines(content, cited_evidence=produced.get("evidence") == "facts")
+    row.update(
+        title_checks(
+            produced, "\n".join([*asr, *(_evidence(f) for f in produced.get("facts", []))])
+        )
+    )
+    row.update(_faithfulness_vs_truth(meeting, content, asr))
+    return row
 
 
 def transcript_sentences(meeting: dict[str, Any]) -> list[str]:
@@ -603,7 +885,8 @@ def score_f3(gold: dict[str, Any], produced: dict[str, Any], lines: list[dict[st
         out["qualifier_preservation"] = qualifiers.pair()
     presenter = gold.get("presenter")
     if presenter:
-        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") == "presenter")
+        # SQ3 T2: the presenter is named in paragraph 1 (framing) now.
+        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") in ("presenter", "framing"))
         fields = [presenter["name"], presenter.get("role"), presenter.get("organisation")]
         out["presenter_accuracy"] = [
             sum(1 for f in fields if f and _contains(text, f)),
@@ -984,6 +1267,11 @@ _PAIRS = (
     "hedge_preservation",
     "attribution",
     "date_resolution",
+    # Sprint SQ1
+    "participant_recall",
+    "participant_precision",
+    "opinion_attribution",
+    "title_ok",
 )
 
 
@@ -1009,6 +1297,12 @@ def aggregate(
     ladders: dict[str, int] = {}
     linted_docs = lint_clean = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
+    sq1 = {"filler_lines": 0, "propagated_from_asr": 0, "invented_vs_truth": 0}
+    truth_docs = 0
+    one_bullet = 0
+    near_empty = [0, 0]
+    shaped = inversions = 0
+    redundancy_ok = [0, 0]
     by_type: dict[str, list[int]] = {}
     for n, row in enumerate(rows):
         for key in _PAIRS:
@@ -1051,6 +1345,18 @@ def aggregate(
             unspecific_left += int(left_rules.get("line.specific") or 0)
         for key in f2:
             f2[key] += int(row.get(key) or 0)
+        for key in sq1:
+            sq1[key] += int(row.get(key) or 0)
+        truth_docs += 1 if "propagated_from_asr" in row else 0
+        one_bullet += int(row.get("one_bullet_sections") or 0)
+        shaped += int(row.get("speaker_shaped_lines") or 0)
+        inversions += int(row.get("order_inversions") or 0)
+        if "redundancy_ok" in row:
+            redundancy_ok[0] += int(row["redundancy_ok"])
+            redundancy_ok[1] += 1
+        if row.get("near_empty") is not None:
+            near_empty[0] += int(row["near_empty"])
+            near_empty[1] += 1
         kind = (types or [None] * len(rows))[n] or "unlabelled"
         bucket = by_type.setdefault(kind, [0, 0])
         pair = row.get("key_fact_recall") or [0, 0]
@@ -1120,6 +1426,24 @@ def aggregate(
         "headings_per_10_min": (
             sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
         ),
+        # Sprint SQ1 (01-quality-criteria §3).
+        "participant_precision": _rate(sums["participant_precision"]),
+        "participant_recall": _rate(sums["participant_recall"]),
+        "opinion_attribution": _rate(sums["opinion_attribution"]),
+        "filler_lines": sq1["filler_lines"],
+        "title_ok": _rate(sums["title_ok"]),
+        "by_third_ratio": (min(present) / max(present)) if present and max(present) > 0 else None,
+        # Sprint SQ2.
+        "sections_count_ok": (sections_ok / linted_docs) if linted_docs else None,
+        "near_empty_rate": _rate(near_empty),
+        "one_bullet_sections": one_bullet,
+        # Sprint SQ3.
+        "speaker_shaped_lines": shaped,
+        "order_inversions": inversions,
+        "redundancy_ok_rate": _rate(redundancy_ok),
+        # Per document, and only over documents scored against the truth.
+        "propagated_from_asr": (sq1["propagated_from_asr"] / truth_docs) if truth_docs else None,
+        "invented_vs_truth": (sq1["invented_vs_truth"] / truth_docs) if truth_docs else None,
     }
 
 

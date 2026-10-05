@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError } from "../api/http";
 import { messageFor } from "../lib/errorCopy";
@@ -13,6 +13,7 @@ import {
 } from "../api/notes";
 import { sharedStrings } from "../i18n/shared";
 import type { SharedNoteView, SharedSection } from "../api/types";
+import { CodeInput } from "../components/CodeInput";
 import { AlertIcon, DownloadIcon } from "../components/icons";
 import { RichText } from "../components/RichText";
 import { FlagControl, SharedItems } from "../components/SharedItems";
@@ -55,6 +56,7 @@ export function SharedNotePage() {
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [verified, setVerified] = useState(false);
   const [changesDismissed, setChangesDismissed] = useState(false);
   const [tab, setTab] = useState<"notes" | "transcript" | null>(null);
   const [reporting, setReporting] = useState(false);
@@ -75,13 +77,14 @@ export function SharedNotePage() {
     }
   };
 
-  const confirmCode = async (e: FormEvent) => {
-    e.preventDefault();
+  const confirmCode = async (value: string = code) => {
+    if (value.trim().length < 6 || busy) return;
     setBusy(true);
     setCodeError(null);
     try {
-      setNote(await verifyShared(token, code.trim()));
+      setNote(await verifyShared(token, value.trim()));
       setCode("");
+      setVerified(true);
     } catch (err) {
       const c = err instanceof ApiError ? err.code : undefined;
       setCodeError(
@@ -238,41 +241,55 @@ export function SharedNotePage() {
                 </button>
               </div>
             )}
+            {verified && !note.requires_verification && (
+              <p className="shared-verify-done" role="status">
+                {t.verified}
+              </p>
+            )}
             {note.requires_verification && (
-              <section className="doc-section shared-key shared-verify" aria-label={t.verifyTitle}>
-                <h2 className="section-name">{t.verifyTitle}</h2>
-                <p className="help">{t.verifyBody}</p>
+              <section className="shared-key shared-verify" aria-label={t.verifyTitle}>
+                <div className="shared-verify-head">
+                  <h2 className="shared-verify-title">{t.verifyTitle}</h2>
+                  <p className="shared-verify-body">{codeSent ? t.codeSent : t.verifyBody}</p>
+                </div>
                 {!codeSent ? (
-                  <button className="btn primary sm" onClick={() => void sendCode()}>
-                    {t.sendCode}
-                  </button>
+                  <div className="shared-verify-actions">
+                    <button className="btn primary" onClick={() => void sendCode()}>
+                      {t.sendCode}
+                    </button>
+                  </div>
                 ) : (
-                  <form className="shared-code" onSubmit={(e) => void confirmCode(e)}>
-                    <p className="help">{t.codeSent}</p>
-                    <label className="field">
-                      <span className="label">{t.codeLabel}</span>
-                      <input
-                        className="input mono"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        maxLength={7}
-                        value={code}
-                        disabled={busy}
-                        onChange={(e) => setCode(e.target.value)}
-                      />
-                    </label>
-                    <div className="row-actions">
-                      <button className="btn primary sm" type="submit" disabled={busy || code.trim().length < 6}>
+                  <form
+                    className="shared-verify-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void confirmCode();
+                    }}
+                  >
+                    <CodeInput
+                      value={code}
+                      onChange={(v) => {
+                        setCode(v);
+                        setCodeError(null);
+                      }}
+                      onComplete={(v) => void confirmCode(v)}
+                      disabled={busy}
+                      invalid={Boolean(codeError)}
+                      label={t.codeLabel}
+                      describedBy={codeError ? "shared-code-error" : undefined}
+                    />
+                    <div className="shared-verify-actions">
+                      <button className="btn primary" type="submit" disabled={busy || code.trim().length < 6}>
                         {t.confirm}
                       </button>
-                      <button className="btn ghost sm" type="button" onClick={() => void sendCode()} disabled={busy}>
-                        {t.sendCode}
+                      <button className="btn ghost" type="button" onClick={() => void sendCode()} disabled={busy}>
+                        {t.resendCode}
                       </button>
                     </div>
                   </form>
                 )}
                 {codeError && (
-                  <p className="help danger-text" role="alert">
+                  <p id="shared-code-error" className="shared-verify-error" role="alert">
                     {codeError}
                   </p>
                 )}

@@ -111,8 +111,8 @@ export function GlossarySection() {
   const notSent = terms?.filter((t) => !inHint(t)) ?? [];
 
   return (
-    <section className="settings-section" aria-label="Workspace vocabulary">
-      <h2>Names and terms</h2>
+    <section className="card pad settings-card" aria-label="Workspace vocabulary">
+      <h2 className="settings-h">Names and terms</h2>
       <p className="help">
         Spellings this workspace uses — people, companies, products. They are given to the
         transcriber before each recording, so it hears them right instead of guessing. Fixing a

@@ -337,6 +337,32 @@ def load_entries(manifest: Path, split: str) -> list[dict[str, Any]]:
     return [e for e in data["files"] if split == "all" or e["split"] == split]
 
 
+def load_asr_corpus(corpus: Path, split: str) -> list[dict[str, Any]]:
+    """Sprint TQ1 T4: the ASR gold set's recordings as DER entries — its
+    ``reference.rttm`` and audio live in ``<corpus>/<id>/`` (fetched from
+    the eval bucket), and the language is kept so de/uk DER can be read
+    per language."""
+    data = json.loads((corpus / "manifest.json").read_text())
+    out: list[dict[str, Any]] = []
+    for row in data["recordings"]:
+        if split != "all" and row["split"] != split:
+            continue
+        folder = corpus / row["id"]
+        audio = sorted(folder.glob("audio.*"))
+        out.append(
+            {
+                "id": row["id"],
+                "split": row["split"],
+                "n_speakers": row["speakers"],
+                "condition": f"asr-{row['language']}",
+                "language": row["language"],
+                "_audio": str(audio[0]) if audio else str(folder / "audio.missing"),
+                "_rttm": str(folder / "reference.rttm"),
+            }
+        )
+    return out
+
+
 # ── Metrics ───────────────────────────────────────────────────────────
 
 
@@ -427,12 +453,15 @@ def evaluate(
     rows: list[dict[str, Any]] = []
     missing: list[str] = []
     for entry in entries:
-        path = audio_path(entry, audio_dir)
+        path = Path(entry["_audio"]) if "_audio" in entry else audio_path(entry, audio_dir)
         if not path.exists():
             missing.append(entry["id"])
             continue
         rttm = entry.get("rttm")
         reference = read_rttm(REPO / "eval" / "speakers" / "v1" / rttm) if rttm else None
+        if "_rttm" in entry:
+            rttm = None  # the ASR corpus has no stereo sides files
+            reference = read_rttm(Path(entry["_rttm"])) if Path(entry["_rttm"]).exists() else None
         if rttm and DECODE_CHANNELS == 2:
             sides = (REPO / "eval" / "speakers" / "v1" / rttm).with_suffix(".sides.json")
             if sides.is_file():
@@ -514,6 +543,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--engine", default="legacy")
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=None,
+        help="an ASR gold corpus (eval/asr/v1) instead of the speaker manifest",
+    )
     parser.add_argument("--split", default="test", choices=("dev", "test", "all"))
     parser.add_argument("--audio-dir", type=Path, default=AUDIO_DIR)
     parser.add_argument("--only", default="", help="file id prefix filter (e.g. vc-)")
@@ -538,7 +573,12 @@ def main() -> int:
         DECODE_CHANNELS = 2
     else:
         name, run, config = build_engine(args.engine)
-    entries = [e for e in load_entries(args.manifest, args.split) if e["id"].startswith(args.only)]
+    loaded = (
+        load_asr_corpus(args.corpus, args.split)
+        if args.corpus
+        else load_entries(args.manifest, args.split)
+    )
+    entries = [e for e in loaded if e["id"].startswith(args.only)]
     rows, missing = evaluate(run, entries, args.audio_dir)
     if missing:
         print(
@@ -562,7 +602,9 @@ def main() -> int:
                 **summary,
                 "files": rows,
             },
-            suffix=f"-{args.split}" + (f"-{args.only.strip('-')}" if args.only else ""),
+            suffix=f"-{args.split}"
+            + (f"-{args.only.strip('-')}" if args.only else "")
+            + ("-asr-v1" if args.corpus else ""),
         )
         print(f"\nreport: {path.relative_to(REPO)}", file=sys.stderr)
     return 0

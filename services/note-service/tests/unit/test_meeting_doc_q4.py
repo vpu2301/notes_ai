@@ -343,7 +343,8 @@ def test_an_uncited_salient_fact_joins_the_nearest_topic() -> None:
     ]
     gate = pipeline._Gate()
     pipeline._append_salient(topics, [*facts, salient], gate)
-    assert topics[1][1][-1] == (salient.text, [salient.item_key], [])  # F2: no sub-points
+    # F2: no sub-points. SQ2: placed in recording order (05:05 is between 05:00 and 05:10).
+    assert topics[1][1][1] == (salient.text, [salient.item_key], [])
     assert gate.salient_appended == 1
     assert salient.salient and not facts[0].salient
 

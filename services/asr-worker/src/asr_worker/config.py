@@ -50,14 +50,18 @@ class Settings(BaseSettings):
     # punctuation model, G0) come back as lower-case run-ons. With the
     # vocabulary rule and the word-level guard the cascade is contained, so
     # it stays ON; the switch remains for a workspace that echoes anyway.
+    # Sprint TQ2 (ADR-0061 d5 amendment): it applies to the in-process
+    # engine only. HTTP backends expose no such switch; their context now
+    # resets at every run group (≤ MDX_ASR_HTTP_GROUP_SECONDS) instead of
+    # running across the whole file.
     asr_condition_prev: bool = Field(default=True, alias="MDX_ASR_CONDITION_PREV")
     # Sprint I2 T7: how the vocabulary reaches the decoder — as
     # `initial_prompt` (today) or as faster-whisper `hotwords` (a variant
     # measured in T7, not bet on).
     asr_vocabulary_mode: str = Field(default="prompt", alias="MDX_ASR_VOCABULARY_MODE")
     # Sprint I2 T4: language identification per VAD chunk, so a passage in
-    # another language is decoded in that language and labelled. In-process
-    # engine only; HTTP backends cannot do it.
+    # another language is decoded in that language and labelled. Since
+    # Sprint TQ2 the worker does it for every backend (chunks.py).
     asr_chunk_language_id: bool = Field(default=True, alias="MDX_ASR_CHUNK_LANGUAGE_ID")
 
     # ── Coverage (Sprint F1) ────────────────────────────────────────────
@@ -83,6 +87,49 @@ class Settings(BaseSettings):
     # Decision 3: a speech run the first decode left empty, mostly
     # uncovered, or mostly echo is decoded once more without the prompt.
     asr_second_pass_enabled: bool = Field(default=True, alias="MD_ASR_SECOND_PASS_ENABLED")
+
+    # ── Sprint TQ2: the worker plans runs and gates segments ────────────
+    # HTTP backends get runs of one language in groups of at most this many
+    # seconds, 300 ms of silence between runs (one request per group).
+    asr_http_group_seconds: float = Field(default=300.0, alias="MDX_ASR_HTTP_GROUP_SECONDS", gt=0)
+    # The local model that identifies each run's language for HTTP backends
+    # (the in-process engine uses its own). A faster-whisper name or a path;
+    # the CPU image bakes tiny at /opt/models/whisper-tiny.
+    asr_lid_model: str = Field(default="tiny", alias="MDX_ASR_LID_MODEL")
+    # Rollback switch: off = nothing is dropped, and diagnostics still record
+    # what would have been (``dry_run``), so the measurement survives.
+    asr_gates_enabled: bool = Field(default=True, alias="MDX_ASR_GATES_ENABLED")
+    # G1 silence text: no_speech ≥ this, and avg_logprob below the next (or
+    # missing), and VAD speech share inside the segment below the share.
+    asr_gate_no_speech: float = Field(default=0.6, alias="MDX_ASR_GATE_NO_SPEECH")
+    asr_gate_logprob: float = Field(default=-1.0, alias="MDX_ASR_GATE_LOGPROB")
+    asr_gate_speech_share: float = Field(default=0.3, alias="MDX_ASR_GATE_SPEECH_SHARE")
+    # G2 loop: compression ratio above this, or a 2–6-gram repeated this
+    # many times in a row.
+    asr_gate_compression: float = Field(default=2.4, alias="MDX_ASR_GATE_COMPRESSION")
+    asr_gate_loop_repeats: int = Field(default=4, alias="MDX_ASR_GATE_LOOP_REPEATS", ge=3)
+    # G3 low confidence: mean word probability below this on a segment
+    # shorter than the next.
+    asr_gate_low_confidence: float = Field(default=0.25, alias="MDX_ASR_GATE_LOW_CONFIDENCE")
+    asr_gate_low_confidence_max_ms: int = Field(
+        default=1500, alias="MDX_ASR_GATE_LOW_CONFIDENCE_MAX_MS"
+    )
+    # T3: a known artefact phrase is dropped when the decoder itself says
+    # no speech at or above this (or the VAD share is below the G1 share).
+    asr_gate_artefact_no_speech: float = Field(default=0.5, alias="MDX_ASR_GATE_ARTEFACT_NO_SPEECH")
+
+    # ── Sprint TQ4 T4: a candidate engine in the shadow ─────────────────
+    # A backend name from config/models.yaml (e.g. cand_parakeet_asr); empty
+    # = off. It decodes a sample of jobs after the primary, through the same
+    # path; only numeric differences are kept (diagnostics.shadow).
+    asr_shadow_backend: str = Field(default="", alias="MDX_ASR_SHADOW_BACKEND")
+    asr_shadow_rate: float = Field(default=0.2, alias="MDX_ASR_SHADOW_RATE", ge=0.0, le=1.0)
+    # Audio hours a day the shadow may decode (all workers together).
+    asr_shadow_budget_hours: float = Field(default=4.0, alias="MDX_ASR_SHADOW_BUDGET_HOURS", ge=0.0)
+    # The shadow may hold a job back at most this long beyond the primary.
+    asr_shadow_max_wait_seconds: float = Field(
+        default=120.0, alias="MDX_ASR_SHADOW_MAX_WAIT_SECONDS", gt=0
+    )
 
     # ── Streaming-window hallucination guard ────────────────────────────
     # A streaming window is a fixed-length slice, so it regularly contains

@@ -989,6 +989,8 @@ extension GenerationView {
             "duplicate": "a duplicated passage",
             "unrelated": "an unrelated fragment",
             "advertisement": "an advertisement",
+            "music": "music",
+            "noise": "noise",
             "passage": "a passage",
         ],
         "de": [
@@ -998,6 +1000,8 @@ extension GenerationView {
             "duplicate": "eine doppelte Passage",
             "unrelated": "ein unzusammenhängendes Fragment",
             "advertisement": "Werbung",
+            "music": "Musik",
+            "noise": "Geräusche",
             "passage": "eine Passage",
         ],
         "uk": [
@@ -1007,6 +1011,8 @@ extension GenerationView {
             "duplicate": "повторений уривок",
             "unrelated": "непов'язаний фрагмент",
             "advertisement": "реклама",
+            "music": "музика",
+            "noise": "шум",
             "passage": "уривок",
         ],
     ]
@@ -1429,10 +1435,21 @@ struct TranscriptResult: Decodable, Sendable {
     var coverage: TranscriptCoverage? = nil
     /// Sprint F1: the capture timing the recording app sent.
     var capture: CaptureInfo? = nil
+    /// Sprint TQ2: music / silence / noise stretches (≥ 5 s) the worker
+    /// marked instead of transcribing. Absent from older servers.
+    var noise: [TranscriptNoise]? = nil
+    /// The language the transcript is in; names the markers.
+    var language: String? = nil
+    /// Sprint TQ3: spellings the server unified (applied in the turns) or
+    /// offers for review. Absent from older servers.
+    var entityCorrections: [EntityCorrection]? = nil
+    var correctionsRev: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
-        case coverage, capture
+        case coverage, capture, noise, language
+        case entityCorrections = "entity_corrections"
+        case correctionsRev = "corrections_rev"
         case nameSuggestions = "name_suggestions"
         case relabelAvailable = "relabel_available"
         case segments, speakers, turns, edits
@@ -2991,4 +3008,149 @@ enum ProductLinks {
     /// The public site — what an OAuth registration names as `client_uri`.
     static let site = "https://notes.ai"
     static let callAudioHelp = "https://notes.ai/help/recording-call-audio"
+}
+
+
+/// Sprint TQ2: a stretch with no speech, marked instead of transcribed —
+/// shown as its own line ("[Musik 00:12–00:41]"), never as a turn. A kind
+/// this build does not know is shown as noise (the field is additive).
+struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
+    let startMs: Int
+    let endMs: Int
+    let kind: String
+
+    var id: Int { startMs }
+
+    enum CodingKeys: String, CodingKey {
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case kind
+    }
+
+    /// "music" | "silence" | "noise".
+    var knownKind: String { kind == "music" || kind == "silence" ? kind : "noise" }
+
+    static let labels: [String: [String: String]] = [
+        "en": ["music": "Music", "silence": "Silence", "noise": "Noise"],
+        "de": ["music": "Musik", "silence": "Stille", "noise": "Geräusch"],
+        "uk": ["music": "Музика", "silence": "Тиша", "noise": "Шум"],
+    ]
+
+    /// "[Musik 00:12–00:41]", in the language that was spoken.
+    func line(language: String?) -> String {
+        let names = Self.labels[language ?? ""] ?? Self.labels["en"] ?? [:]
+        let name = names[knownKind] ?? "Noise"
+        return "[\(name) \(Self.mmss(startMs))–\(Self.mmss(endMs))]"
+    }
+
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// The markers shown before `index` in `turns` (index == count: after
+    /// the last turn). Turns keep their positions.
+    static func before(_ index: Int, turns: [TranscriptTurn], noise: [TranscriptNoise]) -> [TranscriptNoise] {
+        guard !noise.isEmpty else { return [] }
+        let lo = index == 0 ? Int.min : turns[index - 1].startMs
+        let hi = index >= turns.count ? Int.max : turns[index].startMs
+        return noise.filter { $0.startMs >= lo && $0.startMs < hi }
+    }
+}
+
+
+/// Sprint TQ3: one name, one spelling — a correction the server's overlay
+/// applied (`accepted`) or offers (`proposed`). The recording never changes.
+struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
+    let id: String
+    let fromForms: [String]
+    let toText: String
+    let occurrencesCount: Int
+    let source: String
+    let confidence: Double
+    let status: String
+    /// A person accepted, edited or rejected it (older servers omit it).
+    let decided: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, confidence, status, decided
+        case fromForms = "from_forms"
+        case toText = "to_text"
+        case occurrencesCount = "occurrences_count"
+    }
+
+    var isApplied: Bool { status == "accepted" }
+    /// Still asks for a look: not rejected, and nobody has decided it yet.
+    /// A spelling the user accepted leaves the sheet and the banner.
+    var needsReview: Bool { status != "rejected" && decided != true }
+
+    var sourceLabel: String {
+        switch source {
+        case "glossary": return "glossary"
+        case "calendar": return "calendar"
+        case "hint": return "vocabulary hint"
+        case "user": return "edited"
+        default: return "most frequent spelling"
+        }
+    }
+
+    private static let words: [String: (unified: String, review: String, toReview: String, from: String)] = [
+        "en": ("spellings unified", "Review", "spellings to review", "unified from"),
+        "de": ("Schreibweisen vereinheitlicht", "Prüfen", "Schreibweisen zu prüfen", "vereinheitlicht aus"),
+        "uk": ("написань уніфіковано", "Переглянути", "написань на перевірку", "уніфіковано з"),
+    ]
+
+    private static func words(_ language: String?) -> (unified: String, review: String, toReview: String, from: String) {
+        words[language ?? ""] ?? words["en"]!
+    }
+
+    /// "3 Schreibweisen vereinheitlicht · 1 Schreibweisen zu prüfen" and the
+    /// action, or nil when there is nothing to say. Counts variant spellings.
+    static func banner(_ corrections: [EntityCorrection], language: String?) -> (text: String, action: String)? {
+        let live = corrections.filter(\.needsReview)
+        guard !live.isEmpty else { return nil }
+        let w = words(language)
+        let unified = live.filter(\.isApplied).reduce(0) { $0 + $1.fromForms.count }
+        let proposed = live.filter { $0.status == "proposed" }.reduce(0) { $0 + $1.fromForms.count }
+        var parts: [String] = []
+        if unified > 0 { parts.append("\(unified) \(w.unified)") }
+        if proposed > 0 { parts.append("\(proposed) \(w.toReview)") }
+        return (parts.joined(separator: " · "), w.review)
+    }
+
+    /// "vereinheitlicht aus: Andala, Handela"
+    func unifiedFrom(language: String?) -> String {
+        "\(Self.words(language).from): \(fromForms.joined(separator: ", "))"
+    }
+
+    /// The tooltip for a paragraph: where its unified spellings came from.
+    static func paragraphHelp(_ paragraph: String, _ corrections: [EntityCorrection], language: String?) -> String {
+        corrections.filter { $0.isApplied && paragraph.contains($0.toText) }
+            .map { "\($0.toText) — \($0.unifiedFrom(language: language))" }
+            .joined(separator: "\n")
+    }
+}
+
+struct CorrectionsView: Decodable, Sendable {
+    let jobId: String
+    let correctionsRev: Int
+    let corrections: [EntityCorrection]
+
+    enum CodingKeys: String, CodingKey {
+        case corrections
+        case jobId = "job_id"
+        case correctionsRev = "corrections_rev"
+    }
+}
+
+struct CorrectionDecisionRequest: Encodable {
+    let status: String
+    let toText: String?
+    let correctionsRev: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case toText = "to_text"
+        case correctionsRev = "corrections_rev"
+    }
 }

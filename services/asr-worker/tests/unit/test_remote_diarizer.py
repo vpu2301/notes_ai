@@ -45,6 +45,18 @@ JOB = uuid4()
 AUDIO = uuid4()
 
 
+@pytest.fixture(autouse=True)
+def _speech_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stand-in audio is zeros but stands for speech: VAD says so, so
+    the TQ2 gates (which protect speech VAD heard) leave the text alone."""
+    from asr_worker import vad as _vad
+
+    def runs(pcm: np.ndarray, **_kw: Any) -> _vad.SpeechRuns:
+        return _vad.SpeechRuns(runs=[_vad.SpeechSegment(0, max(1, int(len(pcm) / 16)))])
+
+    monkeypatch.setattr(_vad, "speech_runs", runs)
+
+
 class _Conn:
     """One job row; remembers every statement so the test can read the
     completion UPDATE back."""

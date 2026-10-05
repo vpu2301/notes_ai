@@ -807,6 +807,33 @@ actor APIClient {
         return try decode(AISettings.self, from: data)
     }
 
+    // MARK: - Billing (0068)
+
+    /// The workspace's plan, the catalogue and this month's usage. Admins only (403 otherwise).
+    func billing() async throws -> Billing {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/billing", method: "GET",
+                                  authorized: true)
+        return try decode(Billing.self, from: data)
+    }
+
+    /// `applied`: the plan already changed. `redirect`: pay at `redirectURL`
+    /// first (Stripe Checkout) — the plan changes when the payment lands.
+    func changePlan(_ plan: String, yearly: Bool = false) async throws -> ChangePlanResult {
+        let body = ["plan": plan, "interval": yearly ? "yearly" : "monthly"]
+        let data = try await send(base: \.noteBaseURL, path: "/v1/billing/plan", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: body),
+                                  authorized: true)
+        return try decode(ChangePlanResult.self, from: data)
+    }
+
+    /// Spend a redeem code on this workspace (0069). Works without payments.
+    func redeemCode(_ code: String) async throws -> ChangePlanResult {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/billing/redeem", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: ["code": code]),
+                                  authorized: true)
+        return try decode(ChangePlanResult.self, from: data)
+    }
+
     // MARK: - Notes (note-service): open, edit, export
 
     // MARK: - Generation (Sprint 33)
@@ -1118,6 +1145,17 @@ actor APIClient {
     // MARK: - Transcription jobs (asr-service)
 
     /// Plaintext transcript of a COMPLETE job (409 while it is still running).
+    /// Sprint TQ3: accept or reject one unified spelling; a stale
+    /// `correctionsRev` is refused (409) and the caller reloads.
+    func decideCorrection(jobId: String, correctionId: String, status: String,
+                          toText: String?, correctionsRev: Int) async throws -> CorrectionsView {
+        let body = try JSONEncoder().encode(CorrectionDecisionRequest(status: status, toText: toText,
+                                                                      correctionsRev: correctionsRev))
+        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/corrections/\(correctionId)",
+                                  method: "PUT", jsonBody: body, authorized: true)
+        return try decode(CorrectionsView.self, from: data)
+    }
+
     func transcript(jobId: String) async throws -> TranscriptResult {
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/result", method: "GET",
                                   authorized: true)

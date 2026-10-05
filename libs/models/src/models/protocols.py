@@ -8,7 +8,7 @@ the result (``backend``, ``model_id``) for provenance and never chosen here.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -70,6 +70,19 @@ class ChatProvider(Protocol):
 ShouldCancel = Callable[[], Awaitable[bool]]
 
 
+@dataclass(frozen=True, slots=True)
+class SpeechRun:
+    """One VAD speech run the worker planned (Sprint TQ2 T1): where it is in
+    the recording, and the language it is decoded in. ``language_detected``
+    is False when the run is decoded in the recording's language by default
+    (no identification, or an undecided one)."""
+
+    start_ms: int
+    end_ms: int
+    language: str
+    other_language: bool = False
+
+
 @runtime_checkable
 class ASRProvider(Protocol):
     """Batch transcription of 16 kHz mono float32 PCM with per-word timings.
@@ -106,6 +119,24 @@ class ASRProvider(Protocol):
         speech run the first decode lost; decode all of it, with no prompt,
         no conditioning on earlier text and a beam of at least 5 — as far as
         the backend lets a caller choose (HTTP backends: no prompt only)."""
+        ...
+
+    async def transcribe_runs(
+        self,
+        audio_pcm: np.ndarray,
+        runs: Sequence[SpeechRun],
+        *,
+        language: str,
+        prompt: str | None,
+        should_cancel: ShouldCancel | None = None,
+        group_seconds: float = 300.0,
+    ) -> TranscriptionOutput:
+        """Sprint TQ2 T1: decode the worker's planned runs — each in its own
+        ``language`` — and return one transcript on the recording's clock.
+        ``language`` is the recording's. A run in another language comes
+        back with ``Segment.language`` set; the recording's runs leave it
+        ``None``. HTTP backends send runs of one language in groups of at
+        most ``group_seconds``."""
         ...
 
     async def aclose(self) -> None: ...

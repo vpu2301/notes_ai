@@ -25,9 +25,15 @@ a result.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Final
 
-PROMPT_VERSION: Final = "2026-10-23"
+# A real date from Sprint SQ1 on (the day the wording was fixed). Versions
+# 2026-10-12 … 2026-10-23 were labels set ahead of the calendar; they stay in
+# old rows and reports as they were. Compare versions by their history (the
+# hash table in test_meeting_doc_prompts.py), not by string order: the
+# string order broke there once already.
+PROMPT_VERSION: Final = "2026-10-01.3"
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -784,6 +790,31 @@ def restate_suffix(language: str) -> str:
     return _pick(RESTATE_SUFFIX, language)
 
 
+# Sprint SQ2 T3 — the coverage variant of extraction: a third of the
+# recording yielded too few facts, so its passage is read again. Adds only
+# the passage's time range and the ids already found there — no example.
+COVERAGE_SUFFIX: Final[dict[str, str]] = {
+    "en": "This passage runs from {start} to {end}. List facts from this passage that are "
+    "not yet in the following ids: {ids}.",
+    "de": "Dieser Abschnitt reicht von {start} bis {end}. Liste Fakten aus diesem Abschnitt "
+    "auf, die noch nicht unter den folgenden IDs stehen: {ids}.",
+    "uk": "Цей фрагмент триває від {start} до {end}. Перелічи факти з цього фрагмента, "
+    "яких ще немає серед таких ідентифікаторів: {ids}.",
+}
+
+
+def coverage_suffix(language: str, start_ms: int, end_ms: int, ids: Sequence[str]) -> str:
+    def mmss(ms: int) -> str:
+        return f"{ms // 60_000:02d}:{(ms // 1000) % 60:02d}"
+
+    return (
+        _pick(COVERAGE_SUFFIX, language)
+        .replace("{start}", mmss(start_ms))
+        .replace("{end}", mmss(end_ms))
+        .replace("{ids}", ", ".join(ids) or "—")
+    )
+
+
 # F3 — the lines code found an introduction in (a self-introduction cue, or
 # the quote of an asr-service name suggestion), pointed out to the extractor.
 _INTRODUCTION_HINT: Final[dict[str, str]] = {
@@ -1389,6 +1420,8 @@ def fingerprint() -> str:
         "merge": MERGE_SYSTEM,
         "subject_suffix": SUBJECT_SUFFIX,
         "summary_blocks": SUMMARY_BLOCKS,
+        # Sprint SQ2 — the coverage variant of extraction.
+        "coverage_suffix": COVERAGE_SUFFIX,
         # ADR-0059's title call changes what the note says, so it is pinned
         # with the rest (Q6).
         "title": _title_prompt(),

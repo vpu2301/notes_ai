@@ -146,7 +146,10 @@ def build(a: Path, b: Path, corpus: Path, out: Path, *, seed: int = 0, section: 
             f"{t['speaker']}: {t['text']}"
             for t in meeting["transcript"]
         )
-        facts = "\n".join(f"- {f}" for f in meeting.get("gold", {}).get("key_facts", []))
+        facts = "\n".join(
+            f"- {f['text'] if isinstance(f, dict) else f}"
+            for f in meeting.get("gold", {}).get("key_facts", [])
+        )
         (out / f"{pair_id}.md").write_text(
             f"# Pair {pair_id}\n\n## Transcript\n\n{transcript}\n\n"
             f"## What the note should carry\n\n{facts}\n\n"
@@ -276,6 +279,10 @@ RUBRIC: tuple[tuple[str, str, str], ...] = (
     ("q7", "Volume", "Body words within the band shown below: 2 yes · 1 within 25 % · 0 worse"),
     ("q8", "Form", "Copies, description, redundancy, rendering defects: 2 none · 1 one · 0 more"),
 )  # fmt: skip
+# SQ3 T4 — asked beside the rubric, not scored in it: does the title (the
+# note's "# " line) describe the whole recording? yes / no.
+TITLE_QUESTION = ("title_whole", "Does the title describe the whole recording, not only its "
+                  "beginning? yes · no")  # fmt: skip
 RUBRIC_MAX = 2 * len(RUBRIC)
 RUBRIC_GATE_MEAN = 13.0
 RUBRIC_GATE_FAITHFUL = 0.95  # share of notes with Q4 = 2
@@ -309,7 +316,7 @@ def rubric_build(arms: dict[str, Path], corpus: Path, out: Path, *, seed: int = 
         if (folder / f"{meeting_id}.md").is_file()
     ]
     rng.shuffle(notes)
-    sheet: list[list[str]] = [["note_id", "rater", *(q for q, _n, _t in RUBRIC)]]
+    sheet: list[list[str]] = [["note_id", "rater", *(q for q, _n, _t in RUBRIC), TITLE_QUESTION[0]]]
     key: list[list[str]] = [["note_id", "meeting_id", "arm"]]
     for n, (meeting_id, arm, path) in enumerate(notes, 1):
         note_id = f"n{n:03d}"
@@ -324,6 +331,7 @@ def rubric_build(arms: dict[str, Path], corpus: Path, out: Path, *, seed: int = 
             for t in meeting["transcript"]
         )
         questions = "\n".join(f"- **{q.upper()} {name}** — {text}" for q, name, text in RUBRIC)
+        questions += f"\n- **Title** — {TITLE_QUESTION[1]}"
         (out / f"{note_id}.md").write_text(
             f"# Note {note_id}\n\n## Questions (0–2 each)\n\n{questions}\n\n"
             f"**Q4 lines to check:**\n\n" + "\n".join(f"- {ln}" for ln in checked) + "\n\n"
@@ -332,7 +340,7 @@ def rubric_build(arms: dict[str, Path], corpus: Path, out: Path, *, seed: int = 
             f"## The note\n\n{text}\n\n## Transcript\n\n{transcript}\n",
             encoding="utf-8",
         )
-        sheet.append([note_id, "", *([""] * len(RUBRIC))])
+        sheet.append([note_id, "", *([""] * len(RUBRIC)), ""])
         key.append([note_id, meeting_id, arm])
     for name, rows in (("rubric.csv", sheet), ("rubric_key.csv", key)):
         with (out / name).open("w", newline="", encoding="utf-8") as handle:
@@ -355,9 +363,15 @@ def rubric_score(ratings_path: Path, key_path: Path) -> dict[str, Any]:
     for row in rows:
         by_note[row["note_id"]].append(row)
     arms: dict[str, list[dict[str, float]]] = defaultdict(list)
+    title_votes: dict[str, list[bool]] = defaultdict(list)
     for note_id, ratings in by_note.items():
         scores = {q: float(statistics.median(int(r[q]) for r in ratings)) for q, _n, _t in RUBRIC}
         arms[key[note_id]["arm"]].append(scores)
+        # SQ3 T4: the majority of the raters who answered the title question.
+        said = [r.get(TITLE_QUESTION[0], "").strip().casefold() for r in ratings]
+        said = [s for s in said if s in ("yes", "no")]
+        if said:
+            title_votes[key[note_id]["arm"]].append(said.count("yes") * 2 > len(said))
     out: dict[str, Any] = {"raters": len({r["rater"] for r in rows}), "arms": {}}
     for arm, notes in sorted(arms.items()):
         totals = [sum(n.values()) for n in notes]
@@ -368,6 +382,9 @@ def rubric_score(ratings_path: Path, key_path: Path) -> dict[str, Any]:
             "per_question": {q: sum(n[q] for n in notes) / len(notes) for q, _name, _t in RUBRIC},
             "faithful_share": sum(1 for n in notes if n["q4"] == 2) / len(notes),
             "orientation_zero": sum(1 for n in notes if n["q1"] == 0),
+            "title_whole_share": (
+                sum(title_votes[arm]) / len(title_votes[arm]) if title_votes[arm] else None
+            ),
         }
     ours = out["arms"].get(PIPELINE)
     out["release_gate"] = (

@@ -9,6 +9,7 @@ gets a new one here and in the document, together.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Final
 
 # code → (layer, severity, category). Severity: S0 incident, S1 misleads,
@@ -229,7 +230,68 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "judge_problems": ("F-INV", "F-DIST", "F-NUM", "F-ATTR"),
     "deterministic_vs_judge_disagreement": ("P-MEAS",),
     "judge_lines": ("P-MEAS",),
+    # Sprint TQ1 — the transcript harness (scripts/eval/asr_scoring.py)
+    "wer": ("T-ENT", "T-COV", "T-DISP"),
+    "entity_error_rate": ("T-ENT",),
+    "entity_consistency": ("T-ENT",),
+    "entity_variants": ("T-ENT",),
+    "number_date_error_rate": ("T-ENT",),
+    "halluc_chars_per_nonspeech_min": ("T-INJ",),
+    "artefact_hits": ("T-INJ",),
+    "speech_coverage": ("T-COV",),
+    "unexplained_gaps": ("T-COV",),
+    "codeswitch_coverage": ("T-LANG",),
+    "translated_segments": ("T-LANG",),
+    "nonspeech_marked": ("T-ADV",),
+    "nonspeech_content_lines": ("T-ADV",),
+    "punctuated_share": ("T-DISP",),
+    # Sprint SQ1 — the summary criteria
+    "participant_precision": ("F-ROLE",),
+    "participant_recall": ("F-ROLE",),
+    "opinion_attribution": ("F-ATTR",),
+    "filler_lines": ("D-RED",),
+    "title_ok": ("D-HEAD", "F-INV"),
+    "by_third_ratio": ("F-COV",),
+    "propagated_from_asr": ("T-ENT",),
+    "invented_vs_truth": ("F-INV",),
+    # Sprint SQ2 — the whole recording is in the note
+    "sections_count_ok": ("D-STRUCT",),
+    "near_empty_rate": ("F-COV",),
+    "one_bullet_sections": ("D-STRUCT",),
+    # Sprint SQ3 — reads like a note
+    "speaker_shaped_lines": ("D-FORM",),
+    "order_inversions": ("D-STRUCT",),
+    "redundancy_ok_rate": ("D-RED",),
+    # Sprint TQ3 — the spelling overlay
+    "entity_consistency_raw": ("T-ENT",),
+    "entity_error_rate_raw": ("T-ENT",),
+    "wrong_merges": ("T-ENT",),
+    "wrong_merges_per_10": ("T-ENT",),
+    "clusters_applied": ("T-ENT",),
+    "clusters_proposed": ("T-ENT",),
 }
+
+# Keys a scorer's aggregate may carry that are not error measurements, each
+# with why it has no code. Anything else without a code fails
+# tests/unit/test_notes_gates.py (quality criteria §6 rule 5).
+UNCODED_METRICS: Final[dict[str, str]] = {
+    "n": "sample size",
+    "directional": "sample-size flag (n < 20)",
+    "not_measured": "sample-size flag (n < 3)",
+    "word_ts_median_ms": "timing contract (ADR-0037), not a content error",
+    "word_ts_p90_ms": "timing contract (ADR-0037), not a content error",
+    "words_without_timestamps": "timing contract (ADR-0037), not a content error",
+    "rtf": "speed (TR-12)",
+    "rtf_p95": "speed (TR-12)",
+    "seconds_per_audio_hour": "speed and cost (TR-12)",
+    "seconds_per_meeting_hour_p95": "speed (SM-14)",
+}
+
+
+def uncoded_metrics(keys: Iterable[str]) -> list[str]:
+    """The keys that have neither a code nor a stated reason for none."""
+    return sorted(k for k in keys if k not in METRIC_CODES and k not in UNCODED_METRICS)
+
 
 # A person's dismiss reason (notes_corrections.DismissReason) → the one
 # code the weekly report counts it under. `not_said` cannot tell an

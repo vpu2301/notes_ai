@@ -524,11 +524,11 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
     checklist = json.loads(
         (notes_assert.ASSERTIONS / "r03_de_palantir_podcast.assertions.json").read_text("utf-8")
     )
-    top = (
-        "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann. "
-        "Themen sind Thiel, Karp und Überwachung.\nGast: Felix Holtermann, Büroleiter beim "
-        "Handelsblatt\n\nZunächst — Palantir wird 2004 gegründet."
+    framing = (
+        "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann "
+        "(Büroleiter beim Handelsblatt). Themen sind Thiel, Karp und Überwachung."
     )
+    top = f"{framing}\n\nZunächst — Palantir wird 2004 gegründet."
     produced = {
         "language": "de",
         "stats": {
@@ -543,9 +543,8 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
                 for n in range(4)
             ),
         ],
-        "lines": [
-            {"kind": "presenter", "text": "Gast: Felix Holtermann, Büroleiter", "fact_ids": ["a"]}
-        ],
+        # SQ3 T2: the guest is named in paragraph 1, never on a "Gast:" line.
+        "lines": [{"kind": "framing", "text": framing, "fact_ids": ["a"]}],
     }
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
     for name in (
@@ -565,8 +564,10 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
     assert not results["overview.prose_paragraphs_min"]
     assert not results["overview.bullets_above_first_heading"]
-    # A presenter is not a guest.
-    produced["lines"][0]["text"] = "Präsentiert von: Felix Holtermann"
+    # Mentioned, but not among who speaks: not the guest line.
+    produced["lines"][0]["text"] = (
+        "Podcast-Folge über Felix Holtermann. Es sprechen Erzähler/in und Anna Berg."
+    )
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
     assert not results["guest_line"]
 
@@ -596,6 +597,15 @@ def test_every_scorer_metric_and_checklist_check_has_a_code() -> None:
         for name, _ok, _s in notes_assert.check(checklist, {"lines": [], "sections": []}):
             codes = taxonomy.check_codes(name, checklist)
             assert codes and set(codes) <= set(taxonomy.CODES), (path.name, name)
+
+
+def test_every_asr_metric_has_a_code_or_a_reason_for_none() -> None:
+    """Sprint TQ1 T3: the transcript harness's aggregate keys are coded."""
+    asr_scoring = _load("asr_scoring")
+    summary = asr_scoring.aggregate([])
+    assert taxonomy.uncoded_metrics(summary) == []
+    # And the rule has teeth: a new, uncoded key is caught.
+    assert taxonomy.uncoded_metrics([*summary, "brand_new_rate"]) == ["brand_new_rate"]
 
 
 def test_the_taxonomy_detectors() -> None:

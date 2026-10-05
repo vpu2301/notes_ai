@@ -7,6 +7,7 @@ note-service router tests use.
 from __future__ import annotations
 
 import contextlib
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -158,6 +159,14 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     async def _dismissed_keys(conn, *, note_id):  # noqa: ANN001
         return set(store.dismissed)
+
+    # ── generation_repository: the lines the engine respelled ───────
+    store.generated_rows = []
+
+    async def _items_for_note(conn, *, note_id, current_only=False):  # noqa: ANN001
+        return list(store.generated_rows)
+
+    monkeypatch.setattr(rc.gen_repo, "items_for_note", _items_for_note)
 
     async def _list_terms(conn):  # noqa: ANN001
         return list(store.terms)
@@ -659,3 +668,80 @@ def test_a_term_remembered_from_a_note_records_where_it_came_from(
         "/v1/glossary", json={"term": "Pardo", "kind": "product", "note_id": str(uuid4())}
     )
     assert other.status_code == 201 and other.json()["source_note_id"] is None
+
+
+# ── a respelling is decided once, for the whole note ───────────────
+
+TWICE = (
+    "- Laut Fabian Reinbold wird die Mehrheit knapp\n"
+    "- Fabian Reinbold widerspricht dem Vorschlag\n"
+    "- Tom: book the room"
+)
+RESPELLED = [{"surface": "Fabian Reinbolt", "canonical": "Fabian Reinbold", "source": "recording"}]
+
+
+def _twice_rig(rig: SimpleNamespace) -> tuple[str, str]:
+    rig.store.versions[1] = _content(discussion=TWICE)
+    first = _key("Laut Fabian Reinbold wird die Mehrheit knapp")
+    second = _key("Fabian Reinbold widerspricht dem Vorschlag")
+    rig.store.generated_rows = [
+        {"item_key": first, "corrections": RESPELLED},
+        {"item_key": second, "corrections": json.dumps(RESPELLED)},
+    ]
+    return first, second
+
+
+def test_a_source_the_engine_added_later_is_not_refused(rig: SimpleNamespace) -> None:
+    # The engine's fourth source ("a name the recording says three times")
+    # made every Accept and Reject a 422 before the handler ran.
+    key = _named_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{key}",
+        json={
+            "expected_version": 1,
+            "action": "correction_accepted",
+            "surface": "Fabian Reinbolt",
+            "canonical": "Fabian Reinbold",
+            "source": "recording",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_rejecting_puts_the_name_back_on_every_line_it_was_respelled_on(
+    rig: SimpleNamespace,
+) -> None:
+    first, second = _twice_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{first}",
+        json={
+            "expected_version": 1,
+            "action": "correction_rejected",
+            "surface": "Fabian Reinbolt",
+            "canonical": "Fabian Reinbold",
+            "source": "recording",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    text = rig.store.versions[2].sections[0].text
+    assert "Reinbold" not in text and text.count("Fabian Reinbolt") == 2
+    # One version for the decision, one log row per line, each tagged.
+    assert 3 not in rig.store.versions
+    assert {c["item_key"] for c in rig.store.corrections} == {first, second}
+    tags = {t for c in rig.store.corrections for t in c["flags_at_time"] if t.startswith("name:")}
+    assert len(tags) == 1 and "Reinbol" not in next(iter(tags))
+
+
+def test_accepting_a_line_that_has_moved_on_is_still_recorded(rig: SimpleNamespace) -> None:
+    _named_rig(rig)
+    resp = rig.client.patch(
+        f"/v1/notes/{NOTE_ID}/items/by-key/{_key('a line that is gone')}",
+        json={
+            "expected_version": 1,
+            "action": "correction_accepted",
+            "surface": "Fabian Reinbolt",
+            "canonical": "Fabian Reinbold",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert rig.store.corrections[0]["action"] == "correction_accepted"

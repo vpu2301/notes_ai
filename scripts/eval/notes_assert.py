@@ -56,6 +56,25 @@ def _has(text: str, needle: str) -> bool:
     return _fold(needle) in _fold(text)
 
 
+_SPEAKER_LEADS = ("es sprechen", "with", "говорять")
+
+
+def speaker_clause(lines: list[dict[str, Any]]) -> str:
+    """Paragraph 1's list of who speaks (SQ3 T2): from its lead to the
+    sentence's end."""
+    for ln in lines:
+        if ln.get("kind") not in ("framing", "presenter"):
+            continue
+        folded = _fold(ln["text"])
+        for lead in _SPEAKER_LEADS:
+            at = folded.find(lead + " ")
+            if at >= 0:
+                rest = ln["text"][at:]
+                end = re.search(r"\.(?:\s|$)(?![^(]*\))", rest)
+                return rest[: end.start()] if end else rest
+    return ""
+
+
 def checklist_for(meeting_file: Path) -> dict[str, Any] | None:
     stem = meeting_file.name.removesuffix(".json")
     for candidate in (
@@ -178,13 +197,16 @@ def check(
         rows = [ln for ln in lines if ln.get("kind") == "figure"]
         add("figures_cited", bool(rows) and all(ln.get("fact_ids") for ln in rows), "figures")
     if "presenter_line" in checklist:
+        # SQ3 T1/T2: the presenter is named in paragraph 1 ("With Name (role
+        # with organisation, qualifier)"), from the same verified fields the
+        # F3 line had; the check is that every one of them is there.
+        want = checklist["presenter_line"].split(":", 1)[-1]
+        name, _, rest = want.partition(",")
+        fields = [name.strip(), *re.split(r"[(),]", rest)]
+        framing = " ".join(ln["text"] for ln in lines if ln.get("kind") in ("framing", "presenter"))
         add(
             "presenter_line",
-            any(
-                ln.get("kind") == "presenter"
-                and _fold(ln["text"]) == _fold(checklist["presenter_line"])
-                for ln in lines
-            ),
+            all(_has(framing, f.strip()) for f in fields if f.strip()),
             "presenter_line",
         )
     if checklist.get("contact_line"):
@@ -196,19 +218,9 @@ def check(
         reasons = {r[2] for r in stats.get("excluded_ranges") or [] if len(r) > 2}
         add(f"excluded_reasons[{i}]", reason in reasons, "excluded_reasons")
     if "guest_line" in checklist:
-        from note_service.domain.meeting_doc.render import GUEST_LABELS
-
-        labels = {_fold(label) for label in GUEST_LABELS.values()}
-        add(
-            "guest_line",
-            any(
-                ln.get("kind") == "presenter"
-                and _has(ln["text"], checklist["guest_line"])
-                and _fold(ln["text"]).split(":", 1)[0] in labels
-                for ln in lines
-            ),
-            "guest_line",
-        )
+        # SQ3 T2: the guest is named once, among who speaks in paragraph 1
+        # ("Es sprechen …, als Gast Name (…)") — not merely mentioned.
+        add("guest_line", _has(speaker_clause(lines), checklist["guest_line"]), "guest_line")
     headed = [
         s
         for s in produced.get("sections") or []

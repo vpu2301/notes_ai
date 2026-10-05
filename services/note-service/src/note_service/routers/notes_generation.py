@@ -28,6 +28,7 @@ from .. import audit_kinds
 from ..deps import get_state, requires
 from ..domain import access, generation_service
 from ..domain import generation_repository as gen_repo
+from ..domain import glossary_repository as glossary_repo
 from ..domain import notes_repository as repo
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
@@ -366,6 +367,7 @@ async def generated_items(
         rows = await gen_repo.items_for_note(
             conn, note_id=note_id, current_only=generation == "current"
         )
+        reviewed = await glossary_repo.reviewed_name_tags(conn, note_id=note_id)
     return [
         GeneratedItemView(
             item_key=str(r["item_key"]),
@@ -389,7 +391,7 @@ async def generated_items(
             attributed_to=_get(r, "attributed_to"),
             parent_key=_get(r, "parent_key"),
             figure=_figure(_get(r, "payload")) if r["kind"] == "figure" else None,
-            corrections=_json_list(_get(r, "corrections")),
+            corrections=_undecided(_json_list(_get(r, "corrections")), reviewed),
             mentions=_json_list(_get(r, "mentions")),
         )
         for r in rows
@@ -402,6 +404,20 @@ def _get(row: object, key: str) -> object:
         return row[key]  # type: ignore[index]
     except (KeyError, IndexError):
         return None
+
+
+def _undecided(corrections: list[object], reviewed: set[str]) -> list[object]:
+    """The respellings still waiting for the author: one accepted or
+    rejected anywhere in the note is not offered again."""
+    if not reviewed:
+        return corrections
+    return [
+        c
+        for c in corrections
+        if not isinstance(c, dict)
+        or glossary_repo.name_review_tag(str(c.get("surface", "")), str(c.get("canonical", "")))
+        not in reviewed
+    ]
 
 
 def _json_list(value: object) -> list:

@@ -254,6 +254,21 @@ class Settings(BaseSettings):
     # (docs/eval/notes-baseline-2026-09.md). Turn on per environment only
     # with an eval report that clears the gate for that backend.
     note_entity_model_tier: bool = Field(default=False, alias="MDX_NOTE_ENTITY_MODEL_TIER")
+    # Billing (0068): who takes payment for a plan change. `none` shows
+    # plans and changes nothing; `manual` changes the plan at once with no
+    # payment (dev, operator moves); `stripe` arrives with Stripe.
+    billing_provider: Literal["none", "manual"] = Field(
+        default="none", alias="MDX_BILLING_PROVIDER"
+    )
+    # Sprint SQ2 T3: past this many seconds per hour of recording (measured
+    # from the start of the generation), the coverage guard's one re-read of
+    # a thin third is skipped and the third is named as missing instead.
+    # Unset: no limit. SM-14 is 300 s per meeting-hour at p95 on staging; no
+    # routed backend meets it yet (docs/eval/sq2-coverage-2026-10-01.md), so a
+    # limit now would switch the guard off everywhere.
+    note_coverage_retry_budget_s_per_hour: float | None = Field(
+        default=None, alias="MDX_NOTE_COVERAGE_RETRY_BUDGET_S_PER_HOUR"
+    )
     clip_max_span_ms: int = Field(default=60_000, alias="MDX_CLIP_MAX_SPAN_MS")
     clip_pad_ms: int = Field(default=300, alias="MDX_CLIP_PAD_MS")
     # Sprint 35 raised this from 30: playing the seconds behind a cited

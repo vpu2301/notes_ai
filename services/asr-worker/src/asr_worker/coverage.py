@@ -48,6 +48,8 @@ LOW_COVERAGE_CAUSE: Final = "low_coverage"
 PROMPT_ECHO_CAUSE: Final = "prompt_echo"
 DECODER_EMPTY_CAUSE: Final = "decoder_empty"
 TIMEOUT_CAUSE: Final = "timeout"
+# Sprint TQ2 G2: a repetition loop the gate truncated.
+LOOP_CAUSE: Final = "loop"
 
 
 def _mid(start_ms: int, end_ms: int) -> float:
@@ -209,6 +211,8 @@ class RunOutcome:
     echo_removed: bool = False
     other_language: bool = False
     second_pass_words: int | None = None  # None = no second pass ran
+    # Sprint TQ2: the backend request for this run's group failed.
+    backend_error: bool = False
 
 
 def gap_cause(outcome: RunOutcome, *, first_frame_offset_ms: int | None) -> GapCause:
@@ -219,6 +223,8 @@ def gap_cause(outcome: RunOutcome, *, first_frame_offset_ms: int | None) -> GapC
         and abs(run.end_ms - first_frame_offset_ms) <= NO_AUDIO_TOLERANCE_MS
     ):
         return "no_audio"
+    if outcome.backend_error:
+        return "backend_error"
     if run.floor_only:
         return "no_speech_detected"
     if outcome.echo_removed:

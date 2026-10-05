@@ -200,7 +200,9 @@ def test_every_model_pass_failing_still_writes_prose_and_chapters() -> None:
     document = _run(_recording(40), ScriptedProvider(overrides=FAIL_ALL))  # 13 minutes
     assert document.stats["summary_ladder"] == "composed"
     assert document.stats["topics_fallback"] == "chapters"
-    assert document.stats["block_chapters"] == document.stats["blocks"] >= 3
+    # SQ2 T4: parts come from the transcript; a part with fewer than two
+    # facts joins its neighbour, so a 13-minute recording may have two.
+    assert document.stats["block_chapters"] == document.stats["blocks"] >= 2
     top = document.sections[0]
     paragraphs = top.text.split("\n\n")
     assert len(paragraphs) == 2
@@ -264,13 +266,16 @@ def test_a_long_recording_asks_block_by_block_and_merges_only_within_the_band() 
     provider = ScriptedProvider(overrides={"block": block, "merge": merge})
     document = _run(_recording(100), provider)  # 33 minutes
     calls = [c for c in provider.calls if c[0] == "block"]
-    assert len(calls) == document.stats["blocks"] >= 6
+    # SQ2 T4: the transcript gives 8 parts; parts the facts leave under two
+    # are merged into a neighbour (counted), so at least five remain here.
+    assert len(calls) == document.stats["blocks"] >= 5
+    assert document.stats["blocks_boundaries"] == 7
     assert [c for c in provider.calls if c[0] == "merge"]
     assert document.stats["topics_fallback"] is None
     titles = [s.title for s in document.sections if s.role == roles.TOPICS]
     # Every proposed merge would have gone under the band: most are refused.
     assert document.stats["merges_refused"] >= 1
-    assert len(titles) >= 6
+    assert len(titles) >= 5
 
 
 # ── §2.10 the support gate per language ─────────────────────────────
@@ -298,42 +303,49 @@ def test_the_line_gate_threshold_is_per_language() -> None:
 
 
 def test_introductions_sit_in_the_first_paragraph_and_never_read_as_turns() -> None:
-    from note_service.domain.meeting_doc import render, verify
+    """SQ3 T1/T2: who presented and who was a guest are named once, inside
+    "Es sprechen …" — no "Gast: X" paragraph, which every client would draw
+    as a transcript turn."""
+    from note_service.domain.meeting_doc import compose, render, roles_table, verify
 
-    people = [
-        VerifiedFact(
-            kind=schema.INTRODUCTION,
-            text="x",
-            quote="x y z",
-            turn=0,
-            start_ms=n * 1_000,
-            end_ms=n * 1_000 + 1,
-            speaker_label=f"SPEAKER_{n}",
-            speaker_name=None,
-            person=verify.Person(
-                name=name,
-                role="Reporterin",
-                organisation="Handelsblatt",
-                self_introduction=n == 0,
-                joiner="beim",
-                standing="presenter" if n == 0 else "guest",
+    def person(name: str, self_intro: bool) -> verify.Person:
+        return verify.Person(
+            name=name,
+            role="Reporterin",
+            organisation="Handelsblatt",
+            self_introduction=self_intro,
+            joiner="beim",
+        )
+
+    table = roles_table.RolesTable(
+        speakers={
+            "SPEAKER_0": roles_table.Speaker(
+                "SPEAKER_0", 0.6, 40, 0.1, roles_table.NARRATOR, "Anna Berg", person("Anna Berg", True)
             ),
-        )  # fmt: skip
-        for n, name in enumerate(["Anna Berg", "Felix Holtermann", "Eva Klein", "Jonas Roth"])
-    ]
+            "SPEAKER_1": roles_table.Speaker(
+                "SPEAKER_1", 0.3, 20, 0.4, roles_table.GUEST, "Felix Holtermann",
+                person("Felix Holtermann", False),
+            ),
+        }
+    )  # fmt: skip
+    framing = compose.orientation_p1(
+        language="de", recording_type="podcast_broadcast", table=table, subject="Palantir"
+    )
     point = _vf("Palantir wurde im Jahr 2004 gegründet", 9_000)
     [top, *_rest] = render.render_sections(
-        [*people, point],
+        [point],
         role_by_key={},
         language="de",
-        framing="Podcast-Folge über Palantir.",
+        framing=framing,
         summary=[("Palantir wurde 2004 gegründet.", [point.item_key])],
         presenter_lines=True,
     )
     paragraphs = top.text.split("\n\n")
     assert len(paragraphs) == 2
-    assert paragraphs[0].startswith("Podcast-Folge über Palantir.\n")
-    assert "Gast: Felix Holtermann, Reporterin beim Handelsblatt" in paragraphs[0]
+    assert paragraphs[0].startswith("Podcast-Folge über Palantir.")
+    assert "Anna Berg (Reporterin beim Handelsblatt)" in paragraphs[0]
+    assert "als Gast Felix Holtermann (Reporterin beim Handelsblatt)" in paragraphs[0]
+    assert "Gast:" not in top.text
     assert not client_view.looks_like_transcript(top.text)
 
 
@@ -347,17 +359,22 @@ def test_default_speaker_names_are_nobody() -> None:
         Turn(2, "SPEAKER_2", "Speaker 2", "Antwort", 52_000, 60_000),
     ]
     table = roles_table.build(turns, [], "podcast_broadcast")
-    assert compose.speakers_of(table, "de") == (["Erzähler/in"], [])
+    # SQ3 T2: the second voice speaks enough to be listed — unnamed, as a
+    # person, never as its label.
+    assert compose.speakers_of(table, "de") == (["Erzähler/in"], [], ["eine weitere Person"])
     named = [
         *turns,
         *(
-            Turn(3 + n, "SPEAKER_3", "Ada Lovelace", "Hallo", 60_000 + n, 61_000 + n)
+            Turn(
+                3 + n, "SPEAKER_3", "Ada Lovelace", "Hallo", 60_000 + n * 5_000, 64_000 + n * 5_000
+            )
             for n in range(3)
         ),
     ]
     table = roles_table.build(named, [], "meeting")
-    assert "Ada Lovelace" in compose.speakers_of(table, "de")[0]
-    assert all("Speaker" not in s for s in compose.speakers_of(table, "de")[0])
+    listed = [w for part in compose.speakers_of(table, "de") for w in part]
+    assert "Ada Lovelace" in listed
+    assert all("Speaker" not in s for s in listed)
 
 
 def test_composed_prose_passes_over_a_part_that_names_nothing() -> None:

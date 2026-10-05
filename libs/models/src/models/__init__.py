@@ -39,6 +39,7 @@ from .protocols import (
     JsonSchema,
     ProviderResult,
     ShouldCancel,
+    SpeechRun,
 )
 from .recorded import RecordedChatProvider
 from .registry import (
@@ -75,6 +76,7 @@ __all__ = [
     "Registry",
     "ResolvedBackend",
     "ShouldCancel",
+    "SpeechRun",
     "TranscriptionCancelledError",
     "UsageRecord",
     "UsageSink",

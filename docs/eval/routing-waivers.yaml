@@ -1,0 +1,35 @@
+# Routing waivers (Sprint SQ1 T6, scripts/ci/check-routing-has-report.py).
+#
+# A backend that config/models.yaml routes a chat operation to must have a
+# notes report on eval/notes/v2 at the current PROMPT_VERSION — or a waiver
+# here for that exact (backend, prompt_version), with the reason, an owner
+# and an expiry date. A routing change or a prompt bump without one fails CI.
+# A waiver is a recorded exception, not a substitute: it says the number is
+# missing and why.
+waivers:
+  - backend: hf_eu
+    prompt_version: "2026-10-01"
+    reason: >-
+      Staging routes Gemma 3 4B (hf_eu) as before SQ1. There is no eval/notes/v2
+      report: the owner decided on 2026-10-01 not to label a gold set and to judge
+      notes on real recordings instead (ADR-0068). The only numbers are the
+      synthetic m01–m11 runs.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-01.2"
+    reason: >-
+      Sprint SQ2 bumped the prompt version (the coverage variant of extraction).
+      Staging still routes hf_eu with no eval/notes/v2 report, for the same reason
+      as the 2026-10-01 waiver above; SQ2's numbers are synthetic and on the
+      hf_eu stand-in (docs/eval/sq2-coverage-2026-10-01.md).
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-01.3"
+    reason: >-
+      Sprint SQ3 changed the title prompt (excerpts from each third plus the
+      note's themes and facts). Staging still routes hf_eu with no
+      eval/notes/v2 report, for the same reason as the waivers above.
+    owner: founder
+    expires: 2026-12-31

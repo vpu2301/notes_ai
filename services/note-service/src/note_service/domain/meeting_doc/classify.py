@@ -137,6 +137,37 @@ _SLIDE_WORDS: Final = re.compile(
 )
 
 
+# Sprint SQ2 T4 — a speaker saying the recording moves to its next part.
+# Closed per-language patterns; the match is a time, never stored as text.
+STRUCTURE_CUES: Final[dict[str, re.Pattern[str]]] = {
+    "de": re.compile(
+        r"\b(?:kapitel\s+(?:\d+|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)"
+        r"|(?:nächste[rnms]?|zweite[rnms]?|dritte[rnms]?|letzte[rnms]?)\s+(?:punkt|kapitel|thema|teil)"
+        r"|tagesordnungspunkt|kommen wir (?:jetzt |nun )?zu(?:m|r)?\b|weiter geht'?s mit)",
+        re.IGNORECASE,
+    ),
+    "en": re.compile(
+        r"\b(?:chapter\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+        r"|let'?s move on|moving on to|(?:next|second|third|last)\s+(?:item|topic|point|chapter|part)"
+        r"|agenda item|that brings us to)",
+        re.IGNORECASE,
+    ),
+    "uk": re.compile(
+        r"(?:перейдемо до|переходимо до|наступн(?:е|ий|а)\s+(?:питання|пункт|тема|розділ|частина)"
+        r"|розділ\s+(?:\d+|перший|другий|третій)|пункт порядку денного)",
+        re.IGNORECASE,
+    ),
+}
+
+
+def structure_cues(turns: Sequence[Any], language: str) -> list[int]:
+    """Start times (ms) of the turns where a speaker announces the next part."""
+    pattern = STRUCTURE_CUES.get(language)
+    if pattern is None:
+        return []
+    return [int(t.start_ms) for t in turns if pattern.search(t.text)]
+
+
 def type_cues(
     turns: Sequence[Any], table: Any, adverts: Sequence[tuple[int, int]] = ()
 ) -> tuple[str | None, dict[str, Any]]:
@@ -145,13 +176,13 @@ def type_cues(
     Podcast: a show word or jingle, a guest interview, sound-bite clips, an
     advert break. Lecture: one voice with no guest and no clips, slide
     vocabulary. More cues win; a tie is None — the classifier stands."""
-    from .roles_table import ADVERT, CLIP, GUEST, INTERVIEWEE
+    from .roles_table import ADVERT, CLIP, EXPERT, GUEST, INTERVIEWEE
 
     text = " ".join(t.text for t in turns)
     roles = [s.role for s in table.speakers.values()]
     podcast = {
         "show": bool(_SHOW_WORDS.search(text)),
-        "guest": any(r in (GUEST, INTERVIEWEE) for r in roles),
+        "guest": any(r in (GUEST, INTERVIEWEE, EXPERT) for r in roles),
         "clips": CLIP in roles,
         "advert": bool(adverts),
     }

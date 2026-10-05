@@ -28,6 +28,9 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Sequence
+from functools import cache
+from importlib import resources
 from typing import Any, Final
 from uuid import UUID
 
@@ -137,7 +140,8 @@ SCHEMA: Final[dict[str, Any]] = {
 _SYSTEM: Final = (
     "You name notes. Read a meeting transcript and write a concise title for the note.\n"
     "- Name the primary topic or purpose of the conversation as a whole, not its first "
-    "sentence.\n"
+    "sentence. The excerpts come from its beginning, middle and end; a second block, when "
+    "there is one, lists themes and facts found across the whole recording.\n"
     "- Prefer specific nouns (products, projects, customers, subjects) over generic labels.\n"
     "- 30 to 80 characters, 3 to 10 words, sentence case. Name the subject and, when "
     "the conversation has one, the angle; at most one colon.\n"
@@ -182,7 +186,10 @@ def meaningful_word_count(result: dict[str, Any]) -> int:
 
 
 def sample(result: dict[str, Any], *, budget: int = SAMPLE_WORDS) -> str:
-    """The transcript, or evenly spread excerpts of it when it is long."""
+    """The transcript, or — when it is long — three excerpts (400 words each
+    at the default budget): its opening, its middle and its end, one in each
+    third, so the title can name the whole recording (TI-02, SQ3 T4). The
+    opening is kept whole: it is where a recording says what it is about."""
     words = _spoken(result)
     if len(words) <= budget:
         return " ".join(words)
@@ -219,13 +226,38 @@ def _answer_text(answer: Any) -> str:
     return str(parsed.get("title") or "") if isinstance(parsed, dict) else ""
 
 
-async def suggest(provider: Any, result: dict[str, Any], *, language: str) -> str | None:
+# SQ3 T4 — what the note found, given as context: its themes and the
+# verified facts that name, count or date the most.
+CONTEXT_FACTS: Final = 5
+
+
+def context_block(themes: Sequence[str], facts: Sequence[str]) -> str:
+    """The note's themes and top facts, as data — verified text only."""
+    lines = []
+    if themes:
+        lines.append("Themes: " + "; ".join(t.strip() for t in themes if t.strip()))
+    lines += [f"- {f.strip()}" for f in facts[:CONTEXT_FACTS] if f.strip()]
+    return "\n".join(lines)
+
+
+async def suggest(
+    provider: Any,
+    result: dict[str, Any],
+    *,
+    language: str,
+    themes: Sequence[str] = (),
+    facts: Sequence[str] = (),
+) -> str | None:
     """A title for this transcript, or None: not enough said, no topic,
-    or the model failed. Never raises."""
+    or the model failed. Never raises. ``themes`` and ``facts`` (SQ3 T4)
+    are what the note found across the whole recording."""
     if meaningful_word_count(result) < MIN_MEANINGFUL_WORDS:
         return None
     system = _SYSTEM.format(language=language_name(language), guard=prompts.guard(language))
     prompt = f"{prompts.DATA_OPEN}\n{sample(result)}\n{prompts.DATA_CLOSE}"
+    found = context_block(themes, facts)
+    if found:
+        prompt += f"\n\n{prompts.DATA_OPEN}\n{found}\n{prompts.DATA_CLOSE}"
     try:
         answer = await asyncio.wait_for(
             provider.complete(
@@ -239,7 +271,7 @@ async def suggest(provider: Any, result: dict[str, Any], *, language: str) -> st
     title = clean(_answer_text(answer))
     if not title:
         return None
-    reason = unsupported(title, result)
+    reason = unsupported(title, result, language=language)
     if reason is not None:
         logger.info("note_title.skipped", extra={"reason": reason})
         return None
@@ -250,25 +282,74 @@ async def suggest(provider: Any, result: dict[str, Any], *, language: str) -> st
 # first letters with it: English titles are title-cased, so "Planning"
 # over a transcript that says "plan" is a topic word, not a new name.
 _NAME_PREFIX: Final = 4
+# Shortest part a German compound is split into ("Lehrer|mangel").
+_COMPOUND_PART: Final = 3
+# German joins compound parts with these ("Bildung|s|notstand").
+_LINKS: Final = ("s", "es", "n", "en", "e")
 
 
-def unsupported(title: str, result: dict[str, Any]) -> str | None:
+@cache
+def _lexicon(name: str) -> frozenset[str]:
+    """One of the Tatoeba lists in ``asr_models/resources`` (CC-BY 2.0 FR,
+    ``scripts/models/build_frequency_lists.py``); empty when absent."""
+    try:
+        text = resources.files("asr_models").joinpath("resources", name).read_text("utf-8")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return frozenset()
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _common(word: str, language: str, heads: set[str], depth: int = 0) -> bool:
+    """A word the language uses for things rather than names: in its
+    common-word list and never a name in English, or — German — a compound
+    of such words and words that were said ("Lehrermangel"). A summary
+    word the speakers never used ("Krise") is a topic, not a new name;
+    "Berlin" or "Merkel" that nobody said still is a name."""
+    lang = (language or "").split("-")[0].lower()
+    if word in _lexicon("names.txt"):
+        return False
+    if word in _lexicon(f"freq_{lang}.txt"):
+        return True
+    if lang != "de" or depth > 2:
+        return False
+    for i in range(_COMPOUND_PART, len(word) - _COMPOUND_PART + 1):
+        head, rest = word[:i], word[i:]
+        stems = [head] + [head[: -len(s)] for s in _LINKS if head.endswith(s)]
+        if not any(
+            len(s) >= _COMPOUND_PART
+            and s not in _lexicon("names.txt")
+            and (s in _lexicon("freq_de.txt") or s[:_NAME_PREFIX] in heads)
+            for s in stems
+        ):
+            continue
+        if rest[:_NAME_PREFIX] in heads and len(rest) >= _NAME_PREFIX:
+            return True
+        if _common(rest, lang, heads, depth + 1):
+            return True
+    return False
+
+
+def unsupported(title: str, result: dict[str, Any], *, language: str = "") -> str | None:
     """Why this title may not be written, or None (Summary Engine v2, Q6).
 
     ``example`` — it repeats a prompt example: the model copied its
     instructions. ``unsupported`` — it names someone or something the
-    transcript never says. Same rules as the document's lines."""
+    transcript never says. Same rules as the document's lines, except
+    that a common word of ``language`` is a topic, not a name: German
+    capitalises every noun and English titles every word."""
     if prompts.echoes_example(title):
         return "example"
     # The document standard §1: one colon at most, and never the shape of
     # a placeholder ("Meeting notes — 2026-09-26").
     said = " ".join(_spoken(result))
     heads = {w[:_NAME_PREFIX] for w in _WORD.findall(said.casefold()) if len(w) >= _NAME_PREFIX}
+    language = language or str(result.get("language") or "")
     # `new_names` never counts a sentence's first word; a title's first
     # word is often the name, so the title is read as a clause.
     for name in support.new_names(f"re {title}", said):
         words = [w for w in _WORD.findall(name.casefold()) if len(w) >= _NAME_PREFIX]
-        if any(w[:_NAME_PREFIX] not in heads for w in words):
+        if any(w[:_NAME_PREFIX] not in heads and not _common(w, language, heads) for w in words):
+            logger.info("note_title.new_name", extra={"word": name})
             return "unsupported"
     # Sprint D1 T2 — the document standard §1 as constraints: 30–80
     # characters, one colon at most, no repeated phrase, not a placeholder.

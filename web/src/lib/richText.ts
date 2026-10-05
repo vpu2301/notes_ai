@@ -130,7 +130,17 @@ function isTable(lines: string[]): boolean {
  * inside a paragraph; a blank line starts a new block — which is how the
  * note editor's plain-text fields behave.
  */
-export function parseRichText(text: string): Block[] {
+export interface ParseOptions {
+  /**
+   * Read a paragraph that opens "Name: …" as a transcript turn (default).
+   * Off for sections the engine wrote (SQ3 T1): a generated paragraph is
+   * never a turn, whatever its first word.
+   */
+  speakerTurns?: boolean;
+}
+
+export function parseRichText(text: string, opts: ParseOptions = {}): Block[] {
+  const speakerTurns = opts.speakerTurns ?? true;
   if (!text || !text.trim()) return [];
 
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
@@ -147,7 +157,7 @@ export function parseRichText(text: string): Block[] {
       .join(" ");
     para = [];
     if (!body) return;
-    const turn = SPEAKER.exec(body);
+    const turn = speakerTurns ? SPEAKER.exec(body) : null;
     if (turn && (turn[1] ?? "").trim().split(/\s+/).length <= 4) {
       blocks.push({ kind: "para", spans: inlineSpans(body.slice(turn[0].length)), speaker: turn[1] });
       return;

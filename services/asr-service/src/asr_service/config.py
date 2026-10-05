@@ -170,6 +170,20 @@ class Settings(BaseSettings):
     # Suggestions ship DARK: on only after the shadow experiment shows
     # ≥ 95 % precision (docs/product/speaker-decisions.md).
     name_suggestions_enabled: bool = Field(default=False, alias="MDX_NAME_SUGGESTIONS_ENABLED")
+    # Sprint TQ3: one name, one spelling. Off = no unification, the view is
+    # the artefact. Auto-apply off (the kill switch) = every correction is a
+    # proposal a person accepts; nothing changes the text on its own.
+    entity_unify_enabled: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_ENABLED")
+    entity_unify_auto_apply: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_AUTO_APPLY")
+    # Seconds the unifier may take per audio hour before its result is
+    # dropped (status ``skipped_budget``); never less than the floor.
+    entity_unify_budget_s_per_hour: float = Field(
+        default=2.0, alias="MDX_ENTITY_UNIFY_BUDGET_S_PER_HOUR"
+    )
+    entity_unify_budget_floor_s: float = Field(default=0.5, alias="MDX_ENTITY_UNIFY_BUDGET_FLOOR_S")
+    entity_unify_recompute_hourly_limit: int = Field(
+        default=20, alias="MDX_ENTITY_UNIFY_RECOMPUTE_HOURLY_LIMIT", ge=1
+    )
     # The engine the worker diarizes with now (keep equal to the worker's
     # MDX_DIAR_ENGINE, as its engine id). A transcript made by another one
     # is offered "Re-label with the current engine".

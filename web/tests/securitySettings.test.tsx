@@ -78,11 +78,11 @@ function stubServer(mfaEnabled: boolean, overrides: Record<string, unknown> = {}
   );
 }
 
-function mount() {
+function mount(view?: "sessions") {
   return render(
     <ToasterProvider>
       <AuthProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[view ? `/settings/security?view=${view}` : "/settings/security"]}>
           <SecuritySettingsPage />
         </MemoryRouter>
       </AuthProvider>
@@ -204,7 +204,7 @@ describe("sessions", () => {
         },
       ],
     });
-    mount();
+    mount("sessions");
 
     const here = await screen.findByText("Chrome on macOS");
     const hereRow = here.closest(".row")!;
@@ -235,7 +235,7 @@ describe("sessions", () => {
       "/auth/sessions": rows,
       "/auth/sessions/s2": new Response(JSON.stringify({ detail: "nope" }), { status: 500 }),
     });
-    mount();
+    mount("sessions");
 
     await user.click(await screen.findByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(screen.getByText("iPhone")).toBeInTheDocument());

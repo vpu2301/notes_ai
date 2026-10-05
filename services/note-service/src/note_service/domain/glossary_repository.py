@@ -6,6 +6,7 @@ the tenant predicate is the policy's, not a WHERE clause here.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -209,6 +210,36 @@ async def dismissed_keys(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]
         note_id,
     )
     return {str(r["item_key"]) for r in rows if r["action"] == "dismiss"}
+
+
+NAME_TAG_PREFIX = "name:"
+
+
+def name_review_tag(surface: str, canonical: str) -> str:
+    """The flag that says "the author decided on THIS respelling".
+
+    The log holds no text (0050), so the pair goes in as a truncated
+    sha256 — enough to tell this note's respellings apart, nothing a
+    reporting role could read a name back out of.
+    """
+    digest = hashlib.sha256(f"{surface}\u2192{canonical}".encode()).hexdigest()[:16]
+    return f"{NAME_TAG_PREFIX}{digest}"
+
+
+async def reviewed_name_tags(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]:
+    """Respellings the author already accepted or rejected in this note,
+    so the "Names in this note" list does not ask twice."""
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT tag
+        FROM note_item_corrections, unnest(flags_at_time) AS tag
+        WHERE note_id = $1
+          AND action IN ('correction_accepted', 'correction_rejected')
+          AND tag LIKE 'name:%'
+        """,
+        note_id,
+    )
+    return {str(r["tag"]) for r in rows}
 
 
 async def corrections_for(conn: asyncpg.Connection, *, note_id: UUID) -> list[asyncpg.Record]:

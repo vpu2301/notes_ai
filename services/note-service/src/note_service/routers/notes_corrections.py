@@ -22,6 +22,7 @@ from ``note_generated_items``, which is Sprint 33.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Annotated, Literal
@@ -38,6 +39,7 @@ from note_models import NoteContent, NoteStatus
 from .. import audit_kinds, generation_metrics
 from ..deps import get_state, requires
 from ..domain import access, lines
+from ..domain import generation_repository as gen_repo
 from ..domain import glossary_repository as glossary_repo
 from ..domain import notes_repository as repo
 from ..domain.action_items import ACTION_SECTION_KEYS
@@ -91,7 +93,10 @@ class PatchItemRequest(BaseModel):
     reason: Literal["wrong_name"] | None = None
     surface: str | None = Field(default=None, min_length=1, max_length=80)
     canonical: str | None = Field(default=None, min_length=1, max_length=80)
-    source: Literal["glossary", "candidate", "model"] | None = None
+    # Where the engine got the spelling (`meeting_doc/entities.py`:
+    # glossary, candidate, model, recording, …). Logged, never branched
+    # on, so a source the engine adds later must not make the buttons fail.
+    source: str | None = Field(default=None, max_length=32, pattern=r"^[a-z_]+$")
 
 
 class CorrectionResponse(BaseModel):
@@ -482,6 +487,26 @@ async def patch_item(
     )
 
 
+async def _keys_respelled(conn: object, *, note_id: UUID, body: PatchItemRequest) -> list[str]:
+    """Every line of the current generation the engine gave this respelling."""
+    rows = await gen_repo.items_for_note(conn, note_id=note_id, current_only=True)  # type: ignore[arg-type]
+    keys: list[str] = []
+    for row in rows:
+        try:
+            raw = row["corrections"]
+        except (KeyError, IndexError):
+            continue
+        corrections = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if any(
+            isinstance(c, dict)
+            and c.get("surface") == body.surface
+            and c.get("canonical") == body.canonical
+            for c in corrections
+        ):
+            keys.append(str(row["item_key"]))
+    return keys
+
+
 async def _name_correction(
     note_id: UUID, item_key: str, body: PatchItemRequest, claims: Claims
 ) -> CorrectionResponse:
@@ -499,50 +524,71 @@ async def _name_correction(
             detail={"code": "correction_incomplete", "detail": "send surface and canonical"},
         )
     rejected = body.action == "correction_rejected"
+    tag = glossary_repo.name_review_tag(body.surface, body.canonical)
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = await _editable(conn, note_id=note_id, claims=claims)
         version = await repo.fetch_version(conn, version_id=note.current_version_id)  # type: ignore[attr-defined]
         if version is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note has no version")
-        located = _locate(version.content, item_key)
-        if located is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="line not found")
-        index, line = located
-        section = version.content.sections[index]
         version_number = note.current_version_number  # type: ignore[attr-defined]
-        written_line = line.raw
-        new_key = item_key
+        # The panel lists a respelling once, but the engine applied it to
+        # every line that names the person: the decision covers them all.
+        keys = [item_key] + [
+            k for k in await _keys_respelled(conn, note_id=note_id, body=body) if k != item_key
+        ]
+        touched: list[tuple[str, str, str]] = []  # (old key, section key, line)
         if rejected:
             pattern = re.compile(rf"(?<!\w){re.escape(body.canonical)}(?!\w)")
-            if not pattern.search(line.raw):
+            content = version.content
+            for key in keys:
+                located = _locate(content, key)
+                if located is None or not pattern.search(located[1].raw):
+                    continue
+                index, line = located
+                written = pattern.sub(body.surface, line.raw)
+                text = lines.replace_line(content.sections[index].text, key, written)
+                if text is None:
+                    continue
+                content = _with_section(content, index, text)
+                touched.append((key, content.sections[index].section_key, written))
+            if not touched:
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail={"code": "correction_not_in_line", "detail": "the name is not there"},
                 )
-            written_line = pattern.sub(body.surface, line.raw)
-            text = lines.replace_line(section.text, item_key, written_line)
-            if text is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="line not found")
             version_number = await _write(
                 conn,
                 note_id=note_id,
                 expected_version=body.expected_version,
-                content=_with_section(version.content, index, text),
+                content=content,
                 claims=claims,
             )
-            new_key = lines.key_of(lines.strip_marker(written_line)[1])
-        await glossary_repo.record_correction(
-            conn,
-            tenant_id=claims.tid,
-            note_id=note_id,
-            item_key=item_key,
-            kind=_kind_of(section.section_key),
-            action=body.action,
-            reason="wrong_name" if rejected else None,
-            flags_at_time=["entity_corrected"],
-            actor_sub=claims.sub,
-        )
+        else:
+            # Accepting writes nothing, so a line that has moved on since
+            # (another name on it was put back) is no reason to refuse.
+            located = _locate(version.content, item_key)
+            if located is None:
+                touched.append((item_key, "", ""))
+            else:
+                index, line = located
+                touched.append((item_key, version.content.sections[index].section_key, line.raw))
+        for key, section_key, _ in touched:
+            await glossary_repo.record_correction(
+                conn,
+                tenant_id=claims.tid,
+                note_id=note_id,
+                item_key=key,
+                kind=_kind_of(section_key),
+                action=str(body.action),
+                reason="wrong_name" if rejected else None,
+                flags_at_time=["entity_corrected", tag],
+                actor_sub=claims.sub,
+            )
+    # The line the client asked about when it was changed, else the first.
+    first = next((t for t in touched if t[0] == item_key), touched[0])
+    _, section_key, written_line = first
+    new_key = lines.key_of(lines.strip_marker(written_line)[1]) if rejected else item_key
     outcome = "rejected" if rejected else "accepted"
     await _audit(
         claims,
@@ -554,7 +600,7 @@ async def _name_correction(
     return CorrectionResponse(
         id=note_id,
         item_key=new_key,
-        section_key=section.section_key,
+        section_key=section_key,
         version_number=version_number,
-        line=written_line,
+        line=written_line or None,
     )

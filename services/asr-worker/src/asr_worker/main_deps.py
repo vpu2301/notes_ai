@@ -57,6 +57,9 @@ class WorkerState:
     # MDX_DIAR_SHADOW_ENGINE: runs after the primary, its labels are
     # discarded — only counts and timing are logged. None = off.
     shadow_diarizer: Diarizer | None = None
+    # Sprint TQ4 T4: MDX_ASR_SHADOW_BACKEND — a candidate ASR engine that
+    # decodes a sample of jobs after the primary; numbers only. None = off.
+    shadow_asr: ASRProvider | None = None
     # Sprint 31: Silero VAD for the dual-channel analysis, built lazily on
     # the first mic/system job (a mono-only worker never loads it).
     channel_segmenter: Any = None
@@ -217,6 +220,12 @@ async def build_state() -> WorkerState:
 
     engine = build_asr(settings.asr_backend)
     await engine.warm_up()
+    # Not warmed here: a cold candidate endpoint must not hold up a worker
+    # that serves real jobs; the first sampled job wakes it (or skips).
+    shadow_name = settings.asr_shadow_backend.strip()
+    shadow_asr = (
+        build_asr(shadow_name) if shadow_name and shadow_name != settings.asr_backend else None
+    )
 
     diarizer = build_diarizer(settings.diar_engine)
     shadow = settings.diar_shadow_engine.strip()
@@ -246,6 +255,7 @@ async def build_state() -> WorkerState:
         engine=engine,
         diarizer=diarizer,
         shadow_diarizer=shadow_diarizer,
+        shadow_asr=shadow_asr,
     )
 
 

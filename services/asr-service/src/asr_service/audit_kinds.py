@@ -33,5 +33,10 @@ REDIARIZE_REQUESTED: Final = "asr.rediarize_requested"
 REDIARIZE_UNDONE: Final = "asr.rediarize_undone"
 REDIARIZE_FAILED: Final = "asr.rediarize_failed"
 
+# Spelling overlay (Sprint TQ3): counts, source, status — never the text.
+TRANSCRIPT_CORRECTION_PROPOSED: Final = "asr.transcript_correction_proposed"
+TRANSCRIPT_CORRECTION_ACCEPTED: Final = "asr.transcript_correction_accepted"
+TRANSCRIPT_CORRECTION_REJECTED: Final = "asr.transcript_correction_rejected"
+
 # Quota
 QUOTA_EXCEEDED: Final = "asr.quota_exceeded"  # severity=warn

@@ -77,3 +77,47 @@ catch the incident and the silence case without it).
   `MDX_ASR_CONDITION_PREV` back on and rely on the guard alone.
 - A bilingual workspace reports flips: raise the chunk threshold or turn chunk LID off per
   environment.
+
+## Amendment (2026-09-30, Sprint TQ2) — every backend, and what decision 5 now covers
+
+**Decision 4 now runs in the worker for every backend.** `asr_worker/chunks.py` holds the
+rule, moved from `inference.py`, not copied. The worker runs VAD once and plans speech runs
+(≤ 30 s, merged < 500 ms). It identifies the recording's language and each run's, then hands
+the backend `SpeechRun`s, each with its own language. The thresholds are unchanged.
+`asr_inproc` uses the engine's own model, so its behaviour is unchanged. `asr_http` gets the
+recording's language from the backend itself: one request on a 30 s speech sample, so the
+production model decides, as it did when it was sent the whole file. Each run's language comes
+from a local faster-whisper **tiny** (`MDX_ASR_LID_MODEL`, baked in the CPU image, 0.2 s per
+run on CPU). Tiny scores clean Ukrainian at 0.63. The rule tolerates that: a run switches only
+when the recording's language is ≤ 0.2, so a weak uk score keeps the run in uk. The last
+sentence of decision 4 ("In-process engine only; HTTP backends leave the field unset") is
+withdrawn.
+
+HTTP backends receive only speech. Runs of one language are joined with 300 ms of silence into
+groups of at most `MDX_ASR_HTTP_GROUP_SECONDS` (300 s), one request per group, and timestamps
+are mapped back (`models.run_groups`). Silence the decoder never hears cannot become
+"Vielen Dank.". On the TQ2 smoke file, whisper.cpp wrote exactly that over a 20 s silent tail
+when sent the whole file, and nothing once sent the runs.
+
+**Decision 5, amended rather than flipped.** The TQ2 order asked for conditioning OFF on
+grouped requests, decided by number. The number we have is T7's: off costs punctuation on
+conversation chunks. The TQ1 gold set that would settle WER is not labelled yet. What TQ2
+changes is the context's reach:
+
+- In-process, each run is its own faster-whisper call, so conditioning acts within one run of
+  at most 30 s and never across runs. The default stays on, per T7.
+- HTTP backends expose no conditioning switch (the OpenAI-style API has none). Their context
+  used to run across the whole file. It now resets at every run group.
+
+`MDX_ASR_CONDITION_PREV` therefore applies to the in-process engine only. Revisit when
+`eval/asr/v1` exists: if the in-process WER with conditioning off is within 0.5 pp and loops
+(`diagnostics.loops`) drop, turn it off.
+
+**Decision 6 holds on every backend.** `Segment.language` is set for a run decoded in another
+language than the recording's, whoever decoded it.
+
+**Also from TQ2.** Segment gates G1–G3 and the known-artefact list (`asr_worker/guards.py`,
+`asr_models/artefacts.yaml`) run in `processor.decode_recording` before the echo guard, with
+`MDX_ASR_GATES_ENABLED` as the rollback switch (dry-run diagnostics stay on). Non-speech
+stretches of 5 s or more become `noise` markers (`music` / `silence` / `noise`), not text.
+Every drop has a `reason` in `diagnostics.dropped_segments`, as numbers and enums only.

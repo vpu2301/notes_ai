@@ -415,10 +415,14 @@ struct Problem: Decodable, Sendable {
     var requestId: String?
     /// Filled from `Retry-After`, in seconds.
     var retryAfter: Int?
+    /// note-service's `already_assigned` 409: the note this transcription
+    /// already belongs to.
+    var noteId: String?
 
     enum CodingKeys: String, CodingKey {
         case type, title, detail, status, code
         case attemptsLeft = "attempts_left"
+        case noteId = "note_id"
     }
 }
 
@@ -528,6 +532,10 @@ struct RecentCapture: Codable, Identifiable, Equatable, Sendable {
     var status: JobStatus?
     var noteId: String?
     var errorMessage: String?
+    /// The live meeting note the recording was bound to at upload (Sprint
+    /// 34). Kept so a pipeline cut short — the app quit while the
+    /// transcript was still running — can still hand the transcript to it.
+    var meetingNoteId: String?
 
     var id: String { jobId }
 }
@@ -764,6 +772,8 @@ extension GenerationView {
             "duplicate": "a duplicated passage",
             "unrelated": "an unrelated fragment",
             "advertisement": "an advertisement",
+            "music": "music",
+            "noise": "noise",
             "passage": "a passage",
         ],
         "de": [
@@ -773,6 +783,8 @@ extension GenerationView {
             "duplicate": "eine doppelte Passage",
             "unrelated": "ein unzusammenhängendes Fragment",
             "advertisement": "Werbung",
+            "music": "Musik",
+            "noise": "Geräusche",
             "passage": "eine Passage",
         ],
         "uk": [
@@ -782,6 +794,8 @@ extension GenerationView {
             "duplicate": "повторений уривок",
             "unrelated": "непов'язаний фрагмент",
             "advertisement": "реклама",
+            "music": "музика",
+            "noise": "шум",
             "passage": "уривок",
         ],
     ]
@@ -1205,10 +1219,21 @@ struct TranscriptResult: Decodable, Sendable {
     var coverage: TranscriptCoverage? = nil
     /// Sprint F1: the capture timing the recording app sent.
     var capture: CaptureInfo? = nil
+    /// Sprint TQ2: music / silence / noise stretches (≥ 5 s) the worker
+    /// marked instead of transcribing. Absent from older servers.
+    var noise: [TranscriptNoise]? = nil
+    /// The language the transcript is in; names the markers.
+    var language: String? = nil
+    /// Sprint TQ3: spellings the server unified (applied in the turns) or
+    /// offers for review. Absent from older servers.
+    var entityCorrections: [EntityCorrection]? = nil
+    var correctionsRev: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
-        case coverage, capture
+        case coverage, capture, noise, language
+        case entityCorrections = "entity_corrections"
+        case correctionsRev = "corrections_rev"
         case nameSuggestions = "name_suggestions"
         case relabelAvailable = "relabel_available"
         case segments, speakers, turns, edits
@@ -2837,5 +2862,279 @@ struct NotificationReadResult: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case updated
         case unreadCount = "unread_count"
+    }
+}
+
+
+/// Sprint TQ2: a stretch with no speech, marked instead of transcribed —
+/// shown as its own line ("[Musik 00:12–00:41]"), never as a turn. A kind
+/// this build does not know is shown as noise (the field is additive).
+struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
+    let startMs: Int
+    let endMs: Int
+    let kind: String
+
+    var id: Int { startMs }
+
+    enum CodingKeys: String, CodingKey {
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case kind
+    }
+
+    /// "music" | "silence" | "noise".
+    var knownKind: String { kind == "music" || kind == "silence" ? kind : "noise" }
+
+    static let labels: [String: [String: String]] = [
+        "en": ["music": "Music", "silence": "Silence", "noise": "Noise"],
+        "de": ["music": "Musik", "silence": "Stille", "noise": "Geräusch"],
+        "uk": ["music": "Музика", "silence": "Тиша", "noise": "Шум"],
+    ]
+
+    /// "[Musik 00:12–00:41]", in the language that was spoken.
+    func line(language: String?) -> String {
+        let names = Self.labels[language ?? ""] ?? Self.labels["en"] ?? [:]
+        let name = names[knownKind] ?? "Noise"
+        return "[\(name) \(Self.mmss(startMs))–\(Self.mmss(endMs))]"
+    }
+
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// The markers shown before `index` in `turns` (index == count: after
+    /// the last turn). Turns keep their positions.
+    static func before(_ index: Int, turns: [TranscriptTurn], noise: [TranscriptNoise]) -> [TranscriptNoise] {
+        guard !noise.isEmpty else { return [] }
+        let lo = index == 0 ? Int.min : turns[index - 1].startMs
+        let hi = index >= turns.count ? Int.max : turns[index].startMs
+        return noise.filter { $0.startMs >= lo && $0.startMs < hi }
+    }
+}
+
+
+/// Sprint TQ3: one name, one spelling — a correction the server's overlay
+/// applied (`accepted`) or offers (`proposed`). The recording never changes.
+struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
+    let id: String
+    let fromForms: [String]
+    let toText: String
+    let occurrencesCount: Int
+    let source: String
+    let confidence: Double
+    let status: String
+    /// A person accepted, edited or rejected it (older servers omit it).
+    let decided: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, confidence, status, decided
+        case fromForms = "from_forms"
+        case toText = "to_text"
+        case occurrencesCount = "occurrences_count"
+    }
+
+    var isApplied: Bool { status == "accepted" }
+    /// Still asks for a look: not rejected, and nobody has decided it yet.
+    /// A spelling the user accepted leaves the sheet and the banner.
+    var needsReview: Bool { status != "rejected" && decided != true }
+
+    var sourceLabel: String {
+        switch source {
+        case "glossary": return "glossary"
+        case "calendar": return "calendar"
+        case "hint": return "vocabulary hint"
+        case "user": return "edited"
+        default: return "most frequent spelling"
+        }
+    }
+
+    private static let words: [String: (unified: String, review: String, toReview: String, from: String)] = [
+        "en": ("spellings unified", "Review", "spellings to review", "unified from"),
+        "de": ("Schreibweisen vereinheitlicht", "Prüfen", "Schreibweisen zu prüfen", "vereinheitlicht aus"),
+        "uk": ("написань уніфіковано", "Переглянути", "написань на перевірку", "уніфіковано з"),
+    ]
+
+    private static func words(_ language: String?) -> (unified: String, review: String, toReview: String, from: String) {
+        words[language ?? ""] ?? words["en"]!
+    }
+
+    /// "3 Schreibweisen vereinheitlicht · 1 Schreibweisen zu prüfen" and the
+    /// action, or nil when there is nothing to say. Counts variant spellings.
+    static func banner(_ corrections: [EntityCorrection], language: String?) -> (text: String, action: String)? {
+        let live = corrections.filter(\.needsReview)
+        guard !live.isEmpty else { return nil }
+        let w = words(language)
+        let unified = live.filter(\.isApplied).reduce(0) { $0 + $1.fromForms.count }
+        let proposed = live.filter { $0.status == "proposed" }.reduce(0) { $0 + $1.fromForms.count }
+        var parts: [String] = []
+        if unified > 0 { parts.append("\(unified) \(w.unified)") }
+        if proposed > 0 { parts.append("\(proposed) \(w.toReview)") }
+        return (parts.joined(separator: " · "), w.review)
+    }
+
+    /// "vereinheitlicht aus: Andala, Handela"
+    func unifiedFrom(language: String?) -> String {
+        "\(Self.words(language).from): \(fromForms.joined(separator: ", "))"
+    }
+
+    /// The tooltip for a paragraph: where its unified spellings came from.
+    static func paragraphHelp(_ paragraph: String, _ corrections: [EntityCorrection], language: String?) -> String {
+        corrections.filter { $0.isApplied && paragraph.contains($0.toText) }
+            .map { "\($0.toText) — \($0.unifiedFrom(language: language))" }
+            .joined(separator: "\n")
+    }
+}
+
+struct CorrectionsView: Decodable, Sendable {
+    let jobId: String
+    let correctionsRev: Int
+    let corrections: [EntityCorrection]
+
+    enum CodingKeys: String, CodingKey {
+        case corrections
+        case jobId = "job_id"
+        case correctionsRev = "corrections_rev"
+    }
+}
+
+struct CorrectionDecisionRequest: Encodable {
+    let status: String
+    let toText: String?
+    let correctionsRev: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case toText = "to_text"
+        case correctionsRev = "corrections_rev"
+    }
+}
+
+
+// MARK: - Billing (0068)
+
+/// `GET /v1/billing` — the plan, the catalogue, this month's usage.
+struct Billing: Decodable, Equatable, Sendable {
+    let plan: BillingPlan
+    let plans: [BillingPlan]
+    let usage: [UsageMeter]
+    let periodStart: Date
+    let subscription: BillingSubscription?
+    /// False until a payment provider is connected: plans show, switching says why not.
+    let paymentsConnected: Bool
+    let canEdit: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case plan, plans, usage, subscription
+        case periodStart = "period_start"
+        case paymentsConnected = "payments_connected"
+        case canEdit = "can_edit"
+    }
+}
+
+struct BillingPlan: Decodable, Equatable, Sendable, Identifiable {
+    let code: String
+    let name: String
+    let summary: String
+    /// Whole cents per member per month; nil = "talk to us".
+    let priceCents: Int?
+    let currency: String
+    /// Per member per year when paid yearly; nil = monthly only.
+    let yearlyPriceCents: Int?
+    let features: [String]
+    let selfServe: Bool
+
+    var id: String { code }
+
+    enum CodingKeys: String, CodingKey {
+        case code, name, summary, currency, features
+        case priceCents = "price_cents"
+        case yearlyPriceCents = "yearly_price_cents"
+        case selfServe = "self_serve"
+    }
+
+    private func money(_ cents: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = cents % 100 == 0 ? 0 : 2
+        return f.string(from: NSNumber(value: Double(cents) / 100)) ?? "\(cents)"
+    }
+
+    var priceText: String { priceText(yearly: false) }
+
+    /// Paid yearly: "€15 per member / month, billed yearly (€180)". A plan
+    /// with no yearly price shows its monthly one. Mirrors the web's `price`.
+    func priceText(yearly: Bool) -> String {
+        guard let cents = priceCents else { return "Talk to us" }
+        if cents == 0 { return "Free" }
+        if yearly, let year = yearlyPriceCents {
+            let perMonth = Int((Double(year) / 12).rounded())
+            return "\(money(perMonth)) per member / month, billed yearly (\(money(year)))"
+        }
+        return "\(money(cents)) per member / month"
+    }
+}
+
+struct UsageMeter: Decodable, Equatable, Sendable, Identifiable {
+    let key: String
+    let used: Int
+    /// nil = no limit on this plan.
+    let limit: Int?
+
+    var id: String { key }
+
+    var label: String {
+        switch key {
+        case "notes": return "Notes"
+        case "recording_minutes": return "Recording minutes"
+        case "members": return "Members"
+        default: return "AI allowance"
+        }
+    }
+
+    /// 0…1 of the limit, or nil when there is none.
+    var share: Double? {
+        guard let limit else { return nil }
+        return limit > 0 ? min(1, Double(used) / Double(limit)) : 1
+    }
+
+    /// "4 of 50", or "12% used" for the AI allowance — what the model calls
+    /// cost us is not the customer's number.
+    var text: String {
+        if key == "ai" {
+            guard let share else { return "No limit" }
+            return "\(Int((share * 100).rounded()))% used"
+        }
+        guard let limit else { return "\(used) · no limit" }
+        return "\(used) of \(limit)"
+    }
+}
+
+struct BillingSubscription: Decodable, Equatable, Sendable {
+    let provider: String
+    let status: String
+    let currentPeriodEnd: Date?
+    let cancelAtPeriodEnd: Bool
+    /// "monthly" | "yearly" (older servers omit it: monthly).
+    let interval: String?
+
+    var isYearly: Bool { interval == "yearly" }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, status, interval
+        case currentPeriodEnd = "current_period_end"
+        case cancelAtPeriodEnd = "cancel_at_period_end"
+    }
+}
+
+struct ChangePlanResult: Decodable, Sendable {
+    let action: String
+    let redirectURL: String?
+    let billing: Billing
+
+    enum CodingKeys: String, CodingKey {
+        case action, billing
+        case redirectURL = "redirect_url"
     }
 }

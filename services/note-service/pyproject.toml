@@ -42,6 +42,8 @@ dependencies = [
     # Sprint 33: the generation queue the API enqueues onto and
     # `note_service.worker` drains (ADR-0058).
     "jobs",
+    # Note titles: the common-word and name lists (asr_models/resources).
+    "asr_models",
 ]
 
 [tool.uv.sources]
@@ -58,6 +60,7 @@ crypto = { workspace = true }
 storage = { workspace = true }
 models = { workspace = true }
 jobs = { workspace = true }
+asr_models = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

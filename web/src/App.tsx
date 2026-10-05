@@ -11,6 +11,7 @@ import { SignupPage } from "./pages/auth/SignupPage";
 import { WelcomePage } from "./pages/auth/WelcomePage";
 import { ReauthDialog } from "./components/ReauthDialog";
 import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
+import { BillingSettingsPage } from "./pages/settings/BillingSettingsPage";
 import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
 import { MembersSettingsPage } from "./pages/settings/MembersSettingsPage";
@@ -121,6 +122,8 @@ export function App() {
                 {/* Sprint 37: who processes this workspace's meetings.
                     Every member may read it (ADR-0046 decision 12). */}
                 <Route path="data" element={<DataSettingsPage />} />
+                {/* Billing (0068): plan, usage, plan changes — admins. */}
+                <Route path="billing" element={<BillingSettingsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

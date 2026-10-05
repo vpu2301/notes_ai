@@ -326,6 +326,12 @@ services:
       ENV: ${ENV:-dev}
       MODELS_CONFIG: /app/config/models.yaml
       ASR_BACKEND: ${ASR_BACKEND:-inproc_cpu_asr}
+      # Sprint TQ4: Parakeet on this Mac (make dev-model with DEV_MAC_ASR_ENGINE=parakeet)
+      # as the primary (ASR_BACKEND=dev_mac_parakeet_asr) or in the shadow.
+      DEV_MAC_PARAKEET_URL: ${DEV_MAC_PARAKEET_URL:-http://host.docker.internal:8082}
+      MDX_ASR_SHADOW_BACKEND: ${MDX_ASR_SHADOW_BACKEND:-}
+      MDX_ASR_SHADOW_RATE: ${MDX_ASR_SHADOW_RATE:-0.2}
+      MDX_ASR_SHADOW_BUDGET_HOURS: ${MDX_ASR_SHADOW_BUDGET_HOURS:-4}
       DEV_MAC_ASR_URL: ${DEV_MAC_ASR_URL:-http://host.docker.internal:8080}
       HF_ASR_ENDPOINT_URL: ${HF_ASR_ENDPOINT_URL:-}
       HF_ASR_MODEL_PIN: ${HF_ASR_MODEL_PIN:-}
@@ -467,6 +473,9 @@ services:
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
+      # Billing (0068): a plan change applies at once, no payment, until
+      # Stripe is connected. The service default is `none` (no changes).
+      MDX_BILLING_PROVIDER: "${MDX_BILLING_PROVIDER:-manual}"
       # Notification producer — lifecycle transitions publish onto the
       # Redis Streams bus (ADR-0029). Without this the config default
       # (redis://localhost:6379/0) resolves to the container itself and

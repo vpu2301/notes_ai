@@ -103,10 +103,8 @@ export function AskNote({ noteId }: { noteId: string }) {
       )}
 
       <div className="ask-dock">
-        <div className="ask-bar">
-          <span className="spark">
-            <SparkleIcon size={16} />
-          </span>
+        {/* Claude's composer: the field on top, a tool row underneath. */}
+        <div className="ask-bar" onClick={() => inputRef.current?.focus()}>
           <textarea
             ref={inputRef}
             className="ask-input"
@@ -123,16 +121,25 @@ export function AskNote({ noteId }: { noteId: string }) {
               }
             }}
           />
-          <button
-            type="button"
-            className="ask-send"
-            aria-label="Send"
-            title="Send (Return)"
-            disabled={asking || draft.trim() === ""}
-            onClick={() => void send()}
-          >
-            <ArrowUpIcon size={15} />
-          </button>
+          <div className="ask-tools">
+            <span className="ask-scope">
+              <SparkleIcon size={14} />
+              This note
+            </span>
+            <button
+              type="button"
+              className="ask-send"
+              aria-label="Send"
+              title="Send (Return)"
+              disabled={asking || draft.trim() === ""}
+              onClick={(e) => {
+                e.stopPropagation();
+                void send();
+              }}
+            >
+              <ArrowUpIcon size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </>

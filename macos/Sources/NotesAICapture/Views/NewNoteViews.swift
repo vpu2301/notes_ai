@@ -2,35 +2,15 @@ import AppKit
 import SwiftUI
 
 // The other ways a note begins (web parity): blank, from a template, or
-// from a recording made elsewhere. One menu, beside New meeting in the
-// sidebar — the one place these live.
+// from a recording made elsewhere. One list, behind the caret on the
+// sidebar's New meeting row and the ⋯ beside New meeting on home — the
+// two places the web offers it.
 
-/// The "＋" beside New meeting.
-struct NewNoteMenu: View {
-    @EnvironmentObject private var app: AppState
-    @EnvironmentObject private var capture: CaptureViewModel
-
-    var body: some View {
-        DSMenu(width: 224, items: items) {
-            Image(systemName: "plus")
-                .font(.dsIcon(12, .semibold))
-                .foregroundStyle(DS.text2)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
-                        .fill(DS.sidebarOn)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
-                        .strokeBorder(DS.line, lineWidth: DS.hairline)
-                )
-                .contentShape(Rectangle())
-        }
-        .help("New note, from a template or a recording")
-        .accessibilityLabel("New note")
-    }
-
-    private func items() -> [DSMenuItem] {
+@MainActor
+enum NewNoteMenu {
+    /// The other ways to start — the sidebar's caret and the home page's ⋯
+    /// both open this list, as on the web.
+    static func items(app: AppState, capture: CaptureViewModel) -> [DSMenuItem] {
         [
             .item("Blank note", symbol: "doc", disabled: app.creatingNote) {
                 Task { await app.createBlankNote() }

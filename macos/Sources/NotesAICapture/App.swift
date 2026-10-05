@@ -153,6 +153,10 @@ struct MenuBarLabel: View {
 
     var body: some View {
         icon
+            // The desktop disc lives exactly as long as the recording.
+            .onChange(of: capture.isRecording, initial: true) { _, recording in
+                if recording { RecordingBubble.shared.show(capture: capture) } else { RecordingBubble.shared.hide() }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .openMainWindow)) { _ in
                 NSApp.setActivationPolicy(.regular)
                 openWindow(id: MainWindow.id)

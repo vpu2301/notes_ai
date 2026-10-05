@@ -394,6 +394,23 @@ run and coverage is complete by construction (`coverage.vad = "stub"`).
 **If it fires.** Break the counter down by cause on the ASR dashboard's
 F1 row; a jump in one cause after a deploy is a regression in that stage.
 
+### § entity-unify (Sprint TQ3)
+
+The spelling unifier (`asr-service/domain/entity_unify.py`) runs once per job, on the
+first `/result` read. Its corrections are a read-time overlay (`transcript_corrections`,
+migration 0066); the ASR artefact is never rewritten.
+
+- **`AsrEntityUnifyErrors` fires.** More than 5 % of runs fail, so those jobs show raw
+  spellings. Read `asr.entity_unify_failed` in the asr-service logs (error class only)
+  and `mdx_asr_entity_unify_total{outcome}`. A job that failed can be re-run with
+  `POST /asr/jobs/{id}/corrections:recompute`.
+- **`skipped_budget` rises.** A run took longer than `MDX_ENTITY_UNIFY_BUDGET_S_PER_HOUR`
+  (2 s per audio hour, floor 0.5 s). Look at `mdx_asr_entity_unify_seconds`.
+- **Wrong merges reported.** The kill switch is `MDX_ENTITY_UNIFY_AUTO_APPLY=false`.
+  Every new correction is then only proposed, and people accept it in the review sheet.
+  Corrections already accepted stay applied until rejected.
+- **Everything off.** `MDX_ENTITY_UNIFY_ENABLED=false` serves the artefact as is.
+
 ## Pre-flight after deployment
 
 - Confirm `mdx_asr_model_loaded == 1` on every replica.

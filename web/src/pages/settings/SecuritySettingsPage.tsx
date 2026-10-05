@@ -4,6 +4,7 @@ import { isUnavailableHere } from "../../api/auth";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { QrCode } from "../../components/QrCode";
+import { Segmented } from "../../components/Segmented";
 import { SecretOnce } from "../../components/SecretOnce";
 import { useToast } from "../../components/Toaster";
 import { Skeleton } from "../../components/Skeleton";
@@ -11,13 +12,20 @@ import { messageFor } from "../../lib/errorCopy";
 import type { SessionInfo, TotpEnrolment } from "../../api/types";
 import { Problem } from "./AccountSettingsPage";
 import { relativeTime } from "../../lib/time";
+import { useSettingsView } from "../../lib/useSettingsView";
+
+const VIEWS = [
+  { value: "two-factor", label: "Two-factor" },
+  { value: "sessions", label: "Sessions" },
+] as const;
 
 /** `/settings/security` — the second factor, and where you are signed in. */
 export function SecuritySettingsPage() {
+  const [view, setView] = useSettingsView(VIEWS);
   return (
     <div className="settings-stack">
-      <MfaCard />
-      <SessionsCard />
+      <Segmented label="Security" options={VIEWS} value={view} onChange={setView} />
+      {view === "two-factor" ? <MfaCard /> : <SessionsCard />}
     </div>
   );
 }
@@ -377,11 +385,12 @@ function SessionsCard() {
             <div className="row" key={s.sid}>
               <div className="grow">
                 <div className="row-name">
-                  {s.device_name || s.client_type}
+                  {s.device_name || s.client_type || "Unknown device"}
                   {s.current && <span className="pill">This browser</span>}
                 </div>
                 <span className="help">
-                  {s.ip_last || "unknown address"} · last used {relativeTime(s.last_used_at)}
+                  {s.ip_last || "Unknown address"}
+                  {s.last_used_at ? ` · last used ${relativeTime(s.last_used_at)}` : ""}
                 </span>
               </div>
               {!s.current && (

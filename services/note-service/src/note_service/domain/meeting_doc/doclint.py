@@ -52,6 +52,8 @@ SECTIONS_MAX: Final = 8
 MINUTES_PER_SECTION: Final = 4
 SECTIONS_TOLERANCE: Final = 2
 SECTIONS_FROM_MINUTES: Final = 5.0  # below: Q3's "too little to head"
+COVERAGE_MIN_MINUTES: Final = 3.0  # a third shorter than this is not judged
+COVERAGE_MIN_RATIO: Final = 0.6  # worst ÷ best facts per minute
 POINTS_PER_SECTION: Final = (2, 6)
 MERGE_HEADING_SHARE: Final = 0.4
 MERGE_SPAN_MS: Final = 90_000
@@ -72,7 +74,7 @@ LANGUAGE_MIN_WORDS: Final = 6
 SEVERITY: Final[dict[str, str]] = {
     "F-INV": "S1", "F-DIST": "S1", "F-SUBJ": "S1",
     "D-ORIENT": "S2", "D-STRUCT": "S2", "D-SPEC": "S2", "D-VOL": "S2", "D-REF": "S2",
-    "D-LABEL": "S2", "F-COPY": "S2", "F-DESC": "S2",
+    "D-LABEL": "S2", "F-COPY": "S2", "F-DESC": "S2", "F-COV": "S2",
     "D-HEAD": "S3", "D-RED": "S3", "D-NEST": "S3", "D-LANG": "S3", "D-FORM": "S3",
 }  # fmt: skip
 HARD: Final = frozenset({"S1", "S2"})
@@ -87,16 +89,25 @@ class Rule:
 RULES: Final[dict[str, Rule]] = {
     # T1 structure and volume
     "sections.count": Rule("D-STRUCT", hook=True),
+    # SQ2 T3 — a third of the recording barely in the note. The hook is the
+    # pipeline's coverage retry (already run once); left over, the third is
+    # named in the status line (``failed_ranges``), never a silent short note.
+    "coverage.thirds": Rule("F-COV", hook=True),
     "sections.size": Rule("D-STRUCT"),
     "sections.order": Rule("D-STRUCT"),
     "volume.words": Rule("D-VOL"),
     "redundancy": Rule("D-RED"),
+    # SQ3 T3 — lines that add nothing (SM-09).
+    "line.subset": Rule("D-RED"),
+    "orient.ladder_redundant": Rule("D-RED"),
     # T2 headings and title
     "heading.form": Rule("D-HEAD", hook=True),
     "heading.generic": Rule("D-HEAD", hook=True),
     "heading.nouns": Rule("D-HEAD", hook=True),
     "heading.distinct": Rule("D-HEAD", hook=True),
     "title.form": Rule("D-HEAD"),
+    # SQ3 T4 — a title made only of type words ("Podcast-Folge").
+    "title.generic": Rule("D-HEAD"),
     # T3 lines (line.subject is F-SUBJ for a pronoun, D-LABEL for a label)
     "line.specific": Rule("D-SPEC"),
     "line.length": Rule("D-FORM", hook=True),
@@ -106,6 +117,8 @@ RULES: Final[dict[str, Rule]] = {
     "line.person": Rule("D-LANG"),
     "line.certainty": Rule("F-DIST"),
     "line.glyph": Rule("D-FORM"),
+    # SQ3 T1 — a generated paragraph shaped like a transcript turn.
+    "form.paragraph_colon_prefix": Rule("D-FORM"),
     "line.language": Rule("D-LANG"),
     "line.cited": Rule("D-REF"),
     "line.child": Rule("D-NEST"),
@@ -171,6 +184,33 @@ _EXPLETIVE_NEXT: Final = frozenset(
     {"gibt", "ist", "war", "sind", "waren", "geht", "wird", "is", "was", "has", "seems"}
 )
 _PROSE: Final = frozenset({"summary", "bullet", "framing"})
+# SQ3 T1 — the kinds rendered as paragraphs, not list items.
+_PARAGRAPH_KINDS: Final = frozenset({"summary", "framing", "presenter"})
+# The web client's SPEAKER rule (web/src/lib/richText.ts), verbatim: a
+# paragraph opening with up to 40 characters and ": " is drawn as a speaker
+# turn with an avatar. Generated paragraphs never match it.
+SPEAKER_TURN: Final = re.compile(r"^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)")
+
+
+def speaker_shaped(line: Line) -> bool:
+    """A generated paragraph (not a bullet, heading or table row) that a
+    client would render as a transcript turn."""
+    text = line.text.lstrip()
+    if line.kind in ("heading", "bullet") or _BULLET.match(line.text) or text.startswith("|"):
+        return False
+    return SPEAKER_TURN.match(text) is not None
+
+
+def unspeaker(text: str) -> str:
+    """``Gast: Felix`` → ``Gast — Felix``: the deterministic repair."""
+    lead = len(text) - len(text.lstrip())
+    match = SPEAKER_TURN.match(text[lead:])
+    if match is None:
+        return text
+    rest = text[lead + match.end() :]
+    return f"{text[:lead]}{match.group(1).rstrip()} — {rest}"
+
+
 _NO_SOURCE_NEEDED: Final = frozenset({"heading", "note"})
 _FUNCTION_WORDS: Final = frozenset(
     {
@@ -223,6 +263,9 @@ class LintContext:
     known: frozenset[str] = frozenset()
     brief: dict[str, Any] = field(default_factory=dict)
     title: str | None = None
+    """SQ2 T3 — facts and speech minutes per third, from the engine's stats."""
+    facts_by_third: tuple[int, ...] = ()
+    minutes_by_third: tuple[float, ...] = ()
 
     @property
     def minutes(self) -> float:
@@ -420,7 +463,10 @@ def _other_language(text: str, language: str) -> bool:
 def check(sections: Sequence[RenderedSection], ctx: LintContext) -> list[Finding]:
     out: list[Finding] = []
     if ctx.title is not None:
-        out += [_finding("title.form", detail=d) for d in title_faults(ctx.title, ctx)]
+        out += [
+            _finding("title.generic" if d == "type_words" else "title.form", detail=d)
+            for d in title_faults(ctx.title, ctx)
+        ]
     content = [s for s in sections if s.lines or s.text.strip()]
     if not content:
         return out
@@ -430,11 +476,61 @@ def check(sections: Sequence[RenderedSection], ctx: LintContext) -> list[Finding
     out += _check_headings(headed, ctx)
     out += _check_lines(sections, ctx)
     out += _check_volume(sections, ctx)
+    out += _check_coverage(ctx)
     return out
 
 
+def coverage_ratio(ctx: LintContext) -> float | None:
+    """Worst ÷ best facts per minute over the thirds with enough speech;
+    None when fewer than two thirds can be judged."""
+    if len(ctx.facts_by_third) != 3 or len(ctx.minutes_by_third) != 3:
+        return None
+    rates = [
+        n / m
+        for n, m in zip(ctx.facts_by_third, ctx.minutes_by_third, strict=True)
+        if m >= COVERAGE_MIN_MINUTES
+    ]
+    if len(rates) < 2 or max(rates) == 0:
+        return None
+    return min(rates) / max(rates)
+
+
+def _check_coverage(ctx: LintContext) -> list[Finding]:
+    ratio = coverage_ratio(ctx)
+    if ratio is not None and ratio < COVERAGE_MIN_RATIO:
+        return [_finding("coverage.thirds", detail="thin_third")]
+    return []
+
+
+# SQ3 T4 — what a recording is called without saying what it is about: the
+# reader's type words in every language, the type names, and a few more.
+_TYPE_TITLE_WORDS: Final = frozenset(
+    w.casefold()
+    for labels in overview.TYPE_LABELS.values()
+    for label in labels.values()
+    for w in re.findall(r"[^\W\d_]+", label)
+) | frozenset(
+    {
+        "folge", "besprechung", "meeting", "aufnahme", "podcast", "episode", "notiz", "notizen",
+        "notes", "note", "recording", "call", "gespräch", "zusammenfassung", "summary",
+        "über", "about", "zum", "zur", "der", "die", "das", "des", "ein", "eine", "the", "a",
+        "an", "of", "on", "und", "and", "mit", "with", "про", "і", "та", "запис", "зустріч",
+        "eines", "einer", "einem", "dem", "den",
+    }
+)  # fmt: skip
+
+
+def type_words_only(title: str) -> bool:
+    """Every word of the title is a type word or a function word."""
+    words = [w.casefold() for w in re.findall(r"[^\W\d_]+", title)]
+    return bool(words) and all(
+        w in _TYPE_TITLE_WORDS or w.removesuffix("s") in _TYPE_TITLE_WORDS for w in words
+    )
+
+
 def title_faults(title: str, ctx: LintContext) -> list[str]:
-    """§1 — ``length``, ``colons``, ``repeat``, ``generic``, ``name``."""
+    """§1 — ``length``, ``colons``, ``repeat``, ``generic``, ``name``;
+    ``type_words`` (SQ3 T4) — nothing but type words."""
     text = title.strip()
     faults = []
     low, high = TITLE_CHARS
@@ -448,6 +544,8 @@ def title_faults(title: str, ctx: LintContext) -> list[str]:
         faults.append("repeat")
     if GENERIC_TITLE.match(text):
         faults.append("generic")
+    if type_words_only(text):
+        faults.append("type_words")
     evidence = " ".join(f"{f.text} {f.quote}" for f in ctx.facts.values())
     if evidence and any(not _supported(n, evidence) for n in _names(text, ctx)):
         faults.append("name")
@@ -469,7 +567,7 @@ def _check_orientation(sections: Sequence[RenderedSection], ctx: LintContext) ->
     first, second = _paragraphs(top)
     if any(_BULLET.match(ln.text) or _TABLE_ROW.match(ln.text) for ln in top.lines):
         out.append(_finding("orient.present", key, detail="bullets"))
-    if not first or not second:
+    if not first or (not second and not _ladder_would_repeat(sections, ctx)):
         out.append(_finding("orient.present", key, detail="paragraphs"))
     if first:
         out += [_finding("orient.p1", key, detail=d) for d in p1_faults(first, ctx)]
@@ -648,6 +746,8 @@ def _check_lines(sections: Sequence[RenderedSection], ctx: LintContext) -> list[
                 out.append(_finding("line.cited", s.section_key, n, "no_row"))
             if _GLYPHS.search(ln.text) or _MARKDOWN.search(ln.text):
                 out.append(_finding("line.glyph", s.section_key, n, "glyph"))
+            if speaker_shaped(ln):
+                out.append(_finding("form.paragraph_colon_prefix", s.section_key, n, "colon"))
             fault = line_fault(ln, ctx)
             if fault:
                 rule, detail, code = fault
@@ -722,7 +822,135 @@ def _check_volume(sections: Sequence[RenderedSection], ctx: LintContext) -> list
         ):
             key = sections[placed[j][0]].section_key
             out.append(_finding("redundancy", key, placed[j][1], "duplicate"))
+    for si, n in _cross_repeats(sections):
+        out.append(_finding("redundancy", sections[si].section_key, n, "orientation"))
+    for si, n in _subset_lines(sections):
+        out.append(_finding("line.subset", sections[si].section_key, n, "subset"))
+    if _redundant_ladder(sections):
+        out.append(_finding("orient.ladder_redundant", roles.OVERVIEW_KEY, detail="repeats"))
     return out
+
+
+# ── SQ3 T3 — lines that add nothing ─────────────────────────────────
+
+_CONNECTIVE_LEADS: Final = tuple(lead for leads in overview.CONNECTIVES.values() for lead in leads)
+
+
+def _subset_lines(sections: Sequence[RenderedSection]) -> list[tuple[int, int]]:
+    """Lines whose content words are a proper subset of another line's
+    (anywhere in the note): the more specific line says it already."""
+    placed = [
+        (si, n, _tokens(_unladdered(_body(sections[si].lines[n].text))))
+        for si, n, _t in _placed(sections)
+    ]
+    out: list[tuple[int, int]] = []
+    for i, (si, n, own) in enumerate(placed):
+        if own and any(j != i and own < other for j, (_s, _n, other) in enumerate(placed)):
+            out.append((si, n))
+    return out
+
+
+def _unladdered(text: str) -> str:
+    """A ladder sentence without its connective: "Zunächst — X" says X."""
+    stripped = text.lstrip()
+    for lead in _CONNECTIVE_LEADS:
+        if stripped.startswith(lead):
+            return stripped[len(lead) :].lstrip()
+    return text
+
+
+def _ladder(top: RenderedSection) -> list[int]:
+    """Indices of the orientation's ladder sentences ("Zunächst — …")."""
+    return [
+        n
+        for n, ln in enumerate(top.lines)
+        if ln.kind == "summary" and ln.text.lstrip().startswith(_CONNECTIVE_LEADS)
+    ]
+
+
+def _bullet_ids(sections: Sequence[RenderedSection]) -> set[str]:
+    return {
+        i
+        for s in sections
+        if s.section_key != roles.OVERVIEW_KEY
+        for ln in s.lines
+        if _is_bullet(ln)
+        for i in ln.fact_ids
+    }
+
+
+def _redundant_ladder(sections: Sequence[RenderedSection]) -> bool:
+    """The ladder is kept only when it cites a fact no bullet cites."""
+    top = next((s for s in sections if s.section_key == roles.OVERVIEW_KEY), None)
+    if top is None:
+        return False
+    rungs = _ladder(top)
+    if not rungs:
+        return False
+    cited = {i for n in rungs for i in top.lines[n].fact_ids}
+    return bool(cited) and cited <= _bullet_ids(sections)
+
+
+def _ladder_would_repeat(sections: Sequence[RenderedSection], ctx: LintContext) -> bool:
+    """A missing paragraph 2 is not a fault when the ladder code would
+    compose for it cites only facts the bullets already say."""
+    composed = _composed_p2(ctx, [])
+    cited = {i for ln in composed for i in ln.fact_ids}
+    return not cited or cited <= _bullet_ids(sections)
+
+
+def _drop_filler(
+    sections: list[RenderedSection], ctx: LintContext, done: Counter[str]
+) -> list[RenderedSection]:
+    """Remove a ladder that repeats the bullets, then subset lines."""
+
+    def without(secs: list[RenderedSection], drop: set[tuple[int, int]]) -> list[RenderedSection]:
+        return [
+            _with_lines(s, [ln for n, ln in enumerate(s.lines) if (si, n) not in drop], ctx)
+            if any(d[0] == si for d in drop)
+            else s
+            for si, s in enumerate(secs)
+        ]
+
+    if _redundant_ladder(sections):
+        index = next(n for n, s in enumerate(sections) if s.section_key == roles.OVERVIEW_KEY)
+        sections = without(sections, {(index, n) for n in _ladder(sections[index])})
+        done[RULES["orient.ladder_redundant"].code] += 1
+    subset = set(_subset_lines(sections))
+    if subset:
+        done[RULES["line.subset"].code] += len(subset)
+        sections = without(sections, subset)
+    # Lines the repairs after _drop_redundant added (chapters, volume).
+    sections = _drop_redundant(sections, ctx, done)
+    cross = _cross_repeats(sections)
+    if cross:
+        done[RULES["redundancy"].code] += len(cross)
+        sections = without(sections, cross)
+    return sections
+
+
+def _cross_repeats(sections: Sequence[RenderedSection]) -> set[tuple[int, int]]:
+    """§7: no fact rendered twice across orientation and sections. A
+    summary sentence that says what a bullet says: the bullet goes when
+    its section keeps two points, otherwise the sentence."""
+    placed = _placed(sections)
+    top = [p for p in placed if sections[p[0]].section_key == roles.OVERVIEW_KEY]
+    body = [p for p in placed if sections[p[0]].section_key != roles.OVERVIEW_KEY]
+    points = {si: _points(s) for si, s in enumerate(sections)}
+    drop: set[tuple[int, int]] = set()
+    for ti, tn, tt in top:
+        for bi, bn, bt in body:
+            if (bi, bn) in drop or (ti, tn) in drop:
+                continue
+            if _jaccard(tt, bt) < REDUNDANT_JACCARD:
+                continue
+            if points[bi] > POINTS_PER_SECTION[0] and _is_bullet(sections[bi].lines[bn]):
+                drop.add((bi, bn))
+                points[bi] -= 1
+            else:
+                drop.add((ti, tn))
+            break
+    return drop
 
 
 def _placed(sections: Sequence[RenderedSection]) -> list[tuple[int, int, frozenset[str]]]:
@@ -794,6 +1022,8 @@ def repair(
     out = _drop_redundant(out, ctx, done)
     out = _repair_volume(out, ctx, done)
     out = _repair_sections(out, ctx, done, count=False)
+    # SQ3 T3 — last: nothing after this adds a line.
+    out = _drop_filler(out, ctx, done)
     return [s for s in out if s.lines], done
 
 
@@ -814,8 +1044,16 @@ def _fix_text(s: RenderedSection, ctx: LintContext, done: Counter[str]) -> Rende
             done[RULES["line.glyph"].code] += 1
         if ln.kind in _PROSE and _certainty_missing(replace(ln, text=text), ctx):
             unsure = [ctx.facts[i] for i in ln.fact_ids if i in ctx.facts]
-            text = _prefixed(text, patch_claim(_body(text), unsure, ctx.language))
+            text = _prefixed(
+                text,
+                patch_claim(
+                    _body(text), unsure, ctx.language, paragraph=ln.kind in _PARAGRAPH_KINDS
+                ),
+            )
             done[RULES["line.certainty"].code] += 1
+        if speaker_shaped(replace(ln, text=text)):
+            text = unspeaker(text)
+            done[RULES["form.paragraph_colon_prefix"].code] += 1
         changed = changed or text != ln.text
         lines.append(replace(ln, text=text) if text != ln.text else ln)
     return _with_lines(s, lines, ctx) if changed else s
@@ -967,6 +1205,7 @@ def _composed_p1(ctx: LintContext) -> Line | None:
         subject=orientation.get("subject") or "",
         speakers=list(orientation.get("speakers") or []),
         guests=list(orientation.get("guests") or []),
+        others=list(orientation.get("others") or []),
         themes=list(orientation.get("themes") or []),
     )
     return Line(text, "framing", ids)
@@ -1285,7 +1524,8 @@ def context_of(
         n for f in document.facts for n in (getattr(f, "subject", None), f.attributed_to) if n
     }
     names |= {n.split(" (")[0] for n in orientation.get("guests") or []}
-    names |= set(orientation.get("speakers") or [])
+    names |= {n.split(" (")[0] for n in orientation.get("speakers") or []}
+    names |= {n.split(" (")[0] for n in orientation.get("others") or []}
     return LintContext(
         language=str(stats.get("language") or "en"),
         speech_ms=max(0, speech),
@@ -1294,6 +1534,8 @@ def context_of(
         known=frozenset(w for n in names for w in [n, *n.split()]),
         brief=dict(document.brief or {}),
         title=title,
+        facts_by_third=tuple(int(n) for n in stats.get("facts_by_third") or ()),
+        minutes_by_third=tuple(float(m) for m in stats.get("speech_minutes_by_third") or ()),
     )
 
 

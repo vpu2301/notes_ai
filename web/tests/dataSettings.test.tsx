@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,11 +54,14 @@ function server(settings: Record<string, unknown> = SETTINGS) {
   return calls;
 }
 
-const page = () =>
+// Each section of the page is its own view (?view=); the default is Processing.
+const page = (view?: "writing" | "spend") =>
   render(
-    <ToasterProvider>
-      <DataSettingsPage />
-    </ToasterProvider>,
+    <MemoryRouter initialEntries={[view ? `/settings/data?view=${view}` : "/settings/data"]}>
+      <ToasterProvider>
+        <DataSettingsPage />
+      </ToasterProvider>
+    </MemoryRouter>,
   );
 
 beforeEach(() => {
@@ -78,7 +82,7 @@ describe("Settings › Data & AI", () => {
 
   it("makes the admin agree to the new processor before switching tier", async () => {
     const calls = server();
-    page();
+    page("writing");
     await userEvent.click(await screen.findByRole("button", { name: "Premium" }));
 
     // The dialog names exactly what the change lets in.
@@ -97,7 +101,7 @@ describe("Settings › Data & AI", () => {
 
   it("is read-only for a member", async () => {
     server({ ...SETTINGS, can_edit: false });
-    page();
+    page("writing");
     expect(await screen.findByRole("button", { name: "Premium" })).toBeDisabled();
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByText(/only a workspace admin/i)).toBeInTheDocument();
@@ -105,7 +109,7 @@ describe("Settings › Data & AI", () => {
 
   it("says plainly when the month's budget is spent", async () => {
     server({ ...SETTINGS, month_to_date_cents: 2100 });
-    page();
+    page("spend");
     // (the toaster mounts its own empty role="status" region, so this
     // asks for the sentence rather than the role)
     expect(await screen.findByText(/used its AI budget for the month/i)).toBeInTheDocument();

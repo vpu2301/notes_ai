@@ -264,7 +264,7 @@ def test_chunks_in_another_language_are_labelled_and_counted(
     )
     assert calls == [("en", "P"), ("uk", "P")]
     assert [s.language for s in output.segments] == [None, "uk"]
-    assert output.diagnostics == Diagnostics(other_language_chunks=1)
+    assert output.diagnostics == Diagnostics(other_language_chunks=1, language_id="engine")
 
 
 # ── T5 / T7: the decode options follow the settings ─────────────────

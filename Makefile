@@ -1,4 +1,4 @@
-.PHONY: smoke-ios eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-assert eval-asr-validate eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -97,6 +97,18 @@ eval-notes-assert: ## Regression checklists (r01 = the 2026-09-22 audit, m06 = i
 eval-notes-validate: ## Check a notes gold corpus against gold format v2: `make eval-notes-validate [CORPUS=eval/notes/v2]`
 	uv run --project services/note-service python scripts/eval/notes_gold.py $(or $(CORPUS),tests/fixtures/eval/notes)
 
+eval-asr: ## Sprint TQ1: ASR gold set through the job's path → docs/eval/asr-<date>-<backend>-<split>.{json,md}: `make eval-asr BACKEND=hf_eu_asr|dev_mac_asr|inproc_cpu_asr [SPLIT=test] [CORPUS=eval/asr/v1] [IDS=r04] [HINT=hint.txt] [LABEL=hint] [DRAFT=1] [GUARDS=on|off|both]`
+	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py run \
+	    --backend $(BACKEND) --split $(or $(SPLIT),test) $(if $(CORPUS),--corpus $(CORPUS),) \
+	    $(if $(IDS),--ids $(IDS),) $(if $(HINT),--hint-file $(HINT),) $(if $(LABEL),--label $(LABEL),) $(if $(DRAFT),--draft,) $(if $(GUARDS),--guards $(GUARDS),)
+
+eval-asr-assert: ## Sprint TQ1: r03/r04 transcript checklists on the gold set (XFAIL = a later sprint's): `make eval-asr-assert [BACKEND=inproc_cpu_asr] [CORPUS=eval/asr/v1]`
+	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py assert \
+	    --backend $(or $(BACKEND),inproc_cpu_asr) $(if $(CORPUS),--corpus $(CORPUS),)
+
+eval-asr-validate: ## Sprint TQ1: ASR gold manifest, composition and fetched content: `make eval-asr-validate [CORPUS=eval/asr/v1]`
+	uv run --project services/asr-worker python scripts/eval/asr_gold.py validate $(or $(CORPUS),eval/asr/v1) --content
+
 test-egress: ## Prove the worker egress allowlist: example.com/huggingface.co/otel.pyannote.ai blocked, model endpoints reachable, diarized job completes (needs staging/compose up)
 	RUN_EGRESS_TEST=1 uv run pytest tests/integration/test_worker_egress.py -v
 
@@ -107,14 +119,14 @@ secret-scan: ## Scan the repo history for committed secrets (gitleaks; CI runs t
 	@command -v gitleaks >/dev/null || { echo "gitleaks not installed: brew install gitleaks"; exit 1; }
 	gitleaks git --config .gitleaks.toml --redact --no-banner .
 
-der-eval: ## Speaker count + DER on the gold set: `make der-eval ENGINE=legacy|pyannote_c1 SPLIT=test` → docs/eval/der-<date>-<engine>-<split>.json
+der-eval: ## Speaker count + DER on the gold set: `make der-eval ENGINE=legacy|pyannote_c1 SPLIT=test [CORPUS=eval/asr/v1]` → docs/eval/der-<date>-<engine>-<split>.json
 	@# pyannote.audio 4 requires pyannote.metrics 4 (the two cannot resolve
 	@# otherwise); scores match 3.2. Only a pyannote_c1 run pulls torch in.
 	@case '$(or $(ENGINE),legacy)' in \
 	  pyannote_c1*) extra="--with pyannote.audio>=4.0,<4.1" ;; \
 	  *) extra="" ;; \
 	esac; \
-	uv run --with 'pyannote.metrics>=4,<5' $$extra python scripts/eval/run_der.py --engine '$(or $(ENGINE),legacy)' --split $(or $(SPLIT),test)
+	uv run --with 'pyannote.metrics>=4,<5' $$extra python scripts/eval/run_der.py --engine '$(or $(ENGINE),legacy)' --split $(or $(SPLIT),test) $(if $(CORPUS),--corpus $(CORPUS),)
 
 der-grid: ## B-4 guard-rail grid on dev + ship/no-ship verdict on test
 	uv run --with 'pyannote.metrics>=4,<5' python scripts/eval/grid_legacy.py
@@ -122,7 +134,10 @@ der-grid: ## B-4 guard-rail grid on dev + ship/no-ship verdict on test
 sim-overcount: ## No-audio regression of the clusterer roster (S0/S1 must stay 100 %)
 	uv run python scripts/eval/sim_cluster_overcount.py --assert
 
-check-no-eval-audio: ## CI gate — no audio file tracked under eval/
+check-routing-report: ## CI gate (SQ1, SM-15) — every routed chat backend has an eval/notes/v2 report or a waiver at the current PROMPT_VERSION
+	uv run python scripts/ci/check-routing-has-report.py
+
+check-no-eval-audio: ## CI gate — no audio under eval/, no gold content under eval/asr or eval/notes
 	@bash scripts/ci/check-no-eval-audio.sh
 
 measure-turnaround: ## ASR turnaround on a fixture: `make measure-turnaround FIXTURE=10min_de BACKEND=dev_mac_asr` → docs/eval/turnaround-<date>-<backend>-<fixture>.json
@@ -240,6 +255,12 @@ openapi-check: ## CI gate — fail if any committed OpenAPI snapshot drifts
 	    exit 1; \
 	fi
 	@echo "OpenAPI snapshots are up to date."
+
+meeting-quality-dashboard: ## Admin dashboard: rebuild infra/grafana/dashboards/meeting-quality.json from its SQL (open http://localhost:3001, admin/admin in dev)
+	uv run python scripts/grafana/build_meeting_quality_dashboard.py
+
+meeting-quality-backfill: ## Admin dashboard: write the numbers-only quality summary for jobs that completed before migration 0067 (`ARGS=--apply`; dry run by default)
+	uv run python scripts/ops/backfill_job_quality.py $(ARGS)
 
 check-rls: ## CI gate — every user-schema table has RLS+FORCE enabled
 	uv run python scripts/ci/check-rls-policies.py

@@ -75,6 +75,7 @@ class GenerationDeps:
         shadow_percent: int = 0,
         entity_model_tier: bool = False,
         operation_provider_for: Any = None,
+        coverage_retry_budget_s_per_hour: float | None = None,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
@@ -91,6 +92,18 @@ class GenerationDeps:
         self.shadow_percent = shadow_percent
         # Q4: whether the engine may ask the model to respell unknown names.
         self.entity_model_tier = entity_model_tier
+        # SQ2 T3: the coverage retry's time budget per hour of recording.
+        self.coverage_retry_budget_s_per_hour = coverage_retry_budget_s_per_hour
+
+
+def _retry_budget(deps: GenerationDeps, built: list[Any] | None) -> float | None:
+    """SQ2 T3 — seconds the generation may have run before the coverage
+    retry is skipped: the per-hour setting times the recording's length."""
+    per_hour = getattr(deps, "coverage_retry_budget_s_per_hour", None)
+    if per_hour is None or not built:
+        return None
+    hours = max(0, built[-1].end_ms - built[0].start_ms) / 3_600_000
+    return per_hour * max(hours, 1 / 60)
 
 
 async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dict) -> dict:
@@ -166,19 +179,6 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     await _store_detected_type(
         deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
     )
-    # 0057: the note gets its name before the long pass (Q6 order:
-    # classify → name → extract) — one short call, never able to stop it.
-    await _name_note(
-        deps,
-        tenant_id,
-        note_id=note_id,
-        generation_id=generation_id,
-        requested_by=generation.requested_by,
-        result=result,
-        provider=title_provider,
-        language=language,
-    )
-
     # Q4: every name this recording may mean, and the workspace's glossary.
     known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
 
@@ -198,12 +198,29 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         glossary=glossary,
         entity_model_tier=deps.entity_model_tier,
         entity_provider=entity_provider,
+        retry_budget_s=_retry_budget(deps, built),
     )
     # D1 — no note below the document standard is written: lint, repair,
     # fall back, record (stats.lint). D2's regeneration hook is not merged,
     # so nothing is regenerated. Never raises.
     document = await doclint.enforce(
         document, regenerate=document.regenerator, known=frozenset(known_people)
+    )
+    # 0057 / SQ3 T4: the note gets its name once the pass has read the whole
+    # recording — excerpts from each third plus the note's themes and its
+    # most specific facts. One short call, never able to stop the note.
+    themes, title_facts = _title_context(document)
+    await _name_note(
+        deps,
+        tenant_id,
+        note_id=note_id,
+        generation_id=generation_id,
+        requested_by=generation.requested_by,
+        result=result,
+        provider=title_provider,
+        language=language,
+        themes=themes,
+        facts=title_facts,
     )
 
     # ── Write #1: what the reader came for ──────────────────────────
@@ -384,6 +401,37 @@ async def _operation_provider(
         return default
 
 
+def _title_context(document: Any) -> tuple[list[str], list[str]]:
+    """SQ3 T4 — the note's themes, and its five most specific verified
+    statements taken in turn from the first, middle and last third."""
+    from note_service.domain.meeting_doc import support as support_rules
+    from note_service.domain.meeting_doc import windows as windows_mod
+
+    brief = getattr(document, "brief", None) or {}
+    themes = [str(t) for t in brief.get("themes") or [] if str(t).strip()]
+    facts = [
+        f
+        for f in getattr(document, "facts", None) or []
+        if not f.evidence_only and f.person is None and f.figure is None
+    ]
+    if not facts:
+        return themes, []
+    language = str((document.stats or {}).get("language") or "en")
+    start = min(f.start_ms for f in facts)
+    end = max(f.end_ms for f in facts)
+    by_third: dict[int, list[Any]] = {1: [], 2: [], 3: []}
+    for fact in facts:
+        by_third[windows_mod.third_of(fact.start_ms, start, end)].append(fact)
+    for group in by_third.values():
+        group.sort(key=lambda f: -support_rules.specificity(f.text, language))
+    chosen: list[str] = []
+    while len(chosen) < note_title.CONTEXT_FACTS and any(by_third.values()):
+        for k in (1, 2, 3):
+            if by_third[k] and len(chosen) < note_title.CONTEXT_FACTS:
+                chosen.append(by_third[k].pop(0).text)
+    return themes, chosen
+
+
 async def _name_note(
     deps: GenerationDeps,
     tenant_id: UUID,
@@ -394,6 +442,8 @@ async def _name_note(
     result: dict[str, Any],
     provider: Any,
     language: str,
+    themes: list[str] | None = None,
+    facts: list[str] | None = None,
 ) -> None:
     """Replace the placeholder title with one taken from the meeting.
 
@@ -406,7 +456,9 @@ async def _name_note(
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
             if await note_title.source_of(conn, note_id=note_id) != note_title.DEFAULT:
                 return
-        title = await note_title.suggest(provider, result, language=language)
+        title = await note_title.suggest(
+            provider, result, language=language, themes=themes or (), facts=facts or ()
+        )
         if title is None:
             logger.info("note_generate.title_skipped")
             return

@@ -43,6 +43,11 @@ MAX_WINDOW_CHARS: Final = 6_000
 # large window by rounding.
 LARGE_CONTEXT_TOKENS: Final = 65_536
 LARGE_WINDOW_CHARS: Final = 16_000
+# Sprint SQ2 T2 — extraction windows on a long context stop at 8 000
+# characters (about 8 minutes): a model reading 16 000 characters lists the
+# head of the window, and one failed call cannot cost more than ~8 minutes.
+# The context still holds LARGE_WINDOW_CHARS for everything else.
+EXTRACT_WINDOW_CHARS: Final = 8_000
 # A single turn past this is a monologue; it is split at sentence ends.
 # Small enough that a window holds at least two pieces, so the overlap
 # carries real context rather than a window of one piece and nothing else.
@@ -299,9 +304,11 @@ def mark_clips(turns: list[Turn]) -> list[Turn]:
 
 
 def window_chars(context_window: int | None) -> int:
-    """The window size for a backend's context: 16 000 characters at 128K,
-    6 000 at 32K and below (Sprint L2 T5)."""
-    return LARGE_WINDOW_CHARS if (context_window or 0) >= LARGE_CONTEXT_TOKENS else MAX_WINDOW_CHARS
+    """The extraction window for a backend's context: 8 000 characters at
+    128K (SQ2 T2; 16 000 before), 6 000 at 32K and below (Sprint L2 T5)."""
+    if (context_window or 0) >= LARGE_CONTEXT_TOKENS:
+        return EXTRACT_WINDOW_CHARS
+    return MAX_WINDOW_CHARS
 
 
 def build_windows(
@@ -351,6 +358,18 @@ def thirds(windows: list[Window]) -> dict[int, int]:
         share = (middle - start) / span
         out[window.index] = 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
     return out
+
+
+def third_of(ms: int, start_ms: int, end_ms: int) -> int:
+    """Sprint SQ2 T1 — which third of the recording a moment is in, by time.
+
+    ``thirds`` places a whole WINDOW by its middle, so a recording that fits
+    one window (an 11-minute podcast on a 16 000-character backend) puts
+    every fact in the middle third and the split says nothing. Facts and
+    lines are placed by their own time."""
+    span = max(1, end_ms - start_ms)
+    share = (ms - start_ms) / span
+    return 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
 
 
 # ── The engine's view of the turns (F3 amendment, r03) ──────────────

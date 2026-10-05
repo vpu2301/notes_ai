@@ -77,6 +77,9 @@ class BackendConfig(BaseModel):
     # "none" or "bearer:<token>". Held as a SecretStr so a dumped config or a
     # traceback never shows the token.
     auth: SecretStr = SecretStr("none")
+    # Sprint TQ4: a token for our own model server (deploy/asr-server), sent in
+    # its own header next to the platform's bearer. Empty = not sent.
+    server_token: SecretStr = SecretStr("")
     models: dict[str, str] = Field(default_factory=dict)  # {"chat": ..., "asr": ...}
     structured_output: StructuredMode = "json_schema"
     context_window: int = Field(default=32768, ge=1024)

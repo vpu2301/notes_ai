@@ -46,7 +46,8 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, load_registry, write_report  # noqa: E402
+from _common import REPO, load_registry, registry_env, write_report  # noqa: E402
+from notes_gold import fact_text  # noqa: E402
 from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness tests
     COMPOSED,
     MATCH_THRESHOLD,
@@ -60,6 +61,8 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     f3_gates,
     overlap,
     score_meeting,
+    sq2_gates,
+    sq3_gates,
     support,
     support_rules,
     words,
@@ -326,6 +329,15 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         regenerate=document.regenerator,
         known=frozenset({*(gold.get("speakers") or {}).values()}),
     )
+    # SQ3 T4 — the worker's title step, on the whole recording plus what the
+    # note found (jobs.generate_note._title_context).
+    from note_service.domain import note_title
+    from note_service.jobs.generate_note import _title_context
+
+    themes, title_facts = _title_context(document)
+    title = await note_title.suggest(
+        provider, result, language=language, themes=themes, facts=title_facts
+    )
     tokens.uninstall()
     if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
         raise EngineBlindError(meeting["id"])
@@ -378,9 +390,11 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
             for s in document.sections
         ],
         "language": meeting.get("language", "en"),
+        "title": title,
         # The note as a reader sees it — only ever written to local disk
         # (--save-notes, for blind rating), never into a report.
-        "note_text": "\n\n".join(
+        "note_text": (f"# {title}\n\n" if title else "")
+        + "\n\n".join(
             (f"## {s.title}\n{s.text}" if s.title else s.text) for s in document.sections
         ),
     }
@@ -493,7 +507,7 @@ def score(meeting: dict[str, Any], produced: dict[str, Any], totals: Totals) -> 
     # Key facts: did the document say the things a reader needed?
     missed: list[str] = []
     for i, fact in enumerate(gold.get("key_facts", [])):
-        _, best = best_match(fact, lines)
+        _, best = best_match(fact_text(fact), lines)
         hit = best >= MATCH_THRESHOLD
         totals.key_facts.add(hit)
         if not hit:
@@ -742,6 +756,29 @@ _STAT_KEYS = (
     "windows_restated",
     "summary_ladder",
     "small_model_profile",
+    # Sprint SQ2 T1 — the coverage diagnosis, per window and per third.
+    "windows",
+    "facts_by_third",
+    "lines_by_third",
+    "reduce_input_facts",
+    "reduce_cited_facts",
+    "reduce_cited_by_third",
+    "excluded_speech_ms",
+    "blocks_planned",
+    "blocks_rendered",
+    "sections_rendered",
+    "window_chars",
+    "context_window",
+    "speech_minutes_by_third",
+    "coverage_retry",
+    "coverage_retry_facts",
+    "coverage_retry_skipped",
+    "coverage_gaps",
+    "blocks_source",
+    "blocks_boundaries",
+    "blocks_merged_small",
+    "salient_appended",
+    "salient_skipped_full",
 )
 
 
@@ -781,6 +818,7 @@ async def main(
     f2_baseline: Path | None = None,
     judge_lines: Path | None = None,
     label: str | None = None,
+    sq1_baseline: Path | None = None,
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
@@ -878,6 +916,17 @@ async def main(
         # rates (the ledger's own arithmetic), per meeting-hour.
         summary.update(cost_summary(resolved.name, totals, hours))
         summary.update(aggregate(audit_rows, types=types))
+        # SQ2 T6 — time per meeting-hour, per meeting, at the 95th percentile.
+        per_hour = sorted(
+            r["seconds"] / (audio_seconds(m) / 3600)
+            for r, m in zip(rows, meetings, strict=False)
+            if not r.get("failed") and r.get("seconds") is not None and audio_seconds(m) > 0
+        )
+        summary["seconds_per_meeting_hour_p95"] = (
+            round(per_hour[min(len(per_hour) - 1, int(0.95 * len(per_hour)))], 1)
+            if per_hour
+            else None
+        )
         summary["meetings_scored"] = len(audit_rows)
         summary["meetings_failed"] = sum(1 for r in rows if r.get("failed"))
         if judge_provider is not None:
@@ -929,6 +978,19 @@ async def main(
         gates.update(f3_gates(all_runs[-1]["summary"]))
         gates.update(d1_gates(all_runs[-1]["summary"]))
         gates.update(d2_gates(all_runs[-1]["summary"]))
+        # Sprint SQ2 — unsupported is compared with the SQ1 report of the same arm.
+        baseline_unsupported = None
+        if sq1_baseline is not None and sq1_baseline.is_file():
+            sq1 = json.loads(sq1_baseline.read_text("utf-8"))
+            baseline_unsupported = sq1["runs"][-1]["summary"].get("unsupported_rate")
+        gates.update(sq3_gates(all_runs[-1]["summary"]))
+        gates.update(
+            sq2_gates(
+                all_runs[-1]["summary"],
+                baseline_unsupported=baseline_unsupported,
+                staging=registry_env() == "staging",
+            )
+        )
         report["f2_gates"] = gates
         for name, ok in gates.items():
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")
@@ -972,6 +1034,12 @@ if __name__ == "__main__":
         "support_calibration.py (must be under scripts/eval/local/)",
     )
     ap.add_argument(
+        "--sq1-baseline",
+        type=Path,
+        default=None,
+        help="SQ1 report of the same arm: SQ2's unsupported gate may not exceed its rate",
+    )
+    ap.add_argument(
         "--label",
         default=None,
         help="suffix for the report file name (the local bake-off writes one report per candidate)",
@@ -990,6 +1058,7 @@ if __name__ == "__main__":
                 args.f2_baseline,
                 args.judge_lines,
                 args.label,
+                args.sq1_baseline,
             )
         )
     )

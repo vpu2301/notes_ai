@@ -4,6 +4,7 @@ import type {
   AsrLanguage,
   CaptureSource,
   ChannelLayout,
+  CorrectionsView,
   NameSource,
   ReassignResult,
   RediarizeAccepted,
@@ -196,4 +197,24 @@ export function rediarize(id: string, speakersExpected: number | null): Promise<
 /** Put back the labelling before the last re-run (one step; 409 `nothing_to_undo` after). */
 export function undoRediarize(id: string): Promise<RediarizeAccepted> {
   return api<RediarizeAccepted>("asr", `/asr/jobs/${id}/rediarize/undo`, { method: "POST" });
+}
+
+/** Sprint TQ3: the spellings unified (or proposed) for this transcript. */
+export function listCorrections(id: string): Promise<CorrectionsView> {
+  return api<CorrectionsView>("asr", `/asr/jobs/${id}/corrections`);
+}
+
+/**
+ * Accept or reject one unified spelling. `to_text` edits the spelling on
+ * accept. `corrections_rev` is the one the view showed; a stale one is a 409.
+ */
+export function decideCorrection(
+  id: string,
+  correctionId: string,
+  body: { status: "accepted" | "rejected"; to_text?: string; corrections_rev: number },
+): Promise<CorrectionsView> {
+  return api<CorrectionsView>("asr", `/asr/jobs/${id}/corrections/${correctionId}`, {
+    method: "PUT",
+    json: body,
+  });
 }

@@ -70,7 +70,7 @@ final class AppState: ObservableObject {
     @Published var settingsTab: SettingsTab = .general
 
     enum SettingsTab: Hashable, CaseIterable {
-        case general, vocabulary, connectors, dataAI, account, advanced
+        case general, vocabulary, connectors, dataAI, billing, account, advanced
     }
 
     /// Open Settings on the Connectors tab (menus, the home page's prompt).
@@ -816,10 +816,11 @@ final class AppState: ObservableObject {
 
     // MARK: - Recent captures
 
-    func addRecent(jobId: String, title: String) {
+    func addRecent(jobId: String, title: String, meetingNoteId: String? = nil) {
         recents.insert(
             RecentCapture(jobId: jobId, title: title, createdAt: Date(),
-                          status: .queued, noteId: nil, errorMessage: nil),
+                          status: .queued, noteId: nil, errorMessage: nil,
+                          meetingNoteId: meetingNoteId),
             at: 0)
         if recents.count > 10 { recents = Array(recents.prefix(10)) }
         persistRecents()
@@ -860,11 +861,45 @@ final class AppState: ObservableObject {
                          status: job.status,
                          errorMessage: job.status == .failed ? job.failureText : nil)
         }
+        await resumeUnfinishedCaptures()
+    }
+
+    /// Captures whose transcript finished while nothing was waiting for it
+    /// — the app was quit or relaunched mid-transcription — are picked up
+    /// where the pipeline stopped: the transcript goes into the meeting
+    /// note, and the row becomes that note instead of "No note yet".
+    private func resumeUnfinishedCaptures() async {
+        for recent in recents where recent.status == .complete && recent.noteId == nil
+            && (recent.errorMessage ?? "").isEmpty {
+            // The capture in front of the user finishes on its own.
+            if recent.jobId == capture.activeJobId, capture.phase.isBusy { continue }
+            if let live = recent.meetingNoteId {
+                do {
+                    try await finishMeeting(noteId: live)
+                    updateRecent(jobId: recent.jobId, noteId: live)
+                } catch APIError.http(status: 404, problem: _) {
+                    // The live note went to the bin: draft a fresh one.
+                    await draftNote(for: recent, open: false)
+                } catch {
+                    // Offline or the service is down: the next refresh tries again.
+                }
+            } else {
+                await draftNote(for: recent, open: false)
+            }
+        }
+    }
+
+    /// Hand a finished transcript to its meeting note — unless the note
+    /// was already written up meanwhile (Generate Summary on the web):
+    /// attaching then would start a second run over the first.
+    private func finishMeeting(noteId: String) async throws {
+        if (try? await api.generation(noteId: noteId)) != nil { return }
+        _ = try await api.attachTranscript(noteId: noteId)
     }
 
     /// Draft the note for a capture whose transcript finished without one
     /// (the app was quit mid-pipeline, or the note request failed).
-    func draftNote(for capture: RecentCapture) async {
+    func draftNote(for capture: RecentCapture, open: Bool = true) async {
         guard capture.status == .complete, capture.noteId == nil,
               !drafting.contains(capture.jobId) else { return }
         drafting.insert(capture.jobId)
@@ -878,7 +913,15 @@ final class AppState: ObservableObject {
             let note = try await api.createNoteFromTranscript(
                 asrJobId: capture.jobId, templateId: templateId, title: capture.title)
             updateRecent(jobId: capture.jobId, noteId: note.id, errorMessage: "")
-            openNote(note.id)
+            if open { openNote(note.id) }
+        } catch APIError.http(status: 409, problem: let problem) where problem?.noteId != nil {
+            // The transcript already has a note — the meeting note it was
+            // bound to at upload, or one drafted from the web. That IS this
+            // capture's note; finish the meeting on it rather than fail.
+            let noteId = problem?.noteId ?? ""
+            try? await finishMeeting(noteId: noteId)
+            updateRecent(jobId: capture.jobId, noteId: noteId, errorMessage: "")
+            if open { openNote(noteId) }
         } catch {
             updateRecent(jobId: capture.jobId, errorMessage: error.localizedDescription)
         }

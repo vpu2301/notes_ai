@@ -49,6 +49,9 @@ PINNED: dict[str, str] = {
     "2026-10-21": "61f351fc9b999eb4463868fc93fb4573c4931353ebf766f3364b0fbe04afc4f3",  # document standard §1: title 30–80 characters, one colon
     "2026-10-22": "a2bde109721df2d6b242a5249d9be3a1b39b7184e8d41e0ab27b980f14d3a354",  # Sprint D2: blocks, phase headings, quote children, subjects, merges, summary over blocks
     "2026-10-23": "1860764b1df50e455660a394c445c001fe680d6d34daf4f32a52c62cc0f16307",  # Sprint L1: small-model profile — one-shot example, noise rule split out, heading/bullets calls, schema echo
+    "2026-10-01": "1860764b1df50e455660a394c445c001fe680d6d34daf4f32a52c62cc0f16307",  # Sprint SQ1: same wording, the version is now a real date (2026-10-23 was ahead of the calendar)
+    "2026-10-01.2": "21876f4555c36c6d710bac22c6ccc986a88aaf7ed962d0cd5731fd3ee26c8e1c",  # Sprint SQ2: coverage variant of extraction, transcript-segmented blocks, extraction windows capped
+    "2026-10-01.3": "c9e744e3376b1cefb39f918610b0a933a139860702ebe54aa36cd44c8bcc85bd",  # Sprint SQ3: title prompt reads beginning/middle/end excerpts and the note's themes and facts
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")

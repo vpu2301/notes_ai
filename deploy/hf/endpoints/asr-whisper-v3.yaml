@@ -1,0 +1,31 @@
+# cand_whisper_v3_asr — the TQ4 bake-off's arm B (ADR-0067): whisper-large-v3
+# (full) on the same Speaches image as hf_eu_asr (arm A, turbo).
+name: notes-asr-whisper-v3-{env}
+task: automatic-speech-recognition
+type: protected
+model:
+  repository: openai/whisper-large-v3
+  revision: 06f233fe06e710322aca913c1bc4249a0d71fce1   # docs/models/PINS.md (fetched 2026-10-01)
+  framework: pytorch
+  # Served behind an OpenAI-compatible /v1/audio/transcriptions handler that
+  # returns verbose_json with words[] (the asr_http probe rejects anything
+  # else at startup — ADR-0037 word timings are a contract).
+  image:
+    custom:
+      url: ghcr.io/speaches-ai/speaches:0.8.2-cuda   # faster-whisper server, OpenAI route, word timestamps
+      port: 8000
+      health_route: /health
+      env:
+        WHISPER__MODEL: Systran/faster-whisper-large-v3   # CTranslate2 conversion of the repo above; pin edaa852ec7e1 in PINS.md
+        WHISPER__COMPUTE_TYPE: float16
+provider:
+  vendor: aws
+  region: eu-west-1
+compute:
+  accelerator: gpu
+  instance_type: nvidia-t4
+  instance_size: x1
+  scaling:
+    min_replica: 0
+    max_replica: 1
+    scale_to_zero_timeout: 15

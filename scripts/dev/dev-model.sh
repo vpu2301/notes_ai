@@ -18,6 +18,7 @@
 #   DEV_MAC_ASR_URL     http://localhost:8080       whisper.cpp server (OpenAI path)
 #   DEV_MAC_ASR_MODEL   whisper-large-v3-turbo      label only (whisper-server serves one model)
 #   WHISPER_MODEL_FILE  ~/.cache/whisper-cpp/ggml-large-v3-turbo.bin
+#   DEV_MAC_ASR_ENGINE  whisper                      `parakeet` also starts deploy/asr-server on :8082 (TQ4)
 #
 # Memory budget (Sprint L1 T1): total unified memory − the Docker VM's limit
 # − 3 GiB for macOS. A base model whose 4-bit weights plus KV cache at the
@@ -201,11 +202,33 @@ start_asr() {
     ok "whisper weights match the PINS.md digest"
   fi
   say_ "  starting whisper-server on :$asr_port (Metal, OpenAI path)…"
+  # `-l auto` (Sprint TQ2): the OpenAI-style client omits `language` for an
+  # "auto" job, and whisper-server's own default is English — without this
+  # every auto job on the dev Mac was decoded as English.
   nohup whisper-server -m "$WHISPER_FILE" --host 127.0.0.1 --port "$asr_port" \
-        --inference-path /v1/audio/transcriptions --split-on-word >"$logfile" 2>&1 &
+        --inference-path /v1/audio/transcriptions --split-on-word -l auto >"$logfile" 2>&1 &
   echo $! > "$pidfile"
   for _ in $(seq 1 60); do asr_up && break; sleep 1; done
   asr_up && ok "whisper-server up (pid $(cat "$pidfile"), log $logfile)" || { bad "whisper-server did not come up — see $logfile"; return 1; }
+}
+
+# ── Parakeet candidate (Sprint TQ4, ADR-0067 arm C on the Mac) ──────────
+# DEV_MAC_ASR_ENGINE=parakeet also starts deploy/asr-server with its ONNX
+# runtime on :8082 (backend `dev_mac_parakeet_asr`). whisper-server stays up:
+# `dev_mac_asr` is the baseline the candidate is measured against.
+parakeet_port="${DEV_MAC_PARAKEET_PORT:-8082}"
+parakeet_pidfile="$state/asr-server.pid"; parakeet_log="$state/asr-server.log"
+parakeet_up() { curl -sf -m 3 "http://localhost:$parakeet_port/health" 2>/dev/null | grep -q parakeet; }
+start_parakeet() {
+  [ "${DEV_MAC_ASR_ENGINE:-whisper}" = "parakeet" ] || return 0
+  if parakeet_up; then ok "asr-server (parakeet) answering on :$parakeet_port"; return 0; fi
+  say_ "  starting asr-server (parakeet, onnx) on :$parakeet_port — the first start fetches ~2.5 GB of weights…"
+  ( cd "$repo/deploy/asr-server" && MDX_ASR_RUNTIME=onnx MDX_ASR_SERVER_ALLOW_ANONYMOUS=1 HF_HUB_OFFLINE=0 \
+      nohup uv run --no-project --with-requirements requirements-onnx.txt \
+      uvicorn app:app --host 127.0.0.1 --port "$parakeet_port" >"$parakeet_log" 2>&1 & echo $! > "$parakeet_pidfile" )
+  for _ in $(seq 1 120); do parakeet_up && break; sleep 2; done
+  parakeet_up && ok "asr-server up (pid $(cat "$parakeet_pidfile"), log $parakeet_log); the model loads on the first request" \
+    || { bad "asr-server did not come up — see $parakeet_log"; return 1; }
 }
 
 # ── verify ─────────────────────────────────────────────────────────────
@@ -240,12 +263,13 @@ status() {
 }
 
 case "$cmd" in
-  start) say_ "dev-model start  ($(mem_class))"; start_chat; start_asr; verify ;;
+  start) say_ "dev-model start  ($(mem_class))"; start_chat; start_asr; start_parakeet; verify ;;
   chat) say_ "dev-model chat  ($(mem_class))"; start_chat ;;
   fit) say_ "dev-model fit  ($(mem_class))"; fit_check "$BASE_MODEL" ;;
   verify) verify ;;
   status) status ;;
   stop)
-    if [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null; then ok "stopped whisper-server"; rm -f "$pidfile"; else say_ "no whisper-server started by this script (ollama is left running)"; fi ;;
+    if [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null; then ok "stopped whisper-server"; rm -f "$pidfile"; else say_ "no whisper-server started by this script (ollama is left running)"; fi
+    if [ -f "$parakeet_pidfile" ] && kill "$(cat "$parakeet_pidfile")" 2>/dev/null; then ok "stopped asr-server (parakeet)"; rm -f "$parakeet_pidfile"; fi ;;
   *) echo "usage: $0 [start|chat|fit|verify|status|stop]" >&2; exit 2 ;;
 esac

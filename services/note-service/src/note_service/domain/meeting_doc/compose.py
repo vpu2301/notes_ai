@@ -186,24 +186,93 @@ def show_name(turns: Sequence[Turn]) -> str | None:
     return None
 
 
-def speakers_of(table: roles_table.RolesTable, language: str) -> tuple[list[str], list[str]]:
-    """``(speakers, guests)`` for paragraph 1: the narrator or host by role
-    (and name when introduced), participants by verified name only, guests
-    and interviewees as "Name (organisation)". Clips and adverts: nobody."""
+# SQ3 T2 — the role words of paragraph 1, and the person nobody named.
+_ROLE_NOUNS: Final[dict[str, dict[str, str]]] = {
+    "en": {"expert": "expert", "interviewee": "interviewee"},
+    "de": {"expert": "Experte/Expertin", "interviewee": "Interviewpartner/in"},
+    "uk": {"expert": "експерт", "interviewee": "співрозмовник"},
+}
+_UNNAMED: Final[dict[str, tuple[str, str]]] = {
+    "en": ("another person", "{n} other people"),
+    "de": ("eine weitere Person", "{n} weitere Personen"),
+    "uk": ("ще одна особа", "ще {n} особи"),
+}
+LIST_MIN_SHARE: Final = 0.05
+_ARTICLE: Final = re.compile(r"^(?:a|an|the|ein|eine|einen|der|die|das)\s+", re.IGNORECASE)
+
+
+def _described(s: roles_table.Speaker, role_word: str | None, language: str = "en") -> str:
+    """``Name (role with organisation, qualifier)`` from the verified fields
+    of the introduction only — what F3's presenter line said, folded into
+    the speaker list (SQ3 T1). ``role_word`` stands in when the
+    introduction gives no role."""
+    from .render import PRESENTER_LABELS
+
+    person = s.introduced_as
+    name = s.name or ""
+    role = _ARTICLE.sub("", person.role).strip() if person else ""
+    role = role or (role_word or "")
+    org = (person.organisation if person else "").strip()
+    joiner = (person.joiner if person else "") or PRESENTER_LABELS.get(
+        language, PRESENTER_LABELS["en"]
+    )[2]
+    what = f"{role} {joiner} {org}" if role and org else (role or org)
+    qualifier = _ARTICLE.sub("", person.qualifier).strip() if person else ""
+    bits = [b for b in (what, qualifier) if b]
+    return f"{name} ({', '.join(bits)})" if bits and name else name
+
+
+def speakers_of(
+    table: roles_table.RolesTable, language: str
+) -> tuple[list[str], list[str], list[str]]:
+    """``(speakers, guests, others)`` for paragraph 1 — every voice with at
+    least 5 % of the speech or a role, by role rank (host/narrator, expert,
+    guest, interviewee, participant) then share. A voice nobody named is
+    "eine weitere Person" (several: "2 weitere Personen"), never a label
+    (D-LABEL). Clips and adverts: nobody. Guests are written after "als
+    Gast"; ``others`` (interviewees, participants) after them."""
     words = _ROLE_WORDS.get(language, _ROLE_WORDS["en"])
+    nouns = _ROLE_NOUNS.get(language, _ROLE_NOUNS["en"])
+    one, many = _UNNAMED.get(language, _UNNAMED["en"])
+    listed = [
+        s
+        for s in table.speakers.values()
+        if s.role in roles_table.ROLE_RANK
+        and (s.share >= LIST_MIN_SHARE or s.role != roles_table.PARTICIPANT)
+    ]
+    listed.sort(key=lambda s: (roles_table.ROLE_RANK[s.role], -s.share))
     speakers: list[str] = []
     guests: list[str] = []
-    for s in sorted(table.speakers.values(), key=lambda s: -s.share):
+    others: list[str] = []
+    unnamed = 0
+    for s in listed:
+        name = roles_table.real_name(s.name)
         if s.role in (roles_table.NARRATOR, roles_table.HOST):
-            speakers.append(s.name or words[s.role])
-        elif s.role in (roles_table.GUEST, roles_table.INTERVIEWEE) and s.name:
-            where = ", ".join(
-                p for p in (s.introduced_as.organisation if s.introduced_as else "",) if p
+            # A presenter who introduced themselves: their own role and
+            # organisation (F3's presenter line, folded in here — SQ3 T1).
+            if name:
+                speakers.append(_described(s, words[s.role], language))
+            else:
+                speakers.append(words[s.role])
+        elif s.role == roles_table.EXPERT:
+            speakers.append(
+                _described(s, nouns["expert"], language) if name else f"{one} ({nouns['expert']})"
             )
-            guests.append(f"{s.name} ({where})" if where else s.name)
-        elif s.role == roles_table.PARTICIPANT and s.name:
-            speakers.append(s.name)
-    return speakers, guests
+        elif s.role == roles_table.GUEST:
+            guests.append(_described(s, None, language) if name else one)
+        elif s.role == roles_table.INTERVIEWEE:
+            others.append(
+                _described(s, nouns["interviewee"], language)
+                if name
+                else f"{one} ({nouns['interviewee']})"
+            )
+        elif name:
+            others.append(name)
+        else:
+            unnamed += 1
+    if unnamed:
+        others.append(one if unnamed == 1 else many.format(n=unnamed))
+    return speakers, guests, others
 
 
 def orientation_p1(
@@ -216,7 +285,7 @@ def orientation_p1(
     themes: Sequence[str] = (),
     show: str | None = None,
 ) -> str:
-    speakers, guests = speakers_of(table, language)
+    speakers, guests, others = speakers_of(table, language)
     text = overview.first_paragraph(
         language=language,
         recording_type=recording_type,
@@ -224,6 +293,7 @@ def orientation_p1(
         framing=framing,
         speakers=speakers,
         guests=guests,
+        others=others,
         themes=list(themes),
     )
     if show and not framing.strip():
@@ -252,3 +322,175 @@ def clean_themes(themes: Sequence[str]) -> list[str]:
             if piece.casefold() not in {o.casefold() for o in out}:
                 out.append(piece)
     return out
+
+
+# ── Sprint SQ2 T4 — sections follow the recording ───────────────────
+#
+# Block boundaries come from the TRANSCRIPT, not from where facts happen to
+# lie: (a) a spoken structure cue ("Kapitel 2", "let's move on"); (b)
+# otherwise a lexical shift over two-minute tiles (TextTiling: cosine of
+# content words either side of a gap, depth against the neighbouring peaks
+# — deterministic code, no model call); (c) the count reconciled to the
+# standard's ``round(D/4)`` within [3, 8] by dropping the weakest. A
+# recording with no shift at all (a monologue on one subject) gets equal
+# blocks. Facts are placed by their evidence time; a block with fewer than
+# two facts joins its neighbour (never a one-bullet section — D-STRUCT).
+
+TILE_MS: Final = 120_000
+TILING_SIDE: Final = 2  # tiles compared either side of a gap
+MIN_SEGMENT_FACTS: Final = 2
+# A cue and a lexical boundary closer than this are the same boundary.
+BOUNDARY_NEAR_MS: Final = 90_000
+# Below this depth a gap is not a shift (cosines are 0–1).
+MIN_DEPTH: Final = 0.05
+CUE_STRENGTH: Final = 2.0  # a spoken cue outranks any lexical depth
+
+SOURCE_CUES: Final = "cues"
+SOURCE_LEXICAL: Final = "lexical"
+SOURCE_MIXED: Final = "cues+lexical"
+SOURCE_UNIFORM: Final = "uniform"
+SOURCE_SINGLE: Final = "single"
+
+
+@dataclass(frozen=True, slots=True)
+class Segmentation:
+    """Where the recording's parts begin (ms, ascending, the first part's
+    start excluded) and what found them."""
+
+    boundaries: tuple[int, ...]
+    source: str
+
+
+def _cosine(a: Counter[str], b: Counter[str]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(v * b.get(k, 0) for k, v in a.items())
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def lexical_shifts(turns: Sequence[Turn], language: str) -> list[tuple[int, float]]:
+    """``[(boundary ms, depth)]`` at every tile gap, strongest first.
+
+    Tiles are two minutes of speech each; a gap's score is the cosine of
+    the content words of the ``TILING_SIDE`` tiles before and after it; its
+    depth is how far that dips below the highest score on each side."""
+    if not turns:
+        return []
+    start = turns[0].start_ms
+    tiles: list[Counter[str]] = []
+    starts: list[int] = []
+    for turn in turns:
+        k = max(0, (turn.start_ms - start) // TILE_MS)
+        while len(tiles) <= k:
+            tiles.append(Counter())
+            starts.append(start + len(starts) * TILE_MS)
+        tiles[k].update(support.content_tokens(turn.text, language))
+    if len(tiles) < 2:
+        return []
+    scores: list[float] = []
+    for gap in range(1, len(tiles)):
+        left = sum((tiles[i] for i in range(max(0, gap - TILING_SIDE), gap)), Counter())
+        right = sum((tiles[i] for i in range(gap, min(len(tiles), gap + TILING_SIDE))), Counter())
+        scores.append(_cosine(left, right))
+    out: list[tuple[int, float]] = []
+    for i, score in enumerate(scores):
+        left_peak = max(scores[: i + 1])
+        right_peak = max(scores[i:])
+        depth = (left_peak - score) + (right_peak - score)
+        if depth >= MIN_DEPTH:
+            out.append((starts[i + 1], depth))
+    return sorted(out, key=lambda x: (-x[1], x[0]))
+
+
+def segment(
+    turns: Sequence[Turn],
+    minutes: float,
+    language: str,
+    cue_starts: Sequence[int] = (),
+) -> Segmentation:
+    """The recording's parts: cues first, lexical shifts to fill, the
+    weakest dropped to ``target_blocks(minutes)``; equal parts when the
+    transcript has no shift at all."""
+    if not turns:
+        return Segmentation((), SOURCE_SINGLE)
+    start, end = turns[0].start_ms, turns[-1].end_ms
+    wanted = target_blocks(minutes) - 1
+    candidates: list[tuple[int, float, str]] = [
+        (ms, CUE_STRENGTH, SOURCE_CUES)
+        for ms in sorted(set(cue_starts))
+        if start + BOUNDARY_NEAR_MS <= ms <= end - BOUNDARY_NEAR_MS
+    ]
+    for ms, depth in lexical_shifts(turns, language):
+        if all(abs(ms - c) >= BOUNDARY_NEAR_MS for c, _d, _s in candidates):
+            candidates.append((ms, depth, SOURCE_LEXICAL))
+    # Strongest first, but no part shorter than half an equal share: a
+    # shift a minute from the end makes a part too short to hold two facts
+    # (it is merged away and the note loses a section — r03, SQ2).
+    min_part = (end - start) / (wanted + 1) / 2 if wanted > 0 else 0
+    chosen: list[tuple[int, float, str]] = []
+    for cand in sorted(candidates, key=lambda c: (-c[1], c[0])):
+        if len(chosen) >= wanted:
+            break
+        edges = [start, *sorted(c[0] for c in chosen), end]
+        if all(abs(cand[0] - e) >= min_part for e in edges):
+            chosen.append(cand)
+    sources = {src for _m, _d, src in chosen}
+    cuts = sorted(ms for ms, _d, _s in chosen)
+    if not chosen and wanted > 0 and end - start >= (wanted + 1) * BOUNDARY_NEAR_MS:
+        # No shift anywhere (a monologue on one subject): equal parts.
+        step = (end - start) / (wanted + 1)
+        return Segmentation(
+            tuple(round(start + step * k) for k in range(1, wanted + 1)), SOURCE_UNIFORM
+        )
+    # Fewer shifts than the standard's parts: the longest part is halved
+    # until the count holds (a monologue on one subject: equal parts).
+    while len(cuts) < wanted:
+        edges = [start, *cuts, end]
+        a, b = max(zip(edges, edges[1:], strict=False), key=lambda e: e[1] - e[0])
+        if b - a < 2 * BOUNDARY_NEAR_MS:
+            break
+        cuts = sorted([*cuts, (a + b) // 2])
+        sources.add(SOURCE_UNIFORM)
+    if not cuts:
+        return Segmentation((), SOURCE_SINGLE)
+    if sources == {SOURCE_UNIFORM}:
+        source = SOURCE_UNIFORM
+    elif SOURCE_CUES in sources and SOURCE_LEXICAL in sources:
+        source = SOURCE_MIXED
+    else:
+        source = next(iter(sorted(sources - {SOURCE_UNIFORM})))
+        if SOURCE_UNIFORM in sources:
+            source = f"{source}+{SOURCE_UNIFORM}"
+    return Segmentation(tuple(cuts), source)
+
+
+def blocks_at(facts: Sequence[VerifiedFact], segmentation: Segmentation) -> tuple[list[Block], int]:
+    """Facts placed in the parts by their evidence time; a part with fewer
+    than ``MIN_SEGMENT_FACTS`` joins its smaller neighbour (counted)."""
+    ordered = sorted(facts, key=lambda f: (f.start_ms, f.item_key))
+    if not ordered:
+        return [], 0
+    edges = [-1, *segmentation.boundaries]
+    groups: list[list[VerifiedFact]] = [[] for _ in edges]
+    for fact in ordered:
+        k = max(i for i, edge in enumerate(edges) if fact.start_ms >= edge)
+        groups[k].append(fact)
+    groups = [g for g in groups if g]
+    merged = 0
+    while len(groups) > 1:
+        small = [i for i, g in enumerate(groups) if len(g) < MIN_SEGMENT_FACTS]
+        if not small:
+            break
+        i = small[0]
+        if i == 0:
+            j = 1
+        elif i == len(groups) - 1:
+            j = i - 1
+        else:
+            j = i - 1 if len(groups[i - 1]) <= len(groups[i + 1]) else i + 1
+        a, b = sorted((i, j))
+        groups[a : b + 1] = [groups[a] + groups[b]]
+        merged += 1
+    return [Block(n, tuple(g)) for n, g in enumerate(groups)], merged

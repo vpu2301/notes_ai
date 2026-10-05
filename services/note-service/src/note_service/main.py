@@ -20,6 +20,7 @@ from .middleware import AnonymousCorsMiddleware, RequestIDMiddleware
 from .routers import (
     ai_settings,
     audio_clips,
+    billing,
     calendar,
     glossary,
     health,
@@ -227,6 +228,8 @@ def create_app() -> FastAPI:
     app.include_router(glossary.router)
     # Sprint 37: who processes this workspace's meetings (ADR-0046 d.12).
     app.include_router(ai_settings.router)
+    # Billing (0068): plan, usage, plan changes.
+    app.include_router(billing.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

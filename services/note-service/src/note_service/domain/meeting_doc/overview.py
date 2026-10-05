@@ -116,6 +116,7 @@ def first_paragraph(
     speakers: list[str] | None = None,
     guests: list[str] | None = None,
     themes: list[str] | None = None,
+    others: list[str] | None = None,
 ) -> str:
     """ "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast
     Felix Holtermann (Handelsblatt). Es geht um …". A model framing sentence that
@@ -133,7 +134,13 @@ def first_paragraph(
     parts = [first]
     joiner = str(_pick(_AND, language))
     guest_label = str(_pick(_GUEST, language))
-    who = [w for w in (speakers or []) if w] + [f"{guest_label} {g}" for g in (guests or []) if g]
+    # SQ3 T2 — the one writer of who speaks: hosts and experts, then the
+    # guests, then interviewees and everybody else (compose.speakers_of).
+    who = (
+        [w for w in (speakers or []) if w]
+        + [f"{guest_label} {g}" for g in (guests or []) if g]
+        + [w for w in (others or []) if w]
+    )
     if who:
         listed = ", ".join(who[:-1]) + f" {joiner} {who[-1]}" if len(who) > 1 else who[0]
         template = str(_pick(_SPEAKERS, language))

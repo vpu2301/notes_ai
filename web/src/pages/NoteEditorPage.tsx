@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -77,9 +77,18 @@ import { LineEvidence } from "../components/EvidencePopover";
 import { CorrectionsPanel } from "../components/CorrectionsPanel";
 import { useGeneratedLines } from "../lib/useGeneratedLines";
 import { lineKey } from "../lib/itemKey";
-import type { GeneratedItem } from "../api/types";
+import type { GeneratedItem, TranscriptNoise } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
-import { isOtherLanguage, promptEchoLine, transcriptCopyText } from "../lib/transcriptText";
+import {
+  isOtherLanguage,
+  markerKind,
+  markerLine,
+  markersBefore,
+  promptEchoLine,
+  transcriptCopyText,
+} from "../lib/transcriptText";
+import { correctionsBanner, unifiedFromTitle, unifiedParts } from "../lib/corrections";
+import { EntityReviewSheet } from "../components/EntityReviewSheet";
 import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
@@ -94,6 +103,7 @@ import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
 import { defFor, noteBlocks } from "../lib/noteBlocks";
+import { generatedSectionKeys, isGeneratedSection } from "../lib/generatedSections";
 import { useDismiss } from "../lib/useDismiss";
 import { useSpaces } from "../spaces/SpacesContext";
 
@@ -138,6 +148,8 @@ interface FieldProps {
   onChange: (next: NoteSection) => void;
   /** Q5: the evidence of a generated line, drawn at its end. */
   lineExtra?: LineExtra;
+  /** SQ3 T1: the engine wrote this section — its paragraphs are never speaker turns. */
+  generated?: boolean;
 }
 
 /**
@@ -151,7 +163,7 @@ interface FieldProps {
  * with nothing in it skips straight to the editor — there is no document
  * to read yet, only a prompt to write one.
  */
-function FreeTextField({ def, section, readOnly, onChange, lineExtra }: FieldProps) {
+function FreeTextField({ def, section, readOnly, onChange, lineExtra, generated }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const text = section.text ?? "";
@@ -171,7 +183,7 @@ function FreeTextField({ def, section, readOnly, onChange, lineExtra }: FieldPro
     e.target.setSelectionRange(end, end);
   };
 
-  if (readOnly) return <RichText text={text} lineExtra={lineExtra} />;
+  if (readOnly) return <RichText text={text} lineExtra={lineExtra} allowSpeakerTurns={!generated} />;
 
   if (!editing && text.trim() !== "") {
     return (
@@ -188,7 +200,12 @@ function FreeTextField({ def, section, readOnly, onChange, lineExtra }: FieldPro
           }
         }}
       >
-        <RichText text={text} placeholder={placeholder} lineExtra={lineExtra} />
+        <RichText
+          text={text}
+          placeholder={placeholder}
+          lineExtra={lineExtra}
+          allowSpeakerTurns={!generated}
+        />
       </div>
     );
   }
@@ -847,6 +864,13 @@ export function TranscriptView({
   // recording unless asked; the choice lives with this view only.
   const [includeOtherLanguages, setIncludeOtherLanguages] = useState(false);
   const hasOtherLanguages = useMemo(() => turns.some(isOtherLanguage), [turns]);
+  // Sprint TQ2: music / silence / noise markers stay out of a copy unless asked.
+  const markers = result?.noise ?? [];
+  const [includeMarkers, setIncludeMarkers] = useState(false);
+  // Sprint TQ3: the spelling overlay — banner, review sheet, underlines.
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [hoverSpelling, setHoverSpelling] = useState<string | null>(null);
+  const spellingBanner = correctionsBanner(result?.entity_corrections, result?.language);
   const echoLine = promptEchoLine(result?.diagnostics);
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
@@ -861,6 +885,7 @@ export function TranscriptView({
     const text = transcriptCopyText(turns, (t) => turnName(t, names), {
       diarized,
       includeOtherLanguages,
+      markers: includeMarkers ? { noise: markers, language: result?.language } : undefined,
     });
     try {
       await navigator.clipboard.writeText(text);
@@ -1141,12 +1166,48 @@ export function TranscriptView({
             Include other languages
           </label>
         )}
+        {markers.length > 0 && (
+          <label className="help transcript-include-langs">
+            <input
+              type="checkbox"
+              className="chk"
+              checked={includeMarkers}
+              onChange={(e) => setIncludeMarkers(e.target.checked)}
+            />
+            Include markers
+          </label>
+        )}
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
       </div>
       {echoLine && <p className="help transcript-diagnostic">{echoLine}</p>}
       <NotTranscribed coverage={result?.coverage} onSeek={showMoment} />
+      {spellingBanner && (
+        <div className="banner banner-info transcript-spellings" data-testid="spelling-banner">
+          <span className="grow">{spellingBanner.text}</span>
+          <button className="btn ghost sm" onClick={() => setReviewOpen(true)}>
+            {spellingBanner.action}
+          </button>
+        </div>
+      )}
+      {reviewOpen && result && (
+        <EntityReviewSheet
+          jobId={jobId}
+          corrections={result.entity_corrections ?? []}
+          rev={result.corrections_rev ?? 0}
+          online={online}
+          onHover={setHoverSpelling}
+          onChanged={() => {
+            // The text changes with the decision: read the applied view again.
+            void reload().catch((err) => toast.error(messageFor(err)));
+          }}
+          onClose={() => {
+            setHoverSpelling(null);
+            setReviewOpen(false);
+          }}
+        />
+      )}
       {selection.length > 0 && (
         <div className="turn-actions" role="toolbar" aria-label="Selected turns">
           <span className="grow">{turnsLabel(selection.length)} selected</span>
@@ -1169,8 +1230,11 @@ export function TranscriptView({
         const isSelected = selected.has(i);
         const here = openSuggestions.filter((sg) => turnOfSuggestion(turns, sg) === i);
         return (
+          <Fragment key={t.segment_indices?.[0] ?? `${t.start_ms}-${i}`}>
+          {markersBefore(result.noise, turns, i).map((n) => (
+            <NoiseMarker key={`noise-${n.start_ms}`} noise={n} language={result.language} />
+          ))}
           <div
-            key={t.segment_indices?.[0] ?? `${t.start_ms}-${i}`}
             ref={(el) => {
               turnRefs.current[i] = el;
             }}
@@ -1254,7 +1318,19 @@ export function TranscriptView({
             </div>
             {t.paragraphs.map((p, j) => (
               <p key={j} className="turn-text">
-                {p}
+                {unifiedParts(p, result.entity_corrections).map((part, k) =>
+                  part.correction ? (
+                    <span
+                      key={k}
+                      className={`unified-spelling ${hoverSpelling === part.text ? "hovered" : ""}`}
+                      title={unifiedFromTitle(part.correction, result.language)}
+                    >
+                      {part.text}
+                    </span>
+                  ) : (
+                    <Fragment key={k}>{part.text}</Fragment>
+                  ),
+                )}
               </p>
             ))}
             {here.map((sg) => (
@@ -1269,9 +1345,25 @@ export function TranscriptView({
               />
             ))}
           </div>
+          </Fragment>
         );
       })}
+      {markersBefore(result.noise, turns, turns.length).map((n) => (
+        <NoiseMarker key={`noise-${n.start_ms}`} noise={n} language={result.language} />
+      ))}
     </div>
+  );
+}
+
+/**
+ * Sprint TQ2: "[Musik 00:12–00:41]" — music, silence or noise the worker
+ * marked instead of transcribing. A line of its own, never a speaker's.
+ */
+function NoiseMarker({ noise, language }: { noise: TranscriptNoise; language: string }) {
+  return (
+    <p className={`transcript-marker transcript-marker-${markerKind(noise.kind)}`} data-testid="transcript-marker">
+      {markerLine(noise, language)}
+    </p>
   );
 }
 
@@ -1752,6 +1844,7 @@ export function NoteEditorPage() {
   // Q5: evidence and the detail toggle only for the note as it stands,
   // and only when the engine wrote it (it has rows).
   const generated = !viewing && genRows.length > 0;
+  const genSectionKeys = useMemo(() => generatedSectionKeys(genRows), [genRows]);
   const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
   const lineExtra: LineExtra | undefined = generated
     ? (raw) => {
@@ -2063,6 +2156,7 @@ export function NoteEditorPage() {
                       readOnly={!editable}
                       onChange={(next) => onContentChange(withSection(shownContent, next))}
                       lineExtra={lineExtra}
+                      generated={isGeneratedSection(block.key, genSectionKeys)}
                     />
                     {alsoSaid && (alsoSaid.get(block.key)?.length ?? 0) > 0 && (
                       <div className="also-said">

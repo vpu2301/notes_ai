@@ -222,7 +222,8 @@ def test_a_duplicated_bullet_is_one() -> None:
     repaired, done = doclint.repair(sections, _ctx([*facts, twin], minutes=2))
     texts = [ln.text for s in repaired for ln in s.lines]
     assert texts.count(f"- {facts[0].text}") == 1
-    assert done["D-RED"] == 1
+    # SQ3: the composed ladder repeats the bullets and goes too (also D-RED).
+    assert done["D-RED"] >= 1
 
 
 # ── T2 headings and title ───────────────────────────────────────────
@@ -462,16 +463,24 @@ def test_the_pipeline_output_is_enforced_and_recorded() -> None:
             assert doclint.line_fault(line, ctx) is None
 
 
-def test_an_orientation_sentence_may_name_a_fact_a_section_also_carries() -> None:
-    """§2: paragraph 2 names the two or three most specific facts; the
-    sections carry them too. That is not redundancy; two bullets are."""
+def test_an_orientation_sentence_may_name_a_fact_but_not_repeat_its_bullet() -> None:
+    """§2: paragraph 2 names the most specific facts, which the sections
+    carry too. §7 / SQ3 T3: not in the same words — a sentence that says
+    what a bullet says is redundancy, and the repair keeps one of them."""
     facts = [_specific(n, n * MIN) for n in range(4)]
     framing = Line("Podcast-Folge über Palantir.", "framing", (facts[0].item_key,))
-    said = Line(f"{facts[0].text}.", "summary", (facts[0].item_key,))
-    top = RenderedSection(roles.OVERVIEW_KEY, roles.SUMMARY, "", lines=(framing, said))
+    named = Line("Palantir entsteht 1990 aus einer kleinen Gründung.", "summary",
+                 (facts[0].item_key,))  # fmt: skip
+    top = RenderedSection(roles.OVERVIEW_KEY, roles.SUMMARY, "", lines=(framing, named))
     sections = [
         top,
         _topic("Palantir und Peter Thiel", facts[:2]),
         _topic("Alex Karp und Habermas", facts[2:]),
     ]
     assert "redundancy" not in _rules(doclint.check(sections, _ctx(facts, minutes=1)))
+    repeated = Line(f"{facts[0].text}.", "summary", (facts[0].item_key,))
+    sections[0] = RenderedSection(roles.OVERVIEW_KEY, roles.SUMMARY, "", lines=(framing, repeated))
+    assert "orientation" in _rules(doclint.check(sections, _ctx(facts, minutes=1)))["redundancy"]
+    repaired, _done = doclint.repair(sections, _ctx(facts, minutes=1))
+    texts = [ln.text for s in repaired for ln in s.lines]
+    assert sum(facts[0].text in t for t in texts) == 1

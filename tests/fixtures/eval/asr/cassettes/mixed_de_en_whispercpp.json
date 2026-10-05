@@ -1,0 +1,618 @@
+{
+ "about": "Sprint TQ2 T1 parity cassette. Synthetic audio (macOS TTS: German 'Anna', English 'Samantha', a 12 s synthetic chord, 15 s of silence), recorded 2026-09-30 from whisper-server (ggml-large-v3-turbo) through HTTPASRProvider.transcribe_runs. No customer content. 'runs' are the real Silero runs of that file; 'groups' are the server's verbose_json replies per language group (de = runs 1+3 joined with 300 ms silence, en = run 2).",
+ "audio_ms": 43726,
+ "runs": [
+  [
+   2,
+   5854
+  ],
+  [
+   6786,
+   11326
+  ],
+  [
+   12258,
+   16830
+  ]
+ ],
+ "run_languages": [
+  "de",
+  "en",
+  "de"
+ ],
+ "recording_language": "de",
+ "groups": {
+  "de": {
+   "task": "transcribe",
+   "language": "german",
+   "duration": 10.723999977111816,
+   "text": " Wir sprechen heute über die Lage im Nahen Osten.\n Der Sprecher der Regierung hat sich dazu geäußert.\n Soweit das Zitat.\n Peter Welchering ordnet das für uns ein.\n",
+   "segments": [
+    {
+     "id": 0,
+     "text": " Wir sprechen heute über die Lage im Nahen Osten.",
+     "start": 0.0,
+     "end": 2.58,
+     "tokens": [
+      4347,
+      27853,
+      9801,
+      4502,
+      978,
+      41555,
+      566,
+      13933,
+      268,
+      422,
+      6266,
+      13
+     ],
+     "words": [
+      {
+       "word": " Wir",
+       "start": 0.0,
+       "end": 0.18,
+       "t_dtw": -1,
+       "probability": 0.977688729763031
+      },
+      {
+       "word": " sprechen",
+       "start": 0.18,
+       "end": 0.67,
+       "t_dtw": -1,
+       "probability": 0.9999408721923828
+      },
+      {
+       "word": " heute",
+       "start": 0.67,
+       "end": 0.97,
+       "t_dtw": -1,
+       "probability": 0.9999027252197266
+      },
+      {
+       "word": " über",
+       "start": 0.97,
+       "end": 1.21,
+       "t_dtw": -1,
+       "probability": 0.9997768402099609
+      },
+      {
+       "word": " die",
+       "start": 1.21,
+       "end": 1.3900000000000001,
+       "t_dtw": -1,
+       "probability": 0.9997044205665588
+      },
+      {
+       "word": " Lage",
+       "start": 1.3900000000000001,
+       "end": 1.58,
+       "t_dtw": -1,
+       "probability": 0.9999313354492188
+      },
+      {
+       "word": " im",
+       "start": 1.6300000000000001,
+       "end": 1.74,
+       "t_dtw": -1,
+       "probability": 0.9993745684623718
+      },
+      {
+       "word": " Nah",
+       "start": 1.75,
+       "end": 1.93,
+       "t_dtw": -1,
+       "probability": 0.9962761998176575
+      },
+      {
+       "word": "en",
+       "start": 1.93,
+       "end": 2.05,
+       "t_dtw": -1,
+       "probability": 0.9998989105224609
+      },
+      {
+       "word": " O",
+       "start": 2.05,
+       "end": 2.11,
+       "t_dtw": -1,
+       "probability": 0.9993374347686768
+      },
+      {
+       "word": "sten",
+       "start": 2.11,
+       "end": 2.35,
+       "t_dtw": -1,
+       "probability": 0.9998416900634766
+      },
+      {
+       "word": ".",
+       "start": 2.35,
+       "end": 2.58,
+       "t_dtw": -1,
+       "probability": 0.7078372836112976
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.026723384857177734,
+     "no_speech_prob": 1.1561262364123692e-11
+    },
+    {
+     "id": 1,
+     "text": " Der Sprecher der Regierung hat sich dazu geäußert.",
+     "start": 2.94,
+     "end": 5.7,
+     "tokens": [
+      5618,
+      1738,
+      265,
+      6759,
+      1163,
+      42979,
+      2385,
+      3041,
+      13034,
+      1519,
+      737,
+      43796,
+      911,
+      13
+     ],
+     "words": [
+      {
+       "word": " Der",
+       "start": 2.94,
+       "end": 2.94,
+       "t_dtw": -1,
+       "probability": 0.9999065399169922
+      },
+      {
+       "word": " Sp",
+       "start": 2.94,
+       "end": 2.94,
+       "t_dtw": -1,
+       "probability": 0.9996662735939026
+      },
+      {
+       "word": "re",
+       "start": 2.94,
+       "end": 3.04,
+       "t_dtw": -1,
+       "probability": 0.9999675750732422
+      },
+      {
+       "word": "cher",
+       "start": 3.04,
+       "end": 3.31,
+       "t_dtw": -1,
+       "probability": 0.9999561309814453
+      },
+      {
+       "word": " der",
+       "start": 3.31,
+       "end": 3.5100000000000002,
+       "t_dtw": -1,
+       "probability": 0.9999732971191406
+      },
+      {
+       "word": " Regierung",
+       "start": 3.5100000000000002,
+       "end": 4.13,
+       "t_dtw": -1,
+       "probability": 0.9998664855957031
+      },
+      {
+       "word": " hat",
+       "start": 4.13,
+       "end": 4.33,
+       "t_dtw": -1,
+       "probability": 0.9989248514175415
+      },
+      {
+       "word": " sich",
+       "start": 4.33,
+       "end": 4.6000000000000005,
+       "t_dtw": -1,
+       "probability": 0.9995328187942505
+      },
+      {
+       "word": " dazu",
+       "start": 4.6000000000000005,
+       "end": 4.87,
+       "t_dtw": -1,
+       "probability": 0.9995061159133911
+      },
+      {
+       "word": " ge",
+       "start": 4.87,
+       "end": 5.0,
+       "t_dtw": -1,
+       "probability": 0.9994298815727234
+      },
+      {
+       "word": "ä",
+       "start": 5.0,
+       "end": 5.0600000000000005,
+       "t_dtw": -1,
+       "probability": 0.9997673034667969
+      },
+      {
+       "word": "uß",
+       "start": 5.0600000000000005,
+       "end": 5.14,
+       "t_dtw": -1,
+       "probability": 0.9993116855621338
+      },
+      {
+       "word": "ert",
+       "start": 5.2,
+       "end": 5.3,
+       "t_dtw": -1,
+       "probability": 0.9999294281005859
+      },
+      {
+       "word": ".",
+       "start": 5.44,
+       "end": 5.62,
+       "t_dtw": -1,
+       "probability": 0.9987229108810425
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.00036938986158929765,
+     "no_speech_prob": 1.1561262364123692e-11
+    },
+    {
+     "id": 2,
+     "text": " Soweit das Zitat.",
+     "start": 6.22,
+     "end": 7.36,
+     "tokens": [
+      318,
+      6880,
+      270,
+      1482,
+      1176,
+      14032,
+      13
+     ],
+     "words": [
+      {
+       "word": " S",
+       "start": 6.22,
+       "end": 6.22,
+       "t_dtw": -1,
+       "probability": 0.9741984605789185
+      },
+      {
+       "word": "owe",
+       "start": 6.22,
+       "end": 6.22,
+       "t_dtw": -1,
+       "probability": 0.9995442628860474
+      },
+      {
+       "word": "it",
+       "start": 6.23,
+       "end": 6.26,
+       "t_dtw": -1,
+       "probability": 0.9999809265136719
+      },
+      {
+       "word": " das",
+       "start": 6.26,
+       "end": 6.46,
+       "t_dtw": -1,
+       "probability": 0.9999637603759766
+      },
+      {
+       "word": " Z",
+       "start": 6.5600000000000005,
+       "end": 6.65,
+       "t_dtw": -1,
+       "probability": 0.9999637603759766
+      },
+      {
+       "word": "itat",
+       "start": 6.65,
+       "end": 7.03,
+       "t_dtw": -1,
+       "probability": 0.9997615814208984
+      },
+      {
+       "word": ".",
+       "start": 7.03,
+       "end": 7.3500000000000005,
+       "t_dtw": -1,
+       "probability": 0.9744158983230591
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.006605386734008789,
+     "no_speech_prob": 1.1561262364123692e-11
+    },
+    {
+     "id": 3,
+     "text": " Peter Welchering ordnet das für uns ein.",
+     "start": 7.72,
+     "end": 10.02,
+     "tokens": [
+      6508,
+      3778,
+      339,
+      1794,
+      4792,
+      7129,
+      1482,
+      2959,
+      2693,
+      1343,
+      13
+     ],
+     "words": [
+      {
+       "word": " Peter",
+       "start": 7.72,
+       "end": 7.72,
+       "t_dtw": -1,
+       "probability": 0.9990181922912598
+      },
+      {
+       "word": " Wel",
+       "start": 7.72,
+       "end": 7.94,
+       "t_dtw": -1,
+       "probability": 0.9812943935394287
+      },
+      {
+       "word": "ch",
+       "start": 7.94,
+       "end": 7.96,
+       "t_dtw": -1,
+       "probability": 0.9947894215583801
+      },
+      {
+       "word": "ering",
+       "start": 8.08,
+       "end": 8.44,
+       "t_dtw": -1,
+       "probability": 0.9984734058380127
+      },
+      {
+       "word": " ord",
+       "start": 8.44,
+       "end": 8.66,
+       "t_dtw": -1,
+       "probability": 0.9988352656364441
+      },
+      {
+       "word": "net",
+       "start": 8.66,
+       "end": 8.85,
+       "t_dtw": -1,
+       "probability": 0.9998760223388672
+      },
+      {
+       "word": " das",
+       "start": 8.88,
+       "end": 9.1,
+       "t_dtw": -1,
+       "probability": 0.9999465942382812
+      },
+      {
+       "word": " für",
+       "start": 9.1,
+       "end": 9.3,
+       "t_dtw": -1,
+       "probability": 0.9997101426124573
+      },
+      {
+       "word": " uns",
+       "start": 9.35,
+       "end": 9.540000000000001,
+       "t_dtw": -1,
+       "probability": 0.9999504089355469
+      },
+      {
+       "word": " ein",
+       "start": 9.540000000000001,
+       "end": 9.76,
+       "t_dtw": -1,
+       "probability": 0.9990315437316895
+      },
+      {
+       "word": ".",
+       "start": 9.76,
+       "end": 10.02,
+       "t_dtw": -1,
+       "probability": 0.9901761412620544
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.0032617251854389906,
+     "no_speech_prob": 1.1561262364123692e-11
+    }
+   ],
+   "detected_language": "german",
+   "detected_language_probability": 0.9995497465133667,
+   "language_probabilities": {
+    "de": 0.9995497465133667
+   }
+  },
+  "en": {
+   "task": "transcribe",
+   "language": "english",
+   "duration": 4.539999961853027,
+   "text": " We will respond with force if our facilities are attacked\n again, the spokesman said.\n",
+   "segments": [
+    {
+     "id": 0,
+     "text": " We will respond with force if our facilities are attacked",
+     "start": 0.0,
+     "end": 2.75,
+     "tokens": [
+      492,
+      486,
+      4196,
+      365,
+      3464,
+      498,
+      527,
+      9406,
+      366,
+      12692
+     ],
+     "words": [
+      {
+       "word": " We",
+       "start": 0.03,
+       "end": 0.11,
+       "t_dtw": -1,
+       "probability": 0.8791452646255493
+      },
+      {
+       "word": " will",
+       "start": 0.11,
+       "end": 0.33,
+       "t_dtw": -1,
+       "probability": 0.9999065399169922
+      },
+      {
+       "word": " respond",
+       "start": 0.33,
+       "end": 0.72,
+       "t_dtw": -1,
+       "probability": 0.999847412109375
+      },
+      {
+       "word": " with",
+       "start": 0.72,
+       "end": 0.85,
+       "t_dtw": -1,
+       "probability": 0.9997692108154297
+      },
+      {
+       "word": " force",
+       "start": 1.0,
+       "end": 1.18,
+       "t_dtw": -1,
+       "probability": 0.9996529221534729
+      },
+      {
+       "word": " if",
+       "start": 1.24,
+       "end": 1.32,
+       "t_dtw": -1,
+       "probability": 0.989692747592926
+      },
+      {
+       "word": " our",
+       "start": 1.33,
+       "end": 1.5,
+       "t_dtw": -1,
+       "probability": 0.9998226165771484
+      },
+      {
+       "word": " facilities",
+       "start": 1.5,
+       "end": 2.06,
+       "t_dtw": -1,
+       "probability": 0.9993078708648682
+      },
+      {
+       "word": " are",
+       "start": 2.06,
+       "end": 2.23,
+       "t_dtw": -1,
+       "probability": 0.9917354583740234
+      },
+      {
+       "word": " attacked",
+       "start": 2.23,
+       "end": 2.65,
+       "t_dtw": -1,
+       "probability": 0.9988991022109985
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.013659997843205929,
+     "no_speech_prob": 5.387346818652716e-12
+    },
+    {
+     "id": 1,
+     "text": " again, the spokesman said.",
+     "start": 2.75,
+     "end": 4.48,
+     "tokens": [
+      797,
+      11,
+      264,
+      25378,
+      1601,
+      848,
+      13
+     ],
+     "words": [
+      {
+       "word": " again",
+       "start": 2.75,
+       "end": 2.96,
+       "t_dtw": -1,
+       "probability": 0.9993955492973328
+      },
+      {
+       "word": ",",
+       "start": 2.96,
+       "end": 3.12,
+       "t_dtw": -1,
+       "probability": 0.9290673136711121
+      },
+      {
+       "word": " the",
+       "start": 3.12,
+       "end": 3.17,
+       "t_dtw": -1,
+       "probability": 0.9242968559265137
+      },
+      {
+       "word": " spokes",
+       "start": 3.42,
+       "end": 3.75,
+       "t_dtw": -1,
+       "probability": 0.9990220069885254
+      },
+      {
+       "word": "man",
+       "start": 3.75,
+       "end": 3.96,
+       "t_dtw": -1,
+       "probability": 0.9994050860404968
+      },
+      {
+       "word": " said",
+       "start": 3.96,
+       "end": 4.24,
+       "t_dtw": -1,
+       "probability": 0.99993896484375
+      },
+      {
+       "word": ".",
+       "start": 4.24,
+       "end": 4.41,
+       "t_dtw": -1,
+       "probability": 0.9737916588783264
+      }
+     ],
+     "temperature": 0.0,
+     "avg_logprob": -0.02263665199279785,
+     "no_speech_prob": 0.0
+    }
+   ],
+   "detected_language": "english",
+   "detected_language_probability": 0.999894380569458,
+   "language_probabilities": {
+    "en": 0.999894380569458
+   }
+  }
+ }
+}

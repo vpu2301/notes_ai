@@ -685,14 +685,18 @@ def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
     assert [s["text"] for s in body["segments"]] == ["Скарги на кашель.", "Що це таке?"]
     assert [s["language"] for s in body["segments"]] == [None, "uk"]
     assert [t["language"] for t in body["turns"]] == [None, "uk"]
-    assert body["diagnostics"] == {
+    expected = {
         "prompt_echo": [{"start_ms": 0, "end_ms": 900, "words": 3}],
         "prompt_echo_segments_dropped": 0,
         "other_language_chunks": 1,
         # Sprint F1 fields; an artifact from before F1 carries no coverage.
         "coverage": None,
         "second_pass": {"chunks": 0, "recovered_words": 0, "by_cause": {}},
+        # Sprint TQ1 T5: per-segment decoder numbers stay in the artifact.
+        "segments": [],
     }
+    # Later sprints add fields (TQ2: drops, loops, …); these must hold as-is.
+    assert {k: body["diagnostics"][k] for k in expected} == expected
     assert body["coverage"] is None and body["capture"] is None
 
 

@@ -226,12 +226,14 @@ def test_sizes_keep_todays_values_up_to_32k_and_grow_on_128k() -> None:
         assert s.extract_max_tokens == pipeline.EXTRACT_MAX_TOKENS
         assert s.reduce_max_tokens == pipeline.REDUCE_MAX_TOKENS
         assert s.max_facts_budget == pipeline.MAX_FACTS_BUDGET
-    assert large.window_chars == windows.LARGE_WINDOW_CHARS == 16_000
-    assert large.max_facts_budget == 64 and large.extract_max_tokens == 8_000
+    # SQ2 T2: extraction windows stop at 8 000 characters on a long context;
+    # the budgets scale with them (facts per character stay constant).
+    assert large.window_chars == windows.EXTRACT_WINDOW_CHARS == 8_000
+    assert large.max_facts_budget == 32 and large.extract_max_tokens == 4_000
     assert large.reduce_max_tokens > pipeline.REDUCE_MAX_TOKENS
     # A provider without the attribute is today's 32K.
     assert pipeline.sizes_for(object()).window_chars == 6_000
-    assert windows.window_chars(None) == 6_000 and windows.window_chars(131_072) == 16_000
+    assert windows.window_chars(None) == 6_000 and windows.window_chars(131_072) == 8_000
 
 
 def test_a_long_context_provider_gets_larger_windows_and_budgets() -> None:
@@ -250,7 +252,7 @@ def test_a_long_context_provider_gets_larger_windows_and_budgets() -> None:
                 "text": f"Im Jahr {2000 + n} traf Peter Thiel in Kalifornien genau {n + 3} "
                 "Investoren aus dem Silicon Valley und sprach lange über Daten",
             }
-            for n in range(60)
+            for n in range(150)
         ],
     }
     wide, narrow = Wide(), ScriptedProvider()
@@ -260,11 +262,11 @@ def test_a_long_context_provider_gets_larger_windows_and_budgets() -> None:
     doc_narrow = asyncio.run(
         pipeline.run(as_result(meeting), provider=narrow, role_by_key={}, language="de")
     )
-    assert doc_wide.stats["window_chars"] == 16_000 and doc_wide.stats["context_window"] == 131_072
+    assert doc_wide.stats["window_chars"] == 8_000 and doc_wide.stats["context_window"] == 131_072
     assert doc_narrow.stats["window_chars"] == 6_000
     assert doc_wide.windows_total < doc_narrow.windows_total
     schemas_wide = [s for s in wide.schemas if s and "facts" in s["properties"]]
-    assert all(s["properties"]["facts"]["maxItems"] <= 64 for s in schemas_wide)
+    assert all(s["properties"]["facts"]["maxItems"] <= 32 for s in schemas_wide)
     assert any(
         s["properties"]["facts"]["maxItems"] > pipeline.MAX_FACTS_BUDGET for s in schemas_wide
     )

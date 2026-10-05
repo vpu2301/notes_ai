@@ -1,0 +1,646 @@
+{
+  "title": "Meeting quality (admin)",
+  "uid": "meeting-quality",
+  "description": "Admin-only: how each real recording's transcript and note went. Numbers only — built by scripts/grafana/build_meeting_quality_dashboard.py.",
+  "schemaVersion": 39,
+  "tags": [
+    "notes",
+    "quality",
+    "admin"
+  ],
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "editable": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Recordings",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) FROM transcription_jobs j WHERE $__timeFilter(j.queued_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 1,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Minutes transcribed",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT round(coalesce(sum((j.quality->>'audio_s')::numeric), 0) / 60) FROM transcription_jobs j WHERE j.status = 'complete' AND $__timeFilter(j.queued_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 2,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Mean coverage",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT avg((j.quality->>'coverage_share')::numeric) FROM transcription_jobs j WHERE j.status = 'complete' AND $__timeFilter(j.queued_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 3,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Mean confidence",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT avg((j.quality->>'avg_confidence')::numeric) FROM transcription_jobs j WHERE j.status = 'complete' AND $__timeFilter(j.queued_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 4,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Notes written",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) FROM note_generations g WHERE g.status = 'complete' AND $__timeFilter(g.created_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 5,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failures",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT (SELECT count(*) FROM transcription_jobs j WHERE j.status = 'failed' AND $__timeFilter(j.queued_at)) + (SELECT count(*) FROM note_generations g WHERE g.status = 'failed' AND $__timeFilter(g.created_at))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 6,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Meetings — one row per recording (transcript, then note)",
+      "description": "Numbers only, read as funnel_reader. Coverage = share of detected speech that was transcribed. Dropped = segments the guards removed. Spellings = unified names accepted / proposed / rejected. Facts by third = key facts from the first, middle and last third of the recording. Unsupported = written lines the verifier could not ground. Lint open = hard document-standard findings left unresolved.",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- One row per recording in the time range, newest first. Numbers only.\nWITH gen AS (\n    SELECT DISTINCT ON (g.note_id)\n           g.note_id, g.status, g.backend, g.model_id, g.prompt_version, g.stats,\n           g.windows_failed, g.error_kind,\n           EXTRACT(EPOCH FROM (g.finished_at - g.created_at)) AS seconds\n      FROM note_generations g\n     ORDER BY g.note_id, g.created_at DESC\n),\ncorr AS (\n    SELECT c.job_id,\n           count(*) FILTER (WHERE c.status = 'accepted') AS accepted,\n           count(*) FILTER (WHERE c.status = 'proposed') AS proposed,\n           count(*) FILTER (WHERE c.status = 'rejected') AS rejected\n      FROM transcript_corrections c\n     GROUP BY c.job_id\n)\nSELECT coalesce(j.finished_at, j.queued_at)                         AS \"Finished\",\n       coalesce(n.code, '—')                                         AS \"Note\",\n       t.name                                                        AS \"Workspace\",\n       j.status                                                      AS \"ASR\",\n       round((j.quality->>'audio_s')::numeric / 60, 1)               AS \"Min\",\n       coalesce(j.detected_language, j.language)                     AS \"Lang\",\n       regexp_replace(coalesce(j.quality->>'model', j.metadata->>'model'), '^.*/models/([^/]+)/.*$', '\\1')                                                      AS \"ASR model\",\n       (j.quality->>'rtf')::numeric                                  AS \"RTF\",\n       (j.quality->>'coverage_share')::numeric                       AS \"Coverage\",\n       (j.quality->>'avg_confidence')::numeric                       AS \"Confidence\",\n       (j.quality->>'low_confidence_word_share')::numeric            AS \"Low-conf words\",\n       (j.quality->>'speakers')::int                                 AS \"Speakers\",\n       (j.quality->>'diarization_unknown_share')::numeric            AS \"Unknown speaker\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(j.quality->'dropped', '{}')) x(k, v))                               AS \"Dropped\",\n       (j.quality->>'prompt_echo_spans')::int                        AS \"Echo\",\n       (j.quality->>'backend_errors')::int                           AS \"Backend err\",\n       coalesce(c.accepted, 0) || ' / ' || coalesce(c.proposed, 0)\n           || ' / ' || coalesce(c.rejected, 0)                       AS \"Spellings ✓/?/✗\",\n       g.status                                                      AS \"Note status\",\n       g.backend                                                     AS \"Writer\",\n       g.model_id                                                    AS \"Writer model\",\n       g.prompt_version                                              AS \"Prompt\",\n       round(g.seconds::numeric)                                     AS \"Note s\",\n       (g.stats->>'facts_kept')::int                                 AS \"Facts\",\n       (g.stats->>'key_points')::int                                 AS \"Key points\",\n       (g.stats->'facts_by_third'->>0) || ' / ' || (g.stats->'facts_by_third'->>1)\n           || ' / ' || (g.stats->'facts_by_third'->>2)               AS \"Facts by third\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(g.stats->'lines_unsupported', '{}')) x(k, v))                       AS \"Unsupported\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(g.stats->'lint'->'unresolved_hard', '{}')) x(k, v))                 AS \"Lint open\",\n       g.stats->>'recording_type'                                    AS \"Type\",\n       coalesce(g.error_kind, j.error_kind)                          AS \"Error\"\n  FROM transcription_jobs j\n  JOIN tenants t ON t.id = j.tenant_id\n  LEFT JOIN notes n ON n.source_asr_job_id = j.id AND n.deleted_at IS NULL\n  LEFT JOIN gen g ON g.note_id = n.id\n  LEFT JOIN corr c ON c.job_id = j.id\n WHERE $__timeFilter(j.queued_at)\n ORDER BY coalesce(j.finished_at, j.queued_at) DESC\n LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Coverage|Confidence|Low-conf words|Unknown speaker)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Finished)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Finished",
+            "desc": true
+          }
+        ]
+      },
+      "id": 7,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transcript per recording",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Per recording: how much of the speech made it, and how sure the model was.\nSELECT j.finished_at AS time,\n       (j.quality->>'coverage_share')::numeric            AS \"coverage\",\n       (j.quality->>'avg_confidence')::numeric            AS \"confidence\",\n       (j.quality->>'low_confidence_word_share')::numeric AS \"low-confidence words\",\n       (j.quality->>'diarization_unknown_share')::numeric AS \"unknown speaker\"\n  FROM transcription_jobs j\n WHERE j.status = 'complete' AND j.quality IS NOT NULL AND $__timeFilter(j.finished_at)\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 8,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Note per recording",
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Per note (the writer's latest attempt): what it kept and what it could not support.\nWITH gen AS (\n    SELECT DISTINCT ON (g.note_id)\n           g.note_id, g.status, g.backend, g.model_id, g.prompt_version, g.stats,\n           g.windows_failed, g.error_kind,\n           EXTRACT(EPOCH FROM (g.finished_at - g.created_at)) AS seconds\n      FROM note_generations g\n     ORDER BY g.note_id, g.created_at DESC\n)\nSELECT n.created_at AS time,\n       (g.stats->>'facts_kept')::int                    AS \"facts\",\n       (g.stats->>'key_points')::int                    AS \"key points\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(g.stats->'lines_unsupported', '{}')) x(k, v))          AS \"unsupported lines\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(g.stats->'lint'->'unresolved_hard', '{}')) x(k, v))    AS \"open lint findings\"\n  FROM gen g\n  JOIN notes n ON n.id = g.note_id\n WHERE g.status = 'complete' AND $__timeFilter(n.created_at)\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 9,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Speed per recording",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Per recording: transcription real-time factor (lower is faster) and the note's seconds.\nWITH gen AS (\n    SELECT DISTINCT ON (g.note_id)\n           g.note_id, g.status, g.backend, g.model_id, g.prompt_version, g.stats,\n           g.windows_failed, g.error_kind,\n           EXTRACT(EPOCH FROM (g.finished_at - g.created_at)) AS seconds\n      FROM note_generations g\n     ORDER BY g.note_id, g.created_at DESC\n)\nSELECT j.finished_at AS time,\n       (j.quality->>'rtf')::numeric   AS \"ASR RTF\",\n       g.seconds                      AS \"note seconds\"\n  FROM transcription_jobs j\n  LEFT JOIN notes n ON n.source_asr_job_id = j.id AND n.deleted_at IS NULL\n  LEFT JOIN gen g ON g.note_id = n.id\n WHERE j.status = 'complete' AND j.quality IS NOT NULL AND $__timeFilter(j.finished_at)\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 10,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transcript guards per recording",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Per recording: what the transcript guards removed or flagged (TQ2).\nSELECT j.finished_at AS time,\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(j.quality->'dropped', '{}')) x(k, v))                     AS \"dropped segments\",\n       (SELECT coalesce(sum(v::int), 0) FROM jsonb_each_text(coalesce(j.quality->'loops', '{}')) x(k, v))                       AS \"loops\",\n       (j.quality->>'prompt_echo_spans')::int             AS \"prompt echo\",\n       (j.quality->>'backend_errors')::int                AS \"backend errors\",\n       (j.quality->>'other_language_chunks')::int         AS \"other-language chunks\"\n  FROM transcription_jobs j\n WHERE j.status = 'complete' AND j.quality IS NOT NULL AND $__timeFilter(j.finished_at)\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 11,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Spelling unification by source",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Spelling unification (TQ3): how often each source fired and what people decided.\nSELECT c.source AS \"Source\",\n       count(*) FILTER (WHERE c.status = 'accepted') AS \"Accepted\",\n       count(*) FILTER (WHERE c.status = 'proposed') AS \"Proposed\",\n       count(*) FILTER (WHERE c.status = 'rejected') AS \"Rejected\",\n       round(avg(c.confidence), 3)                   AS \"Mean confidence\"\n  FROM transcript_corrections c\n WHERE $__timeFilter(c.created_at)\n GROUP BY c.source\n ORDER BY 2 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 12,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Failures by stage and kind",
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- What failed, by stage and error kind.\nSELECT 'transcript' AS \"Stage\", coalesce(j.error_kind, '—') AS \"Error kind\", count(*) AS \"Count\"\n  FROM transcription_jobs j\n WHERE j.status = 'failed' AND $__timeFilter(j.queued_at)\n GROUP BY 2\nUNION ALL\nSELECT 'note', coalesce(g.error_kind, '—'), count(*)\n  FROM note_generations g\n WHERE g.status = 'failed' AND $__timeFilter(g.created_at)\n GROUP BY 2\n ORDER BY 3 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 13,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    }
+  ]
+}

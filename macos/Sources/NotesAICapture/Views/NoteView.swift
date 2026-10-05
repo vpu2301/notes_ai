@@ -13,10 +13,12 @@ struct NoteView: View {
     @State private var shareWithClient = false
     @State private var confirmMarkDone = false
     /// Which speaker label is being renamed inline, and the text so far.
+    @State private var reviewingSpellings = false
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
     /// What is typed in the ask bar at the bottom.
     @State private var askDraft = ""
+    @FocusState private var askFocused: Bool
     /// Which section is open in its editor. A draft reads as a document
     /// until you click into one, and only one is ever open at a time.
     @State private var editingSection: String?
@@ -297,22 +299,28 @@ struct NoteView: View {
     /// Title, meta line, tabs and the section editors — the note itself.
     @ViewBuilder
     private var documentBody: some View {
+        // Vertical, so a long title wraps onto more lines instead of
+        // running off the right edge. A title is still one line of text:
+        // a pasted line break becomes a space.
         TextField("Untitled note", text: Binding(
             get: { model.content?.title ?? "" },
-            set: { model.setTitle($0) }
-        ))
+            set: { model.setTitle($0.replacingOccurrences(of: "\n", with: " ")) }
+        ), axis: .vertical)
         .textFieldStyle(.plain)
-        .font(.dsDisplay(30))
+        .font(.dsSerif(38))
+        .tracking(-0.7)
+        .lineLimit(1...6)
+        .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(DS.text1)
         .disabled(!model.editableNow)
-        .padding(.bottom, 10)
+        .padding(.bottom, 6)
 
-        // The meta line is a row of pills, not a run of text: when it was
-        // taken, what wrote it, where it is filed, what it is called. Only
-        // the space is a control — the rest are the facts you want at a
-        // glance without reading a sentence.
+        // The meta line is a row of quiet, unframed items, not a run of
+        // text: when it was taken, what wrote it, where it is filed, what
+        // it is called. Only the space is a control — the rest are the
+        // facts you want at a glance without reading a sentence.
         if let note = model.note {
-            HStack(spacing: 6) {
+            HStack(spacing: 2) {
                 DSMetaPill(symbol: "calendar", text: formatDateTime(note.createdAt))
                 DSMetaPill(text: "Updated \(relativeTime(note.updatedAt))")
                 if let template = model.templateName {
@@ -322,7 +330,8 @@ struct NoteView: View {
                 spacePill
                 DSMetaPill(text: note.code, mono: true)
             }
-            .padding(.bottom, 18)
+            .padding(.leading, -8)
+            .padding(.bottom, 14)
         }
 
         if model.conflict {
@@ -355,7 +364,7 @@ struct NoteView: View {
 
         // Notes, the transcript when there is one, and what a client would
         // see (Sprint 36) — the web's tabs, in the web's order.
-        DSSegmentedPill(options: tabOptions, selection: $model.tab, height: 28)
+        DSSegmentedPill(options: tabOptions, selection: $model.tab, height: 36)
             .padding(.bottom, 20)
             .onChange(of: model.hasTranscript) { _, has in
                 if !has, model.tab == .transcript { model.tab = .notes }
@@ -459,49 +468,73 @@ struct NoteView: View {
         }
     }
 
-    /// The composer, floating over the foot of the document: one field,
-    /// Return sends. It is centred on the note's column, so it reads as
-    /// part of the document rather than as a strip of window chrome.
+    /// The composer, floating over the foot of the document — Claude's:
+    /// the field on top, a tool row underneath (what it asks about, and
+    /// send). Return sends. It is centred on the note's column, so it reads
+    /// as part of the document rather than as a strip of window chrome.
     private var askBar: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Ask about this note…", text: $askDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.ds(15))
+                .foregroundStyle(DS.text1)
+                .lineLimit(1...8)
+                .focused($askFocused)
+                .onSubmit { sendQuestion() }
             HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.dsIcon(12, .medium))
-                    .foregroundStyle(DS.accentText)
-                TextField("Ask about this note…", text: $askDraft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.ds(13.5))
-                    .foregroundStyle(DS.text1)
-                    .lineLimit(1...4)
-                    .onSubmit { sendQuestion() }
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.dsIcon(12, .medium))
+                        .foregroundStyle(DS.accentText)
+                    Text("This note")
+                        .font(.ds(13))
+                        .foregroundStyle(DS.text3)
+                }
+                Spacer(minLength: 0)
                 Button { sendQuestion() } label: {
                     Image(systemName: "arrow.up")
-                        .font(.dsIcon(12, .semibold))
-                        .frame(width: 8)
+                        .font(.dsIcon(13, .semibold))
+                        .foregroundStyle(DS.inkText)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            RoundedRectangle(cornerRadius: DS.radiusSm + 2, style: .continuous)
+                                .fill(DS.ink)
+                        )
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(DSButtonStyle(kind: .primary, size: 12, height: 26))
-                .disabled(model.asking || askDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.plain)
+                .disabled(askEmpty)
+                .opacity(askEmpty ? 0.35 : 1)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Send (Return)")
+                .accessibilityLabel("Send")
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 8)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: DS.radiusXl, style: .continuous)
-                    .fill(DS.surface)
-                    .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.radiusXl, style: .continuous)
-                    .strokeBorder(DS.line, lineWidth: DS.hairline)
-            )
-            .frame(maxWidth: DS.docWidth)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 40)
-            .padding(.bottom, 14)
-            .padding(.top, 6)
         }
+        .padding(.top, 14)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .padding(.bottom, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(DS.surface)
+                .shadow(color: .black.opacity(askFocused ? 0.16 : 0.10), radius: askFocused ? 14 : 10, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(askFocused ? DS.lineHover : DS.line, lineWidth: DS.hairline)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onTapGesture { askFocused = true }
+        .animation(.easeOut(duration: 0.15), value: askFocused)
+        .frame(maxWidth: DS.docWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 40)
+        .padding(.bottom, 14)
+        .padding(.top, 6)
+    }
+
+    private var askEmpty: Bool {
+        model.asking || askDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func sendQuestion() {
@@ -610,8 +643,11 @@ struct NoteView: View {
                         // A "#" hangs in the gutter so the document's outline
                         // is legible at a glance; it sits outside the text
                         // column, so it never pushes the words in.
+                        // The section names are the document's headings —
+                        // the same serif as the title, a size down.
                         Text(title)
-                            .font(.dsDisplay(18, .semibold))
+                            .font(.dsSerif(20))
+                            .tracking(-0.2)
                             .foregroundStyle(DS.text1)
                             .overlay(alignment: .leading) {
                                 Text("#")
@@ -821,10 +857,20 @@ struct NoteView: View {
                     .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
                     .disabled(turns.isEmpty)
                 }
+                if let banner = model.spellingBanner {
+                    HStack(spacing: 8) {
+                        DSNotice(tone: .info, symbol: "textformat.abc", text: banner.text)
+                        Button(banner.action) { reviewingSpellings = true }
+                            .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
+                    }
+                }
                 if let line = model.coverageLine {
                     notTranscribed(line)
                 }
                 ForEach(turns) { turn in
+                    ForEach(model.markers(before: turn)) { marker in
+                        NoiseMarkerLine(marker: marker, language: model.transcriptLanguage)
+                    }
                     HStack(alignment: .top, spacing: 12) {
                     if model.diarized { turnAvatar(turn) }
                     VStack(alignment: .leading, spacing: 3) {
@@ -838,12 +884,14 @@ struct NoteView: View {
                                 .foregroundStyle(DS.muted)
                         }
                         ForEach(Array(turn.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                            Text(paragraph)
+                            Text(EntityCorrection.underlined(paragraph, model.entityCorrections))
                                 .font(.dsDocBody)
                                 .foregroundStyle(DS.text1)
                                 .lineSpacing(4)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .help(EntityCorrection.paragraphHelp(paragraph, model.entityCorrections,
+                                                                     language: model.transcriptLanguage))
                         }
                     }
                     Spacer(minLength: 0)
@@ -864,6 +912,9 @@ struct NoteView: View {
                     .animation(.easeOut(duration: 0.2), value: model.highlightedTurnId)
                     .id(turn.id)
                 }
+                ForEach(model.trailingMarkers) { marker in
+                    NoiseMarkerLine(marker: marker, language: model.transcriptLanguage)
+                }
             } else {
                 DSSkeleton(height: 56)
                 DSSkeleton(height: 56)
@@ -871,6 +922,9 @@ struct NoteView: View {
             }
         }
         .task { await model.loadTranscript() }
+        .sheet(isPresented: $reviewingSpellings) {
+            EntityReviewSheetView(model: model)
+        }
     }
 
     /// A picked turn, or the one a suggestion's quote pointed at (2 s).
@@ -1360,5 +1414,124 @@ struct UncertainMarker: View {
             .offset(x: 3, y: 3)
             .help(Self.explanation)
             .accessibilityLabel(Self.explanation)
+    }
+}
+
+
+/// Sprint TQ2: "[Musik 00:12–00:41]" — music, silence or noise the worker
+/// marked instead of transcribing. A quiet line of its own, not a turn.
+struct NoiseMarkerLine: View {
+    let marker: TranscriptNoise
+    let language: String?
+
+    var body: some View {
+        Text(marker.line(language: language))
+            .font(.dsMeta)
+            .italic()
+            .foregroundStyle(DS.muted)
+            .padding(.vertical, 2)
+            .accessibilityLabel(marker.line(language: language))
+    }
+}
+
+
+/// Sprint TQ3: one row per unified spelling — Accept, Reject, Edit, Add to
+/// glossary. Offline it is read-only (corrections live on the server).
+struct EntityReviewSheetView: View {
+    @ObservedObject var model: NoteViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: String?
+    @State private var draft = ""
+    @State private var learned: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Unified spellings").font(.dsMeta).bold()
+            Text("One name, one spelling across the transcript, the note and its quotes. Nothing in the recording changes.")
+                .font(.dsMeta).foregroundStyle(DS.muted)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(model.entityCorrections.filter(\.needsReview)) { c in
+                        row(c)
+                        Divider()
+                    }
+                }
+            }
+            if !model.online {
+                Text("Offline — reviewing needs a connection.").font(.dsMeta).foregroundStyle(DS.muted)
+            }
+            if let error = model.spellingError {
+                DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() } }
+        }
+        .padding(20)
+        .frame(minWidth: 360, minHeight: 280)
+        // The last spelling decided: nothing left to review.
+        .onChange(of: model.entityCorrections) { _, corrections in
+            if !corrections.contains(where: \.needsReview) { dismiss() }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ c: EntityCorrection) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if editing == c.id {
+                    TextField("Spelling", text: $draft)
+                } else {
+                    Text(c.toText).bold()
+                }
+                Text("\(c.isApplied ? "applied" : "proposed") · \(c.occurrencesCount)× · \(c.sourceLabel)")
+                    .font(.dsMeta).foregroundStyle(DS.muted)
+            }
+            Text("replaces: \(c.fromForms.joined(separator: ", "))").font(.dsMeta).foregroundStyle(DS.muted)
+            HStack(spacing: 6) {
+                if editing == c.id {
+                    Button("Save") {
+                        let value = draft.trimmingCharacters(in: .whitespaces)
+                        editing = nil
+                        Task { await model.decide(c, accept: true, toText: value) }
+                    }
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Cancel") { editing = nil }
+                } else {
+                    if !c.isApplied {
+                        Button("Accept") { Task { await model.decide(c, accept: true) } }
+                    }
+                    Button("Reject") { Task { await model.decide(c, accept: false) } }
+                    Button("Edit") { draft = c.toText; editing = c.id }
+                    if c.isApplied && c.source != "glossary" && !learned.contains(c.id) {
+                        Button("Add to glossary") {
+                            learned.insert(c.id)
+                            Task { await model.rememberSpelling(c) }
+                        }
+                    }
+                    if learned.contains(c.id) {
+                        Text("in the glossary").font(.dsMeta).foregroundStyle(DS.muted)
+                    }
+                }
+            }
+            .disabled(!model.online)
+        }
+    }
+}
+
+extension EntityCorrection {
+    /// The paragraph with each accepted spelling quietly underlined.
+    static func underlined(_ paragraph: String, _ corrections: [EntityCorrection]) -> AttributedString {
+        var out = AttributedString(paragraph)
+        for c in corrections where c.isApplied && !c.toText.isEmpty {
+            var search = out.startIndex..<out.endIndex
+            while let range = out[search].range(of: c.toText) {
+                let before = range.lowerBound == out.startIndex ? nil : out.characters[out.characters.index(before: range.lowerBound)]
+                let after = range.upperBound == out.endIndex ? nil : out.characters[range.upperBound]
+                if !(before?.isLetter ?? false), !(after?.isLetter ?? false) {
+                    out[range].underlineStyle = Text.LineStyle(pattern: .dot)
+                }
+                search = range.upperBound..<out.endIndex
+            }
+        }
+        return out
     }
 }

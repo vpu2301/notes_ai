@@ -1135,6 +1135,17 @@ actor APIClient {
     // MARK: - Transcription jobs (asr-service)
 
     /// Plaintext transcript of a COMPLETE job (409 while it is still running).
+    /// Sprint TQ3: accept or reject one unified spelling; a stale
+    /// `correctionsRev` is refused (409) and the caller reloads.
+    func decideCorrection(jobId: String, correctionId: String, status: String,
+                          toText: String?, correctionsRev: Int) async throws -> CorrectionsView {
+        let body = try JSONEncoder().encode(CorrectionDecisionRequest(status: status, toText: toText,
+                                                                      correctionsRev: correctionsRev))
+        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/corrections/\(correctionId)",
+                                  method: "PUT", jsonBody: body, authorized: true)
+        return try decode(CorrectionsView.self, from: data)
+    }
+
     func transcript(jobId: String) async throws -> TranscriptResult {
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/result", method: "GET",
                                   authorized: true)

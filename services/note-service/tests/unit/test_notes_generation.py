@@ -304,6 +304,11 @@ def _serve_items(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, rows: li
     from note_service.routers import notes_dates
 
     monkeypatch.setattr(rig.module.gen_repo, "items_for_note", _items)
+
+    async def _reviewed(conn, *, note_id):  # noqa: ANN001
+        return set(getattr(rig, "reviewed_tags", set()))
+
+    monkeypatch.setattr(rig.module.glossary_repo, "reviewed_name_tags", _reviewed)
     monkeypatch.setattr(notes_dates, "tenant_connection", rig.module.tenant_connection)
     monkeypatch.setattr(notes_dates.repo, "fetch_note", rig.module.repo.fetch_note)
     return seen
@@ -321,6 +326,17 @@ def test_a_line_row_carries_what_it_cites_and_its_labels(
     assert item["mentions"][0]["time"] == "00:00"
     rig.client.get(f"/v1/notes/{NOTE_ID}/generated-items")
     assert seen == [True, False]  # default: every generation, as before
+
+
+def test_a_respelling_the_author_decided_is_not_offered_again(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from note_service.domain.glossary_repository import name_review_tag
+
+    _serve_items(rig, monkeypatch, [_row()])
+    rig.reviewed_tags = {name_review_tag("Jonas Pfefer", "Jonas Pfeffer")}
+    [item] = rig.client.get(f"/v1/notes/{NOTE_ID}/generated-items?generation=current").json()
+    assert item["corrections"] == []
 
 
 def test_a_key_date_downloads_as_a_calendar_file(

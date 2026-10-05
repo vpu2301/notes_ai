@@ -174,6 +174,8 @@ interface RichTextProps {
   className?: string;
   /** Q5: drawn at the end of each paragraph and list item, from its source. */
   lineExtra?: LineExtra;
+  /** SQ3 T1: false for a section the engine wrote — no paragraph is a speaker turn. */
+  allowSpeakerTurns?: boolean;
 }
 
 /**
@@ -181,8 +183,17 @@ interface RichTextProps {
  * and small tables come out as real structure instead of the raw `- `
  * and `**…**` a `pre-wrap` box used to show.
  */
-export function RichText({ text, placeholder = "Nothing entered.", className, lineExtra }: RichTextProps) {
-  const blocks = useMemo(() => parseRichText(text), [text]);
+export function RichText({
+  text,
+  placeholder = "Nothing entered.",
+  className,
+  lineExtra,
+  allowSpeakerTurns = true,
+}: RichTextProps) {
+  const blocks = useMemo(
+    () => parseRichText(text, { speakerTurns: allowSpeakerTurns }),
+    [text, allowSpeakerTurns],
+  );
   if (blocks.length === 0) {
     return <div className={`rt empty-val ${className ?? ""}`}>{placeholder}</div>;
   }

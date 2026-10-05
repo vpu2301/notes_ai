@@ -162,6 +162,9 @@ ENV PYTHONPATH=/deps \
 # backend is enabled in the running ENV.
 COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
 ENV MODELS_CONFIG=/app/config/models.yaml
+# Sprint TQ2 T1: for an HTTP ASR backend the worker identifies each speech
+# run's language itself, with the baked tiny model (offline at runtime).
+ENV MDX_ASR_LID_MODEL=/opt/models/whisper-tiny
 
 USER nonroot
 WORKDIR /app

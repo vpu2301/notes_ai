@@ -171,6 +171,15 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var transcriptError: String?
     /// Sprint F1: speech the transcript is missing — "Not transcribed: …".
     @Published private(set) var coverageLine: CoverageGapsFormatter.Line?
+    /// Sprint TQ2: music / silence / noise markers, and the language that
+    /// names them. Left out of the copied transcript.
+    @Published private(set) var noise: [TranscriptNoise] = []
+    @Published private(set) var transcriptLanguage: String?
+    /// Sprint TQ3: the spelling overlay — applied and proposed corrections,
+    /// and the rev a decision must name.
+    @Published private(set) var entityCorrections: [EntityCorrection] = []
+    @Published private(set) var correctionsRev = 0
+    @Published private(set) var spellingError: String?
     @Published private(set) var renamingSpeaker = false
     /// Roster (after merges) and talk time per speaker.
     @Published private(set) var speakers: [String] = []
@@ -433,11 +442,62 @@ final class NoteViewModel: ObservableObject {
         nameSuggestions = result.nameSuggestions ?? []
         relabelAvailable = result.relabelAvailable ?? false
         coverageLine = CoverageGapsFormatter.line(result.coverage)
+        noise = result.noise ?? []
+        transcriptLanguage = result.language
+        entityCorrections = result.entityCorrections ?? []
+        correctionsRev = result.correctionsRev ?? 0
         // A selection is of the turns as they were; drop picks that are gone.
         let ids = Set((result.turns ?? []).map(\.id))
         selectedTurnIds.formIntersection(ids)
     }
 
+
+    /// Sprint TQ2: the markers shown just before `turn` (after the turn
+    /// before it), and those after the last turn.
+    func markers(before turn: TranscriptTurn) -> [TranscriptNoise] {
+        let all = turns ?? []
+        guard let index = all.firstIndex(where: { $0.id == turn.id }) else { return [] }
+        return TranscriptNoise.before(index, turns: all, noise: noise)
+    }
+
+    var trailingMarkers: [TranscriptNoise] {
+        let all = turns ?? []
+        return TranscriptNoise.before(all.count, turns: all, noise: noise)
+    }
+
+    // MARK: - Unified spellings (Sprint TQ3)
+
+    var spellingBanner: (text: String, action: String)? {
+        EntityCorrection.banner(entityCorrections, language: transcriptLanguage)
+    }
+
+    /// Accept or reject; the text changes with it, so the transcript is
+    /// read again. Accepting a spelling the glossary gave teaches the
+    /// glossary its variants. A stale view reloads and says so.
+    func decide(_ correction: EntityCorrection, accept: Bool, toText: String? = nil) async {
+        guard let jobId else { return }
+        spellingError = nil
+        do {
+            _ = try await api.decideCorrection(jobId: jobId, correctionId: correction.id,
+                                               status: accept ? "accepted" : "rejected",
+                                               toText: toText == correction.toText ? nil : toText,
+                                               correctionsRev: correctionsRev)
+            if accept && correction.source == "glossary" {
+                try? await api.rememberTerm(toText ?? correction.toText, kind: .term,
+                                            heardAs: correction.fromForms, noteId: noteId)
+            }
+        } catch {
+            spellingError = "These spellings changed or could not be saved — reloaded, please check again."
+        }
+        if let result = try? await api.transcript(jobId: jobId) { apply(result) }
+    }
+
+    /// "Add to glossary" for a spelling that did not come from it.
+    func rememberSpelling(_ correction: EntityCorrection) async {
+        _ = try? await api.rememberTerm(correction.toText,
+                                        kind: correction.source == "calendar" ? .person : .term,
+                                        heardAs: correction.fromForms, noteId: noteId)
+    }
 
     // MARK: - Speakers
 

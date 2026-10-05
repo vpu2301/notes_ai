@@ -76,6 +76,8 @@ GapCause = Literal[
     "decoder_empty",
     "prompt_echo",
     "other_language",
+    # Sprint TQ2: the backend request for this run's group failed.
+    "backend_error",
     "unknown",
 ]
 
@@ -123,6 +125,111 @@ class SecondPass(BaseModel):
     by_cause: dict[str, int] = Field(default_factory=dict)
 
 
+class SegmentDiagnostics(BaseModel):
+    """The decoder's own numbers for one segment it returned (Sprint TQ1 T5).
+
+    Recorded for every segment the backend decoded, including ones a guard
+    later dropped, so the non-speech gates (TQ2) can be tuned on what the
+    decoder said about itself. A backend that does not report a number
+    leaves it ``None`` (whisper.cpp omits some); nothing fails on its
+    absence. Numbers and times only, never text.
+    """
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+    no_speech_prob: float | None = None
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
+    # True for a segment from the prompt-free second decode of a lost run.
+    second_pass: bool = False
+
+
+DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact"]
+
+
+class DroppedSegment(BaseModel):
+    """A decoded segment (or the tail of one) a quality gate removed —
+    Sprint TQ2 T2/T3. Numbers and enum strings only."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    reason: DropReason
+    no_speech_prob: float | None = None
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
+    # VAD speech share inside the segment, the condition that protects
+    # real quiet speech.
+    speech_share: float | None = None
+    # ``<language>:<index>`` into asr_models/artefacts.yaml for reason
+    # ``artefact``.
+    artefact: str | None = Field(default=None, max_length=12)
+    # Guards switched off (MDX_ASR_GATES_ENABLED=false): recorded, not removed.
+    dry_run: bool = False
+
+
+class KeptArtefact(BaseModel):
+    """A known artefact phrase over audio VAD calls speech — kept, flagged
+    (a real "Vielen Dank." at the end of a meeting survives)."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    artefact: str = Field(max_length=12)
+
+
+class LoopEvent(BaseModel):
+    """A repetition loop (G2) and what the prompt-free second decode did."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    outcome: Literal["recovered", "kept_truncated", "second_pass_failed", "second_pass_off"]
+
+
+class BackendError(BaseModel):
+    """A run group whose request failed (HTTP backends); its speech is a
+    coverage gap with cause ``backend_error``, never silently empty."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    kind: str = Field(max_length=32)
+    # The run's planned language, so a retry decodes it in that language.
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+
+
+class ShadowDiagnostics(BaseModel):
+    """Sprint TQ4 T4: a candidate engine decoded the same audio after the
+    primary; only how the two differed is kept — never the shadow's text."""
+
+    backend: str = Field(max_length=32)
+    # Why no comparison: "error" | "timeout" | "budget" | "unavailable".
+    skipped: str | None = Field(default=None, max_length=16)
+    words_primary: NonNegativeInt = 0
+    words_shadow: NonNegativeInt = 0
+    # Word edit distance between the two transcripts ÷ the primary's words
+    # (the shadow's "WER" with the primary as reference — a disagreement
+    # rate, not an error rate).
+    word_disagreement: float | None = None
+    # Distinct capitalised word forms: a proxy for how many spellings of
+    # names each engine produced.
+    name_forms_primary: NonNegativeInt = 0
+    name_forms_shadow: NonNegativeInt = 0
+    dropped_primary: NonNegativeInt = 0
+    dropped_shadow: NonNegativeInt = 0
+    rtf: float | None = None
+
+
+NoiseKind = Literal["music", "silence", "noise"]
+
+
+class NoiseRegion(BaseModel):
+    """A stretch of ≥ 5 s with no VAD speech, marked instead of transcribed
+    (Sprint TQ2 T4). Clients render an unknown ``kind`` as ``noise``."""
+
+    start_ms: NonNegativeInt
+    end_ms: NonNegativeInt
+    kind: NoiseKind
+
+
 class Diagnostics(BaseModel):
     """What the guards did to this transcript. Counts and timestamps only;
     lives in the stored artifact, not in a table."""
@@ -133,6 +240,22 @@ class Diagnostics(BaseModel):
     # Sprint F1. None on artifacts stored before coverage was measured.
     coverage: Coverage | None = None
     second_pass: SecondPass = Field(default_factory=SecondPass)
+    # Sprint TQ1 T5: per decoded segment, in time order. Empty on artifacts
+    # stored before it was recorded.
+    segments: list[SegmentDiagnostics] = Field(default_factory=list)
+    # Sprint TQ2: what the guards removed or kept, and why.
+    dropped_segments: list[DroppedSegment] = Field(default_factory=list)
+    artefact_kept: list[KeptArtefact] = Field(default_factory=list)
+    loops: list[LoopEvent] = Field(default_factory=list)
+    backend_errors: list[BackendError] = Field(default_factory=list)
+    # A gate that could not read its field on this backend → segments it
+    # skipped, per field (e.g. ``compression_ratio`` on whisper.cpp).
+    gate_unavailable: dict[str, int] = Field(default_factory=dict)
+    # Who decided each run's language: the engine's own model (in-process),
+    # the worker's local identifier (HTTP backends), or nobody.
+    language_id: Literal["engine", "local", "unavailable", "pinned"] | None = None
+    # Sprint TQ4 T4: the candidate engine's shadow comparison (numbers only).
+    shadow: ShadowDiagnostics | None = None
 
 
 class DiarizationStats(BaseModel):
@@ -209,6 +332,8 @@ class TranscriptionOutput(BaseModel):
     # Sprint I2: prompt-echo spans and other-language chunk count. Older
     # artifacts decode with the empty default.
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
+    # Sprint TQ2 T4: non-speech regions ≥ 5 s, marked instead of transcribed.
+    noise: list[NoiseRegion] = Field(default_factory=list)
     schema_version: int = 1
 
 
@@ -350,6 +475,24 @@ class CaptureTimingView(BaseModel):
     first_frame_offset_ms: NonNegativeInt | None = None
 
 
+class EntityCorrectionView(BaseModel):
+    """Sprint TQ3: one unified spelling — the overlay the view applied
+    (``accepted``) or offers for review (``proposed``)."""
+
+    id: UUID
+    kind: Literal["entity"] = "entity"
+    from_forms: list[str]
+    to_text: str
+    occurrences_count: NonNegativeInt
+    source: Literal["glossary", "calendar", "hint", "majority", "user"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    status: Literal["proposed", "accepted", "rejected"]
+    # A person accepted, edited or rejected it: the review sheet has
+    # nothing left to ask about it. An applied row nobody decided is still
+    # under review.
+    decided: bool = False
+
+
 class TranscriptResultView(BaseModel):
     """Plaintext transcript response for a COMPLETE job (proxy-decrypt).
 
@@ -414,4 +557,14 @@ class TranscriptResultView(BaseModel):
     # and the capture timing the client reported at upload.
     coverage: CoverageView | None = None
     capture: CaptureTimingView | None = None
+    # Sprint TQ2 T4: music / silence / noise markers, rendered by the
+    # clients as non-speaker lines. Additive: older clients ignore it.
+    noise: list[NoiseRegion] = Field(default_factory=list)
+    # Sprint TQ3: spellings unified by the overlay (accepted, applied in
+    # ``segments``/``turns``) or offered for review (proposed); rejected ones
+    # are left out. ``corrections_rev`` is what a PUT must name.
+    entity_corrections: list[EntityCorrectionView] = Field(default_factory=list)
+    corrections_rev: NonNegativeInt = 0
+    # Why there are none: "skipped_budget" | "error" | "disabled"; None = ran.
+    entity_unify: str | None = None
     schema_version: int = 1

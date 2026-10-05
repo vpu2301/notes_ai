@@ -97,6 +97,7 @@ jobs:
           make check-no-vendor-import
           make check-dev-keys
           make check-no-eval-audio
+          make check-routing-report
 
   # ──────────────────────────────────────────────────────────────
   # S16 deployment: the Helm chart must render (staging + prod), the

@@ -17,6 +17,8 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     duplicate: "a duplicated passage",
     unrelated: "an unrelated fragment",
     advertisement: "an advertisement",
+    music: "music",
+    noise: "noise",
   },
   de: {
     background: "Hintergrundgespräch",
@@ -25,6 +27,8 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     duplicate: "eine doppelte Passage",
     unrelated: "ein unzusammenhängendes Fragment",
     advertisement: "Werbung",
+    music: "Musik",
+    noise: "Geräusche",
   },
   uk: {
     background: "фонова мова",
@@ -33,6 +37,8 @@ export const NOISE_LABELS: Record<string, Record<string, string>> = {
     duplicate: "повторений уривок",
     unrelated: "непов'язаний фрагмент",
     advertisement: "реклама",
+    music: "музика",
+    noise: "шум",
   },
 };
 

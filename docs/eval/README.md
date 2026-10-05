@@ -37,6 +37,35 @@ make sim-overcount                                           # no-audio clustere
   `~/.cache/mdx-models/speaker-diarization-community-1` (gated, CC-BY-4.0).
   The adapter forces `PYANNOTE_METRICS_ENABLED=false` and `HF_HUB_OFFLINE=1`.
 
+
+## ASR gold set (`eval/asr/v1`, Sprint TQ1)
+
+Real recordings with human-corrected transcripts, used for the transcript
+criteria TR-01 to TR-13. Only `manifest.json` and `README.md` are in git.
+References, spans, RTTM, alignment and audio live in
+`s3://notes-eval/asr/v1/<id>/` (eval role). CI fails on tracked content
+under `eval/asr/**` and `eval/notes/**`.
+
+```
+uv run python scripts/eval/asr_gold.py fetch eval/asr/v1   # eval role
+make eval-asr-validate                                      # manifest, composition, content
+make eval-asr BACKEND=inproc_cpu_asr SPLIT=test             # → docs/eval/asr-<date>-<backend>-<split>.{json,md}
+make eval-asr-assert                                        # r03/r04 checklists (XFAIL = a later sprint's)
+make der-eval ENGINE=pyannote_c1 SPLIT=test CORPUS=eval/asr/v1   # de/uk DER on the same recordings
+```
+
+- Every recording goes through `asr_worker.processor.decode_recording`, the
+  job's own path, on the backend named in `config/models.yaml`.
+- The labelling rules (verbatim-lite) with worked examples per language are
+  in `docs/eval/asr-labelling.md`. Formats are the pydantic models in
+  `scripts/eval/asr_gold.py`.
+- The metrics are in `scripts/eval/asr_scoring.py`. Each maps to a taxonomy
+  code, and `test_notes_gates.py` enforces that.
+- The nightly workflow `nightly-asr.yml` compares each backend to
+  `docs/eval/asr-baseline-<backend>-test.json`. Per language, WER may rise
+  at most 1.0 pp, and TR-02/TR-03 may not worsen (ADR-0019 amendment).
+- Decisions taken on these numbers go in `docs/product/asr-decisions.md`.
+
 ## Sprint 29 — engines behind the seam, guard, user-stated count
 
 Both engines run through the production code path: `legacy` via

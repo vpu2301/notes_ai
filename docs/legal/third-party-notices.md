@@ -56,3 +56,41 @@ The upstream model card is baked next to the weights as `MODEL_CARD.md`.
 
 The pipeline runs on the `pyannote.audio` library (MIT licence,
 <https://github.com/pyannote/pyannote-audio>).
+
+## NVIDIA Parakeet-TDT-0.6B-v3 — ASR candidate (Sprint TQ4)
+
+`nvidia/parakeet-tdt-0.6b-v3` (revision `541d1f99c6b0`) runs in `deploy/asr-server`, the
+bake-off's arm C (ADR-0067). On the dev Mac its ONNX export
+`istupakov/parakeet-tdt-0.6b-v3-onnx` (revision `8f23f0c03c87`) is used, which carries the
+same licence.
+
+- **Licence:** Creative Commons Attribution 4.0 International (CC-BY-4.0).
+- **Attribution (required wherever the model is used or its output is shown, product docs
+  included):** "Speech recognition by Parakeet-TDT-0.6B-v3, © NVIDIA Corporation, licensed
+  under CC-BY-4.0 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)."
+- **Runtimes:** NVIDIA NeMo 3.0.0 (Apache-2.0) in the endpoint image, and `onnx-asr` 0.12.0
+  (MIT) on the dev Mac.
+- **Status:** a candidate, not routed. The attribution must appear in the product's notices
+  before ADR-0067 is accepted for it.
+
+## Tatoeba — common-word lists for the spelling unifier (Sprint TQ3)
+
+`libs/asr_models/src/asr_models/resources/freq_{de,en,uk}.txt` hold the 50 000 most
+frequent word forms per language. They are counted from the Tatoeba sentence exports
+(`https://downloads.tatoeba.org/exports/per_language/<lang>/<lang>_sentences.tsv.bz2`,
+fetched 2026-10-01) by `scripts/models/build_frequency_lists.py`. No sentence is kept.
+
+- **Licence:** Tatoeba sentences are under Creative Commons Attribution 2.0 France
+  (CC-BY 2.0 FR), and some under CC0. The derived word lists are distributed under the
+  same attribution terms.
+- **Attribution:** "Word frequencies derived from Tatoeba (https://tatoeba.org),
+  CC-BY 2.0 FR."
+- **Not used:** the Leipzig Corpora Collection, whose licence could not be confirmed on
+  2026-10-01 because the site is behind an anti-bot wall. Also hermitdave/FrequencyWords,
+  whose data is CC-BY-SA 4.0 (share-alike).
+
+## Metaphone (Double Metaphone) — asr-service
+
+`Metaphone` 0.6 (https://github.com/oubiwann/metaphone), a PyPI dependency of
+asr-service, gives the English and romanised-Ukrainian phonetic keys of the spelling
+unifier. Licence: BSD.

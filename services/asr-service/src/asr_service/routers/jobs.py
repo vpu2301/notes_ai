@@ -39,6 +39,7 @@ from opentelemetry import metrics
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from asr_models import (
+    LANGUAGE_REQUEST_PATTERN,
     SPEAKER_LABEL_PATTERN,
     CaptureTimingView,
     ConfidenceSpanView,
@@ -65,7 +66,7 @@ from storage import ObjectNotFoundError
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires, requires_any
-from ..domain import repository
+from ..domain import corrections, entity_unify, repository
 from ..domain.name_suggestions import suggest
 from ..domain.speaker_edits import (
     SpeakerEdit,
@@ -182,9 +183,10 @@ def _reject(
 async def submit_job(
     audio: Annotated[UploadFile, File(description="Audio file to transcribe.")],
     # ``auto`` (the clients' default) lets the recording decide: the worker
-    # identifies the spoken language and transcribes in it. ``uk``/``en``
-    # pin the decoder for callers that know better.
-    language: Annotated[str, Form(pattern="^(auto|uk|en)$")],
+    # identifies the spoken language and transcribes in it. ``uk``/``en``/
+    # ``de`` pin the decoder for callers that know better. The pattern is the
+    # shared one: a literal here once refused the ``de`` every client offers.
+    language: Annotated[str, Form(pattern=LANGUAGE_REQUEST_PATTERN)],
     vocabulary_hint: Annotated[str | None, Form(max_length=2000)] = None,
     # Ambient Capture v1: run offline speaker diarization after
     # transcription. Rides the queue payload only — the stored result's
@@ -677,6 +679,14 @@ async def get_job_result(
         raise exc
     raw = await _load_transcript(state, claims.tid, job_id, uri)
     output = TranscriptionOutput.model_validate_json(raw)
+    # Sprint TQ3: one name, one spelling — a read-time overlay on the
+    # artefact (planned once, on the first read; applied on every read).
+    overlay_rows, corrections_rev, unify_note = await _spelling_overlay(
+        state, claims, job_id=job_id, output=output, attendees=candidates
+    )
+    output = entity_unify.apply(
+        output, [r.applied() for r in overlay_rows if r.status == "accepted"]
+    )
     # The "opened" fact the weekly speaker report counts from (Sprint 30);
     # set once. A service reading on the user's behalf (note-service builds
     # the note right after every capture) says so and is not an opening —
@@ -711,6 +721,9 @@ async def get_job_result(
         name_sources=name_sources,
     )
     update: dict[str, object] = {
+        "entity_corrections": [r.view() for r in overlay_rows if r.status != "rejected"],
+        "corrections_rev": corrections_rev,
+        "entity_unify": unify_note,
         "relabel_available": await _relabel_available(state, claims.tid, job_id, output),
         # Sprint F1: how much of the speech is transcribed, and the capture
         # timing the client reported.
@@ -815,6 +828,49 @@ def _result_key(tenant_id: UUID, job_id: UUID, uri: str | None) -> str:
     return repository.key_from_uri(uri) if uri else f"{tenant_id}/{job_id}.json.enc"
 
 
+async def _spelling_overlay(
+    state: Any,
+    claims: Claims,
+    *,
+    job_id: UUID,
+    output: TranscriptionOutput,
+    attendees: list[str],
+) -> tuple[list[corrections.Row], int, str | None]:
+    """``(rows, corrections_rev, note)`` for the result view. Runs the
+    unifier when this job has never been unified; a failure or an overrun
+    leaves the transcript as the artefact and says why in ``note``."""
+    if not settings.entity_unify_enabled:
+        return [], 0, "disabled"
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        job_state = await corrections.job_state(conn, job_id=job_id)
+        if job_state is None:
+            return [], 0, None
+        rows = await corrections.list_rows(conn, job_id=job_id)
+        glossary = await corrections.glossary_terms(conn) if job_state.status is None else []
+    if job_state.status is None:
+        outcome, proposals, _discarded = await corrections.plan_for(
+            output,
+            glossary=glossary,
+            attendees=attendees,
+            hint=job_state.hint,
+            auto_apply=settings.entity_unify_auto_apply,
+            per_hour=settings.entity_unify_budget_s_per_hour,
+            floor=settings.entity_unify_budget_floor_s,
+        )
+        async with tenant_connection(state.app_pool, claims.tid) as conn:
+            stored = await corrections.store(
+                conn, tenant_id=claims.tid, job_id=job_id, status=outcome, proposals=proposals
+            )
+            rows = await corrections.list_rows(conn, job_id=job_id)
+            job_state = await corrections.job_state(conn, job_id=job_id) or job_state
+        if stored:
+            from . import corrections as corrections_routes
+
+            await corrections_routes.audit_proposed(state, claims, job_id, proposals)
+    note = None if job_state.status in (None, "done") else job_state.status
+    return rows, job_state.rev, note
+
+
 async def _load_transcript(
     state: object, tenant_id: UUID, job_id: UUID, uri: str | None = None
 ) -> bytes:
@@ -911,7 +967,12 @@ async def _enriched_result_view(
         name_candidates=list(name_candidates or []),
         speaker_sides=dict(output.speaker_sides),
         speaker_name_sources=dict(name_sources or {}),
-        diagnostics=output.diagnostics,
+        # Per-segment decoder numbers (TQ1 T5) stay in the stored artifact
+        # for the eval and the TQ2 gates; no client reads them, and on an
+        # hour-long recording they would add ~1000 rows to every fetch.
+        diagnostics=output.diagnostics.model_copy(update={"segments": []}),
+        # Sprint TQ2 T4: music / silence / noise markers for the clients.
+        noise=list(output.noise),
     )
     overlap = list(output.overlap_ms)
     if not settings.nlp_enrich_enabled or not output.segments:
@@ -1273,6 +1334,7 @@ def _edit_view(
             segments=_served_segments(output),
             metadata=output.metadata,
             speakers=list(output.speakers),
+            noise=list(output.noise),
         ),
         names,
         edits,

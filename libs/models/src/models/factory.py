@@ -56,6 +56,7 @@ def build_asr_provider(
             auth_token=cfg.bearer_token(),
             timeout_s=cfg.timeout_seconds,
             cold_start_seconds=cfg.cold_start_seconds,
+            server_token=cfg.server_token.get_secret_value() or None,
         )
     if resolved.kind == "asr_inproc":
         if inproc_engine is None:

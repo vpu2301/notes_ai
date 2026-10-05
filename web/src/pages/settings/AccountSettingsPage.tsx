@@ -4,21 +4,35 @@ import * as authApi from "../../api/auth";
 import { ApiError } from "../../api/http";
 import { useAuth } from "../../auth/AuthContext";
 import { CodeInput } from "../../components/CodeInput";
+import { Segmented } from "../../components/Segmented";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/Toaster";
 import { AlertIcon } from "../../components/icons";
 import { messageFor } from "../../lib/errorCopy";
+import { useSettingsView } from "../../lib/useSettingsView";
+
+const VIEWS = [
+  { value: "details", label: "Details" },
+  { value: "sign-in", label: "Sign-in" },
+  { value: "delete", label: "Delete account" },
+] as const;
 
 /** `/settings/account` — who you are, how you're reached, and leaving. */
 export function AccountSettingsPage() {
   const { identity } = useAuth();
+  const [view, setView] = useSettingsView(VIEWS);
   if (!identity) return null;
   return (
     <div className="settings-stack">
-      <ProfileCard />
-      <EmailCard />
-      <PasswordCard />
-      <DangerCard />
+      <Segmented label="Profile" options={VIEWS} value={view} onChange={setView} />
+      {view === "details" && (
+        <>
+          <ProfileCard />
+          <EmailCard />
+        </>
+      )}
+      {view === "sign-in" && <PasswordCard />}
+      {view === "delete" && <DangerCard />}
     </div>
   );
 }

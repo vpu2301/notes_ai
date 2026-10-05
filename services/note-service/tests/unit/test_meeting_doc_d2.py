@@ -450,7 +450,8 @@ def test_r02s_host_presents_and_a_meeting_has_participants() -> None:
     ]
     table = roles_table.build(meeting, [], "meeting")
     assert {s.role for s in table.speakers.values()} == {roles_table.PARTICIPANT}
-    assert compose.speakers_of(table, "de") == (["Ada", "Ben"], [])
+    # SQ3 T2: participants come after hosts, experts and guests.
+    assert compose.speakers_of(table, "de") == ([], [], ["Ada", "Ben"])
 
 
 # ── T5 orientation paragraph 2 ──────────────────────────────────────

@@ -29,7 +29,7 @@ from .deps import install_state
 from .domain.reaper import reaper_loop
 from .main_deps import build_state, teardown_state
 from .middleware import RequestIDMiddleware
-from .routers import health, jobs
+from .routers import corrections, health, jobs
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(jobs.router)
+    app.include_router(corrections.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

@@ -22,6 +22,9 @@ Pins resolved from the Hugging Face API on **2026-06-10**.
 | libs/models `mistral_eu_small` (Sprint L2) | `mistral-small-2603` (Mistral Small 4, v26.03, GA, 256k context; `classify`/`title`/`entities`) | dated id (`MISTRAL_SMALL_PIN`) | served by Mistral AI | n/a | same endpoint, same key; prices in `config/model_costs.yaml` |
 | libs/models `hf_eu` (DEP-S1; staging/beta, HF Inference Endpoint eu-west-1) | `google/gemma-3-4b-it` (gated: accept Gemma terms in the HF namespace) | `093f9f388b31de276ce2de164bdc2081324b9767` | served by TGI (weights fetched by HF at that revision) | n/a — HF verifies the revision | `deploy/hf/endpoints/chat.yaml` |
 | libs/models `hf_eu_asr` (DEP-S1; staging/beta) | `openai/whisper-large-v3-turbo` (endpoint model) served as `deepdml/faster-whisper-large-v3-turbo-ct2` (CT2) | `41f01f3fe87f28c78e2fbf8b568835947dd65ed9` / `4df90f75321148c3a29a9e2351b7ddf8f5b115a8` | Speaches image (`ghcr.io/speaches-ai/speaches:0.8.2-cuda`) | n/a — HF verifies the revision | `deploy/hf/endpoints/asr.yaml` |
+| libs/models `cand_parakeet_asr` (Sprint TQ4 arm C, ADR-0067; candidate, not routed) — licence **CC-BY-4.0** (attribution in `docs/legal/third-party-notices.md`) | `nvidia/parakeet-tdt-0.6b-v3` | `541d1f99c6b0c3cd0b11a95167540bb8edefd82b` | `parakeet-tdt-0.6b-v3.nemo` | `3cbdc85877e668ca7b82d0d56770eb1fac76691f55d6b97545e8d61ca588d10d` (fetched 2026-10-01) | `/opt/models/parakeet/` in `deploy/asr-server` (NeMo 3.0.0, fp16 T4); endpoint spec `deploy/hf/endpoints/asr-parakeet.yaml` |
+| libs/models `dev_mac_parakeet_asr` (Sprint TQ4, dev Mac only; the endpoint's fallback runtime) | `istupakov/parakeet-tdt-0.6b-v3-onnx` (ONNX export of the weights above, CC-BY-4.0) via `onnx-asr` 0.12.0 (MIT) | `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce` | `encoder-model.onnx(.data)`, `decoder_joint-model.onnx`, `nemo128.onnx` | encoder.data `9a22d372c51455c34f13405da2520baefb7125bd16981397561423ed32d24f36` · encoder `98a74b21b4cc0017c1e7030319a4a96f4a9506e50f0708f3a516d02a77c96bb1` · decoder_joint `e978ddf6688527182c10fde2eb4b83068421648985ef23f7a86be732be8706c1` · nemo128 `a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f` | `~/.cache/huggingface/hub/` (fetched by `make dev-model` with `DEV_MAC_ASR_ENGINE=parakeet`) |
+| libs/models `cand_whisper_v3_asr` (Sprint TQ4 arm B; candidate, not routed) | `openai/whisper-large-v3` served as `Systran/faster-whisper-large-v3` (CT2) | `06f233fe06e710322aca913c1bc4249a0d71fce1` / `edaa852ec7e145841d8ffdb056a99866b5f0a478` | Speaches image (`ghcr.io/speaches-ai/speaches:0.8.2-cuda`), fp16 | `69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1` (`model.bin`, same as the worker image) | `deploy/hf/endpoints/asr-whisper-v3.yaml` |
 
 Assembly for the ECAPA row is scripted — `scripts/models/prepare_ecapa.py`
 (also verifies `mean_var_norm_emb.ckpt`
@@ -88,6 +91,35 @@ page (decision 12). "Hugging Face is never a runtime dependency" therefore
 now reads: *never for the baked models in this table*; the Inference
 Endpoints path is a deliberate, disclosed runtime processor for beta,
 replaced by `hosted_eu` at gate H0. DEP-S1 adds the pin-upgrade runbook.
+
+## What each ASR backend returns per segment (Sprint TQ2, probed 2026-09-30)
+
+The TQ2 gates (`asr_worker/guards.py`) read these fields where a backend
+reports them. A missing field skips that part of a gate, and
+`diagnostics.gate_unavailable` counts it.
+
+| Backend | `no_speech_prob` | `avg_logprob` | `compression_ratio` | Words | Language with `auto` |
+|---|---|---|---|---|---|
+| `inproc_cpu_asr` (faster-whisper large-v3) | yes | yes | yes | real words | `detect_language`, full probability table |
+| `hf_eu_asr` (Speaches 0.8.2, faster-whisper) | yes, per faster-whisper's segment fields | yes | yes | top-level `words[]`, no leading spaces | `language`. The probability table is not verified, because no endpoint was raised in TQ2. |
+| `dev_mac_asr` (whisper.cpp `whisper-server`, ggml-large-v3-turbo) | present, but **≈ 0 even on text written over silence**: 3e-10 on a "Vielen Dank." over 20 s of digital silence, `avg_logprob` −0.22 | yes | **absent** | **decoder tokens**: a token without a leading space continues the word before it. `asr_http._merge_subwords` joins them since TQ2. Before that, every whisper.cpp transcript's words were sub-word pieces. | `detected_language`, `detected_language_probability`, `language_probabilities`. These are reported **only when the server runs with `-l auto`**. Its default is English, and the client omits `language` for an auto job, so `make dev-model` now starts it with `-l auto`. |
+
+whisper.cpp also stamps its last segment up to the next 30 s boundary, past
+the end of the audio it was sent. `models.run_groups.Group.to_recording`
+clamps those times.
+
+The local language identifier for HTTP backends is faster-whisper **tiny**
+(`MDX_ASR_LID_MODEL`). The CPU image bakes it at `/opt/models/whisper-tiny`,
+using the `MD_ASR_MODEL_*` tiny pin above. On CPU it takes 0.21 s per run,
+against 1.86 s for small and 11.6 s for large-v3. On clean TTS speech it
+gives de 0.99, en 1.00 and uk 0.63, measured 2026-09-30. The GPU image does
+not bake tiny. A GPU worker with an HTTP backend therefore decodes every run
+in the recording's language, and `language_id` reads `unavailable`.
+
+**Mac binaries for TQ4.** `parakeet.cpp` and the FluidAudio CoreML CLI, both named in the
+sprint, are **not pinned or used**. The Mac arm runs the same `deploy/asr-server` code as the
+endpoint, with its ONNX runtime, so the Mac and EU-GPU paths share one server. The FluidAudio
+measurement that Sprint C5 needs is open (`docs/eval/asr-bakeoff-2026-11.md`).
 
 ## How the pin is enforced
 

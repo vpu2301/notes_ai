@@ -435,3 +435,40 @@ export function ArrowUpIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/** The sidebar toggle: a window with its left pane ruled off. */
+export function SidebarIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2.5" />
+      <path d="M7.75 4v12" />
+    </svg>
+  );
+}
+
+export function ShieldIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M10 2.75 4 5v4.6c0 3.7 2.6 6.4 6 7.65 3.4-1.25 6-3.95 6-7.65V5l-6-2.25Z" />
+      <path d="m7.5 10 1.75 1.75L12.75 8.25" />
+    </svg>
+  );
+}
+
+export function BuildingIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="4" y="3" width="8.5" height="14" rx="1.5" />
+      <path d="M12.5 8H15a1 1 0 0 1 1 1v8M2.75 17h14.5M7 6.5h2.5M7 9.5h2.5M7 12.5h2.5" />
+    </svg>
+  );
+}
+
+export function CreditCardIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="2.75" y="4.5" width="14.5" height="11" rx="2" />
+      <path d="M2.75 8.25h14.5M5.75 12.5h3" />
+    </svg>
+  );
+}

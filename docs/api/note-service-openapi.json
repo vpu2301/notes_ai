@@ -254,6 +254,61 @@
         "title": "AudioSegmentOut",
         "type": "object"
       },
+      "BillingView": {
+        "properties": {
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "payments_connected": {
+            "title": "Payments Connected",
+            "type": "boolean"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanView"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/PlanView"
+            },
+            "title": "Plans",
+            "type": "array"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "items": {
+              "$ref": "#/components/schemas/UsageMeter"
+            },
+            "title": "Usage",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan",
+          "plans",
+          "usage",
+          "period_start",
+          "subscription",
+          "payments_connected",
+          "can_edit"
+        ],
+        "title": "BillingView",
+        "type": "object"
+      },
       "BoundNote": {
         "additionalProperties": false,
         "description": "Content-free: the caller holds template.update, not note.read.",
@@ -593,6 +648,61 @@
           "from_date"
         ],
         "title": "CarriedView",
+        "type": "object"
+      },
+      "ChangePlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "interval": {
+            "default": "monthly",
+            "enum": [
+              "monthly",
+              "yearly"
+            ],
+            "title": "Interval",
+            "type": "string"
+          },
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "ChangePlanRequest",
+        "type": "object"
+      },
+      "ChangePlanResult": {
+        "properties": {
+          "action": {
+            "enum": [
+              "applied",
+              "redirect"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "billing": {
+            "$ref": "#/components/schemas/BillingView"
+          },
+          "redirect_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Url"
+          }
+        },
+        "required": [
+          "action",
+          "billing"
+        ],
+        "title": "ChangePlanResult",
         "type": "object"
       },
       "ChecklistItem": {
@@ -3368,6 +3478,86 @@
         "title": "PatchItemRequest",
         "type": "object"
       },
+      "PlanView": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "limits": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Limits",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Cents"
+          },
+          "self_serve": {
+            "title": "Self Serve",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "yearly_price_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearly Price Cents"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "summary",
+          "price_cents",
+          "currency",
+          "yearly_price_cents",
+          "limits",
+          "features",
+          "self_serve"
+        ],
+        "title": "PlanView",
+        "type": "object"
+      },
       "PreviousNoteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3550,6 +3740,22 @@
           "to_template_id"
         ],
         "title": "RebindResponse",
+        "type": "object"
+      },
+      "RedeemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "RedeemRequest",
         "type": "object"
       },
       "ReportRequest": {
@@ -4951,6 +5157,51 @@
         "title": "StatusResponse",
         "type": "object"
       },
+      "SubscriptionView": {
+        "properties": {
+          "cancel_at_period_end": {
+            "title": "Cancel At Period End",
+            "type": "boolean"
+          },
+          "current_period_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Period End"
+          },
+          "interval": {
+            "enum": [
+              "monthly",
+              "yearly"
+            ],
+            "title": "Interval",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "status",
+          "current_period_end",
+          "cancel_at_period_end",
+          "interval"
+        ],
+        "title": "SubscriptionView",
+        "type": "object"
+      },
       "SynonymGroupBody": {
         "additionalProperties": false,
         "properties": {
@@ -5637,6 +5888,42 @@
           }
         },
         "title": "UpdateSettingsRequest",
+        "type": "object"
+      },
+      "UsageMeter": {
+        "properties": {
+          "key": {
+            "enum": [
+              "notes",
+              "recording_minutes",
+              "members",
+              "ai"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "used": {
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "used",
+          "limit"
+        ],
+        "title": "UsageMeter",
         "type": "object"
       },
       "ValidationError": {
@@ -6940,6 +7227,174 @@
         "summary": "Stream Clip",
         "tags": [
           "audio-clips"
+        ]
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "operationId": "get_billing_v1_billing_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Billing",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/billing/plan": {
+      "post": {
+        "operationId": "change_plan_v1_billing_plan_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangePlanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Plan",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/v1/billing/redeem": {
+      "post": {
+        "description": "Put the workspace on the plan a code gives. Works with no payment\nprovider at all \u2014 that is what codes are for.",
+        "operationId": "redeem_code_v1_billing_redeem_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangePlanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redeem Code",
+        "tags": [
+          "billing"
         ]
       }
     },

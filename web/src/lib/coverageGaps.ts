@@ -15,6 +15,7 @@ const REASONS: Record<CoverageGapCause, string> = {
   prompt_echo: "could not be decoded",
   unknown: "could not be decoded",
   other_language: "another language",
+  backend_error: "the transcriber did not answer",
 };
 
 /** mm:ss, or h:mm:ss from an hour on. */

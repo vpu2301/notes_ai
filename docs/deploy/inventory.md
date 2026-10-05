@@ -106,6 +106,31 @@ Cost, order of magnitude: a scale-to-zero T4 at ~$0.50–0.75 per GPU-hour
 and ~0.15 × audio is roughly **$0.07–0.11 per audio-hour** plus idle and
 cold starts. Measure it against the real bill before quoting it.
 
+## Mistral AI (EU) — hosted chat model (Sprint L2, SQ1 T5)
+
+The processor half is in `docs/legal/third-party-notices.md` (zero data retention,
+training opt-out, DPA, Data-page acknowledgement). This is the operational half.
+
+| Thing | Where |
+|---|---|
+| Backends | `mistral_eu` (`mistral-large-2512`, writing: `understand`/`summarize`) and `mistral_eu_small` (`mistral-small-2603`, `classify`/`title`/`entities`) in `config/models.yaml`. Today they are routed in **dev only** (`env_overrides.dev`). Staging and prod route `hf_eu` until ADR-0068 is accepted for Mistral. |
+| Endpoint | `https://api.mistral.ai/v1` (`MISTRAL_API_URL`), EU hosting |
+| Secrets | `MISTRAL_API_KEY`, one key per environment, in k8s secret `mdx-model-keys` (staging/prod) and `.env` (dev). Never in the web bundle and never in a log. The startup probe fails the service when it is missing (`missing_env`) and falls back in dev only. Pins: `MISTRAL_LARGE_PIN`, `MISTRAL_SMALL_PIN` (dated ids, never `-latest`) |
+| Egress | one destination, `api.mistral.ai:443`, added to `scripts/k8s/egress-allowlist.sh` when staging routes it |
+| Cost | `config/model_costs.yaml`: Large 0.05 / 0.15 cents per 1k input / output tokens; Small 0.015 / 0.06 (read 2026-09-27). Per meeting-hour: **not measured on real recordings** (SQ1 T3 needs `eval/notes/v2`). Reports carry it from `model_costs.yaml` |
+| Plan | Mistral Pro (active since 2026-09-28) |
+| Rollback | revert the routing PR; `hf_eu` stays deployed |
+
+## Parakeet ASR candidate (Sprint TQ4, ADR-0067)
+
+| Thing | Where |
+|---|---|
+| Image | `deploy/asr-server` → `ghcr.io/notes-ai/asr-server:{tag}` (NeMo, weights baked and sha256-checked) |
+| Endpoint | `deploy/hf/endpoints/asr-parakeet.yaml`: `notes-asr-parakeet-{env}`, `eu-west-1`, T4, `min_replica: 0` |
+| Backend | `cand_parakeet_asr` (not routed); worker shadow via `MDX_ASR_SHADOW_BACKEND` |
+| Secrets | `CAND_PARAKEET_URL`, `HF_TOKEN` (gateway); `MDX_ASR_SERVER_TOKEN` on the server, which is the same value as the worker's `CAND_PARAKEET_SERVER_TOKEN`, sent as `X-MDX-ASR-Token` |
+| Cost | scale-to-zero T4. Per audio-hour: **not measured** (no endpoint raised yet) |
+
 ## Diarization capacity (Sprint 32)
 
 Measured on an Apple M5 CPU (not a cluster node; re-measure on the worker

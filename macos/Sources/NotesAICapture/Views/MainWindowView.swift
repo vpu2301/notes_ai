@@ -61,8 +61,10 @@ struct MainWindowView: View {
         }
         .frame(minWidth: 860, minHeight: 540)
         .sheet(isPresented: $app.settingsPresented) {
+            // Roomy, but never taller or wider than the screen it opens on.
             SettingsView(onClose: { app.settingsPresented = false })
-                .frame(width: 760, height: 620)
+                .frame(width: min(940, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
+                       height: min(780, (NSScreen.main?.visibleFrame.height ?? 900) - 80))
         }
         .sheet(isPresented: $app.invitePresented) {
             InviteView(onClose: { app.invitePresented = false })

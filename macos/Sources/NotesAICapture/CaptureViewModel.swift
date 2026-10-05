@@ -398,14 +398,26 @@ final class CaptureViewModel: ObservableObject {
             // The recording and the note the author typed in are one
             // meeting from here on.
             await attachRecording(jobId: job.id)
-            app.addRecent(jobId: job.id, title: meetingTitle)
+            app.addRecent(jobId: job.id, title: meetingTitle, meetingNoteId: noteId)
             if app.selection == nil { app.selection = .capture(jobId: job.id) }
 
             phase = .transcribing
             var current = job
+            var misses = 0
             while !current.status.isTerminal {
                 try await Task.sleep(for: .seconds(3))
-                current = try await app.api.jobStatus(id: job.id)
+                // A long transcript outlives a Wi-Fi blip or a sleeping
+                // Mac; one failed poll must not abandon the meeting.
+                do {
+                    current = try await app.api.jobStatus(id: job.id)
+                    misses = 0
+                } catch let error as APIError {
+                    throw error
+                } catch {
+                    misses += 1
+                    if misses >= 20 { throw error }
+                    continue
+                }
                 app.updateRecent(jobId: job.id, status: current.status)
             }
             guard current.status == .complete else {

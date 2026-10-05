@@ -16,6 +16,14 @@ import { ApiError } from "../api/http";
 
 /** Written in the second person, no jargon, and never a code number. */
 const COPY: Record<string, string> = {
+  // ── billing (0068) ────────────────────────────────────────────────
+  billing_not_connected: "Payments aren't connected yet, so the plan can't change here.",
+  redeem_unknown: "That code isn't valid. Check it and try again.",
+  redeem_expired: "That code has expired.",
+  redeem_used_up: "That code has already been used as many times as it allows.",
+  redeem_already: "This workspace has already used that code.",
+  redeem_rate_limited: "Too many tries. Wait a while and try again.",
+  plan_contact_sales: "Enterprise is arranged with us — get in touch and we'll set it up.",
   // ── session ───────────────────────────────────────────────────────
   auth_refresh_replay:
     "You were signed out for security. Sign in again — if you did not expect this, change your password.",

@@ -1080,6 +1080,46 @@ export interface TranscriptResult {
   coverage?: TranscriptCoverage | null;
   /** Sprint F1: when Record was pressed and how long until audio flowed. */
   capture?: CaptureTiming | null;
+  /**
+   * Sprint TQ2: stretches of ≥ 5 s with no speech, marked instead of
+   * transcribed. Absent on older results. An unknown `kind` renders as noise.
+   */
+  noise?: TranscriptNoise[];
+  /**
+   * Sprint TQ3: spellings unified by the server's overlay (`accepted`,
+   * already applied in segments/turns) or offered for review (`proposed`).
+   * Absent on older servers.
+   */
+  entity_corrections?: EntityCorrection[];
+  /** What a correction decision must name; a stale one is refused (409). */
+  corrections_rev?: number;
+  /** Why nothing was unified: "skipped_budget" | "error" | "disabled"; null = ran. */
+  entity_unify?: string | null;
+}
+
+export interface EntityCorrection {
+  id: string;
+  kind: "entity";
+  from_forms: string[];
+  to_text: string;
+  occurrences_count: number;
+  source: "glossary" | "calendar" | "hint" | "majority" | "user";
+  confidence: number;
+  status: "proposed" | "accepted" | "rejected";
+  /** A person accepted, edited or rejected it (older servers omit it). */
+  decided?: boolean;
+}
+
+export interface CorrectionsView {
+  job_id: string;
+  corrections_rev: number;
+  corrections: EntityCorrection[];
+}
+
+export interface TranscriptNoise {
+  start_ms: number;
+  end_ms: number;
+  kind: "music" | "silence" | "noise" | (string & {});
 }
 
 export type CoverageGapCause =
@@ -1088,6 +1128,7 @@ export type CoverageGapCause =
   | "decoder_empty"
   | "prompt_echo"
   | "other_language"
+  | "backend_error"
   | "unknown";
 
 export interface CoverageGap {
@@ -1451,4 +1492,53 @@ export interface GeneratedItem {
   corrections?: { surface: string; canonical: string; source: string }[];
   /** Q5: dates the line names, resolved against the recording day. */
   mentions?: { text: string; date: string; time: string | null; direction: string }[];
+}
+
+// ─── Billing (0068) ──────────────────────────────────────────────────────
+
+export interface BillingPlan {
+  code: string;
+  name: string;
+  summary: string;
+  /** Whole cents per member per month; null = "talk to us". */
+  price_cents: number | null;
+  currency: string;
+  /** Per member per year when paid yearly; null = monthly only. */
+  yearly_price_cents: number | null;
+  limits: Record<string, number | null>;
+  features: string[];
+  self_serve: boolean;
+}
+
+export interface UsageMeter {
+  key: "notes" | "recording_minutes" | "members" | "ai";
+  used: number;
+  /** null = no limit on this plan. */
+  limit: number | null;
+}
+
+export interface BillingSubscription {
+  provider: string;
+  status: "active" | "trialing" | "past_due" | "canceled";
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  interval: BillingInterval;
+}
+
+export type BillingInterval = "monthly" | "yearly";
+
+export interface Billing {
+  plan: BillingPlan;
+  plans: BillingPlan[];
+  usage: UsageMeter[];
+  period_start: string;
+  subscription: BillingSubscription | null;
+  payments_connected: boolean;
+  can_edit: boolean;
+}
+
+export interface ChangePlanResult {
+  action: "applied" | "redirect";
+  redirect_url: string | null;
+  billing: Billing;
 }

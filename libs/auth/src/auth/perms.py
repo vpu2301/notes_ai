@@ -58,6 +58,10 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     # their own voice. Only an admin may change it.
     ("tenant_admin", "ai_settings.read", "tenant"): True,
     ("tenant_admin", "ai_settings.write", "tenant"): True,
+    # Billing (0068): the plan, the month's usage, changing the plan.
+    # An admin's business — what the workspace pays is not every member's.
+    ("tenant_admin", "billing.read", "tenant"): True,
+    ("tenant_admin", "billing.write", "tenant"): True,
     ("tenant_admin", "tenant.update", "tenant"): True,
     ("tenant_admin", "tenant.create", "tenant"): True,
     ("tenant_admin", "tenant.manage_members", "tenant"): True,

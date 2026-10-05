@@ -1,0 +1,9 @@
+# asr-server, ONNX runtime (the dev Mac; the fallback if the NeMo image is too
+# large for the endpoint build — TQ4 failure table).
+onnx-asr[cpu,hub]==0.12.0
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.30,<0.31
+python-multipart>=0.0.9
+soundfile>=0.12.1
+soxr>=0.3.7
+numpy>=1.26.0

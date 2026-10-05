@@ -48,6 +48,8 @@ struct SettingsView: View {
                             ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
                         case .dataAI:
                             DataAndAIView()
+                        case .billing:
+                            BillingView()
                         case .account:
                             account
                         case .advanced:
@@ -91,6 +93,10 @@ struct SettingsView: View {
             navRow("Names and terms", symbol: "character.book.closed", tab: .vocabulary)
             navRow("Connectors", symbol: "link", tab: .connectors)
             navRow("Data & AI", symbol: "lock.shield", tab: .dataAI)
+            // What the workspace pays is an admin's business (the API agrees).
+            if app.activeWorkspace?.canManageMembers == true {
+                navRow("Billing", symbol: "creditcard", tab: .billing)
+            }
             navRow("Account", symbol: "person.crop.circle", tab: .account)
             navRow("Advanced", symbol: "wrench.and.screwdriver", tab: .advanced)
             Spacer()
@@ -137,6 +143,7 @@ struct SettingsView: View {
         case .vocabulary: return "Names and terms"
         case .connectors: return "Connectors"
         case .dataAI: return "Data & AI"
+        case .billing: return "Billing"
         case .account: return "Account"
         case .advanced: return "Advanced"
         }
@@ -159,9 +166,11 @@ struct SettingsView: View {
                         selection: $capture.language)
                 }
                 row("Separate speakers") {
-                    Toggle("Separate speakers", isOn: $capture.diarize)
+                    // DSToggleStyle draws its label and ignores
+                    // .labelsHidden(); the row already names it.
+                    Toggle(isOn: $capture.diarize) { EmptyView() }
                         .toggleStyle(DSToggleStyle())
-                        .labelsHidden()
+                        .fixedSize()
                         .accessibilityLabel("Separate speakers")
                 }
                 row("People") {
@@ -169,11 +178,10 @@ struct SettingsView: View {
                         .frame(width: 300)
                 }
                 row("Record call audio (other participants)") {
-                    Toggle("Record call audio (other participants)",
-                           isOn: Binding(get: { capture.recordsCallAudio },
-                                         set: { capture.setCallAudio($0) }))
+                    Toggle(isOn: Binding(get: { capture.recordsCallAudio },
+                                         set: { capture.setCallAudio($0) })) { EmptyView() }
                         .toggleStyle(DSToggleStyle())
-                        .labelsHidden()
+                        .fixedSize()
                         .accessibilityLabel("Record call audio (other participants)")
                         .accessibilityHint("Also records what your Mac plays, so both sides of a call are in the note")
                 }

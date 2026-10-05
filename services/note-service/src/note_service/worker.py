@@ -183,6 +183,7 @@ async def run() -> None:
         operation_provider_for=providers.get,
         shadow_provider_for=providers.shadow,
         entity_model_tier=settings.note_entity_model_tier,
+        coverage_retry_budget_s_per_hour=settings.note_coverage_retry_budget_s_per_hour,
         shadow_percent=(
             settings.note_generation_shadow_percent
             if settings.note_generation_shadow_backend

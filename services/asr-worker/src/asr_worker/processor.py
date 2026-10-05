@@ -61,11 +61,15 @@ import numpy as np
 from opentelemetry import metrics
 
 from asr_models import (
+    Diagnostics,
     DiarizationStats,
+    DroppedSegment,
     JobEnqueuePayload,
     JobErrorKind,
+    LoopEvent,
     SecondPass,
     Segment,
+    TranscriptionMetadata,
     TranscriptionOutput,
     spec_for,
 )
@@ -85,7 +89,7 @@ from messaging import Message, RedisStreamsConsumer
 from models import ProviderError, TranscriptionCancelledError
 from storage import ObjectNotFoundError
 
-from . import audit_kinds, vad
+from . import audit_kinds, chunks, guards, quality, shadow, vad
 from . import coverage as cov
 from .audio_io import AudioDecodeError, decode_to_pcm, mixdown
 from .config import settings
@@ -497,21 +501,24 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         deadline = time.monotonic() + max_infer
         should_cancel = _cancel_poller(state, tenant_id, job_id)
         try:
-            output: TranscriptionOutput = await asyncio.wait_for(
-                state.engine.transcribe(
-                    pcm,
-                    language=payload.language,
-                    # Optional free-text vocabulary hint → initial_prompt.
-                    prompt=payload.vocabulary_hint,
-                    # Cancel is a request, not a status: DELETE /asr/jobs/{id}
-                    # on a RUNNING job only sets `cancel_requested`, and it is
-                    # the worker that has to act on it. Before this it never
-                    # looked again after inference started, so pressing Cancel
-                    # on a job that was already transcribing did nothing at
-                    # all — the job ran to completion and came back `complete`.
-                    should_cancel=should_cancel,
-                ),
+            output: TranscriptionOutput = await decode_recording(
+                state,
+                pcm,
+                stereo=stereo,
+                language=payload.language,
+                # Optional free-text vocabulary hint → initial_prompt.
+                prompt=payload.vocabulary_hint,
+                first_frame_offset_ms=payload.first_frame_offset_ms,
                 timeout=max_infer,
+                deadline=deadline,
+                # Cancel is a request, not a status: DELETE /asr/jobs/{id}
+                # on a RUNNING job only sets `cancel_requested`, and it is
+                # the worker that has to act on it. Before this it never
+                # looked again after inference started, so pressing Cancel
+                # on a job that was already transcribing did nothing at
+                # all — the job ran to completion and came back `complete`.
+                should_cancel=should_cancel,
+                job_id=job_id,
             )
         except TranscriptionCancelledError:
             await _mark_cancelled(state, tenant_id, job_id)
@@ -537,29 +544,30 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _release_cuda_cache()
             raise err from exc
 
-        # Sprint I2 T3: words the decoder copied from its prompt come out,
-        # whatever backend decoded them. A transcript that was nothing but
-        # the prompt is then an empty one and files as `no_speech` below.
-        output = _guarded(output, payload.vocabulary_hint, job_id=job_id)
-
-        # Sprint F1: what the transcript covers of the speech; runs the first
-        # decode lost are decoded again without the prompt. Before the empty
-        # check: a recording whose every word was echo can still be rescued.
-        try:
-            output = await _covered(
-                state,
-                output,
-                pcm=pcm,
-                stereo=stereo,
-                prompt=payload.vocabulary_hint,
-                first_frame_offset_ms=payload.first_frame_offset_ms,
-                deadline=deadline,
-                should_cancel=should_cancel,
-                job_id=job_id,
+        # Sprint TQ4 T4: the candidate engine decodes the same audio while
+        # the primary goes on (diarization); bounded, numbers only.
+        shadow_task: asyncio.Task[Any] | None = None
+        if getattr(state, "shadow_asr", None) is not None and output.segments and shadow.sampled():
+            shadow_task = asyncio.create_task(
+                shadow.run(
+                    state.shadow_asr,
+                    redis=state.redis,
+                    decode=decode_recording,
+                    primary=output,
+                    audio_seconds=audio_seconds,
+                    decode_kwargs={
+                        "pcm": pcm,
+                        "stereo": stereo,
+                        "language": payload.language,
+                        "prompt": payload.vocabulary_hint,
+                        "first_frame_offset_ms": payload.first_frame_offset_ms,
+                        "timeout": max_infer,
+                        "deadline": time.monotonic() + max_infer,
+                        "should_cancel": None,
+                        "job_id": job_id,
+                    },
+                )
             )
-        except TranscriptionCancelledError:
-            await _mark_cancelled(state, tenant_id, job_id)
-            return
 
         # Inference ran and produced nothing. Same reasoning as the empty-PCM
         # gate above, one stage later: a zero-segment transcript stored as
@@ -628,6 +636,15 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             await _mark_cancelled(state, tenant_id, job_id)
             return
 
+        if shadow_task is not None:
+            shadow_diag = await shadow.bounded(shadow_task)
+            if shadow_diag is not None:
+                output = output.model_copy(
+                    update={
+                        "diagnostics": output.diagnostics.model_copy(update={"shadow": shadow_diag})
+                    }
+                )
+
         result_key = f"{tenant_id}/{job_id}.json.enc"
         body = output.model_dump_json().encode("utf-8")
         try:
@@ -654,6 +671,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                         finished_at=now(),
                         metadata=$3::jsonb,
                         detected_language=$4,
+                        -- Numbers only, for the admin dashboard (0067).
+                        quality=$6::jsonb,
                         -- Shape B only: the transcript is complete but the
                         -- speakers are missing, and the clients read this
                         -- to offer a re-run.
@@ -671,6 +690,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                     # only inside the encrypted result.
                     output.language,
                     diarization_error,
+                    json.dumps(quality.summarize(output, audio_seconds=audio_seconds)),
                 )
                 await conn.execute(
                     "UPDATE audio_files SET status='transcribed' WHERE id = $1",
@@ -765,6 +785,126 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         raise
 
 
+async def decode_recording(
+    state: Any,
+    pcm: np.ndarray,
+    *,
+    stereo: np.ndarray | None,
+    language: str,
+    prompt: str | None,
+    first_frame_offset_ms: int | None,
+    timeout: float,
+    deadline: float,
+    should_cancel: Any,
+    job_id: UUID,
+) -> TranscriptionOutput:
+    """The transcript of one recording exactly as a job makes it. ``state``
+    needs only ``engine`` (the ASR provider).
+
+    The one path from audio to transcript. The job calls it; so does the
+    gold-set harness (``scripts/eval/asr_eval.py``), so a number the eval
+    reports is a number production would have produced. Every guard runs
+    here and nowhere else, whatever the backend (Sprint TQ2 T1):
+
+    1. VAD once (``vad.speech_runs``, floor pass per settings).
+    2. ``chunks.plan``: the recording's language and each run's.
+    3. The backend decodes the planned runs (``transcribe_runs``).
+    4. ``guards.apply``: G1–G3 and the artefact list (TQ2 T2/T3).
+    5. The prompt-echo guard (Sprint I2).
+    6. Coverage and the prompt-free second pass, loops included (F1, TQ2).
+    7. Non-speech markers (TQ2 T4).
+
+    Raises what the engine raises (``TimeoutError`` after ``timeout``,
+    ``ProviderError``, ``TranscriptionCancelledError``); the caller
+    classifies. ``deadline`` bounds both decodes together.
+    """
+    provider = state.engine
+    heard = await asyncio.to_thread(
+        vad.speech_runs,
+        pcm,
+        stereo=stereo,
+        pad_ms=settings.asr_vad_pad_ms,
+        floor=settings.asr_vad_floor_enabled,
+        floor_threshold=settings.asr_vad_floor_threshold,
+        floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
+    )
+
+    async def decode() -> TranscriptionOutput:
+        if not hasattr(provider, "transcribe_runs"):
+            # A provider that cannot take planned runs decodes the file.
+            out: TranscriptionOutput = await provider.transcribe(
+                pcm, language=language, prompt=prompt, should_cancel=should_cancel
+            )
+            return out
+        lid = await chunks.identifier_for(provider)
+        planned = await chunks.plan(
+            pcm, heard.runs, language=language, lid=lid, should_cancel=should_cancel
+        )
+        if planned.runs:
+            out = await provider.transcribe_runs(
+                pcm,
+                planned.runs,
+                language=planned.language,
+                prompt=prompt,
+                should_cancel=should_cancel,
+                group_seconds=settings.asr_http_group_seconds,
+            )
+        else:
+            out = TranscriptionOutput(
+                language=planned.language,
+                segments=[],
+                metadata=TranscriptionMetadata(
+                    model=provider.model_name,
+                    vad_seconds_speech=0.0,
+                    infer_seconds=0.0,
+                    beam_size=1,
+                ),
+            )
+        return out.model_copy(
+            update={
+                "language": planned.language,
+                "language_detected": planned.language_detected,
+                "language_probability": planned.language_probability
+                if planned.language_detected
+                else out.language_probability,
+                "diagnostics": out.diagnostics.model_copy(
+                    update={
+                        "other_language_chunks": planned.other_language_runs,
+                        "language_id": planned.language_id,
+                    }
+                ),
+            }
+        )
+
+    output = await asyncio.wait_for(decode(), timeout=timeout)
+    # Sprint TQ2 T2/T3: text nobody said, before anything else reads it.
+    gated = guards.apply(output, heard.runs)
+    output = gated.output
+    # Sprint I2 T3: words the decoder copied from its prompt come out,
+    # whatever backend decoded them. A transcript that was nothing but
+    # the prompt is then an empty one and files as `no_speech`.
+    output = _guarded(output, prompt, job_id=job_id)
+    # Sprint F1: what the transcript covers of the speech; runs the first
+    # decode lost (and TQ2 loops) are decoded again without the prompt.
+    output = await _covered(
+        state,
+        output,
+        pcm=pcm,
+        stereo=stereo,
+        prompt=prompt,
+        first_frame_offset_ms=first_frame_offset_ms,
+        deadline=deadline,
+        should_cancel=should_cancel,
+        job_id=job_id,
+        heard=heard,
+        loop_ranges=gated.loop_ranges,
+    )
+    if heard.stub:
+        return output
+    # Sprint TQ2 T4: music, silence and noise are marked, not transcribed.
+    return output.model_copy(update={"noise": chunks.nonspeech_regions(pcm, heard.runs)})
+
+
 def _guarded(
     output: TranscriptionOutput, prompt: str | None, *, job_id: UUID
 ) -> TranscriptionOutput:
@@ -808,6 +948,8 @@ async def _covered(
     deadline: float,
     should_cancel: Any,
     job_id: UUID,
+    heard: vad.SpeechRuns | None = None,
+    loop_ranges: list[tuple[int, int]] | None = None,
 ) -> TranscriptionOutput:
     """Sprint F1 decisions 1, 3 and 4: measure how much of the speech the
     transcript covers, decode the runs the first pass lost once more without
@@ -816,14 +958,15 @@ async def _covered(
     Never fails the job: a VAD error leaves the transcript as it was, with
     no coverage recorded. Cancellation propagates."""
     try:
-        heard = await asyncio.to_thread(
-            vad.speech_runs,
-            pcm,
-            stereo=stereo,
-            floor=settings.asr_vad_floor_enabled,
-            floor_threshold=settings.asr_vad_floor_threshold,
-            floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
-        )
+        if heard is None:
+            heard = await asyncio.to_thread(
+                vad.speech_runs,
+                pcm,
+                stereo=stereo,
+                floor=settings.asr_vad_floor_enabled,
+                floor_threshold=settings.asr_vad_floor_threshold,
+                floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
+            )
     except Exception as exc:  # noqa: BLE001 — diagnostics must not cost the transcript
         logger.warning(
             "asr.coverage_vad_failed",
@@ -833,6 +976,11 @@ async def _covered(
     runs = heard.runs
     segments = list(output.segments)
     spans = list(output.diagnostics.prompt_echo)
+    seg_diagnostics = list(output.diagnostics.segments)
+    loops = list(loop_ranges or [])
+    loop_events: list[LoopEvent] = list(output.diagnostics.loops)
+    second_drops: list[DroppedSegment] = []
+    failed = output.diagnostics.backend_errors
     outcomes: dict[tuple[int, int], cov.RunOutcome] = {}
     by_cause: dict[str, int] = {}
     chunks = 0
@@ -845,20 +993,53 @@ async def _covered(
             run=run,
             echo_removed=cov.echo_words_in(run, spans) > 0,
             other_language=cov.run_language(run, segments) is not None,
+            backend_error=any(e.start_ms < run.end_ms and run.start_ms < e.end_ms for e in failed),
         )
         outcomes[(run.start_ms, run.end_ms)] = outcome
         slice_start = max(run.start_ms - settings.asr_vad_pad_ms, prev_end, 0)
         prev_end = run.end_ms
-        cause = cov.second_pass_cause(run, segments, spans) if second_pass_on else None
+        in_loop: list[tuple[int, int]] = [
+            r for r in loops if r[0] < run.end_ms and run.start_ms < r[1]
+        ]
+        if in_loop:
+            cause: str | None = cov.LOOP_CAUSE if second_pass_on else None
+            if cause is None:
+                loop_events.extend(
+                    LoopEvent(start_ms=a, end_ms=b, outcome="second_pass_off") for a, b in in_loop
+                )
+                for r in in_loop:
+                    loops.remove(r)
+                continue
+        else:
+            cause = cov.second_pass_cause(run, segments, spans) if second_pass_on else None
         if cause is None:
             continue
+
+        def loop_outcome(
+            result: str, cause: str = cause, in_loop: list[tuple[int, int]] = in_loop
+        ) -> None:
+            if cause != cov.LOOP_CAUSE:
+                return
+            for r in in_loop:
+                if r in loops:
+                    loops.remove(r)
+                    loop_events.append(LoopEvent(start_ms=r[0], end_ms=r[1], outcome=result))  # type: ignore[arg-type]
+
         remaining = deadline - time.monotonic()
         if timed_out or remaining <= 1.0:
             timed_out = True
             by_cause[cov.TIMEOUT_CAUSE] = by_cause.get(cov.TIMEOUT_CAUSE, 0) + 1
             _second_pass_total.add(1, {"cause": cov.TIMEOUT_CAUSE, "outcome": "empty"})
+            loop_outcome("second_pass_failed")
             continue
-        language = cov.run_language(run, segments) or output.language
+        failed_here = next(
+            (e for e in failed if e.start_ms < run.end_ms and run.start_ms < e.end_ms), None
+        )
+        language = (
+            (failed_here.language if failed_here else None)
+            or cov.run_language(run, segments)
+            or output.language
+        )
         chunk = pcm[int(slice_start * 16) : int(run.end_ms * 16)]
         try:
             second = await asyncio.wait_for(
@@ -875,6 +1056,7 @@ async def _covered(
             timed_out = True
             by_cause[cov.TIMEOUT_CAUSE] = by_cause.get(cov.TIMEOUT_CAUSE, 0) + 1
             _second_pass_total.add(1, {"cause": cov.TIMEOUT_CAUSE, "outcome": "empty"})
+            loop_outcome("second_pass_failed")
             continue
         except ProviderError as exc:
             # The first attempt stands; the gap's cause stays unknown.
@@ -883,10 +1065,30 @@ async def _covered(
                 extra={"job_id": str(job_id), "start_ms": run.start_ms, "kind": str(exc.kind)},
             )
             _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
+            loop_outcome("second_pass_failed")
             continue
         chunks += 1
         by_cause[cause] = by_cause.get(cause, 0) + 1
         fresh = cov.shift(second.segments, slice_start)
+        # TQ2: the second decode goes through the same gates (a prompt-free
+        # decode over noise writes stock phrases too).
+        fresh_diags = [
+            d.model_copy(
+                update={"start_ms": d.start_ms + slice_start, "end_ms": d.end_ms + slice_start}
+            )
+            for d in second.diagnostics.segments
+        ]
+        regated = guards.apply(
+            second.model_copy(
+                update={
+                    "segments": fresh,
+                    "diagnostics": Diagnostics(segments=fresh_diags),
+                }
+            ),
+            runs,
+        )
+        fresh = list(regated.output.segments)
+        second_drops.extend(regated.output.diagnostics.dropped_segments)
         # The second attempt had no prompt, but the guard still applies:
         # the rule is about what reaches a transcript, not how it was asked.
         fresh, fresh_spans, _ = guard_segments(fresh, prompt)
@@ -896,10 +1098,23 @@ async def _covered(
         if second_words > first_words and cov.confident(fresh):
             segments = cov.splice(segments, slice_start, run.end_ms, fresh)
             spans.extend(fresh_spans)
+            # TQ1 T5: the spliced decode's own numbers, on the recording's clock.
+            seg_diagnostics.extend(
+                d.model_copy(
+                    update={
+                        "start_ms": d.start_ms + slice_start,
+                        "end_ms": d.end_ms + slice_start,
+                        "second_pass": True,
+                    }
+                )
+                for d in second.diagnostics.segments
+            )
             recovered += second_words - first_words
             _second_pass_total.add(1, {"cause": cause, "outcome": "recovered"})
+            loop_outcome("recovered")
         else:
             _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
+            loop_outcome("kept_truncated")
 
     coverage = cov.measure(
         runs,
@@ -931,6 +1146,14 @@ async def _covered(
             "prompt_echo": spans,
             "coverage": coverage,
             "second_pass": SecondPass(chunks=chunks, recovered_words=recovered, by_cause=by_cause),
+            "segments": sorted(seg_diagnostics, key=lambda d: (d.start_ms, d.second_pass)),
+            "loops": [
+                *loop_events,
+                # A loop whose run the second pass never reached (no speech
+                # run overlaps it): kept as truncated.
+                *(LoopEvent(start_ms=a, end_ms=b, outcome="kept_truncated") for a, b in loops),
+            ],
+            "dropped_segments": [*output.diagnostics.dropped_segments, *second_drops],
         }
     )
     metadata = output.metadata.model_copy(update={"coverage_share": round(coverage.share, 4)})
@@ -1469,7 +1692,10 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
                     diarization_updated_at = now(),
                     metadata = $4::jsonb,
                     speaker_names = $5::jsonb,
-                    speaker_name_sources = $6::jsonb
+                    speaker_name_sources = $6::jsonb,
+                    -- The speaker numbers changed; the rest is carried over.
+                    quality = CASE WHEN quality IS NULL THEN NULL
+                                   ELSE quality || $7::jsonb END
                 WHERE id = $1
                 """,
                 job_id,
@@ -1478,6 +1704,7 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
                 json.dumps(relabelled.metadata.model_dump(mode="json")),
                 json.dumps(carried),
                 json.dumps(carried_sources),
+                json.dumps(quality.speaker_numbers(relabelled)),
             )
             superseded = row["previous_result_storage_uri"]
     except Exception as exc:  # noqa: BLE001
