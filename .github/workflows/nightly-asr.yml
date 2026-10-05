@@ -1,0 +1,121 @@
+# Nightly transcript regression on the ASR gold set (Sprint TQ1 T4, ADR-0019).
+#
+# Runs the backends we ship through the worker's own path
+# (asr_worker.processor.decode_recording) over eval/asr/v1 test and fails
+# when, per language, WER rises by more than 1.0 pp or a TR-02 / TR-03
+# metric worsens against the committed baseline report
+# (scripts/eval/compare_asr.py).
+#
+# Self-hosted on purpose: the gold set is personal data and third-party
+# content (check-no-eval-audio keeps it out of git) and lives in the private
+# eval bucket; the runner holds the eval role's credentials and the cached
+# model weights. The runner needs the label `mdx-eval`.
+#
+# Backends:
+#   inproc_cpu_asr — always (faster-whisper large-v3, int8, CPU).
+#   dev_mac_asr    — when whisper-server answers on DEV_MAC_ASR_URL.
+#   hf_eu_asr      — when the HF endpoint secrets are set (scale-to-zero:
+#                    the first file pays the cold start; rtf is reported,
+#                    not gated here).
+name: nightly-asr
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      inject_regression_pp:
+        description: "Drill: add this many WER points to tonight's report before comparing (expect failure)"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-asr
+  cancel-in-progress: false
+
+env:
+  # Committed baselines (docs/eval/asr-baseline-2026-10.md explains them).
+  # Replace one in a PR, with its report, only when a change is MEANT to
+  # move the numbers.
+  BASELINE_DIR: docs/eval
+  # Per-metric tolerance; unlisted metrics use compare_asr.DEFAULT_MAX_DROP
+  # (wer +0.010, TR-02/TR-03 metrics 0).
+  MAX_DROP: '{"wer": 0.010}'
+  HF_HUB_OFFLINE: "1"
+  DEV_MAC_ASR_URL: ${{ vars.DEV_MAC_ASR_URL || 'http://localhost:8090' }}
+
+jobs:
+  asr:
+    runs-on: [self-hosted, macOS, mdx-eval]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync
+        run: uv sync --all-packages --all-extras
+
+      - name: Gold set present
+        # Eval role credentials come from the runner's environment.
+        run: |
+          uv run python scripts/eval/asr_gold.py fetch eval/asr/v1
+          make eval-asr-validate
+
+      - name: inproc_cpu_asr — test split
+        run: make eval-asr BACKEND=inproc_cpu_asr SPLIT=test LABEL=nightly
+
+      - name: dev_mac_asr — test split
+        run: |
+          if curl -fsS -m 5 "$DEV_MAC_ASR_URL/health" >/dev/null 2>&1 || curl -fsS -m 5 "$DEV_MAC_ASR_URL/" >/dev/null 2>&1; then
+            make eval-asr BACKEND=dev_mac_asr SPLIT=test LABEL=nightly
+          else
+            echo "::warning::whisper-server not reachable at $DEV_MAC_ASR_URL — dev_mac_asr not measured tonight"
+          fi
+
+      - name: hf_eu_asr — test split
+        env:
+          HF_ASR_ENDPOINT_URL: ${{ secrets.HF_ASR_ENDPOINT_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_ASR_MODEL_PIN: ${{ vars.HF_ASR_MODEL_PIN }}
+        run: |
+          if [ -n "$HF_ASR_ENDPOINT_URL" ] && [ -n "$HF_TOKEN" ]; then
+            make eval-asr BACKEND=hf_eu_asr SPLIT=test LABEL=nightly
+          else
+            echo "::warning::HF endpoint secrets not set — hf_eu_asr not measured tonight"
+          fi
+
+      - name: Compare against the committed baselines
+        run: |
+          set -euo pipefail
+          today="$(date -u +%Y-%m-%d)"
+          inject="${{ github.event.inputs.inject_regression_pp || '0' }}"
+          status=0
+          for backend in inproc_cpu_asr dev_mac_asr hf_eu_asr; do
+            current="docs/eval/asr-${today}-${backend}-test-nightly.json"
+            baseline="$BASELINE_DIR/asr-baseline-${backend}-test.json"
+            if [ ! -f "$current" ]; then continue; fi
+            if [ ! -f "$baseline" ]; then
+              echo "::warning::no committed baseline ($baseline) — $backend not gated"
+              continue
+            fi
+            uv run python scripts/eval/compare_asr.py --baseline "$baseline" --current "$current" \
+              --inject-wer-pp "$inject" || status=1
+          done
+          exit $status
+
+      - name: Regression checklists (r03, r04)
+        run: make eval-asr-assert BACKEND=inproc_cpu_asr
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-reports
+          # Reports are numbers and ids only; transcripts stay in scripts/eval/local.
+          path: docs/eval/asr-*-nightly.*
+          retention-days: 30

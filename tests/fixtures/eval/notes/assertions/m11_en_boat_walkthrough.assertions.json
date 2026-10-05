@@ -1,0 +1,33 @@
+{
+ "id": "m11_en_boat_walkthrough",
+ "recording_type": "presentation_demo",
+ "sprint": {
+  "recording_type": "F3",
+  "figures": "F3",
+  "presenter_line": "F3",
+  "contact_line": "F3",
+  "no_copied_lines": "F2",
+  "no_information_lines": "F2",
+  "no_marks": "F2",
+  "must_not_contain": "F2"
+ },
+ "speakers": {"SPEAKER_1": "Corvin Aldmere"},
+ "figures": [
+  {"name": "length overall", "value": "58", "unit": "feet"},
+  {"name": "beam", "value": "16.5", "unit": "feet", "qualifier": "a little over"},
+  {"name": "fresh water", "value": "250", "unit": "gallons", "qualifier": "just under"},
+  {"name": "fuel tank", "value": "700", "unit": "gallons", "qualifier": "about"},
+  {"name": "engine power", "value": "800", "unit": "horsepower"},
+  {"name": "cruising speed", "value": "26", "unit": "knots"},
+  {"name": "top speed", "value": "32", "unit": "knots", "qualifier": "up to"},
+  {"name": "cabins", "value": "3"}
+ ],
+ "figures_min": 7,
+ "presenter_line": "Presenter: Corvin Aldmere, broker with Harbourline Yachts (Tessaline dealer for the North Sea)",
+ "contact_line": true,
+ "no_copied_lines": true,
+ "no_information_lines_max": 0,
+ "no_marks": true,
+ "must_not_contain": ["incredible"],
+ "every_line_cited": true
+}

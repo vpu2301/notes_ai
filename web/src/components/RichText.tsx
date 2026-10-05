@@ -1,5 +1,6 @@
-import { Fragment, type ReactNode, useMemo } from "react";
+import React, { Fragment, type ReactNode, useMemo } from "react";
 import { type Block, type Inline, type ListItem, parseRichText } from "../lib/richText";
+import { speakerInitials, speakerTint } from "../lib/speakers";
 
 /** Inline runs — code, bold and italic; everything else is plain text. */
 function Spans({ spans }: { spans: Inline[] }) {
@@ -21,7 +22,16 @@ function Spans({ spans }: { spans: Inline[] }) {
  * on so a sibling list (a numbered run after a bulleted one, say) starts
  * its own element rather than joining this one.
  */
-function buildList(items: ListItem[], start: number, depth: number): { node: ReactNode; next: number } {
+/** Something drawn at the end of one line, from its source text — the
+ *  evidence of a generated line (Q5). */
+export type LineExtra = (raw: string) => ReactNode;
+
+function buildList(
+  items: ListItem[],
+  start: number,
+  depth: number,
+  extra?: LineExtra,
+): { node: ReactNode; next: number } {
   const first = items[start] as ListItem;
   const ordered = first.ordered;
   const checklist = first.done !== undefined;
@@ -33,7 +43,7 @@ function buildList(items: ListItem[], start: number, depth: number): { node: Rea
     if (item.depth > depth) {
       // Deeper: it hangs under the item we just placed. A deeper line with
       // nothing above it can only be a stray indent — treat it as ours.
-      const sub = buildList(items, i, item.depth);
+      const sub = buildList(items, i, item.depth, extra);
       const parent = rows[rows.length - 1];
       if (!parent) return sub;
       parent.sub = sub.node;
@@ -51,6 +61,7 @@ function buildList(items: ListItem[], start: number, depth: number): { node: Rea
       {checklist && <span className={`box${item.done ? " done" : ""}`} aria-hidden="true" />}
       <span>
         <Spans spans={item.spans} />
+        {extra && item.raw ? extra(item.raw) : null}
       </span>
       {sub}
     </li>
@@ -67,7 +78,7 @@ function buildList(items: ListItem[], start: number, depth: number): { node: Rea
   return { node, next: i };
 }
 
-function Blocks({ blocks }: { blocks: Block[] }) {
+function Blocks({ blocks, extra }: { blocks: Block[]; extra?: LineExtra }) {
   const out: ReactNode[] = [];
   blocks.forEach((block, b) => {
     switch (block.kind) {
@@ -83,9 +94,24 @@ function Blocks({ blocks }: { blocks: Block[] }) {
         break;
       }
       case "para":
+        if (block.speaker) {
+          out.push(
+            <div key={b} className="rt-turn">
+              <span className="speaker-avatar" style={{ "--tint": speakerTint(block.speaker) } as React.CSSProperties} aria-hidden="true">
+                {speakerInitials(block.speaker)}
+              </span>
+              <span className="rt-speaker">{block.speaker}</span>
+              <p className="rt-p rt-turn-text">
+                <Spans spans={block.spans} />
+              </p>
+            </div>,
+          );
+          break;
+        }
         out.push(
           <p key={b} className="rt-p">
             <Spans spans={block.spans} />
+            {extra && block.raw ? extra(block.raw) : null}
           </p>,
         );
         break;
@@ -130,7 +156,7 @@ function Blocks({ blocks }: { blocks: Block[] }) {
       case "list": {
         let i = 0;
         while (i < block.items.length) {
-          const { node, next } = buildList(block.items, i, (block.items[i] as ListItem).depth);
+          const { node, next } = buildList(block.items, i, (block.items[i] as ListItem).depth, extra);
           out.push(<Fragment key={`${b}-${i}`}>{node}</Fragment>);
           i = next > i ? next : i + 1;
         }
@@ -146,6 +172,10 @@ interface RichTextProps {
   /** Shown in place of an empty body. */
   placeholder?: string;
   className?: string;
+  /** Q5: drawn at the end of each paragraph and list item, from its source. */
+  lineExtra?: LineExtra;
+  /** SQ3 T1: false for a section the engine wrote — no paragraph is a speaker turn. */
+  allowSpeakerTurns?: boolean;
 }
 
 /**
@@ -153,14 +183,23 @@ interface RichTextProps {
  * and small tables come out as real structure instead of the raw `- `
  * and `**…**` a `pre-wrap` box used to show.
  */
-export function RichText({ text, placeholder = "Nothing entered.", className }: RichTextProps) {
-  const blocks = useMemo(() => parseRichText(text), [text]);
+export function RichText({
+  text,
+  placeholder = "Nothing entered.",
+  className,
+  lineExtra,
+  allowSpeakerTurns = true,
+}: RichTextProps) {
+  const blocks = useMemo(
+    () => parseRichText(text, { speakerTurns: allowSpeakerTurns }),
+    [text, allowSpeakerTurns],
+  );
   if (blocks.length === 0) {
     return <div className={`rt empty-val ${className ?? ""}`}>{placeholder}</div>;
   }
   return (
     <div className={`rt ${className ?? ""}`}>
-      <Blocks blocks={blocks} />
+      <Blocks blocks={blocks} extra={lineExtra} />
     </div>
   );
 }

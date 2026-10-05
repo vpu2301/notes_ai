@@ -1,0 +1,79 @@
+{
+ "id": "m06_de_news_podcast",
+ "recording_type": "podcast_broadcast",
+ "topics_min": 2,
+ "speakers": {
+  "SPEAKER_1": "Lena Hartwig",
+  "SPEAKER_2": "Jonas Pfeffer",
+  "SPEAKER_3": "Karla Sommerfeld"
+ },
+ "must_not_contain": [
+  "November",
+  "Teambesprechung",
+  "Hinweis zum Transkript",
+  "Sonnenfeld",
+  "Waltzmann",
+  "Quillhaven",
+  "Ferrytale"
+ ],
+ "must_contain_any": [
+  [
+   "Rentenpaket",
+   "Frühverrentung"
+  ],
+  [
+   "Hafenbund"
+  ],
+  [
+   "3.000",
+   "3000",
+   "dreitausend"
+  ],
+  [
+   "Sommerfeld"
+  ],
+  [
+   "Walzmann"
+  ],
+  [
+   "Emden",
+   "Bremerhaven",
+   "Wilhelmshaven"
+  ],
+  [
+   "Autoteil"
+  ]
+ ],
+ "hedged_must_keep": [
+  {
+   "match": "Frühverrentung",
+   "markers": [
+    "wahrscheinlich",
+    "voraussichtlich",
+    "Prognose",
+    "abgeschwächt"
+   ]
+  }
+ ],
+ "dates": [
+  {
+   "text": "am Montag",
+   "resolved": "2026-09-21"
+  },
+  {
+   "text": "bis Mittwoch 0 Uhr",
+   "resolved": "2026-09-23T00:00"
+  }
+ ],
+ "every_line_cited": true,
+ "sprint": {
+  "recording_type": "Q3",
+  "topics_min": "Q2",
+  "speakers": "Q4",
+  "must_not_contain": "Q3",
+  "must_contain_any": "Q2",
+  "hedged_must_keep": "Q4",
+  "dates": "Q3",
+  "every_line_cited": "Q5"
+ }
+}

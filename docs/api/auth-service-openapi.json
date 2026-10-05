@@ -207,6 +207,52 @@
         "title": "InviteResponse",
         "type": "object"
       },
+      "LeadAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "const": "accepted",
+            "default": "accepted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "LeadAccepted",
+        "type": "object"
+      },
+      "LeadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "const": true,
+            "title": "Consent",
+            "type": "boolean"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z2-7]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "email",
+          "consent"
+        ],
+        "title": "LeadRequest",
+        "type": "object"
+      },
       "LockdownRequest": {
         "additionalProperties": false,
         "properties": {
@@ -647,6 +693,32 @@
         "title": "SessionSummary",
         "type": "object"
       },
+      "SignupPublicConfig": {
+        "additionalProperties": false,
+        "description": "What the SPA needs to pick a form: signup, or the lead capture.",
+        "properties": {
+          "disposable_domains_blocked": {
+            "const": true,
+            "default": true,
+            "title": "Disposable Domains Blocked",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "min_password_length": {
+            "title": "Min Password Length",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "min_password_length"
+        ],
+        "title": "SignupPublicConfig",
+        "type": "object"
+      },
       "SignupRequest": {
         "additionalProperties": false,
         "properties": {
@@ -682,6 +754,18 @@
             "minLength": 1,
             "title": "Password",
             "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z2-7]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
           }
         },
         "required": [
@@ -2419,6 +2503,47 @@
         ]
       }
     },
+    "/auth/leads": {
+      "post": {
+        "operationId": "capture_lead_auth_leads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leave an e-mail address from the shared page's CTA",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "operationId": "login_auth_login_post",
@@ -3134,6 +3259,28 @@
           }
         },
         "summary": "Create an account; a confirmation code goes to the address",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/signup/config": {
+      "get": {
+        "description": "Answers in every mode and never 404s: the SPA's `/join` shows the\nsignup form when this says `enabled`, and the Sprint 19 lead form\notherwise. Nothing here is secret.",
+        "operationId": "signup_config_auth_signup_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupPublicConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Is self-serve signup on here?",
         "tags": [
           "auth"
         ]

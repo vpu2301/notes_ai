@@ -1,0 +1,7 @@
+# Weekly loop-funnel report (Sprint 22)
+#
+# Runs scripts/ops/loop_funnel.sql as the read-only funnel_reader role and
+# writes reports/funnel-YYYY-WW.csv — the input to the weekly product
+# review. Counts only.
+CRON_TZ=UTC
+15 6 * * 1  cd /opt/notes-ai-backend && DATABASE_URL=postgresql://funnel_reader:funnel_reader@localhost:5432/notes /usr/bin/env uv run python scripts/jobs/weekly_funnel.py >> /var/log/mdx/weekly-funnel.log 2>&1

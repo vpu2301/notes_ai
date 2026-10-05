@@ -60,6 +60,19 @@ finalization, and search.
   so both apps and every later read agree. While the note is a draft the
   app also rewrites the turn prefixes in the note body; a finalized note
   keeps its text.
+- Speaker edits (Sprint 28): `POST /asr/jobs/{id}/speakers/merge`
+  (`{"from": "SPEAKER_3", "into": "SPEAKER_1"}`) and
+  `DELETE /asr/jobs/{id}/speakers/edits/{edit_id}` (undo, latest edit
+  only). Edits live in `transcription_speaker_edits` and are folded onto
+  the segments at read time, in `seq` order, before roster, names, turns
+  and `speaker_stats` are built; the stored transcript is never
+  rewritten. Labels are not renumbered. An edit applies to one
+  diarization run: `result_rev` must equal `transcription_jobs.diarization_rev`
+  (a re-run bumps it and leaves older edits inert). Anything that anchors
+  to a transcript must use `start_ms`/`end_ms`, never `turn_index` alone.
+- Every diarized job stores `metadata.diarization` (`DiarizationStats`):
+  engine, chunks, clusters before/after the merge, clusters dropped,
+  speakers, speech seconds per speaker, unknown share, wall time.
 
 ## Room devices
 

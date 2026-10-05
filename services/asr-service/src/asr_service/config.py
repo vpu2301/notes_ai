@@ -116,8 +116,12 @@ class Settings(BaseSettings):
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
     # ── Upload validation ───────────────────────────────────────────────
-    max_upload_mb: int = Field(default=100, alias="MD_ASR_MAX_UPLOAD_MB")
-    max_duration_seconds: int = Field(default=30 * 60, alias="MD_ASR_MAX_DURATION_SECONDS")
+    # A meeting, not a memo: two hours by default. The clients read this
+    # (GET /asr/limits), warn five minutes before it and stop at it, so a
+    # recording is never refused after the fact. 250 MB covers two hours
+    # of the WAV fallback (16 kHz mono 16-bit ≈ 115 MB/h); FLAC is a third.
+    max_upload_mb: int = Field(default=250, alias="MD_ASR_MAX_UPLOAD_MB")
+    max_duration_seconds: int = Field(default=2 * 3600, alias="MD_ASR_MAX_DURATION_SECONDS")
     # Floor, not a cap: below this an upload cannot carry a usable
     # utterance, and Whisper answers a fraction of a second of noise with a
     # confident hallucination. Rejecting is safer than storing it.
@@ -143,17 +147,47 @@ class Settings(BaseSettings):
     # The grace windows are the ONLY interlock: asr-worker publishes no
     # heartbeat. Keep `running` comfortably above the worst case the worker
     # allows itself — max_duration_seconds × the worker's inference
-    # multiplier (30 min × 5 = 2.5 h at the defaults), plus a redelivery.
+    # multiplier (2 h × 6.5 = 13 h at the defaults since Sprint F1 raised it
+    # for the second pass), plus a redelivery.
     job_reaper_enabled: bool = Field(default=True, alias="MD_ASR_JOB_REAPER_ENABLED")
     job_reaper_interval_s: float = Field(default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S")
     job_reaper_running_grace_s: float = Field(
-        default=3 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
+        default=14 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
     )
     # A job nobody has claimed in this long is not backlogged, it is lost.
     job_reaper_queued_grace_s: float = Field(
         default=6 * 3600.0, alias="MD_ASR_JOB_REAPER_QUEUED_GRACE_S"
     )
     job_reaper_batch_limit: int = Field(default=100, alias="MD_ASR_JOB_REAPER_BATCH_LIMIT")
+
+    # ── Speaker re-labelling (Sprint 29, POST /asr/jobs/{id}/rediarize) ──
+    # A re-run is a full diarization pass over the stored audio: capped per
+    # job (one in flight, this many in total) and per user per hour.
+    rediarize_max_runs: int = Field(default=5, alias="MD_ASR_REDIARIZE_MAX_RUNS")
+    rediarize_user_hourly_limit: int = Field(default=10, alias="MD_ASR_REDIARIZE_USER_HOURLY_LIMIT")
+
+    # ── Name suggestions + re-label offer (Sprint 32) ───────────────────
+    # Suggestions ship DARK: on only after the shadow experiment shows
+    # ≥ 95 % precision (docs/product/speaker-decisions.md).
+    name_suggestions_enabled: bool = Field(default=False, alias="MDX_NAME_SUGGESTIONS_ENABLED")
+    # Sprint TQ3: one name, one spelling. Off = no unification, the view is
+    # the artefact. Auto-apply off (the kill switch) = every correction is a
+    # proposal a person accepts; nothing changes the text on its own.
+    entity_unify_enabled: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_ENABLED")
+    entity_unify_auto_apply: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_AUTO_APPLY")
+    # Seconds the unifier may take per audio hour before its result is
+    # dropped (status ``skipped_budget``); never less than the floor.
+    entity_unify_budget_s_per_hour: float = Field(
+        default=2.0, alias="MDX_ENTITY_UNIFY_BUDGET_S_PER_HOUR"
+    )
+    entity_unify_budget_floor_s: float = Field(default=0.5, alias="MDX_ENTITY_UNIFY_BUDGET_FLOOR_S")
+    entity_unify_recompute_hourly_limit: int = Field(
+        default=20, alias="MDX_ENTITY_UNIFY_RECOMPUTE_HOURLY_LIMIT", ge=1
+    )
+    # The engine the worker diarizes with now (keep equal to the worker's
+    # MDX_DIAR_ENGINE, as its engine id). A transcript made by another one
+    # is offered "Re-label with the current engine".
+    current_diar_engine: str = Field(default="legacy-ecapa-ahc", alias="MDX_DIAR_CURRENT_ENGINE")
 
     # ── NLP batch enrichment (sprint 05 pipeline over batch results) ────
     # GET /asr/jobs/{id}/result runs the raw transcript through

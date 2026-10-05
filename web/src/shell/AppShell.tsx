@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { errorMessage } from "../api/http";
+import { listTenants } from "../api/account";
+import { ApiError } from "../api/http";
+import type { TenantSummary } from "../api/types";
 import * as notifApi from "../api/notifications";
 import type { NotificationItem } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/Toaster";
 import { createBlankNote } from "../lib/createBlankNote";
+import { messageFor } from "../lib/errorCopy";
 import { useDismiss } from "../lib/useDismiss";
-import { BrandMark } from "../components/BrandMark";
 import {
   BellIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
+  CheckIcon,
   FileTextIcon,
   LayersIcon,
   LogoutIcon,
@@ -21,11 +22,13 @@ import {
   MonitorIcon,
   SettingsIcon,
   MoonIcon,
+  PlusIcon,
+  SidebarIcon,
   SunIcon,
   UploadIcon,
+  ShareIcon,
 } from "../components/icons";
 import { relativeTime } from "../lib/time";
-import { useSpaces } from "../spaces/SpacesContext";
 import { SpacesNav } from "./SpacesNav";
 import { useTheme, type ThemePref } from "./theme";
 
@@ -107,31 +110,30 @@ function NewMenu({
   const items = collapsed ? [primary, ...actions] : actions;
 
   return (
-    <div className={`sb-cta-split ${collapsed ? "collapsed" : ""}`} ref={ref}>
+    <div className={`sb-new ${collapsed ? "collapsed" : ""} ${open ? "open" : ""}`} ref={ref}>
       {collapsed ? (
-        <button className="sb-cta" onClick={toggle} title="Create" aria-haspopup="menu" aria-expanded={open}>
-          <span className="sb-cta-icon">
-            <MicIcon size={14} />
-          </span>
+        <button className="sb-new-main" onClick={toggle} title="Create" aria-label="Create" aria-haspopup="menu" aria-expanded={open}>
+          <PlusIcon size={16} />
         </button>
       ) : (
         <>
           <button
-            className="sb-cta"
+            className="sb-new-main"
             onClick={primary.onClick}
             title={primary.kbd ? `${primary.label} (${primary.kbd})` : primary.label}
           >
-            <span className="sb-cta-icon">{primary.icon}</span>
-            <span className="sb-cta-label">{primary.label}</span>
+            <PlusIcon size={16} />
+            <span className="sb-link-label">{primary.label}</span>
           </button>
           <button
-            className={`sb-cta sb-cta-caret ${open ? "open" : ""}`}
+            className="sb-new-caret"
             onClick={toggle}
             title="More ways to start"
+            aria-label="More ways to start"
             aria-haspopup="menu"
             aria-expanded={open}
           >
-            <ChevronDownIcon size={13} />
+            <ChevronDownIcon size={14} />
           </button>
         </>
       )}
@@ -165,7 +167,7 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
     { v: "dark", icon: <MoonIcon />, title: "Dark" },
   ];
   return (
-    <div className="seg-pill" role="group" aria-label="Theme">
+    <div className="seg-pill" role="group" aria-label="Appearance">
       {opts.map((o) => (
         <button
           key={o.v}
@@ -181,7 +183,82 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
   );
 }
 
+/**
+ * The workspaces this account belongs to, read when the menu first opens.
+ * `GET /tenants` rather than the memberships on `/auth/me`: the tenant
+ * list carries the display name and `is_active`, which is what the
+ * switcher shows, and it is the same call the Mac and iPhone apps make.
+ */
+function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
+  const { activeTenantId, canSwitchWorkspaces, switchWorkspace } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
+  // A `409 legacy_session` answers the question once: the switcher goes.
+  const [legacy, setLegacy] = useState(false);
+
+  useEffect(() => {
+    if (!canSwitchWorkspaces) return;
+    let live = true;
+    listTenants()
+      .then((r) => live && setTenants(r.items))
+      .catch(() => live && setTenants([]));
+    return () => {
+      live = false;
+    };
+  }, [canSwitchWorkspaces]);
+
+  if (!canSwitchWorkspaces || legacy || !tenants || tenants.length < 2) return null;
+
+  const pick = async (t: TenantSummary) => {
+    if (t.id === activeTenantId || switching) return;
+    setSwitching(t.id);
+    try {
+      await switchWorkspace(t.id);
+      onDone();
+      navigate("/");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "legacy_session") setLegacy(true);
+      toast.error(messageFor(err));
+    } finally {
+      setSwitching(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="sb-user-menu-label">Workspace</div>
+      {tenants.map((t) => {
+        const current = t.id === activeTenantId;
+        return (
+          <button
+            key={t.id}
+            className={`sb-user-menu-item ${current ? "current" : ""}`}
+            role="menuitemradio"
+            aria-checked={current}
+            disabled={switching !== null}
+            onClick={() => void pick(t)}
+          >
+            <span className="sb-ws-mark" aria-hidden="true">
+              {initialsOf(t.display_name || t.name)}
+            </span>
+            <span className="grow ellipsis">{t.display_name || t.name}</span>
+            {current ? (
+              <CheckIcon size={13} />
+            ) : (
+              switching === t.id && <span className="sb-user-menu-hint">Switching…</span>
+            )}
+          </button>
+        );
+      })}
+      <div className="sb-user-menu-sep" />
+    </>
+  );
+}
+
 function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
+  const { pref, setPref } = useTheme();
   // `identity`, not `db_user`: IDX-B2 deletes the per-tenant `users` row,
   // and `AuthContext` already reconciles whichever shape `/auth/me` sends.
   const { identity, displayName } = useAuth();
@@ -205,11 +282,8 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
         </span>
         {!collapsed && (
           <>
-            <span className="sb-user-info">
-              <span className="sb-user-name">{displayName}</span>
-              <span className="sb-user-role">{email || "Member"}</span>
-            </span>
-            {open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+            <span className="sb-user-name">{displayName}</span>
+            <ChevronDownIcon size={14} />
           </>
         )}
       </button>
@@ -220,6 +294,7 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
             {email && <span>{email}</span>}
           </div>
           <div className="sb-user-menu-sep" />
+          <WorkspaceSwitch onDone={close} />
           <button
             className="sb-user-menu-item"
             role="menuitem"
@@ -231,6 +306,11 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
             <SettingsIcon size={14} />
             <span>Settings</span>
           </button>
+          <div className="sb-user-menu-row">
+            {pref === "dark" ? <MoonIcon size={14} /> : pref === "light" ? <SunIcon size={14} /> : <MonitorIcon size={14} />}
+            <span className="grow">Appearance</span>
+            <ThemeSeg pref={pref} onChange={setPref} />
+          </div>
           <div className="sb-user-menu-sep" />
           <button
             className="sb-user-menu-item danger"
@@ -350,18 +430,16 @@ function NotificationBell() {
 }
 
 /** Route → topbar title. Pages that need a richer crumb own their heading. */
-function titleFor(pathname: string, spaceName?: string): string {
-  if (pathname === "/") return "Notes";
-  if (pathname.startsWith("/spaces/")) return spaceName ?? "Space";
+function titleFor(pathname: string): string {
+  // The home page, a space and a note carry their own heading.
+  if (pathname === "/" || pathname.startsWith("/spaces/") || pathname.startsWith("/notes/")) return "";
   if (pathname.startsWith("/meeting/new")) return "New meeting";
   if (pathname.startsWith("/new")) return "New from template";
-  if (pathname.startsWith("/notes/")) return "Note";
   return "Notes AI";
 }
 
 function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
   const { pathname } = useLocation();
-  const { spaces } = useSpaces();
   const [stuck, setStuck] = useState(false);
 
   useEffect(() => {
@@ -376,7 +454,7 @@ function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
   return (
     <header className={`tb ${stuck ? "is-stuck" : ""}`}>
       <div className="tb-title">
-        {titleFor(pathname, spaces.find((s) => pathname === `/spaces/${s.id}`)?.name)}
+        {titleFor(pathname)}
       </div>
       <div className="tb-spacer" />
       <div className="tb-actions">
@@ -421,8 +499,7 @@ function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => void; on
 
 export function AppShell() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
-  const { pref, setPref } = useTheme();
+  const { activeRole, logout } = useAuth();
   const toast = useToast();
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -434,7 +511,7 @@ export function AppShell() {
     try {
       navigate(`/notes/${await createBlankNote()}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       blankInFlight.current = false;
     }
@@ -489,30 +566,25 @@ export function AppShell() {
   return (
     <div className="app">
       <aside className={`sb ${collapsed ? "collapsed" : ""}`}>
-        <div className="sb-brand">
-          <NavLink to="/" className="sb-brand-inner" title="Notes AI">
-            <span className="sb-brand-mark" aria-hidden="true">
-              <BrandMark size={26} />
-            </span>
-            {!collapsed && (
-              <span className="sb-wordmark">
-                Notes <span className="ai">AI</span>
-              </span>
-            )}
-          </NavLink>
+        <div className="sb-head">
           <button
             className="sb-toggle"
             onClick={() => setCollapsed((v) => !v)}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {collapsed ? <ChevronRightIcon size={13} /> : <ChevronLeftIcon size={13} />}
+            <SidebarIcon size={17} />
           </button>
+          {!collapsed && (
+            <NavLink to="/" className="sb-wordmark" title="Notes AI">
+              Notes AI
+            </NavLink>
+          )}
         </div>
 
         <NewMenu
           collapsed={collapsed}
-          primary={{ icon: <MicIcon size={13} />, label: "New meeting", kbd: "N", onClick: () => navigate("/meeting/new") }}
+          primary={{ icon: <MicIcon size={14} />, label: "New meeting", kbd: "N", onClick: () => navigate("/meeting/new") }}
           actions={[
             { icon: <FileTextIcon size={14} />, label: "Blank note", kbd: "B", onClick: () => void newBlankNote() },
             { icon: <UploadIcon size={14} />, label: "Upload a recording", onClick: () => navigate("/meeting/new?mode=upload") },
@@ -521,30 +593,17 @@ export function AppShell() {
         />
 
         <nav className="sb-nav" aria-label="Main">
-          <SideLink to="/" end icon={<NotesIcon size={14} />} label="All notes" collapsed={collapsed} />
+          <SideLink to="/" end icon={<NotesIcon size={16} />} label="All notes" collapsed={collapsed} />
+          {(activeRole === "owner" || activeRole === "admin") && (
+            /* Sprint 22: the workspace's recipient loop, counts only; the API refuses everyone else. */
+            <SideLink to="/admin/sharing" icon={<ShareIcon size={16} />} label="Sharing" collapsed={collapsed} />
+          )}
           <SpacesNav collapsed={collapsed} />
         </nav>
 
         <div className="sb-spacer" />
 
         <div className="sb-foot">
-          <div className="sb-controls">
-            {collapsed ? (
-              <button
-                className="icon-btn"
-                title="Toggle theme"
-                aria-label="Toggle theme"
-                onClick={() => setPref(pref === "dark" ? "light" : "dark")}
-              >
-                {pref === "dark" ? <MoonIcon /> : <SunIcon />}
-              </button>
-            ) : (
-              <>
-                <ThemeSeg pref={pref} onChange={setPref} />
-                <span className="grow" />
-              </>
-            )}
-          </div>
           <AccountMenu collapsed={collapsed} onSignOut={() => setConfirmOut(true)} />
         </div>
       </aside>

@@ -16,6 +16,14 @@ import { ApiError } from "../api/http";
 
 /** Written in the second person, no jargon, and never a code number. */
 const COPY: Record<string, string> = {
+  // ── billing (0068) ────────────────────────────────────────────────
+  billing_not_connected: "Payments aren't connected yet, so the plan can't change here.",
+  redeem_unknown: "That code isn't valid. Check it and try again.",
+  redeem_expired: "That code has expired.",
+  redeem_used_up: "That code has already been used as many times as it allows.",
+  redeem_already: "This workspace has already used that code.",
+  redeem_rate_limited: "Too many tries. Wait a while and try again.",
+  plan_contact_sales: "Enterprise is arranged with us — get in touch and we'll set it up.",
   // ── session ───────────────────────────────────────────────────────
   auth_refresh_replay:
     "You were signed out for security. Sign in again — if you did not expect this, change your password.",
@@ -93,7 +101,63 @@ const COPY: Record<string, string> = {
   sole_owner_with_members:
     "You are the only owner of a workspace other people are still using. Hand it over first.",
   confirm_required: "Type DELETE to confirm.",
+
+  // ── speaker count / re-labelling (Sprint 29) ──────────────────────
+  // The roster maps these with sharper, in-place wording (RELABEL_COPY in
+  // SpeakerRoster.tsx); these are the fallbacks any other surface gets.
+  speakers_hint_invalid: "The number of people cannot be larger than the maximum.",
+  job_not_complete: "The transcript is not finished yet. Try again when it is.",
+  rediarize_in_progress: "Speakers are already being re-labelled.",
+  audio_unavailable: "The recording is no longer kept, so speakers cannot be re-labelled.",
+  rediarize_limit: "This transcript has been re-labelled as often as it can be.",
+  enqueue_failed: "We could not start that just now. Nothing changed — try again in a moment.",
+  nothing_to_undo: "There is nothing to undo any more.",
+  // Sprint 31 dual-channel capture (sent by the macOS app only).
+  channel_layout_mismatch: "This recording could not be read as a call recording. Try uploading it again.",
+  local_speaker_name_invalid: "Your display name is too long to label your voice. Shorten it in your profile.",
+
+  // ── moving turns / capture context (Sprint 30) ────────────────────
+  // `stale_result_rev` is the one the transcript acts on: it reloads and
+  // says this, so the sentence has to hold after the reload too.
+  stale_result_rev: "Speakers were updated elsewhere.",
+  bad_segment_index: "That part of the transcript has changed. Reload and try again.",
+  too_many_segments: "That is too much to move at once. Move fewer turns at a time.",
+  too_many_speakers: "A transcript can have at most 8 speakers. Move these turns to someone already listed.",
+  unknown_label: "That speaker is no longer in this transcript. Reload and try again.",
+  name_candidates_invalid: "The invited people's names could not be used. Record without them, or try again.",
+
+  // ── note writing (Sprint 37 / L2) ─────────────────────────────────
+  // The same three sentences GenerationStatus shows in its banner, so a
+  // refused "Generate summary" reads the same as a run that never started.
+  processor_unacknowledged:
+    "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI.",
+  generation_disabled: "Automatic note writing is off for this workspace.",
+  budget_exceeded:
+    "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
+  generation_in_progress: "This note is already being written.",
+  too_many_generations: "This note has been rewritten as often as it can be today.",
+  no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
+  note_cancelled: "This note was cancelled and cannot be written again.",
+  // Sprint 36: a 1:1 or an interview debrief has no version for a client.
+  not_available_for_type: "A one-to-one and an interview debrief have no client version.",
 };
+
+/** The one sentence for a connection that never reached the server. */
+export const OFFLINE_COPY = "Can't connect. Check your connection and try again.";
+
+/** What an unmapped refusal says: by status, never the server's own words. */
+function fallbackFor(status: number): string {
+  if (status === 401) return "Incorrect email or password.";
+  if (status === 403) return "You are not allowed to do that here.";
+  if (status === 404) return "That could not be found. It may have been removed.";
+  if (status === 409 || status === 412) return "That changed in the meantime. Reload and try again.";
+  if (status === 413) return "That is too large to send.";
+  if (status === 422) return "Something in what you entered is not right. Check it and try again.";
+  if (status === 423) return "This account is temporarily locked. Try again shortly.";
+  if (status === 429) return "Too many attempts. Wait a moment and try again.";
+  if (status >= 500) return "The server had a problem. Try again in a moment.";
+  return "Something went wrong. Try again in a moment.";
+}
 
 /** True when the code has a written message (what the coverage test asks). */
 export function hasCopy(code: string): boolean {
@@ -101,21 +165,30 @@ export function hasCopy(code: string): boolean {
 }
 
 /**
- * The message to show. Falls back to the server's `detail` — which is at
- * least in English and about the right thing — rather than to a generic
- * apology that tells the user nothing.
+ * The message to show for any thrown value.
+ *
+ * A code with copy gets its sentence; a role denial gets the one about
+ * access; anything else gets a sentence for its status. The server's
+ * `detail` is never shown: it is written for a developer reading a log,
+ * and a raw "a workspace admin has to agree to who processes your
+ * meetings [processor_unacknowledged]" is exactly what this file exists
+ * to prevent. Somebody who has to quote the failure gets the ref from
+ * `messageWithRef`.
  */
 export function messageFor(err: unknown): string {
   if (!(err instanceof ApiError)) {
-    if (err instanceof TypeError) return "Cannot reach the server — is it running?";
-    return err instanceof Error ? err.message : "Something went wrong";
+    if (err instanceof TypeError) return OFFLINE_COPY;
+    if (err instanceof DOMException && err.name === "AbortError") return "That was cancelled.";
+    // A plain Error is one of ours (a guard in a hook, a validation
+    // sentence), written to be read.
+    return err instanceof Error && err.message ? err.message : "Something went wrong. Try again in a moment.";
   }
   const written = err.code ? COPY[err.code] : undefined;
   if (written) return written;
-  if (err.status === 401) return "Incorrect email or password.";
-  if (err.status === 423) return "This account is temporarily locked. Try again shortly.";
-  if (err.status >= 500) return "The server had a problem. Try again in a moment.";
-  return err.detail;
+  if (err.isRoleDenial) {
+    return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access.";
+  }
+  return fallbackFor(err.status);
 }
 
 /**

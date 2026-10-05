@@ -147,6 +147,17 @@ class Settings(BaseSettings):
     # would refuse, with a field-level reason instead of a realm error in
     # a language nobody chose.
     signup_min_password_length: int = Field(default=12, alias="AUTH_SIGNUP_MIN_PASSWORD_LENGTH")
+    # ── Sprint 21: the conversion step ──────────────────────────────────
+    # Recorded on every self-serve tenant as `plan_limits`; NOT enforced.
+    signup_free_limits: str = Field(
+        default='{"notes_per_month": 50, "members": 3}', alias="MDX_SIGNUP_FREE_LIMITS"
+    )
+    # Optional longer throwaway-domain list (one per line) on top of the
+    # bundled floor in domain/disposable_domains.py.
+    disposable_domains_file: str = Field(default="", alias="MDX_DISPOSABLE_DOMAINS_FILE")
+    # `/auth/signup` never answers faster than this, whatever branch it
+    # took: the uniform 202 is only uniform if its timing is too.
+    signup_min_response_ms: int = Field(default=300, alias="AUTH_SIGNUP_MIN_RESPONSE_MS")
     # Rate limits (BE-0 §G). The two `start` scopes fail CLOSED: a down
     # Redis must not turn signup into an open mail relay pointed at
     # addresses of somebody else's choosing.
@@ -381,7 +392,9 @@ class Settings(BaseSettings):
     )
     auth_email_from: str = Field(default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_FROM")
     auth_email_from_name: str = Field(default="Notes AI", alias="MDX_AUTH_EMAIL_FROM_NAME")
-    auth_email_reply_to: str = Field(default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_REPLY_TO")
+    auth_email_reply_to: str = Field(
+        default="sales@notes-ai.local", alias="MDX_AUTH_EMAIL_REPLY_TO"
+    )
     # SPA origin the mailed links point at. The reset link is only useful
     # if it lands on the app the user actually runs.
     app_base_url: str = Field(default="http://localhost:5173", alias="MDX_APP_BASE_URL")

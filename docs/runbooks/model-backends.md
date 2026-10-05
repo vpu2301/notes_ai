@@ -1,8 +1,8 @@
 # Runbook — model backends (`libs/models`, HF Inference Endpoints, job warming)
 
-Scope: the chat/ASR backends resolved from `config/models.yaml` (`hf_eu`,
-`hf_eu_asr` on staging/beta; `dev_mac*` on the founder's Mac; `hosted_eu`
-dormant), the `waiting_on_model` job state, the `model_usage` ledger and
+Scope: the chat/ASR/diarization backends resolved from `config/models.yaml`
+(`hf_eu`, `hf_eu_asr`, `hf_eu_diar` on staging/beta; `dev_mac*` on the
+founder's Mac; `hosted_eu` dormant), the `waiting_on_model` job state, the `model_usage` ledger and
 the HF token. Alerts: `infra/prometheus/rules/model-backends.yml`.
 Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 
@@ -12,9 +12,61 @@ Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 | Endpoint specs / apply | `deploy/hf/endpoints/*.yaml`, `make hf-endpoints ARGS="status --env staging"` |
 | Queue + warming | `libs/jobs/` (`jobs` table, migration 0022), `jobs_waiting_by_backend()` |
 | Usage ledger | `model_usage`, `model_usage_daily` (0023), rates `config/model_costs.yaml` |
-| Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
+| Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_DIAR_ENDPOINT_URL`, `MDX_DIAR_SERVER_TOKEN`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
 | Egress | `scripts/k8s/egress-allowlist.sh`, `workers-egress-allowlist` NetworkPolicy |
 | Dev Mac | `docs/dev/models-on-mac.md`, `make dev-model` |
+| Mistral AI (EU) | `mistral_eu` / `mistral_eu_small` in `config/models.yaml`; `MISTRAL_API_KEY` (dev: `.env.local`; staging/prod: the `mdx-model-api` secret, M2) — §mistral-account |
+
+## mistral-account
+
+Sprint L2 makes Mistral's EU-hosted API the dev default for writing notes
+(`mistral_eu`, Mistral Large 3) and for the short calls (`mistral_eu_small`,
+Mistral Small 4); M2 rolls it to staging/prod. Nothing about the account
+lives in the repo but this text.
+
+1. **Organisation.** Create a Mistral AI organisation on the
+   pay-as-you-go plan (console → Organisation). Billing owner: the
+   company; contact: the founder. Region: the API is EU-hosted; the DPA
+   is the Mistral AI Data Processing Addendum for the API — file the
+   signed reference in the vendor register next to the HF one.
+2. **Training opt-out.** Organisation → Privacy: turn *off* "improve
+   Mistral's models with my data" (the default for API traffic is off;
+   confirm and screenshot for the register).
+3. **Zero data retention.** Request ZDR for the organisation through
+   Mistral support (Enterprise / ZDR form) and attach the DPA reference.
+   We make **stateless calls only** — `/v1/chat/completions` with no
+   `store`, no conversations, no batch, no files — so ZDR costs no
+   feature. Until the confirmation arrives the API's standard 30-day
+   abuse-monitoring retention applies; record the date of the request and
+   of the confirmation here.
+4. **Keys.** One key per **person** for dev (name it after the person;
+   `.env.local` only, gitignored, never in compose files or values);
+   later one key per **environment** (staging, prod) in the
+   `mdx-model-api` secret — M2. Rotate by creating the new key first,
+   then deleting the old; `models.route` on restart shows the process
+   still resolves `mistral_eu`.
+5. **Spend cap.** Set the organisation's monthly limit to **3× the
+   projected spend**: at the L2 estimate (Large 3 at $0.50/$1.50 per 1M,
+   ≈ 60k input + 12k output tokens per meeting-hour through the pipeline)
+   that is about $0.05 per meeting-hour, so 100 meeting-hours/month ≈ $5
+   → cap $15 in dev; recompute from `model_usage_monthly` before the M2
+   flip. A hit cap surfaces as `rate_limited` — jobs retry with backoff
+   and the alert (M2) fires.
+6. **Egress.** Dev has no allowlist. Staging/prod add `api.mistral.ai:443`
+   to `scripts/k8s/egress-allowlist.sh` in M2; until then a staging
+   process that resolves `mistral_eu` cannot reach it and refuses to boot
+   on the startup probe — by design.
+7. **Pins.** `mistral-large-2512` and `mistral-small-2603` are dated ids
+   (never `-latest`); a version change is a PR that updates
+   `config/models.yaml`, `docs/models/PINS.md` and `config/model_costs.yaml`
+   and re-runs `make eval-notes BACKEND=mistral_eu` — §pin-upgrade.
+
+Fallback behaviour (dev only): no key → `models.override_fallback
+reason=missing_env` and the local model writes; API not answering the
+5-second startup probe → `reason=probe_failed`; `MDX_DEV_CHAT_BACKEND=dev_mac`
+→ `reason=forced`. The AI-settings page shows "Notes are written by: …"
+from the same registry object. Staging/prod never fall back: a missing key
+or a failed probe is a `ConfigError` and the process does not start.
 
 ## warming-too-long
 
@@ -109,6 +161,58 @@ exposure.
 5. If the old token may have leaked: `make secret-scan` on the repo; check
    HF audit log for endpoint changes; rotate again after the incident.
 
+## tier-flip
+
+Changing which model writes notes for the `standard` (or `premium`) tier.
+It is a config PR, reviewed like a migration — the model that reads every
+customer's meetings is not a deploy-time detail.
+
+**1. Eval parity.** Run the gold set on the candidate and on what is live:
+
+    make eval-notes BACKEND=<candidate> RUNS=3 CORPUS=eval/notes/v1
+    make eval-notes BACKEND=<live>      RUNS=3 CORPUS=eval/notes/v1
+
+No §7 metric may regress. Reports land in `docs/eval/`; attach both.
+
+**2. Shadow.** On the worker deployment:
+
+    MDX_NOTE_GENERATION_SHADOW_BACKEND=<candidate>
+    MDX_NOTE_GENERATION_SHADOW_PERCENT=5
+
+The candidate now runs beside the real backend on one generation in
+twenty and **its output is discarded** — only counts survive
+(`mdx_note_generation_shadow_*`). Nothing is written twice, and no second
+copy of any document or transcript exists. A workspace is shadowed only
+onto a processor it has already acknowledged; the rest are silently
+skipped, which is why the shadow count is lower than 5 % of generations.
+
+Watch for a day: `shadow_runs{outcome="error"}` near zero,
+`shadow_facts{verdict="missed"}` not growing against `kept`, and
+`shadow_seconds` p95 inside the current backend's.
+
+**3. Flip.** One line in `config/models.yaml`:
+
+    routing:
+      summarize: { standard: <candidate>, premium: … }
+
+Deploy. `note_generations.backend` / `.model_id` show the change per note
+from the first generation after the rollout — that is the evidence, not
+the config file.
+
+**4. Acknowledgement.** If the candidate's processor is new, every
+workspace on that tier now resolves to **platform/standard** until its
+admin agrees on Settings → Data & AI. That is the safety valve, not a
+bug: check how many are waiting before announcing the change.
+
+```sql
+SELECT count(*) FROM workspace_model_settings
+WHERE NOT acknowledged_processors @> '[{"name": "<processor>"}]'::jsonb;
+```
+
+**5. Rollback.** Revert the routing line and deploy. In-flight jobs finish
+on whatever they started with; queued ones pick the reverted backend up.
+No data migration, no note rewritten.
+
 ## pin-upgrade
 
 Changing `model.revision` (or the model) in a spec is a model change:
@@ -158,9 +262,31 @@ leaves the cluster without the CIDR allowlist that protects the workers —
 tracked as an open decision (widen the policy for app-tier peers, or move
 the call into a `libs/jobs` worker).
 
+## diarization-endpoint
+
+`hf_eu_diar` is not a vendor model behind a handler — it is **our** image
+(`deploy/diar-server`) with pyannote community-1 baked in, chosen in
+ADR-0052 because community-1 needs 0.64–0.85 × audio on four CPU threads and
+the worker shape allows 0.25.
+
+- Spec `deploy/hf/endpoints/diar.yaml`; apply/status like the others
+  (`make hf-endpoints ARGS="status --env staging"`).
+- Build and push the image from the repo root with the gated-model
+  secret: `deploy/diar-server/README.md`.
+- The worker reaches it with `MDX_DIAR_ENGINE=http`; failure behaviour,
+  symptoms and rollback live in `docs/runbooks/asr-worker.md`
+  § diarization-endpoint (an outage costs speakers, never a transcript).
+- Upgrading the model is § diarization-model-upgrade in that same
+  runbook — the endpoint and the worker image are pinned to the same
+  revision and digests, so they move together.
+
 ## Pre-flight after deployment
 
 - `make hf-endpoints ARGS="plan --env staging"` → no drift.
 - `make eval-smoke ENV=staging BACKEND=hf_eu` → 5/5, hallucination 0.
-- `make test-egress` → example.com blocked, endpoints reachable.
+- `make test-egress` → example.com, `otel.pyannote.ai` and `huggingface.co`
+  blocked, endpoints reachable; with `MDX_DIAR_ENGINE=pyannote` a
+  `diarize=true` job completes on `pyannote-community-1` (Sprint 29 B-8).
+  The in-process diarizer adds **no** allowlist host: its weights are baked
+  and loaded offline and its telemetry is off (docs/models/PINS.md).
 - `SELECT * FROM model_usage_daily ORDER BY day DESC LIMIT 5;` shows rows for `hf_eu` / `hf_eu_asr`.

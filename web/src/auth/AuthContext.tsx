@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import * as authApi from "../api/auth";
+import { activateWorkspace } from "../api/account";
 import type { ProfilePatch } from "../api/auth";
 import {
   refreshSession,
@@ -37,6 +38,15 @@ interface AuthContextValue {
   activeTenantId: string | null;
   /** This account's role in the active workspace, or null when unknown. */
   activeRole: string | null;
+  /**
+   * Whether this session can be re-scoped to another workspace. False for
+   * a Keycloak-issued session (`dual` mode): auth-service cannot mint a
+   * token for another `tid` on its behalf, so the switcher is hidden
+   * rather than left to earn a `409 legacy_session`.
+   */
+  canSwitchWorkspaces: boolean;
+  /** Move this session to another workspace. Throws `ApiError`. */
+  switchWorkspace: (tenantId: string) => Promise<void>;
   displayName: string;
   /** Password sign-in. Throws `ApiError`; `otp_required` means try again with `otp`. */
   login: (email: string, password: string, otp?: string) => Promise<void>;
@@ -71,6 +81,11 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+/** `useAuth` for a screen that only *prefers* to know who is signed in (null outside the provider). */
+export function useAuthOptional(): AuthContextValue | null {
+  return useContext(AuthContext);
+}
+
 /**
  * The person behind a `/auth/me`, whichever half of the cut-over answered.
  *
@@ -92,6 +107,11 @@ function identityFromMe(me: MeResponse): Identity | null {
     has_password: true, // a `users` row only exists in the Keycloak era
     status: u.status,
   };
+}
+
+/** Routes served to people with no account: never touch the session. */
+export function isAnonymousRoute(pathname: string): boolean {
+  return pathname.startsWith("/s/") || pathname === "/join" || pathname.startsWith("/join/");
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -182,6 +202,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Restore the session on first load via the HttpOnly refresh cookie.
   useEffect(() => {
     let cancelled = false;
+    if (isAnonymousRoute(window.location.pathname)) {
+      // A recipient opening a shared link, or the lead page behind its
+      // CTA, has no account and must not be the reason `/auth/refresh`
+      // fires: the refresh cookie rotates, and a stray call from a page
+      // that never needed a session is exactly the kind of re-use that
+      // revokes every session the person does have elsewhere.
+      setStatus("anonymous");
+      return;
+    }
     void (async () => {
       const ok = await refreshSession();
       if (cancelled) return;
@@ -265,6 +294,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMemberships(meResp.memberships ?? []);
   }, []);
 
+  /**
+   * `POST /auth/token` with `activate`: the new access token replaces the
+   * one in memory, the identity is re-read under the new scope, and
+   * `activeTenantId` changing is what remounts the signed-in tree
+   * (`WorkspaceScope` in App.tsx), so no page keeps the old workspace's
+   * rows on screen.
+   */
+  const switchWorkspace = useCallback(
+    async (tenantId: string) => {
+      if (tenantId === activeTenantId) return;
+      const token = await activateWorkspace(tenantId);
+      setAccessToken(token.access_token);
+      scheduleRefresh(token.expires_in);
+      setActiveTenantId(token.tenant_id);
+      try {
+        const meResp = await authApi.fetchMe();
+        setMe(meResp);
+        setIdentity(identityFromMe(meResp) ?? identity);
+        setMemberships(meResp.memberships ?? []);
+      } catch {
+        /* the token is real; the profile read is a bonus */
+      }
+    },
+    [activeTenantId, identity, scheduleRefresh],
+  );
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -340,6 +395,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return membership?.role ?? me?.db_user?.role ?? null;
   }, [memberships, activeTenantId, me]);
 
+  // A Keycloak issuer looks like `…/realms/<name>`; the native issuer is
+  // the auth-service origin. `dual` mode is the only time both exist.
+  const canSwitchWorkspaces = useMemo(() => {
+    const iss = me?.claims.iss ?? "";
+    return !iss.includes("/realms/");
+  }, [me]);
+
   const value = useMemo(
     () => ({
       status,
@@ -348,6 +410,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       memberships,
       activeTenantId,
       activeRole,
+      canSwitchWorkspaces,
+      switchWorkspace,
       displayName,
       login,
       signInWithEmailCode,
@@ -368,6 +432,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       memberships,
       activeTenantId,
       activeRole,
+      canSwitchWorkspaces,
+      switchWorkspace,
       displayName,
       login,
       signInWithEmailCode,

@@ -37,6 +37,13 @@ dependencies = [
     "python-dateutil>=2.9",
     # "Ask this note" (ADR-0046): the model-provider seam
     "models",
+    # Sprint 19: abuse caps on the anonymous shared-note surface
+    "ratelimit",
+    # Sprint 33: the generation queue the API enqueues onto and
+    # `note_service.worker` drains (ADR-0058).
+    "jobs",
+    # Note titles: the common-word and name lists (asr_models/resources).
+    "asr_models",
 ]
 
 [tool.uv.sources]
@@ -48,9 +55,12 @@ template_models = { workspace = true }
 note_models = { workspace = true }
 notification_events = { workspace = true }
 secret = { workspace = true }
+ratelimit = { workspace = true }
 crypto = { workspace = true }
 storage = { workspace = true }
 models = { workspace = true }
+jobs = { workspace = true }
+asr_models = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

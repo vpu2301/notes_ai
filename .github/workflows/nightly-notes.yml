@@ -1,0 +1,97 @@
+# Nightly notes-engine eval (Summary Engine v2, Q1 T8).
+#
+# Runs the document engine (pipeline arm) and the one-prompt baseline
+# (single_pass arm) over the notes gold set with the stack model, runs
+# the regression checklists (r01 = the 2026-09-22 audit, m06 = its
+# synthetic twin), and fails when the pipeline regressed against the
+# committed baseline: unsupported_rate up by more than 0.01, any invented
+# claim, any prompt-example echo, or key_fact_recall down by more than 0.02.
+#
+# Self-hosted on purpose: the real gold set (eval/notes/v2) is consent-
+# gated or third-party content that is never committed, and the stack
+# model runs on the eval Mac. The runner needs the label `mdx-eval` and
+# the corpus at $NOTES_CORPUS (default: the committed synthetic set).
+name: nightly-notes
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      corpus:
+        description: "Corpus directory (default: the committed synthetic set)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-notes
+  cancel-in-progress: false
+
+env:
+  # Committed report the nightly compares against. Update it (in a PR,
+  # with the report) when an engine change is MEANT to move the numbers.
+  BASELINE_PIPELINE: docs/eval/notes-baseline-pipeline.json
+  MAX_UNSUPPORTED_RISE: "0.01"
+  MAX_RECALL_DROP: "0.02"
+  DEV_MAC_MODEL_URL: http://localhost:11434/v1
+
+jobs:
+  notes:
+    runs-on: [self-hosted, macOS, mdx-eval]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync
+        run: uv sync --all-packages
+
+      - name: Corpus
+        id: corpus
+        env:
+          CORPUS_INPUT: ${{ github.event.inputs.corpus }}
+        run: |
+          set -euo pipefail
+          corpus="${CORPUS_INPUT:-${NOTES_CORPUS:-tests/fixtures/eval/notes}}"
+          test -d "$corpus" || { echo "::error::corpus not found: $corpus"; exit 3; }
+          echo "path=$corpus" >> "$GITHUB_OUTPUT"
+
+      - name: Gold set is valid
+        run: make eval-notes-validate CORPUS="${{ steps.corpus.outputs.path }}"
+
+      - name: Stack model
+        run: make dev-model ARGS=start
+
+      - name: Pipeline arm
+        run: make eval-notes BACKEND=dev_mac ARM=pipeline CORPUS="${{ steps.corpus.outputs.path }}"
+
+      - name: Single-pass baseline arm
+        run: make eval-notes BACKEND=dev_mac ARM=single_pass CORPUS="${{ steps.corpus.outputs.path }}"
+
+      - name: Regression checklists
+        # r01 and later regression cases are EXPECTED to fail until the
+        # sprint that owns each check lands; the output says which one.
+        # Reported, not gating — the comparison below is the gate.
+        continue-on-error: true
+        run: make eval-notes-assert BACKEND=dev_mac CORPUS="${{ steps.corpus.outputs.path }}"
+
+      - name: Compare against the committed baseline
+        run: |
+          set -euo pipefail
+          today="$(date -u +%Y-%m-%d)"
+          uv run python scripts/eval/compare_notes.py --baseline "$BASELINE_PIPELINE" \
+            --current "docs/eval/notes-pipeline-${today}-dev_mac.json" \
+            --max-unsupported-rise "$MAX_UNSUPPORTED_RISE" --max-recall-drop "$MAX_RECALL_DROP"
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notes-reports
+          path: docs/eval/notes-*-dev_mac.json
+          retention-days: 30

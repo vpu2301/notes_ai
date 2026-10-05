@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import * as authApi from "../../api/auth";
 import { ApiError } from "../../api/http";
@@ -17,6 +18,7 @@ import { Banner, LoginShell } from "./LoginShell";
  * `/login/mfa`.
  */
 export function PasswordLoginPage() {
+  useDocumentTitle("Sign in");
   const { status, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

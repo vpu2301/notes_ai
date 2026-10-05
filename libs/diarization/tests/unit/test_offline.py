@@ -17,6 +17,7 @@ from diarization.offline import (
     OfflineClusteringConfig,
     OfflineDiarizationConfig,
     cluster_embeddings,
+    cluster_embeddings_with_stats,
     diarize_offline,
 )
 
@@ -258,3 +259,66 @@ def test_clustering_is_deterministic() -> None:
 
 def test_cluster_embeddings_empty() -> None:
     assert cluster_embeddings([], OfflineClusteringConfig()) == ([], [])
+
+
+# ── Sprint 28: stats + duration-based guard-rails ──────────────────────
+
+
+def test_stats_explain_the_roster() -> None:
+    embedder = FakeEmbedder(_voice_a(3) + _voice_c(1) + _voice_b(3))
+    diar = diarize_offline(
+        _pcm(7000),
+        SAMPLE_RATE_HZ,
+        embedder=embedder,  # type: ignore[arg-type]
+        segmenter=FakeSegmenter(_regions(7)),  # type: ignore[arg-type]
+    )
+
+    assert diar.stats.chunks == 7
+    assert diar.stats.clusters_raw == 3
+    assert diar.stats.clusters_after_merge == 3
+    assert diar.stats.clusters_dropped == 1  # the stray chunk
+    assert len(diar.speakers) == 2
+    assert [s.label for s in diar.segments].count("UNKNOWN") == 1
+
+
+def test_min_speaker_speech_ms_drops_a_short_voice() -> None:
+    # Voice C has 2 chunks (passes the chunk floor) but only 2 s of speech.
+    vectors = _voice_a(4) + _voice_c(2) + _voice_b(4)
+    durations = [1000] * len(vectors)
+    base = OfflineClusteringConfig()
+
+    _, _, loose = cluster_embeddings_with_stats(vectors, base, durations_ms=durations)
+    labels, _, strict = cluster_embeddings_with_stats(
+        vectors,
+        OfflineClusteringConfig(min_speaker_speech_ms=3000),
+        durations_ms=durations,
+    )
+
+    assert loose.clusters_dropped == 0
+    assert strict.clusters_dropped == 1
+    assert set(labels) - {"UNKNOWN"} == {"S1", "S2"}
+
+
+def test_short_chunks_are_scored_but_do_not_form_clusters() -> None:
+    # Two short chunks of voice C would form a speaker; excluded from
+    # learning they can only be scored against A and B → UNKNOWN.
+    vectors = _voice_a(4) + _voice_c(2) + _voice_b(4)
+    durations = [1200] * 4 + [300] * 2 + [1200] * 4
+
+    labels, _, stats = cluster_embeddings_with_stats(
+        vectors,
+        OfflineClusteringConfig(cluster_chunk_min_ms=500),
+        durations_ms=durations,
+    )
+
+    assert stats.clusters_after_merge == 2
+    assert labels[4:6] == ["UNKNOWN", "UNKNOWN"]
+
+
+def test_defaults_ignore_durations() -> None:
+    vectors = _voice_a(3) + _voice_b(3) + _voice_c(3)
+    plain = cluster_embeddings(vectors, OfflineClusteringConfig())
+    labels, confidences, _ = cluster_embeddings_with_stats(
+        vectors, OfflineClusteringConfig(), durations_ms=[10] * 9
+    )
+    assert (labels, confidences) == plain

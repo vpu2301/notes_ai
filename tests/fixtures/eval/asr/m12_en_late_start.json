@@ -1,0 +1,36 @@
+{
+  "id": "m12_en_late_start",
+  "language": "en",
+  "about": "Synthetic twin of the 2026-09-25 Pardo recording (Sprint F1 T5). An invented presenter introduces himself for 40 s at -28 dBFS on the call channel while the microphone carries -20 dBFS of room noise; then the talk continues at normal level. The first decode writes the prompt back over the quiet introduction. No real people, companies or audio: the speech is the bundled probe clip, the words are scripted.",
+  "sample_rate": 16000,
+  "duration_ms": 70000,
+  "channel_layout": "mic_system",
+  "prompt": "Gysi, Moderator, Moderator II, moderatorin, narrator, speaker background",
+  "audio": {
+    "mic": [
+      {"start_ms": 0, "end_ms": 40000, "noise_dbfs": -20},
+      {"start_ms": 40000, "end_ms": 70000, "noise_dbfs": -40}
+    ],
+    "system": [
+      {"start_ms": 0, "end_ms": 40000, "speech_dbfs": -28},
+      {"start_ms": 40000, "end_ms": 70000, "speech_dbfs": -16}
+    ]
+  },
+  "truth": [
+    {"start_ms": 400, "end_ms": 14000, "text": "Good afternoon and welcome to the first showing of the Tessaline 58 here in the harbour today."},
+    {"start_ms": 14500, "end_ms": 27000, "text": "My name is Corvin Aldmere and I am a broker with Harbourline Yachts, so please come and find me afterwards."},
+    {"start_ms": 27500, "end_ms": 39500, "text": "Before we go aboard, a word on the hull, which was laid up in one piece this spring."},
+    {"start_ms": 40200, "end_ms": 55000, "text": "Now if you step this way you will see the saloon, with the galley aft and the helm forward."},
+    {"start_ms": 55500, "end_ms": 69500, "text": "The tender garage takes a three metre jet tender, and the swim platform lowers into the water."}
+  ],
+  "first_pass": {
+    "echo_until_ms": 40000
+  },
+  "assertions": {
+    "coverage_min_share": 0.98,
+    "must_contain_before_ms": [
+      {"text": "Corvin Aldmere", "before_ms": 60000},
+      {"text": "Harbourline", "before_ms": 60000}
+    ]
+  }
+}

@@ -14,7 +14,7 @@ answer (content, ADR-0031).
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -70,6 +70,7 @@ class AskResponse(BaseModel):
 
 
 _asker: NoteAsker | None = None
+_ledger: Any = None
 
 
 def get_asker() -> NoteAsker:
@@ -81,8 +82,28 @@ def get_asker() -> NoteAsker:
             environ=settings.registry_environ(),
             max_tokens=settings.ask_max_tokens,
             max_chars=settings.ask_context_chars,
+            settings_source=getattr(get_state(), "workspace_model_settings", None),
+            registry=getattr(get_state(), "model_registry", None),
         )
     return _asker
+
+
+def get_ledger() -> Any:
+    """The usage ledger for answers (debt D-3).
+
+    Generations were metered from the day they existed because the worker
+    runs them; answers were not, because nothing in the API process
+    buffered the records — so "Ask" cost real money and appeared nowhere.
+    One ledger, installed once, and every model call in this process is
+    counted the same way the worker's are.
+    """
+    global _ledger
+    if _ledger is None:
+        from jobs import CostTable, UsageLedger
+
+        _ledger = UsageLedger(CostTable.load(settings.models_config))
+        _ledger.install()
+    return _ledger
 
 
 def _unavailable(detail: str, *, code: str, **extras: str) -> HTTPException:
@@ -133,6 +154,8 @@ async def ask_note(
             logger.info("ask.transcript_unavailable", extra={"status": exc.status_code})
 
     history = [Turn(role=t.role, text=t.text) for t in body.history]
+    ledger = get_ledger()
+    ledger.begin()
     try:
         answer = await get_asker().answer(
             workspace_id=str(claims.tid),
@@ -156,6 +179,17 @@ async def ask_note(
             code="model_unavailable",
             kind=str(exc.kind),
         ) from exc
+
+    # What that answer cost, on the same ledger as a generation. No
+    # job owns it, hence `job_id=None`; the row still carries the
+    # backend, the tokens and the estimate the Data page adds up.
+    records = ledger.drain()
+    if records:
+        try:
+            async with tenant_connection(state.app_pool, claims.tid) as conn:
+                await ledger.flush(conn, tenant_id=claims.tid, job_id=None, records=records)
+        except Exception:  # noqa: BLE001 — an answer is not lost over bookkeeping
+            logger.warning("ask.usage_not_recorded", exc_info=True)
 
     await state.audit_writer.write_event(
         tenant_id=claims.tid,

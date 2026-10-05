@@ -84,9 +84,7 @@ async def _run(args: argparse.Namespace) -> int:
     # ("everything unconfirmed, right now") and `or` would silently turn
     # it back into the 30-day default.
     days = (
-        settings.signup_stale_after_days
-        if args.older_than_days is None
-        else args.older_than_days
+        settings.signup_stale_after_days if args.older_than_days is None else args.older_than_days
     )
     # Deleting accounts is not something to do because a flag was
     # forgotten, so the safe mode is the default and --yes is the opt-in.
@@ -146,9 +144,7 @@ async def _remove_one(state: Any, row: Any) -> None:
             await conn.execute(
                 "DELETE FROM users WHERE sub = $1 AND tenant_id = $2", identity_id, tenant_id
             )
-        await conn.execute(
-            "DELETE FROM tenant_memberships WHERE user_sub = $1", identity_id
-        )
+        await conn.execute("DELETE FROM tenant_memberships WHERE user_sub = $1", identity_id)
         await conn.execute("DELETE FROM auth_challenges WHERE identity_id = $1", identity_id)
         await conn.execute("DELETE FROM identities WHERE id = $1", identity_id)
         if drop_tenant and tenant_id is not None:

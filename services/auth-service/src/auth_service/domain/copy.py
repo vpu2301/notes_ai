@@ -1028,6 +1028,11 @@ def client_line(lang: str, client_label: str) -> str:
     return _CLIENT_LINE.get(lang, _CLIENT_LINE[DEFAULT_LANG]).format(client_label=label)
 
 
+# The legal sender line every mail ends with. The HTML templates carry
+# the same line in their footer.
+LEGAL_LINE: Final = "3Days Labs Inc, 2166 Market Street, San Francisco, CA 94114"
+
+
 def text_body(kind: str, lang: str, values: dict[str, str]) -> str:
     """Render the plain-text alternate. Raises ``KeyError`` on a gap.
 
@@ -1035,7 +1040,7 @@ def text_body(kind: str, lang: str, values: dict[str, str]) -> str:
     string would produce a mail telling somebody to open a blank link.
     """
     template = _TEXT.get((kind, lang)) or _TEXT[(kind, DEFAULT_LANG)]
-    return template.format(**values)
+    return template.format(**values).rstrip("\n") + "\n" + LEGAL_LINE
 
 
 def utcnow() -> datetime:

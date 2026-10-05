@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Link, useNavigate } from "react-router-dom";
 import * as authApi from "../../api/auth";
 import { useToast } from "../../components/Toaster";
@@ -29,6 +30,7 @@ export function ResetPasswordPage({
   /** Set by `/account-recovery`, which reaches this step already holding a token. */
   notice?: string;
 }) {
+  useDocumentTitle("Reset your password");
   const navigate = useNavigate();
   const toast = useToast();
   const [token] = useState(() => injected ?? mailToken("/reset"));

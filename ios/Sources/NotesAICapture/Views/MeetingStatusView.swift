@@ -58,11 +58,15 @@ struct MeetingStatusView: View {
     private var status: some View {
         switch row.status {
         case .queued, .running:
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Transcribing… the note appears here when it is ready.")
-                    .font(.dsBody)
-                    .foregroundStyle(DS.text2)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Transcribing… the note appears here when it is ready.")
+                        .font(.dsBody)
+                        .foregroundStyle(DS.text2)
+                }
+                Button("Cancel transcription") { Task { await app.cancelCapture(jobId: row.jobId) } }
+                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 34))
             }
             .dsCard()
         case .failed, .cancelled:
@@ -98,12 +102,18 @@ struct MeetingStatusView: View {
     }
 
     private func menuItems() -> [DSMenuItem] {
-        [
+        var items: [DSMenuItem] = [
             .item("Copy job ID", symbol: "number") { copyToPasteboard(row.jobId) },
             .separator,
-            .item("Remove from list", symbol: "trash", danger: true) {
-                app.removeRecents(jobIds: [row.jobId])
-            },
         ]
+        if row.status == .queued || row.status == .running {
+            items.append(.item("Cancel transcription", symbol: "xmark.circle", danger: true) {
+                Task { await app.cancelCapture(jobId: row.jobId) }
+            })
+        }
+        items.append(.item("Remove from list", symbol: "trash", danger: true) {
+            app.removeRecents(jobIds: [row.jobId])
+        })
+        return items
     }
 }

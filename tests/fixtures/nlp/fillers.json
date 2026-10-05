@@ -1,0 +1,8 @@
+{
+  "_comment": "Sprint I3 T3 — non-lexical fillers hidden from a conversation's displayed transcript, per language, lower-cased. raw_text keeps every word; hidden words keep their timings. nlp-service (stages/disfluency.py) and note-service (meeting_doc/verify.normalise_quote) each assert their table equals this file, so a quote taken from the displayed text still matches the raw one.",
+  "fillers": {
+    "en": ["uh", "um", "erm", "er", "hmm", "hm", "mm", "mhm", "ah", "eh", "uh-huh"],
+    "de": ["äh", "ähm", "hm", "hmm", "öh", "öhm", "mh"],
+    "uk": ["е", "ем", "мм", "ммм", "хм", "е-е", "а-а"]
+  }
+}

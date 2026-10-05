@@ -1,0 +1,58 @@
+groups:
+  - name: viral-loop
+    interval: 1m
+    rules:
+      # A sustained stream of 429s on the anonymous shared-note surface is
+      # either a scraper working through tokens or a proxy misconfiguration
+      # collapsing every reader into one IP bucket (TRUSTED_PROXY_CIDRS).
+      - alert: SharedPageRateLimitHigh
+        expr: sum(rate(mdx_shared_rate_limit_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "More than 5 rate-limited /v1/shared requests per second for 5 minutes"
+          runbook: "docs/runbooks/notes.md#recipient-links-sprint-19"
+
+      # The concept doc's kill signal: recipients disputing more than a
+      # fifth of what they act on means the notes are not trustworthy
+      # enough to put in front of clients. Stop scaling distribution and
+      # fix extraction first.
+      - alert: SharedPageDisputeRateHigh
+        expr: |
+          (sum(increase(mdx_shared_responses_total{kind="dispute"}[7d]))
+           / clamp_min(sum(increase(mdx_shared_responses_total[7d])), 20))
+          > 0.2
+        for: 1h
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "Recipients disputed more than 20% of acted-on items over 7 days"
+          runbook: "docs/runbooks/notes.md#recipient-responses-sprint-20"
+
+      # Sprint 23: abuse. More than three reports in a day is either a
+      # real spammer or a page that reads as one; either way a person
+      # looks at it today.
+      - alert: SharedPageReportsHigh
+        expr: sum(increase(mdx_share_abuse_reports_total[24h])) > 3
+        for: 10m
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "More than 3 shared-page abuse reports in 24 hours"
+          runbook: "docs/runbooks/external-sharing.md#abuse-reports"
+
+      # Verification codes are mail; a burst is someone using the page as
+      # a relay, or a broken client retrying.
+      - alert: SharedPageOtpBurst
+        expr: sum(rate(mdx_share_otp_requests_total[10m])) * 600 > 100
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "More than 100 recipient verification codes requested in 10 minutes"
+          runbook: "docs/runbooks/external-sharing.md#verification-codes"

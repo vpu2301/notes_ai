@@ -1,0 +1,83 @@
+{
+ "id": "r01_de_zeit_was_jetzt",
+ "recording_type": "podcast_broadcast",
+ "topics_min": 2,
+ "speakers": {
+  "SPEAKER_1": "Imre Balzer",
+  "SPEAKER_2": "Fabian Reinbold"
+ },
+ "must_not_contain": [
+  "November",
+  "Teambesprechung",
+  "Entscheidung",
+  "Fraktionsvorsitzende",
+  "Schmerz",
+  "Schlesing",
+  "Hinweis zum Transkript"
+ ],
+ "must_contain_any": [
+  [
+   "PKV",
+   "privat"
+  ],
+  [
+   "Tankrabatt"
+  ],
+  [
+   "Rente mit 63"
+  ],
+  [
+   "Schwesig"
+  ],
+  [
+   "Söder"
+  ],
+  [
+   "3.000",
+   "3000",
+   "dreitausend"
+  ],
+  [
+   "Usmanow"
+  ],
+  [
+   "Fridman"
+  ],
+  [
+   "Lettland"
+  ],
+  [
+   "Reinbold"
+  ],
+  [
+   "Balzer"
+  ]
+ ],
+ "hedged_must_keep": [
+  {
+   "match": "Rente mit 63",
+   "markers": [
+    "wahrscheinlich",
+    "voraussichtlich",
+    "Prognose"
+   ]
+  }
+ ],
+ "dates": [
+  {
+   "text": "am Montag",
+   "resolved": "2026-09-21"
+  }
+ ],
+ "every_line_cited": true,
+ "sprint": {
+  "recording_type": "Q3",
+  "topics_min": "Q2",
+  "speakers": "Q4",
+  "must_not_contain": "Q1",
+  "must_contain_any": "Q2/Q4",
+  "hedged_must_keep": "Q4",
+  "dates": "Q3",
+  "every_line_cited": "Q5"
+ }
+}

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/http";
 import { useAuth } from "../../auth/AuthContext";
@@ -24,6 +25,7 @@ interface MfaState {
  * bookmark, a reload) has no challenge to complete and bounces to `/login`.
  */
 export function MfaPage() {
+  useDocumentTitle("Sign in");
   const { status, completeMfa } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

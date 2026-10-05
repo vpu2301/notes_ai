@@ -1,0 +1,171 @@
+{
+ "id": "r03_de_palantir_podcast",
+ "sprint": {
+  "recording_type": "F3-amendment",
+  "must_not_contain": "F3-amendment",
+  "must_contain_any": "F3-amendment",
+  "excluded_reasons": "F3-amendment",
+  "guest_line": "F3-amendment",
+  "chapters_min": "F3-amendment",
+  "overview": "F3-amendment",
+  "every_line_cited": "F3-amendment",
+  "lint": "D1"
+ },
+ "recording_type": "podcast_broadcast",
+ "must_not_contain": [
+  "Gysi",
+  "Chris Hansen",
+  "Dateline",
+  "Präsentiert von",
+  "Technische Daten",
+  "Zwanzig Jahre",
+  "Eine Software",
+  "8:46",
+  "Nordturm",
+  "Südturm",
+  "World Trade Center",
+  "Hegel",
+  "Gymnastikhanteln"
+ ],
+ "must_contain_any": [
+  [
+   "Felix Holtermann"
+  ],
+  [
+   "Handelsblatt"
+  ],
+  [
+   "Palantir"
+  ],
+  [
+   "Peter Thiel"
+  ],
+  [
+   "Alex Karp"
+  ],
+  [
+   "PayPal"
+  ],
+  [
+   "Total Information Awareness"
+  ],
+  [
+   "Habermas"
+  ],
+  [
+   "Herr der Ringe",
+   "Palantiri"
+  ],
+  [
+   "2004"
+  ],
+  [
+   "3000",
+   "3.000"
+  ]
+ ],
+ "excluded_reasons": [
+  "advertisement"
+ ],
+ "guest_line": "Felix Holtermann",
+ "chapters_min": 4,
+ "overview": {
+  "prose_paragraphs_min": 2,
+  "names_recording_type": true,
+  "names_guest": "Felix Holtermann",
+  "themes_min": 3,
+  "bullets_above_first_heading": 0
+ },
+ "every_line_cited": true,
+ "codes": {
+  "must_not_contain[0]": [
+   "T-INJ"
+  ],
+  "must_not_contain[1]": [
+   "T-ADV",
+   "F-ROLE"
+  ],
+  "must_not_contain[2]": [
+   "T-ADV"
+  ],
+  "must_not_contain[3]": [
+   "F-ROLE"
+  ],
+  "must_not_contain[4]": [
+   "D-FORM"
+  ],
+  "must_not_contain[5]": [
+   "F-NUM"
+  ],
+  "must_not_contain[6]": [
+   "F-NUM"
+  ],
+  "must_not_contain[7]": [
+   "F-INV"
+  ],
+  "must_not_contain[8]": [
+   "F-INV"
+  ],
+  "must_not_contain[9]": [
+   "F-INV"
+  ],
+  "must_not_contain[10]": [
+   "F-INV"
+  ],
+  "must_not_contain[11]": [
+   "F-INV"
+  ],
+  "must_not_contain[12]": [
+   "F-INV"
+  ],
+  "must_contain_any[0]": [
+   "F-ROLE",
+   "F-COV"
+  ],
+  "must_contain_any[1]": [
+   "F-ROLE",
+   "F-COV"
+  ],
+  "must_contain_any[2]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[3]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[4]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[5]": [
+   "F-COV"
+  ],
+  "must_contain_any[6]": [
+   "F-COV"
+  ],
+  "must_contain_any[7]": [
+   "T-ENT",
+   "F-COV"
+  ],
+  "must_contain_any[8]": [
+   "F-COV"
+  ],
+  "must_contain_any[9]": [
+   "F-NUM",
+   "F-COV"
+  ],
+  "must_contain_any[10]": [
+   "F-NUM",
+   "F-COV"
+  ]
+ },
+ "lint": {
+  "D-ORIENT": 0,
+  "D-STRUCT": 0,
+  "D-HEAD": 0,
+  "D-LABEL": 0,
+  "D-FORM": 0,
+  "D-REF": 0
+ }
+}

@@ -3,7 +3,11 @@ FROM python:3.12-slim AS build
 
 WORKDIR /build
 
-RUN pip install --no-cache-dir uv==0.4.29
+RUN pip install --no-cache-dir uv==0.10.6
+# PyPI fetches share the link with the torch wheels of the ASR images when
+# `docker compose build` runs everything at once; bump uv's 30s default so a
+# slow index response doesn't fail the build.
+ENV UV_HTTP_TIMEOUT=600
 
 COPY pyproject.toml .
 # Install production deps only into /deps so we can copy them cleanly

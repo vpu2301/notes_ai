@@ -181,7 +181,12 @@ MEMBERSHIP_COLUMNS = "id, tenant_id, user_sub, role, status, invited_by, created
 async def list_tenants_for_user(
     conn: asyncpg.Connection, *, user_sub: UUID
 ) -> list[asyncpg.Record]:
-    """All tenants the principal is a member of, with their membership role.
+    """The tenants the principal has JOINED, with their membership role.
+
+    Only ``active`` memberships in ``active`` tenants: an invitation the
+    person has not accepted yet (``invited``) or one an admin has paused
+    (``suspended``) is not a workspace they can open, so it must not appear
+    in the switcher until it is accepted / reinstated.
 
     Cross-tenant by design → must run on the ``tenant_writer`` pool (its
     ``USING (true)`` policies), never under app_role RLS.
@@ -194,6 +199,8 @@ async def list_tenants_for_user(
             FROM tenant_memberships m
             JOIN tenants t ON t.id = m.tenant_id
             WHERE m.user_sub = $1
+              AND m.status = 'active'
+              AND t.status = 'active'
             ORDER BY t.display_name, t.id
             """,
             user_sub,

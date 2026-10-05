@@ -608,3 +608,43 @@ If `auth.signup.compensation_failed` appears in the logs, the Keycloak
 delete itself failed and there **is** an orphan: delete that user in the
 console, and open an issue — the compensation path is meant to be the one
 thing that always works.
+
+## Self-serve signup: the conversion step (Sprint 21, ADR-0048)
+
+`POST /auth/signup` (BE-0) now records the plan and where the account
+came from: every self-serve tenant is `plan = 'free'`,
+`signup_source = 'self_serve'` or `'referral'` (a `ref` from a shared
+note's CTA), with `plan_limits` recorded from `MDX_SIGNUP_FREE_LIMITS`
+and **not enforced**. `GET /auth/signup/config` tells the SPA whether
+signup is on; `/join` shows the signup form or the Sprint 19 lead form
+accordingly.
+
+**"A referral never got attributed."** Attribution is two writes: signup
+inserts `referrals (ref_code, referred_sub)`; verify stamps
+`referred_tenant_id`. If the second is missing the person never spent
+the code — `SELECT * FROM referrals WHERE referred_tenant_id IS NULL AND
+referred_sub IS NOT NULL` lists them; `auth_challenges` (kind
+`signup_verify`) shows whether a code is still open. The audit line
+`auth.email_verified` carries `ref_present`.
+
+**"Signups from a domain never arrive."** The domain is on the
+disposable list (bundled in `domain/disposable_domains.py`, extended by
+`MDX_DISPOSABLE_DOMAINS_FILE`). Those answer 202 and create nothing, by
+design; the counter `mdx_auth_signup_total{result="disposable"}` shows
+how often.
+
+**"Signup feels slow."** `AUTH_SIGNUP_MIN_RESPONSE_MS` (300) is a floor
+on every branch of `/auth/signup`, so timing cannot tell a taken address
+from a new one. Lower it only with a reason.
+
+**Erasing a stuck signup.** BE-0's rules apply: an account that never
+verified is a Keycloak user (disabled) plus rows in `tenants`,
+`tenant_memberships`, `identities`, `users` and — if referred — one
+`referrals` row keyed by `referred_sub`. `scripts/ops/erase_lead.py`
+covers lead rows only; delete the referral row by `referred_sub` when
+purging the identity.
+
+**Funnel.** `scripts/ops/loop_funnel.sql` produces the cohort table
+(links viewed → CTA → signup → verified → first finalized note) from the
+audit and referral tables; run it against a read replica, not the app
+role.

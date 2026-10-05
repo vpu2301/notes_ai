@@ -29,9 +29,26 @@ struct MCPClient {
         case rpc(code: Int, message: String)
         case badResponse(String)
 
+        /// What the connector row says. The server's own words — a body,
+        /// an RPC message — are for `technicalDetail`, not the person.
         var errorDescription: String? {
             switch self {
-            case .unauthorized: return "The server wants you to sign in."
+            case .unauthorized: return "The connector wants you to sign in."
+            case .http(let code, _):
+                switch code {
+                case 400..<500: return "The connector refused the request. Check its address and sign in again."
+                case 500..<600: return "The connector is not answering right now. Try again in a moment."
+                default: return "Couldn't reach the connector. Try again."
+                }
+            case .rpc: return "The connector answered in a way this app did not expect. Try again."
+            case .badResponse: return "The connector answered in a way this app did not expect. Try again."
+            }
+        }
+
+        /// The server's words, for a disclosure or a bug report.
+        var technicalDetail: String {
+            switch self {
+            case .unauthorized: return "401"
             case .http(let code, let body):
                 let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
                 return "HTTP \(code)" + (trimmed.isEmpty ? "" : ": \(trimmed.prefix(160))")

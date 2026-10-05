@@ -20,10 +20,20 @@ class Category(StrEnum):
     "unknown intent is a bug" contract as nlp-service's operations map.
     """
 
+    # Producers retired with the finalize lifecycle (note-service 0042);
+    # kept so rows already in the feed still render and preferences load.
     NOTE_FINALIZED = "note.finalized"
     NOTE_AMENDED = "note.amended"
     NOTE_CHAIN_FAILURE = "note.chain_failure"
     NOTE_SHARED_WITH_YOU = "note.shared_with_you"
+    # Sprint 20: a recipient acted on the shared page (confirm/done/
+    # dispute/flag). Debounced per link by the producer.
+    NOTE_RECIPIENT_RESPONDED = "note.recipient_responded"
+    # Sprint 22: a recipient link was opened. In-app only; feeds the
+    # sender's "Sent → Opened" chips without polling.
+    NOTE_LINK_STATUS_CHANGED = "note.link_status_changed"
+    # Sprint 23: a recipient reported a shared page; the workspace's admins hear.
+    SHARE_REPORTED = "share.reported"
     DICTATION_COMPLETED = "dictation.completed"
     TRANSCRIPTION_COMPLETED = "transcription.completed"
     TRANSCRIPTION_FAILED = "transcription.failed"
@@ -33,6 +43,10 @@ class Category(StrEnum):
     # arriving half. `exclude_actor` is irrelevant here — the actor is the
     # reviewer, the audience is the subject, and they are never the same.
     SECURITY_MFA_REMINDER = "security.mfa_reminder"
+    # Sprint 37: this workspace has spent its monthly AI budget and notes
+    # have stopped writing themselves. The admins hear, because they are
+    # the only people who can raise it.
+    AI_BUDGET_REACHED = "ai.budget_reached"
     SYSTEM_DIGEST = "system.digest"
 
 

@@ -15,7 +15,12 @@ enum DS {
     static let surface      = Color.ds("ffffff", "1e1b18")
     static let surface2     = Color.ds("f3f1ec", "27231f")
     static let surfaceHover = Color.ds("f6f4f0", "231f1c")
-    static let sidebar      = Color.ds("f6f4ef", "131110")
+    static let sidebar      = Color.ds("f8f7f3", "131110")
+    /// Neutral row fills from the web's Claude-style sidebar: hover / the
+    /// row you are on, the filled "New" row, and pressed.
+    static let sidebarHover = Color.ds("efede7", "1e1b18")
+    static let sidebarActive = Color.ds("ebe8e1", "25211d")
+    static let sidebarPress = Color.ds("e3dfd7", "2e2a25")
     static let sidebarOn    = Color.ds("ffffff", "1e1b18")
 
     // Ink (text) scale — warm, never pure black
@@ -64,9 +69,19 @@ enum DS {
     static let infoSoft     = Color.ds("4b6f9e", "8fb0dd", lightAlpha: 0.10, darkAlpha: 0.12)
 
     // Radii — rounder than the web's, the organic half of the look
+    static let radiusXs: CGFloat = 6
+    static let radiusSm: CGFloat = 9
     static let radius: CGFloat = 12
     static let radiusLg: CGFloat = 16
     static let radiusXl: CGFloat = 22
+
+    // Speaker tints: a stable function of the name picks one (same hash
+    // as the web and the Mac), so a person keeps their colour everywhere.
+    // Each is a light/dark pair, and none of them is orange.
+    static let speakerTints: [Color] = [
+        Color.ds("4f7a5e", "8fbf9c"), Color.ds("6b7f5a", "a6b892"), Color.ds("8a6d2f", "c9ad6b"),
+        Color.ds("4a6d8c", "8fb0d0"), Color.ds("7a5a8c", "b59fc7"), Color.ds("3f7f7a", "83bdb7"),
+    ]
 
     // Layout
     /// Page gutter on an iPhone.
@@ -80,9 +95,20 @@ enum DS {
 // Avenir Next — ships with iOS — for everything you read; SF Mono for
 // codes and timers. Display sizes use the DemiBold cut. Sizes are a notch
 // above the Mac's for a phone held at arm's length.
+//
+// The bookish serif (Iowan Old Style, the web's `--serif`) is kept to the
+// few places the web sets it since its Claude-style layout: the wordmark,
+// the home greeting, the note's title and its section headings.
 
 enum DSType {
     static let family = "AvenirNext"
+
+    static func serifFace(_ weight: Font.Weight) -> String {
+        switch weight {
+        case .semibold, .bold, .heavy, .black: return "IowanOldStyle-Bold"
+        default: return "IowanOldStyle-Roman"
+        }
+    }
 
     static func face(_ weight: Font.Weight) -> String {
         switch weight {
@@ -104,8 +130,21 @@ extension Font {
     static func dsDisplay(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
         .custom(DSType.face(weight), size: size)
     }
+    /// The serif (`--serif`): wordmark, greeting, note title, headings.
+    static func dsSerif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .custom(DSType.serifFace(weight), size: size)
+    }
+    /// SF Mono for codes and timers, scaled with Dynamic Type — a system
+    /// font given a point size is fixed, so the size is put through the
+    /// same metrics the text styles use.
     static func dsMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight, design: .monospaced)
+    }
+
+    /// A symbol (or a system-font glyph) at a design size, scaled with
+    /// Dynamic Type — for the `.font(.system(size:))` an icon used to get.
+    static func dsSymbol(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
+        .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight)
     }
 
     static let dsTitle   = Font.dsDisplay(26)
@@ -272,7 +311,9 @@ struct DSButtonStyle: ButtonStyle {
             .font(.ds(size, .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, 14)
-            .frame(height: height)
+            // A minimum, not a height: at large Dynamic Type sizes the
+            // label grows and the button with it instead of clipping.
+            .frame(minHeight: height)
             .frame(maxWidth: fill ? .infinity : nil)
             .background(
                 RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
@@ -327,7 +368,7 @@ struct DSIconButtonStyle: ButtonStyle {
             .foregroundStyle(on ? DS.accentText : DS.text3)
             .frame(width: size, height: size)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(on ? DS.accentSoft : (configuration.isPressed ? DS.surface2 : .clear))
             )
             .contentShape(Rectangle())
@@ -423,6 +464,9 @@ struct DSToggleStyle: ToggleStyle {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Read as a switch with its state, not as a plain button.
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }
 
@@ -458,30 +502,35 @@ struct DSSegmentedPill<T: Hashable>: View {
                             Image(systemName: symbol).font(.ds(12, .medium))
                         }
                         if let label = option.label {
-                            Text(label).font(.ds(13.5, .medium))
+                            Text(label).font(.ds(14))
                         }
                     }
                     .foregroundStyle(on ? DS.text1 : DS.muted)
                     .padding(.horizontal, option.label == nil ? 9 : 12)
-                    .frame(height: height - 6)
+                    .frame(minHeight: height - 6)
                     .frame(maxWidth: .infinity)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: DS.radiusSm - 1, style: .continuous)
                             .fill(on ? DS.surface : .clear)
+                            .shadow(color: .black.opacity(on ? 0.08 : 0), radius: 1.5, y: 1)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: DS.radiusSm - 1, style: .continuous)
                                     .strokeBorder(DS.line, lineWidth: on ? DS.hairline : 0)
                             )
                     )
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(option.help ?? option.label ?? "")
+                // Sprint 32: a segment says its name, what it does, and
+                // whether it is the one chosen.
+                .accessibilityLabel(option.label ?? option.help ?? "")
+                .accessibilityHint(option.label == nil ? "" : (option.help ?? ""))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(3)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.radius - 1, style: .continuous)
                 .fill(DS.surface2)
         )
     }
@@ -499,6 +548,24 @@ struct DSLabel: View {
         Text(text.uppercased())
             .font(.dsLabel)
             .tracking(0.8)
+            .foregroundStyle(DS.muted)
+    }
+}
+
+/// Sentence-case section label (`.home-group-h`), as Claude's "Active" —
+/// the home page uses it; forms keep the tracked `DSLabel`.
+struct DSSectionLabel: View {
+    let text: String
+    var size: CGFloat = 14
+
+    init(_ text: String, size: CGFloat = 14) {
+        self.text = text
+        self.size = size
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.ds(size))
             .foregroundStyle(DS.muted)
     }
 }
@@ -525,18 +592,18 @@ struct DSChip: View {
     }
 }
 
-/// Initials avatar (`.avatar`): a tinted circle with two letters.
+/// Initials avatar (`.avatar`): a quiet neutral disc with ink initials,
+/// as Claude's.
 struct DSAvatar: View {
     let name: String
     var size: CGFloat = 32
 
     var body: some View {
         Text(initials)
-            .font(.dsDisplay(size * 0.42, .medium))
-            .foregroundStyle(DS.accentText)
+            .font(.ds(size * 0.41, .medium))
+            .foregroundStyle(DS.text1)
             .frame(width: size, height: size)
-            .background(Circle().fill(DS.accentSoft))
-            .overlay(Circle().strokeBorder(DS.accent.opacity(0.25), lineWidth: DS.hairline))
+            .background(Circle().fill(DS.sidebarPress))
     }
 
     private var initials: String {
@@ -563,19 +630,16 @@ struct DSBrandMark: View {
     }
 }
 
-/// "Notes AI" with the AI in accent, as the web wordmark does.
+/// "Notes AI" in the serif, as the web's sidebar wordmark.
 struct DSWordmark: View {
     var size: CGFloat = 16
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text("Notes ")
-                .foregroundStyle(DS.text1)
-            Text("AI")
-                .foregroundStyle(DS.accentText)
-        }
-        .font(.dsDisplay(size + 1))
-        .tracking(-0.3)
+        Text("Notes AI")
+            .font(.dsSerif(size + 5))
+            .tracking(-0.3)
+            .foregroundStyle(DS.text1)
+            .lineLimit(1)
     }
 }
 
@@ -628,10 +692,11 @@ extension JobStatus {
     }
 }
 
-/// A pill on the note's meta line (`.doc-pill` on the web): an icon and a
+/// An item on the note's meta line (`.doc-pill` on the web): an icon and a
 /// short fact — when the note was taken, what wrote it, where it is
-/// filed. Sized for a fingertip; the ones that are also controls are
-/// wrapped in a Button by the caller.
+/// filed. Unframed, as the web's since its Claude-style pass; sized for a
+/// fingertip. The ones that are also controls are wrapped in a Button by
+/// the caller. The accent tone keeps its tint.
 struct DSMetaPill: View {
     var symbol: String?
     let text: String
@@ -641,20 +706,23 @@ struct DSMetaPill: View {
     enum Tone { case neutral, accent }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.dsSymbol(12))
                     .foregroundStyle(tone == .accent ? DS.accentText : DS.muted)
             }
             Text(text)
-                .font(mono ? .dsMono(11.5) : .ds(12.5, .medium))
+                .font(mono ? .dsMono(11.5) : .ds(14))
         }
         .foregroundStyle(tone == .accent ? DS.accentText : DS.text3)
-        .padding(.horizontal, 11)
+        .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(Capsule().fill(tone == .accent ? DS.accentSoft : .clear))
-        .overlay(Capsule().strokeBorder(tone == .accent ? .clear : DS.line, lineWidth: DS.hairline))
-        .contentShape(Capsule())
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                .fill(tone == .accent ? DS.accentSoft : .clear)
+        )
+        .padding(.horizontal, tone == .accent ? 4 : 0)
+        .contentShape(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous))
     }
 }

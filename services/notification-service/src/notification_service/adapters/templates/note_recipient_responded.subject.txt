@@ -1,0 +1,1 @@
+{{ fields.get('link_label') or 'A recipient' }} responded on note {{ fields.get('note_code', '—') }}

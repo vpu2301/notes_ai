@@ -190,6 +190,681 @@
           "legendFormat": "{{code}}"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Speakers",
+      "id": 10,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "title": "Speakers per diarized job (24 h)",
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "vertical"
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(mdx_asr_diarization_speakers_bucket[24h]))",
+          "legendFormat": "≤ {{le}}",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Diarization seconds p95",
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_asr_diarization_seconds_bucket[30m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Unknown speech share / clusters dropped",
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(mdx_asr_diarization_unknown_share_sum[1h])) / sum(rate(mdx_asr_diarization_unknown_share_count[1h]))",
+          "legendFormat": "mean unknown share"
+        },
+        {
+          "expr": "sum(increase(mdx_asr_diarization_clusters_dropped_total[1h]))",
+          "legendFormat": "clusters dropped / h"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Speakers per diarized job by engine (24 h)",
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 41
+      },
+      "description": "Speaker-count histogram split by the engine that produced the stored labels (legacy-ecapa-ahc = legacy ECAPA+AHC, pyannote-community-1 = Diarizer v2). Only the PRIMARY engine records here; a shadow run keeps counts only as the delta in 'Shadow − primary speakers'. Both engines show side by side while the primary is switched or during a canary.",
+      "options": {
+        "displayMode": "basic",
+        "orientation": "vertical"
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(mdx_asr_diarization_speakers_bucket{engine=\"legacy-ecapa-ahc\"}[24h]))",
+          "legendFormat": "legacy ≤ {{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        },
+        {
+          "expr": "sum by (le) (increase(mdx_asr_diarization_speakers_bucket{engine=\"pyannote-community-1\"}[24h]))",
+          "legendFormat": "v2 ≤ {{le}}",
+          "refId": "B",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Diarization vs audio seconds (p50 / p95)",
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 41
+      },
+      "description": "Raw diarization wall time per engine next to audio duration per job. Separate histograms (audio also counts non-diarized jobs, diarization also counts re-labelling runs), so do not divide the lines; the per-job ratio is the next panel.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, engine) (rate(mdx_asr_diarization_seconds_bucket[1h])))",
+          "legendFormat": "diarization p50 {{engine}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, engine) (rate(mdx_asr_diarization_seconds_bucket[1h])))",
+          "legendFormat": "diarization p95 {{engine}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(mdx_asr_audio_duration_seconds_bucket[1h])))",
+          "legendFormat": "audio p50",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_asr_audio_duration_seconds_bucket[1h])))",
+          "legendFormat": "audio p95",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Diarization / audio per job, p95 (target ≤ 0.25)",
+      "id": 16,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 41
+      },
+      "description": "p95 of per-job diarization wall time ÷ audio duration (mdx_asr_diarization_audio_ratio), diarized jobs and re-labelling runs, primary engine. 0.25 is a bucket boundary, so the line is exact at the target. Alert: DiarizationSlowVsAudio.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, engine) (rate(mdx_asr_diarization_audio_ratio_bucket[1h])))",
+          "legendFormat": "p95 {{engine}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, engine) (rate(mdx_asr_diarization_audio_ratio_bucket[1h])))",
+          "legendFormat": "p50 {{engine}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Re-labelling runs by outcome (worker, per hour)",
+      "id": 17,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 49
+      },
+      "description": "Speaker re-labelling runs finished by the worker (task=rediarize): complete vs failed.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(mdx_asr_rediarize_total[1h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Re-labelling failure rate (1 h)",
+      "id": 18,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 49
+      },
+      "description": "failed / (complete + failed) over 1 h. The alert (RediarizeFailureRateHigh) also needs ≥ 10 runs in the hour, so a single failed run on a quiet hour shows here at 100 % without paging.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_rediarize_total{outcome=\"failed\"}[1h])) / sum(increase(mdx_asr_rediarize_total[1h]))",
+          "legendFormat": "failure rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Re-labelling run seconds (p50 / p95)",
+      "id": 19,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 49
+      },
+      "description": "Wall time of successful re-labelling runs (decode + diarize + store). Failed runs are not timed.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(mdx_asr_rediarize_seconds_bucket[1h])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_asr_rediarize_seconds_bucket[1h])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Re-labelling requests by outcome (asr-service, per hour)",
+      "id": 20,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "description": "POST re-label / undo requests at the API: accepted, undone, or the refusal code (rate_limited, rediarize_limit, rediarize_in_progress, job_not_complete, audio_unavailable, nothing_to_undo, enqueue_failed). 'accepted' here vs worker runs shows queue loss or lag.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(mdx_asr_rediarize_requests_total[1h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Shadow − primary speakers per job (24 h)",
+      "id": 21,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "description": "Distribution of (shadow engine speakers − primary engine speakers) per job, all engine pairs summed. Buckets are cumulative upper bounds: '≤ -4' holds every job where the shadow found 4+ fewer speakers, '+Inf' every job where it found 5+ more. Empty when no shadow engine is configured.",
+      "options": {
+        "displayMode": "basic",
+        "orientation": "vertical"
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(mdx_asr_diarization_shadow_delta_bucket[24h]))",
+          "legendFormat": "≤ {{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Mean shadow − primary speakers (per engine pair)",
+      "id": 22,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "description": "Mean speaker-count delta per job, per primary/shadow pair; 0 = the engines agree on average.",
+      "targets": [
+        {
+          "expr": "sum by (primary, shadow) (rate(mdx_asr_diarization_shadow_delta_sum[6h])) / sum by (primary, shadow) (rate(mdx_asr_diarization_shadow_delta_count[6h]))",
+          "legendFormat": "{{shadow}} − {{primary}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Speaker correction rate (7 d)",
+      "id": 23,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 65
+      },
+      "description": "Diarized results opened for the first time that later got a correction (a first speaker edit or a first re-run), over 7 days: increase(mdx_asr_speaker_corrected_jobs_total[7d]) / increase(mdx_asr_diarized_results_opened_total[7d]). Both counters are +1 once per job; a correction counts even if it was later undone. No correction is read as 'correct', so the true error rate is at least this. The alert (SpeakerCorrectionRateHigh) fires above 30 % with ≥ 50 opened jobs in the window. Weekly cohort: docs/product/speaker-metrics.md.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_speaker_corrected_jobs_total[7d])) / sum(increase(mdx_asr_diarized_results_opened_total[7d]))",
+          "legendFormat": "correction rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Speaker edits by kind / action (per hour)",
+      "id": 24,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 65
+      },
+      "description": "The edit mix: merges and turn reassigns applied, reverted (undo of the latest edit) and reset (all edits of a job cleared). Re-runs are the 'Re-labelling runs by outcome' panel above.",
+      "targets": [
+        {
+          "expr": "sum by (kind, action) (increase(mdx_asr_speaker_edits_total[1h]))",
+          "legendFormat": "{{kind}} {{action}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Speakers named by source (per day)",
+      "id": 25,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 65
+      },
+      "description": "Speaker names set, by where the name came from: the calendar-invitee picklist or typed. The only naming signal — the weekly report's role cannot read speaker names.",
+      "targets": [
+        {
+          "expr": "sum by (source) (increase(mdx_asr_speaker_named_total[1d]))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Dual-channel captures by outcome (24 h)",
+      "id": 26,
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Sprint 31: macOS captures with microphone + call audio. `dual` = diarized per side; `mono_fallback` = the channel analysis failed and the mixdown was diarized instead (speakers kept, channel guarantee lost).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(mdx_asr_diarization_dual_jobs_total[24h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Dual-channel mono-fallback rate (24 h, alert > 5 %)",
+      "id": 27,
+      "gridPos": {
+        "x": 12,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Share of dual-channel captures diarized from the mixdown because the channel analysis failed. Alert DualChannelMonoFallbackHigh at > 5 % with ≥ 20 dual jobs a day.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_diarization_dual_jobs_total{outcome=\"mono_fallback\"}[24h])) / sum(increase(mdx_asr_diarization_dual_jobs_total[24h]))",
+          "legendFormat": "mono fallback",
+          "refId": "A",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt-echo words per audio hour (24 h, alert > 20) — Sprint I2",
+      "id": 28,
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Share of dual-channel captures diarized from the mixdown because the channel analysis failed. Alert DualChannelMonoFallbackHigh at > 5 % with ≥ 20 dual jobs a day.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_prompt_echo_words_total[24h])) / (sum(increase(mdx_asr_audio_duration_seconds_sum[24h])) / 3600)",
+          "legendFormat": "echo words / audio h",
+          "refId": "A",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Other-language chunks and echo-dropped segments (24 h) — Sprint I2",
+      "id": 41,
+      "gridPos": {
+        "x": 12,
+        "y": 81,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Share of dual-channel captures diarized from the mixdown because the channel analysis failed. Alert DualChannelMonoFallbackHigh at > 5 % with ≥ 20 dual jobs a day.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_asr_other_language_chunks_total[24h]))",
+          "legendFormat": "other-language chunks",
+          "refId": "A",
+          "datasource": null
+        },
+        {
+          "expr": "sum(increase(mdx_asr_prompt_echo_segments_dropped_total[24h]))",
+          "legendFormat": "echo segments dropped",
+          "refId": "B",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Uncovered speech share (1 h, alert > 5 %) — Sprint F1",
+      "gridPos": {
+        "x": 0,
+        "y": 89,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(mdx_asr_uncovered_speech_ms_total{cause!=\"no_audio\"}[1h])) / sum(increase(mdx_asr_speech_ms_total[1h]))",
+          "legendFormat": "uncovered share"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Uncovered speech by cause (minutes per hour) — Sprint F1",
+      "gridPos": {
+        "x": 12,
+        "y": 89,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause) (increase(mdx_asr_uncovered_speech_ms_total[1h])) / 60000",
+          "legendFormat": "{{cause}}"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Coverage share per job (p50 / p05) — Sprint F1",
+      "gridPos": {
+        "x": 0,
+        "y": 97,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdx_asr_coverage_share_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.05, sum by (le) (rate(mdx_asr_coverage_share_bucket[1h])))",
+          "legendFormat": "p05"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Second-pass chunks by cause and outcome (per hour) — Sprint F1",
+      "gridPos": {
+        "x": 12,
+        "y": 97,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause, outcome) (increase(mdx_asr_second_pass_total[1h]))",
+          "legendFormat": "{{cause}} / {{outcome}}"
+        }
+      ]
     }
   ],
   "uid": "asr-health"

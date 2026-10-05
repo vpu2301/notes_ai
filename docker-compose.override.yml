@@ -22,6 +22,7 @@
 #   llama-server          :8089   (inference backend — mounts the
 #                                  host's `ollama pull gemma3:1b` blob)
 #   asr-worker            (no port — Redis-stream consumer)
+#   note-worker           (no port — drains the note.generate queue)
 #
 # NOTE: building asr-worker + dictation-service downloads the pinned
 # faster-whisper-tiny weights from Hugging Face at BUILD time (offline
@@ -87,14 +88,15 @@ x-common-env: &common-env
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
 
-# Object storage (S3-compatible). The local MinIO container was removed —
-# there is no object store in the dev stack by default. Point these at a
-# real S3-compatible endpoint in `.env` to re-enable audio at rest; left
-# empty the services start fine and only the audio paths fail.
+# Object storage (S3-compatible). Defaults to the stack's own MinIO
+# (docker-compose.yml), which holds every recording and transcript written
+# so far. Point these at another S3-compatible endpoint in `.env` only
+# after moving those objects across; an empty S3_ENDPOINT makes every
+# transcript and audio read answer 503 `object_store_not_configured`.
 x-s3-env: &s3-env
-  S3_ENDPOINT: ${S3_ENDPOINT:-}
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
 
 x-svc-healthcheck: &svc-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).status==200 else sys.exit(1)"]
@@ -104,6 +106,29 @@ x-svc-healthcheck: &svc-healthcheck
   start_period: 30s
 
 services:
+  # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
+  minio-init:
+    image: minio/mc:RELEASE.2024-04-18T16-45-29Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}"
+        mc mb --ignore-existing local/mdx-audio
+        mc mb --ignore-existing local/mdx-transcripts
+        mc version enable local/mdx-audio || true
+        mc version enable local/mdx-transcripts || true
+        # Replay clips — 5-min token/registry TTL is the real lifetime;
+        # 1-day ILM is the ciphertext backstop (ADR-0037).
+        mc mb --ignore-existing local/mdx-audio-clips
+        mc ilm rule rm --all --force local/mdx-audio-clips 2>/dev/null || true
+        mc ilm rule add --expire-days 1 local/mdx-audio-clips
+        echo "minio-init: buckets ready"
+    restart: "no"
+
   # ── DB schema migrations (one-shot, runs as the postgres superuser
   #    because migrations CREATE ROLE / extensions) ──────────────────
   migrate:
@@ -268,6 +293,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   # ── asr-worker — batch Whisper inference (Redis-stream consumer) ──
   # Runs large-v3 (the production model) on CPU/int8 for real transcript
@@ -290,13 +319,19 @@ services:
       MD_ASR_MODEL_REPO: Systran/faster-whisper-large-v3
       MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
-      MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "40.0"
+      MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "52.0"  # F1: 40 × 1.3 for the second pass
       # Model-provider registry (libs/models, DEP-S0/S1). ENV=dev routes
       # ASR_BACKEND=dev_mac_asr to whisper-server on this Mac (make dev-model);
       # the default keeps the baked CPU whisper. HF_* only matter with ENV=staging.
       ENV: ${ENV:-dev}
       MODELS_CONFIG: /app/config/models.yaml
       ASR_BACKEND: ${ASR_BACKEND:-inproc_cpu_asr}
+      # Sprint TQ4: Parakeet on this Mac (make dev-model with DEV_MAC_ASR_ENGINE=parakeet)
+      # as the primary (ASR_BACKEND=dev_mac_parakeet_asr) or in the shadow.
+      DEV_MAC_PARAKEET_URL: ${DEV_MAC_PARAKEET_URL:-http://host.docker.internal:8082}
+      MDX_ASR_SHADOW_BACKEND: ${MDX_ASR_SHADOW_BACKEND:-}
+      MDX_ASR_SHADOW_RATE: ${MDX_ASR_SHADOW_RATE:-0.2}
+      MDX_ASR_SHADOW_BUDGET_HOURS: ${MDX_ASR_SHADOW_BUDGET_HOURS:-4}
       DEV_MAC_ASR_URL: ${DEV_MAC_ASR_URL:-http://host.docker.internal:8080}
       HF_ASR_ENDPOINT_URL: ${HF_ASR_ENDPOINT_URL:-}
       HF_ASR_MODEL_PIN: ${HF_ASR_MODEL_PIN:-}
@@ -313,6 +348,10 @@ services:
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
         condition: service_completed_successfully
 
   # ── dictation-service — real-time streaming ASR over WebSocket ────
@@ -396,6 +435,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   # ── nlp-service — post-processing pipeline ────────────────────────
   nlp-service:
@@ -426,10 +469,13 @@ services:
       context: .
       dockerfile: services/note-service/Dockerfile
     restart: unless-stopped
-    environment:
+    environment: &note-env
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
+      # Billing (0068): a plan change applies at once, no payment, until
+      # Stripe is connected. The service default is `none` (no changes).
+      MDX_BILLING_PROVIDER: "${MDX_BILLING_PROVIDER:-manual}"
       # Notification producer — lifecycle transitions publish onto the
       # Redis Streams bus (ADR-0029). Without this the config default
       # (redis://localhost:6379/0) resolves to the container itself and
@@ -467,6 +513,16 @@ services:
       # Where the mailed links point. Must be the origin the SPA is
       # actually served from, or every shared note 404s.
       MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
+      # ── Who writes the notes (Sprint L2, config/models.yaml) ────────
+      # With the key: Mistral's EU API (large model writes, small model
+      # classifies/names). Without it, or with MDX_DEV_CHAT_BACKEND=dev_mac,
+      # this Mac's Ollama — the startup log says which and why
+      # (`models.route` / `models.override_fallback`). The key is read from
+      # .env.local only; never write a value here.
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
+      MISTRAL_API_URL: "${MISTRAL_API_URL:-https://api.mistral.ai/v1}"
+      MDX_DEV_CHAT_BACKEND: "${MDX_DEV_CHAT_BACKEND:-}"
+      DEV_MAC_CONTEXT: "${DEV_MAC_CONTEXT:-16384}"
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
     ports:
@@ -481,8 +537,52 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
       mailpit:
         condition: service_healthy
+
+  # ── note-worker — the process that writes notes (ADR-0058) ────────
+  # Same image and same code as note-service, different container: a
+  # generation is minutes of model calls, and running it on the request
+  # loop would tie a browser to it and let one slow meeting starve every
+  # other note operation. It is the first consumer of the `libs/jobs`
+  # queue, so without it `POST /v1/notes/{id}/generate` enqueues a job
+  # that nothing ever drains and the note stays `queued` forever.
+  #
+  # `environment: *note-env` is deliberate — the worker calls the API's
+  # own `build_state()`, so it needs exactly the API's wiring (pool,
+  # envelope crypto, object store). Drift between the two blocks is a
+  # generation that fails only in the worker.
+  #
+  # No port and no healthcheck: it serves no HTTP. In dev the chat
+  # backend it resolves is Mistral's EU API when MISTRAL_API_KEY is set
+  # and `dev_mac` — the Mac's Ollama on :11434 — otherwise (Sprint L2;
+  # see config/models.yaml). With nothing listening there either, a
+  # generation fails with a model error and the note keeps the transcript
+  # it had.
+  note-worker:
+    build:
+      context: .
+      dockerfile: services/note-service/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "note_service.worker"]
+    environment: *note-env
+    volumes:
+      - ./infra/dev/master.key:/etc/mdx/master.key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:

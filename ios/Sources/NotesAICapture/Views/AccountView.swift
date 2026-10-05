@@ -26,12 +26,17 @@ struct AccountView: View {
     /// Whether this phone holds a saved password (Keycloak sessions only,
     /// during the dual-issuer period). Read once, then owned by the row.
     @State private var savedPassword = CredentialStore.hasSaved
+    /// Who is in the open workspace — the roster, read-only here.
+    @State private var members: [TenantMember] = []
+    @State private var membersLoading = true
+    @State private var membersError: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 profile
                 workspaces
+                WorkspaceRoster(members: members, loading: membersLoading, error: membersError)
                 security
                 sessionsCard
                 if !app.oldPending.isEmpty {
@@ -51,7 +56,21 @@ struct AccountView: View {
             name = app.identity?.displayName ?? ""
             await app.refreshWorkspaces()
             await loadSessions()
+            await loadMembers()
         }
+        .onChange(of: app.tenantId) { _, _ in Task { await loadMembers() } }
+    }
+
+    private func loadMembers() async {
+        membersLoading = true
+        membersError = nil
+        do {
+            let current = try await app.api.currentTenant()
+            members = try await app.api.tenantMembers(tenantId: current.id)
+        } catch {
+            membersError = AuthCopy.message(for: error)
+        }
+        membersLoading = false
     }
 
     // MARK: - Profile
@@ -229,7 +248,7 @@ struct AccountView: View {
                         .foregroundStyle(DS.accentText)
                     Spacer()
                     Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.dsSymbol(13, .semibold))
                         .foregroundStyle(DS.muted)
                 }
                 .contentShape(Rectangle())
@@ -289,7 +308,7 @@ struct AccountView: View {
     private func sessionRow(_ session: DeviceSession) -> some View {
         HStack(spacing: 10) {
             Image(systemName: session.symbol)
-                .font(.system(size: 15, weight: .medium))
+                .font(.dsSymbol(15, .medium))
                 .foregroundStyle(session.current ? DS.accentText : DS.muted)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 1) {

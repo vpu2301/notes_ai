@@ -17,9 +17,18 @@ backends:
     enabled_in_envs: [dev]
     models: { chat: "${DEV_MAC_CHAT_MODEL:-notes-chat}" }
     structured_output: json_schema
-    context_window: 32768
+    # Sprint L1: 16K is what infra/models/dev-mac/Modelfile bakes; the
+    # single-pass eval arm sets DEV_MAC_CONTEXT=32768 with notes-chat-long.
+    context_window: ${DEV_MAC_CONTEXT:-16384}
     max_concurrency: 1
-    timeout_seconds: 600
+    timeout_seconds: 900
+    # Sprint L1 T2: the engine gives a small local model simpler work
+    # (meeting_doc small-model profile). Off for every hosted backend.
+    small_model: ${DEV_MAC_SMALL_MODEL:-true}
+    # Ollama's /v1 route honours `reasoning_effort`: `none` keeps a
+    # reasoning family (Qwen3) from spending the budget on <think>; a
+    # non-reasoning family (Gemma) ignores it. Empty = not sent.
+    request_overrides: { reasoning_effort: "${DEV_MAC_REASONING_EFFORT:-none}" }
     processor: { name: "Developer machine", region: "local" }
 
   dev_mac_asr:
@@ -30,6 +39,37 @@ backends:
     models: { asr: "${DEV_MAC_ASR_MODEL:-whisper-large-v3-turbo}" }
     timeout_seconds: 3600
     processor: { name: "Developer machine", region: "local" }
+
+  # ── Mistral AI, EU-hosted API (Sprint L2: the dev default; M2 flips
+  # staging/prod). Two backends, one key: the large model writes
+  # (understand/summarize), the small one classifies, names and corrects
+  # (classify/title/entities). Ids are pinned to a dated version — never a
+  # `-latest` alias — and recorded in docs/models/PINS.md. Prices in
+  # config/model_costs.yaml. Zero data retention + training opt-out are
+  # account settings (docs/runbooks/model-backends.md §mistral-account).
+  mistral_eu:
+    kind: openai_compat
+    base_url: ${MISTRAL_API_URL:-https://api.mistral.ai/v1}
+    auth: bearer:${MISTRAL_API_KEY}
+    enabled_in_envs: [dev, staging, prod]
+    models: { chat: "${MISTRAL_LARGE_PIN:-mistral-large-2512}" }
+    structured_output: probe
+    context_window: 131072
+    max_concurrency: 8
+    timeout_seconds: 120
+    processor: { name: "Mistral AI", region: "EU" }
+
+  mistral_eu_small:
+    kind: openai_compat
+    base_url: ${MISTRAL_API_URL:-https://api.mistral.ai/v1}
+    auth: bearer:${MISTRAL_API_KEY}
+    enabled_in_envs: [dev, staging, prod]
+    models: { chat: "${MISTRAL_SMALL_PIN:-mistral-small-2603}" }
+    structured_output: probe
+    context_window: 131072
+    max_concurrency: 8
+    timeout_seconds: 60
+    processor: { name: "Mistral AI", region: "EU" }
 
   # ── Hugging Face Inference Endpoints, EU region (beta default) ─────────
   hf_eu:
@@ -54,6 +94,151 @@ backends:
     cold_start_seconds: 240
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  # ── speaker diarization (Sprint 29 B-9, shape B — ADR-0052) ───────────
+  # Our own image (deploy/diar-server), pyannote community-1 on a GPU.
+  # Audio is sent as FLAC, held in memory for the request and never
+  # stored; the server returns labelled spans, never embeddings.
+  # TWO tokens: the `auth:` bearer below satisfies the endpoint gateway,
+  # and MDX_DIAR_SERVER_TOKEN (worker setting, sent as X-MDX-Diar-Token)
+  # satisfies the container itself. On a bare server they are the same
+  # value and the bearer alone is enough.
+  dev_mac_diar:
+    kind: diar_http
+    base_url: ${DEV_MAC_DIAR_URL:-http://host.docker.internal:8081}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { diarization: "${DEV_MAC_DIAR_MODEL:-pyannote-community-1}" }
+    max_concurrency: 1
+    timeout_seconds: 1800
+    processor: { name: "Developer machine", region: "local" }
+
+  hf_eu_diar:
+    kind: diar_http
+    base_url: ${HF_DIAR_ENDPOINT_URL}
+    auth: bearer:${HF_TOKEN}
+    enabled_in_envs: [staging, prod]
+    models: { diarization: "${HF_DIAR_MODEL_PIN}" }
+    max_concurrency: 2
+    cold_start_seconds: 240
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  # ── ASR bake-off candidates (Sprint TQ4, ADR-0067) ─────────────────────
+  # Same rule as the chat candidates below: a candidate and the backend it
+  # would become are the same object, so winning is a routing change. ASR
+  # candidates are also enabled on staging — the worker's shadow run
+  # (MDX_ASR_SHADOW_BACKEND) is where an adopted arm earns its switch — but
+  # `routing` never names them until ADR-0067 is accepted.
+  cand_parakeet_asr:          # arm C: nvidia/parakeet-tdt-0.6b-v3 in deploy/asr-server (NeMo, T4)
+    kind: asr_http
+    base_url: ${CAND_PARAKEET_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    server_token: ${CAND_PARAKEET_SERVER_TOKEN:-}
+    enabled_in_envs: [dev, test, staging]
+    models: { asr: "${CAND_PARAKEET_MODEL_PIN:-nvidia/parakeet-tdt-0.6b-v3}" }
+    cold_start_seconds: 300
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_whisper_v3_asr:        # arm B: whisper-large-v3 (full), Speaches, fp16 T4
+    kind: asr_http
+    base_url: ${CAND_WHISPER_V3_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test, staging]
+    models: { asr: "${CAND_WHISPER_V3_MODEL_PIN:-Systran/faster-whisper-large-v3}" }
+    cold_start_seconds: 300
+    timeout_seconds: 1800
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  dev_mac_parakeet_asr:       # arm C on the Mac: deploy/asr-server, ONNX runtime, :8082
+    kind: asr_http
+    base_url: ${DEV_MAC_PARAKEET_URL:-http://host.docker.internal:8082}
+    auth: none
+    enabled_in_envs: [dev]
+    models: { asr: "parakeet-tdt-0.6b-v3" }
+    timeout_seconds: 3600
+    processor: { name: "Developer machine", region: "local" }
+
+  # ── bake-off candidates (Sprint 37 B-1) ────────────────────────────────
+  # Eval only: `enabled_in_envs: [dev, test]` means the harness can reach
+  # them and no customer workspace ever can, whatever `routing` says. They
+  # exist here rather than in the eval script so that a candidate and the
+  # backend it would become are the SAME object — winning the bake-off is
+  # then a two-line routing change, not a port.
+  #
+  # Each URL points at a scratch HF EU endpoint (or a local server) raised
+  # for the run and torn down after it; `make eval-notes` names the backend.
+  cand_gemma_27b:
+    kind: openai_compat
+    base_url: ${CAND_GEMMA_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_GEMMA_MODEL:-google/gemma-3-27b-it}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_mistral_small:
+    kind: openai_compat
+    base_url: ${CAND_MISTRAL_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_MISTRAL_MODEL:-mistralai/Mistral-Small-3.2-24B-Instruct-2506}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_qwen_32b:
+    kind: openai_compat
+    base_url: ${CAND_QWEN_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_QWEN_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_gptoss_20b:
+    kind: openai_compat
+    base_url: ${CAND_GPTOSS_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_GPTOSS_MODEL:-openai/gpt-oss-20b}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  # The premium candidate: a frontier model behind an EU-resident,
+  # zero-retention endpoint. Registered `enabled: false` and NAMELESS on
+  # purpose — a processor entry is a disclosure, and the Data page reads
+  # these names. It is filled in, with its real company and region, in the
+  # same PR that selects it (ADR-0058), and only then can a workspace
+  # acknowledge it.
+  cand_frontier_eu:
+    kind: openai_compat
+    enabled: false
+    base_url: ${CAND_FRONTIER_URL:-}
+    auth: bearer:${CAND_FRONTIER_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_FRONTIER_MODEL:-}" }
+    structured_output: json_schema
+    context_window: 131072
+    max_concurrency: 2
+    timeout_seconds: 600
+    processor: { name: "Unselected premium candidate", region: "EU" }
 
   # ── our own EU GPU host (vLLM) — registered, disabled until gate H0 ────
   hosted_eu:
@@ -88,12 +273,31 @@ backends:
     cassette_dir: ${MODELS_CASSETTE_DIR:-tests/fixtures/eval/cassettes}
 
 # operation -> tier -> backend. `premium` flips to hosted_eu at gate H0 by PR.
+# These rows are what staging/prod run (dev is overridden below); M2 T7
+# flips understand/summarize to mistral_eu and classify/title/entities to
+# mistral_eu_small there, after the acknowledgement rollout.
 routing:
   understand: { standard: hf_eu,     premium: hf_eu }
   summarize:  { standard: hf_eu,     premium: hf_eu }
+  classify:   { standard: hf_eu,     premium: hf_eu }
+  title:      { standard: hf_eu,     premium: hf_eu }
+  entities:   { standard: hf_eu,     premium: hf_eu }
   asr:        { standard: hf_eu_asr, premium: hf_eu_asr }
 
 # Per-environment override of an operation *kind*, applied before routing.
+# Sprint L2: dev chat is Mistral by default with the Mac as the fallback —
+# taken when MISTRAL_API_KEY is unset (missing_env), when the service's
+# MDX_DEV_CHAT_BACKEND names another backend (forced), or when the API does
+# not answer the startup probe (probe_failed). An override may name an
+# operation as well as a kind: the short operations (classify/title/
+# entities) go to the small model, and to dev_mac when the fallback is
+# active, so a laptop without the key still names its notes.
 env_overrides:
-  dev:  { chat: dev_mac,  asr: dev_mac_asr }
+  dev:
+    chat: { primary: mistral_eu, fallback: dev_mac }
+    classify: { primary: mistral_eu_small, fallback: dev_mac }
+    title: { primary: mistral_eu_small, fallback: dev_mac }
+    entities: { primary: mistral_eu_small, fallback: dev_mac }
+    asr: dev_mac_asr
+    diarization: dev_mac_diar
   test: { chat: recorded, asr: inproc_cpu_asr }

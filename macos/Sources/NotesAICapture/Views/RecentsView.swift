@@ -32,7 +32,53 @@ struct MeetingRow: View {
         }
     }
 
+    @ViewBuilder
     private var rowLabel: some View {
+        if compact { compactLabel } else { fullLabel }
+    }
+
+    /// The popover's row: title and time on one line, a soft fill on
+    /// hover, the ⋯ taking the time's place while you point at it.
+    private var compactLabel: some View {
+        HStack(spacing: 8) {
+            Text(capture.title)
+                .font(.ds(13))
+                .foregroundStyle(DS.text1)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            statusChip
+            ZStack(alignment: .trailing) {
+                Text(shortWhen(capture.createdAt))
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+                    .opacity(hover ? 0 : 1)
+                DSMenu(width: 220, dim: true, items: menuItems)
+                    .opacity(hover ? 1 : 0)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .frame(height: 30)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                .fill(hover ? DS.sidebarHover : .clear)
+        )
+        .contentShape(Rectangle())
+    }
+
+    /// "20:07" today, "Yesterday", else "28 Sep".
+    private func shortWhen(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    private var fullLabel: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(capture.title)
@@ -43,6 +89,15 @@ struct MeetingRow: View {
                     Text(capture.createdAt.formatted(date: .omitted, time: .shortened))
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
+                    // Sprint 20: a recipient disputed something on this note.
+                    if let disputes = app.notes.first(where: { $0.noteId == capture.noteId })?.openDisputes,
+                       disputes > 0 {
+                        Text("·").font(.dsMeta).foregroundStyle(DS.muted)
+                        Circle().fill(DS.dangerText).frame(width: 6, height: 6)
+                        Text("\(disputes) disputed")
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.dangerText)
+                    }
                     if let error = capture.errorMessage, !error.isEmpty,
                        capture.status == .failed || capture.noteId == nil {
                         Text("·").font(.dsMeta).foregroundStyle(DS.muted)
@@ -73,6 +128,9 @@ struct MeetingRow: View {
         switch capture.status {
         case .queued, .running:
             DSChip(text: "In progress", tint: DS.info, soft: DS.infoSoft, dot: true)
+        case .complete where app.relabelling.contains(capture.jobId):
+            // The transcript is readable meanwhile; only the speakers move.
+            DSChip(text: "Re-labelling speakers…", tint: DS.info, soft: DS.infoSoft, dot: true)
         case .failed:
             DSChip(text: "Failed", tint: DS.rec, soft: DS.recSoft)
         case .cancelled:
@@ -100,6 +158,7 @@ struct MeetingRow: View {
             .item("Open", symbol: "macwindow") { app.select(jobId: capture.jobId) },
         ]
         if let noteId = capture.noteId {
+            items.append(.item("Share with client…", symbol: "paperplane") { app.shareWithClient(noteId: noteId) })
             items.append(.item("Open in web app", symbol: "safari") { app.openNoteInBrowser(noteId) })
             items.append(.item("Copy link", symbol: "link") {
                 if let url = app.noteURL(noteId) { copy(url.absoluteString) }
@@ -125,7 +184,26 @@ struct MeetingList: View {
     var compact = false
     var limit: Int? = nil
 
+    @ViewBuilder
     var body: some View {
+        if compact { flat } else { cards }
+    }
+
+    /// The popover: a few plain rows under one "Recent" label — no day
+    /// groups, no cards; each row carries its own short date.
+    private var flat: some View {
+        let items = app.recents.sorted { $0.createdAt > $1.createdAt }
+        return VStack(alignment: .leading, spacing: 1) {
+            DSSectionLabel("Recent", size: 11.5)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 2)
+            ForEach(Array(items.prefix(limit ?? items.count))) { item in
+                MeetingRow(capture: item, compact: true)
+            }
+        }
+    }
+
+    private var cards: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
             ForEach(MeetingGroups.make(app.recents, limit: limit), id: \.title) { group in
                 let items = group.items

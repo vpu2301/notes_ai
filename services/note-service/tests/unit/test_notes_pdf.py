@@ -137,10 +137,11 @@ def test_pdf_409_for_cancelled(client: TestClient, monkeypatch: pytest.MonkeyPat
     assert client.audit_calls == []  # type: ignore[attr-defined]
 
 
-def test_pdf_200_for_draft_with_watermark(
+def test_pdf_200_with_watermark_on_request(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A draft note renders a PDF with the draft treatment on."""
+    """``variant=draft`` renders the provisional treatment (0042: the
+    note's status no longer decides it)."""
     from note_service.routers import notes_pdf
 
     captured: dict = {}
@@ -163,13 +164,12 @@ def test_pdf_200_for_draft_with_watermark(
     monkeypatch.setattr(notes_pdf.repo, "fetch_version", _fetch_version)
     monkeypatch.setattr(notes_pdf, "render_note_pdf", _render)
 
-    resp = client.get(f"/v1/notes/{NOTE_ID}/pdf")
+    resp = client.get(f"/v1/notes/{NOTE_ID}/pdf?variant=draft")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
     assert f"note-{NOTE_ID}-draft.pdf" in resp.headers["content-disposition"]
     assert resp.content.startswith(b"%PDF")
     assert len(resp.content) > 0
-    # The draft note forces the draft treatment.
     assert captured["is_draft"] is True
     assert captured["language"] == "en"
 
@@ -179,43 +179,13 @@ def test_pdf_200_for_draft_with_watermark(
     assert calls[0]["payload"]["variant"] == "draft"
 
 
-def test_pdf_clean_variant_ignored_for_draft(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """variant=clean is NOT honoured for a draft note."""
+def test_pdf_clean_is_the_default(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from note_service.routers import notes_pdf
 
     captured: dict = {}
 
     async def _fetch_note(conn, *, note_id):  # noqa: ANN001
         return _note_row(status=NoteStatus.DRAFT, finalized=False)
-
-    async def _fetch_version(conn, *, version_id):  # noqa: ANN001
-        return _version_row()
-
-    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
-        captured["is_draft"] = is_draft
-        return b"%PDF-1.7 x"
-
-    monkeypatch.setattr(notes_pdf.repo, "fetch_note", _fetch_note)
-    monkeypatch.setattr(notes_pdf.repo, "fetch_version", _fetch_version)
-    monkeypatch.setattr(notes_pdf, "render_note_pdf", _render)
-
-    resp = client.get(f"/v1/notes/{NOTE_ID}/pdf?variant=clean")
-    assert resp.status_code == 200
-    assert captured["is_draft"] is True
-    assert f"note-{NOTE_ID}-draft.pdf" in resp.headers["content-disposition"]
-
-
-def test_pdf_clean_variant_honoured_for_finalized(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from note_service.routers import notes_pdf
-
-    captured: dict = {}
-
-    async def _fetch_note(conn, *, note_id):  # noqa: ANN001
-        return _note_row(status=NoteStatus.FINALIZED, finalized=True)
 
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()

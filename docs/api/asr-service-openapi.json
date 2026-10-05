@@ -1,6 +1,64 @@
 {
   "components": {
     "schemas": {
+      "AsrLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "max_duration_seconds": {
+            "title": "Max Duration Seconds",
+            "type": "integer"
+          },
+          "max_upload_mb": {
+            "title": "Max Upload Mb",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_duration_seconds",
+          "max_upload_mb"
+        ],
+        "title": "AsrLimits",
+        "type": "object"
+      },
+      "BackendError": {
+        "description": "A run group whose request failed (HTTP backends); its speech is a\ncoverage gap with cause ``backend_error``, never silently empty.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "kind": {
+            "maxLength": 32,
+            "title": "Kind",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z]{2,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "kind"
+        ],
+        "title": "BackendError",
+        "type": "object"
+      },
       "Body_submit_job_asr_jobs_post": {
         "properties": {
           "audio": {
@@ -9,15 +67,107 @@
             "title": "Audio",
             "type": "string"
           },
+          "capture_source": {
+            "anyOf": [
+              {
+                "pattern": "^(calendar_event|manual|upload)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Source"
+          },
+          "channel_layout": {
+            "default": "mono",
+            "pattern": "^(mono|mic_system)$",
+            "title": "Channel Layout",
+            "type": "string"
+          },
           "diarize": {
             "default": false,
             "title": "Diarize",
             "type": "boolean"
           },
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
           "language": {
-            "pattern": "^(auto|uk|en)$",
+            "pattern": "^(auto|uk|en|de)$",
             "title": "Language",
             "type": "string"
+          },
+          "local_speaker_name": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Speaker Name"
+          },
+          "name_candidates": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Candidates"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
+          },
+          "speakers_expected": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Expected"
+          },
+          "speakers_max": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Max"
           },
           "vocabulary_hint": {
             "anyOf": [
@@ -37,6 +187,37 @@
           "language"
         ],
         "title": "Body_submit_job_asr_jobs_post",
+        "type": "object"
+      },
+      "CaptureTimingView": {
+        "description": "When the person pressed Record and how long the first audio frame\ntook (Sprint F1). Client wall clock; both None for older clients.",
+        "properties": {
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
+          }
+        },
+        "title": "CaptureTimingView",
         "type": "object"
       },
       "ConfidenceSpanView": {
@@ -65,9 +246,692 @@
         "title": "ConfidenceSpanView",
         "type": "object"
       },
+      "CorrectionDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "corrections_rev": {
+            "minimum": 0.0,
+            "title": "Corrections Rev",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "to_text": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Text"
+          }
+        },
+        "required": [
+          "status",
+          "corrections_rev"
+        ],
+        "title": "CorrectionDecision",
+        "type": "object"
+      },
+      "CorrectionsView": {
+        "properties": {
+          "corrections": {
+            "items": {
+              "$ref": "#/components/schemas/EntityCorrectionView"
+            },
+            "title": "Corrections",
+            "type": "array"
+          },
+          "corrections_rev": {
+            "title": "Corrections Rev",
+            "type": "integer"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "corrections_rev",
+          "corrections"
+        ],
+        "title": "CorrectionsView",
+        "type": "object"
+      },
+      "Coverage": {
+        "description": "How much of the speech the transcript covers (Sprint F1, decision 1).\n\n``speech_ms`` is what voice activity detection heard; ``transcribed_ms``\nis ``speech_ms`` minus every gap inside the file. A gap is a speech run\nof at least 3 s that no surviving word covers for half its length. The\n``no_audio`` gap (capture latency) is reported but lies outside the file\nand therefore outside both totals. Offsets and counts only, never text.",
+        "properties": {
+          "first_segment_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Segment Ms"
+          },
+          "first_speech_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Speech Ms"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageGap"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "speech_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "transcribed_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Transcribed Ms",
+            "type": "integer"
+          },
+          "vad": {
+            "default": "silero",
+            "enum": [
+              "silero",
+              "stub"
+            ],
+            "title": "Vad",
+            "type": "string"
+          }
+        },
+        "title": "Coverage",
+        "type": "object"
+      },
+      "CoverageGap": {
+        "description": "A stretch of speech the transcript does not cover (Sprint F1).",
+        "properties": {
+          "cause": {
+            "enum": [
+              "no_audio",
+              "no_speech_detected",
+              "decoder_empty",
+              "prompt_echo",
+              "other_language",
+              "backend_error",
+              "unknown"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "cause"
+        ],
+        "title": "CoverageGap",
+        "type": "object"
+      },
+      "CoverageView": {
+        "description": "``Coverage`` as served on ``/result``, with the share spelled out.",
+        "properties": {
+          "first_segment_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Segment Ms"
+          },
+          "first_speech_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Speech Ms"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageGap"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "type": "number"
+          },
+          "speech_ms": {
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "transcribed_ms": {
+            "minimum": 0.0,
+            "title": "Transcribed Ms",
+            "type": "integer"
+          },
+          "vad": {
+            "default": "silero",
+            "enum": [
+              "silero",
+              "stub"
+            ],
+            "title": "Vad",
+            "type": "string"
+          }
+        },
+        "required": [
+          "speech_ms",
+          "transcribed_ms",
+          "share"
+        ],
+        "title": "CoverageView",
+        "type": "object"
+      },
+      "Diagnostics": {
+        "description": "What the guards did to this transcript. Counts and timestamps only;\nlives in the stored artifact, not in a table.",
+        "properties": {
+          "artefact_kept": {
+            "items": {
+              "$ref": "#/components/schemas/KeptArtefact"
+            },
+            "title": "Artefact Kept",
+            "type": "array"
+          },
+          "backend_errors": {
+            "items": {
+              "$ref": "#/components/schemas/BackendError"
+            },
+            "title": "Backend Errors",
+            "type": "array"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dropped_segments": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedSegment"
+            },
+            "title": "Dropped Segments",
+            "type": "array"
+          },
+          "gate_unavailable": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Gate Unavailable",
+            "type": "object"
+          },
+          "language_id": {
+            "anyOf": [
+              {
+                "enum": [
+                  "engine",
+                  "local",
+                  "unavailable",
+                  "pinned"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Id"
+          },
+          "loops": {
+            "items": {
+              "$ref": "#/components/schemas/LoopEvent"
+            },
+            "title": "Loops",
+            "type": "array"
+          },
+          "other_language_chunks": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Other Language Chunks",
+            "type": "integer"
+          },
+          "prompt_echo": {
+            "items": {
+              "$ref": "#/components/schemas/EchoSpan"
+            },
+            "title": "Prompt Echo",
+            "type": "array"
+          },
+          "prompt_echo_segments_dropped": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Prompt Echo Segments Dropped",
+            "type": "integer"
+          },
+          "second_pass": {
+            "$ref": "#/components/schemas/SecondPass"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentDiagnostics"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "shadow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShadowDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "Diagnostics",
+        "type": "object"
+      },
+      "DiarizationStats": {
+        "description": "Why a diarized job produced N speakers (Sprint 28). Numbers only:\nno labels-to-names mapping, no text, no embeddings.",
+        "properties": {
+          "both_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Both Share"
+          },
+          "channel_layout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Layout"
+          },
+          "chunks": {
+            "minimum": 0.0,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "clusters_after_merge": {
+            "minimum": 0.0,
+            "title": "Clusters After Merge",
+            "type": "integer"
+          },
+          "clusters_dropped": {
+            "minimum": 0.0,
+            "title": "Clusters Dropped",
+            "type": "integer"
+          },
+          "clusters_raw": {
+            "minimum": 0.0,
+            "title": "Clusters Raw",
+            "type": "integer"
+          },
+          "count_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count Confidence"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "hint_max_speakers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Max Speakers"
+          },
+          "hint_num_speakers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Num Speakers"
+          },
+          "leak_gain_db": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leak Gain Db"
+          },
+          "local_speakers": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Speakers"
+          },
+          "overlap_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Share"
+          },
+          "remote_speakers": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Speakers"
+          },
+          "seconds": {
+            "minimum": 0.0,
+            "title": "Seconds",
+            "type": "number"
+          },
+          "speaker_speech_seconds": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Speaker Speech Seconds",
+            "type": "array"
+          },
+          "speakers": {
+            "minimum": 0.0,
+            "title": "Speakers",
+            "type": "integer"
+          },
+          "speakers_dissolved": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Speakers Dissolved",
+            "type": "integer"
+          },
+          "speech_seconds": {
+            "minimum": 0.0,
+            "title": "Speech Seconds",
+            "type": "number"
+          },
+          "unknown_share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Unknown Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "engine",
+          "engine_version",
+          "chunks",
+          "clusters_raw",
+          "clusters_after_merge",
+          "clusters_dropped",
+          "speakers",
+          "speech_seconds",
+          "unknown_share",
+          "seconds"
+        ],
+        "title": "DiarizationStats",
+        "type": "object"
+      },
+      "DismissSuggestionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "name"
+        ],
+        "title": "DismissSuggestionRequest",
+        "type": "object"
+      },
+      "DroppedSegment": {
+        "description": "A decoded segment (or the tail of one) a quality gate removed \u2014\nSprint TQ2 T2/T3. Numbers and enum strings only.",
+        "properties": {
+          "artefact": {
+            "anyOf": [
+              {
+                "maxLength": 12,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artefact"
+          },
+          "avg_logprob": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Logprob"
+          },
+          "compression_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compression Ratio"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "no_speech_prob": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Speech Prob"
+          },
+          "reason": {
+            "enum": [
+              "no_speech",
+              "loop",
+              "low_confidence_nonspeech",
+              "artefact"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "speech_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speech Share"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "reason"
+        ],
+        "title": "DroppedSegment",
+        "type": "object"
+      },
+      "EchoSpan": {
+        "description": "Words removed as prompt echo (Sprint I2 T3): where and how many,\nnever which.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "words": {
+            "minimum": 0.0,
+            "title": "Words",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "words"
+        ],
+        "title": "EchoSpan",
+        "type": "object"
+      },
       "EnrichedSegment": {
         "description": "One segment as served by ``GET /asr/jobs/{id}/result``.\n\n``text`` is the NLP post-processed rendering (dictated punctuation\napplied, numbers/dates normalized) when the view's ``nlp_applied``\nis true; otherwise it equals ``raw_text``. ``words`` always carry\nthe raw Whisper timings.",
         "properties": {
+          "artifact_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Index"
+          },
+          "artifact_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Artifact Indices",
+            "type": "array"
+          },
           "avg_confidence": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -86,6 +950,17 @@
             "title": "End Ms",
             "type": "integer"
           },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
           "raw_text": {
             "title": "Raw Text",
             "type": "string"
@@ -100,6 +975,16 @@
               }
             ],
             "title": "Speaker"
+          },
+          "speaker_cleared": {
+            "default": false,
+            "title": "Speaker Cleared",
+            "type": "boolean"
+          },
+          "speaker_uncertain": {
+            "default": false,
+            "title": "Speaker Uncertain",
+            "type": "boolean"
           },
           "start_ms": {
             "minimum": 0.0,
@@ -126,6 +1011,80 @@
           "avg_confidence"
         ],
         "title": "EnrichedSegment",
+        "type": "object"
+      },
+      "EntityCorrectionView": {
+        "description": "Sprint TQ3: one unified spelling \u2014 the overlay the view applied\n(``accepted``) or offers for review (``proposed``).",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "decided": {
+            "default": false,
+            "title": "Decided",
+            "type": "boolean"
+          },
+          "from_forms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "From Forms",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "entity",
+            "default": "entity",
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurrences_count": {
+            "minimum": 0.0,
+            "title": "Occurrences Count",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "glossary",
+              "calendar",
+              "hint",
+              "majority",
+              "user"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "to_text": {
+            "title": "To Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "from_forms",
+          "to_text",
+          "occurrences_count",
+          "source",
+          "confidence",
+          "status"
+        ],
+        "title": "EntityCorrectionView",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -165,6 +1124,156 @@
         "title": "JobStatus",
         "type": "string"
       },
+      "KeptArtefact": {
+        "description": "A known artefact phrase over audio VAD calls speech \u2014 kept, flagged\n(a real \"Vielen Dank.\" at the end of a meeting survives).",
+        "properties": {
+          "artefact": {
+            "maxLength": 12,
+            "title": "Artefact",
+            "type": "string"
+          },
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "artefact"
+        ],
+        "title": "KeptArtefact",
+        "type": "object"
+      },
+      "LoopEvent": {
+        "description": "A repetition loop (G2) and what the prompt-free second decode did.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "recovered",
+              "kept_truncated",
+              "second_pass_failed",
+              "second_pass_off"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "outcome"
+        ],
+        "title": "LoopEvent",
+        "type": "object"
+      },
+      "NameSuggestionView": {
+        "description": "A name offered for an unnamed speaker, with the quote that justifies\nit (Sprint 32). Evidence is shown before a person accepts.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "role_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Text"
+          },
+          "segment_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Segment Indices",
+            "type": "array"
+          },
+          "source": {
+            "const": "self_introduction",
+            "default": "self_introduction",
+            "title": "Source",
+            "type": "string"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "name",
+          "quote",
+          "start_ms",
+          "end_ms"
+        ],
+        "title": "NameSuggestionView",
+        "type": "object"
+      },
+      "NoiseRegion": {
+        "description": "A stretch of \u2265 5 s with no VAD speech, marked instead of transcribed\n(Sprint TQ2 T4). Clients render an unknown ``kind`` as ``noise``.",
+        "properties": {
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "music",
+              "silence",
+              "noise"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms",
+          "kind"
+        ],
+        "title": "NoiseRegion",
+        "type": "object"
+      },
       "ReadyResponse": {
         "properties": {
           "db": {
@@ -193,6 +1302,362 @@
         "title": "ReadyResponse",
         "type": "object"
       },
+      "RediarizeRequest": {
+        "additionalProperties": false,
+        "description": "``speakers_expected``: the count a person states; ``null`` lets the\nengine decide again (e.g. after an engine upgrade).",
+        "properties": {
+          "speakers_expected": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Expected"
+          }
+        },
+        "title": "RediarizeRequest",
+        "type": "object"
+      },
+      "RediarizeStatusView": {
+        "properties": {
+          "diarization_rev": {
+            "title": "Diarization Rev",
+            "type": "integer"
+          },
+          "diarization_status": {
+            "title": "Diarization Status",
+            "type": "string"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "diarization_status",
+          "diarization_rev"
+        ],
+        "title": "RediarizeStatusView",
+        "type": "object"
+      },
+      "SecondPass": {
+        "description": "Chunks decoded a second time, without the prompt (Sprint F1,\ndecision 3): how many, how many words the second attempt brought back,\nand why each ran (``low_coverage`` | ``prompt_echo`` | ``decoder_empty``\n| ``timeout``).",
+        "properties": {
+          "by_cause": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Cause",
+            "type": "object"
+          },
+          "chunks": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "recovered_words": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Recovered Words",
+            "type": "integer"
+          }
+        },
+        "title": "SecondPass",
+        "type": "object"
+      },
+      "SegmentDiagnostics": {
+        "description": "The decoder's own numbers for one segment it returned (Sprint TQ1 T5).\n\nRecorded for every segment the backend decoded, including ones a guard\nlater dropped, so the non-speech gates (TQ2) can be tuned on what the\ndecoder said about itself. A backend that does not report a number\nleaves it ``None`` (whisper.cpp omits some); nothing fails on its\nabsence. Numbers and times only, never text.",
+        "properties": {
+          "avg_logprob": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Logprob"
+          },
+          "compression_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compression Ratio"
+          },
+          "end_ms": {
+            "minimum": 0.0,
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z]{2,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "no_speech_prob": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Speech Prob"
+          },
+          "second_pass": {
+            "default": false,
+            "title": "Second Pass",
+            "type": "boolean"
+          },
+          "start_ms": {
+            "minimum": 0.0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_ms",
+          "end_ms"
+        ],
+        "title": "SegmentDiagnostics",
+        "type": "object"
+      },
+      "ShadowDiagnostics": {
+        "description": "Sprint TQ4 T4: a candidate engine decoded the same audio after the\nprimary; only how the two differed is kept \u2014 never the shadow's text.",
+        "properties": {
+          "backend": {
+            "maxLength": 32,
+            "title": "Backend",
+            "type": "string"
+          },
+          "dropped_primary": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Dropped Primary",
+            "type": "integer"
+          },
+          "dropped_shadow": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Dropped Shadow",
+            "type": "integer"
+          },
+          "name_forms_primary": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Name Forms Primary",
+            "type": "integer"
+          },
+          "name_forms_shadow": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Name Forms Shadow",
+            "type": "integer"
+          },
+          "rtf": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rtf"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          },
+          "word_disagreement": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Word Disagreement"
+          },
+          "words_primary": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Words Primary",
+            "type": "integer"
+          },
+          "words_shadow": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Words Shadow",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backend"
+        ],
+        "title": "ShadowDiagnostics",
+        "type": "object"
+      },
+      "SpeakerEditResult": {
+        "properties": {
+          "created_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created Label"
+          },
+          "edit_id": {
+            "format": "uuid",
+            "title": "Edit Id",
+            "type": "string"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "speaker_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Names",
+            "type": "object"
+          },
+          "speaker_stats": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerStatView"
+            },
+            "title": "Speaker Stats",
+            "type": "array"
+          },
+          "speakers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Speakers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "job_id",
+          "edit_id",
+          "speakers",
+          "speaker_names",
+          "speaker_stats"
+        ],
+        "title": "SpeakerEditResult",
+        "type": "object"
+      },
+      "SpeakerEditView": {
+        "description": "A live (not reverted) speaker edit applied to the transcript.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "creates_label": {
+            "default": false,
+            "title": "Creates Label",
+            "type": "boolean"
+          },
+          "from_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Label"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "to_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Label"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "created_at"
+        ],
+        "title": "SpeakerEditView",
+        "type": "object"
+      },
+      "SpeakerMergeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "From",
+            "type": "string"
+          },
+          "into": {
+            "pattern": "^SPEAKER_[1-9][0-9]{0,2}$",
+            "title": "Into",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "into"
+        ],
+        "title": "SpeakerMergeRequest",
+        "type": "object"
+      },
       "SpeakerNamesUpdate": {
         "additionalProperties": false,
         "description": "``PUT /asr/jobs/{id}/speakers`` body: the complete label \u2192 name\nmapping. A label left out (or given an empty name) goes back to its\nneutral default.",
@@ -203,6 +1668,19 @@
             },
             "maxProperties": 64,
             "title": "Names",
+            "type": "object"
+          },
+          "sources": {
+            "additionalProperties": {
+              "enum": [
+                "picklist",
+                "typed",
+                "suggestion"
+              ],
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Sources",
             "type": "object"
           }
         },
@@ -231,9 +1709,158 @@
         "title": "SpeakerNamesView",
         "type": "object"
       },
+      "SpeakerReassignRequest": {
+        "additionalProperties": false,
+        "description": "Move turns: ``to`` is a roster label, ``\"new\"`` (a speaker the system\nmissed) or ``null`` (unattributed). ``segment_indices`` are the turn's\n``segment_indices`` from the result view \u2014 artifact index space, valid\nonly for ``result_rev``.",
+        "properties": {
+          "result_rev": {
+            "minimum": 1.0,
+            "title": "Result Rev",
+            "type": "integer"
+          },
+          "segment_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Segment Indices",
+            "type": "array"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "result_rev",
+          "segment_indices",
+          "to"
+        ],
+        "title": "SpeakerReassignRequest",
+        "type": "object"
+      },
+      "SpeakerStatView": {
+        "description": "Talk time of one roster label, after speaker edits.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "share": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "type": "number"
+          },
+          "speech_ms": {
+            "minimum": 0.0,
+            "title": "Speech Ms",
+            "type": "integer"
+          },
+          "turns": {
+            "minimum": 0.0,
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "speech_ms",
+          "share",
+          "turns"
+        ],
+        "title": "SpeakerStatView",
+        "type": "object"
+      },
       "TranscriptResultView": {
         "description": "Plaintext transcript response for a COMPLETE job (proxy-decrypt).\n\nThe stored artifact stays :class:`TranscriptionOutput` (raw ASR);\nNLP enrichment is applied at read time and degrades gracefully \u2014\n``nlp_applied=False`` means the segments are the raw transcript.",
         "properties": {
+          "capture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureTimingView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "corrections_rev": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Corrections Rev",
+            "type": "integer"
+          },
+          "count_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count Confidence"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CoverageView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/Diagnostics"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerEditView"
+            },
+            "title": "Edits",
+            "type": "array"
+          },
+          "enrichment": {
+            "default": "raw",
+            "enum": [
+              "full",
+              "partial",
+              "raw"
+            ],
+            "title": "Enrichment",
+            "type": "string"
+          },
+          "entity_corrections": {
+            "items": {
+              "$ref": "#/components/schemas/EntityCorrectionView"
+            },
+            "title": "Entity Corrections",
+            "type": "array"
+          },
+          "entity_unify": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Unify"
+          },
           "job_id": {
             "format": "uuid",
             "title": "Job Id",
@@ -263,6 +1890,27 @@
           "metadata": {
             "$ref": "#/components/schemas/TranscriptionMetadata"
           },
+          "name_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Name Candidates",
+            "type": "array"
+          },
+          "name_suggestions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NameSuggestionView"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Suggestions"
+          },
           "nlp_applied": {
             "default": false,
             "title": "Nlp Applied",
@@ -279,6 +1927,23 @@
             ],
             "title": "Nlp Pipeline Version"
           },
+          "noise": {
+            "items": {
+              "$ref": "#/components/schemas/NoiseRegion"
+            },
+            "title": "Noise",
+            "type": "array"
+          },
+          "relabel_available": {
+            "default": false,
+            "title": "Relabel Available",
+            "type": "boolean"
+          },
+          "result_rev": {
+            "default": 1,
+            "title": "Result Rev",
+            "type": "integer"
+          },
           "schema_version": {
             "default": 1,
             "title": "Schema Version",
@@ -291,6 +1956,13 @@
             "title": "Segments",
             "type": "array"
           },
+          "speaker_name_sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Speaker Name Sources",
+            "type": "object"
+          },
           "speaker_names": {
             "additionalProperties": {
               "type": "string"
@@ -298,12 +1970,41 @@
             "title": "Speaker Names",
             "type": "object"
           },
+          "speaker_sides": {
+            "additionalProperties": {
+              "enum": [
+                "local",
+                "remote"
+              ],
+              "type": "string"
+            },
+            "title": "Speaker Sides",
+            "type": "object"
+          },
+          "speaker_stats": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerStatView"
+            },
+            "title": "Speaker Stats",
+            "type": "array"
+          },
           "speakers": {
             "items": {
               "type": "string"
             },
             "title": "Speakers",
             "type": "array"
+          },
+          "speakers_hint": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speakers Hint"
           },
           "turns": {
             "items": {
@@ -329,6 +2030,17 @@
             "minimum": 0.0,
             "title": "End Ms",
             "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
           },
           "name": {
             "anyOf": [
@@ -370,6 +2082,11 @@
             "minimum": 0.0,
             "title": "Start Ms",
             "type": "integer"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -393,10 +2110,26 @@
             "title": "Audio Id",
             "type": "string"
           },
+          "can_undo_rediarize": {
+            "default": false,
+            "title": "Can Undo Rediarize",
+            "type": "boolean"
+          },
           "cancel_requested": {
             "default": false,
             "title": "Cancel Requested",
             "type": "boolean"
+          },
+          "coverage_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Share"
           },
           "detected_language": {
             "anyOf": [
@@ -408,6 +2141,44 @@
               }
             ],
             "title": "Detected Language"
+          },
+          "diarization_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diarization Error"
+          },
+          "diarization_rev": {
+            "default": 1,
+            "title": "Diarization Rev",
+            "type": "integer"
+          },
+          "diarization_runs": {
+            "default": 0,
+            "title": "Diarization Runs",
+            "type": "integer"
+          },
+          "diarization_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "complete",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diarization Status"
           },
           "diarize": {
             "default": false,
@@ -487,6 +2258,28 @@
             ],
             "title": "Finished At"
           },
+          "first_frame_offset_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Offset Ms"
+          },
+          "hints_applied": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hints Applied"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -504,6 +2297,18 @@
             "format": "date-time",
             "title": "Queued At",
             "type": "string"
+          },
+          "record_pressed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Pressed At"
           },
           "requester_sub": {
             "format": "uuid",
@@ -547,6 +2352,17 @@
             "format": "uuid",
             "title": "Tenant Id",
             "type": "string"
+          },
+          "vocabulary_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vocabulary Hint"
           }
         },
         "required": [
@@ -571,6 +2387,29 @@
             "minimum": 1.0,
             "title": "Beam Size",
             "type": "integer"
+          },
+          "coverage_share": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Share"
+          },
+          "diarization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiarizationStats"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "gpu_seconds": {
             "default": 0.0,
@@ -792,6 +2631,23 @@
         "parameters": [
           {
             "in": "header",
+            "name": "X-Client-Type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Client-Type"
+            }
+          },
+          {
+            "in": "header",
             "name": "Authorization",
             "required": false,
             "schema": {
@@ -965,6 +2821,334 @@
         ]
       }
     },
+    "/asr/jobs/{job_id}/corrections": {
+      "get": {
+        "operationId": "list_corrections_asr_jobs__job_id__corrections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Spellings unified (or proposed) for this transcript.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/corrections/{correction_id}": {
+      "put": {
+        "description": "Accept applies the spelling on the next read (all clients); reject\nreverts every occurrence. The same decision twice is a no-op.",
+        "operationId": "decide_correction_asr_jobs__job_id__corrections__correction_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "correction_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Correction Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept or reject one unified spelling.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/corrections:recompute": {
+      "post": {
+        "description": "For a job whose first run had no glossary (route down, terms added\nsince). Idempotent: the same transcript and priors give the same rows.",
+        "operationId": "recompute_corrections_asr_jobs__job_id__corrections_recompute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run the spelling unifier again (decisions people made are kept).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/rediarize": {
+      "post": {
+        "description": "\"There were 2 people\": new speaker labels in minutes, words untouched.\n\nThe job's ``status`` stays ``complete`` \u2014 the transcript is readable\nthe whole time; progress rides ``diarization_status``. Sprint 28 merges\nbelong to the replaced labelling and stop applying. Capped: one run in\nflight and ``rediarize_max_runs`` per job, plus a per-user hourly\nlimit. Re-runs do not count against the tenant's concurrent-job cap.",
+        "operationId": "rediarize_asr_jobs__job_id__rediarize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RediarizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RediarizeStatusView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Re-label a complete job's speakers from its stored audio (no re-transcription).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/rediarize/undo": {
+      "post": {
+        "operationId": "undo_rediarize_asr_jobs__job_id__rediarize_undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RediarizeStatusView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Go back to the speaker labels the last re-run replaced (one step).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
     "/asr/jobs/{job_id}/result": {
       "get": {
         "description": "Architecture rule: presigned URLs serve ciphertext \u2014 useless to a\nbrowser \u2014 so the transcript is decrypted through the envelope path and\nreturned on this AUTHENTICATED endpoint (ADR-0011 forbids client-side\ndecrypt). Every plaintext read is audited.\n\nThe raw transcript is run through nlp-service's batch pipeline\n(dictated \u00ab\u043a\u0440\u0430\u043f\u043a\u0430\u00bb\u2192\".\" + punctuation/number normalization) with the\ncaller's own bearer forwarded; on any NLP failure the raw transcript\nis returned with ``nlp_applied=false``.",
@@ -1090,6 +3274,373 @@
           }
         },
         "summary": "Name the diarized speakers of a job (label \u2192 display name).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/edits/reset": {
+      "post": {
+        "description": "Back to what the diarizer produced for this revision. Idempotent;\nthe stored transcript was never changed, so nothing else moves.",
+        "operationId": "reset_speaker_edits_asr_jobs__job_id__speakers_edits_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revert every speaker edit of the current revision.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/edits/{edit_id}": {
+      "delete": {
+        "description": "Only the latest live edit can be undone \u2014 keeps the fold deterministic.",
+        "operationId": "undo_speaker_edit_asr_jobs__job_id__speakers_edits__edit_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "edit_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Edit Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo the latest speaker edit of a job.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/merge": {
+      "post": {
+        "description": "Every segment of ``from`` reads as ``into`` from now on \u2014 in the\nroster, the names, the turns and the talk time. The stored transcript\nis not touched; the edit is undone with ``DELETE \u2026/speakers/edits/{id}``.\nIf ``from`` has a name and ``into`` has none, ``into`` takes the name.",
+        "operationId": "merge_speakers_asr_jobs__job_id__speakers_merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeakerEditResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge one diarized speaker into another (reversible overlay).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/reassign": {
+      "post": {
+        "description": "One wrong reply fixed in two clicks. An overlay edit like a merge:\nthe stored transcript never changes, the latest edit can be undone,\nand the edit applies only to the revision it was made on.",
+        "operationId": "reassign_turns_asr_jobs__job_id__speakers_reassign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerReassignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeakerEditResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move turns to another speaker, a new speaker, or unattributed.",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/jobs/{job_id}/speakers/suggestions/dismiss": {
+      "post": {
+        "operationId": "dismiss_name_suggestion_asr_jobs__job_id__speakers_suggestions_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissSuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Never offer this name for this speaker again (this job).",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/limits": {
+      "get": {
+        "operationId": "limits_asr_limits_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsrLimits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "What one upload may be \u2014 so a client can warn before, not fail after.",
         "tags": [
           "asr"
         ]

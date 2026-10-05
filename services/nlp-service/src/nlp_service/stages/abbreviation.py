@@ -25,6 +25,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 
 from ..pipeline.base import (
     AbbreviationEntry,
@@ -72,20 +73,31 @@ class AbbreviationStage:
         )
 
 
-def _compile_rules(ctx: ProcessingContext) -> list[_CompiledRule]:
-    """Project the snapshot into a list of compiled regex rules.
+def _compile_rules(ctx: ProcessingContext) -> tuple[_CompiledRule, ...]:
+    """Project the snapshot into compiled regex rules.
 
     Order matters: tenant overrides FIRST so a global rule never wins
     against a tenant one. Domain-matching rules win over ``all`` which
     wins over NULL domain.
+
+    Memoized on ``(entries, category)`` — the snapshot is immutable and
+    shared across requests, so a tenant with a large dictionary compiles
+    its Unicode patterns once instead of on every call.
     """
+    return _compile_rules_cached(ctx.abbreviation_snapshot.entries, ctx.category)
+
+
+@lru_cache(maxsize=256)
+def _compile_rules_cached(
+    entries: tuple[AbbreviationEntry, ...], category: str | None
+) -> tuple[_CompiledRule, ...]:
     relevant: list[AbbreviationEntry] = []
     seen: set[tuple[str, str]] = set()
     sorted_entries = sorted(
-        ctx.abbreviation_snapshot.entries,
+        entries,
         key=lambda e: (
             0 if e.is_tenant_override else 1,
-            0 if e.domain == ctx.category else (1 if e.domain == "all" else 2),
+            0 if e.domain == category else (1 if e.domain == "all" else 2),
         ),
     )
     for e in sorted_entries:
@@ -110,4 +122,4 @@ def _compile_rules(ctx: ProcessingContext) -> list[_CompiledRule]:
             flags | re.UNICODE,
         )
         rules.append(_CompiledRule(pattern=pattern, replacement=dst, domain=e.domain))
-    return rules
+    return tuple(rules)

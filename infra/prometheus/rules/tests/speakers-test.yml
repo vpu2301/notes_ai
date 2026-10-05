@@ -1,0 +1,265 @@
+rule_files:
+  - ../speakers.yml
+evaluation_interval: 1m
+tests:
+  - interval: 10m
+    name: fires when a third of diarized jobs have 5+ speakers
+    input_series:
+      - series: 'mdx_asr_diarization_speakers_bucket{le="4"}'
+        values: "0+2x200"
+      - series: 'mdx_asr_diarization_speakers_count'
+        values: "0+3x200"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: DiarizationSpeakerOvercount
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform}
+            exp_annotations:
+              summary: "33.33% of diarized jobs have 5+ speakers (24 h)"
+              description: |
+                Speaker over-count smell: check the Speakers row (speaker-count histogram, clusters dropped) and the per-job metadata.diarization of recent jobs.
+                Runbook: docs/runbooks/asr-worker.md#speaker-overcount
+
+  - interval: 10m
+    name: silent when most jobs have 2-4 speakers
+    input_series:
+      - series: 'mdx_asr_diarization_speakers_bucket{le="4"}'
+        values: "0+9x200"
+      - series: 'mdx_asr_diarization_speakers_count'
+        values: "0+10x200"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: DiarizationSpeakerOvercount
+        exp_alerts: []
+
+  - interval: 1h
+    name: silent below the volume floor
+    input_series:
+      - series: 'mdx_asr_diarization_speakers_bucket{le="4"}'
+        values: "0+0x30"
+      - series: 'mdx_asr_diarization_speakers_count'
+        values: "0+0.5x30"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: DiarizationSpeakerOvercount
+        exp_alerts: []
+
+  - interval: 10m
+    name: diarization slow vs audio fires when 1 run in 10 takes over a quarter of its audio
+    input_series:
+      # 9 of every 10 runs at ratio (0.1, 0.15], 1 at (0.25, 0.3] -> p95 = 0.275.
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.1"}'
+        values: "0+0x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.15"}'
+        values: "0+9x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.25"}'
+        values: "0+9x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.3"}'
+        values: "0+10x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="+Inf"}'
+        values: "0+10x30"
+      - series: 'mdx_asr_diarization_audio_ratio_count{engine="pyannote-community-1"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: DiarizationSlowVsAudio
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform, engine: pyannote-community-1}
+            exp_annotations:
+              summary: "pyannote-community-1: p95 diarization time is 27.5% of the job's audio (target ≤ 25 %)"
+              description: |
+                More than 5 % of diarization runs in the last hour took over a quarter of their audio duration. Check the Speakers row (diarization/audio ratio, raw diarization vs audio seconds) and whether the worker fell back to CPU.
+                Runbook: docs/runbooks/asr-worker.md#diarization-slow
+
+  - interval: 10m
+    name: diarization slow vs audio silent when only 4 % of runs exceed a quarter of their audio
+    input_series:
+      # 96 of every 100 runs at ratio (0.2, 0.25], 4 at (0.25, 0.3] -> p95 just under 0.25.
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.2"}'
+        values: "0+0x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.25"}'
+        values: "0+96x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.3"}'
+        values: "0+100x30"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="+Inf"}'
+        values: "0+100x30"
+      - series: 'mdx_asr_diarization_audio_ratio_count{engine="pyannote-community-1"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: DiarizationSlowVsAudio
+        exp_alerts: []
+
+  - interval: 1h
+    name: diarization slow vs audio silent below the volume floor
+    input_series:
+      # Every run slow, but only 3 runs an hour.
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.3"}'
+        values: "0+0x10"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="0.5"}'
+        values: "0+3x10"
+      - series: 'mdx_asr_diarization_audio_ratio_bucket{engine="pyannote-community-1", le="+Inf"}'
+        values: "0+3x10"
+      - series: 'mdx_asr_diarization_audio_ratio_count{engine="pyannote-community-1"}'
+        values: "0+3x10"
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: DiarizationSlowVsAudio
+        exp_alerts: []
+
+  - interval: 10m
+    name: rediarize failure rate fires when one run in five fails
+    input_series:
+      - series: 'mdx_asr_rediarize_total{outcome="complete"}'
+        values: "0+4x30"
+      - series: 'mdx_asr_rediarize_total{outcome="failed"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RediarizeFailureRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform}
+            exp_annotations:
+              summary: "20% of speaker re-labelling runs failed (1 h)"
+              description: |
+                Re-labelling failures: check the Speakers row (re-labelling runs by outcome, request outcomes) and the error kind in transcription_jobs.diarization_error and the asr.rediarize_failed audit events.
+                Runbook: docs/runbooks/asr-worker.md#rediarize-failures
+
+  - interval: 10m
+    name: rediarize failure rate silent at one failure in twenty
+    input_series:
+      - series: 'mdx_asr_rediarize_total{outcome="complete"}'
+        values: "0+19x30"
+      - series: 'mdx_asr_rediarize_total{outcome="failed"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RediarizeFailureRateHigh
+        exp_alerts: []
+
+  - interval: 1h
+    name: rediarize failure rate silent when the only run of the hour failed
+    input_series:
+      - series: 'mdx_asr_rediarize_total{outcome="complete"}'
+        values: "0+0x10"
+      - series: 'mdx_asr_rediarize_total{outcome="failed"}'
+        values: "0+1x10"
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: RediarizeFailureRateHigh
+        exp_alerts: []
+
+  - interval: 1h
+    name: speaker correction rate fires when 4 in 10 opened results are corrected
+    input_series:
+      - series: 'mdx_asr_diarized_results_opened_total'
+        values: "0+10x200"
+      - series: 'mdx_asr_speaker_corrected_jobs_total'
+        values: "0+4x200"
+    alert_rule_test:
+      - eval_time: 8d
+        alertname: SpeakerCorrectionRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform}
+            exp_annotations:
+              summary: "40% of opened diarized results were corrected (7 d)"
+              description: |
+                People are fixing the speakers of more than 30 % of the transcripts they open. Check the Speakers row (correction rate, edit mix, re-labelling outcomes, speakers per job by engine) and the weekly speaker CSV by engine / hint / client (docs/product/speaker-metrics.md).
+                Runbook: docs/runbooks/asr-worker.md#speaker-correction-rate
+
+  - interval: 1h
+    name: speaker correction rate silent at one in five
+    input_series:
+      - series: 'mdx_asr_diarized_results_opened_total'
+        values: "0+10x200"
+      - series: 'mdx_asr_speaker_corrected_jobs_total'
+        values: "0+2x200"
+    alert_rule_test:
+      - eval_time: 8d
+        alertname: SpeakerCorrectionRateHigh
+        exp_alerts: []
+
+  - interval: 6h
+    name: speaker correction rate silent below 50 opened jobs a week
+    input_series:
+      # 28 opened a week, every one corrected.
+      - series: 'mdx_asr_diarized_results_opened_total'
+        values: "0+1x40"
+      - series: 'mdx_asr_speaker_corrected_jobs_total'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 8d
+        alertname: SpeakerCorrectionRateHigh
+        exp_alerts: []
+
+  - interval: 1h
+    name: dual-channel mono fallback fires at one in ten
+    input_series:
+      - series: 'mdx_asr_diarization_dual_jobs_total{outcome="dual"}'
+        values: "0+9x60"
+      - series: 'mdx_asr_diarization_dual_jobs_total{outcome="mono_fallback"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: DualChannelMonoFallbackHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "10% of dual-channel captures fell back to mono (24 h)"
+              description: |
+                The channel analysis is failing on dual-channel captures; they are diarized from the mixdown. Check `diarization.dual_fallback` log lines (error_class) and the Speakers row (dual-channel outcomes).
+                Runbook: docs/runbooks/asr-worker.md#dual-channel-fallback
+
+  - interval: 1h
+    name: dual-channel mono fallback silent at one in a hundred
+    input_series:
+      - series: 'mdx_asr_diarization_dual_jobs_total{outcome="dual"}'
+        values: "0+99x60"
+      - series: 'mdx_asr_diarization_dual_jobs_total{outcome="mono_fallback"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: DualChannelMonoFallbackHigh
+        exp_alerts: []
+
+  - interval: 6h
+    name: dual-channel mono fallback silent below 20 dual jobs a day
+    input_series:
+      # Every one falls back, but only 4 a day.
+      - series: 'mdx_asr_diarization_dual_jobs_total{outcome="mono_fallback"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 3d
+        alertname: DualChannelMonoFallbackHigh
+        exp_alerts: []
+
+  - interval: 5m
+    name: engine unavailable fires on repeated load failures
+    input_series:
+      - series: 'mdx_asr_diarization_unavailable_total{engine="pyannote-community-1"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DiarizationEngineUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              engine: pyannote-community-1
+            exp_annotations:
+              summary: "pyannote-community-1: diarization engine failed to load 6 times in 30 min"
+              description: |
+                Diarized jobs cannot be labelled. Check the worker log `diarization.load_failed` / `diarization.v2_refused` (reason) and MDX_DIAR_ENGINE; rollback is MDX_DIAR_ENGINE=legacy.
+                Runbook: docs/runbooks/asr-worker.md#diarization-engine
+
+  - interval: 5m
+    name: engine unavailable silent on a single failure
+    input_series:
+      - series: 'mdx_asr_diarization_unavailable_total{engine="legacy-ecapa-ahc"}'
+        values: "0 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DiarizationEngineUnavailable
+        exp_alerts: []

@@ -1,0 +1,276 @@
+{
+  "title": "Viral loop",
+  "uid": "viral-loop",
+  "schemaVersion": 39,
+  "tags": [
+    "notes",
+    "growth"
+  ],
+  "time": {
+    "from": "now-14d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Links created (by kind)",
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(mdx_share_links_created_total[1d]))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "First views (link reached the recipient)",
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(mdx_shared_views_total{first_view=\"true\"}[1d]))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "CTA clicks",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_shared_cta_clicks_total[1d]))",
+          "legendFormat": "clicks"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Leads captured",
+      "targets": [
+        {
+          "expr": "sum by (ref_present) (increase(mdx_leads_captured_total[1d]))",
+          "legendFormat": "ref_present={{ref_present}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Funnel ratios (14d)",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_shared_views_total{first_view=\"true\",kind=\"recipient\"}[14d])) / clamp_min(sum(increase(mdx_share_links_created_total{kind=\"recipient\"}[14d])), 1)",
+          "legendFormat": "first views / recipient links"
+        },
+        {
+          "expr": "sum(increase(mdx_shared_cta_clicks_total[14d])) / clamp_min(sum(increase(mdx_shared_views_total{first_view=\"true\"}[14d])), 1)",
+          "legendFormat": "CTA clicks / first views"
+        },
+        {
+          "expr": "sum(increase(mdx_leads_captured_total[14d])) / clamp_min(sum(increase(mdx_shared_cta_clicks_total[14d])), 1)",
+          "legendFormat": "leads / CTA clicks"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate-limited requests on /v1/shared (by scope)",
+      "targets": [
+        {
+          "expr": "sum by (scope) (rate(mdx_shared_rate_limit_total[5m]))",
+          "legendFormat": "{{scope}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Recipient responses (by kind)",
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(mdx_shared_responses_total[1d]))",
+          "legendFormat": "{{kind}}"
+        },
+        {
+          "expr": "sum(increase(mdx_shared_flags_total[1d]))",
+          "legendFormat": "flag"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Dispute rate (7d) \u2014 kill signal above 20%",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_shared_responses_total{kind=\"dispute\"}[7d])) / clamp_min(sum(increase(mdx_shared_responses_total[7d])), 1)",
+          "legendFormat": "disputes / all responses"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 30,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Parser quality: items with owner / due (14d)",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_action_items_materialised_total{parsed_owner=\"true\"}[14d])) / clamp_min(sum(increase(mdx_action_items_materialised_total[14d])), 1)",
+          "legendFormat": "with owner"
+        },
+        {
+          "expr": "sum(increase(mdx_action_items_materialised_total{parsed_due=\"true\"}[14d])) / clamp_min(sum(increase(mdx_action_items_materialised_total[14d])), 1)",
+          "legendFormat": "with due date"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Flags per 100 first views (14d)",
+      "targets": [
+        {
+          "expr": "100 * sum(increase(mdx_shared_flags_total[14d])) / clamp_min(sum(increase(mdx_shared_views_total{first_view=\"true\"}[14d])), 1)",
+          "legendFormat": "flags / 100 views"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 38,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Signups (by outcome)",
+      "targets": [
+        {
+          "expr": "sum by (result) (increase(mdx_auth_signup_total[1d]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Referred signups: requested \u2192 verified",
+      "targets": [
+        {
+          "expr": "sum by (stage) (increase(mdx_auth_signup_referred_total[1d]))",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 46,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "table",
+      "title": "Loop funnel by week (links \u2192 sent \u2192 viewed \u2192 responded \u2192 CTA \u2192 leads \u2192 signups \u2192 verified \u2192 activated)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Recipient viral loop \u2014 the funnel cohort (Sprints 19\u201322).\n--\n-- One row per ISO week of link creation, counts only:\n--   finalized notes \u2192 notes with a recipient link \u2192 links created \u2192 sent\n--   by the product \u2192 first-viewed \u2192 with \u22651 response \u2192 CTA clicked \u2192\n--   leads \u2192 referred signups \u2192 verified workspaces \u2192 workspaces with a\n--   finalized note within 7 days of verifying.\n--\n-- Run as `funnel_reader` (migration 0040) \u2014 Grafana's Postgres datasource\n-- and scripts/jobs/weekly_funnel.py both do. The join from referrals to\n-- the sender's link happens HERE and nowhere in the product: no table\n-- stores the referring tenant next to the referred one.\n\nWITH weeks AS (\n    SELECT date_trunc('week', created_at)::date AS week, id AS note_id\n    FROM notes WHERE finalized_at IS NOT NULL AND deleted_at IS NULL\n),\nlinks AS (\n    SELECT id, note_id, ref_code, created_at,\n           date_trunc('week', created_at)::date AS week,\n           first_viewed_at, cta_clicked_at,\n           delivery_status::text AS delivery_status\n    FROM note_share_links\n    WHERE kind = 'recipient'\n),\nresponded AS (\n    SELECT DISTINCT link_id FROM share_link_responses WHERE cleared_at IS NULL\n),\nleads AS (\n    SELECT ref_code FROM referrals WHERE lead_email IS NOT NULL\n),\nreferred AS (\n    SELECT ref_code, referred_sub, referred_tenant_id, created_at\n    FROM referrals WHERE source = 'signup'\n),\nactivated AS (\n    SELECT t.id AS tenant_id, min(n.finalized_at) AS first_finalized_at\n    FROM tenants t JOIN notes n ON n.tenant_id = t.id AND n.finalized_at IS NOT NULL\n    WHERE t.signup_source = 'referral'\n    GROUP BY t.id\n)\nSELECT\n    l.week,\n    (SELECT count(*) FROM weeks w WHERE w.week = l.week)                        AS notes_finalized,\n    count(DISTINCT l.note_id)                                                   AS notes_with_recipient_link,\n    count(*)                                                                    AS links_created,\n    count(*) FILTER (WHERE l.delivery_status = 'sent')                          AS links_sent,\n    count(l.first_viewed_at)                                                    AS first_viewed,\n    count(r.link_id)                                                            AS links_responded,\n    count(l.cta_clicked_at)                                                     AS cta_clicked,\n    count(ld.ref_code)                                                          AS leads,\n    count(rf.referred_sub)                                                      AS signup_requested,\n    count(rf.referred_tenant_id)                                                AS verified,\n    count(a.tenant_id) FILTER (\n        WHERE a.first_finalized_at <= rf.created_at + interval '7 days')        AS activated_7d,\n    round(100.0 * count(rf.referred_tenant_id)\n          / nullif(count(l.first_viewed_at), 0), 2)                             AS loop_efficiency_pct\nFROM links l\nLEFT JOIN responded r  ON r.link_id = l.id\nLEFT JOIN leads ld     ON ld.ref_code = l.ref_code\nLEFT JOIN referred rf  ON rf.ref_code = l.ref_code\nLEFT JOIN activated a  ON a.tenant_id = rf.referred_tenant_id\nGROUP BY l.week\nORDER BY l.week DESC;\n",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 24,
+        "h": 10
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Recipient mail from the product (by outcome)",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(mdx_recipient_mail_sent_total[1d]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      }
+    }
+  ]
+}

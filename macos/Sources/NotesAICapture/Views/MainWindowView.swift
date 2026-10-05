@@ -61,15 +61,35 @@ struct MainWindowView: View {
         }
         .frame(minWidth: 860, minHeight: 540)
         .sheet(isPresented: $app.settingsPresented) {
+            // Roomy, but never taller or wider than the screen it opens on.
             SettingsView(onClose: { app.settingsPresented = false })
-                .frame(width: 760, height: 620)
+                .frame(width: min(940, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
+                       height: min(780, (NSScreen.main?.visibleFrame.height ?? 900) - 80))
         }
         .sheet(isPresented: $app.invitePresented) {
             InviteView(onClose: { app.invitePresented = false })
                 .frame(width: 540, height: 560)
         }
+        .sheet(isPresented: $app.templatePickerPresented) {
+            TemplatePickerSheet(onClose: { app.templatePickerPresented = false })
+                .frame(width: 640, height: 520)
+        }
+        .alert("That did not work", isPresented: Binding(
+            get: { app.actionNotice != nil }, set: { if !$0 { app.actionNotice = nil } }
+        )) {
+            Button("OK") { app.actionNotice = nil }
+        } message: {
+            Text(app.actionNotice ?? "")
+        }
         .sheet(item: $app.reauth) { prompt in
             ReauthSheet(prompt: prompt)
+        }
+        // Sprint 31: the call-audio notice. Settings shows its own copy
+        // while it is open (a sheet cannot present over another here).
+        .sheet(isPresented: Binding(
+            get: { capture.callAudioConsentPresented && !app.settingsPresented },
+            set: { if !$0 { capture.callAudioConsentPresented = false } })) {
+            CallAudioConsentSheet()
         }
         .alert("Recordings are still waiting", isPresented: $app.signOutPrompt) {
             Button("Keep for next sign-in") { Task { await app.signOut() } }
@@ -87,8 +107,11 @@ struct MainWindowView: View {
                 await app.refreshWorkspaces()
                 await app.retryPendingUploads()
             }
+            // The bell's count, kept warm only while the window is open.
+            app.startNotificationPolling()
         }
         .onDisappear {
+            app.stopNotificationPolling()
             // Back to a menu-bar-only app once the window is gone.
             NSApp.setActivationPolicy(.accessory)
         }
@@ -210,15 +233,21 @@ private struct MeetingStatusPane: View {
     }
 
     private func menuItems() -> [DSMenuItem] {
-        [
+        var items: [DSMenuItem] = [
             .item("Copy job ID", symbol: "number") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(row.jobId, forType: .string)
             },
-            .separator,
-            .item("Remove from list", symbol: "trash", danger: true) {
-                app.removeRecents(jobIds: [row.jobId])
-            },
         ]
+        if row.status == .queued || row.status == .running {
+            items.append(.item("Cancel transcription", symbol: "xmark.circle", danger: true) {
+                Task { await app.cancelCapture(jobId: row.jobId) }
+            })
+        }
+        items.append(.separator)
+        items.append(.item("Remove from list", symbol: "trash", danger: true) {
+            app.removeRecents(jobIds: [row.jobId])
+        })
+        return items
     }
 }

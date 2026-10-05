@@ -111,7 +111,7 @@ struct ConnectorsView: View {
         case .some(false) where !google.isConnected:
             return google.linkAvailable
                 ? "Google sign-in is not set up on this server — add a calendar by its private iCal address instead."
-                : "Not set up on this server (GOOGLE_CALENDAR_CLIENT_ID)."
+                : "Google Calendar isn't set up for this workspace. Ask whoever runs it."
         default:
             if google.isConnected { return "Next 7 days on the home page, here and in the web app." }
             return google.linkAvailable
@@ -321,7 +321,7 @@ struct ConnectorsView: View {
             }
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsSymbol(12, .medium))
                     .foregroundStyle(DS.accentText)
                     .padding(.top, 2)
                 Text("Google or Outlook calendar missing? Add the account in Settings › Apps › Calendar › Accounts; it shows up here.")
@@ -349,7 +349,7 @@ struct ConnectorsView: View {
                 DSMenu(items: presetItems) {
                     HStack(spacing: 5) {
                         Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.dsSymbol(11, .semibold))
                         Text("Add")
                             .font(.ds(13.5, .medium))
                     }
@@ -509,11 +509,11 @@ private struct ConnectorGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 14, weight: .medium))
+            .font(.dsSymbol(14, .medium))
             .foregroundStyle(DS.accentText)
             .frame(width: 32, height: 32)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                     .fill(DS.accentSoft)
             )
     }
@@ -703,7 +703,7 @@ private struct ConnectorEditor: View {
                     Button {
                         copyToPasteboard(MCPOAuth.redirectURI)
                     } label: {
-                        Image(systemName: "doc.on.doc").font(.system(size: 12))
+                        Image(systemName: "doc.on.doc").font(.dsSymbol(12, .regular))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DS.muted)

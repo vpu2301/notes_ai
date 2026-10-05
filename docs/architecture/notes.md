@@ -32,25 +32,23 @@ A note belongs to a **tenant + author** (`primary_author_id` +
 
 ## Status lifecycle
 
-Allowed transitions (`domain/note_lifecycle.py`):
+A note is a living document. It is `draft` from creation until it is
+cancelled; there is no "done" state (migration 0042 retired the
+finalize → amend lifecycle and moved every frozen row back to
+`draft`; `finalized_at` is kept as history). The one transition
+(`domain/note_lifecycle.py`):
 
 ```
-   ┌──────────┐   finalize   ┌──────────────┐   amend    ┌─────────┐
-   │  draft   │─────────────►│  finalized   │───────────►│ amended │──┐
-   └────┬─────┘ ◄────revert──└──────┬───────┘            └─────────┘  │ amend
-        │     (1h, author)          │                         ▲       │ (again)
-        │ cancel                    │ cancel                  └───────┘
-        ▼                           ▼
-   ┌──────────┐                ┌──────────┐
-   │ cancelled│                │ cancelled│
-   └──────────┘                └──────────┘
+   ┌──────────┐   cancel    ┌───────────┐
+   │  draft   │────────────►│ cancelled │
+   └──────────┘             └───────────┘
 ```
 
-Finalize is a plain lifecycle transition with validation (required
-sections present, typed-field completeness). Transitions are
-single-statement UPDATEs with `WHERE status = expected_from`;
-concurrent transitions are caught and 409'd. The revert window is 1
-hour and limited to the primary author.
+It is a single-statement UPDATE with `WHERE status = expected_from`;
+a concurrent transition is caught and 409'd. Every edit appends a
+version (see below), sharing works on any live note, and action
+items are derived lazily from whichever version is current when it is
+first read (`domain/action_items.py::ensure_items`).
 
 ## Optimistic locking
 
@@ -65,18 +63,17 @@ Idempotent retries use `metadata.body_hash`: same body + same
 `expected_version` returns the prior version with `idempotent_replay:
 true`.
 
-## Amendments
+## Amendments (retired)
 
-`POST /v1/notes/{id}/amend` is allowed on finalized (or already
-amended) notes. It creates a new `note_versions` row with
-`is_amendment=true` and moves the note to `amended`; further
-amendments keep appending versions.
+`POST /v1/notes/{id}/amend` was removed with the finalize lifecycle
+(0042). The `is_amendment` / `amendment_type` / `amendment_reason`
+columns on `note_versions` remain as history and are still returned
+on version listings; every new version is an ordinary autosave.
 
 ## Chain integrity
 
 `domain/chain_integrity.py` is a pure-Python verifier; it's called
 by:
-- The CI property test (`tests/property/test_amendment_chain.py`),
 - The daily reconciler (`jobs/chain_reconciler.py`, cron 04:30 UTC).
 
 Anomalies recorded both in `audit.note_chain_failures` (for the
@@ -131,9 +128,9 @@ are always safe.
 `GET /v1/notes/{id}/pdf` renders the current version through
 Jinja2 + WeasyPrint (`domain/pdf.py`, deterministic byte-equal
 output). Tenant branding (`domain/branding.py`) supplies the issuer
-name from the `tenants` row. Draft notes always carry a bilingual
-DRAFT watermark; `?variant=clean` is honoured only for
-finalized/amended notes; cancelled notes are refused (409).
+name from the `tenants` row. The output is clean by default;
+`?variant=draft` adds the bilingual DRAFT watermark when the author
+wants a copy marked provisional; cancelled notes are refused (409).
 
 ## Observability
 
@@ -150,13 +147,92 @@ finalized/amended notes; cancelled notes are refused (409).
 
 ## Related surfaces
 
+- **Corrections and the workspace glossary (Sprint 35, ADR-0055
+  amendment)**: a generated line is addressed by its `item_key` — the hash
+  of its body with the marker, owner prefix and due phrase stripped, cut by
+  the one splitter in `domain/lines.py`. `POST /v1/notes/{id}/items/{key}/
+  dismiss` (with a closed-vocabulary reason), `…/restore` (which takes the
+  line's text back out of the version chain rather than storing it) and
+  `PATCH /v1/notes/{id}/items/by-key/{key}` (owner and due date, in place)
+  all write ordinary note versions, so History, the diff and the derived
+  action items follow. The key does not change, which is what keeps a
+  recipient's confirmation attached across an owner fix.
+  `note_item_corrections` logs what was fixed and never the text.
+  `workspace_glossary` + `/v1/glossary` hold the spellings this workspace
+  uses; `GET /v1/glossary/hint` is the capture form's `vocabulary_hint`, so
+  the transcriber gets the names before it guesses. Terms are added only by
+  an explicit yes to "Remember this?" after a correction.
+- **The document engine (Sprint 33, ADR-0058)**: a note writes itself.
+  `POST /v1/notes/from-transcript` snapshots the ASR result, inserts a
+  `note_generations` row and enqueues `note.generate` on `libs/jobs`;
+  `python -m note_service.worker` drains it. The pipeline
+  (`domain/meeting_doc/`) is windows → extract → **verify** → merge →
+  reduce → render, and verification is the load-bearing step: a claim
+  whose quote is not in the transcript is dropped, an owner who was not
+  in the room is cleared, a date nobody said is never written, a number
+  that does not match is removed, and a decision nobody agreed to is
+  downgraded to a key point. `writer.py` rewrites only sections that are
+  empty or still hold the last generation's exact text — the author's
+  own writing is never touched, and its facts come back as `suggested`.
+  Verified facts land in `note_generated_items` with their quote and
+  timing (what Sprint 35's evidence chips read). Status and regenerate
+  are `/v1/notes/{id}/generation`; the facts are
+  `/v1/notes/{id}/generated-items`. Section ROLES
+  (`meeting_doc/roles.py`, `TemplateSection.role`) are what the engine,
+  the shared page, the action-item projection and the PDF all decide by.
+- **Type-specific generation (Sprint 36, ADR-0057 amendment)**: the
+  extractor's enum is built per FAMILY from `meeting_doc/types.py`, so a
+  sales call sees `need`/`objection`/`stakeholder` and a client call sees
+  `client_request`/`commitment_ours`/`commitment_theirs`. A `judgement`
+  fact is stored `suggested` + `internal` with its quote and is never
+  written to the field. A `completion` may only reference a carried item
+  by its number in the prompt's list, and without a verified quote the
+  item stays open. A commitment's side comes from the owner's name, not
+  from the kind the model chose; an unresolved side is flagged and
+  rendered in its own group. `note_generated_items.audience` marks
+  internal-by-kind lines, which `client_view` drops.
+- **The client document and series (Sprint 36, ADR-0057)**: every
+  external surface — `GET /v1/shared/{token}`, the shared PDF
+  (`variant="client"`) and the author's preview
+  (`GET /v1/notes/{id}/client-version`) — renders `domain/client_view.py`
+  and nothing else. It is an allow-list by ROLE
+  (`domain/meeting_doc/types.py`): `user_notes` and the transcript can
+  never appear, a section that IS a transcript is excluded whatever slot
+  it sits in, a line prefixed `(internal)` is dropped (and the mark never
+  renders, and does not change the line's `item_key`), and the 1:1 and
+  interview families have no client version at all. Meetings in a series
+  are joined by `note_meetings.series_key` — a hash of the calendar UID,
+  else of the title plus the attendee set — and the previous meeting's
+  open items are restated as "Still open from {date}" check items
+  (`domain/carry_over.py`, `note_carried_items`), keeping the previous
+  note's `item_key`. Reading another note always goes through
+  `access.can_view` for the new note's author.
+- **The live meeting note (ADR-0055)**: `POST /v1/notes/meeting` creates
+  the note when Record is pressed — before there is any audio, let alone a
+  transcript — so the author has somewhere to type while the meeting runs.
+  It is idempotent on `client_capture_id`. The capture's lifecycle lives on
+  the `note_meetings` sidecar (`recording → uploading → transcribing →
+  generating → ready`, plus `no_audio` / `failed`), never on `notes.status`:
+  `PUT /v1/notes/{id}/my-notes/timing` records when each typed line was
+  first touched, `POST /v1/notes/{id}/meeting/job` binds the transcription,
+  `POST /v1/notes/{id}/transcript` fills the note and queues the engine
+  (Sprint 33, same rules as `from-transcript`; the capture is `ready`, the
+  run's progress is on `GET /v1/notes/{id}/generation`), and
+  `GET /v1/notes/{id}/meeting` lets a second device pick up where the first
+  stopped. What the author typed lives in the `user_notes` section of every
+  meeting template and is **never** rewritten by anything downstream.
+  Line timings sit in `note_user_line_times` rather than in `NoteContent`,
+  which is `extra="forbid"` and hash-chained. Attendee names and the
+  invite's agenda (extracted deterministically by
+  `domain/meeting_doc/agenda.py`; the raw description is never stored) are
+  content: tenant-scoped, never logged or audited.
 - **Create-from-transcript**: `POST /v1/notes/from-transcript` turns a
   completed batch transcription into a draft note; template selection
   is deterministic keyword scoring (`domain/template_match.py`) with a
   `meeting_notes` fallback. `GET /v1/notes/by-source-job` powers the
   jobs-list "already assigned" badge.
-- **Dictation sessions**: sessions create drafts via `POST /v1/notes`;
-  finalize can backfill `source_session_id`.
+- **Dictation sessions**: sessions create drafts via `POST /v1/notes`
+  and stamp `source_session_id`.
 - **Audio replay (ADR-0037)**: per-section segment listing under
   `/v1/notes/{id}/sections/{key}/audio-clips` plus the ephemeral
   clip pipeline under `/v1/audio-clips`.
@@ -169,6 +245,12 @@ finalized/amended notes; cancelled notes are refused (409).
   `templates.category`.
 - **Idle-draft cleanup** (sprint-16, ADR-0041): in-process scheduler,
   `MDX_BACKGROUND_JOBS`.
+- **Speakers in a transcript-backed note** (Sprint 28–30): the result view
+  note-service fetches already has speaker edits folded in (merge +
+  reassign, `seq` order, one revision) — see `asr.md` § Speaker edits for
+  the fold order and the artifact index space. Anchor evidence by
+  `start_ms`/`end_ms` + artifact `segment_indices`, never by turn position;
+  `name_candidates` on that view are read-only here.
 
 ## `field_specific_metadata` — the normative key registry (sprint 13)
 
@@ -208,32 +290,47 @@ Common rules (enforced by the typed models):
   `META_MODEL_BY_FIELD_TYPE` in `note_models.field_metadata` — never
   by bypassing it.
 
-## Typed finalize completeness (sprint 13)
+## Typed-field provenance (sprint 13)
 
-`min_chars` measures prose, so it says nothing about a `choice`
-section whose answer lives in `field_specific_metadata`. Each typed
-field type gets its own "filled" rule. Free-text sections behave
-exactly as they did in sprint 08 — zero change for existing templates.
+A typed section may carry `source: "extracted"` in its metadata. That
+is deliberate and honest: the hash chain covers the content including
+its provenance marker, so a reader can always tell which values a
+machine proposed and the author left standing, versus which they
+entered or confirmed themselves. (Sprint 13's finalize completeness
+rules were retired with finalize itself, 0042.)
 
-| `field_type` | filled when | violation code |
-| --- | --- | --- |
-| `free_text` | `min_chars` (unchanged) | `missing_required_section` / `below_min_chars` |
-| `choice` | metadata `selected` present (any `source`) | `choice_not_selected` |
-| `multi_choice` | `selected` non-empty (any `source`) | `choice_not_selected` |
-| `numeric_with_unit` | metadata `value` **and** `unit` present | `numeric_not_filled` |
-| `date` / `date_with_note` | metadata `date` present; `date_with_note` also applies `min_chars` to the note | `date_not_filled` (+ `below_min_chars`) |
+## Action items as a derived projection (Sprint 20, migration 0037)
 
-All violations travel in the existing sprint-08 `FinalizeProblem`
-shape at **422** (409 stays reserved for status/version conflicts);
-the codes are registered in `_REASON_BY_CODE`.
+`note_action_items` is **derived** from the `action_items` / `next_steps`
+section text of one `note_versions` row, materialised the first time
+that version is read — author items view or shared page
+(`domain/action_items.py::ensure_items`) — and never edited directly
+except for `status`. The section text stays
+canonical: the version hash chain, the editor, PDF, Markdown and search
+are unchanged, and nothing can drift from the prose.
 
-An `extracted` value satisfies "filled": the author saw the proposal
-and chose to finalize, which is acceptance.
+**Line grammar** (deterministic, no model): `[bullet] [Owner:] task [— [by|due] date]`.
+An explicit `Name:` prefix (≤ 4 words) is the owner with confidence 1.0;
+two leading capitalised words are an *inferred* owner at 0.5, shown to
+the author as "check owner". The date goes through `parse_due` — ISO,
+`DD.MM[.YYYY]`, `18 Sep`, `Sep 18`, month names in en/uk/de, weekdays,
+today/tomorrow/next week — anchored to today in the tenant's time zone.
+Unparseable text keeps `due_text` with no `due_date`.
 
-### Provenance in finalized content
+**`item_key`** = first 16 hex of sha256(normalised task text without
+owner/date/bullets, lower-cased). It is the identity a recipient's
+response attaches to: an unchanged line keeps its key — and its
+responses and status — across an edit; an edited line starts clean,
+because the recipient confirmed *that* wording. Duplicate lines within
+one version collapse to the first.
 
-A non-required typed section may carry `source: "extracted"` into a
-finalized note. That is deliberate and honest: the hash chain covers
-the content including its provenance marker, so a reader can always
-tell which values a machine proposed and the author left standing,
-versus which they entered or confirmed themselves.
+`share_link_responses` holds what a recipient did (`confirm` / `done` /
+`dispute` on an item, `flag` on a section) keyed by link and target, one
+live row per (link, target); a new stance replaces the old one, which is
+cleared rather than deleted. The comment is text, capped at 280
+characters, refused if it carries a URL, and rendered as text only —
+never Markdown, HTML or an e-mail body.
+
+The extractor is a seam (`ActionItemExtractor`); `rules` is the only
+implementation. A model-backed extractor would replace the parser, not
+the projection.

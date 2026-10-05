@@ -6,7 +6,7 @@ forwarded; asr-service authorizes + tenant-scopes the read and audits
 it), pick a template (explicit ``template_id`` or deterministic
 auto-match), and create a draft note whose first free-text section
 holds the transcript. The note then follows the normal note
-lifecycle (edit → finalize).
+lifecycle (edit, share).
 
 ``GET /v1/notes/by-source-job`` — bulk lookup so the transcription
 jobs list can badge jobs that are already assigned.
@@ -36,10 +36,12 @@ from template_models import FieldType, TemplateDefinition
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import code_sequence, template_match
+from ..domain import code_sequence, generation_service, template_match
 from ..domain import notes_repository as repo
 from ..domain.field_extraction_client import extract_fields
 from ..domain.repository import get_template
+from ..notifications import emit_budget_reached
+from . import ai_settings as ai_settings_router
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,22 @@ class FromTranscriptResponse(BaseModel):
     template_name: str
     template_selection: Literal["explicit", "auto", "fallback"]
     template_score: int | None = None
+    # Sprint 33 — present when the engine is writing this note, so the
+    # client can start polling without a second round trip.
+    generation: GenerationStub | None = None
+    # Sprint 37 — why no generation, when there is none. The client says
+    # "your workspace has turned this off" instead of showing a note that
+    # looks like it is still thinking.
+    generation_blocked: (
+        Literal["generation_disabled", "budget_exceeded", "processor_unacknowledged"] | None
+    ) = None
+
+
+class GenerationStub(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    status: str
 
 
 class SourceJobLink(BaseModel):
@@ -90,7 +108,13 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
     url = f"{settings.asr_service_base_url.rstrip('/')}/asr/jobs/{job_id}/result"
     try:
         async with httpx.AsyncClient(timeout=_ASR_TIMEOUT) as client:
-            resp = await client.get(url, headers={"Authorization": auth_header})
+            # Building the note is not a person opening the transcript:
+            # asr-service must not count it in the speaker-correction
+            # denominator (Sprint 30 learn loop).
+            resp = await client.get(
+                url,
+                headers={"Authorization": auth_header, "X-MDX-Read-Purpose": "note_build"},
+            )
     except httpx.HTTPError as exc:
         logger.warning("from_transcript.asr_unreachable: %s", exc.__class__.__name__)
         raise HTTPException(
@@ -230,6 +254,22 @@ def _transcript_text(result: dict[str, Any]) -> str:
     return " ".join(p for p in parts if p)
 
 
+# Section ids that are made for running prose, best first.
+_PROSE_HOMES = ("transcript", "discussion", "notes", "summary", "conversation", "body")
+
+
+def _transcript_home(ordered: list[Any]) -> Any:
+    free = [s for s in ordered if s.field_type == FieldType.FREE_TEXT]
+    for key in _PROSE_HOMES:
+        for s in free:
+            if s.id == key:
+                return s
+    for s in free:
+        if s.id != "attendees":
+            return s
+    return free[0] if free else ordered[0]
+
+
 def _content_for_template(
     *,
     definition: TemplateDefinition,
@@ -239,9 +279,13 @@ def _content_for_template(
     title: str,
     extracted_fields: dict[str, dict[str, Any]] | None = None,
 ) -> NoteContent:
-    """All template sections in order; the transcript lands in the first
+    """All template sections in order; the transcript lands in ONE
     free-text section (dictations are linear speech — distributing text
-    across sections is the author's edit, not a guess we make).
+    across sections is the author's edit, not a guess we make). Which
+    one: a section made for prose (discussion, notes, summary…) first,
+    then any free-text section that is not the attendee list — a 3 KB
+    transcript under "Attendees" reads as a wall of names on the shared
+    page and in the PDF.
 
     Sprint 13: typed sections additionally carry the extractor's
     PROPOSALS in ``field_specific_metadata`` (``source: "extracted"``).
@@ -249,7 +293,7 @@ def _content_for_template(
     never consumes or rewrites what was dictated.
     """
     ordered = sorted(definition.sections, key=lambda s: s.order)
-    target = next((s for s in ordered if s.field_type == FieldType.FREE_TEXT), ordered[0])
+    target = _transcript_home(ordered)
     proposals = extracted_fields or {}
     sections = [
         NoteSection(
@@ -318,7 +362,10 @@ async def create_note_from_transcript(
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         existing = await conn.fetchrow(
-            "SELECT id, code FROM notes WHERE source_asr_job_id = $1",
+            # A note in the bin has let go of its job (0056): the author
+            # trashed the live note mid-meeting, and the transcript still
+            # needs somewhere to land.
+            "SELECT id, code FROM notes WHERE source_asr_job_id = $1 AND deleted_at IS NULL",
             body.asr_job_id,
         )
         if existing is not None:
@@ -386,6 +433,10 @@ async def create_note_from_transcript(
         )
 
         code = await code_sequence.next_code(conn, tenant_id=claims.tid)
+        generation_id: UUID | None = None
+        generation_status = ""
+        generation_blocked: str | None = None
+        budget_crossed: tuple[int, int] | None = None
         try:
             note_id, version_id = await repo.create_note_with_v1(
                 conn,
@@ -398,6 +449,7 @@ async def create_note_from_transcript(
                 source_session_id=None,
                 content=content,
                 source_asr_job_id=body.asr_job_id,
+                title_source="user" if body.title.strip() else "default",
             )
         except asyncpg.UniqueViolationError:
             # Concurrent double-assign lost the race on the partial index.
@@ -405,6 +457,55 @@ async def create_note_from_transcript(
                 status.HTTP_409_CONFLICT,
                 detail={"code": "already_assigned", "detail": "assigned concurrently"},
             ) from None
+
+        # Sprint 33: the note writes itself. Same transaction as the
+        # note, so either both exist or neither does — and never able to
+        # cost the note: a stack with no object store or no model still
+        # produces the transcript-in-a-section note it produced before.
+        if settings.note_generation_enabled:
+            try:
+                generation_id, generation_status = await generation_service.start(
+                    conn,
+                    queue=state.job_queue,
+                    store=state.transcripts_store,
+                    tenant_id=claims.tid,
+                    note_id=note_id,
+                    requested_by=claims.sub,
+                    transcript=result,
+                    reason="auto",
+                    transcript_rev=int(result.get("result_rev") or 1),
+                    required_processors=ai_settings_router.required_processors(),
+                )
+            except generation_service.GenerationDisabledError:
+                # The workspace turned it off. Not an error, and not
+                # worth a stack trace on every upload.
+                generation_id = None
+                generation_blocked = "generation_disabled"
+            except generation_service.ProcessorUnacknowledgedError:
+                # Sprint L2: a processor in the data path nobody agreed to.
+                # The Data page shows the dialog; nothing was sent.
+                generation_id = None
+                generation_blocked = "processor_unacknowledged"
+            except generation_service.BudgetExceededError as exc:
+                generation_id = None
+                generation_blocked = "budget_exceeded"
+                budget_crossed = (exc.spent, exc.budget)
+            except Exception:  # noqa: BLE001
+                generation_id = None
+                logger.warning(
+                    "from_transcript.generation_not_started",
+                    extra={"note_id": str(note_id)},
+                    exc_info=True,
+                )
+
+    if budget_crossed is not None:
+        await emit_budget_reached(
+            state.redis,
+            tenant_id=claims.tid,
+            actor_user_id=claims.sub,
+            spent_cents=budget_crossed[0],
+            budget_cents=budget_crossed[1],
+        )
 
     await state.audit_writer.write_event(
         tenant_id=claims.tid,
@@ -424,6 +525,12 @@ async def create_note_from_transcript(
     )
 
     return FromTranscriptResponse(
+        generation=(
+            GenerationStub(id=generation_id, status=generation_status)
+            if generation_id is not None
+            else None
+        ),
+        generation_blocked=generation_blocked,  # type: ignore[arg-type]
         id=note_id,
         code=code,
         version_id=version_id,

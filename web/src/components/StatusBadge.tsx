@@ -1,4 +1,4 @@
-const KNOWN = new Set(["draft", "finalized", "amended", "cancelled", "queued", "running", "complete", "failed"]);
+const KNOWN = new Set(["draft", "cancelled", "queued", "running", "complete", "failed"]);
 
 /** Status chip. Unknown values (e.g. "v3") render as a neutral mono chip. */
 export function StatusBadge({ status }: { status: string }) {

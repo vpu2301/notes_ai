@@ -43,3 +43,10 @@ token_switch_counter = _meter.create_counter(
     description="Workspace-scoped token mints by outcome",
     unit="1",
 )
+
+# Sprint 19: fake-door leads from the shared page's CTA (POST /auth/leads).
+leads_captured_counter = _meter.create_counter(
+    "mdx_leads_captured_total",
+    description="Lead e-mails captured on /join (label: ref_present)",
+    unit="1",
+)

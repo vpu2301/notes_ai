@@ -1,4 +1,4 @@
-.PHONY: smoke-ios test-egress check-no-vendor-import eval-smoke measure-turnaround dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa chaos-dictation chaos-asr load-dictation nightly-verify test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-assert eval-asr-validate eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -76,13 +76,40 @@ doctor: ## Diagnose local environment issues
 
 ##@ Models (DEP-S0 — libs/models, config/models.yaml)
 
-dev-model: ## Start/verify the model servers on this Mac: `make dev-model` (start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
+dev-model: $(if $(ARGS),,dev-up) ## Start the docker stack + model servers on this Mac: `make dev-model` (dev-up+start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
 	@bash scripts/dev/dev-model.sh $(ARGS)
 
 eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
 	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
 
-test-egress: ## Prove the worker egress allowlist: example.com blocked, model endpoints reachable (needs staging/compose up)
+eval-notes: ## Gold-set eval of the document engine: `make eval-notes BACKEND=dev_mac [ARM=pipeline|single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>] [LABEL=qwen3-8b]`
+	uv run --project services/note-service --with pyyaml python scripts/eval/notes_eval.py \
+	    --backend $(BACKEND) --arm $(or $(ARM),pipeline) --runs $(or $(RUNS),1) \
+	    $(if $(CORPUS),--corpus $(CORPUS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save-notes $(SAVE),) $(if $(LABEL),--label $(LABEL),)
+
+local-bakeoff: ## Sprint L1: every local candidate on a corpus → docs/eval/notes-local-bakeoff-<date>.md: `make local-bakeoff [CORPUS=tests/fixtures/eval/notes] [CANDIDATES="gemma3:4b qwen3:8b"]`
+	@bash scripts/dev/local-bakeoff.sh $(if $(CORPUS),--corpus $(CORPUS),) $(if $(CANDIDATES),--candidates "$(CANDIDATES)",)
+
+eval-notes-assert: ## Regression checklists (r01 = the 2026-09-22 audit, m06 = its synthetic twin): `make eval-notes-assert BACKEND=dev_mac [CORPUS=eval/notes/v2]`
+	uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py \
+	    --backend $(or $(BACKEND),dev_mac) $(if $(CORPUS),--corpus $(CORPUS),)
+
+eval-notes-validate: ## Check a notes gold corpus against gold format v2: `make eval-notes-validate [CORPUS=eval/notes/v2]`
+	uv run --project services/note-service python scripts/eval/notes_gold.py $(or $(CORPUS),tests/fixtures/eval/notes)
+
+eval-asr: ## Sprint TQ1: ASR gold set through the job's path → docs/eval/asr-<date>-<backend>-<split>.{json,md}: `make eval-asr BACKEND=hf_eu_asr|dev_mac_asr|inproc_cpu_asr [SPLIT=test] [CORPUS=eval/asr/v1] [IDS=r04] [HINT=hint.txt] [LABEL=hint] [DRAFT=1] [GUARDS=on|off|both]`
+	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py run \
+	    --backend $(BACKEND) --split $(or $(SPLIT),test) $(if $(CORPUS),--corpus $(CORPUS),) \
+	    $(if $(IDS),--ids $(IDS),) $(if $(HINT),--hint-file $(HINT),) $(if $(LABEL),--label $(LABEL),) $(if $(DRAFT),--draft,) $(if $(GUARDS),--guards $(GUARDS),)
+
+eval-asr-assert: ## Sprint TQ1: r03/r04 transcript checklists on the gold set (XFAIL = a later sprint's): `make eval-asr-assert [BACKEND=inproc_cpu_asr] [CORPUS=eval/asr/v1]`
+	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py assert \
+	    --backend $(or $(BACKEND),inproc_cpu_asr) $(if $(CORPUS),--corpus $(CORPUS),)
+
+eval-asr-validate: ## Sprint TQ1: ASR gold manifest, composition and fetched content: `make eval-asr-validate [CORPUS=eval/asr/v1]`
+	uv run --project services/asr-worker python scripts/eval/asr_gold.py validate $(or $(CORPUS),eval/asr/v1) --content
+
+test-egress: ## Prove the worker egress allowlist: example.com/huggingface.co/otel.pyannote.ai blocked, model endpoints reachable, diarized job completes (needs staging/compose up)
 	RUN_EGRESS_TEST=1 uv run pytest tests/integration/test_worker_egress.py -v
 
 hf-endpoints: ## HF Inference Endpoints from deploy/hf/endpoints/*.yaml: `make hf-endpoints ARGS="plan --env staging"` (validate|plan|apply|status|pause|resume|delete)
@@ -91,6 +118,27 @@ hf-endpoints: ## HF Inference Endpoints from deploy/hf/endpoints/*.yaml: `make h
 secret-scan: ## Scan the repo history for committed secrets (gitleaks; CI runs the same config)
 	@command -v gitleaks >/dev/null || { echo "gitleaks not installed: brew install gitleaks"; exit 1; }
 	gitleaks git --config .gitleaks.toml --redact --no-banner .
+
+der-eval: ## Speaker count + DER on the gold set: `make der-eval ENGINE=legacy|pyannote_c1 SPLIT=test [CORPUS=eval/asr/v1]` → docs/eval/der-<date>-<engine>-<split>.json
+	@# pyannote.audio 4 requires pyannote.metrics 4 (the two cannot resolve
+	@# otherwise); scores match 3.2. Only a pyannote_c1 run pulls torch in.
+	@case '$(or $(ENGINE),legacy)' in \
+	  pyannote_c1*) extra="--with pyannote.audio>=4.0,<4.1" ;; \
+	  *) extra="" ;; \
+	esac; \
+	uv run --with 'pyannote.metrics>=4,<5' $$extra python scripts/eval/run_der.py --engine '$(or $(ENGINE),legacy)' --split $(or $(SPLIT),test) $(if $(CORPUS),--corpus $(CORPUS),)
+
+der-grid: ## B-4 guard-rail grid on dev + ship/no-ship verdict on test
+	uv run --with 'pyannote.metrics>=4,<5' python scripts/eval/grid_legacy.py
+
+sim-overcount: ## No-audio regression of the clusterer roster (S0/S1 must stay 100 %)
+	uv run python scripts/eval/sim_cluster_overcount.py --assert
+
+check-routing-report: ## CI gate (SQ1, SM-15) — every routed chat backend has an eval/notes/v2 report or a waiver at the current PROMPT_VERSION
+	uv run python scripts/ci/check-routing-has-report.py
+
+check-no-eval-audio: ## CI gate — no audio under eval/, no gold content under eval/asr or eval/notes
+	@bash scripts/ci/check-no-eval-audio.sh
 
 measure-turnaround: ## ASR turnaround on a fixture: `make measure-turnaround FIXTURE=10min_de BACKEND=dev_mac_asr` → docs/eval/turnaround-<date>-<backend>-<fixture>.json
 	uv run --project libs/models python scripts/eval/measure_turnaround.py --fixture $(FIXTURE) --backend $(BACKEND)
@@ -208,6 +256,12 @@ openapi-check: ## CI gate — fail if any committed OpenAPI snapshot drifts
 	fi
 	@echo "OpenAPI snapshots are up to date."
 
+meeting-quality-dashboard: ## Admin dashboard: rebuild infra/grafana/dashboards/meeting-quality.json from its SQL (open http://localhost:3001, admin/admin in dev)
+	uv run python scripts/grafana/build_meeting_quality_dashboard.py
+
+meeting-quality-backfill: ## Admin dashboard: write the numbers-only quality summary for jobs that completed before migration 0067 (`ARGS=--apply`; dry run by default)
+	uv run python scripts/ops/backfill_job_quality.py $(ARGS)
+
 check-rls: ## CI gate — every user-schema table has RLS+FORCE enabled
 	uv run python scripts/ci/check-rls-policies.py
 
@@ -306,6 +360,9 @@ check-metric-names: ## CI gate — exported metric names must match the declared
 prepare-ecapa: ## Fetch + checksum-verify the pinned ECAPA speaker-diarization model (ADR-0034)
 	uv run python scripts/models/prepare_ecapa.py
 
+prepare-pyannote: ## Fetch + checksum-verify the pinned pyannote community-1 diarizer (gated: needs HF_TOKEN with the model terms accepted)
+	uv run python scripts/models/prepare_pyannote.py
+
 chaos-dictation: ## Run dictation chaos scenarios (needs dev stack + token)
 	RUN_DICTATION_CHAOS=1 uv run --project services/dictation-service pytest tests/chaos/dictation_chaos.py -v
 
@@ -324,6 +381,12 @@ dev-up-gpu: ## Start base + dev + GPU overlay (requires NVIDIA toolkit)
 nightly-verify: ## Run the audit-chain nightly verifier once and emit Prom textfile
 	PROM_TEXTFILE=/tmp/audit_chain.prom uv run python scripts/jobs/nightly_verify.py
 
+weekly-speakers: ## Weekly speaker-quality CSV (reports/speakers-YYYY-WW.csv) as the read-only funnel_reader role
+	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_speakers.py
+
+weekly-notes: ## Weekly notes-quality CSV (reports/notes-quality-YYYY-WW.csv) with kill thresholds, as funnel_reader
+	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_notes_quality.py
+
 test-integration-db: ## All integration tests against the live dev DB (needs migrate-up)
 	RUN_DB_INTEGRATION=1 uv run --project libs/db pytest libs/db/tests/integration/ -v
 	RUN_DB_INTEGRATION=1 uv run --project libs/audit pytest libs/audit/tests/integration/ -v
@@ -332,7 +395,10 @@ test-integration-db: ## All integration tests against the live dev DB (needs mig
 
 ci: lint typecheck test security lint-imports check-no-os-environ check-no-direct-asyncpg check-audit-insert check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-no-vendor-import check-k8s-rendered check-notification-pii-free validate-templates check-alert-rules check-metric-names ## Mirror CI gates locally
 
-ci-with-db: ci check-rls check-identity-bridge openapi-check ## Full CI mirror — needs `make dev-up && make migrate-up`
+test-isolation: ## Two-workspace isolation suite (I1): hint, job, echoed transcript, id routes, search, Redis, objects, logs, eval — needs `make dev-up && make migrate-up`
+	RUN_DB_INTEGRATION=1 uv run pytest tests/integration/test_two_tenant_isolation.py -v
+
+ci-with-db: ci check-rls check-identity-bridge openapi-check test-isolation ## Full CI mirror — needs `make dev-up && make migrate-up`
 
 pre-commit-install: ## Install the pre-commit hook into git
 	@command -v pre-commit >/dev/null || (echo "Install pre-commit: pip install pre-commit"; exit 1)

@@ -294,10 +294,14 @@ async def test_cross_tenant_probe_threshold(
 _ENTITY_TABLES: tuple[str, ...] = (
     "audio_files",  # asr_job (audio side)
     "transcription_jobs",  # asr_job
+    "transcription_speaker_edits",  # speaker edit overlay (0043)
     "dictation_sessions",  # dictation_session
     "abbreviation_dictionary",  # abbreviation
     "templates",  # template
     "notes",  # note
+    "note_share_links",  # share link (0016/0035)
+    "note_action_items",  # action item projection (0037)
+    "share_link_responses",  # recipient response (0037)
 )
 
 
@@ -335,14 +339,23 @@ async def test_every_entity_table_isolates_tenants(
                 b"\x00" * 32,
                 f"minio://mdx-audio/{a}/{audio_id}.enc",
             )
+            job_id = uuid4()
             await c.execute(
                 "INSERT INTO transcription_jobs (id, tenant_id, audio_id, requester_sub, "
                 "language) VALUES ($1,$2,$3,$4,$5)",
-                uuid4(),
+                job_id,
                 a,
                 audio_id,
                 author_a,
                 lang,
+            )
+            await c.execute(
+                "INSERT INTO transcription_speaker_edits (tenant_id, job_id, seq, kind, "
+                "from_label, to_label, actor_sub) "
+                "VALUES ($1,$2,1,'merge','SPEAKER_3','SPEAKER_1',$3)",
+                a,
+                job_id,
+                author_a,
             )
             await c.execute(
                 "INSERT INTO dictation_sessions (id, tenant_id, user_id, language) "
@@ -372,12 +385,40 @@ async def test_every_entity_table_isolates_tenants(
                 f"NOTE-2026-{a.hex[:5]}",
                 author_a,
             )
+            link_id = uuid4()
+            await c.execute(
+                "INSERT INTO note_share_links (id, tenant_id, note_id, token_hash, created_by, "
+                "kind, label, recipient_email) "
+                "VALUES ($1,$2,$3,$4,$5,'recipient','Tom','tom@client.example')",
+                link_id,
+                a,
+                note_id,
+                f"hash-{a.hex}",
+                author_a,
+            )
+            await c.execute(
+                "INSERT INTO share_link_responses (id, tenant_id, note_id, link_id, kind, item_key) "
+                "VALUES ($1,$2,$3,$4,'confirm','k1')",
+                uuid4(),
+                a,
+                note_id,
+                link_id,
+            )
+            version_id = uuid4()
             await c.execute(
                 "INSERT INTO note_versions (id, note_id, version_number, created_by, "
                 "content_jsonb) VALUES ($1,$2,1,$3,'{}'::jsonb)",
-                uuid4(),
+                version_id,
                 note_id,
                 author_a,
+            )
+            await c.execute(
+                "INSERT INTO note_action_items (id, tenant_id, note_id, note_version_id, item_key, "
+                "position, text) VALUES ($1,$2,$3,$4,'k1',0,'send the proposal')",
+                uuid4(),
+                a,
+                note_id,
+                version_id,
             )
 
         # Tenant B sees none of tenant A's rows.

@@ -1,0 +1,148 @@
+{
+ "id": "m11_en_boat_walkthrough",
+ "language": "en",
+ "meeting_type": "auto",
+ "recorded_on": "2026-09-25",
+ "recording_type": "presentation_demo",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 7000,
+   "text": "Good afternoon and welcome to the first showing of the Tessaline 58 here at the harbour festival."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 7000,
+   "t_end_ms": 15000,
+   "text": "My name is Corvin Aldmere. I am a broker with Harbourline Yachts, the Tessaline dealer for the North Sea."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 15000,
+   "t_end_ms": 23000,
+   "text": "So let's start with the numbers everybody asks about. The length overall is fifty eight feet."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 23000,
+   "t_end_ms": 31000,
+   "text": "The beam is a little over sixteen and a half feet, which gives you a very wide saloon."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 31000,
+   "t_end_ms": 38000,
+   "text": "We carry just under two hundred and fifty gallons of fresh water on board."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 38000,
+   "t_end_ms": 45000,
+   "text": "The fuel tank takes about seven hundred gallons, so the range is serious."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 45000,
+   "t_end_ms": 51000,
+   "text": "She has twin engines at eight hundred horsepower each."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 51000,
+   "t_end_ms": 59000,
+   "text": "Cruising speed is twenty six knots and the top speed is up to thirty two knots."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 59000,
+   "t_end_ms": 66000,
+   "text": "Down below there are three cabins and two heads for the owner and the guests."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 66000,
+   "t_end_ms": 75000,
+   "text": "The swim platform lowers right into the water, so it doubles as a staircase and a tender ramp."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 75000,
+   "t_end_ms": 82000,
+   "text": "The tender garage takes a three metre jet tender with room to spare."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 82000,
+   "t_end_ms": 90000,
+   "text": "If you have any questions, just email me or leave a comment below this video."
+  }
+ ],
+ "gold": {
+  "key_facts": [
+   "The Tessaline 58 is shown for the first time at the harbour festival",
+   "The swim platform lowers into the water and doubles as a staircase and tender ramp",
+   "The tender garage takes a three metre jet tender",
+   "There are three cabins and two heads below deck"
+  ],
+  "actions": [],
+  "decisions": [],
+  "open_questions": [],
+  "speakers": {
+   "SPEAKER_1": "Corvin Aldmere"
+  },
+  "figures": [
+   {
+    "name": "length overall",
+    "value": "58",
+    "unit": "feet"
+   },
+   {
+    "name": "beam",
+    "value": "16.5",
+    "unit": "feet",
+    "qualifier": "a little over"
+   },
+   {
+    "name": "fresh water",
+    "value": "250",
+    "unit": "gallons",
+    "qualifier": "just under"
+   },
+   {
+    "name": "fuel tank",
+    "value": "700",
+    "unit": "gallons",
+    "qualifier": "about"
+   },
+   {
+    "name": "engine power",
+    "value": "800",
+    "unit": "horsepower"
+   },
+   {
+    "name": "cruising speed",
+    "value": "26",
+    "unit": "knots"
+   },
+   {
+    "name": "top speed",
+    "value": "32",
+    "unit": "knots",
+    "qualifier": "up to"
+   },
+   {
+    "name": "cabins",
+    "value": "3"
+   }
+  ],
+  "presenter": {
+   "name": "Corvin Aldmere",
+   "role": "broker",
+   "organisation": "Harbourline Yachts"
+  },
+  "contact": [
+   "Questions can be sent by email or left as a comment below the video"
+  ]
+ }
+}

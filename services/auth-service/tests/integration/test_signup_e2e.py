@@ -128,9 +128,7 @@ async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) 
 
     # Before confirmation the account is disabled in Keycloak, so no grant
     # of any kind can produce a token.
-    early = await client.post(
-        "/auth/login", json={"username": email, "password": PASSWORD}
-    )
+    early = await client.post("/auth/login", json={"username": email, "password": PASSWORD})
     assert early.status_code == 403, early.text
     assert early.json()["code"] == "email_not_verified"
 
@@ -139,9 +137,7 @@ async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) 
     )
     assert verified.status_code == 200, verified.text
 
-    logged_in = await client.post(
-        "/auth/login", json={"username": email, "password": PASSWORD}
-    )
+    logged_in = await client.post("/auth/login", json={"username": email, "password": PASSWORD})
     assert logged_in.status_code == 200, logged_in.text
     body = logged_in.json()
     assert body["access_token"]
@@ -165,9 +161,7 @@ async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) 
     tenant_id = await su.fetchval("SELECT tenant_id FROM users WHERE email = $1", email)
     assert claims["tid"] == str(tenant_id)
     assert await su.fetchval("SELECT status FROM users WHERE email = $1", email) == "active"
-    assert await su.fetchval(
-        "SELECT kind FROM tenants WHERE id = $1", tenant_id
-    ) == "personal"
+    assert await su.fetchval("SELECT kind FROM tenants WHERE id = $1", tenant_id) == "personal"
     # The bridge row and the identity go together: without the identity
     # `/auth/me` cannot describe the person, and BE-3's code login later
     # cannot find them.
@@ -195,9 +189,7 @@ async def test_a_second_signup_with_the_same_address_creates_nothing(app, client
     assert "already" in latest.text_body.lower() or "bereits" in latest.text_body.lower()
 
 
-async def test_the_created_keycloak_user_has_no_pending_required_actions(
-    app, client, su
-) -> None:
+async def test_the_created_keycloak_user_has_no_pending_required_actions(app, client, su) -> None:
     """The single line this whole flow rests on.
 
     ``create_user`` (the admin-invite path) sets
@@ -246,13 +238,9 @@ async def test_a_wrong_code_five_times_then_a_resend_works(app, client, su) -> N
     assert fifth.status_code == 429
     assert fifth.json()["code"] == "too_many_attempts"
 
+    assert (await client.post("/auth/signup/resend", json={"email": email})).status_code == 202
     assert (
-        await client.post("/auth/signup/resend", json={"email": email})
-    ).status_code == 202
-    assert (
-        await client.post(
-            "/auth/signup/verify", json={"email": email, "code": _code(app, email)}
-        )
+        await client.post("/auth/signup/verify", json={"email": email, "code": _code(app, email)})
     ).status_code == 200
 
 
@@ -294,7 +282,5 @@ async def test_the_concierge_path_onboards_without_a_code(app, su) -> None:
         base_url="http://test",
         headers={**ORIGIN, "X-Forwarded-For": "198.51.100.7"},
     ) as c:
-        logged_in = await c.post(
-            "/auth/login", json={"username": email, "password": password}
-        )
+        logged_in = await c.post("/auth/login", json={"username": email, "password": password})
     assert logged_in.status_code == 200, logged_in.text

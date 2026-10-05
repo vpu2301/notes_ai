@@ -39,12 +39,45 @@ final class AppState: ObservableObject {
     /// Which page the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable { case general, connectors, account }
+    enum SettingsTab: Hashable { case general, connectors, dataAI, account }
 
     /// Open Settings on the Connectors page (menus, the home page's prompt).
     func showConnectors() {
         settingsTab = .connectors
         settingsPresented = true
+    }
+
+    /// Open Settings on Data & AI — from a note that could not be written
+    /// because nobody agreed to a processor yet.
+    func showDataAndAI() {
+        settingsTab = .dataAI
+        settingsPresented = true
+    }
+
+    /// The invite sheet (avatar menu › Invite people…).
+    @Published var invitePresented = false
+    /// "New from template…" (the + menu).
+    @Published var newNotePresented = false
+    /// The bell's feed.
+    @Published var notificationsPresented = false
+    /// A note could not be created; the home page shows it.
+    @Published var creationError: String?
+    /// The bell: unread count and the feed.
+    private(set) lazy var notifications = NotificationsModel(api: api)
+
+    /// Owners and admins may add members; everyone else can send the link
+    /// from Settings › Account's roster, so the menu item is theirs alone.
+    var canManageMembers: Bool {
+        if let role = activeWorkspace?.myRole { return role == "owner" || role == "admin" }
+        guard let tenantId, let membership = memberships.first(where: { $0.tenantId == tenantId }) else {
+            return false
+        }
+        return membership.role == "owner" || membership.role == "admin"
+    }
+
+    /// Where an invited colleague signs in — the web app's login page.
+    var inviteURL: URL? {
+        URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
     }
 
     /// The pages pushed over the home page. Empty = home.
@@ -324,23 +357,57 @@ final class AppState: ObservableObject {
     /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
     /// IDX-B2's to extend), so this is a no-op today and the account screen
     /// falls back to the address the Keychain item carries.
+    /// Sprint 21: true for an account younger than a day that has not
+    /// dismissed the "record your first meeting" card on this device.
+    @Published var isFirstRun = false
+
+    private static let firstRunSeenKey = "notesai.first_run_seen"
+
+    func dismissFirstRun() {
+        isFirstRun = false
+        UserDefaults.standard.set(true, forKey: Self.firstRunSeenKey)
+    }
+
+    private func detectFirstRun(_ identity: IdentitySummary) {
+        guard let created = identity.createdAt,
+              Date().timeIntervalSince(created) < 24 * 3600,
+              !UserDefaults.standard.bool(forKey: Self.firstRunSeenKey) else { return }
+        isFirstRun = true
+    }
+
     private func hydrateIdentity() async {
         guard let response = try? await api.me() else { return }
-        if let identity = response.identity { self.identity = identity }
+        if let identity = response.identity {
+            self.identity = identity
+            detectFirstRun(identity)
+        }
         if let memberships = response.memberships { self.memberships = memberships }
     }
 
+    /// Sprint 23: what the workspace admin allows. Permissive until known,
+    /// so an older server changes nothing.
+    @Published private(set) var sharingRules: SharingConstraints = .permissive
+
     private func loadWorkspace() async {
+        if let rules = try? await api.sharingConstraints() { sharingRules = rules }
         await refreshWorkspaces(force: true)
         refreshPending()
+        // Sprint 34: anything typed while this device was offline goes up
+        // now. Idempotent on the capture id, so a repeat costs one request.
+        await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
         await googleCalendar.refresh(force: true)
     }
 
     func signOut() async {
+        let signedOut = identityId
         await api.logout()
         clearSignedInState()
+        // Sprint 32: the names the account brought to kept recordings and
+        // the per-job answers go with it; the recordings stay.
+        SignOutCleanup.run(identityId: signedOut)
+        capture.forgetContext()
         gateOn = await api.isGateOn()
         signedOutNotice = nil
         authState = .signedOut
@@ -358,6 +425,7 @@ final class AppState: ObservableObject {
     }
 
     private func clearSignedInState() {
+        notifications.forget()
         googleCalendar.reset()
         templateCache = nil
         notes = []
@@ -392,8 +460,10 @@ final class AppState: ObservableObject {
     /// over and to sign them in afterwards, which it already does: a BE-0
     /// account is an ordinary password account here.
     func openSignup() {
+        // Sprint 21: `/join` picks signup or the lead form by the server's
+        // config, so the app never has to know which one is on.
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
-            .appending(path: "signup") else { return }
+            .appending(path: "join") else { return }
         UIApplication.shared.open(url)
     }
 
@@ -692,6 +762,9 @@ final class AppState: ObservableObject {
                 contentType: contentType(of: capture.audioURL),
                 language: capture.info.language,
                 diarize: capture.info.diarize,
+                speakersExpected: capture.info.speakersExpected,
+                context: capture.info.captureContext,
+                captureTiming: capture.info.captureTiming,
                 tenantId: capture.info.tenantId)
             // On the server now: the file may go.
             PendingCaptures.delete(capture)
@@ -800,6 +873,7 @@ final class AppState: ObservableObject {
 
     /// The note is gone (deleted here or from the note page): forget it.
     func noteDeleted(_ noteId: String) {
+        capture.forgetNote(noteId)
         notes.removeAll { $0.noteId == noteId }
         var list = spaces
         for index in list.indices { list[index].noteIds.removeAll { $0 == noteId } }
@@ -957,6 +1031,44 @@ final class AppState: ObservableObject {
         return candidates.first { $0.language == language }?.id
     }
 
+    /// A note typed from scratch: the given template, or the meeting
+    /// template in the app's language (`createBlankNote.ts`). Returns the
+    /// new note's id, or nil after telling the home page why not.
+    func createBlankNote(templateId: String? = nil) async -> String? {
+        creationError = nil
+        do {
+            var id = templateId
+            if id == nil {
+                if templateCache == nil { templateCache = try await api.fetchTemplates() }
+                let language = capture.language == CaptureViewModel.autoLanguage ? "en" : capture.language
+                guard let template = TemplateSummary.defaultTemplate(templateCache ?? [], language: language) else {
+                    creationError = "Your workspace has no note templates yet."
+                    return nil
+                }
+                id = template.id
+            }
+            guard let id else { return nil }
+            let detail = try await api.fetchTemplate(id: id)
+            let created = try await api.createNote(content: detail.blankContent())
+            await refreshNotes()
+            return created.id
+        } catch {
+            creationError = AuthCopy.message(for: error)
+            return nil
+        }
+    }
+
+    /// Stop a transcription that is queued or running (Home, the meeting
+    /// page). The row says "Cancelled"; the recording is not deleted.
+    func cancelCapture(jobId: String) async {
+        do {
+            try await api.cancelJob(id: jobId)
+            updateRecent(jobId: jobId, status: .cancelled, errorMessage: "")
+        } catch {
+            creationError = AuthCopy.message(for: error)
+        }
+    }
+
     // MARK: - Recent captures
 
     func addRecent(jobId: String, title: String) {
@@ -968,8 +1080,10 @@ final class AppState: ObservableObject {
         persistRecents()
     }
 
-    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil) {
+    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil,
+                      title: String? = nil) {
         guard let index = recents.firstIndex(where: { $0.jobId == jobId }) else { return }
+        if let title, !title.isEmpty { recents[index].title = title }
         if let status { recents[index].status = status }
         if let noteId { recents[index].noteId = noteId }
         if let errorMessage { recents[index].errorMessage = errorMessage }
@@ -1067,6 +1181,15 @@ final class AppState: ObservableObject {
 
     func openWebApp() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces)) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Settings › Data & AI in the web app — where the tier and the
+    /// processor acknowledgement are actually changed.
+    func openWebSettingsData() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/data") {
             UIApplication.shared.open(url)
         }
     }

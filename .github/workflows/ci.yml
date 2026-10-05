@@ -96,6 +96,8 @@ jobs:
           make check-no-demo-envvars-in-prod
           make check-no-vendor-import
           make check-dev-keys
+          make check-no-eval-audio
+          make check-routing-report
 
   # ──────────────────────────────────────────────────────────────
   # S16 deployment: the Helm chart must render (staging + prod), the
@@ -186,8 +188,80 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      # Sprint 20: recipient comments are text. The only raw-HTML sink is
+      # the locally generated QR code; anything else is a red build.
+      - name: No raw HTML from data
+        run: npm run check:no-danger
       - name: Production build
         run: npm run build
+
+  # ──────────────────────────────────────────────────────────────
+  # Summary Engine v2 (Q6 T4): the document engine without a model. The
+  # engine tests against the scripted provider, the gold-format validator
+  # on the committed fixtures, and the regression checklists for m06/m09/
+  # m10 with the scripted provider — only the checks the engine guarantees
+  # whatever a model says (named speakers, the audit's strings, every line
+  # cited). Deterministic and offline; the model-quality numbers are the
+  # self-hosted `nightly-notes` workflow's job. Scoped to PRs touching the
+  # engine, the eval scripts or the fixtures.
+  # ──────────────────────────────────────────────────────────────
+  notes-engine:
+    name: Notes engine — scripted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Touches the engine?
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base" HEAD | grep -qE '^(services/note-service/src/note_service/domain/meeting_doc/|scripts/eval/|tests/fixtures/eval/notes/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.run == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        if: steps.scope.outputs.run == 'true'
+        run: pip install uv==${{ env.UV_VERSION }}
+
+      - name: Engine tests (scripted provider)
+        if: steps.scope.outputs.run == 'true'
+        run: >
+          uv run --project services/note-service --with pyyaml pytest -q
+          services/note-service/tests/unit/test_meeting_doc_engine.py
+          services/note-service/tests/unit/test_meeting_doc_prompts.py
+          services/note-service/tests/unit/test_meeting_doc_lines.py
+          services/note-service/tests/unit/test_meeting_doc_q2.py
+          services/note-service/tests/unit/test_meeting_doc_q3.py
+          services/note-service/tests/unit/test_meeting_doc_q4.py
+          services/note-service/tests/unit/test_meeting_doc_q5.py
+          services/note-service/tests/unit/test_note_title.py
+
+      - name: Eval scorers, gold format and checklist tests
+        if: steps.scope.outputs.run == 'true'
+        run: >
+          uv run --project services/note-service --with pyyaml pytest -q
+          tests/unit/test_notes_scoring.py tests/unit/test_notes_gold.py
+          tests/unit/test_notes_gates.py
+
+      - name: Gold format (fixtures)
+        if: steps.scope.outputs.run == 'true'
+        run: uv run --project services/note-service python scripts/eval/notes_gold.py tests/fixtures/eval/notes
+
+      - name: Regression checklists (scripted provider)
+        if: steps.scope.outputs.run == 'true'
+        run: uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py --backend scripted
 
   # ──────────────────────────────────────────────────────────────
   # macOS capture app (IDX-M1). The Swift half of the estate had never

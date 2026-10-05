@@ -1,0 +1,41 @@
+# ############################################################################
+# pyannote speaker-diarization-community-1 pipeline config (Sprint 29 B-7).
+# Repo-owned copy of upstream's config.yaml at the revision pinned in
+# scripts/models/prepare_pyannote.py, so the pipeline loads FULLY OFFLINE
+# from the baked dir (HF_HUB_OFFLINE=1, docs/models/PINS.md):
+#
+#   * Every sub-model is `$model/<subfolder>`. Loaded with
+#     `Pipeline.from_pretrained(<local dir>)`, pyannote.audio resolves
+#     `$model` to THAT directory — never a hub id. Leaving any of
+#     segmentation / embedding / plda out would silently fall back to
+#     SpeakerDiarization's default, which is the hub repo id.
+#   * Hyper-parameters are upstream's, unchanged. prepare_pyannote.py
+#     downloads upstream's config.yaml, verifies it by its git blob id and
+#     refuses to install if its content differs from this file (other than
+#     `dependencies`) — upstream drift is a loud failure, not a silent one.
+#
+# Model: pyannote/speaker-diarization-community-1 — CC-BY-4.0, (c) pyannoteAI.
+# Attribution: docs/legal/third-party-notices.md.
+# ############################################################################
+
+dependencies:
+  pyannote.audio: 4.0.0
+
+pipeline:
+  name: pyannote.audio.pipelines.SpeakerDiarization
+  params:
+    clustering: VBxClustering
+    embedding: $model/embedding
+    embedding_batch_size: 32
+    embedding_exclude_overlap: true
+    plda: $model/plda
+    segmentation: $model/segmentation
+    segmentation_batch_size: 32
+
+params:
+  clustering:
+    threshold: 0.6
+    Fa: 0.07
+    Fb: 0.8
+  segmentation:
+    min_duration_off: 0.0

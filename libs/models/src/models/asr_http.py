@@ -17,7 +17,7 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import httpx
@@ -25,7 +25,10 @@ import numpy as np
 
 from asr_models import (
     AUTO_LANGUAGE,
+    BackendError,
+    Diagnostics,
     Segment,
+    SegmentDiagnostics,
     TranscriptionMetadata,
     TranscriptionOutput,
     WordTiming,
@@ -33,7 +36,8 @@ from asr_models import (
 
 from .audio import SAMPLE_RATE, pcm_to_wav_bytes, probe_clip_path, wav_file_to_pcm
 from .errors import ErrorKind, ProviderError, TranscriptionCancelledError, register_secret
-from .protocols import ShouldCancel
+from .protocols import ShouldCancel, SpeechRun
+from .run_groups import plan_groups, remap
 from .usage import UsageRecord, emit
 
 logger = logging.getLogger("models.asr_http")
@@ -56,6 +60,9 @@ _LANGUAGE_NAMES = {
 }
 
 
+SERVER_TOKEN_HEADER = "x-mdx-asr-token"
+
+
 class HTTPASRProvider:
     def __init__(
         self,
@@ -68,6 +75,7 @@ class HTTPASRProvider:
         cold_start_seconds: int = 0,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        server_token: str | None = None,
     ) -> None:
         self.backend = backend
         self._sleep: Callable[[float], Awaitable[None]] = sleep or asyncio.sleep
@@ -78,7 +86,13 @@ class HTTPASRProvider:
         self._loaded = False
         self._warmup_seconds = 0.0
         register_secret(auth_token)
+        register_secret(server_token)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+        # Sprint TQ4: our own server's token (deploy/asr-server) rides its own
+        # header — behind a managed endpoint the gateway consumes
+        # `Authorization` (same rule as diar-server's x-mdx-diar-token).
+        if server_token:
+            headers[SERVER_TOKEN_HEADER] = server_token
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
             headers=headers,
@@ -127,7 +141,12 @@ class HTTPASRProvider:
         language: str,
         prompt: str | None,
         should_cancel: ShouldCancel | None = None,
+        second_pass: bool = False,
     ) -> TranscriptionOutput:
+        # ``second_pass``: an OpenAI-compatible server takes no beam or
+        # conditioning switch; the caller already sends no prompt, which is
+        # the part of decision 3 this backend can honour.
+        del second_pass
         if not self._loaded:
             raise RuntimeError("HTTPASRProvider.warm_up() must succeed before transcribe()")
         started = time.monotonic()
@@ -168,6 +187,94 @@ class HTTPASRProvider:
             )
         )
         return output
+
+    async def transcribe_runs(
+        self,
+        audio_pcm: np.ndarray,
+        runs: Sequence[SpeechRun],
+        *,
+        language: str,
+        prompt: str | None,
+        should_cancel: ShouldCancel | None = None,
+        group_seconds: float = 300.0,
+    ) -> TranscriptionOutput:
+        """Sprint TQ2 T1: the worker's runs, one request per language group
+        (``run_groups``), each sent with its ``language`` and the prompt.
+
+        A group whose request fails after the warming wait is recorded in
+        ``diagnostics.backend_errors`` and becomes a coverage gap — unless
+        nothing has been decoded yet and the error is retryable, in which
+        case the job is retried whole (a cold endpoint is not a gap)."""
+        started = time.monotonic()
+        groups = plan_groups(runs, group_seconds)
+        segments: list[Segment] = []
+        seg_diags: list[SegmentDiagnostics] = []
+        errors: list[BackendError] = []
+        detected: str | None = None
+        probability: float | None = None
+        decoded_any = False
+        for group in groups:
+            if should_cancel is not None and await should_cancel():
+                raise TranscriptionCancelledError("cancel requested between run groups")
+            try:
+                out = await self.transcribe(
+                    group.audio(audio_pcm),
+                    language=group.language,
+                    prompt=prompt,
+                    should_cancel=should_cancel,
+                )
+            except ProviderError as exc:
+                if exc.retryable and not decoded_any:
+                    raise
+                logger.warning(
+                    "models.asr_group_failed",
+                    extra={
+                        "backend": self.backend,
+                        "kind": str(exc.kind),
+                        "start_ms": group.start_ms,
+                        "runs": len(group.runs),
+                    },
+                )
+                errors.extend(
+                    BackendError(
+                        start_ms=r.start_ms,
+                        end_ms=r.end_ms,
+                        kind=str(exc.kind)[:32],
+                        language=r.language if r.language != AUTO_LANGUAGE else None,
+                    )
+                    for r in group.runs
+                )
+                continue
+            decoded_any = True
+            if group.language == AUTO_LANGUAGE and detected is None:
+                detected, probability = out.language, out.language_probability
+            recording = language if language != AUTO_LANGUAGE else (detected or out.language)
+            label = None if group.language in (recording, AUTO_LANGUAGE) else group.language
+            mapped = remap(out, group, label=label)
+            segments.extend(mapped.segments)
+            seg_diags.extend(mapped.diagnostics.segments)
+        if groups and not decoded_any:
+            raise ProviderError(
+                ErrorKind.UNAVAILABLE,
+                f"every run group failed ({len(groups)})",
+                backend=self.backend,
+            )
+        segments.sort(key=lambda seg: seg.start_ms)
+        seg_diags.sort(key=lambda d: d.start_ms)
+        final_language = language if language != AUTO_LANGUAGE else (detected or "en")
+        return TranscriptionOutput(
+            language=final_language,
+            language_detected=language == AUTO_LANGUAGE,
+            language_probability=probability,
+            segments=segments,
+            metadata=TranscriptionMetadata(
+                model=self._model,
+                vad_seconds_speech=sum(r.end_ms - r.start_ms for r in runs) / 1000,
+                infer_seconds=time.monotonic() - started,
+                beam_size=1,
+            ),
+            diagnostics=Diagnostics(segments=seg_diags, backend_errors=errors),
+        )
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -340,10 +447,43 @@ def _merge_punctuation(words: list[WordTiming]) -> list[WordTiming]:
     return merged
 
 
+def _raw_text(raw: dict[str, Any]) -> str:
+    return str(raw.get("word") or raw.get("text") or "")
+
+
+def _merge_subwords(raw_list: list[dict[str, Any]]) -> list[WordTiming]:
+    """whisper.cpp's ``words`` are decoder tokens: one that starts with a
+    space begins a word, one that does not continues it (" Nah" + "en",
+    " Д" + "обр" + "ого"). Sprint TQ2 found the transcript's words — and
+    so WER, word timings and clip replay — were sub-word pieces. Joined
+    here: first token's start, last token's end, the lowest probability."""
+    merged: list[WordTiming] = []
+    for raw in raw_list:
+        w = _word(raw)
+        if w is None:
+            continue
+        if merged and not _raw_text(raw)[:1].isspace():
+            prev = merged[-1]
+            merged[-1] = WordTiming(
+                text=prev.text + w.text,
+                start_ms=prev.start_ms,
+                end_ms=max(prev.end_ms, w.end_ms),
+                probability=min(prev.probability, w.probability),
+            )
+        else:
+            merged.append(w)
+    return merged
+
+
 def _words(raw_list: Any) -> list[WordTiming]:
     if not isinstance(raw_list, list):
         return []
-    return _merge_punctuation([w for w in (_word(x) for x in raw_list if isinstance(x, dict)) if w])
+    items = [x for x in raw_list if isinstance(x, dict)]
+    # The space-marked token convention (whisper.cpp) is recognised by its
+    # leading spaces; OpenAI / Speaches words carry none and are words.
+    if any(_raw_text(x)[:1].isspace() for x in items):
+        return _merge_punctuation(_merge_subwords(items))
+    return _merge_punctuation([w for w in (_word(x) for x in items) if w])
 
 
 def _to_output(
@@ -357,6 +497,7 @@ def _to_output(
     raw_segments = body.get("segments") or []
     top_words = _words(body.get("words"))
     segments: list[Segment] = []
+    seg_diagnostics: list[SegmentDiagnostics] = []
     if not raw_segments and (body.get("text") or top_words):
         # Server returned text + words but no segments: one segment.
         text = str(body.get("text") or " ".join(w.text for w in top_words)).strip()
@@ -366,11 +507,22 @@ def _to_output(
     for raw in raw_segments:
         if not isinstance(raw, dict):
             continue
+        start, end = _ms(raw.get("start")), _ms(raw.get("end"))
+        end = max(start, end)
+        # Sprint TQ1 T5: the decoder's own numbers for every segment it
+        # returned, empty ones included; None where the server omits them.
+        seg_diagnostics.append(
+            SegmentDiagnostics(
+                start_ms=start,
+                end_ms=end,
+                no_speech_prob=_float_or_none(raw.get("no_speech_prob")),
+                avg_logprob=_float_or_none(raw.get("avg_logprob")),
+                compression_ratio=_float_or_none(raw.get("compression_ratio")),
+            )
+        )
         text = str(raw.get("text") or "").strip()
         if not text:
             continue
-        start, end = _ms(raw.get("start")), _ms(raw.get("end"))
-        end = max(start, end)
         words = _words(raw.get("words"))
         if not words and top_words:
             words = [w for w in top_words if w.start_ms >= start and w.start_ms < end] or [
@@ -383,7 +535,12 @@ def _to_output(
     language = _normalise_language(
         body.get("language") or body.get("detected_language"), requested_language
     )
-    detected = requested_language == AUTO_LANGUAGE
+    # Sprint TQ4: a server that names no language (Parakeet has no language
+    # identification) has not detected one — "en" above is only a fallback,
+    # and the worker must not take it for the recording's language.
+    detected = requested_language == AUTO_LANGUAGE and bool(
+        body.get("language") or body.get("detected_language")
+    )
     prob = body.get("language_probability", body.get("detected_language_probability"))
     metadata = TranscriptionMetadata(
         model=model,
@@ -391,13 +548,36 @@ def _to_output(
         infer_seconds=infer_seconds,
         beam_size=1,
     )
+    # The whole file is decoded in one language on this path.
+    seg_diagnostics = [d.model_copy(update={"language": language}) for d in seg_diagnostics]
+    # Sprint TQ4: words with no probability (a transducer server may send
+    # none) read as 1.0 above; the low-confidence gate (G3) must know.
+    raw_words = list(body.get("words") or []) + [
+        w for seg in raw_segments if isinstance(seg, dict) for w in (seg.get("words") or [])
+    ]
+    unscored = sum(
+        1
+        for w in raw_words
+        if isinstance(w, dict) and w.get("probability") is None and w.get("confidence") is None
+    )
     return TranscriptionOutput(
         language=language,
         language_detected=detected,
         language_probability=float(prob) if isinstance(prob, int | float) else None,
         segments=segments,
         metadata=metadata,
+        diagnostics=Diagnostics(
+            segments=seg_diagnostics,
+            gate_unavailable={"word_probability": unscored} if unscored else {},
+        ),
     )
+
+
+def _float_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    f = float(value)
+    return f if f == f else None
 
 
 def _normalise_language(value: Any, requested: str) -> str:

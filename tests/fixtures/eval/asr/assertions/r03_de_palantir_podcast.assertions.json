@@ -1,0 +1,47 @@
+{
+  "id": "r03_de_palantir_podcast",
+  "recording": "r03",
+  "about": "Simplicissimus podcast, Palantir episode (audit 2026-09-26, docs/eval/error-taxonomy.md). Third-party content: audio and reference in s3://notes-eval/asr/v1/r03/ only. Run by `make eval-asr-assert`. Strings below are what the audit saw, not reference text. Since TQ3 the entity checks run on the applied view (spelling overlay) and must pass.",
+  "codes": {
+    "must_not_contain[0]": [
+      "T-INJ"
+    ],
+    "entity_variants_max[Palantir]": [
+      "T-ENT"
+    ],
+    "entity_variants_max[Thiel]": [
+      "T-ENT"
+    ],
+    "entity_variants_max[Karp]": [
+      "T-ENT"
+    ]
+  },
+  "assertions": {
+    "must_not_contain": [
+      "Gysi"
+    ],
+    "entity_variants_max": {
+      "Palantir": {
+        "max": 1,
+        "heard_as": [
+          "Palantir",
+          "Heiland hier"
+        ]
+      },
+      "Thiel": {
+        "max": 1,
+        "heard_as": [
+          "Thiel",
+          "Tilda"
+        ]
+      },
+      "Karp": {
+        "max": 1,
+        "heard_as": [
+          "Karp",
+          "Carp"
+        ]
+      }
+    }
+  }
+}

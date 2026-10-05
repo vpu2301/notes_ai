@@ -3,7 +3,8 @@
 Public surface::
 
     from models import Registry, build_chat_provider, build_asr_provider
-    registry = Registry.load("config/models.yaml", env=settings.env, environ=os.environ)
+    registry = Registry.load("config/models.yaml", env=settings.env,
+                             environ=settings.registry_environ())
     chat = build_chat_provider(registry.resolve(workspace_id, "understand"))
     result = await chat.complete(prompt, schema, max_tokens=2048)
     # result.backend / result.model_id are stored on every run for provenance.
@@ -38,13 +39,21 @@ from .protocols import (
     JsonSchema,
     ProviderResult,
     ShouldCancel,
+    SpeechRun,
 )
 from .recorded import RecordedChatProvider
-from .registry import Capabilities, Registry, ResolvedBackend, WorkspaceModelSettings
+from .registry import (
+    ActiveOverride,
+    Capabilities,
+    Registry,
+    ResolvedBackend,
+    WorkspaceModelSettings,
+)
 from .usage import UsageRecord, UsageSink, emit, set_usage_sink
 
 __all__ = [
     "ASRProvider",
+    "ActiveOverride",
     "BackendConfig",
     "Capabilities",
     "ChatProvider",
@@ -67,6 +76,7 @@ __all__ = [
     "Registry",
     "ResolvedBackend",
     "ShouldCancel",
+    "SpeechRun",
     "TranscriptionCancelledError",
     "UsageRecord",
     "UsageSink",

@@ -19,3 +19,18 @@ datasources:
     access: proxy
     url: http://jaeger:16686
     editable: false
+
+  # Sprint 22: the loop funnel, read as the SELECT-only role (migration 0040).
+  - name: Funnel
+    uid: funnel
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: funnel_reader
+    secureJsonData:
+      password: funnel_reader
+    jsonData:
+      database: notes
+      sslmode: disable
+      postgresVersion: 1500
+    editable: false

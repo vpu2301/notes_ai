@@ -1,0 +1,47 @@
+{
+ "id": "r02_en_pardo_65gt",
+ "sprint": {
+  "no_copied_lines": "F2",
+  "no_information_lines": "F2",
+  "no_marks": "F2",
+  "topics": "F2",
+  "must_not_contain": "F2",
+  "figures": "F3",
+  "presenter_line": "F3",
+  "contact_line": "F3"
+ },
+ "no_copied_lines": true,
+ "no_information_lines_max": 0,
+ "no_marks": true,
+ "must_not_contain": [
+  "incredible",
+  "crowded boat"
+ ],
+ "topics": [
+  {
+   "match": [
+    "platform",
+    "swim"
+   ],
+   "max_lines": 5,
+   "min_children": 1
+  }
+ ],
+ "every_line_cited": true,
+ "figures": [
+  {
+   "name": "length overall",
+   "value": "66",
+   "unit": "feet"
+  },
+  {
+   "name": "water tank",
+   "value": "300",
+   "unit": "gallons",
+   "qualifier": "just under"
+  }
+ ],
+ "figures_min": 2,
+ "presenter_line": "Presenter: Mitchell, broker with Springbrook Marine Group (Pardo dealer for the Great Lakes)",
+ "contact_line": true
+}

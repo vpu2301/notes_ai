@@ -1,0 +1,10 @@
+# diar-server runtime (shape B, ADR-0052). Pinned like the worker image:
+# pyannote.audio <4.1 because the adapter reads output attributes that
+# only 4.0.x guarantees (ADR-0052 risk list).
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.30,<0.31
+python-multipart>=0.0.9
+pyannote.audio>=4.0,<4.1
+soundfile>=0.12.1
+numpy>=1.26.0
+httpx>=0.27.0

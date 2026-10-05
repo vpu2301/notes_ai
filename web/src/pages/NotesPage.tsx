@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { errorMessage } from "../api/http";
-import { searchNotes } from "../api/notes";
+import { messageFor } from "../lib/errorCopy";
+import { deleteNote, searchNotes } from "../api/notes";
 import type { SearchHit, SharingView } from "../api/types";
 import { AccessMenu, noteAccess, withSharing } from "../components/AccessBadge";
+import { useAuthOptional } from "../auth/AuthContext";
 import { ComingUp } from "../components/ComingUp";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
-import { FolderIcon, MicIcon, PlusIcon, SearchIcon, UploadIcon, WaveformIcon } from "../components/icons";
+import { AlertIcon, FolderIcon, LayersIcon, MicIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { SearchField } from "../components/SearchField";
 import { SkeletonRow } from "../components/Skeleton";
@@ -18,6 +21,9 @@ import { relativeTime } from "../lib/time";
 import { useCaptures, type Capture } from "../lib/useCaptures";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { useSpaces } from "../spaces/SpacesContext";
+
+/** In-progress captures shown before "Show N more" — the notes come first. */
+const CAPTURES_SHOWN = 3;
 
 /** Extra pages to pull through when a space narrows the list client-side. */
 const SPACE_PAGES = 4;
@@ -102,7 +108,7 @@ function CaptureRow({
           </button>
         )}
         {job.status === "complete" && (!mine || noteError) && (
-          <button className="btn primary sm" onClick={onCreate} disabled={creating}>
+          <button className="btn sm" onClick={onCreate} disabled={creating}>
             {creating ? "Creating…" : noteError ? "Try again" : "Create note"}
           </button>
         )}
@@ -118,14 +124,14 @@ function CaptureRow({
 function NoteRow({
   hit,
   spaceName,
-  moveItems,
+  menuItems,
   onOpen,
   onAccessChange,
 }: {
   hit: SearchHit;
   /** Shown as a chip when the list is not already narrowed to that space. */
   spaceName?: string;
-  moveItems: MenuItem[];
+  menuItems: MenuItem[];
   onOpen: () => void;
   onAccessChange: (view: SharingView) => void;
 }) {
@@ -149,7 +155,7 @@ function NoteRow({
       <span className="row-body">
         <span className="row-1">
           <span className="row-name">{hit.title || "Untitled note"}</span>
-          {hit.status !== "draft" && <StatusBadge status={hit.status} />}
+          {hit.status === "cancelled" && <StatusBadge status={hit.status} />}
           {spaceName && (
             <span className="chip space-chip">
               <FolderIcon size={11} /> {spaceName}
@@ -164,11 +170,9 @@ function NoteRow({
       </span>
       {access && <AccessMenu hit={hit} access={access} onChange={onAccessChange} />}
       <span className="row-time">{relativeTime(hit.updated_at)}</span>
-      {moveItems.length > 0 && (
-        <span className="row-side" onClick={(e) => e.stopPropagation()}>
-          <Menu anchored items={moveItems} label={`Move “${hit.title || "Untitled note"}”`} />
-        </span>
-      )}
+      <span className="row-side" onClick={(e) => e.stopPropagation()}>
+        <Menu anchored items={menuItems} label={`Actions for “${hit.title || "Untitled note"}”`} />
+      </span>
     </div>
   );
 }
@@ -179,7 +183,10 @@ export function NotesPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** The list could not be read; the page says so in place instead of showing "nothing yet". */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [makingBlank, setMakingBlank] = useState(false);
+  const [allCaptures, setAllCaptures] = useState(false);
   const debouncedQ = useDebouncedValue(q, 300);
   const navigate = useNavigate();
   const location = useLocation();
@@ -189,8 +196,16 @@ export function NotesPage() {
 
   // A space in the URL narrows the list to the notes filed in it.
   const { spaceId } = useParams();
-  const { spaces, spaceOf, loading: spacesLoading, file } = useSpaces();
+  const { spaces, spaceOf, loading: spacesLoading, file, forgetNote } = useSpaces();
+  /** The note the row menu asked to move to the trash, until confirmed. */
+  const [pendingTrash, setPendingTrash] = useState<SearchHit | null>(null);
+  const [trashing, setTrashing] = useState(false);
+  const [trashError, setTrashError] = useState<string | null>(null);
   const space = spaces.find((s) => s.id === spaceId);
+  // "Good afternoon, Volodymyr" — the first word of a real name, never an e-mail.
+  const realName = useAuthOptional()?.identity?.display_name?.trim() ?? "";
+  const firstName = realName.includes("@") ? "" : realName.split(/\s+/)[0];
+  useDocumentTitle(space ? space.name : "Notes");
 
   // The space was deleted (here or on another device) — fall back to all notes.
   useEffect(() => {
@@ -203,6 +218,7 @@ export function NotesPage() {
       const controller = new AbortController();
       abortRef.current = controller;
       setLoading(true);
+      setLoadError(null);
       try {
         const limit = spaceId ? 100 : 25;
         const res = await searchNotes({ q: query, limit, signal: controller.signal });
@@ -220,15 +236,15 @@ export function NotesPage() {
         setNextCursor(cursor);
       } catch (err) {
         if (!controller.signal.aborted) {
-          setHits([]);
+          setHits(null);
           setNextCursor(null);
-          toast.error(errorMessage(err));
+          setLoadError(messageFor(err));
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [toast, spaceId],
+    [spaceId],
   );
 
   useEffect(() => {
@@ -248,7 +264,7 @@ export function NotesPage() {
       setHits((prev) => [...(prev ?? []), ...res.hits]);
       setNextCursor(res.next_cursor);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setLoadingMore(false);
     }
@@ -273,7 +289,7 @@ export function NotesPage() {
     try {
       navigate(`/notes/${await createBlankNote()}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
       setMakingBlank(false);
     }
   };
@@ -300,18 +316,50 @@ export function NotesPage() {
     return out;
   }, [visible, searching]);
 
-  /** "Move to …" for every space, the note's own one unfiling it again. */
-  const moveItems = useCallback(
-    (noteId: string): MenuItem[] => {
-      const current = spaceOf[noteId];
-      return spaces.map((s) => ({
+  /**
+   * The row's ⋯ menu: "Move to …" for every space (the note's own one
+   * unfiling it again), then "Move to trash" — as the Mac app's row.
+   */
+  const menuItems = useCallback(
+    (hit: SearchHit): MenuItem[] => {
+      const current = spaceOf[hit.note_id];
+      const items: MenuItem[] = spaces.map((s) => ({
         label: current === s.id ? `Remove from ${s.name}` : `Move to ${s.name}`,
         icon: <FolderIcon size={14} />,
-        onClick: () => void file(noteId, current === s.id ? null : s.id),
+        onClick: () => void file(hit.note_id, current === s.id ? null : s.id),
       }));
+      items.push({
+        label: "Move to trash",
+        icon: <TrashIcon size={14} />,
+        sep: items.length > 0,
+        danger: true,
+        onClick: () => {
+          setTrashError(null);
+          setPendingTrash(hit);
+        },
+      });
+      return items;
     },
     [spaces, spaceOf, file],
   );
+
+  const onTrash = async () => {
+    if (!pendingTrash) return;
+    const id = pendingTrash.note_id;
+    setTrashing(true);
+    setTrashError(null);
+    try {
+      await deleteNote(id);
+      forgetNote(id);
+      setHits((prev) => prev?.filter((h) => h.note_id !== id) ?? prev);
+      setPendingTrash(null);
+      toast.success("Note moved to trash");
+    } catch (err) {
+      setTrashError(messageFor(err));
+    } finally {
+      setTrashing(false);
+    }
+  };
 
   // Captures only show on All notes, so a space is empty on its notes alone.
   const empty =
@@ -332,42 +380,20 @@ export function NotesPage() {
    * has to be right *before* the list has loaded.
    */
   const hasSomething = (hits?.length ?? 0) > 0 || (captures?.length ?? 0) > 0;
-  const firstUse = !searching && !spaceId && !hasSomething;
+  const firstUse = !searching && !spaceId && !hasSomething && !loadError;
 
   return (
     <div className="home">
-      <div className="home-h">
-        <div>
-          <h1>{space ? space.name : greeting()}</h1>
-          <div className="home-date">
-            {space
-              ? `${visible.length} ${visible.length === 1 ? "note" : "notes"} in ${space.name}`
-              : todayLabel()}
-          </div>
+      {/* One compact row: the title, then search and the ways to start —
+          kept apart (finding a note is not starting one) but on one line,
+          so the notes themselves start right under it. */}
+      <div className="home-top">
+        <div className="home-title">
+          <h1>{space ? space.name : firstName ? `${greeting()}, ${firstName}` : greeting()}</h1>
+          <span className="home-sub">
+            {space ? `${visible.length} ${visible.length === 1 ? "note" : "notes"}` : todayLabel()}
+          </span>
         </div>
-        {/* Named as a group: the sidebar carries its own "New meeting", and
-            without this the two are indistinguishable to a screen reader
-            moving by landmark — and to anything else asking for "the New
-            meeting button on this page". */}
-        <div className="home-actions" role="group" aria-label="Start a note">
-          <button className="btn ghost" onClick={() => navigate("/meeting/new?mode=upload")} title="Upload a recording">
-            <UploadIcon size={14} /> Upload
-          </button>
-          <button className="btn" onClick={() => void onBlank()} disabled={makingBlank} title="Blank note (B)">
-            <PlusIcon size={14} /> {makingBlank ? "Creating…" : "Blank note"}
-          </button>
-          <button
-            ref={newMeetingRef}
-            className="btn accent"
-            onClick={() => navigate("/meeting/new")}
-            title="New meeting (N)"
-          >
-            <MicIcon size={14} /> New meeting
-          </button>
-        </div>
-      </div>
-
-      <div className="home-search">
         <SearchField
           value={q}
           onChange={setQ}
@@ -376,15 +402,36 @@ export function NotesPage() {
           busy={searching && loading}
           status={searching && !loading && hits ? resultCount : undefined}
         />
+        {/* Named as a group: the sidebar carries its own "New meeting", and
+            without this the two are indistinguishable to a screen reader
+            moving by landmark — and to anything else asking for "the New
+            meeting button on this page". */}
+        <div className="home-start" role="group" aria-label="Start a note">
+          <button ref={newMeetingRef} className="btn accent" onClick={() => navigate("/meeting/new")} title="New meeting (N)">
+            <MicIcon size={14} /> New meeting
+          </button>
+          <Menu
+            anchored
+            label="More ways to start"
+            triggerClassName="icon-btn home-more"
+            items={[
+              { label: makingBlank ? "Creating…" : "Blank note", icon: <PlusIcon size={14} />, onClick: () => void onBlank(), disabled: makingBlank },
+              { label: "Upload a recording", icon: <UploadIcon size={14} />, onClick: () => navigate("/meeting/new?mode=upload") },
+              { label: "New from template…", icon: <LayersIcon size={14} />, onClick: () => navigate("/new") },
+            ]}
+          />
+        </div>
       </div>
 
       {!searching && !spaceId && <ComingUp invite={hasSomething} />}
 
       {!spaceId && captures && captures.length > 0 && (
         <section className="home-group" aria-label="In progress">
-          <h2 className="home-group-h">In progress</h2>
-          <div className="panel">
-            {captures.map((c) => (
+          <h2 className="home-group-h">
+            In progress <span className="home-group-count">{captures.length}</span>
+          </h2>
+          <div className="home-list">
+            {(allCaptures ? captures : captures.slice(0, CAPTURES_SHOWN)).map((c) => (
               <CaptureRow
                 key={c.job.id}
                 capture={c}
@@ -393,22 +440,40 @@ export function NotesPage() {
                 onCreate={() =>
                   void createNote(c.job)
                     .then((id) => navigate(`/notes/${id}`))
-                    .catch((err) => toast.error(errorMessage(err)))
+                    .catch((err) => toast.error(messageFor(err)))
                 }
-                onCancel={() => void cancel(c.job).catch((err) => toast.error(errorMessage(err)))}
+                onCancel={() => void cancel(c.job).catch((err) => toast.error(messageFor(err)))}
                 onDismiss={() => dismissFailed(c.job)}
               />
             ))}
+            {captures.length > CAPTURES_SHOWN && (
+              <button className="home-list-more" onClick={() => setAllCaptures((v) => !v)} aria-expanded={allCaptures}>
+                {allCaptures ? "Show fewer" : `Show ${captures.length - CAPTURES_SHOWN} more`}
+              </button>
+            )}
           </div>
         </section>
       )}
 
       {loading && (
-        <div className="panel" aria-busy="true" aria-label="Loading notes">
+        <div className="home-list" aria-busy="true" aria-label="Loading notes">
           <SkeletonRow />
           <SkeletonRow />
           <SkeletonRow />
         </div>
+      )}
+
+      {!loading && loadError && (
+        <EmptyState
+          icon={<AlertIcon size={20} />}
+          title="Your notes could not be loaded"
+          message={loadError}
+          action={
+            <button className="btn" onClick={() => void runSearch(debouncedQ)}>
+              Try again
+            </button>
+          }
+        />
       )}
 
       {empty && !searching && spaceId && (
@@ -468,13 +533,13 @@ export function NotesPage() {
         groups.map((g) => (
           <section key={g.label} className="home-group" aria-label={g.label}>
             <h2 className="home-group-h">{g.label}</h2>
-            <div className="panel">
+            <div className="home-list">
               {g.hits.map((hit) => (
                 <NoteRow
                   key={hit.note_id}
                   hit={hit}
                   spaceName={spaceId ? undefined : spaces.find((s) => s.id === spaceOf[hit.note_id])?.name}
-                  moveItems={moveItems(hit.note_id)}
+                  menuItems={menuItems(hit)}
                   onOpen={() => navigate(`/notes/${hit.note_id}`)}
                   onAccessChange={(view) =>
                     setHits((prev) => prev?.map((h) => (h.note_id === view.note_id ? withSharing(h, view) : h)) ?? prev)
@@ -491,6 +556,21 @@ export function NotesPage() {
             {loadingMore ? "Loading…" : "Show more"}
           </button>
         </div>
+      )}
+
+      {pendingTrash && (
+        <ConfirmDialog
+          title="Move this note to the trash?"
+          subtitle="It disappears from everyone's list and any public link stops working."
+          confirmLabel="Move to trash"
+          confirmDanger
+          busy={trashing}
+          error={trashError}
+          onConfirm={() => void onTrash()}
+          onCancel={() => setPendingTrash(null)}
+        >
+          The note is kept for the workspace's records but is no longer shown anywhere.
+        </ConfirmDialog>
       )}
     </div>
   );

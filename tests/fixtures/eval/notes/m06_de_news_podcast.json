@@ -1,0 +1,198 @@
+{
+ "id": "m06_de_news_podcast",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-09-22",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 38000,
+   "text": "Guten Morgen, das ist die Morgenlage vom Rheinblatt, ich bin Lena Hartwig. Heute geht es um zwei Themen: den Streit in der Koalition über das Rentenpaket und den Warnstreik in den Nordseehäfen. Aus dem Hauptstadtbüro ist mein Kollege Jonas Pfeffer zugeschaltet. Jonas, fangen wir mit der Rente an. Worum wird da eigentlich gestritten?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 38000,
+   "t_end_ms": 142000,
+   "text": "Guten Morgen. Im Kern geht es um die Frühverrentung nach 45 Beitragsjahren. Wer so lange eingezahlt hat, kann bisher früher ohne Abschläge in Rente gehen. Die Sozialministerin Karla Sonnenfeld will diese Regel unbedingt erhalten. Der Finanzminister Bernd Waltzmann will sie abschaffen, weil sie nach seinen Zahlen jedes Jahr mehrere Milliarden kostet und Fachkräfte zu früh aus dem Arbeitsmarkt holt. Die beiden Häuser haben sich in den letzten Wochen gegenseitig Rechenmodelle geschickt, und die Zahlen gehen ziemlich weit auseinander. Nach allem, was ich aus beiden Ministerien höre, wird die Frühverrentung wahrscheinlich nicht ganz abgeschafft, sondern abgeschwächt. Entschieden ist aber noch nichts. Am Donnerstag soll der Koalitionsausschuss tagen, und dort soll das Rentenpaket geeint werden."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 142000,
+   "t_end_ms": 150000,
+   "text": "Die Ministerin hat sich gestern Abend dazu sehr deutlich geäußert."
+  },
+  {
+   "speaker": "SPEAKER_3",
+   "t_start_ms": 150000,
+   "t_end_ms": 164000,
+   "text": "Wer fünfundvierzig Jahre gearbeitet hat, darf dafür nicht bestraft werden. Das ist für uns nicht verhandelbar."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 164000,
+   "t_end_ms": 172000,
+   "text": "Nicht verhandelbar, sagt sie. Jonas, wie ernst ist das gemeint?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 172000,
+   "t_end_ms": 236000,
+   "text": "Das ist erst einmal eine Verhandlungsposition, und so wird es in der Koalition auch gelesen. Im Finanzministerium hält man die Kosten für zu hoch, und auch in den eigenen Reihen der Ministerin gibt es Stimmen, die eine Reform für nötig halten. Ein möglicher Kompromiss wäre, die Grenze für die Jahrgänge ab 1970 schrittweise anzuheben, also für alle, die heute Mitte fünfzig sind. Das ist aber nicht bestätigt, das wird in Koalitionskreisen nur als eine von mehreren Varianten genannt."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 236000,
+   "t_end_ms": 262000,
+   "text": "Und damit zu unserem zweiten Thema, dem Streik in den Häfen. In Emden, Bremerhaven und Wilhelmshaven liegen seit heute früh viele Terminals still. Jonas, wer streikt da und warum?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 262000,
+   "t_end_ms": 352000,
+   "text": "Die Gewerkschaft Hafenbund hat rund 3.000 Beschäftigte zum Warnstreik aufgerufen, vor allem an den Containerterminals und in der Kfz-Verladung. Die letzte Verhandlungsrunde ist am Montag gewesen, ohne Ergebnis. Der Hafenbund fordert acht Prozent mehr Lohn bei einer Laufzeit von zwölf Monaten, die Arbeitgeber bieten bisher vier Prozent bei vierundzwanzig Monaten. Der Warnstreik soll bis Mittwoch 0 Uhr dauern. Der Verband der Hafenbetriebe hat angekündigt, bis Freitag ein neues Angebot vorzulegen, und die Gewerkschaft sagt, sie warte dieses Angebot ab, bevor sie über weitere Schritte entscheidet."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 352000,
+   "t_end_ms": 358000,
+   "text": "Was bedeutet das für Verbraucherinnen und Verbraucher?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 358000,
+   "t_end_ms": 402000,
+   "text": "Kurzfristig wenig. Ein Tag Stillstand lässt sich in den Häfen aufholen. Wenn der Streik aber verlängert wird, könnten sich Lieferungen von Autoteilen und Elektronik um mehrere Tage verzögern, das sagen zumindest die Logistikverbände. Die Reedereien haben angekündigt, einzelne Schiffe nach Rotterdam umzuleiten."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 402000,
+   "t_end_ms": 418000,
+   "text": "Danke, Jonas. Das war die Morgenlage vom Rheinblatt. Morgen früh sind wir wieder da."
+  }
+ ],
+ "gold": {
+  "key_facts": [
+   "Die Koalition streitet über die Frühverrentung nach 45 Beitragsjahren im Rentenpaket",
+   "Sozialministerin Sommerfeld will die Frühverrentung erhalten, Finanzminister Walzmann will sie abschaffen",
+   "Die Frühverrentung wird wahrscheinlich abgeschwächt statt abgeschafft",
+   "Der Koalitionsausschuss soll am Donnerstag tagen und das Rentenpaket einigen",
+   "Ein möglicher Kompromiss hebt die Grenze für Jahrgänge ab 1970 an, das ist nicht bestätigt",
+   "Der Hafenbund hat rund 3.000 Beschäftigte zum Warnstreik aufgerufen",
+   "Die letzte Verhandlungsrunde am Montag blieb ohne Ergebnis",
+   "Der Hafenbund fordert acht Prozent mehr Lohn, die Arbeitgeber bieten vier Prozent",
+   "Der Warnstreik soll bis Mittwoch 0 Uhr dauern",
+   "Der Verband der Hafenbetriebe will bis Freitag ein neues Angebot vorlegen",
+   "Bei längerem Streik könnten sich Lieferungen von Autoteilen und Elektronik verzögern"
+  ],
+  "actions": [],
+  "decisions": [],
+  "open_questions": [],
+  "entities": [
+   {
+    "canonical": "Karla Sommerfeld",
+    "surface_forms": [
+     "Karla Sonnenfeld"
+    ],
+    "kind": "person"
+   },
+   {
+    "canonical": "Bernd Walzmann",
+    "surface_forms": [
+     "Bernd Waltzmann"
+    ],
+    "kind": "person"
+   },
+   {
+    "canonical": "Hafenbund",
+    "surface_forms": [
+     "Hafenbund"
+    ],
+    "kind": "org"
+   }
+  ],
+  "hedged": [
+   {
+    "fact": "Die Frühverrentung wird wahrscheinlich abgeschwächt statt abgeschafft",
+    "modality": "forecast"
+   },
+   {
+    "fact": "Ein möglicher Kompromiss hebt die Grenze für Jahrgänge ab 1970 an",
+    "modality": "unconfirmed"
+   },
+   {
+    "fact": "Lieferungen von Autoteilen und Elektronik könnten sich verzögern",
+    "modality": "forecast"
+   }
+  ],
+  "dates": [
+   {
+    "text": "heute",
+    "resolved": "2026-09-22",
+    "tense": "none"
+   },
+   {
+    "text": "am Montag",
+    "resolved": "2026-09-21",
+    "tense": "past"
+   },
+   {
+    "text": "am Donnerstag",
+    "resolved": "2026-09-24",
+    "tense": "future"
+   },
+   {
+    "text": "bis Mittwoch 0 Uhr",
+    "resolved": "2026-09-23T00:00",
+    "tense": "future"
+   },
+   {
+    "text": "bis Freitag",
+    "resolved": "2026-09-25",
+    "tense": "future"
+   }
+  ],
+  "speakers": {
+   "SPEAKER_1": "Lena Hartwig",
+   "SPEAKER_2": "Jonas Pfeffer",
+   "SPEAKER_3": "Karla Sommerfeld"
+  },
+  "name_candidates": [
+   "Lena Hartwig",
+   "Jonas Pfeffer",
+   "Karla Sommerfeld"
+  ],
+  "glossary": [
+   {
+    "term": "Bernd Walzmann",
+    "kind": "person",
+    "heard_as": [
+     "Bernd Waltzmann"
+    ]
+   }
+  ],
+  "topics": [
+   {
+    "title": "Rentenpaket",
+    "t_start_ms": 38000
+   },
+   {
+    "title": "Warnstreik in den Häfen",
+    "t_start_ms": 236000
+   }
+  ],
+  "must_contain": [
+   "Hafenbund",
+   "Rentenpaket"
+  ],
+  "must_not_contain": [
+   "Teambesprechung",
+   "Hinweis zum Transkript",
+   "Sonnenfeld",
+   "Waltzmann",
+   "Quillhaven",
+   "Ferrytale"
+  ]
+ }
+}

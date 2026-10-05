@@ -1,12 +1,19 @@
-# Dev-Mac chat model for libs/models `dev_mac` backend (DEP-S0).
+# Dev-Mac chat model for libs/models `dev_mac` backend (DEP-S0, Sprint L1).
 #
 # Why a Modelfile: Ollama's OpenAI-compatible endpoint ignores per-request
-# `num_ctx`, and the default context (4k) silently truncates a 60-minute
-# transcript window. Baking num_ctx into a named model is the only way the
-# /v1 route honours the `context_window` promised in config/models.yaml.
+# `num_ctx`, and the default context (4k) silently truncates a transcript
+# window. Baking num_ctx into a named model is the only way the /v1 route
+# honours the `context_window` promised in config/models.yaml.
+#
+# Why 16K (Sprint L1 T1): the pipeline's calls are small — a 6 000-character
+# window (~2.5k tokens) plus ~1.2k of system prompt and up to 3k of output;
+# a reduce over a block of facts is ~4k in and 2.5k out. 32K of KV cache
+# is what stopped a 12B model fitting next to the Docker dev stack on a
+# 24 GB Mac. Only the eval's single-pass arm needs the long context: that
+# is Modelfile.longctx, served as `notes-chat-long`.
 #
 # `make dev-model` runs: ollama create notes-chat -f infra/models/dev-mac/Modelfile
 # Override the base with DEV_MAC_BASE_MODEL (the script substitutes FROM).
 FROM gemma3:4b
-PARAMETER num_ctx 32768
+PARAMETER num_ctx 16384
 PARAMETER temperature 0

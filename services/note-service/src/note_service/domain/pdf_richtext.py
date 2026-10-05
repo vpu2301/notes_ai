@@ -48,6 +48,9 @@ _ITALIC_ = re.compile(r"(?<![\w_])_(\S(?:[^_\n]*\S)?)_(?![\w_])")
 # the head of a paragraph reads as a heading, not as body — the template
 # styles <b class=lead> that way.
 _LEAD = re.compile(r"^<strong>([^<]{1,60}?)</strong>(?=[\s:—–-]|$)")
+# "Anna: we ship Friday" — a transcript turn or a run-in label. The label
+# is at most four words, carries no markup and is not a URL scheme.
+_SPEAKER = re.compile(r"^([^\s<>:][^<>:]{0,39}?):\s+(?=\S)")
 
 
 def _inline(text: str) -> str:
@@ -67,6 +70,17 @@ def _paragraph(lines: list[str]) -> str:
     if not body:
         return ""
     body = _LEAD.sub(r'<strong class="lead">\1</strong>', body, count=1)
+    if not body.startswith("<"):
+        turn = _SPEAKER.match(body)
+        if (
+            turn
+            and len(turn.group(1).split()) <= 4
+            and not turn.group(1).lower().startswith("http")
+        ):
+            return (
+                f'<p class="turn"><span class="speaker">{turn.group(1)}</span> '
+                f"{body[turn.end() :]}</p>"
+            )
     return f"<p>{body}</p>"
 
 

@@ -60,7 +60,7 @@ RUN apt-get update \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
-RUN pip install --no-cache-dir --upgrade pip uv==0.4.29
+RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/
@@ -80,7 +80,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/audit \
     /build/libs/db \
     /build/libs/asr_models \
-    /build/libs/secret
+    /build/libs/secret \
+    /build/libs/note_models
 
 # This image is CPU-only (the punctuation model runs under torch.no_grad on
 # CPU — nothing here ever touches a GPU), so torch comes from the PyTorch CPU

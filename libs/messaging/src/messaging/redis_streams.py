@@ -35,7 +35,6 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable
-from dataclasses import dataclass
 from typing import Any, Final, cast
 
 from redis.asyncio import Redis
@@ -54,12 +53,6 @@ DEFAULT_MAX_RETRIES: Final = 3
 HEADER_ATTEMPTS_KEY: Final = "x-attempts"
 # Lifetime of the per-(stream, group) delivery-attempt counter hash.
 _ATTEMPTS_TTL_S: Final = 7 * 24 * 3600
-
-
-@dataclass(slots=True)
-class _PendingMessage:
-    message_id: bytes
-    fields: dict[bytes, bytes]
 
 
 class RedisStreamsProducer:

@@ -5,6 +5,8 @@ description = "Shared Pydantic models for ASR job + transcription output (sprint
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7.0",
+    # artefacts.yaml (Sprint TQ1); loaded lazily by asr_models.artefacts.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

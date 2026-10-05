@@ -120,6 +120,7 @@ async def test_native_mode_returns_the_shape_the_web_client_declares() -> None:
         "mfa_enabled": True,
         "has_password": False,
         "status": "active",
+        "created_at": None,
     }
     # `kind` is what tells a personal workspace from a team one — the whole
     # signup acceptance criterion (`memberships[0].kind == "personal"`)

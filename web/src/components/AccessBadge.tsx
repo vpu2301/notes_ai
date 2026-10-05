@@ -1,4 +1,4 @@
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import { createPublicLink, revokePublicLink, setVisibility } from "../api/notes";
 import type { SearchHit, SharingView } from "../api/types";
 import { ChevronDownIcon, CloseIcon, GlobeIcon, LockIcon, UsersIcon } from "./icons";
@@ -84,7 +84,7 @@ export function AccessMenu({
       onChange(view);
       await done?.(view);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     }
   };
 

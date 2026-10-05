@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/http";
@@ -17,6 +18,7 @@ import { Banner, LoginShell, useCountdown } from "./auth/LoginShell";
  * only honest sentence, and it is the same sentence every time.
  */
 export function LoginPage() {
+  useDocumentTitle("Sign in");
   const { status, signInWithEmailCode } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -215,8 +217,8 @@ export function LoginPage() {
             anything — `/auth/email/*` is not mounted and the code never
             arrives. `/signup` is the way in there, and a person who needs
             it should not have to guess the URL. */}
-        <Link className="link-btn" to="/signup">
-          Create an account
+        <Link className="link-btn" to="/join">
+          Create a free workspace
         </Link>
       </p>
     </LoginShell>

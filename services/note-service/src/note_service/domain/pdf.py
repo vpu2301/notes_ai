@@ -197,9 +197,44 @@ def build_render_input(
     is_draft: bool = False,
     language: str = "en",
     section_names: dict[str, str] | None = None,
+    variant: str = "full",
+    template_code: str | None = None,
+    internal_keys: frozenset[str] = frozenset(),
 ) -> RenderInput:
+    """``variant="full"`` is the author's PDF: every section, as before.
+
+    ``variant="client"`` (Sprint 36) renders the CLIENT DOCUMENT — an
+    allow-list by role, with `user_notes`, the transcript and every line
+    marked `(internal)` removed. Every external surface uses it. Before
+    Sprint 36 there was only one PDF, and it went to recipients with the
+    author's private scratchpad in it.
+    """
     content = version.content
     names = dict(section_names or {})
+
+    if variant == "client":
+        from . import client_view
+        from .meeting_doc import types as meeting_types
+
+        document = client_view.build(
+            content,
+            family=meeting_types.family_for_template(template_code),
+            section_names=names,
+            internal_keys=internal_keys,
+        )
+        return RenderInput(
+            title=document.title or note.title,
+            code=note.code,
+            issuer_name=issuer_name,
+            primary_author_full_name="",
+            co_author_names=[],
+            finalized_at=note.finalized_at.isoformat() if note.finalized_at else "",
+            updated_at=note.updated_at.isoformat(),
+            is_draft=is_draft,
+            language=language,
+            sections=[{"section_key": s.section_key, "text": s.text} for s in document.sections],
+            section_names={s.section_key: s.name for s in document.sections},
+        )
 
     # ``finalized_at`` may be empty for non-finalized (draft) notes; the
     # template falls back to the last-updated stamp for those.
@@ -238,6 +273,9 @@ def render_note_pdf(
     is_draft: bool = False,
     language: str = "en",
     section_names: dict[str, str] | None = None,
+    variant: str = "full",
+    template_code: str | None = None,
+    internal_keys: frozenset[str] = frozenset(),
 ) -> bytes:
     """Render the PDF bytes for a note version.
 
@@ -253,6 +291,9 @@ def render_note_pdf(
         is_draft=is_draft,
         language=language,
         section_names=section_names,
+        variant=variant,
+        template_code=template_code,
+        internal_keys=internal_keys,
     )
     return _render(payload)
 
@@ -271,7 +312,12 @@ def _prepare_sections(payload: RenderInput) -> list[dict[str, str]]:
             continue
         text = _clamp(text, min(MAX_SECTION_LENGTH, budget))
         budget -= len(text)
-        name = payload.section_names.get(key) or _humanize(key)
+        name = payload.section_names.get(key)
+        if name is None:
+            # An engine-made block with no title is read as the note
+            # itself: no heading. A template key nobody named is at
+            # least made readable.
+            name = "" if key.startswith("gen:") else _humanize(key)
         out.append({"name": _clamp(name), "html": render_rich_text(text)})
     return out
 
@@ -323,12 +369,6 @@ def _render(payload: RenderInput) -> bytes:
         base_url=(_TEMPLATE_DIR / "note.html.j2").as_uri(),
     ).write_pdf(presentational_hints=False)
     return _normalise_pdf_dates(pdf_bytes)
-
-
-def compute_pdf_hash(pdf_bytes: bytes) -> bytes:
-    import hashlib
-
-    return hashlib.sha256(pdf_bytes).digest()
 
 
 def _normalise_pdf_dates(pdf_bytes: bytes) -> bytes:

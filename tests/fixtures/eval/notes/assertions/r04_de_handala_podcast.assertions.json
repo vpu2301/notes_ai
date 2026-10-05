@@ -1,0 +1,95 @@
+{
+  "id": "r04_de_handala_podcast",
+  "sprint": {
+    "must_not_contain": "SQ1",
+    "must_contain_any": "SQ1",
+    "guest_line": "SQ1"
+  },
+  "recording_type": "podcast_broadcast",
+  "must_not_contain": [
+    "8 Tage zuvor",
+    "Kash Patel",
+    "Cash Patel",
+    "Cash-Patel"
+  ],
+  "must_contain_any": [
+    [
+      "Natanz"
+    ],
+    [
+      "1.000 Zentrifugen",
+      "1000 Zentrifugen",
+      "tausend Zentrifugen"
+    ],
+    [
+      "Homeland Justice"
+    ],
+    [
+      "Albanien"
+    ],
+    [
+      "Kindergärten",
+      "Kindergarten"
+    ],
+    [
+      "Panikknöpfe",
+      "Panikknopf"
+    ],
+    [
+      "Grüne Bewegung"
+    ],
+    [
+      "2009"
+    ],
+    [
+      "Handala"
+    ]
+  ],
+  "guest_line": "Welchering",
+  "codes": {
+    "must_not_contain[0]": [
+      "F-INV"
+    ],
+    "must_not_contain[1]": [
+      "F-INV"
+    ],
+    "must_not_contain[2]": [
+      "F-INV"
+    ],
+    "must_not_contain[3]": [
+      "F-INV"
+    ],
+    "must_contain_any[0]": [
+      "F-COV"
+    ],
+    "must_contain_any[1]": [
+      "F-NUM",
+      "F-COV"
+    ],
+    "must_contain_any[2]": [
+      "F-COV"
+    ],
+    "must_contain_any[3]": [
+      "F-COV"
+    ],
+    "must_contain_any[4]": [
+      "F-COV"
+    ],
+    "must_contain_any[5]": [
+      "F-COV"
+    ],
+    "must_contain_any[6]": [
+      "F-COV"
+    ],
+    "must_contain_any[7]": [
+      "F-NUM"
+    ],
+    "must_contain_any[8]": [
+      "T-ENT",
+      "F-COV"
+    ],
+    "guest_line": [
+      "F-ROLE"
+    ]
+  }
+}

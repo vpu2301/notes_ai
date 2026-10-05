@@ -91,6 +91,72 @@ natively, in a window laid out like the Claude / Codex desktop apps
    close it. `open "Notes AI Capture.app" --args --window` launches straight
    into it.
 
+## Call audio (Sprint 31)
+
+With headphones on, the other people in an online call never reach the
+microphone, so a microphone-only recording has half the meeting. With
+**Settings › General › Record call audio (other participants)** on, the
+app also records what the Mac plays and uploads a **two-channel** file:
+ch0 = your microphone, ch1 = the call audio (16 kHz FLAC, WAV fallback),
+with `channel_layout=mic_system` and `local_speaker_name` (your account's
+display name) on `POST /asr/jobs`. The server uses the split to tell *you*
+from the other side; a speaker named from the channel shows
+"· from your microphone" and an ✕ that removes the name.
+
+**How it records** (`SystemAudioTap.swift`, macOS 14.2+): one Core Audio
+*process tap* of every process except this app
+(`CATapDescription(stereoGlobalTapButExcludeProcesses:)`, private,
+unmuted), placed in a **private aggregate device** together with the
+default input device, drift compensation on the tap. Microphone and call
+audio arrive in one IO callback on one clock, so the channels stay aligned
+for the whole meeting. When the default input or output device changes
+(AirPods connect) the aggregate device is rebuilt on the new one after a
+250 ms settle — a short gap on both channels. The aggregate device
+(`ai.notes.capture.aggregate.*`) and the tap are destroyed on Stop; a
+device a crashed run left behind is removed at the next launch. On macOS
+older than 14.2 the setting has no effect.
+
+**Consent posture.** The setting is **off** by default. Turning it on shows
+a blocking notice — what is recorded (other participants' audio from this
+Mac), that *you* are responsible for telling participants and getting their
+agreement where required, a sentence to say, and a help link
+(`CallAudioConsent.helpURL`, currently
+`https://notes.ai/help/recording-call-audio` — **that page must exist before
+release**). *Accept* turns the setting on; *Not now* keeps recordings
+microphone-only. The accepted version is stored on this Mac
+(`callAudioConsentVersion`); raising `CallAudioConsent.currentVersion` asks
+again, and until it is accepted recordings are microphone-only. While call
+audio is recorded, the menu-bar record dot carries a small headphones badge
+and the card shows two meters, **You** and **Call audio**.
+
+**Permission.** macOS asks once to allow *System Audio Recording* for Notes
+AI Capture (`NSAudioCaptureUsageDescription` in `Support/Info.plist`). It
+lives in System Settings › Privacy & Security › **Screen & System Audio
+Recording**; the card's **Fix** link opens that pane.
+
+**Troubleshooting.**
+- *"Recording your microphone only — call audio permission is off"*: the tap
+  could not be created. Click **Fix**, allow Notes AI Capture under System
+  Audio Recording, then start a new meeting. `tccutil reset AudioCapture
+  ai.notes.capture` should make macOS ask again (service name not yet
+  checked on a real machine).
+- *Call audio is silent although the card says it is recorded*: when the
+  permission is denied macOS may still create the tap and deliver silence —
+  the app cannot tell that apart from a quiet call. Check the permission.
+- *"Call audio stopped"*: the tap or the aggregate device went away
+  mid-meeting (a device change that could not be rebuilt). The recording
+  continues from the microphone; ch1 is silence from that point and the
+  file is still uploaded as two-channel.
+- As with the microphone, the grant is keyed to the code signature — use
+  `scripts/make-app.sh` (persistent identity), not ad-hoc signing.
+
+**Not verified on hardware yet** (the app is only built, never launched,
+in development by the assistant): that the tap works under App Sandbox
+(the XcodeGen build) — no extra entitlement is added, none is documented;
+the permission prompt; channel skew < 5 ms over 60 min; CPU < 3 %; the
+AirPods rebuild gap. ScreenCaptureKit (audio-only `SCStream`) is the
+fallback if the tap fails any of these; it is not built.
+
 ## Signing in (IDX-M1)
 
 The default way in is your address and a six-digit code from the mail —
@@ -144,6 +210,57 @@ as **Not uploaded yet** on the home page, above the notes, with *Send*,
 *Export…*, *Show in Finder* and *Delete* (which asks first, because it
 removes the only copy). Signing back in sends them automatically, and so
 does reconnecting. Nothing in the app deletes one on its own.
+
+## My notes: typing during the meeting (Sprint 34, ADR-0055)
+
+Pressing Record now **opens the note**, before there is any audio. The
+capture card carries a scratchpad — the note's own `user_notes` section —
+and what you type there is the note from the first second.
+
+What that guarantees, and how:
+
+- **It is saved as you type.** Every change is written to the app's
+  protected container within half a second (`PendingMeetingNotes`), and
+  autosaved into the note (`PUT /v1/notes/{id}/draft`) about a second
+  later. An app kill, a crash or a flat battery costs a sentence at worst.
+- **Offline is not a special case.** With no network the recorder starts
+  anyway and the note is opened at Stop instead; if that fails too, the
+  typing waits on disk and is replayed the next time a workspace loads.
+  Creating the note is idempotent on the capture id, so a replay never
+  makes a second one.
+- **Two devices never overwrite each other.** When the server already has
+  different text (you typed on the Mac too), the local lines are
+  **appended under a `---` divider**, and lines the server already holds
+  are skipped. Nothing you typed is ever replaced by something else.
+- **Nothing rewrites your words.** `user_notes` comes back byte-identical
+  after the transcript lands. A line the recording cannot support is kept
+  and marked, never silently corrected or dropped.
+- **Line times, not keystrokes.** The first moment each line appears is
+  recorded as `line_key → offset_ms` — a hash and an offset, no content —
+  so the document can later say what was being said when you wrote it.
+- **Sign-out clears them.** Unsynced scratchpads for the identity signing
+  out are deleted (`SignOutCleanup`); another person's on a shared device
+  are left alone, and kept *recordings* are never touched.
+
+The menu-bar popover adds **Quick note…** while a recording runs: one
+line, Return, and it is appended to the same `user_notes` with the moment
+it was written — without opening the window.
+
+## Names and terms: the workspace glossary (Sprint 35)
+
+Renaming a speaker offers, once, to remember the spelling for the
+workspace — and only a tap on **Remember** writes anything. The rules for
+when it is worth asking live in `RememberableName` and are the same on all
+three clients: a name typed over a placeholder or over a different
+spelling counts; case, spacing, or clearing a name back to "Speaker 2" do
+not, and neither do the invisible characters that make one name render as
+another.
+
+The terms are listed under **Settings → Names and terms**, deletable by
+whoever added them, and the capture sends them as the upload's
+`vocabulary_hint` so the transcriber has the spellings before it guesses.
+Fetching the hint never delays a recording: it happens beside
+`beginRecording()`, and a failure costs the hint, not the meeting.
 
 ## Workspaces (IDX-M2)
 
@@ -264,6 +381,7 @@ open NotesAICapture.xcodeproj
 `project.yml` defines an app target that uses `Support/Info.plist`
 (`NSMicrophoneUsageDescription` for the mic prompt,
 `NSCalendarsFullAccessUsageDescription` for the home page's Upcoming list,
+`NSAudioCaptureUsageDescription` for the call-audio prompt,
 `CFBundleURLTypes` for the `notesai://` OAuth callback of MCP connectors,
 `LSUIElement` so the app is menu-bar-only with no Dock icon) and
 `Support/NotesAICapture.entitlements` (sandbox + network client +
@@ -292,7 +410,9 @@ macos/
     ├── AppURLRouter.swift           # notesai:// links from outside the app
     ├── AuthCopy.swift               # what each error code says to the person
     ├── PendingCaptures.swift        # recordings that never reached the server
-    ├── Recorder.swift               # AVAudioRecorder + metering
+    ├── Recorder.swift               # AVAudioEngine → FLAC/WAV, mono or mic+call (TapSink), metering
+    ├── SystemAudioTap.swift         # Core Audio process tap + private aggregate device (call audio)
+    ├── CallAudio.swift              # consent notice/version, channel_layout, local_speaker_name
     ├── AppState.swift               # auth/settings/recents/selection/template cache
     ├── CaptureViewModel.swift       # record → upload → poll → note pipeline
     ├── NoteViewModel.swift          # one open note: load, autosave, finalize, transcript, PDF
@@ -306,6 +426,7 @@ macos/
         ├── Dropdowns.swift          # styled ⋯ menus (DSMenu) and select fields (DSSelect)
         ├── Components.swift         # status chip, level meter, pipeline stepper, skeleton
         ├── CaptureView.swift        # ActiveCaptureCard + NewMeetingButton
+        ├── CallAudioConsentSheet.swift # the blocking call-audio notice
         ├── RecentsView.swift        # popover rows / list (grouped by day)
         ├── RootView.swift           # menu-bar popover
         ├── MainWindowView.swift     # window: sidebar + detail (note / status / home)
@@ -323,7 +444,7 @@ macos/
 
 ```sh
 cd macos
-swift test          # the session, the transport, workspaces, pending uploads
+swift test          # the session, the transport, workspaces, pending uploads, call audio
 ```
 
 They stub the network with a `URLProtocol` and the Keychain with an

@@ -160,6 +160,149 @@
         "w": 12,
         "h": 4
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "Generated lines by outcome (support gate)",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(mdx_note_generation_lines_total[15m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Excluded share of speech (p50 / p95)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdx_note_generation_excluded_share_bucket[1h])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_note_generation_excluded_share_bucket[1h])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 6,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Facts and noise flags by outcome",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(mdx_note_generation_facts_total[15m]))",
+          "legendFormat": "facts {{outcome}}"
+        },
+        {
+          "expr": "sum by (outcome) (rate(mdx_note_generation_noise_total[15m]))",
+          "legendFormat": "noise {{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 16,
+        "w": 6,
+        "h": 8
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Recording types, how decided (7 d)",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(mdx_note_generation_classify_total[7d]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lines left out as repeats (render)",
+      "targets": [
+        {
+          "expr": "sum(rate(mdx_note_generation_redundant_lines_total[1h]))",
+          "legendFormat": "redundant lines / s"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Names in notes: respelled, doubted, unattributed",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(mdx_note_generation_entities_total[1h]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Statements, not quotes: facts copied or dropped (F2, per hour)",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_facts_total{outcome=~\"copied|dropped_no_information|dropped_first_person\"}[1h]))",
+          "legendFormat": "{{outcome}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_lines_total{outcome=~\"copied|no_information|first_person\"}[1h]))",
+          "legendFormat": "line {{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Windows asked to restate (F2, per hour)",
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(mdx_note_generation_restate_total[1h]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
     }
   ]
 }

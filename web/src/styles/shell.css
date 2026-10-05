@@ -23,24 +23,23 @@
   background-image: var(--dots);
   background-size: var(--dots-size);
   background-position: 10px 10px;
-  --dots-light: linear-gradient(var(--dots-light-angle), rgba(0, 0, 0, 0.28) 0%, #000 38%, #000 62%, rgba(0, 0, 0, 0.28) 100%);
-  -webkit-mask-image: var(--dots-fade), var(--dots-light);
-  mask-image: var(--dots-fade), var(--dots-light);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  /* The light sweep (mask + animation) is declared once, for both dot
+     prints, in base.css. */
   pointer-events: none;
   z-index: 0;
-  animation: dots-light var(--dots-light-duration) linear infinite;
 }
 .app:has(.sb.collapsed) .app-main::before { left: 56px; }
 .app-main > * { position: relative; z-index: 1; }
 
 /* ─── Sidebar ───────────────────────────────────────────────────────────── */
+/* Laid out like Claude's: a toggle and a serif wordmark on top, a filled
+   "New" row, then plain text rows — no frames, no pills — sentence-case
+   section labels, and the account as one row at the foot. */
 .sb {
   display: flex; flex-direction: column;
   background: var(--sidebar);
-  border-right: var(--hairline) solid var(--line);
-  padding: calc(12px * var(--density)) calc(12px * var(--density)) calc(8px * var(--density));
+  border-right: var(--hairline) solid var(--line-2);
+  padding: calc(10px * var(--density)) calc(8px * var(--density)) 0;
   overflow-y: auto; overflow-x: hidden;
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
@@ -50,92 +49,63 @@
 .sb.collapsed {
   width: 56px;
   min-width: 56px;
-  padding: calc(10px * var(--density)) calc(4px * var(--density)) calc(8px * var(--density));
+  padding: calc(10px * var(--density)) calc(8px * var(--density)) 0;
 }
 
-.sb-brand {
-  display: flex; align-items: center;
-  padding: calc(2px * var(--density)) 0 calc(4px * var(--density)) calc(2px * var(--density));
-  gap: calc(4px * var(--density));
-  min-height: 34px;
-}
-.sb-brand-inner {
-  display: flex; align-items: center; gap: calc(9px * var(--density));
-  flex: 1; min-width: 0;
-  font-family: var(--display);
-  font-size: calc(15.5px * var(--fs)); font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--text-1);
-  padding: calc(4px * var(--density));
-  border-radius: var(--radius-sm);
-  transition: background var(--t-fast) var(--ease);
-}
-.sb-brand-inner:hover { background: var(--surface-2); }
-/* The brand mark. The shape itself is an inline superellipse
-   (components/BrandMark.tsx) rather than a CSS radius, so it is the same
-   squircle in every browser and the same one the app icons use; this rule
-   only holds it and gives it the small lift on hover. No frame — a filled
-   mark needs none. */
-.sb-brand-mark {
-  flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: transform var(--t) var(--ease);
-}
-.sb-brand-inner:hover .sb-brand-mark { transform: scale(1.06) rotate(-1.5deg); }
-.sb-wordmark { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sb-wordmark .ai { color: var(--accent-text); }
-.sb-toggle {
-  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--muted);
-  transition: background .12s, color .12s;
-}
-.sb-toggle:hover { background: var(--surface-2); color: var(--text-1); }
-.sb.collapsed .sb-brand { padding: 0; gap: 0; flex-direction: column; }
-.sb.collapsed .sb-brand-inner { flex: 0 0 auto; padding: calc(4px * var(--density)) 0; gap: 0; }
-
-/* Create button: the ink pill (Granola's one filled button) + caret. */
-.sb-cta {
+.sb-head {
   display: flex; align-items: center; gap: calc(8px * var(--density));
-  background: var(--ink); color: var(--ink-text);
-  height: 34px;
-  padding: 0 calc(12px * var(--density)); margin: 0;
-  border-radius: var(--radius);
-  font-size: calc(13px * var(--fs)); font-weight: 500;
-  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  height: 36px;
+  padding: 0 calc(2px * var(--density));
+  margin-bottom: calc(10px * var(--density));
 }
-.sb-cta:hover { opacity: .88; }
-.sb-cta:active { transform: scale(.985); }
-.sb-cta-icon {
-  width: 18px; height: 18px; flex: none;
+.sb-toggle {
+  width: 32px; height: 32px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.sb-cta-label {
-  flex: 1; text-align: left; min-width: 0;
+.sb-toggle:hover { background: var(--sidebar-hover); color: var(--text-1); }
+.sb-wordmark {
+  font-family: var(--serif);
+  font-size: calc(21px * var(--fs)); font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--text-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.sb-cta kbd {
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: inherit;
+.sb.collapsed .sb-head { justify-content: center; padding: 0; }
+
+/* "New meeting": the one filled row, a caret for the other ways to start
+   that surfaces on hover. */
+.sb-new { position: relative; display: flex; align-items: center; margin: 0 0 calc(2px * var(--density)); }
+.sb-new-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: calc(12px * var(--density));
+  height: 36px;
+  padding: 0 calc(10px * var(--density));
+  border-radius: var(--radius-sm);
+  /* Raised off the sidebar, so it never reads as the row you are on
+     (that one takes the flat --sidebar-active fill). */
+  background: var(--surface);
+  border: var(--hairline) solid var(--line);
+  box-shadow: 0 1px 2px rgba(26, 24, 22, .06);
+  color: var(--text-1);
+  font-size: calc(14px * var(--fs)); font-weight: 450;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease);
 }
-/* One pill, split. The seam between the label and the caret is a
-   translucent rule drawn INSIDE the ink, not a gap letting the sidebar
-   through — a slit would break the shape in two. */
-.sb-cta-split { position: relative; display: flex; margin: calc(6px * var(--density)) 0 0; }
-.sb-cta-split > .sb-cta:first-child { flex: 1; min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
-.sb-cta-caret {
-  flex: 0 0 auto; width: 34px; padding: 0;
-  justify-content: center;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--ink-text) 16%, transparent);
+.sb-new-main svg { flex: none; color: var(--text-2); }
+.sb-new-main:hover { background: var(--surface-hover); }
+.sb-new-caret {
+  position: absolute; right: 4px;
+  width: 28px; height: 28px; border-radius: var(--radius-xs);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.sb-cta-caret.open { opacity: .88; }
-.sb-cta-split.collapsed { margin: calc(6px * var(--density)) 0 0; justify-content: center; }
-.sb.collapsed .sb-cta {
-  justify-content: center; width: 36px; height: 36px; padding: 0; margin: 0 auto;
-  border-radius: var(--radius);
-}
+.sb-new:hover .sb-new-caret, .sb-new.open .sb-new-caret, .sb-new-caret:focus-visible { opacity: 1; }
+.sb-new-caret:hover, .sb-new.open .sb-new-caret { background: var(--sidebar-active); color: var(--text-1); }
+.sb-new.collapsed .sb-new-main { flex: 0 0 auto; width: 40px; padding: 0; justify-content: center; margin: 0 auto; }
 
 /* Anchored dropdown menu (fixed off its trigger; escapes overflow clipping). */
 .anchored-menu {
@@ -196,66 +166,55 @@
 .sb.collapsed .sb-group-h { display: none; }
 .sb.collapsed .sb-group-body { padding: 0; }
 
-/* Tracked uppercase section label (DSLabel). */
-.sb-section-h {
-  font-size: calc(10.5px * var(--fs)); text-transform: uppercase; letter-spacing: .08em;
-  color: var(--muted); font-weight: 600;
-  padding: calc(10px * var(--density)) calc(10px * var(--density)) calc(4px * var(--density));
-}
-
-/* Nav row: 32px tall. The active one lifts off the sidebar as a white card
-   on a warm hairline — the same trick the segmented pill uses — and only its
-   icon takes the moss. Frames stay neutral. */
+/* Nav row: plain text on the sidebar ground; hover and the active row
+   take a soft neutral fill. Frames stay out of it entirely. */
 .sb-link {
-  display: flex; align-items: center; gap: calc(9px * var(--density));
-  height: 32px;
+  display: flex; align-items: center; gap: calc(12px * var(--density));
+  height: 36px;
   padding: 0 calc(10px * var(--density)); margin: 1px 0;
-  border-radius: var(--radius);
-  border: var(--hairline) solid transparent;
-  color: var(--text-3); cursor: pointer;
-  font-size: calc(13px * var(--fs)); font-weight: 500;
+  border-radius: var(--radius-sm);
+  color: var(--text-1); cursor: pointer;
+  font-size: calc(14px * var(--fs)); font-weight: 400;
   position: relative;
-  transition: background var(--t) var(--ease), color var(--t) var(--ease),
-              border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.sb-link svg { color: currentColor; flex-shrink: 0; }
-.sb-link:hover { background: var(--surface-hover); color: var(--text-1); }
-.sb-link.on {
-  background: var(--surface);
-  border-color: var(--line);
-  color: var(--text-1);
-  box-shadow: 0 1px 2px rgba(26, 24, 22, .05);
-}
-.sb-link.on svg { color: var(--accent-text); }
+.sb-link svg { color: var(--text-3); flex-shrink: 0; }
+.sb-link:hover { background: var(--sidebar-hover); }
+.sb-link.on { background: var(--sidebar-active); font-weight: 500; }
+.sb-link.on svg { color: var(--text-1); }
 .sb-link-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-link .badge {
   font-family: var(--mono);
   font-size: calc(10.5px * var(--fs)); font-weight: 500;
   color: var(--muted);
 }
-.sb.collapsed .sb-link { justify-content: center; padding: 0; margin: 1px auto; width: 36px; }
+.sb.collapsed .sb-link { justify-content: center; padding: 0; margin: 1px auto; width: 40px; }
 .sb.collapsed .sb-link-label, .sb.collapsed .sb-link .badge { display: none; }
 
-.sb-nav { display: flex; flex-direction: column; margin-top: calc(8px * var(--density)); }
+.sb-nav { display: flex; flex-direction: column; }
 .sb-spacer { flex: 1; min-height: 12px; }
 
 /* ─── Spaces: the user's own folders, under the main nav ─────────────── */
-.sb-spaces { display: flex; flex-direction: column; margin-top: calc(10px * var(--density)); }
+.sb-spaces { display: flex; flex-direction: column; margin-top: calc(22px * var(--density)); }
+/* Sentence-case label, as Claude's "Pinned" / "Chats and tasks". */
 .sb-section-h {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 calc(10px * var(--density)) calc(4px * var(--density));
-  font-size: calc(10.5px * var(--fs)); font-weight: 700;
-  letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+  height: 28px;
+  padding: 0 calc(4px * var(--density)) 0 calc(10px * var(--density));
+  font-size: calc(12.5px * var(--fs)); font-weight: 400;
+  color: var(--muted);
 }
 .sb-section-h span { flex: 1; }
 .sb-section-add {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; flex: none;
-  border: 0; background: transparent; border-radius: var(--radius-sm);
+  width: 24px; height: 24px; flex: none;
+  border: 0; background: transparent; border-radius: var(--radius-xs);
   color: var(--muted); cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.sb-section-add:hover { background: var(--surface-hover); color: var(--text-1); }
+.sb-spaces:hover .sb-section-add, .sb-section-add:focus-visible { opacity: 1; }
+.sb-section-add:hover { background: var(--sidebar-hover); color: var(--text-1); }
 
 /* Row = link + a ⋯ that only shows on hover / focus / when open. */
 .sb-space { display: flex; align-items: center; position: relative; }
@@ -266,22 +225,23 @@
 }
 .sb-space:hover .sb-space-more,
 .sb-space-more:focus-within { opacity: 1; }
-.sb-space-more .icon-btn { width: 24px; height: 24px; border-radius: var(--radius-sm); }
+.sb-space-more .icon-btn { width: 26px; height: 26px; border-radius: var(--radius-xs); }
+.sb-space-more .icon-btn:hover { background: var(--surface); }
 .sb-space:hover .sb-count { opacity: 0; }
 .sb-count {
   font-size: calc(10.5px * var(--fs)); font-weight: 600; color: var(--muted);
   font-variant-numeric: tabular-nums; flex: none;
   transition: opacity var(--t-fast) var(--ease);
 }
-.sb-link.on .sb-count { color: var(--accent-text); }
 .sb.collapsed .sb-count { display: none; }
 
 /* Inline "new space" / rename field, sized like a nav row. */
 .sb-space-edit {
   display: flex; align-items: center; gap: calc(9px * var(--density));
-  height: 32px; margin: 1px 0;
+  height: 36px; margin: 1px 0;
   padding: 0 calc(10px * var(--density));
-  border-radius: var(--radius);
+  gap: calc(12px * var(--density));
+  border-radius: var(--radius-sm);
   border: var(--hairline) solid var(--line-active);
   background: var(--surface);
   color: var(--text-3);
@@ -290,26 +250,22 @@
   flex: 1; min-width: 0;
   border: 0; background: transparent; outline: none; padding: 0;
   color: var(--text-1); font: inherit;
-  font-size: calc(13px * var(--fs)); font-weight: 500;
+  font-size: calc(14px * var(--fs)); font-weight: 400;
 }
 .sb-hint {
   margin: calc(4px * var(--density)) calc(10px * var(--density));
   font-size: calc(11.5px * var(--fs)); line-height: 1.45; color: var(--muted);
 }
 
-/* Footer: controls + account, above a hairline. */
+/* Footer: the account as a single row, pinned under a quiet hairline
+   that the list scrolls beneath. */
 .sb-foot {
+  position: sticky; bottom: 0;
+  margin: 8px calc(-8px * var(--density)) 0;
+  padding: calc(6px * var(--density)) calc(8px * var(--density)) calc(8px * var(--density));
+  background: var(--sidebar);
   border-top: var(--hairline) solid var(--line-2);
-  padding: calc(8px * var(--density)) 0 0;
-  margin: 8px calc(-12px * var(--density)) 0;
-  padding-left: calc(8px * var(--density));
-  padding-right: calc(8px * var(--density));
-  display: flex; flex-direction: column; gap: calc(6px * var(--density));
 }
-.sb-controls { display: flex; align-items: center; gap: calc(4px * var(--density)); padding: 0 calc(2px * var(--density)); }
-.sb-controls .grow { flex: 1; }
-.sb.collapsed .sb-foot { margin: 8px calc(-4px * var(--density)) 0; padding: calc(8px * var(--density)) 0 0; }
-.sb.collapsed .sb-controls { justify-content: center; padding: 0; gap: 0; flex-direction: column; }
 
 /* Segmented pill (DSSegmentedPill): warm track, white raised segment on a
    neutral hairline. */
@@ -357,32 +313,29 @@
 
 .sb-user-wrap { position: relative; }
 .sb-user {
-  display: flex; align-items: center; gap: calc(9px * var(--density));
+  display: flex; align-items: center; gap: calc(10px * var(--density));
   height: 44px;
   padding: 0 calc(8px * var(--density));
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   width: 100%;
   text-align: left;
+  transition: background var(--t-fast) var(--ease);
 }
-.sb-user:hover, .sb-user.open { background: var(--surface-2); }
-.sb-user > svg { color: var(--muted); }
-/* Initials avatar (DSAvatar): a moss-tinted circle with the faintest moss
-   ring — a circle has no frame to speak of, so this one stays. */
+.sb-user:hover, .sb-user.open { background: var(--sidebar-hover); }
+.sb-user > svg { color: var(--muted); flex: none; transition: transform var(--t) var(--ease); }
+.sb-user.open > svg { transform: rotate(180deg); }
+/* Initials avatar: a quiet neutral disc with ink initials, as Claude's. */
 .avatar {
   width: 28px; height: 28px; flex-shrink: 0;
   border-radius: 50%;
-  background: var(--accent-soft);
-  border: var(--hairline) solid color-mix(in srgb, var(--accent) 25%, transparent);
-  color: var(--accent-text);
-  font-family: var(--display);
-  font-weight: 500; font-size: calc(11px * var(--fs));
+  background: var(--sidebar-press);
+  color: var(--text-1);
+  font-family: var(--sans);
+  font-weight: 500; font-size: calc(11.5px * var(--fs));
   display: inline-flex; align-items: center; justify-content: center;
-  letter-spacing: -0.01em;
 }
-.sb-user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
-.sb-user-name { display: block; font-size: calc(12.5px * var(--fs)); font-weight: 500; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sb-user-role { display: block; font-family: var(--mono); font-size: calc(10px * var(--fs)); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-user-name { flex: 1; min-width: 0; font-size: calc(14px * var(--fs)); font-weight: 400; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb.collapsed .sb-user { justify-content: center; padding: 0; }
 
 .sb-user-menu {
@@ -420,7 +373,35 @@
 .sb-user-menu-item.danger svg { color: currentColor; }
 .sb-user-menu-item.danger:hover { background: var(--danger-soft); }
 .sb-user-menu-sep { height: var(--hairline); background: var(--line-2); margin: 4px 2px; }
+.sb-user-menu-row {
+  display: flex; align-items: center; gap: calc(10px * var(--density));
+  padding: calc(4px * var(--density)) calc(4px * var(--density)) calc(4px * var(--density)) calc(10px * var(--density));
+  font-size: calc(13px * var(--fs)); color: var(--text-1);
+}
+.sb-user-menu-row > svg { color: var(--text-3); flex: none; }
+.sb-user-menu-row .grow { flex: 1; }
 .sb-user-menu-hint { margin-left: auto; font-size: calc(11px * var(--fs)); color: var(--muted); }
+/* Workspace switcher inside the account menu: a label, one radio row per
+   workspace, the current one ticked. The mark is the same moss-tinted
+   circle as the avatar, smaller. */
+.sb-user-menu-label {
+  padding: calc(6px * var(--density)) calc(10px * var(--density)) calc(2px * var(--density));
+  font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.sb-user-menu-item .grow { flex: 1; min-width: 0; }
+.sb-user-menu-item .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-user-menu-item.current { color: var(--text-1); }
+.sb-user-menu-item.current svg { color: var(--accent-text); }
+.sb-user-menu-item:disabled { cursor: default; opacity: .7; }
+.sb-ws-mark {
+  width: 20px; height: 20px; flex: none;
+  border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent-text);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: calc(9px * var(--fs)); font-weight: 600; letter-spacing: .02em;
+}
+.sb.collapsed .sb-foot { margin: 8px calc(-8px * var(--density)) 0; }
 
 /* ─── Topbar ────────────────────────────────────────────────────────────── */
 /* Part of the page, not a strip laid over it — transparent until the page

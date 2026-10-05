@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import asyncpg
 from opentelemetry import metrics
@@ -13,12 +14,14 @@ from audit import AuditWriter, Severity
 from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
+from jobs import JobQueue
 from storage import EncryptedObjectStore, S3Client
 
 from . import audit_kinds
 from .adapters.email import EmailProvider
 from .adapters.email import build_provider as build_email_provider
 from .config import settings
+from .domain.ai_settings import WorkspaceSettings
 from .domain.autosave_rate_limit import AutosaveRateLimiter
 from .domain.cache import TemplateCache
 from .domain.clip_rate_limit import ClipRateLimiter
@@ -26,6 +29,9 @@ from .domain.diff_cache import DiffCache
 from .domain.draft_audit_buffer import DraftAuditBuffer
 from .domain.google_calendar import GoogleCalendarClient
 from .domain.ics_calendar import IcsFeedClient
+from .domain.model_routing import load_registry, probe_chat
+from .domain.public_rate_limit import PublicRateLimiter
+from .domain.recipient_mail import ShareMailCaps
 from .domain.search_audit_buffer import SearchAuditBuffer
 from .domain.share_email import ShareEmailRateLimiter
 
@@ -49,6 +55,7 @@ def auth_issuers() -> list[IssuerConfig]:
         audience=settings.auth_audience,
     )
 
+
 @dataclass
 class ServiceState:
     jwks_cache: JwksCache
@@ -69,6 +76,18 @@ class ServiceState:
     crypto_pool: asyncpg.Pool
     audio_store: EncryptedObjectStore
     transcripts_store: EncryptedObjectStore
+    # Sprint 33 — the queue the note-worker drains. `libs/jobs`'s
+    # first consumer; the API only ever enqueues.
+    job_queue: Any
+    # Sprint 37 — the table behind `Registry(settings_source=…)`. Cached
+    # for a minute; the settings route invalidates it on write so a tier
+    # change takes effect while the admin is still on the page.
+    workspace_model_settings: Any
+    # Sprint L2 — the one registry this process routes with: loaded with the
+    # settings source above, probed once at startup; in dev the fallback
+    # (the Mac) is chosen here when the API key is missing or the API does
+    # not answer. None when config/models.yaml cannot be loaded at all.
+    model_registry: Any
     clips_store: EncryptedObjectStore
     clip_rate_limiter: ClipRateLimiter
     # Sprint 15: aggregated search.expanded audit (ADR-0038).
@@ -86,6 +105,10 @@ class ServiceState:
     # spam relay wearing our From address.
     email_provider: EmailProvider
     share_email_rate_limiter: ShareEmailRateLimiter
+    # Sprint 19: abuse caps on the anonymous shared-note surface.
+    public_rate_limiter: PublicRateLimiter
+    # Sprint 22: sends per link / sender / workspace per day.
+    share_mail_caps: ShareMailCaps
     # Metric handles (kept on state so routers don't recreate them).
     diff_cache_hit_metric: object
     autosave_conflicts_metric: object
@@ -247,6 +270,9 @@ async def build_state() -> ServiceState:
         redirect_uri=settings.google_calendar_redirect_uri,
     )
 
+    workspace_model_settings = WorkspaceSettings(app_pool)
+    model_registry = await _model_registry(workspace_model_settings)
+
     return ServiceState(
         jwks_cache=jwks_cache,
         app_pool=app_pool,
@@ -260,11 +286,23 @@ async def build_state() -> ServiceState:
         crypto_pool=crypto_pool,
         audio_store=audio_store,
         transcripts_store=transcripts_store,
+        job_queue=JobQueue(app_pool),
+        workspace_model_settings=workspace_model_settings,
+        model_registry=model_registry,
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
         email_provider=email_provider,
         share_email_rate_limiter=ShareEmailRateLimiter(
             redis, per_hour=settings.share_emails_per_user_per_hour
+        ),
+        share_mail_caps=ShareMailCaps(redis),
+        public_rate_limiter=PublicRateLimiter(
+            redis,
+            ip_per_minute=settings.shared_rl_ip_per_minute,
+            link_per_hour=settings.shared_rl_link_per_hour,
+            cta_per_hour=settings.shared_rl_cta_per_hour,
+            trusted_proxy_cidrs=settings.trusted_proxy_cidrs,
+            write_per_hour=settings.shared_rl_write_per_hour,
         ),
         search_audit_buffer=search_audit_buffer,
         envelope=envelope,
@@ -275,6 +313,27 @@ async def build_state() -> ServiceState:
         clips_created_metric=clips_created_metric,
         clip_pipeline_latency_metric=clip_pipeline_latency_metric,
     )
+
+
+async def _model_registry(workspace_model_settings: Any) -> Any:
+    """Load `config/models.yaml` and probe the chat backend once (Sprint L2).
+
+    A registry that cannot load (no models.yaml on this deployment) is
+    None — the routes that need one say so on first use, as before. A
+    probe that fails on staging/prod raises: the process refuses to boot
+    rather than write notes with a processor nobody chose.
+    """
+    try:
+        registry = load_registry(workspace_model_settings)
+    except Exception:  # noqa: BLE001
+        logger.warning("models.registry_unavailable", exc_info=True)
+        return None
+    if settings.testing:
+        return registry
+    await probe_chat(registry)
+    for active in registry.active_overrides():
+        logger.info("models.route", extra=active.log_fields())
+    return registry
 
 
 async def teardown_state(state: ServiceState) -> None:

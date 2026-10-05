@@ -110,6 +110,49 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         email_template="note_shared",
     ),
     CategorySpec(
+        category=Category.NOTE_RECIPIENT_RESPONDED,
+        # The author team, by hint — note-service names them. No actor:
+        # the recipient has no account.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.DIGEST,
+        severity=Severity.INFO,
+        digest_eligible=True,
+        email_template="note_recipient_responded",
+    ),
+    CategorySpec(
+        category=Category.SHARE_REPORTED,
+        recipient_rule=RecipientRule.TENANT_ADMINS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.WARNING,
+        digest_eligible=False,
+    ),
+    CategorySpec(
+        category=Category.AI_BUDGET_REACHED,
+        # Only an admin can raise a budget, so only an admin is told.
+        recipient_rule=RecipientRule.TENANT_ADMINS,
+        default_in_app=True,
+        # No mail: the numbers are on the Data page, and one budget is
+        # reached once a month at most — a banner is the right weight.
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.WARNING,
+        digest_eligible=False,
+        # System-raised at enqueue time; the "actor" is whoever happened
+        # to record the meeting that crossed the line, and they need
+        # telling as much as anyone.
+        exclude_actor=False,
+    ),
+    CategorySpec(
+        category=Category.NOTE_LINK_STATUS_CHANGED,
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        # Never mail: a chip on a screen, not a message worth an inbox.
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+    ),
+    CategorySpec(
         category=Category.DICTATION_COMPLETED,
         # The dictating user, named by dictation-service, which owns
         # the session row. Nobody else has any interest in the fact that

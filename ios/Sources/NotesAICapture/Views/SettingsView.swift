@@ -14,15 +14,17 @@ struct SettingsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    // Signed out, the server is what you came for.
-                    if app.authState != .signedIn { advanced }
                     general
                     appearance
                     if app.authState == .signedIn {
+                        vocabulary
                         connectorsRow
+                        dataRow
                         account
-                        advanced
                     }
+                    // Last, and one group: which server this phone talks
+                    // to is set once and then left alone.
+                    advanced
                 }
                 .padding(.horizontal, DS.gutter)
                 .padding(.vertical, 12)
@@ -41,6 +43,8 @@ struct SettingsView: View {
                 switch tab {
                 case .connectors:
                     ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
+                case .dataAI:
+                    DataAndAIView()
                 case .account:
                     AccountView()
                 case .general:
@@ -52,6 +56,7 @@ struct SettingsView: View {
         .onAppear {
             if app.settingsTab == .connectors { path = [.connectors] }
             if app.settingsTab == .account { path = [.account] }
+            if app.settingsTab == .dataAI { path = [.dataAI] }
             app.refreshPending()
         }
         .onDisappear { app.settingsTab = .general }
@@ -82,6 +87,16 @@ struct SettingsView: View {
             DSDivider()
             Toggle("Separate speakers", isOn: $capture.diarize)
                 .toggleStyle(DSToggleStyle())
+            VStack(alignment: .leading, spacing: 8) {
+                Text("People")
+                    .font(.ds(15))
+                    .foregroundStyle(capture.diarize ? DS.text1 : DS.muted)
+                PeoplePicker()
+                Text("How many people usually speak. Auto and 6+ let each recording decide.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -95,14 +110,20 @@ struct SettingsView: View {
         }
     }
 
+    private var vocabulary: some View {
+        group("Names and terms") {
+            GlossaryView()
+        }
+    }
+
     private var connectorsRow: some View {
         NavigationLink(value: AppState.SettingsTab.connectors) {
             HStack(spacing: 12) {
                 Image(systemName: "puzzlepiece.extension")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.dsSymbol(14, .medium))
                     .foregroundStyle(DS.accentText)
                     .frame(width: 32, height: 32)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(DS.accentSoft))
+                    .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.accentSoft))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Connectors")
                         .font(.ds(15, .medium))
@@ -113,7 +134,36 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.dsSymbol(12, .semibold))
+                    .foregroundStyle(DS.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .dsCard(padding: 14)
+    }
+
+    /// Who processes this workspace's meetings (Sprint 37). Read-only
+    /// here; the change — and the acknowledgement it needs — is on the web.
+    private var dataRow: some View {
+        NavigationLink(value: AppState.SettingsTab.dataAI) {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.shield")
+                    .font(.dsSymbol(14, .medium))
+                    .foregroundStyle(DS.accentText)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.accentSoft))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Data & AI")
+                        .font(.ds(15, .medium))
+                        .foregroundStyle(DS.text1)
+                    Text("Who processes your meetings, and what it costs")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.dsSymbol(12, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .contentShape(Rectangle())
@@ -141,7 +191,7 @@ struct SettingsView: View {
                 Spacer()
                 if app.pending.isEmpty {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.dsSymbol(12, .semibold))
                         .foregroundStyle(DS.muted)
                 } else {
                     DSChip(text: "\(app.pending.count) waiting", tint: DS.warn, soft: DS.warnSoft)
@@ -170,16 +220,17 @@ struct SettingsView: View {
     }
 
     private var advanced: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            group("Server") {
-                Text(isPhysicalDevice
-                     ? "The computer running Notes AI, by its address on your Wi‑Fi. Find it in System Settings › Wi‑Fi › Details on the Mac, and publish the stack with PUBLISH_HOST=0.0.0.0 in its .env."
-                     : "The computer running Notes AI. On the simulator, localhost is the Mac.")
+        group("Advanced") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Server")
+                    .font(.ds(15))
+                    .foregroundStyle(DS.text1)
+                Text("The address of the Notes AI server this phone talks to — a name or an IP address.")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    DSTextField(placeholder: "192.168.1.20", text: $host, mono: true)
+                    DSTextField(placeholder: "notes.example.com", text: $host, mono: true)
                         .keyboardType(.URL)
                         .submitLabel(.done)
                         .onSubmit(applyHost)
@@ -194,14 +245,19 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else if isPhysicalDevice, app.settings.pointsAtLocalhost {
                     DSNotice(tone: .warn, symbol: "wifi.exclamationmark",
-                             text: "localhost is this phone, not your Mac — enter the Mac's Wi‑Fi address above.")
+                             text: "The address points at this phone itself. Enter the server's address above.")
                 }
             }
-            group("Server addresses") {
-                labeledField("Auth", text: $app.settings.authBaseURL)
-                labeledField("ASR", text: $app.settings.asrBaseURL)
+            DSDivider()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Service addresses")
+                    .font(.ds(15))
+                    .foregroundStyle(DS.text1)
+                labeledField("Sign-in", text: $app.settings.authBaseURL)
+                labeledField("Transcription", text: $app.settings.asrBaseURL)
                 labeledField("Notes", text: $app.settings.noteBaseURL)
-                labeledField("Web", text: $app.settings.webAppURL)
+                labeledField("Notifications", text: $app.settings.notificationBaseURL)
+                labeledField("Web app", text: $app.settings.webAppURL)
             }
         }
         .onAppear { host = app.settings.commonHost ?? "" }

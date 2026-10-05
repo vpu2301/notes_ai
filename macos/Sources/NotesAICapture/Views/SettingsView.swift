@@ -42,8 +42,14 @@ struct SettingsView: View {
                         switch app.settingsTab {
                         case .general:
                             general
+                        case .vocabulary:
+                            GlossaryView()
                         case .connectors:
                             ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
+                        case .dataAI:
+                            DataAndAIView()
+                        case .billing:
+                            BillingView()
                         case .account:
                             account
                         case .advanced:
@@ -56,6 +62,9 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.bg)
+        }
+        .sheet(isPresented: $capture.callAudioConsentPresented) {
+            CallAudioConsentSheet()
         }
         .alert("Remove local data?",
                isPresented: Binding(get: { removingIdentity != nil },
@@ -81,7 +90,13 @@ struct SettingsView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 12)
             navRow("General", symbol: "slider.horizontal.3", tab: .general)
+            navRow("Names and terms", symbol: "character.book.closed", tab: .vocabulary)
             navRow("Connectors", symbol: "link", tab: .connectors)
+            navRow("Data & AI", symbol: "lock.shield", tab: .dataAI)
+            // What the workspace pays is an admin's business (the API agrees).
+            if app.activeWorkspace?.canManageMembers == true {
+                navRow("Billing", symbol: "creditcard", tab: .billing)
+            }
             navRow("Account", symbol: "person.crop.circle", tab: .account)
             navRow("Advanced", symbol: "wrench.and.screwdriver", tab: .advanced)
             Spacer()
@@ -100,7 +115,7 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.dsIcon(12, .medium))
                     .frame(width: 16)
                 Text(label)
                     .font(.ds(13, .medium))
@@ -125,7 +140,10 @@ struct SettingsView: View {
     private func title(for tab: AppState.SettingsTab) -> String {
         switch tab {
         case .general: return "General"
+        case .vocabulary: return "Names and terms"
         case .connectors: return "Connectors"
+        case .dataAI: return "Data & AI"
+        case .billing: return "Billing"
         case .account: return "Account"
         case .advanced: return "Advanced"
         }
@@ -148,9 +166,33 @@ struct SettingsView: View {
                         selection: $capture.language)
                 }
                 row("Separate speakers") {
-                    Toggle("", isOn: $capture.diarize)
+                    // DSToggleStyle draws its label and ignores
+                    // .labelsHidden(); the row already names it.
+                    Toggle(isOn: $capture.diarize) { EmptyView() }
                         .toggleStyle(DSToggleStyle())
-                        .labelsHidden()
+                        .fixedSize()
+                        .accessibilityLabel("Separate speakers")
+                }
+                row("People") {
+                    PeoplePicker()
+                        .frame(width: 300)
+                }
+                row("Record call audio (other participants)") {
+                    Toggle(isOn: Binding(get: { capture.recordsCallAudio },
+                                         set: { capture.setCallAudio($0) })) { EmptyView() }
+                        .toggleStyle(DSToggleStyle())
+                        .fixedSize()
+                        .accessibilityLabel("Record call audio (other participants)")
+                        .accessibilityHint("Also records what your Mac plays, so both sides of a call are in the note")
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("With headphones on, the other people in an online call never reach your microphone. This also records what your Mac plays during a recording, so both sides of the meeting are in the note. You are responsible for telling participants they are recorded.")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Link("About recording other participants", destination: CallAudioConsent.helpURL)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.accentText)
                 }
             }
 
@@ -294,7 +336,7 @@ struct SettingsView: View {
                         ForEach(others, id: \.id) { other in
                             HStack(spacing: 10) {
                                 DSAvatar(name: other.email.isEmpty ? "?" : other.email, size: 24)
-                                Text(other.email.isEmpty ? other.id : other.email)
+                                Text(other.email.isEmpty ? "Unknown account" : other.email)
                                     .font(.ds(13))
                                     .foregroundStyle(DS.text1)
                                     .lineLimit(1)
@@ -327,10 +369,14 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             localDataGroup
             group("Server addresses") {
-                labeledField("Auth", text: $app.settings.authBaseURL)
-                labeledField("ASR", text: $app.settings.asrBaseURL)
+                labeledField("Sign-in", text: $app.settings.authBaseURL)
+                labeledField("Audio", text: $app.settings.asrBaseURL)
                 labeledField("Notes", text: $app.settings.noteBaseURL)
+                labeledField("Alerts", text: $app.settings.notificationBaseURL)
                 labeledField("Web", text: $app.settings.webAppURL)
+                Text("Only change these if whoever runs your server asked you to.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
             }
         }
     }
@@ -363,7 +409,7 @@ struct SettingsView: View {
             Text(label)
                 .font(.ds(12.5))
                 .foregroundStyle(DS.text3)
-                .frame(width: 44, alignment: .leading)
+                .frame(width: 52, alignment: .leading)
             DSTextField(placeholder: label, text: text, mono: true)
         }
     }

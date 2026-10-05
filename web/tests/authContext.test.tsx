@@ -221,3 +221,29 @@ describe("step-up gate", () => {
     await expect(declined).rejects.toThrow("reauth cancelled");
   });
 });
+
+describe("anonymous routes", () => {
+  it("never calls /auth/refresh on a shared link or the join page", async () => {
+    const { isAnonymousRoute } = await import("../src/auth/AuthContext");
+    expect(isAnonymousRoute("/s/" + "t".repeat(43))).toBe(true);
+    expect(isAnonymousRoute("/join")).toBe(true);
+    expect(isAnonymousRoute("/join/")).toBe(true);
+    expect(isAnonymousRoute("/")).toBe(false);
+    expect(isAnonymousRoute("/login")).toBe(false);
+    expect(isAnonymousRoute("/settings")).toBe(false);
+  });
+
+  it("settles to anonymous without a network call when the page is /s/:token", async () => {
+    window.history.pushState({}, "", "/s/" + "t".repeat(43));
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      probe();
+      await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      window.history.pushState({}, "", "/");
+    }
+  });
+});

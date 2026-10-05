@@ -15,7 +15,11 @@ RUN apt-get update \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
-RUN pip install --no-cache-dir --upgrade pip uv==0.4.29
+RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
+# PyPI fetches share the link with the torch wheels of the ASR images when
+# `docker compose build` runs everything at once; bump uv's 30s default so a
+# slow index response doesn't fail the build.
+ENV UV_HTTP_TIMEOUT=600
 
 WORKDIR /build
 COPY pyproject.toml uv.lock /build/
@@ -34,7 +38,12 @@ RUN uv pip install --system --no-cache \
     /build/libs/note_models \
     /build/libs/secret \
     /build/libs/models \
-    /build/libs/asr_models
+    /build/libs/jobs \
+    /build/libs/asr_models \
+    /build/libs/notification_events \
+    /build/libs/ratelimit \
+    /build/libs/crypto \
+    /build/libs/storage
 
 # Editable workspace libs install as .pth files, which Python only honors
 # in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because

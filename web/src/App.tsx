@@ -11,14 +11,21 @@ import { SignupPage } from "./pages/auth/SignupPage";
 import { WelcomePage } from "./pages/auth/WelcomePage";
 import { ReauthDialog } from "./components/ReauthDialog";
 import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
+import { BillingSettingsPage } from "./pages/settings/BillingSettingsPage";
+import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
+import { MembersSettingsPage } from "./pages/settings/MembersSettingsPage";
 import { SecuritySettingsPage } from "./pages/settings/SecuritySettingsPage";
 import { SettingsLayout } from "./pages/settings/SettingsLayout";
+import { WorkspaceSettingsPage } from "./pages/settings/WorkspaceSettingsPage";
 import { MeetingPage } from "./pages/MeetingPage";
 import { NewNotePage } from "./pages/NewNotePage";
 import { NoteEditorPage } from "./pages/NoteEditorPage";
 import { NotesPage } from "./pages/NotesPage";
+import { JoinPage } from "./pages/JoinPage";
 import { SharedNotePage } from "./pages/SharedNotePage";
+import { SharedPrivacyPage } from "./pages/SharedPrivacyPage";
+import { SharingStatsPage } from "./pages/SharingStatsPage";
 import { AppShell } from "./shell/AppShell";
 import { SpacesProvider } from "./spaces/SpacesContext";
 
@@ -31,10 +38,9 @@ import { SpacesProvider } from "./spaces/SpacesContext";
  * to throw the old tree away. The key covers `SpacesProvider`'s cache and
  * `NotificationBell`'s poll along with every page.
  *
- * It is inert today: nothing can change `activeTenantId` yet, because
- * `POST /auth/token` (the workspace-scoped token exchange) does not exist —
- * see `docs/sprints/IDX-W2.md`. It is here so that the switcher, when B1/A2
- * land, is a list and a call rather than a hunt for stale state.
+ * The switcher in the account menu (`AppShell`) changes `activeTenantId`
+ * through `AuthContext.switchWorkspace` (`POST /auth/token`), and this key
+ * is what makes that one call enough.
  */
 function WorkspaceScope({ children }: { children: ReactNode }) {
   const { activeTenantId } = useAuth();
@@ -80,7 +86,10 @@ export function App() {
             <Route path="/account-recovery" element={<AccountRecoveryPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
             {/* Public link: anyone with the token, no sign-in. */}
+            <Route path="/s/privacy" element={<SharedPrivacyPage />} />
             <Route path="/s/:token" element={<SharedNotePage />} />
+            {/* Where the shared page's CTA lands (Sprint 19 fake door). */}
+            <Route path="/join" element={<JoinPage />} />
             <Route
               element={
                 <RequireAuth>
@@ -97,13 +106,24 @@ export function App() {
               <Route path="/meeting/new" element={<MeetingPage />} />
               <Route path="/new" element={<NewNotePage />} />
               <Route path="/notes/:noteId" element={<NoteEditorPage />} />
+              {/* Sprint 22: workspace admins only; the API enforces it. */}
+              <Route path="/admin/sharing" element={<SharingStatsPage />} />
               <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />
               <Route path="/settings" element={<SettingsLayout />}>
                 <Route index element={<Navigate to="/settings/account" replace />} />
                 <Route path="account" element={<AccountSettingsPage />} />
                 <Route path="security" element={<SecuritySettingsPage />} />
+                {/* Owners and admins; the API re-checks the role on every call. */}
+                <Route path="members" element={<MembersSettingsPage />} />
                 {/* Server-checked as well — see DevicesSettingsPage. */}
                 <Route path="devices" element={<DevicesSettingsPage />} />
+                {/* Sprint 23: branding + external sharing policy (admins). */}
+                <Route path="workspace" element={<WorkspaceSettingsPage />} />
+                {/* Sprint 37: who processes this workspace's meetings.
+                    Every member may read it (ADR-0046 decision 12). */}
+                <Route path="data" element={<DataSettingsPage />} />
+                {/* Billing (0068): plan, usage, plan changes — admins. */}
+                <Route path="billing" element={<BillingSettingsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

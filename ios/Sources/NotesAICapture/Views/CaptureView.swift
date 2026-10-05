@@ -42,10 +42,26 @@ struct ActiveCaptureCard: View {
                 } else {
                     PulsingDot()
                 }
-                Text(formatElapsed(capture.recorder.elapsed))
-                    .font(.dsMono(18, .medium))
-                    .foregroundStyle(DS.text1)
-                    .monospacedDigit()
+                // Sprint F1: "Starting…" until audio actually reaches the
+                // file; then the counter, with one quiet line when the
+                // audio began noticeably after the press.
+                VStack(alignment: .leading, spacing: 1) {
+                    if let offset = capture.recorder.firstFrameOffsetMs {
+                        Text(formatElapsed(capture.recorder.elapsed))
+                            .font(.dsMono(18, .medium))
+                            .foregroundStyle(DS.text1)
+                            .monospacedDigit()
+                        if let notice = CaptureTiming.latencyNotice(offsetMs: offset) {
+                            Text(notice)
+                                .font(.dsMeta)
+                                .foregroundStyle(DS.muted)
+                        }
+                    } else {
+                        Text("Starting…")
+                            .font(.dsMono(18, .medium))
+                            .foregroundStyle(DS.muted)
+                    }
+                }
                 LevelMeter(level: capture.recorder.level, active: !capture.recorder.interrupted,
                            segments: 14, height: 12)
                 Spacer(minLength: 8)
@@ -61,12 +77,30 @@ struct ActiveCaptureCard: View {
                 .font(.dsDisplay(18, .medium))
                 .foregroundStyle(DS.text1)
                 .submitLabel(.done)
-            Text(capture.recorder.interrupted
-                 ? "Paused for a call. Recording resumes when it ends."
-                 : "Recording this phone's microphone. Stop when the meeting ends — the note is drafted for you.")
-                .font(.dsMeta)
-                .foregroundStyle(DS.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            if let invited = capture.context.inviteLine {
+                // Sprint 30: a capture from a calendar event says what the
+                // invitation will be used for — quietly.
+                Text(invited)
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+            }
+            HStack(spacing: 10) {
+                Text("People")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                PeoplePicker(height: 30)
+            }
+            MyNotesEditor()
+            if let warning = capture.limitWarning {
+                DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark", text: warning)
+            } else {
+                Text(capture.recorder.interrupted
+                     ? "Paused for a call. Recording resumes when it ends."
+                     : "Everything you type is already in the note. Stop when the meeting ends — the rest is filled in for you.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -82,6 +116,13 @@ struct ActiveCaptureCard: View {
                     .lineLimit(1)
             }
             PipelineSteps(phase: capture.phase)
+            if capture.stoppedAtLimit {
+                DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark",
+                         text: "Stopped at the \(formatLimit(capture.recorder.limitSeconds)) limit. The note is being drafted — start a new meeting to keep recording.")
+            }
+            // The typing does not disappear the moment the meeting ends:
+            // the most useful minute to add a line is often the one after.
+            MyNotesEditor()
             Text("Keep the app open until the upload finishes; the rest happens on the server.")
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
@@ -142,6 +183,95 @@ struct ActiveCaptureCard: View {
     }
 }
 
+/// "People": how many speakers the meeting has, sent with the upload so
+/// the speaker separation looks for that many. Auto and 6+ leave the count
+/// to it. Can be set while recording — it is read when the upload goes (or
+/// kept with the recording if that has to wait). Off with "Separate
+/// speakers", which it only refines.
+struct PeoplePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    var height: CGFloat = 34
+
+    var body: some View {
+        DSSegmentedPill(
+            options: PeopleCount.allCases.map { .init($0, label: $0.label) },
+            selection: $capture.people,
+            height: height)
+            .disabled(!capture.diarize)
+            .opacity(capture.diarize ? 1 : 0.45)
+            // A container with its own name: a label on the bare stack
+            // would replace every segment's name with this one.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("People in the meeting")
+            .accessibilityHint(capture.diarize ? "" : "Turn on Separate speakers to use this")
+    }
+}
+
+/// "My notes": what the author types while the meeting runs (Sprint 34).
+///
+/// It is the note's `user_notes` section, not a scratch buffer — autosaved
+/// as it is typed, on disk within half a second, and on every other device
+/// of the same person. Nothing downstream ever rewrites a character of it:
+/// the document is built AROUND these lines.
+struct MyNotesEditor: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                if capture.myNotes.isEmpty {
+                    Text("Type what matters. We'll fill in the rest.")
+                        .font(.ds(15))
+                        .foregroundStyle(DS.muted)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $capture.myNotes)
+                    .font(.ds(15))
+                    .foregroundStyle(DS.text1)
+                    .scrollContentBackground(.hidden)
+                    .focused($focused)
+                    // Tall enough to feel like a page, short enough to leave
+                    // the timer and Stop in reach of a thumb.
+                    .frame(minHeight: 120, maxHeight: 220)
+            }
+            .padding(.horizontal, 5)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
+                    .fill(DS.surface2)
+            )
+            .accessibilityLabel("My notes")
+            .accessibilityHint("Type what matters while the meeting runs")
+            Text(capture.notesUnsaved ? "Saving…" : "Saved — open on any device")
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+                .accessibilityHidden(capture.notesUnsaved == false)
+        }
+    }
+}
+
+/// What kind of meeting the next one is: picks the template family the note
+/// is written into. "Auto" is the default and is always right enough, so
+/// this is a thing to notice rather than a step to complete.
+struct MeetingTypePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            DSSegmentedPill(
+                options: MeetingType.allCases.map { .init($0, label: $0.label) },
+                selection: $capture.meetingType,
+                height: 30)
+                .padding(.horizontal, 1)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Kind of meeting")
+    }
+}
+
 /// The one button. Dark, like the web's create button.
 struct NewMeetingButton: View {
     @EnvironmentObject private var capture: CaptureViewModel
@@ -154,7 +284,7 @@ struct NewMeetingButton: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.dsSymbol(13, .semibold))
                 Text("New meeting")
             }
         }
@@ -179,7 +309,10 @@ struct CaptureBar: View {
         Group {
             if case .idle = capture.phase {
                 if !keyboardShown {
-                    NewMeetingButton(fill: true, height: 50)
+                    VStack(spacing: 8) {
+                        MeetingTypePicker()
+                        NewMeetingButton(fill: true, height: 50)
+                    }
                 }
             } else {
                 card
@@ -252,7 +385,7 @@ struct CaptureBar: View {
             }
             .overlay(alignment: .trailing) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.dsSymbol(12, .semibold))
                     .foregroundStyle(DS.muted)
             }
             .frame(height: 22)
@@ -283,7 +416,8 @@ private struct CompactCaptureRow: View {
                 } else {
                     PulsingDot(size: 8)
                 }
-                Text(formatElapsed(capture.recorder.elapsed))
+                Text(capture.recorder.firstFrameOffsetMs == nil
+                     ? "Starting…" : formatElapsed(capture.recorder.elapsed))
                     .font(.dsMono(15, .medium))
                     .foregroundStyle(DS.text1)
                     .monospacedDigit()

@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "notes": "Sprint TQ1 ASR gold set. Ids, languages, minutes, kinds and consent references only; no names, no titles. Content lives in s3://notes-eval/asr/v1/<id>/ (private, SSE-KMS, eval role). Rows are added as recordings are consented, fetched and labelled; composition target in scripts/eval/asr_gold.py COMPOSITION. Regression cases keep the ids r03 and r04.",
+  "recordings": []
+}

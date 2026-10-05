@@ -1,0 +1,91 @@
+{
+ "id": "m08_en_one_on_one",
+ "language": "en",
+ "meeting_type": "one_on_one",
+ "recorded_on": "2026-09-22",
+ "recording_type": "one_on_one",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 32000,
+   "text": "Thanks for making time, Dana. I wanted to use today's one-on-one to go through the feedback from the quarterly review. Overall it is very positive: the migration of the billing service landed two weeks early and support tickets for billing dropped by a third."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 32000,
+   "t_end_ms": 45000,
+   "text": "That's good to hear. I was worried the rollout weekend would come up as a problem."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 45000,
+   "t_end_ms": 82000,
+   "text": "It came up, but as a lesson rather than a problem. The one thing reviewers asked for is more written design notes before a big change, so other teams can follow what is coming. They also said you could delegate more of the on-call work to Omar now that he has ramped up."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 82000,
+   "t_end_ms": 100000,
+   "text": "Fair. I have been holding on to on-call because the handover document is not finished. I can finish it this month."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 100000,
+   "t_end_ms": 128000,
+   "text": "Good. On the promotion question: I think you are ready for senior, and I will put you forward in the next cycle. I'll send you the draft of the promotion packet by Friday so you can add your own examples."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 128000,
+   "t_end_ms": 136000,
+   "text": "Great, thank you. I'll read it over the weekend."
+  }
+ ],
+ "gold": {
+  "key_facts": [
+   "The billing service migration landed two weeks early",
+   "Support tickets for billing dropped by a third",
+   "Reviewers asked for more written design notes before big changes",
+   "Dana could delegate more on-call work to Omar",
+   "The manager will put Dana forward for senior in the next promotion cycle"
+  ],
+  "actions": [
+   {
+    "text": "Send Dana the draft of the promotion packet by Friday",
+    "owner": "Sam",
+    "due": "2026-09-25"
+   }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "entities": [
+   {
+    "canonical": "Omar",
+    "surface_forms": [],
+    "kind": "person"
+   }
+  ],
+  "hedged": [],
+  "dates": [
+   {
+    "text": "by Friday",
+    "resolved": "2026-09-25",
+    "tense": "future"
+   }
+  ],
+  "speakers": {
+   "SPEAKER_1": "Sam",
+   "SPEAKER_2": "Dana"
+  },
+  "name_candidates": [
+   "Sam",
+   "Dana",
+   "Omar"
+  ],
+  "must_not_contain": [
+   "Quillhaven",
+   "Ferrytale"
+  ]
+ }
+}

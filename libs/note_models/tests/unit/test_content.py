@@ -101,3 +101,47 @@ def test_rendered_text_skips_empty_sections() -> None:
     rt = rendered_text_from_content(c)
     assert "empty" not in rt
     assert "present" in rt
+
+
+def test_a_section_title_is_optional_and_round_trips() -> None:
+    content = NoteContent.model_validate(
+        {
+            "template_id": "70cd91de-82b0-48e5-81ce-dcc01e0a2297",
+            "template_schema_version": 1,
+            "sections": [
+                {"section_key": "gen:overview", "text": "An interview about the club."},
+                {"section_key": "gen:transfers", "title": "Transfer strategy", "text": "- one"},
+            ],
+        }
+    )
+    assert content.sections[0].title is None
+    assert content.sections[1].title == "Transfer strategy"
+    assert NoteContent.model_validate(content.model_dump(mode="json")) == content
+
+
+def test_canonical_bytes_carry_a_title_only_when_there_is_one() -> None:
+    from note_models import canonical_content_bytes
+
+    base = {
+        "template_id": "70cd91de-82b0-48e5-81ce-dcc01e0a2297",
+        "template_schema_version": 1,
+        "sections": [{"section_key": "notes", "text": "x"}],
+    }
+    without = canonical_content_bytes(NoteContent.model_validate(base))
+    sections = without.split(b'"sections":')[1].split(b"],")[0]
+    assert b"title" not in sections
+    titled = dict(base, sections=[{"section_key": "gen:a", "title": "A", "text": "x"}])
+    assert b'"title":"A"' in canonical_content_bytes(NoteContent.model_validate(titled))
+
+
+def test_rendered_text_prefers_the_title_over_the_key() -> None:
+    content = NoteContent.model_validate(
+        {
+            "template_id": "70cd91de-82b0-48e5-81ce-dcc01e0a2297",
+            "template_schema_version": 1,
+            "sections": [
+                {"section_key": "gen:transfers", "title": "Transfer strategy", "text": "- one"}
+            ],
+        }
+    )
+    assert rendered_text_from_content(content) == "Transfer strategy\n- one"

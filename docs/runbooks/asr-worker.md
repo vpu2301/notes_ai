@@ -105,11 +105,311 @@ the DLQ path (`retry_exhausted`) and the reaper in **asr-service**
 4. Reaping is safe to re-run and never overwrites a finished job: the
    update is conditional on the status the sweep scanned.
 
+### § speaker-overcount
+
+`DiarizationSpeakerOvercount`: over 25 % of diarized jobs in 24 h have 5+
+speakers. Read `metadata.diarization` on recent rows:
+
+```sql
+SELECT id, metadata->'diarization' FROM transcription_jobs
+WHERE metadata ? 'diarization' ORDER BY finished_at DESC LIMIT 20;
+```
+
+- `clusters_raw` ≫ `speakers` with a large `clusters_dropped`: the floor is
+  working; the extra speakers survived it. Look at `speaker_speech_seconds`
+  — a tail of labels with a few seconds each is phantom speakers.
+- `unknown_share` > 0.15: speech the clusterer could not place (crosstalk,
+  far field). Expect wrong or missing labels more than extra ones.
+- Compare against the gold set: `make der-eval ENGINE=legacy SPLIT=test`.
+Users fix a bad split with Merge in any client; nothing to do per job.
+
+### § diarization-engine (switch, shadow, rollback)
+
+Sprint 29 put the diarizer behind a seam (`libs/diarization/protocol.py`).
+The worker logs `diarization.engine_selected {engine, shadow_engine}` at
+startup — it has no readiness endpoint, so that line is how to confirm a
+pod's engine.
+
+| Setting | Values | Effect |
+| --- | --- | --- |
+| `MDX_DIAR_ENGINE` | `legacy` (default) \| `pyannote` \| `http` | Engine for every diarized job and re-run. `http` = the GPU endpoint (ADR-0052 shape B, § diarization-endpoint). An unknown value fails startup. |
+| `MDX_DIAR_SHADOW_ENGINE` | empty \| `legacy` \| `pyannote` | Also runs this engine AFTER the job is complete and announced; its labels are discarded. Emits `mdx_asr_diarization_shadow_delta` and logs `diarization.shadow`. Failures only log `diarization.shadow_failed`. |
+| `MDX_DIAR_V2_MODEL_DIR` / `_MODEL_REPO` / `_MODEL_REVISION` / `_PINS` | baked dir / repo / revision / JSON filename→sha256 | community-1 weights, verified before load (fail-closed). |
+| `MDX_DIAR_V2_BATCH` | 0 = 16 CPU / 32 GPU | Windows embedded at once; lower it if a worker OOMs on long recordings. |
+| `MDX_DIAR_MIN_SPEAKER_SPEECH_MS` / `_SHARE` | 8000 / 0.03 | Roster guard floor, every engine. Both 0 = grade the count, dissolve nothing. In shape B it travels with each request, so the policy stays the worker's. |
+| `MDX_DIAR_HTTP_BACKEND` | empty \| a `diar_http` backend in `config/models.yaml` | Which endpoint `http` calls. Empty = the env's `diarization` override (dev → `dev_mac_diar`, staging/prod → set it to `hf_eu_diar`). |
+| `MDX_DIAR_SERVER_TOKEN` | the diar-server's own token | Sent as `X-MDX-Diar-Token`. The endpoint gateway eats `Authorization`, so the container needs its own; empty = the backend's bearer is sent in both places. A wrong value is caught at startup — the health check reports `authenticated: false` and the worker refuses the engine. |
+| `MDX_DIAR_HTTP_SECONDS_PER_AUDIO_SECOND` | 0.5 | Timeout budget per second of audio. Fits a GPU endpoint (~0.15 ×); raise it above 0.85 for a CPU-hosted one or every recording times out. |
+
+- **Rollback** = set `MDX_DIAR_ENGINE=legacy` and restart workers; no other
+  service deploys. `metadata.diarization.engine` on each job says which
+  engine produced it; old jobs can be re-run on demand with today's engine.
+- **v2 refuses to load** (`diarization_unavailable`, retryable) when
+  `PYANNOTE_METRICS_ENABLED` is not `false` or `HF_HUB_OFFLINE` is not `1`
+  (`last_error` = `telemetry_not_disabled` / `hub_not_offline`). The worker's
+  `config.py` pins both at import; something overrode them after start.
+  Never "fix" this by unsetting the check — it is what keeps the worker
+  from posting to `otel.pyannote.ai`.
+- **v2 digest mismatch / missing dir**: same retryable failure; rebuild the
+  image (`make prepare-pyannote` on dev boxes) or flip to `legacy`.
+
+### § diarization-endpoint (shape B)
+
+Since ADR-0052 the diarizer runs on its own GPU endpoint
+(`deploy/diar-server`, spec `deploy/hf/endpoints/diar.yaml`, backend
+`hf_eu_diar`). The worker posts audio and gets labelled spans back; the
+engine inside the endpoint is the same one shape A would run in-process.
+
+| Symptom | What it means | Do |
+| --- | --- | --- |
+| Jobs complete but have **no speakers**, `diarization_status='failed'` with `diarization_error='diarization_unavailable'` | The endpoint was unreachable or refused the token. **This is the designed behaviour** — the transcript is never held hostage to the diarizer. | `make hf-endpoints ARGS="status --env staging"`; check `HF_DIAR_ENDPOINT_URL` and the token; when it is back, the affected jobs re-label on demand (`POST /asr/jobs/{id}/rediarize`) — the clients offer it. |
+| `diarization_error='diarization_failed'` on many jobs | The endpoint answered, but the run failed or the reply was unreadable (a `wire_version` this worker does not know, after a one-sided deploy). | Deploy the endpoint and the worker from the same commit. Roll back with `MDX_DIAR_ENGINE=legacy`. |
+| First job of the day is slow | `min_replica: 0` cold start (~4 min, inside the timeout). | Nothing. `keep-warm` if it becomes a complaint. |
+| Diarization latency alert (p95 > 0.25 × audio) | Endpoint on CPU, or saturated at `max_replica`. | Check the endpoint's accelerator and replica count in the spec. |
+| The endpoint refuses to start | `MDX_DIAR_SERVER_TOKEN` is empty, or `MDX_DIAR_DEVICE=cpu`. | Set the token (secret store, `docs/deploy/inventory.md`); anonymous is a laptop-only mode. CPU is refused on purpose (0.64–0.85 × audio — every recording would time out); `MDX_DIAR_ALLOW_CPU=1` overrides it deliberately. |
+| Workers log `diarization.remote_unreachable` with `last_error='auth'` at startup | The worker's token is not the one the endpoint expects. | Compare `MDX_DIAR_SERVER_TOKEN` on both sides. This is the loud version of what used to be a silent week of speakerless transcripts. |
+
+**Rollback** is still `MDX_DIAR_ENGINE=legacy` (in-process, no endpoint).
+`MDX_DIAR_ENGINE=pyannote` is shape A and is the right setting the day a
+worker has a GPU — the image still carries the weights.
+
+The endpoint never receives a tenant id, job id, user, filename or any
+text, stores nothing, and returns no embeddings. If a change would alter
+any of that, it is an ADR, not a patch.
+
+### § diarization-model-upgrade
+
+Upgrading community-1 (or any baked diarization model): bump the revision in
+`scripts/models/prepare_pyannote.py`, run `--resolve-pins` with a token whose
+account accepted the model terms, commit the printed digests in the three places
+PINS.md names, rebuild the image, then run it as `MDX_DIAR_SHADOW_ENGINE` first
+(compare `mdx_asr_diarization_shadow_delta` and the gold set:
+`make der-eval ENGINE=pyannote_c1`) before flipping `MDX_DIAR_ENGINE`. Old
+transcripts are offered "Re-label with the current engine" once
+`MDX_DIAR_CURRENT_ENGINE` (asr-service) names the new engine id — keep it equal
+to the worker's engine.
+
+### § rediarize (speaker re-labelling states)
+
+`POST /asr/jobs/{id}/rediarize` recomputes speaker labels from the stored
+audio and words — no ASR pass. The job's `status` stays `complete`; the
+re-run has its own columns:
+
+| `diarization_status` | Meaning |
+| --- | --- |
+| NULL | never re-labelled |
+| `queued` | API accepted it and enqueued a `task=rediarize` message |
+| `running` | a worker claimed it (conditional on `diarization_rev = target_rev − 1`) |
+| `complete` | new artifact `{tenant}/{job}.r{rev}.json.enc`, row repointed, `diarization_rev` bumped |
+| `failed` | `diarization_error` holds the kind; the job and its previous labels are untouched |
+
+- **Deploy order: asr-worker BEFORE asr-service.** An old worker reads a
+  rediarize message as a transcribe of a complete job and acks it — a
+  silent no-op that leaves `diarization_status='queued'` until the reaper.
+- Artifacts: the current one is `result_storage_uri`; exactly one previous
+  one is kept (`previous_result_storage_uri`) for undo. Every read goes
+  through `result_storage_uri`; never build the key from the job id.
+- Sprint 28 merges carry the old `result_rev` and stop applying after a
+  re-run or an undo (both bump `diarization_rev`). That is by design; the
+  clients warn before confirming.
+- Names follow a speaker when ≥ 60 % of its speech lands on one new label
+  and no other named label lands there (`carry_over_mapping`).
+
+### § rediarize-failures
+
+`RediarizeFailureRateHigh`: > 10 % of re-runs failed in the last hour
+(with ≥ 10 runs). Group by kind:
+
+```sql
+SELECT diarization_error, count(*) FROM transcription_jobs
+WHERE diarization_status = 'failed' AND diarization_updated_at > now() - interval '1 hour'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+- `audio_missing` / `decrypt_failed`: storage or key problem — see
+  § object-store-outage; the API only refuses erased audio up front.
+- `diarization_unavailable` (retried, then `retry_exhausted`): the engine
+  cannot load — § diarization-engine.
+- `diarization_failed`: deterministic for that recording; not retried.
+- `stranded`: the reaper failed a re-run left `queued`/`running` past the
+  grace windows (a dead worker or lost message). Users can simply re-run;
+  it does not count as an extra run beyond the one already spent.
+
+### § stranded-rediarize
+
+Same reaper and grace windows as § stranded-jobs
+(`asr_tenants_with_stale_jobs` also returns tenants with stale
+`diarization_status`, measured from `diarization_updated_at`). The reaper
+fails only the re-run (`diarization_error='stranded'`), never the job.
+
+### § diarization-slow
+
+`DiarizationSlowVsAudio`: p95 of `mdx_asr_diarization_audio_ratio`
+(diarization wall time ÷ audio duration, per job) above 0.25 for an hour.
+Check `MDX_DIAR_DEVICE` (v2 on CPU is several times slower than on GPU),
+`MDX_DIAR_V2_BATCH`, and whether a shadow engine is competing for the same
+CPU (`MDX_DIAR_SHADOW_ENGINE` — turn it off first). Per job:
+`metadata.diarization.seconds` against the job's audio duration.
+
+### § dual-channel (mic + call audio captures, Sprint 31)
+
+A macOS capture with `channel_layout=mic_system` is a 2-channel file:
+ch0 = microphone, ch1 = call audio. The worker decodes it as int16 pairs
+(`decode_to_pcm(channels=2)`, half the memory of float32), runs ASR ONCE on
+the mixdown, and diarizes each side through the engine seam
+(`diarization.dual_channel.diarize_dual`): a remote voice can never carry a
+local label. `metadata.diarization.channel_layout` says what happened:
+`mic_system` (per side), `mono_fallback` (see below) or `mono`.
+The web app sends the same layout when "Also record this tab's audio (Me / Them)" is on (Sprint I3); iPhone recordings stay single-channel — iOS never declares `channel_layout`.
+
+- Deploy order: asr-worker before asr-service. An old worker ignores the
+  new payload fields and downmixes — safe, just without sides.
+- Re-runs read the layout from `transcription_jobs.capture_context`.
+- `leak_gain_db` / `local_speakers` / `remote_speakers` / `both_share` on
+  the stats explain a result: a `leak_gain_db` of null means headphones.
+- Automatic name: exactly one local speaker with ≥ 10 s of speech and a
+  `local_speaker_name` on the submit → `speaker_names[label]` set with source
+  `channel`. A person clearing it records `cleared`; it is never re-applied.
+- Memory (measured, 2 h pink-noise stereo, M5): decode + mixdown peak
+  1.9 GB, + Silero channel analysis 3.0 GB, before either engine pass. The
+  full dual path on 2 h has NOT been measured yet against the 3.5 GiB
+  budget.
+
+### § dual-channel-fallback
+
+`DualChannelMonoFallbackHigh`: > 5 % of dual-channel captures in 24 h were
+diarized from the mixdown because the channel path raised. The user still
+gets speakers. Look at `diarization.dual_fallback` log lines
+(`error_class`, job id — no content). Typical causes: a malformed second
+channel (a client writing garbage on ch1), Silero failing to load (the
+channel analysis needs it even when the engine is pyannote), memory.
+
 ### § audit-chain-divergence (touching asr.*)
 
 Same procedure as sprint-02 auth audit divergence; ASR kinds are
 `asr.audio_uploaded`, `asr.job_queued`, `asr.transcription_*`,
-`asr.job_cancelled`, `asr.quota_exceeded`.
+`asr.job_cancelled`, `asr.speakers_*`, `asr.speaker_edit_reverted`,
+`asr.rediarize_*`, `asr.audio_exported_for_eval`, `asr.quota_exceeded`.
+
+### § speaker-correction-rate
+
+`SpeakerCorrectionRateHigh`: of the diarized results opened in the last
+7 days (≥ 50), more than 30 % got a correction — a first speaker edit or a
+first re-run (`mdx_asr_speaker_corrected_jobs_total` ÷
+`mdx_asr_diarized_results_opened_total`). Not an outage: a quality signal
+for the weekly speaker review.
+
+1. Speakers row: did it start with an engine switch or a threshold change
+   (speakers per job by engine, shadow − primary delta)? If so, the switch
+   is the suspect — § diarization-engine has the rollback.
+2. Edit mix: mostly `merge` = over-count (split voices, § speaker-overcount);
+   mostly `reassign` with created labels = under-count (merged voices);
+   many re-runs = people use the hint to fix the count.
+3. Break it down with the weekly cohort, which says where:
+   `make weekly-speakers` → `speakers-YYYY-WW.csv`, rows by engine / hint /
+   client / source / count_confidence (definitions and approximations:
+   `docs/product/speaker-metrics.md`). Record what you find and decide in
+   `docs/product/speaker-decisions.md`.
+4. Nothing to do per job — people have already fixed their transcripts.
+   Recordings that show a new failure pattern can join the eval set only
+   with consent: `docs/runbooks/speakers-eval.md`.
+
+### § prompt-echo (Sprint I2)
+
+**Symptom.** A transcript contains names or role labels nobody said —
+"Gysi, Moderator II, moderatorin, narrator, speaker background …" — at the
+start of a passage, or for minutes on end; `AsrPromptEchoRate` fires.
+
+**Cause.** Whisper is given the workspace glossary as its prompt. Over
+audio it cannot decode (silence past the VAD, a breath, speech in another
+language) it writes the prompt back, sometimes with real speech glued on.
+
+**What the worker does now.** `asr_worker/echo.py` removes runs of ≥ 3
+consecutive prompt words at a segment start or after a 1.5 s pause,
+whatever backend decoded them; a segment left empty is dropped; the spans
+are in the job's `diagnostics.prompt_echo` (timestamps and counts) and
+in `mdx_asr_prompt_echo_words_total`. The old whole-segment rule
+(`_is_prompt_echo`, needs `no_speech_prob ≥ 0.5`) still applies.
+
+**If it fires.**
+1. `scripts/admin/glossary_audit.py` — which workspaces still hold role
+   labels (they are no longer sent since I2, but a large hint of real names
+   echoes too on a bad recording).
+2. `MDX_ASR_CONDITION_PREV` is `true` by default (off makes conversation
+   chunks lower-case run-ons — T7); for a workspace that echoes anyway,
+   `false` stops one echo becoming the next chunk's context.
+3. A backend change (`ASR_BACKEND`, model) — compare the counter per backend.
+4. A person disputing a removal: `GET /asr/jobs/{id}` has the exact
+   `vocabulary_hint` (migration 0061) and the result's `diagnostics` say
+   where; the Transcript tab shows "n words removed as prompt echo at
+   mm:ss". Re-running the job without a hint is the undo (rediarize
+   pattern; a dedicated route is I3's).
+
+### § other-language (Sprint I2)
+
+A VAD chunk ≥ 2 s whose language identification is sure of another
+supported language (en/de/uk; p ≥ 0.6, and ≤ 0.2 for the recording's) is decoded in that
+language, labelled `segment.language`, never translated (`task` is always
+`transcribe`); counted in `mdx_asr_other_language_chunks_total`. In-process
+engine only — an HTTP backend gives no per-chunk language, and the note
+engine then falls back to its script heuristic. Turn it off with
+`MDX_ASR_CHUNK_LANGUAGE_ID=false` if a bilingual workspace complains about
+flips; report the chunk count first.
+
+### § coverage (Sprint F1)
+
+**Symptom.** A transcript starts late or has a hole in it; the Transcript
+tab shows "Not transcribed: 00:00–00:44 (…)"; `AsrUncoveredSpeech` fires
+(more than 5 % of the speech VAD heard in an hour has no transcript).
+
+**What the worker measures.** After the echo guard, the processor runs VAD
+on the recording (per channel for a mic/system capture) and checks every
+speech run of ≥ 3 s. A run whose surviving words cover < 50 % of it, whose
+words were > 30 % echo, or that has no words is decoded once more without
+the prompt, without conditioning, beam ≥ 5 (HTTP backends: without the
+prompt only); the attempt with more non-echo words is kept, and a
+second attempt below 0.4 average word probability is never kept. What is
+still uncovered is a gap with a cause, in the artifact's
+`diagnostics.coverage` and on `/result` as `coverage`; the share is on
+the job view as `coverage_share`.
+
+| Cause | Meaning | Where to look |
+|---|---|---|
+| `no_audio` | the client took ≥ 3 s from Record to its first frame; that stretch never reached the file | client capture start (permissions, system-audio tap); the job's `first_frame_offset_ms` |
+| `no_speech_detected` | only the floor pass (lower threshold, per channel) heard it | quiet call audio under a loud microphone; `MD_ASR_VAD_FLOOR_*` |
+| `prompt_echo` | the guard removed the words and the second pass recovered nothing | § prompt-echo |
+| `other_language` | the chunk was labelled another language and still came back empty | § other-language |
+| `decoder_empty` | both decodes produced no words | backend health, model, audio level |
+| `unknown` | anything else (a second pass that errored or timed out) | `asr.second_pass_failed` logs, `mdx_asr_second_pass_total{cause="timeout"}` |
+
+**Knobs.** `MD_ASR_VAD_PAD_MS` (0 — off since the T3 measurement; when set, every run
+starts this much earlier),
+`MD_ASR_VAD_FLOOR_ENABLED` / `_THRESHOLD` (0.35) / `_MAX_SPEECH_SHARE`
+(0.2), `MD_ASR_SECOND_PASS_ENABLED`. The inference budget
+(`MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER`) covers both passes and was
+raised 1.3× for it; the reaper's running grace moved to 14 h to stay above
+it. With the Silero stub (dev without silero-vad) the whole file is one
+run and coverage is complete by construction (`coverage.vad = "stub"`).
+
+**If it fires.** Break the counter down by cause on the ASR dashboard's
+F1 row; a jump in one cause after a deploy is a regression in that stage.
+
+### § entity-unify (Sprint TQ3)
+
+The spelling unifier (`asr-service/domain/entity_unify.py`) runs once per job, on the
+first `/result` read. Its corrections are a read-time overlay (`transcript_corrections`,
+migration 0066); the ASR artefact is never rewritten.
+
+- **`AsrEntityUnifyErrors` fires.** More than 5 % of runs fail, so those jobs show raw
+  spellings. Read `asr.entity_unify_failed` in the asr-service logs (error class only)
+  and `mdx_asr_entity_unify_total{outcome}`. A job that failed can be re-run with
+  `POST /asr/jobs/{id}/corrections:recompute`.
+- **`skipped_budget` rises.** A run took longer than `MDX_ENTITY_UNIFY_BUDGET_S_PER_HOUR`
+  (2 s per audio hour, floor 0.5 s). Look at `mdx_asr_entity_unify_seconds`.
+- **Wrong merges reported.** The kill switch is `MDX_ENTITY_UNIFY_AUTO_APPLY=false`.
+  Every new correction is then only proposed, and people accept it in the review sheet.
+  Corrections already accepted stay applied until rejected.
+- **Everything off.** `MDX_ENTITY_UNIFY_ENABLED=false` serves the artefact as is.
 
 ## Pre-flight after deployment
 

@@ -586,6 +586,58 @@ actor APIClient {
         return try decode(RevokedOthers.self, from: data).revoked
     }
 
+    // MARK: - Workspace membership (auth-service /tenants)
+
+    /// The workspace this session is signed into, with the caller's role.
+    func currentTenant() async throws -> Tenant {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/current", method: "GET",
+                                  authorized: true)
+        return try decode(Tenant.self, from: data)
+    }
+
+    func tenantMembers(tenantId: String) async throws -> [TenantMember] {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "GET",
+                                  authorized: true)
+        return try decode(TenantMembersResponse.self, from: data).items
+    }
+
+    /// Add someone to the workspace. The server resolves the address to an
+    /// existing account: 404 when nobody signed up with it yet (invite them
+    /// by e-mail instead), 403 when the caller is not an owner/admin.
+    @discardableResult
+    func addTenantMember(tenantId: String, email: String, role: String) async throws -> TenantMember {
+        let body = try JSONSerialization.data(withJSONObject: ["email": email, "role": role])
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(TenantMember.self, from: data)
+    }
+
+    // MARK: - Notifications (notification-service)
+
+    func unreadNotifications() async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/unread-count",
+                                  method: "GET", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
+    func notifications(limit: Int = 15) async throws -> NotificationFeed {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications", method: "GET",
+                                  query: [("limit", String(limit))], authorized: true)
+        return try decode(NotificationFeed.self, from: data)
+    }
+
+    func markNotificationRead(id: String) async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/\(id)/read",
+                                  method: "POST", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
+    func markAllNotificationsRead() async throws -> UnreadCount {
+        let data = try await send(base: \.notificationBaseURL, path: "/v1/notifications/read-all",
+                                  method: "POST", authorized: true)
+        return try decode(UnreadCount.self, from: data)
+    }
+
     // MARK: - Calendar connections (note-service, 0019)
 
     func calendarConnections() async throws -> CalendarConnectionsResponse {
@@ -681,13 +733,227 @@ actor APIClient {
     }
 
     func createNoteFromTranscript(asrJobId: String, templateId: String?, title: String) async throws -> FromTranscriptResponse {
-        let request = FromTranscriptRequest(asrJobId: asrJobId, templateId: templateId, title: title)
+        // The app's own "Meeting <date>" placeholder is not a title anyone
+        // chose: sent empty, the server names the note from what was said.
+        let request = FromTranscriptRequest(asrJobId: asrJobId, templateId: templateId,
+                                            title: CaptureViewModel.isPlaceholderTitle(title) ? "" : title)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/from-transcript", method: "POST",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true)
         return try decode(FromTranscriptResponse.self, from: data)
     }
 
-    // MARK: - Notes (note-service): open, edit, finalize, export
+
+    /// `POST /v1/notes` — a note typed from scratch (Blank note, New from
+    /// template), its sections pre-filled with the template's defaults.
+    func createNote(content: NoteContent) async throws -> NoteCreatedResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(CreateNoteRequest(content: content)),
+                                  authorized: true)
+        return try decode(NoteCreatedResponse.self, from: data)
+    }
+
+    // MARK: - History
+
+    func versions(noteId: String, purpose: ReadPurpose? = nil) async throws -> [NoteVersionSummary] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/versions", method: "GET",
+                                  query: purpose.map { [("purpose", $0.rawValue)] } ?? [], authorized: true)
+        return try decode([NoteVersionSummary].self, from: data)
+    }
+
+    func version(noteId: String, number: Int, purpose: ReadPurpose? = nil) async throws -> NoteVersionDetail {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/versions/\(number)",
+                                  method: "GET",
+                                  query: purpose.map { [("purpose", $0.rawValue)] } ?? [], authorized: true)
+        return try decode(NoteVersionDetail.self, from: data)
+    }
+
+    // MARK: - Series, carry-over and the client version (Sprint 36)
+
+    /// What is still open from the previous meeting in this series. 404
+    /// (no series) is the caller's to treat as "nothing to show".
+    func carried(noteId: String) async throws -> CarriedView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/carried", method: "GET",
+                                  authorized: true)
+        return try decode(CarriedView.self, from: data)
+    }
+
+    /// Tick a carried item off (`done_marked`), re-open it, or drop it.
+    @discardableResult
+    func setCarriedState(noteId: String, itemKey: String, state: String) async throws -> CarriedItem {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/carried/\(itemKey)",
+                                  method: "POST",
+                                  jsonBody: try JSONEncoder().encode(CarriedStateRequest(state: state)),
+                                  authorized: true)
+        return try decode(CarriedItem.self, from: data)
+    }
+
+    /// Exactly what a client would see. 409 for a 1:1 or an interview.
+    func clientVersion(noteId: String) async throws -> ClientVersion {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/client-version",
+                                  method: "GET", authorized: true)
+        return try decode(ClientVersion.self, from: data)
+    }
+
+    func clientVersionCheck(noteId: String) async throws -> ClientVersionCheck {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/client-version/check",
+                                  method: "GET", authorized: true)
+        return try decode(ClientVersionCheck.self, from: data)
+    }
+
+    // MARK: - Evidence (Summary Engine v2, Q5)
+
+    /// Every line the engine wrote, with the words that prove it — only
+    /// the run the reader is looking at.
+    func generatedItems(noteId: String) async throws -> [GeneratedItem] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generated-items",
+                                  method: "GET", query: [("generation", "current")], authorized: true)
+        return try decode([GeneratedItem].self, from: data)
+    }
+
+    /// Accept or reject a name the engine respelled.
+    @discardableResult
+    func correctName(noteId: String, itemKey: String, request: NameCorrectionRequest) async throws -> CorrectionResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items/by-key/\(itemKey)",
+                                  method: "PATCH", jsonBody: try JSONEncoder().encode(request),
+                                  authorized: true)
+        return try decode(CorrectionResponse.self, from: data)
+    }
+
+    // MARK: - The live meeting note (Sprint 34, ADR-0055)
+
+    /// Open the note as Record is pressed. Idempotent on
+    /// `clientCaptureId`: a retry, a double tap and a second device that
+    /// resumed the same capture all get the same note.
+    ///
+    /// The caller must never let this block or stop a recording — a note
+    /// we failed to create is recoverable, a meeting we failed to record
+    /// is not.
+    func startMeeting(clientCaptureId: String, title: String, startedAt: Date,
+                      language: String?, meetingType: MeetingType,
+                      calendar: MeetingCalendarContext?) async throws -> StartMeetingResponse {
+        let request = StartMeetingRequest(
+            clientCaptureId: clientCaptureId,
+            title: title.isEmpty ? nil : title,
+            startedAt: ISO8601DateFormatter().string(from: startedAt),
+            language: language,
+            meetingType: meetingType.rawValue,
+            calendar: calendar)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/meeting", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+        return try decode(StartMeetingResponse.self, from: data)
+    }
+
+    /// When each typed line was first touched. First report per key wins,
+    /// so re-sending a queue that may already have landed is safe.
+    func putLineTimes(noteId: String, lines: [UserLineTime]) async throws {
+        guard !lines.isEmpty else { return }
+        let body = try JSONEncoder().encode(["lines": lines])
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/my-notes/timing",
+                           method: "PUT", jsonBody: body, authorized: true)
+    }
+
+    /// The recording reached asr-service: bind the job to the note.
+    @discardableResult
+    func attachMeetingJob(noteId: String, asrJobId: String) async throws -> MeetingInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["asr_job_id": asrJobId])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting/job",
+                                  method: "POST", jsonBody: body, authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+    /// The transcription finished: put it in the note. Safe from any
+    /// device of the author, and idempotent — which is what makes a
+    /// capture survive the app being killed mid-transcription.
+    @discardableResult
+    func attachTranscript(noteId: String) async throws -> AttachTranscriptResponse {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/transcript",
+                                  method: "POST", authorized: true)
+        return try decode(AttachTranscriptResponse.self, from: data)
+    }
+
+    /// The recording was discarded or never happened. The note stays — it
+    /// holds what was typed, which is the part that cannot be redone.
+    @discardableResult
+    func markMeetingNoAudio(noteId: String) async throws -> MeetingInfo {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting/no-audio",
+                                  method: "POST", authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+    /// 404 when the note is not a live capture (an upload, or typed by hand).
+    func meeting(noteId: String) async throws -> MeetingInfo {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting",
+                                  method: "GET", authorized: true)
+        return try decode(MeetingInfo.self, from: data)
+    }
+
+
+    // MARK: - The workspace glossary (Sprint 35)
+
+    func glossary() async throws -> [GlossaryTerm] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary", method: "GET",
+                                  authorized: true)
+        return try decode([GlossaryTerm].self, from: data)
+    }
+
+    /// Remember one term. Sending one the workspace already has merges the
+    /// new mishearing into it rather than failing as a duplicate. `noteId`
+    /// is the note the correction was made in (Sprint I2), so the glossary
+    /// page can say where a term came from. 422 `term_not_vocabulary`: a
+    /// role label, refused.
+    @discardableResult
+    func rememberTerm(_ term: String, kind: GlossaryKind = .person,
+                      heardAs: [String] = [], noteId: String? = nil) async throws -> GlossaryTerm {
+        let request = RememberTermRequest(term: term, kind: kind.rawValue,
+                                          heardAs: heardAs.filter { !$0.isEmpty },
+                                          noteId: noteId)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary", method: "POST",
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+        return try decode(GlossaryTerm.self, from: data)
+    }
+
+    func forgetTerm(id: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/glossary/\(id)", method: "DELETE",
+                           authorized: true)
+    }
+
+    /// The workspace's terms as a `vocabulary_hint`, so the transcriber
+    /// has the spellings before it guesses.
+    func glossaryHint() async throws -> GlossaryHint {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/glossary/hint", method: "GET",
+                                  authorized: true)
+        return try decode(GlossaryHint.self, from: data)
+    }
+
+    // MARK: - Model tiers and processors (Sprint 37)
+
+    /// Who processes this workspace's meetings. Every member may read it.
+    func aiSettings() async throws -> AISettings {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/ai/settings", method: "GET",
+                                  authorized: true)
+        return try decode(AISettings.self, from: data)
+    }
+
+    // MARK: - Notes (note-service): open, edit, export
+
+    // MARK: - Generation (Sprint 33)
+
+    /// 404 when the note was never written up by the engine.
+    func generation(noteId: String) async throws -> GenerationView {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
+                                  method: "GET", authorized: true)
+        return try decode(GenerationView.self, from: data)
+    }
+
+    /// Write the note from its recording — *Generate Summary*. 409 with
+    /// a code when the workspace has it off, is over budget, or the note
+    /// is already being written; 429 after ten runs in a day.
+    @discardableResult
+    func regenerate(noteId: String) async throws -> GenerationStarted {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
+                                  method: "POST", authorized: true)
+        return try decode(GenerationStarted.self, from: data)
+    }
 
     /// `purpose` is required when the note is not ours and was not shared
     /// with us; the server says so with `APIError.needsReadPurpose`.
@@ -710,17 +976,6 @@ actor APIClient {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/draft", method: "PUT",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true)
         return try decode(UpdateDraftResponse.self, from: data)
-    }
-
-    func finalizeNote(id: String, expectedVersion: Int) async throws {
-        let body = try JSONSerialization.data(withJSONObject: ["expected_version": expectedVersion])
-        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/finalize", method: "POST",
-                           jsonBody: body, authorized: true)
-    }
-
-    func revertToDraft(id: String) async throws {
-        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/revert-to-draft", method: "POST",
-                           authorized: true)
     }
 
     /// The tenant's notes, newest first; `q` runs the server's full-text
@@ -771,6 +1026,84 @@ actor APIClient {
         return try decode(SharingView.self, from: data)
     }
 
+
+
+    // MARK: - Action items + recipient responses (Sprint 20)
+
+    func items(noteId: String) async throws -> [ActionItem] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items", method: "GET",
+                                  authorized: true)
+        return try decode([ActionItem].self, from: data)
+    }
+
+    func setItemStatus(noteId: String, itemId: String, status: ActionItemStatus) async throws -> ActionItem {
+        let body = try JSONSerialization.data(withJSONObject: ["status": status.rawValue])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/items/\(itemId)", method: "PATCH",
+                                  jsonBody: body, authorized: true)
+        return try decode(ActionItem.self, from: data)
+    }
+
+    func responses(noteId: String) async throws -> [ItemResponse] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/responses", method: "GET",
+                                  authorized: true)
+        return try decode([ItemResponse].self, from: data)
+    }
+
+    func clearResponse(noteId: String, responseId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/responses/\(responseId)/clear",
+                           method: "POST", authorized: true)
+    }
+
+    // MARK: - Per-recipient links (Sprint 19)
+
+    /// 201 with the new link, or 200 with the one already minted for that
+    /// address.
+    func createLink(id: String, label: String, recipientEmail: String?, expiresInDays: Int,
+                    mail: Bool = false, personalMessage: String = "",
+                    source: String = "native") async throws -> LinkView {
+        var payload: [String: Any] = ["label": label, "expires_in_days": expiresInDays, "source": source]
+        if let recipientEmail, !recipientEmail.isEmpty { payload["recipient_email"] = recipientEmail }
+        if mail {
+            // Sprint 22: create and mail in one call, in the app's language.
+            payload["send"] = true
+            if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
+            payload["lang"] = Locale.preferredLanguageCode ?? "en"
+        }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(LinkView.self, from: data)
+    }
+
+    /// Sprint 22: mail (or re-mail) a recipient link from the product.
+    /// 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap.
+    func sendLink(id: String, linkId: String, personalMessage: String) async throws -> LinkView {
+        var payload: [String: Any] = ["lang": Locale.preferredLanguageCode ?? "en"]
+        if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links/\(linkId)/send", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(LinkView.self, from: data)
+    }
+
+    /// Sprint 23: the workspace's sharing rules, for any member.
+    func sharingConstraints() async throws -> SharingConstraints {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/sharing/constraints", method: "GET",
+                                  authorized: true)
+        return try decode(SharingConstraints.self, from: data)
+    }
+
+    func listLinks(id: String) async throws -> [LinkView] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links", method: "GET",
+                                  authorized: true)
+        return try decode([LinkView].self, from: data)
+    }
+
+    func revokeLink(id: String, linkId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/links/\(linkId)", method: "DELETE",
+                           authorized: true)
+    }
+
     /// 404 `not_a_member` when nobody in the workspace has that address.
     func shareWithMember(id: String, email: String) async throws -> SharingView {
         let body = try JSONSerialization.data(withJSONObject: ["email": email])
@@ -802,6 +1135,17 @@ actor APIClient {
     // MARK: - Transcription jobs (asr-service)
 
     /// Plaintext transcript of a COMPLETE job (409 while it is still running).
+    /// Sprint TQ3: accept or reject one unified spelling; a stale
+    /// `correctionsRev` is refused (409) and the caller reloads.
+    func decideCorrection(jobId: String, correctionId: String, status: String,
+                          toText: String?, correctionsRev: Int) async throws -> CorrectionsView {
+        let body = try JSONEncoder().encode(CorrectionDecisionRequest(status: status, toText: toText,
+                                                                      correctionsRev: correctionsRev))
+        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/corrections/\(correctionId)",
+                                  method: "PUT", jsonBody: body, authorized: true)
+        return try decode(CorrectionsView.self, from: data)
+    }
+
     func transcript(jobId: String) async throws -> TranscriptResult {
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/result", method: "GET",
                                   authorized: true)
@@ -821,11 +1165,77 @@ actor APIClient {
     /// Name the diarized speakers of a job (the complete label → name map;
     /// a label left out goes back to its "Speaker N" default). Stored on the
     /// job, so the web app and the note built from it show the same names.
-    func setSpeakerNames(jobId: String, names: [String: String]) async throws -> [String: String] {
-        let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names))
+    /// `sources` (Sprint 30, a metric only) says per label whether the name
+    /// was picked from `name_candidates` or typed.
+    func setSpeakerNames(jobId: String, names: [String: String],
+                         sources: [String: SpeakerNameSource]? = nil) async throws -> [String: String] {
+        let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names, sources: sources))
         let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers", method: "PUT",
                                   jsonBody: body, authorized: true)
         return try decode(SpeakerNamesResponse.self, from: data).speakerNames
+    }
+
+    /// Sprint 32: "✕" on a name suggestion. 204, idempotent; that
+    /// label/name pair never comes back for this job.
+    func dismissNameSuggestion(jobId: String, label: String, name: String) async throws {
+        let body = try JSONEncoder().encode(NameSuggestionDismissRequest(label: label, name: name))
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/suggestions/dismiss",
+                               method: "POST", jsonBody: body, authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Merge one diarized speaker into another (a reversible overlay on the job).
+    func mergeSpeakers(jobId: String, from: String, into: String) async throws -> SpeakerEditResult {
+        let body = try JSONEncoder().encode(SpeakerMergeRequest(from: from, into: into))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/merge",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(SpeakerEditResult.self, from: data)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Move turns to another speaker (Sprint 30). `segmentIndices` are the
+    /// selected turns' `segment_indices`, concatenated as they came — one
+    /// call however many turns. `resultRev` is the result they were read
+    /// from; a newer one on the server is `SpeakerEditError.staleResultRev`.
+    func reassignTurns(jobId: String, resultRev: Int, segmentIndices: [Int],
+                       to target: ReassignTarget) async throws -> SpeakerReassignResult {
+        let body = try JSONEncoder().encode(SpeakerReassignRequest(resultRev: resultRev,
+                                                                   segmentIndices: segmentIndices,
+                                                                   to: target))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/reassign",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(SpeakerReassignResult.self, from: data)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Undo every live speaker edit (merges and moved turns) of the current
+    /// result. Idempotent; 204.
+    func resetSpeakerEdits(jobId: String) async throws {
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/edits/reset",
+                               method: "POST", authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
+    }
+
+    /// Undo the job's latest speaker edit.
+    func undoSpeakerEdit(jobId: String, editId: String) async throws {
+        do {
+            _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/speakers/edits/\(editId)",
+                               method: "DELETE", authorized: true)
+        } catch {
+            throw SpeakerEditError.from(error)
+        }
     }
 
     /// Upload a recording.
@@ -837,6 +1247,10 @@ actor APIClient {
     /// the upload borrows a token for that workspace rather than moving
     /// the session under the person's feet.
     func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool,
+                   speakersExpected: Int? = nil,
+                   context: CaptureContext? = nil,
+                   vocabularyHint: String? = nil,
+                   captureTiming: CaptureTiming? = nil,
                    tenantId: String? = nil) async throws -> TranscriptionJob {
         // The upload is the one request in this app that can be tens of
         // megabytes over a phone connection. Start it with a token that
@@ -847,20 +1261,95 @@ actor APIClient {
             borrowed = try await borrowToken(for: tenantId)
         }
         let audioData = try Data(contentsOf: fileURL)
-        let boundary = "NotesAICapture-\(UUID().uuidString)"
-        let body = Self.multipartBody(
-            boundary: boundary,
-            fields: [("language", language), ("diarize", diarize ? "true" : "false")],
-            fileField: "audio",
-            fileName: fileURL.lastPathComponent,
-            contentType: contentType,
-            fileData: audioData
-        )
-        let data = try await send(base: \.asrBaseURL, path: "/asr/jobs", method: "POST",
-                                  body: body,
-                                  contentType: "multipart/form-data; boundary=\(boundary)",
-                                  authorized: true, bearer: borrowed)
-        return try decode(TranscriptionJob.self, from: data)
+        func post(_ context: CaptureContext?) async throws -> TranscriptionJob {
+            let boundary = "NotesAICapture-\(UUID().uuidString)"
+            let body = Self.multipartBody(
+                boundary: boundary,
+                fields: Self.jobFields(language: language, diarize: diarize,
+                                       speakersExpected: speakersExpected, context: context,
+                                       vocabularyHint: vocabularyHint,
+                                       captureTiming: captureTiming),
+                fileField: "audio",
+                fileName: fileURL.lastPathComponent,
+                contentType: contentType,
+                fileData: audioData
+            )
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs", method: "POST",
+                                      body: body,
+                                      contentType: "multipart/form-data; boundary=\(boundary)",
+                                      authorized: true, bearer: borrowed)
+            return try decode(TranscriptionJob.self, from: data)
+        }
+        do {
+            return try await post(context)
+        } catch where Self.refusedNames(error) && !(context?.nameCandidates.isEmpty ?? true) {
+            return try await post(context?.withoutNames)
+        }
+    }
+
+    /// The form fields of `POST /asr/jobs`. `speakers_expected` goes only
+    /// when the person picked an exact number: "Auto" and "6+" send nothing
+    /// and leave the count to the diarizer.
+    /// Sprint 30: the capture context adds `speakers_max`, `name_candidates`
+    /// and `capture_source` (see `CaptureContext.formFields`).
+    static func jobFields(language: String, diarize: Bool,
+                          speakersExpected: Int?,
+                          context: CaptureContext? = nil,
+                          vocabularyHint: String? = nil,
+                          captureTiming: CaptureTiming? = nil) -> [(String, String)] {
+        var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
+        if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
+        if let context { fields += context.formFields(diarize: diarize) }
+        // Sprint 35: the workspace's own names and terms, so the
+        // transcriber has the spellings before it guesses.
+        if let vocabularyHint, !vocabularyHint.isEmpty {
+            fields.append(("vocabulary_hint", String(vocabularyHint.prefix(2000))))
+        }
+        // Sprint F1: when Record was pressed and how late the audio began;
+        // both or neither.
+        if let captureTiming { fields += captureTiming.formFields }
+        return fields
+    }
+
+    /// The server refused the invitee names; the upload is worth more.
+    static func refusedNames(_ error: Error) -> Bool {
+        guard case APIError.http(_, let problem) = error else { return false }
+        return problem?.code == "name_candidates_invalid"
+    }
+
+    /// Re-label the job's speakers ("Wrong number of speakers?"). Returns
+    /// once the run is queued; poll `jobStatus` for `diarization_status`.
+    func rediarize(jobId: String, speakersExpected: Int?) async throws -> RediarizeResponse {
+        let body = try JSONEncoder().encode(RediarizeRequest(speakersExpected: speakersExpected))
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/rediarize",
+                                      method: "POST", jsonBody: body, authorized: true)
+            return try decode(RediarizeResponse.self, from: data)
+        } catch {
+            throw RediarizeError.from(error)
+        }
+    }
+
+    /// Put back the labelling the last re-run replaced (one step only).
+    func undoRediarize(jobId: String) async throws -> RediarizeResponse {
+        do {
+            let data = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(jobId)/rediarize/undo",
+                                      method: "POST", authorized: true)
+            return try decode(RediarizeResponse.self, from: data)
+        } catch {
+            throw RediarizeError.from(error)
+        }
+    }
+
+    func asrLimits() async throws -> AsrLimits {
+        let data = try await send(base: \.asrBaseURL, path: "/asr/limits", method: "GET", authorized: true)
+        return try decode(AsrLimits.self, from: data)
+    }
+
+    /// `DELETE /asr/jobs/{id}` — stop a transcription that is queued or
+    /// running. The job ends `cancelled`; the recording is not deleted.
+    func cancelJob(id: String) async throws {
+        _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(id)", method: "DELETE", authorized: true)
     }
 
     func jobStatus(id: String) async throws -> TranscriptionJob {

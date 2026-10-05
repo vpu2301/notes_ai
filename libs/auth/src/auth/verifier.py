@@ -55,7 +55,11 @@ def _resolve_issuers(
     if expected_issuer and expected_audience:
         # jwks_url is unused on this path: the caller already built the
         # cache, and a legacy caller has exactly one entry in it.
-        return (IssuerConfig(issuer=expected_issuer, jwks_url=expected_issuer, audience=expected_audience),)
+        return (
+            IssuerConfig(
+                issuer=expected_issuer, jwks_url=expected_issuer, audience=expected_audience
+            ),
+        )
     raise TypeError(
         "verify_token needs either issuers=[IssuerConfig, ...] or both "
         "expected_issuer= and expected_audience="

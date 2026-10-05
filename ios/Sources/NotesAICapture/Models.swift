@@ -7,12 +7,47 @@ struct BackendSettings: Codable, Equatable, Sendable {
     var asrBaseURL: String
     var noteBaseURL: String
     var webAppURL: String
+    /// notification-service (the bell). Settings saved before it existed
+    /// decode without it and get the address derived from the others.
+    var notificationBaseURL: String
+
+    init(authBaseURL: String, asrBaseURL: String, noteBaseURL: String, webAppURL: String,
+         notificationBaseURL: String? = nil) {
+        self.authBaseURL = authBaseURL
+        self.asrBaseURL = asrBaseURL
+        self.noteBaseURL = noteBaseURL
+        self.webAppURL = webAppURL
+        self.notificationBaseURL = notificationBaseURL
+            ?? Self.derivedNotificationURL(from: noteBaseURL)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case authBaseURL, asrBaseURL, noteBaseURL, webAppURL, notificationBaseURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let note = try c.decode(String.self, forKey: .noteBaseURL)
+        self.init(authBaseURL: try c.decode(String.self, forKey: .authBaseURL),
+                  asrBaseURL: try c.decode(String.self, forKey: .asrBaseURL),
+                  noteBaseURL: note,
+                  webAppURL: try c.decode(String.self, forKey: .webAppURL),
+                  notificationBaseURL: try c.decodeIfPresent(String.self, forKey: .notificationBaseURL))
+    }
+
+    /// The notification service on the same host as note-service, on its
+    /// usual dev port — for settings written before the bell existed.
+    static func derivedNotificationURL(from noteBaseURL: String) -> String {
+        guard let (scheme, host) = parseHost(noteBaseURL) else { return "http://localhost:8004" }
+        return "\(scheme)://\(host):8004"
+    }
 
     static let `default` = BackendSettings(
         authBaseURL: "http://localhost:8000",
         asrBaseURL: "http://localhost:8001",
         noteBaseURL: "http://localhost:8006",
-        webAppURL: "http://localhost:5173"
+        webAppURL: "http://localhost:5173",
+        notificationBaseURL: "http://localhost:8004"
     )
 
     /// The dev stack on one machine: every service on its usual port of
@@ -24,7 +59,8 @@ struct BackendSettings: Codable, Equatable, Sendable {
             authBaseURL: "\(scheme)://\(host):8000",
             asrBaseURL: "\(scheme)://\(host):8001",
             noteBaseURL: "\(scheme)://\(host):8006",
-            webAppURL: "\(scheme)://\(host):5173"
+            webAppURL: "\(scheme)://\(host):5173",
+            notificationBaseURL: "\(scheme)://\(host):8004"
         )
     }
 
@@ -71,7 +107,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
 
     /// The host every address points at, when they agree; nil otherwise.
     var commonHost: String? {
-        let hosts = [authBaseURL, asrBaseURL, noteBaseURL, webAppURL]
+        let hosts = [authBaseURL, asrBaseURL, noteBaseURL, webAppURL, notificationBaseURL]
             .map { URL(string: $0.trimmingCharacters(in: .whitespaces))?.host() }
         guard let first = hosts.first ?? nil, hosts.allSatisfy({ $0 == first }) else { return nil }
         return first
@@ -105,11 +141,15 @@ struct IdentitySummary: Codable, Equatable, Sendable {
     var hasPassword: Bool = false
     var status: String = "active"
 
+    /// Sprint 21: when the account came to exist; absent on an older server.
+    let createdAt: Date?
+
     enum CodingKeys: String, CodingKey {
         case id, email, status
         case displayName = "display_name"
         case mfaEnabled = "mfa_enabled"
         case hasPassword = "has_password"
+        case createdAt = "created_at"
     }
 }
 
@@ -461,13 +501,36 @@ struct TranscriptionJob: Decodable, Sendable {
     let detectedLanguage: String?
     let errorMessage: String?
     let errorKind: String?
+    /// Sprint 29 — speaker re-labelling. All optional: an older server
+    /// sends none of them and the job still decodes.
+    /// Bumped by every re-label and undo.
+    var diarizationRev: Int? = nil
+    /// nil (never re-labelled) | "queued" | "running" | "complete" | "failed".
+    /// The job's `status` stays `complete` meanwhile: the transcript is
+    /// readable the whole time.
+    var diarizationStatus: String? = nil
+    var diarizationError: String? = nil
+    var diarizationRuns: Int? = nil
+    var canUndoRediarize: Bool? = nil
+    /// Submit response only: true = the speaker-count hint was used, false =
+    /// sent but ignored (diarize off), nil = none sent.
+    var hintsApplied: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status
         case detectedLanguage = "detected_language"
         case errorMessage = "error_message"
         case errorKind = "error_kind"
+        case diarizationRev = "diarization_rev"
+        case diarizationStatus = "diarization_status"
+        case diarizationError = "diarization_error"
+        case diarizationRuns = "diarization_runs"
+        case canUndoRediarize = "can_undo_rediarize"
+        case hintsApplied = "hints_applied"
     }
+
+    /// A speaker re-label is queued or running.
+    var isRelabelling: Bool { diarizationStatus == "queued" || diarizationStatus == "running" }
 
     /// Human-readable failure text (`error_message` is documented as safe to show).
     var failureText: String {
@@ -481,11 +544,33 @@ struct TranscriptionJob: Decodable, Sendable {
 
 // MARK: - Templates & notes (note-service)
 
-struct TemplateSummary: Decodable, Sendable {
+struct TemplateSummary: Decodable, Sendable, Identifiable {
     let id: String
     let code: String
     let name: String
     let language: String
+    /// "active" | "archived"; absent from an older server.
+    var status: String?
+    var category: String?
+
+    /// The template a bare "new note" starts from: meeting notes, in the
+    /// asked-for language first (`web/src/lib/createBlankNote.ts`).
+    static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
+        let live = list.filter { $0.status != "archived" }
+        return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
+            ?? live.first { $0.code.hasPrefix("meeting_notes") }
+            ?? live.first
+    }
+}
+
+/// `POST /v1/notes` — a note typed from scratch, from a template.
+struct CreateNoteRequest: Encodable, Sendable {
+    let content: NoteContent
+}
+
+struct NoteCreatedResponse: Decodable, Sendable {
+    let id: String
+    let code: String
 }
 
 struct FromTranscriptRequest: Encodable, Sendable {
@@ -677,6 +762,8 @@ struct RecentCapture: Codable, Identifiable, Equatable, Sendable {
 // MARK: - Notes (note-service) — the document the app opens natively
 
 enum NoteStatus: String, Codable, Sendable {
+    /// `finalized` / `amended` are legacy values a note no longer takes
+    /// (finalize retired, ADR-0051); kept so old rows decode.
     case draft, finalized, amended, cancelled
 
     var label: String {
@@ -731,12 +818,17 @@ struct NoteSection: Codable, Equatable, Sendable {
     var text: String?
     var fieldSpecificMetadata: [String: JSONValue]?
     var transcriptSegmentIds: [String]?
+    /// The heading of a section the template does not name (one the
+    /// engine made from the conversation). nil: no heading — the block
+    /// is read as the note itself. Round-tripped, never set here.
+    var title: String?
 
     enum CodingKeys: String, CodingKey {
         case sectionKey = "section_key"
         case text
         case fieldSpecificMetadata = "field_specific_metadata"
         case transcriptSegmentIds = "transcript_segment_ids"
+        case title
     }
 }
 
@@ -777,6 +869,199 @@ struct SectionLabel: Decodable, Sendable {
     }
 }
 
+/// The document engine's status for one note (Sprint 33): the Notes
+/// tab's status line, and whether *Generate Summary* is offered.
+struct GenerationView: Decodable, Sendable {
+    let id: String
+    /// queued | running | partial | complete | failed | superseded
+    let status: String
+    let windowsTotal: Int?
+    let windowsDone: Int?
+    /// Why it ended without a document, from a closed vocabulary.
+    let errorKind: String?
+    /// How many sections the run wrote; 0 on a finished run means the
+    /// recording yielded nothing the verifier let through.
+    let sectionsWritten: Int?
+    /// Q3 — what the recording was taken to be (`meeting`, `interview`,
+    /// `podcast_broadcast`, …) and who decided (`user`, `classifier`,
+    /// `rule`, `template`). Nil before Q3.
+    let recordingType: String?
+    let recordingTypeSource: String?
+    /// Q2 — the passages the engine left out of the note. Nil or empty
+    /// when nothing was, and on runs made before Q2.
+    let excludedRanges: [ExcludedRange]?
+    /// The spoken language the run wrote in (`en`/`de`/`uk`), so the
+    /// exclusions are named in it. Nil before Q3.
+    let language: String?
+
+    var isLive: Bool { status == "queued" || status == "running" }
+    var isFinished: Bool { status == "complete" || status == "partial" }
+    /// Finished, and nothing to show for it: say so, offer another go.
+    var wroteNothing: Bool { isFinished && sectionsWritten == 0 }
+
+    var progressText: String {
+        if let total = windowsTotal, total > 0 {
+            return "Writing this note — \(min(windowsDone ?? 0, total)) of \(total) minutes read"
+        }
+        return "Writing this note…"
+    }
+
+    /// A sentence per reason. The API never sends prose.
+    var failureText: String {
+        switch errorKind {
+        case "budget_exceeded": return GenerationCopy.budgetExceeded
+        case "generation_disabled": return GenerationCopy.generationDisabled
+        case "processor_unacknowledged": return GenerationCopy.processorUnacknowledged
+        case "no_snapshot", "snapshot_unreadable": return GenerationCopy.recordingUnreadable
+        case "model_unavailable": return GenerationCopy.modelUnavailable
+        default: return GenerationCopy.generic
+        }
+    }
+
+    /// The run ended because nobody agreed to a processor: the note view
+    /// offers the way to Settings › Data & AI beside the sentence.
+    var needsProcessorAcknowledgement: Bool { errorKind == "processor_unacknowledged" }
+
+    static let nothingWrittenText =
+        "Nothing could be written from this recording: no statement in it could be verified against the words that were said."
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case windowsTotal = "windows_total"
+        case windowsDone = "windows_done"
+        case errorKind = "error_kind"
+        case sectionsWritten = "sections_written"
+        case recordingType = "recording_type"
+        case recordingTypeSource = "recording_type_source"
+        case excludedRanges = "excluded_ranges"
+        case language
+    }
+}
+
+/// One passage the engine left out of a note (Summary Engine v2, Q2):
+/// background speech, another language, a duplicate. `reason` comes from a
+/// closed vocabulary, but is kept a string so a reason this build does not
+/// know yet still decodes — it is then called "a passage".
+struct ExcludedRange: Decodable, Equatable, Sendable {
+    let startMs: Int
+    let endMs: Int
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+    }
+}
+
+/// The words for what the engine did with a recording (Q3), as the web
+/// client says them (`web/src/lib/generation.ts`). Pure, so the tests can
+/// pin the wording.
+extension GenerationView {
+    /// What the recording was taken to be. `meeting` (and anything this
+    /// build does not know) has no label: the template name says enough.
+    static let recordingTypeLabels: [String: String] = [
+        "client_call": "Client call",
+        "sales_call": "Sales call",
+        "interview": "Interview",
+        "one_on_one": "One-on-one",
+        "podcast_broadcast": "Podcast / broadcast",
+        "lecture_webinar": "Lecture / webinar",
+        "presentation_demo": "Presentation / demo",
+        "voice_memo": "Voice memo",
+    ]
+
+    static func recordingTypeLabel(_ recordingType: String?) -> String? {
+        guard let recordingType, recordingType != "meeting" else { return nil }
+        return recordingTypeLabels[recordingType]
+    }
+
+    var recordingTypeLabel: String? { Self.recordingTypeLabel(recordingType) }
+
+    /// Why a passage was left out, in the language that was spoken. The
+    /// API never sends prose; `passage` is the word for a reason this
+    /// build does not know.
+    static let noiseLabels: [String: [String: String]] = [
+        "en": [
+            "background": "background speech",
+            "other_language": "a passage in another language",
+            "artifact": "a transcription artifact",
+            "duplicate": "a duplicated passage",
+            "unrelated": "an unrelated fragment",
+            "advertisement": "an advertisement",
+            "music": "music",
+            "noise": "noise",
+            "passage": "a passage",
+        ],
+        "de": [
+            "background": "Hintergrundgespräch",
+            "other_language": "eine Passage in einer anderen Sprache",
+            "artifact": "ein Transkriptionsartefakt",
+            "duplicate": "eine doppelte Passage",
+            "unrelated": "ein unzusammenhängendes Fragment",
+            "advertisement": "Werbung",
+            "music": "Musik",
+            "noise": "Geräusche",
+            "passage": "eine Passage",
+        ],
+        "uk": [
+            "background": "фонова мова",
+            "other_language": "уривок іншою мовою",
+            "artifact": "артефакт транскрипції",
+            "duplicate": "повторений уривок",
+            "unrelated": "непов'язаний фрагмент",
+            "advertisement": "реклама",
+            "music": "музика",
+            "noise": "шум",
+            "passage": "уривок",
+        ],
+    ]
+
+    static func noiseLabel(_ reason: String, language: String?) -> String {
+        let labels = noiseLabels[language ?? ""] ?? noiseLabels["en"] ?? [:]
+        return labels[reason] ?? labels["passage"] ?? "a passage"
+    }
+
+    /// Ranges shown before "+N more".
+    static let maxShownRanges = 4
+
+    /// "00:45" — minutes are not wrapped into hours, as on the web.
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    struct ExcludedItem: Equatable, Sendable {
+        let startMs: Int
+        /// "00:45–00:52 (background speech)"
+        let text: String
+    }
+
+    /// Every excluded passage, in time order, in the note's language.
+    var excludedItems: [ExcludedItem] {
+        (excludedRanges ?? [])
+            .sorted { $0.startMs < $1.startMs }
+            .map { range in
+                ExcludedItem(
+                    startMs: range.startMs,
+                    text: "\(Self.mmss(range.startMs))–\(Self.mmss(range.endMs)) (\(Self.noiseLabel(range.reason, language: language)))"
+                )
+            }
+    }
+
+    /// The items the line shows, and how many more there are.
+    var shownExcluded: (items: [ExcludedItem], more: Int) {
+        let all = excludedItems
+        let shown = Array(all.prefix(Self.maxShownRanges))
+        return (shown, all.count - shown.count)
+    }
+}
+
+struct GenerationStarted: Decodable, Sendable {
+    let id: String
+    let status: String
+}
+
 struct NoteEnvelope: Decodable, Sendable {
     let id: String
     let code: String
@@ -793,9 +1078,12 @@ struct NoteEnvelope: Decodable, Sendable {
     let primaryAuthorName: String?
     let content: NoteContent?
     let sectionLabels: [SectionLabel]?
+    /// The transcription job the note was made from, if any.
+    let sourceJobId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, code, status, title, content, visibility
+        case sourceJobId = "source_job_id"
         case currentVersionNumber = "current_version_number"
         case primaryAuthorId = "primary_author_id"
         case primaryAuthorName = "primary_author_name"
@@ -844,14 +1132,113 @@ struct SharingView: Decodable, Sendable {
     let canDelete: Bool
     let sharedWith: [SharedMember]
     let publicLink: PublicLink?
+    /// Every live link, newest first (Sprint 19). Absent on an older server.
+    let links: [LinkView]
+    /// Sprint 23: the workspace's effective sharing rules. Absent on an older server.
+    let constraints: SharingConstraints?
 
     enum CodingKeys: String, CodingKey {
-        case visibility
+        case visibility, links, constraints
         case noteId = "note_id"
         case canManage = "can_manage"
         case canDelete = "can_delete"
         case sharedWith = "shared_with"
         case publicLink = "public_link"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        noteId = try c.decode(String.self, forKey: .noteId)
+        visibility = try c.decode(String.self, forKey: .visibility)
+        canManage = try c.decode(Bool.self, forKey: .canManage)
+        canDelete = try c.decode(Bool.self, forKey: .canDelete)
+        sharedWith = try c.decode([SharedMember].self, forKey: .sharedWith)
+        publicLink = try c.decodeIfPresent(PublicLink.self, forKey: .publicLink)
+        links = try c.decodeIfPresent([LinkView].self, forKey: .links) ?? []
+        constraints = try? c.decodeIfPresent(SharingConstraints.self, forKey: .constraints)
+    }
+
+    /// The client-facing links only.
+    var recipientLinks: [LinkView] { links.filter { $0.kind == .recipient } }
+}
+
+// MARK: - Per-recipient links (Sprint 19, 0035)
+
+enum ShareLinkKind: String, Decodable, Sendable {
+    case `public`, recipient
+}
+
+/// One share link: the public one or a per-recipient one. Decoded from
+/// `LinkView`; the token is only ever returned to people who may manage
+/// the note.
+struct LinkView: Decodable, Sendable, Identifiable {
+    let id: String
+    let kind: ShareLinkKind
+    let label: String
+    let recipientEmail: String?
+    let token: String
+    /// SPA path; prefix with the web app origin for a full URL.
+    let path: String
+    let refCode: String?
+    let createdAt: Date
+    let expiresAt: Date?
+    let viewCount: Int
+    let firstViewedAt: Date?
+    let lastViewedAt: Date?
+    let ctaClickedAt: Date?
+    /// Sprint 20: live responses from this link. Absent on an older server.
+    let responseCount: Int?
+    /// Sprint 22: the product mailed the link. Raw so an unknown value
+    /// from a newer server decodes rather than failing the whole sheet.
+    let deliveryStatusRaw: String?
+    let sentAt: Date?
+    let sendCount: Int?
+    let lastSendError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, label, token, path
+        case recipientEmail = "recipient_email"
+        case refCode = "ref_code"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case viewCount = "view_count"
+        case firstViewedAt = "first_viewed_at"
+        case lastViewedAt = "last_viewed_at"
+        case ctaClickedAt = "cta_clicked_at"
+        case responseCount = "response_count"
+        case deliveryStatusRaw = "delivery_status"
+        case sentAt = "sent_at"
+        case sendCount = "send_count"
+        case lastSendError = "last_send_error"
+    }
+
+    enum DeliveryStatus: String { case notSent = "not_sent", sent, failed, suppressed }
+
+    var deliveryStatus: DeliveryStatus { DeliveryStatus(rawValue: deliveryStatusRaw ?? "") ?? .notSent }
+
+    /// "Sent 12:31 · Opened 17 Sep · Responded (2)"
+    var statusLine: String {
+        var parts: [String] = []
+        switch deliveryStatus {
+        case .sent:
+            if let sentAt { parts.append("Sent " + sentAt.formatted(date: .omitted, time: .shortened)) } else { parts.append("Sent") }
+        case .failed: parts.append("Failed")
+        case .suppressed: parts.append("Opted out")
+        case .notSent: parts.append("Not sent")
+        }
+        parts.append(opened)
+        if let n = responseCount, n > 0 { parts.append("Responded (\(n))") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The product may mail it (again): an address, not opted out, under the cap.
+    var canSend: Bool {
+        recipientEmail != nil && deliveryStatus != .suppressed && (sendCount ?? 0) < 3
+    }
+
+    var opened: String {
+        guard let firstViewedAt else { return "Not opened" }
+        return "Opened " + firstViewedAt.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
@@ -905,11 +1292,25 @@ struct TemplateSectionDef: Decodable, Sendable, Identifiable {
     let required: Bool?
     let minChars: Int?
     let order: Int?
+    /// What a fresh note starts the section with.
+    var defaultContent: String?
+
+    init(id: String, name: String, fieldType: String?, required: Bool?, minChars: Int?, order: Int?,
+         defaultContent: String? = nil) {
+        self.id = id
+        self.name = name
+        self.fieldType = fieldType
+        self.required = required
+        self.minChars = minChars
+        self.order = order
+        self.defaultContent = defaultContent
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, name, required, order
         case fieldType = "field_type"
         case minChars = "min_chars"
+        case defaultContent = "default_content"
     }
 
     var isFreeText: Bool { fieldType == nil || fieldType == "free_text" }
@@ -923,10 +1324,20 @@ struct TemplateDetail: Decodable, Sendable {
     let id: String
     let name: String
     let schemaJsonb: Definition
+    var schemaVersion: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case schemaJsonb = "schema_jsonb"
+        case schemaVersion = "schema_version"
+    }
+
+    /// The content a blank note starts with: every section in order, with
+    /// the template's default text (`createBlankNote.ts`).
+    func blankContent() -> NoteContent {
+        let sections = schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
+            .map { NoteSection(sectionKey: $0.id, text: $0.defaultContent ?? "", fieldSpecificMetadata: [:]) }
+        return NoteContent(templateId: id, templateSchemaVersion: schemaVersion ?? 1, title: "", sections: sections)
     }
 }
 
@@ -937,11 +1348,15 @@ struct TranscriptSegment: Decodable, Sendable {
     let startMs: Int
     let endMs: Int
     let speaker: String?
+    /// Sprint 30: where this segment sits in the stored artifact — the
+    /// space `TranscriptTurn.segmentIndices` is in. Nil from older servers.
+    var artifactIndex: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case text, speaker
         case startMs = "start_ms"
         case endMs = "end_ms"
+        case artifactIndex = "artifact_index"
     }
 }
 
@@ -956,14 +1371,26 @@ struct TranscriptTurn: Decodable, Identifiable, Equatable, Sendable {
     let startMs: Int
     let endMs: Int
     let paragraphs: [String]
+    /// Sprint 30: the turn's segments in ARTIFACT index space. Opaque —
+    /// sent back as-is to move the turn, never used to index `segments`.
+    /// Nil from servers that cannot move turns.
+    var segmentIndices: [Int]? = nil
+    /// Sprint 30: people talked over each other here, or the label was
+    /// smoothed — the attribution is a guess.
+    var uncertain: Bool? = nil
 
     /// Turns are chronological and non-overlapping, so the start is unique.
     var id: Int { startMs }
 
+    /// Whether this turn can be moved to another speaker.
+    var isMovable: Bool { !(segmentIndices ?? []).isEmpty }
+    var isUncertain: Bool { uncertain == true }
+
     enum CodingKeys: String, CodingKey {
-        case speaker, name, paragraphs
+        case speaker, name, paragraphs, uncertain
         case startMs = "start_ms"
         case endMs = "end_ms"
+        case segmentIndices = "segment_indices"
     }
 }
 
@@ -976,11 +1403,350 @@ struct TranscriptResult: Decodable, Sendable {
     let speakerNames: [String: String]?
     /// The transcript as speaker turns — what the Transcript tab renders.
     let turns: [TranscriptTurn]?
+    /// Talk time per roster label, after speaker edits.
+    let speakerStats: [SpeakerStat]?
+    /// Diarization run the edits apply to.
+    let resultRev: Int?
+    /// Live speaker edits, application order (latest last).
+    let edits: [SpeakerEdit]?
+    /// "high" | "low" | nil (not diarized, or a pre-Sprint-29 result).
+    var countConfidence: String? = nil
+    /// The exact speaker count a person asked for on this labelling.
+    var speakersHint: Int? = nil
+    /// Sprint 30: names offered when renaming a speaker (calendar invitees).
+    var nameCandidates: [String]? = nil
+    /// Sprint 31: label → "local" (heard on the recording Mac's microphone)
+    /// or "remote" (came through the call audio). Empty for mono jobs;
+    /// absent from older servers.
+    var speakerSides: [String: String]? = nil
+    /// Sprint 31: label → how the name was given ("typed", "picklist",
+    /// "channel", "suggestion", "cleared"). "channel" = the server named
+    /// the only speaker on the microphone after the account owner.
+    var speakerNameSources: [String: String]? = nil
+    /// Sprint 32: names the server heard people give themselves ("Hi, this
+    /// is Anna"), offered with their evidence. Only sent while the server's
+    /// suggestion switch is on — absent is the normal case.
+    var nameSuggestions: [NameSuggestion]? = nil
+    /// Sprint 32: labelled by an older engine and the audio is still there,
+    /// so a re-label is worth offering. Absent from older servers.
+    var relabelAvailable: Bool? = nil
+    /// Sprint F1: how much of the speech made it into the transcript, and
+    /// the stretches that did not. Absent from older servers and results.
+    var coverage: TranscriptCoverage? = nil
+    /// Sprint F1: the capture timing the recording app sent.
+    var capture: CaptureInfo? = nil
+    /// Sprint TQ2: music / silence / noise stretches (≥ 5 s) the worker
+    /// marked instead of transcribing. Absent from older servers.
+    var noise: [TranscriptNoise]? = nil
+    /// The language the transcript is in; names the markers.
+    var language: String? = nil
+    /// Sprint TQ3: spellings the server unified (applied in the turns) or
+    /// offers for review. Absent from older servers.
+    var entityCorrections: [EntityCorrection]? = nil
+    var correctionsRev: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
-        case segments, speakers, turns
+        case coverage, capture, noise, language
+        case entityCorrections = "entity_corrections"
+        case correctionsRev = "corrections_rev"
+        case nameSuggestions = "name_suggestions"
+        case relabelAvailable = "relabel_available"
+        case segments, speakers, turns, edits
+        case speakerSides = "speaker_sides"
+        case speakerNameSources = "speaker_name_sources"
         case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+        case resultRev = "result_rev"
+        case countConfidence = "count_confidence"
+        case speakersHint = "speakers_hint"
+        case nameCandidates = "name_candidates"
+    }
+}
+
+struct SpeakerStat: Decodable, Sendable, Equatable {
+    let label: String
+    let speechMs: Int
+    let share: Double
+    let turns: Int
+
+    enum CodingKeys: String, CodingKey {
+        case label, share, turns
+        case speechMs = "speech_ms"
+    }
+
+    /// Probably someone else split off (or a cough): worth one question.
+    var isSmall: Bool { share < 0.05 || speechMs < 15_000 }
+}
+
+struct SpeakerEdit: Decodable, Sendable, Equatable {
+    let id: String
+    let kind: String
+    let fromLabel: String?
+    let toLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind
+        case fromLabel = "from_label"
+        case toLabel = "to_label"
+    }
+}
+
+/// Sprint 32 — one name suggestion: the name (calendar spelling) the
+/// server heard for `label`, and the words it heard it in, shown before
+/// anything is accepted. Everything but the pair is optional so a server
+/// that trims a field never costs the whole transcript.
+struct NameSuggestion: Decodable, Equatable, Hashable, Identifiable, Sendable {
+    let label: String
+    let name: String
+    var source: String? = nil
+    /// The evidence, at most 160 characters.
+    var quote: String? = nil
+    var startMs: Int? = nil
+    var endMs: Int? = nil
+    /// Artifact index space, like `TranscriptTurn.segmentIndices`.
+    var segmentIndices: [Int]? = nil
+
+    /// A pair is dismissed once and never comes back, so it is the identity.
+    var id: String { "\(label)|\(name)" }
+
+    enum CodingKeys: String, CodingKey {
+        case label, name, source, quote
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case segmentIndices = "segment_indices"
+    }
+}
+
+/// `POST /asr/jobs/{id}/speakers/suggestions/dismiss` body.
+struct NameSuggestionDismissRequest: Encodable, Sendable {
+    let label: String
+    let name: String
+}
+
+struct SpeakerMergeRequest: Encodable, Sendable {
+    let from: String
+    let into: String
+}
+
+/// `POST /asr/jobs/{id}/speakers/merge` response.
+struct SpeakerEditResult: Decodable, Sendable {
+    let editId: String
+    let speakers: [String]
+    let speakerNames: [String: String]
+    let speakerStats: [SpeakerStat]
+
+    enum CodingKeys: String, CodingKey {
+        case speakers
+        case editId = "edit_id"
+        case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+    }
+}
+
+/// Why a speaker merge or undo was refused, in words a person can act on.
+enum SpeakerEditError: LocalizedError {
+    case notComplete, unknownLabel, notLatest
+    /// Sprint 30: the result changed since it was read (another device,
+    /// the web app). The caller reloads and says so.
+    case staleResultRev
+    case badSegmentIndex, tooManySegments, tooManySpeakers
+    case relabelInProgress
+    /// 410: the transcript was erased.
+    case erased
+
+    var errorDescription: String? {
+        switch self {
+        case .notComplete: return "The transcript is not finished yet."
+        case .unknownLabel: return "That speaker is no longer in the transcript. Reload and try again."
+        case .notLatest: return "Only the last speaker change can be undone."
+        case .staleResultRev: return "Speakers were updated elsewhere."
+        case .badSegmentIndex: return "Those turns have changed. Reload and try again."
+        case .tooManySegments: return "Too many turns at once. Move fewer turns at a time."
+        case .tooManySpeakers: return "A transcript can have at most 8 speakers."
+        case .relabelInProgress: return "Speakers are being re-labelled. Try again when it has finished."
+        case .erased: return "This transcript was erased."
+        }
+    }
+
+    static func from(_ error: Error) -> Error {
+        guard case APIError.http(let status, let problem) = error else { return error }
+        switch problem?.code {
+        case "job_not_complete": return SpeakerEditError.notComplete
+        case "unknown_label", "same_label": return SpeakerEditError.unknownLabel
+        case "edit_not_latest": return SpeakerEditError.notLatest
+        case "stale_result_rev": return SpeakerEditError.staleResultRev
+        case "bad_segment_index": return SpeakerEditError.badSegmentIndex
+        case "too_many_segments": return SpeakerEditError.tooManySegments
+        case "too_many_speakers": return SpeakerEditError.tooManySpeakers
+        case "rediarize_in_progress": return SpeakerEditError.relabelInProgress
+        default: return status == 410 ? SpeakerEditError.erased : error
+        }
+    }
+}
+
+/// Where a moved turn goes: an existing speaker, a speaker the diarizer
+/// missed ("new"), or nobody ("Unknown", sent as JSON null).
+enum ReassignTarget: Equatable, Hashable, Sendable {
+    case speaker(String)
+    case new
+    case unknown
+}
+
+/// `POST /asr/jobs/{id}/speakers/reassign` body. `to` is always present:
+/// null is a meaning ("Unknown"), not an omission.
+struct SpeakerReassignRequest: Encodable, Sendable {
+    let resultRev: Int
+    let segmentIndices: [Int]
+    let to: ReassignTarget
+
+    enum CodingKeys: String, CodingKey {
+        case to
+        case resultRev = "result_rev"
+        case segmentIndices = "segment_indices"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(resultRev, forKey: .resultRev)
+        try container.encode(segmentIndices, forKey: .segmentIndices)
+        switch to {
+        case .speaker(let label): try container.encode(label, forKey: .to)
+        case .new: try container.encode("new", forKey: .to)
+        case .unknown: try container.encodeNil(forKey: .to)
+        }
+    }
+}
+
+/// The 200 of a reassign: the roster after the move, and the label made
+/// for "New speaker" (nil otherwise).
+struct SpeakerReassignResult: Decodable, Sendable {
+    let editId: String
+    let speakers: [String]
+    let speakerNames: [String: String]
+    let speakerStats: [SpeakerStat]
+    var createdLabel: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case speakers
+        case editId = "edit_id"
+        case speakerNames = "speaker_names"
+        case speakerStats = "speaker_stats"
+        case createdLabel = "created_label"
+    }
+}
+
+/// Sprint 30 — how a speaker's new name was chosen (a metric only; the
+/// server does not store it).
+enum SpeakerNameSource: String, Encodable, Sendable {
+    case picklist, typed
+    /// Sprint 32: an accepted name suggestion.
+    case suggestion
+}
+
+/// Sprint 31: which side of a call a speaker was heard on.
+enum SpeakerSide: String, Sendable {
+    case local, remote
+
+    var symbol: String { self == .local ? "mic.fill" : "headphones" }
+    var accessibilityLabel: String { self == .local ? "On your microphone" : "On the call audio" }
+}
+
+/// Sprint 31 roster markers: the side glyph, and the "from your
+/// microphone" marker on a name the server gave from the channel split.
+enum SpeakerChannelMarkers {
+    static let channelSource = "channel"
+    static let fromMicrophone = "· from your microphone"
+    static let removeLabel = "Remove this name"
+    /// Sprint 32: the marker on a name that came from an accepted
+    /// suggestion, until the person edits it.
+    static let suggestionSource = "suggestion"
+    static let suggested = "suggested"
+
+    /// The side glyph for `label`; nil for mono jobs, unknown labels, or a
+    /// value this build does not know.
+    static func side(of label: String, in sides: [String: String]) -> SpeakerSide? {
+        sides[label].flatMap(SpeakerSide.init(rawValue:))
+    }
+
+    /// Whether `label`'s name came from the channel split (and so gets the
+    /// marker and the ✕ that clears it).
+    static func isChannelNamed(_ label: String, sources: [String: String]) -> Bool {
+        sources[label] == channelSource
+    }
+
+    /// Whether `label`'s name is an accepted suggestion (the "suggested" marker).
+    static func isSuggested(_ label: String, sources: [String: String]) -> Bool {
+        sources[label] == suggestionSource
+    }
+
+    /// `speaker_name_sources` after a successful rename of `label`: the
+    /// source sent, or "cleared" when the name was removed — so the marker
+    /// never outlives the name it described.
+    static func sources(_ sources: [String: String], afterRenaming label: String,
+                        sent: SpeakerNameSource?) -> [String: String] {
+        var updated = sources
+        updated[label] = sent?.rawValue ?? "cleared"
+        return updated
+    }
+}
+
+/// `POST /asr/jobs/{id}/rediarize` body. `speakers_expected` is always
+/// sent — `null` means "let the diarizer decide".
+struct RediarizeRequest: Encodable, Sendable {
+    let speakersExpected: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case speakersExpected = "speakers_expected"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(speakersExpected, forKey: .speakersExpected)
+    }
+}
+
+/// The 202 of a re-label and the 200 of its undo.
+struct RediarizeResponse: Decodable, Sendable {
+    let jobId: String
+    let diarizationStatus: String?
+    let diarizationRev: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case diarizationStatus = "diarization_status"
+        case diarizationRev = "diarization_rev"
+    }
+}
+
+/// Why a speaker re-label or its undo was refused.
+enum RediarizeError: LocalizedError, Equatable {
+    case notComplete, inProgress, audioUnavailable, limitReached, rateLimited, enqueueFailed, nothingToUndo
+
+    var errorDescription: String? {
+        switch self {
+        case .notComplete: return "The transcript is not finished yet."
+        case .inProgress: return "Speakers are already being re-labelled."
+        case .audioUnavailable: return "The recording is no longer stored, so speakers can't be re-labelled."
+        case .limitReached: return "Speakers can be re-labelled 5 times per recording, and that's been used up."
+        case .rateLimited: return "Too many re-labels in the last hour. Try again later."
+        case .enqueueFailed: return "Couldn't start re-labelling. Nothing changed — try again."
+        case .nothingToUndo: return "There is nothing to undo."
+        }
+    }
+
+    static func from(_ error: Error) -> Error {
+        guard case APIError.http(_, let problem) = error else { return error }
+        switch problem?.code {
+        case "job_not_complete": return RediarizeError.notComplete
+        case "rediarize_in_progress": return RediarizeError.inProgress
+        case "audio_unavailable": return RediarizeError.audioUnavailable
+        case "rediarize_limit": return RediarizeError.limitReached
+        case "rate_limited": return RediarizeError.rateLimited
+        case "enqueue_failed": return RediarizeError.enqueueFailed
+        case "nothing_to_undo": return RediarizeError.nothingToUndo
+        default: return error
+        }
     }
 }
 
@@ -1023,6 +1789,8 @@ struct AskNoteResponse: Decodable, Sendable {
 
 struct SpeakerNamesRequest: Encodable, Sendable {
     let names: [String: String]
+    /// Label → how its name was chosen; omitted when nil.
+    var sources: [String: SpeakerNameSource]? = nil
 }
 
 struct SpeakerNamesResponse: Decodable, Sendable {
@@ -1048,6 +1816,8 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     /// Who can open it (0016). Nil from a server that predates the badge.
     /// Mutable so a change made from the list shows without a reload.
     var access: NoteAccess?
+    /// Sprint 20 — live recipient disputes, for the "1 disputed" marker.
+    var openDisputes: Int = 0
 
     var id: String { noteId }
 
@@ -1057,6 +1827,7 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         case updatedAt = "updated_at"
         case sharedWithCount = "shared_with_count"
         case hasPublicLink = "has_public_link"
+        case openDisputes = "open_disputes"
     }
 
     init(from decoder: Decoder) throws {
@@ -1067,6 +1838,7 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         status = NoteStatus(rawValue: try c.decode(String.self, forKey: .status))
         snippet = (try? c.decode(String.self, forKey: .snippet)) ?? ""
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        openDisputes = (try? c.decodeIfPresent(Int.self, forKey: .openDisputes)) ?? 0
         if let visibility = try? c.decodeIfPresent(String.self, forKey: .visibility) {
             let link = (try? c.decodeIfPresent(Bool.self, forKey: .hasPublicLink)) ?? false
             let shared = (try? c.decodeIfPresent(Int.self, forKey: .sharedWithCount)) ?? 0
@@ -1098,30 +1870,37 @@ struct NoteAccess: Equatable, Sendable {
 
     var isWorkspace: Bool { visibility == "workspace" }
 
-    /// The widest audience wins: a public link reaches more people than
-    /// the workspace, which reaches more than a named few.
+    /// A live public link: the pill is tinted and carries a globe, but the
+    /// word stays the workspace visibility — the two are separate facts,
+    /// and "Public" next to a checked "Private" read as a contradiction.
     var isPublic: Bool { hasPublicLink }
 
     var label: String {
-        if hasPublicLink { return "Public" }
         if isWorkspace { return "Workspace" }
         if sharedWithCount > 0 { return "Shared with \(sharedWithCount)" }
         return "Private"
     }
 
     var symbol: String {
-        if hasPublicLink { return "globe" }
         if isWorkspace { return "person.2.fill" }
         return "lock.fill"
     }
 
     var help: String {
-        if hasPublicLink { return "Public — anyone with the link can open it" }
-        if isWorkspace { return "Visible to everyone in the workspace" }
-        if sharedWithCount > 0 {
-            return "Private — shared with \(sharedWithCount) \(sharedWithCount == 1 ? "person" : "people") in the workspace"
+        let base: String
+        if isWorkspace {
+            base = "Visible to everyone in the workspace"
+        } else if sharedWithCount > 0 {
+            base = "Private — shared with \(sharedWithCount) \(sharedWithCount == 1 ? "person" : "people") in the workspace"
+        } else {
+            base = "Private — only the note's authors can open it"
         }
-        return "Private — only the note's authors can open it"
+        return hasPublicLink ? base + ". A public link is on: anyone with it can open the note" : base
+    }
+
+    /// The menu's line about the link, under its own header.
+    var publicLinkHint: String {
+        hasPublicLink ? "On — anyone with the link can open the note" : "Off"
     }
 }
 
@@ -1262,9 +2041,16 @@ struct UpcomingEvent: Decodable, Identifiable, Equatable, Sendable {
     let attendees: [String]
     let organizer: String?
     let responseStatus: String?
+    /// Sprint 34 — stable across the copies an invite makes in several
+    /// calendars, and the agenda the server read out of its description
+    /// (the description itself never leaves the server).
+    let icalUid: String
+    let agendaLines: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, color, title, start, end, location, attendees, organizer
+        case icalUid = "ical_uid"
+        case agendaLines = "agenda_lines"
         case connectionId = "connection_id"
         case accountEmail = "account_email"
         case calendarId = "calendar_id"
@@ -1297,4 +2083,1074 @@ struct UpcomingEventsResponse: Decodable, Sendable {
     let connected: Bool
     let events: [UpcomingEvent]
     let problems: [CalendarProblem]
+}
+
+// MARK: - Action items + recipient responses (Sprint 20, 0037)
+
+enum ActionItemStatus: String, Codable, Sendable {
+    case open, done, dropped
+}
+
+enum ResponseKind: String, Decodable, Sendable {
+    case confirm, done, dispute, flag
+}
+
+/// What a recipient did on the shared page. `comment` is theirs and is
+/// only ever shown as text.
+struct ItemResponse: Decodable, Sendable, Identifiable {
+    let id: String
+    let linkId: String
+    let linkLabel: String
+    let kind: ResponseKind
+    let itemKey: String?
+    let sectionKey: String?
+    let comment: String?
+    let createdAt: Date
+    let clearedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, comment
+        case linkId = "link_id"
+        case linkLabel = "link_label"
+        case itemKey = "item_key"
+        case sectionKey = "section_key"
+        case createdAt = "created_at"
+        case clearedAt = "cleared_at"
+    }
+}
+
+struct ItemCounts: Decodable, Sendable {
+    let confirms: Int
+    let dones: Int
+    let disputes: Int
+}
+
+/// One action item of the note's current version, with the responses on it.
+struct ActionItem: Decodable, Sendable, Identifiable {
+    let id: String
+    let itemKey: String
+    let position: Int
+    let text: String
+    let ownerLabel: String?
+    let ownerConfidence: Double?
+    let dueDate: String?
+    let dueText: String?
+    var status: ActionItemStatus
+    var counts: ItemCounts
+    var responses: [ItemResponse]
+
+    enum CodingKeys: String, CodingKey {
+        case id, position, text, status, counts, responses
+        case itemKey = "item_key"
+        case ownerLabel = "owner_label"
+        case ownerConfidence = "owner_confidence"
+        case dueDate = "due_date"
+        case dueText = "due_text"
+    }
+
+    /// "Owner inferred — check it" when the parser only guessed.
+    var ownerNeedsCheck: Bool { ownerLabel != nil && (ownerConfidence ?? 1) < 1 }
+
+    var summary: String {
+        var parts: [String] = []
+        if counts.confirms > 0 { parts.append("\(counts.confirms) confirmed") }
+        if counts.dones > 0 { parts.append("\(counts.dones) done") }
+        if counts.disputes > 0 { parts.append("\(counts.disputes) disputed") }
+        return parts.isEmpty ? "No responses yet" : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Sharing constraints (Sprint 23)
+
+/// What the workspace admin allows. Read from `GET /v1/notes/sharing/constraints`
+/// and carried on every `SharingView`; the clients hide what the server
+/// would refuse.
+struct SharingConstraints: Decodable, Sendable, Equatable {
+    let externalLinksEnabled: Bool
+    let publicLinksEnabled: Bool
+    let maxLinkDays: Int
+    let productEmailEnabled: Bool
+    let verifiedRecipientsRequired: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case externalLinksEnabled = "external_links_enabled"
+        case publicLinksEnabled = "public_links_enabled"
+        case maxLinkDays = "max_link_days"
+        case productEmailEnabled = "product_email_enabled"
+        case verifiedRecipientsRequired = "verified_recipients_required"
+    }
+
+    static let permissive = SharingConstraints(
+        externalLinksEnabled: true, publicLinksEnabled: true,
+        maxLinkDays: 180, productEmailEnabled: true, verifiedRecipientsRequired: false)
+}
+
+
+// MARK: - Transcript-shaped text
+
+/// "Anna: we ship Friday" — a paragraph that opens with a short speaker
+/// label. The same rule note-service and the web use, so a section reads
+/// as the transcript on every surface or on none.
+enum TranscriptText {
+    struct Turn: Identifiable, Equatable {
+        let id: Int
+        let speaker: String?
+        let text: String
+    }
+
+    private static let lead = try! NSRegularExpression(  // swiftlint:disable:this force_try
+        pattern: "^(?!https?:)([^\\s*_`:][^*_`:]{0,39}?):\\s+(?=\\S)")
+
+    static func paragraphs(_ text: String) -> [String] {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .split(whereSeparator: { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+            .map { $0.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ") }
+            .filter { !$0.isEmpty }
+    }
+
+    /// (speaker, rest) when the paragraph is a turn.
+    static func split(_ paragraph: String) -> (String, String)? {
+        let range = NSRange(paragraph.startIndex..., in: paragraph)
+        guard let m = lead.firstMatch(in: paragraph, range: range),
+              let nameRange = Range(m.range(at: 1), in: paragraph),
+              let whole = Range(m.range, in: paragraph) else { return nil }
+        let name = String(paragraph[nameRange])
+        guard name.split(whereSeparator: \.isWhitespace).count <= 4 else { return nil }
+        return (name, String(paragraph[whole.upperBound...]))
+    }
+
+    /// Mostly turns (≥ 60 % of at least two paragraphs) → the transcript.
+    static func isTranscript(_ text: String) -> Bool {
+        let paras = paragraphs(text)
+        guard paras.count >= 2 else { return false }
+        let turns = paras.filter { split($0) != nil }.count
+        return turns * 10 >= paras.count * 6
+    }
+
+    static func turns(_ text: String) -> [Turn] {
+        paragraphs(text).enumerated().map { i, p in
+            if let (name, rest) = split(p) { return Turn(id: i, speaker: name, text: rest) }
+            return Turn(id: i, speaker: nil, text: p)
+        }
+    }
+}
+
+/// What one upload may be (`GET /asr/limits`), read before a recording
+/// starts so the app can warn before the cap rather than fail after it.
+struct AsrLimits: Decodable, Sendable {
+    let maxDurationSeconds: Int
+    let maxUploadMb: Int
+
+    enum CodingKeys: String, CodingKey {
+        case maxDurationSeconds = "max_duration_seconds"
+        case maxUploadMb = "max_upload_mb"
+    }
+}
+
+// MARK: - The note that exists from the first second (Sprint 34, ADR-0055)
+
+/// What a capture is doing right now. It lives on `note_meetings`, not on
+/// the note's status — a note is a draft until it is cancelled (ADR-0051).
+enum MeetingState: String, Codable, Sendable {
+    case recording, uploading, transcribing, generating, ready
+    case noAudio = "no_audio"
+    case failed
+
+    /// Whether the recording still has to reach the server. The sweeper
+    /// reclaims these after 12 hours; a client that is still alive should
+    /// not leave one behind.
+    var isPreUpload: Bool { self == .recording || self == .uploading }
+}
+
+/// What kind of meeting this is — picks the template family the note is
+/// written into. `auto` is the default and is always right enough.
+enum MeetingType: String, Codable, CaseIterable, Sendable {
+    case auto, client, team, sales
+    case oneOnOne = "one_on_one"
+    case interview
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .client: return "Client"
+        case .team: return "Team"
+        case .sales: return "Sales"
+        case .oneOnOne: return "1:1"
+        case .interview: return "Interview"
+        }
+    }
+}
+
+/// What the invite knew, as `POST /v1/notes/meeting` takes it.
+///
+/// `description` is only ever sent for an EventKit event, whose notes field
+/// the client has but the server has never seen; the server reads the
+/// agenda out of it and discards the rest. For a server-owned calendar the
+/// agenda arrives already extracted on `/v1/calendar/events`.
+struct MeetingCalendarContext: Codable, Equatable, Sendable {
+    var source: String
+    var title: String?
+    var icalUid: String?
+    var attendeeNames: [String]?
+    var agendaLines: [String]?
+    var description: String?
+
+    /// The server's cap on an EventKit notes field.
+    static let maxDescription = 8192
+
+    enum CodingKeys: String, CodingKey {
+        case source, title, description
+        case icalUid = "ical_uid"
+        case attendeeNames = "attendee_names"
+        case agendaLines = "agenda_lines"
+    }
+}
+
+struct StartMeetingRequest: Encodable, Sendable {
+    let clientCaptureId: String
+    let title: String?
+    /// ISO-8601, explicitly: the shared `JSONEncoder` has no date strategy
+    /// and a Unix timestamp on the wire is a contract nobody can read.
+    let startedAt: String
+    let language: String?
+    let meetingType: String
+    let calendar: MeetingCalendarContext?
+
+    enum CodingKeys: String, CodingKey {
+        case title, language, calendar
+        case clientCaptureId = "client_capture_id"
+        case startedAt = "started_at"
+        case meetingType = "meeting_type"
+    }
+}
+
+struct StartMeetingResponse: Decodable, Sendable {
+    let id: String
+    let code: String
+    let versionNumber: Int
+    let templateId: String
+    let state: MeetingState
+
+    enum CodingKeys: String, CodingKey {
+        case id, code, state
+        case versionNumber = "version_number"
+        case templateId = "template_id"
+    }
+}
+
+/// `GET /v1/notes/{id}/meeting` — what a second device needs to show the
+/// right status and to finish what the first one started.
+struct MeetingInfo: Decodable, Sendable {
+    let state: MeetingState
+    let asrJobId: String?
+    let meetingType: MeetingType
+    let startedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case asrJobId = "asr_job_id"
+        case meetingType = "meeting_type"
+        case startedAt = "started_at"
+    }
+}
+
+struct AttachTranscriptResponse: Decodable, Sendable {
+    let id: String
+    let versionNumber: Int
+    let state: MeetingState
+
+    enum CodingKeys: String, CodingKey {
+        case id, state
+        case versionNumber = "version_number"
+    }
+}
+
+/// When a typed line was first touched, relative to the recording's t=0.
+struct UserLineTime: Codable, Equatable, Sendable {
+    let lineKey: String
+    let offsetMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case lineKey = "line_key"
+        case offsetMs = "offset_ms"
+    }
+}
+
+// MARK: - The workspace glossary (Sprint 35)
+
+/// A name, company, product or term this workspace spells a particular way.
+///
+/// The point of the table is that a correction is made once. You fix "Jon
+/// Meyer" to "John Mayer", the workspace remembers it, and the transcriber
+/// is told the spelling before the next recording instead of guessing the
+/// same way again.
+struct GlossaryTerm: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let term: String
+    let kind: GlossaryKind
+    /// How it has been misheard or misspelled before.
+    let heardAs: [String]
+    let createdAt: Date
+    /// Whether this person may remove it: its creator, or an admin.
+    let canDelete: Bool
+    /// Sprint I2 — whether the server still sends it to the transcriber.
+    /// False for a role label ("Moderator II") that got in before the
+    /// rule existed: kept so it can be seen and removed, never sent.
+    let inHint: Bool
+    /// The note it was remembered from, when it came from a correction.
+    let sourceNoteId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, term, kind
+        case heardAs = "heard_as"
+        case createdAt = "created_at"
+        case canDelete = "can_delete"
+        case inHint = "in_hint"
+        case sourceNoteId = "source_note_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        term = try c.decode(String.self, forKey: .term)
+        kind = try c.decode(GlossaryKind.self, forKey: .kind)
+        heardAs = try c.decodeIfPresent([String].self, forKey: .heardAs) ?? []
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        canDelete = try c.decode(Bool.self, forKey: .canDelete)
+        // An older server does not say; everything it stores is sent.
+        inHint = try c.decodeIfPresent(Bool.self, forKey: .inHint) ?? true
+        sourceNoteId = try c.decodeIfPresent(String.self, forKey: .sourceNoteId)
+    }
+}
+
+enum GlossaryKind: String, Codable, CaseIterable, Sendable {
+    case person, company, product, term
+
+    var label: String {
+        switch self {
+        case .person: return "Person"
+        case .company: return "Company"
+        case .product: return "Product"
+        case .term: return "Term"
+        }
+    }
+}
+
+/// `GET /v1/glossary/hint` — the terms as the capture form's
+/// `vocabulary_hint`, ready to send with the next upload.
+struct GlossaryHint: Decodable, Equatable, Sendable {
+    let hint: String
+    let terms: Int
+}
+
+struct RememberTermRequest: Encodable, Sendable {
+    let term: String
+    let kind: String
+    let heardAs: [String]
+    /// The note the correction was made in, when there is one (Sprint I2).
+    var noteId: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case term, kind
+        case heardAs = "heard_as"
+        case noteId = "note_id"
+    }
+}
+
+/// Whether a rename is worth offering to remember, and what the old
+/// spelling should be recorded as.
+///
+/// Only a real correction counts: a name typed over a placeholder or over
+/// a different name. A name cleared back to "Speaker 2", or one that only
+/// changed case or spacing, teaches nothing — and an offer that appears
+/// when nothing was learned trains people to dismiss it.
+enum RememberableName {
+    /// Characters a term may not contain — the same set the server
+    /// refuses. Written as code-point RANGES rather than as a literal
+    /// character class: half of them are invisible, and source that
+    /// contains a bidi override in order to reject bidi overrides is
+    /// source nobody can review.
+    ///
+    ///   0000–001F, 007F–009F  C0 / C1 controls
+    ///   200B–200F             zero-width space, joiners, LRM/RLM
+    ///   2028–202E             line/paragraph separators, bidi embedding
+    ///   2066–2069             bidi isolates
+    static let forbidden: [ClosedRange<UInt32>] = [
+        0x0000...0x001F, 0x007F...0x009F, 0x200B...0x200F, 0x2028...0x202E, 0x2066...0x2069,
+    ]
+
+    /// Whitespace collapsed, exactly as the server stores it — so a
+    /// rename that only changes the spacing compares as no change.
+    static func normalised(_ name: String) -> String {
+        name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    static func isPlaceholder(_ name: String) -> Bool {
+        let trimmed = normalised(name).lowercased()
+        guard trimmed.hasPrefix("speaker") else { return false }
+        let rest = trimmed.dropFirst("speaker".count).trimmingCharacters(in: .whitespaces)
+        return !rest.isEmpty && rest.allSatisfy(\.isNumber)
+    }
+
+    // MARK: Role labels are not vocabulary (Sprint I2)
+
+    /// Words a person uses to label a voice rather than name it, in the
+    /// three languages the apps speak. The one list every client and the
+    /// server share: `tests/fixtures/glossary/role_words.json`, and the
+    /// test asserts this set equals it. A term made only of these (and
+    /// ordinals) is "Moderator II", not a name — and once it reached the
+    /// glossary it was read to the transcriber before every recording,
+    /// which echoed it into a transcript (the 2026-09-25 incident).
+    static let roleWords: Set<String> = [
+        // en
+        "speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee",
+        "presenter", "caller", "background", "unknown", "voice", "participant", "translator",
+        "announcer",
+        // de
+        "sprecher", "sprecherin", "moderatorin", "gast", "gastgeber", "erzähler", "erzählerin",
+        "hintergrund", "unbekannt", "stimme", "teilnehmer", "teilnehmerin", "übersetzer",
+        // uk
+        "спікер", "ведучий", "ведуча", "гість", "гостя", "оповідач", "фон", "невідомий", "голос",
+        "учасник", "учасниця", "перекладач",
+    ]
+
+    static let ordinals: Set<String> = [
+        "i", "ii", "iii", "iv", "v", "1", "2", "3", "4", "5", "one", "two", "three", "eins", "zwei",
+        "drei", "один", "два", "три", "first", "second", "erste", "zweite", "перший", "другий",
+    ]
+
+    /// Whether a term belongs in the transcriber's vocabulary — the same
+    /// rule as the server's `is_vocabulary`.
+    ///
+    /// No: every token is a role word or an ordinal; a person with no
+    /// capital letter anywhere ("moderatorin"). Yes: anything else — the
+    /// rule only has to keep labels out, not judge names.
+    static func isVocabulary(_ term: String, kind: GlossaryKind) -> Bool {
+        let tokens = term.split { !($0.isLetter || $0.isNumber) }.map { $0.lowercased() }
+        guard !tokens.isEmpty else { return false }
+        if tokens.allSatisfy({ roleWords.contains($0) || ordinals.contains($0) }) { return false }
+        if kind == .person {
+            let anyCapital = term.split(whereSeparator: \.isWhitespace).contains { part in
+                part.unicodeScalars.first?.properties.isUppercase == true
+            }
+            if !anyCapital { return false }
+        }
+        return true
+    }
+
+    static func worthRemembering(from: String, to: String) -> Bool {
+        let term = normalised(to)
+        guard term.count >= 2, term.count <= 80, !isPlaceholder(term) else { return false }
+        guard normalised(from).lowercased() != term.lowercased() else { return false }
+        guard isVocabulary(term, kind: .person) else { return false }
+        return !term.unicodeScalars.contains { scalar in
+            forbidden.contains { $0.contains(scalar.value) }
+        }
+    }
+
+    /// The previous spelling, or "" when it was only a placeholder.
+    static func heardAs(_ from: String) -> String {
+        let previous = normalised(from)
+        return isPlaceholder(previous) || previous.count < 2 ? "" : previous
+    }
+}
+
+// MARK: - Who processes this workspace's meetings (Sprint 37)
+
+/// One company in the data path, as the server's registry reports it.
+struct AIProcessor: Decodable, Identifiable, Equatable, Sendable {
+    let name: String
+    let region: String
+    /// What it does with the data — "writing your meeting notes", …
+    let purpose: String
+    /// Which tiers route to it.
+    let tiers: [String]
+    let acknowledged: Bool
+
+    var id: String { "\(name)/\(region)" }
+}
+
+/// `GET /v1/ai/settings`. Read-only here on purpose: changing who
+/// processes a workspace's meetings is an admin decision with an
+/// acknowledgement dialog, and it belongs on one surface — the web page.
+struct AISettings: Decodable, Equatable, Sendable {
+    let provider: String
+    let tier: String
+    let generationEnabled: Bool
+    let effectiveProvider: String
+    let effectiveTier: String
+    let processors: [AIProcessor]
+    let needsAcknowledgement: [AIProcessor]
+    let monthToDateCents: Int
+    let budgetCents: Int
+    let mayChoosePremium: Bool
+    let canEdit: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case provider, tier, processors
+        case generationEnabled = "generation_enabled"
+        case effectiveProvider = "effective_provider"
+        case effectiveTier = "effective_tier"
+        case needsAcknowledgement = "needs_acknowledgement"
+        case monthToDateCents = "month_to_date_cents"
+        case budgetCents = "budget_cents"
+        case mayChoosePremium = "may_choose_premium"
+        case canEdit = "can_edit"
+    }
+}
+
+// MARK: - Workspace membership (auth-service /tenants)
+
+/// The workspace the session is signed into (`GET /tenants/current`).
+/// Only the fields the invite sheet needs are decoded.
+struct Tenant: Decodable, Sendable {
+    let id: String
+    let name: String
+    let displayName: String
+    /// The caller's membership role: owner, admin, member, assistant, viewer.
+    let myRole: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case displayName = "display_name"
+        case myRole = "my_role"
+    }
+
+    var title: String { displayName.isEmpty ? name : displayName }
+
+    /// Only owners and admins may add members; the rest can send the link.
+    var canManageMembers: Bool { myRole == "owner" || myRole == "admin" }
+}
+
+struct TenantMember: Decodable, Sendable, Identifiable {
+    let userSub: String
+    let role: String
+    let status: String
+    let email: String?
+    let displayName: String?
+
+    var id: String { userSub }
+    var title: String {
+        let name = displayName?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !name.isEmpty { return name }
+        return email ?? "Member"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case role, status, email
+        case userSub = "user_sub"
+        case displayName = "display_name"
+    }
+}
+
+struct TenantMembersResponse: Decodable, Sendable {
+    let items: [TenantMember]
+}
+
+// MARK: - The client version (Sprint 36)
+
+struct ClientSection: Decodable, Sendable, Identifiable {
+    let sectionKey: String
+    let role: String
+    let name: String
+    let text: String
+
+    var id: String { sectionKey }
+
+    enum CodingKeys: String, CodingKey {
+        case role, name, text
+        case sectionKey = "section_key"
+    }
+}
+
+/// Exactly what an external surface renders — the preview, the shared
+/// page and the client PDF call the same builder, so they cannot differ.
+struct ClientVersion: Decodable, Sendable {
+    let available: Bool
+    let reason: String?
+    let title: String
+    let sections: [ClientSection]
+    let hiddenLines: Int
+    let hiddenSections: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case available, reason, title, sections
+        case hiddenLines = "hidden_lines"
+        case hiddenSections = "hidden_sections"
+    }
+}
+
+struct ChecklistItem: Decodable, Sendable, Identifiable {
+    let code: String
+    let detail: String
+    let count: Int
+
+    var id: String { code }
+}
+
+struct ClientVersionCheck: Decodable, Sendable {
+    let available: Bool
+    /// Warnings, never blockers: the author decides.
+    let warnings: [ChecklistItem]
+    let isEmpty: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case available, warnings
+        case isEmpty = "is_empty"
+    }
+}
+
+// MARK: - Carry-over from the previous meeting (Sprint 36)
+
+/// An item brought forward from the previous meeting in this series.
+struct CarriedItem: Decodable, Sendable, Identifiable, Equatable {
+    let itemKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    /// `done_mentioned` is the recording saying so, with a quote;
+    /// `done_marked` is the author ticking it. Only the engine may claim
+    /// the first.
+    var state: String
+    let doneQuote: String?
+    let doneSpeaker: String?
+
+    var id: String { itemKey }
+    var isDone: Bool { state == "done_marked" || state == "done_mentioned" }
+
+    enum CodingKeys: String, CodingKey {
+        case text, state
+        case itemKey = "item_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case doneQuote = "done_quote"
+        case doneSpeaker = "done_speaker"
+    }
+}
+
+struct CarriedView: Decodable, Sendable, Equatable {
+    var items: [CarriedItem]
+    let fromNoteId: String?
+    let fromNoteCode: String?
+    let fromDate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case fromNoteId = "from_note_id"
+        case fromNoteCode = "from_note_code"
+        case fromDate = "from_date"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decodeIfPresent([CarriedItem].self, forKey: .items) ?? []
+        fromNoteId = try c.decodeIfPresent(String.self, forKey: .fromNoteId)
+        fromNoteCode = try c.decodeIfPresent(String.self, forKey: .fromNoteCode)
+        // The date arrives as a day ("2026-09-12") or a full timestamp;
+        // either way it only labels the heading.
+        if let day = try? c.decodeIfPresent(Date.self, forKey: .fromDate) {
+            fromDate = day
+        } else if let raw = try? c.decodeIfPresent(String.self, forKey: .fromDate) {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            fromDate = f.date(from: String(raw.prefix(10)))
+        } else {
+            fromDate = nil
+        }
+    }
+}
+
+struct CarriedStateRequest: Encodable, Sendable {
+    let state: String
+}
+
+// MARK: - The rows behind a generated note (Summary Engine v2, Q5)
+
+/// One line the engine wrote, with the words that prove it. Every field
+/// the older rows lack decodes as nil, so a note written before Q5 still
+/// opens — its lines simply have no evidence to show.
+struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
+    struct Correction: Decodable, Sendable, Equatable {
+        let surface: String
+        let canonical: String
+        let source: String?
+    }
+
+    let itemKey: String
+    let kind: String
+    let sectionKey: String
+    let text: String
+    let ownerLabel: String?
+    let dueText: String?
+    let quote: String
+    let startMs: Int
+    let endMs: Int
+    let speakerLabel: String?
+    let speakerName: String?
+    let placement: String
+    /// Q5: the facts this line rests on (their item keys).
+    let cites: [String]?
+    /// fact | estimate | prediction | opinion | proposal | allegation
+    let certainty: String?
+    let attributedTo: String?
+    let parentKey: String?
+    let corrections: [Correction]?
+
+    var id: String { itemKey }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, text, quote, placement, cites, certainty, corrections
+        case itemKey = "item_key"
+        case sectionKey = "section_key"
+        case ownerLabel = "owner_label"
+        case dueText = "due_text"
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case speakerLabel = "speaker_label"
+        case speakerName = "speaker_name"
+        case attributedTo = "attributed_to"
+        case parentKey = "parent_key"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        itemKey = try c.decode(String.self, forKey: .itemKey)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        sectionKey = try c.decodeIfPresent(String.self, forKey: .sectionKey) ?? ""
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        ownerLabel = try c.decodeIfPresent(String.self, forKey: .ownerLabel)
+        dueText = try c.decodeIfPresent(String.self, forKey: .dueText)
+        quote = try c.decodeIfPresent(String.self, forKey: .quote) ?? ""
+        startMs = try c.decodeIfPresent(Int.self, forKey: .startMs) ?? 0
+        endMs = try c.decodeIfPresent(Int.self, forKey: .endMs) ?? 0
+        speakerLabel = try c.decodeIfPresent(String.self, forKey: .speakerLabel)
+        speakerName = try c.decodeIfPresent(String.self, forKey: .speakerName)
+        placement = try c.decodeIfPresent(String.self, forKey: .placement) ?? ""
+        cites = try c.decodeIfPresent([String].self, forKey: .cites)
+        certainty = try c.decodeIfPresent(String.self, forKey: .certainty)
+        attributedTo = try c.decodeIfPresent(String.self, forKey: .attributedTo)
+        parentKey = try c.decodeIfPresent(String.self, forKey: .parentKey)
+        corrections = try c.decodeIfPresent([Correction].self, forKey: .corrections)
+    }
+
+    /// What a line's certainty is called on its chip. A plain fact has
+    /// no chip (`EvidencePopover.tsx` CERTAINTY_LABELS).
+    static let certaintyLabels: [String: String] = [
+        "prediction": "Forecast",
+        "estimate": "Estimate",
+        "opinion": "Opinion",
+        "proposal": "Proposal",
+        "allegation": "Allegation",
+    ]
+
+    /// "Forecast · Reinbold" — or nil for a plain fact.
+    var chipLabel: String? {
+        guard let certainty, let label = Self.certaintyLabels[certainty] else { return nil }
+        let holder = attributedTo?.split(whereSeparator: \.isWhitespace).last.map(String.init)
+        return holder.map { "\(label) · \($0)" } ?? label
+    }
+
+    /// The names the engine respelled in this line, as they now read.
+    var correctedNames: [String] {
+        (corrections ?? []).filter { $0.canonical != $0.surface }.map(\.canonical)
+    }
+}
+
+/// `PATCH /v1/notes/{id}/items/by-key/{key}` — accept or reject a name
+/// the engine respelled (Q5).
+struct NameCorrectionRequest: Encodable, Sendable {
+    let expectedVersion: Int
+    let action: String
+    let surface: String
+    let canonical: String
+    let source: String?
+    let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case action, surface, canonical, source, reason
+        case expectedVersion = "expected_version"
+    }
+}
+
+struct CorrectionResponse: Decodable, Sendable {
+    let itemKey: String
+    let versionNumber: Int
+    let line: String?
+
+    enum CodingKeys: String, CodingKey {
+        case line
+        case itemKey = "item_key"
+        case versionNumber = "version_number"
+    }
+}
+
+// MARK: - History (note versions)
+
+struct NoteVersionSummary: Decodable, Sendable, Identifiable {
+    let id: String
+    let versionNumber: Int
+    let createdBy: String
+    let createdAt: Date
+    let isAmendment: Bool
+    let amendmentType: String?
+    let amendmentReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case versionNumber = "version_number"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case isAmendment = "is_amendment"
+        case amendmentType = "amendment_type"
+        case amendmentReason = "amendment_reason"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        versionNumber = try c.decode(Int.self, forKey: .versionNumber)
+        createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy) ?? ""
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        isAmendment = try c.decodeIfPresent(Bool.self, forKey: .isAmendment) ?? false
+        amendmentType = try c.decodeIfPresent(String.self, forKey: .amendmentType)
+        amendmentReason = try c.decodeIfPresent(String.self, forKey: .amendmentReason)
+    }
+}
+
+struct NoteVersionDetail: Decodable, Sendable {
+    let id: String
+    let versionNumber: Int
+    let createdAt: Date
+    let content: NoteContent
+    let renderedText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content
+        case versionNumber = "version_number"
+        case createdAt = "created_at"
+        case renderedText = "rendered_text"
+    }
+}
+
+// MARK: - notification-service
+
+struct NotificationItem: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let category: String
+    let title: String
+    let bodyText: String
+    let deepLink: String
+    let resourceType: String
+    let resourceId: String?
+    let severity: String
+    var readAt: Date?
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, title, severity
+        case bodyText = "body_text"
+        case deepLink = "deep_link"
+        case resourceType = "resource_type"
+        case resourceId = "resource_id"
+        case readAt = "read_at"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        bodyText = try c.decodeIfPresent(String.self, forKey: .bodyText) ?? ""
+        deepLink = try c.decodeIfPresent(String.self, forKey: .deepLink) ?? ""
+        resourceType = try c.decodeIfPresent(String.self, forKey: .resourceType) ?? ""
+        resourceId = try c.decodeIfPresent(String.self, forKey: .resourceId)
+        severity = try c.decodeIfPresent(String.self, forKey: .severity) ?? "info"
+        readAt = try? c.decodeIfPresent(Date.self, forKey: .readAt)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    /// The note this is about, when it is about one.
+    var noteId: String? {
+        if resourceType == "note", let resourceId { return resourceId }
+        // "/notes/<id>" — the web's route, which the app can open too.
+        if let range = deepLink.range(of: "/notes/") {
+            let rest = deepLink[range.upperBound...]
+            let id = rest.split(whereSeparator: { "/?#".contains($0) }).first.map(String.init) ?? ""
+            return id.isEmpty ? nil : id
+        }
+        return nil
+    }
+}
+
+struct NotificationFeed: Decodable, Sendable {
+    let items: [NotificationItem]
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case unreadCount = "unread_count"
+    }
+}
+
+struct UnreadCount: Decodable, Sendable {
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case unreadCount = "unread_count"
+    }
+}
+
+/// Product links that are not a backend address.
+enum ProductLinks {
+    /// The public site — what an OAuth registration names as `client_uri`.
+    static let site = "https://notes.ai"
+    static let callAudioHelp = "https://notes.ai/help/recording-call-audio"
+}
+
+
+/// Sprint TQ2: a stretch with no speech, marked instead of transcribed —
+/// shown as its own line ("[Musik 00:12–00:41]"), never as a turn. A kind
+/// this build does not know is shown as noise (the field is additive).
+struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
+    let startMs: Int
+    let endMs: Int
+    let kind: String
+
+    var id: Int { startMs }
+
+    enum CodingKeys: String, CodingKey {
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+        case kind
+    }
+
+    /// "music" | "silence" | "noise".
+    var knownKind: String { kind == "music" || kind == "silence" ? kind : "noise" }
+
+    static let labels: [String: [String: String]] = [
+        "en": ["music": "Music", "silence": "Silence", "noise": "Noise"],
+        "de": ["music": "Musik", "silence": "Stille", "noise": "Geräusch"],
+        "uk": ["music": "Музика", "silence": "Тиша", "noise": "Шум"],
+    ]
+
+    /// "[Musik 00:12–00:41]", in the language that was spoken.
+    func line(language: String?) -> String {
+        let names = Self.labels[language ?? ""] ?? Self.labels["en"] ?? [:]
+        let name = names[knownKind] ?? "Noise"
+        return "[\(name) \(Self.mmss(startMs))–\(Self.mmss(endMs))]"
+    }
+
+    static func mmss(_ ms: Int) -> String {
+        let total = max(0, ms / 1000)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// The markers shown before `index` in `turns` (index == count: after
+    /// the last turn). Turns keep their positions.
+    static func before(_ index: Int, turns: [TranscriptTurn], noise: [TranscriptNoise]) -> [TranscriptNoise] {
+        guard !noise.isEmpty else { return [] }
+        let lo = index == 0 ? Int.min : turns[index - 1].startMs
+        let hi = index >= turns.count ? Int.max : turns[index].startMs
+        return noise.filter { $0.startMs >= lo && $0.startMs < hi }
+    }
+}
+
+
+/// Sprint TQ3: one name, one spelling — a correction the server's overlay
+/// applied (`accepted`) or offers (`proposed`). The recording never changes.
+struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
+    let id: String
+    let fromForms: [String]
+    let toText: String
+    let occurrencesCount: Int
+    let source: String
+    let confidence: Double
+    let status: String
+    /// A person accepted, edited or rejected it (older servers omit it).
+    let decided: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, confidence, status, decided
+        case fromForms = "from_forms"
+        case toText = "to_text"
+        case occurrencesCount = "occurrences_count"
+    }
+
+    var isApplied: Bool { status == "accepted" }
+    /// Still asks for a look: not rejected, and nobody has decided it yet.
+    /// A spelling the user accepted leaves the sheet and the banner.
+    var needsReview: Bool { status != "rejected" && decided != true }
+
+    var sourceLabel: String {
+        switch source {
+        case "glossary": return "glossary"
+        case "calendar": return "calendar"
+        case "hint": return "vocabulary hint"
+        case "user": return "edited"
+        default: return "most frequent spelling"
+        }
+    }
+
+    private static let words: [String: (unified: String, review: String, toReview: String, from: String)] = [
+        "en": ("spellings unified", "Review", "spellings to review", "unified from"),
+        "de": ("Schreibweisen vereinheitlicht", "Prüfen", "Schreibweisen zu prüfen", "vereinheitlicht aus"),
+        "uk": ("написань уніфіковано", "Переглянути", "написань на перевірку", "уніфіковано з"),
+    ]
+
+    private static func words(_ language: String?) -> (unified: String, review: String, toReview: String, from: String) {
+        words[language ?? ""] ?? words["en"]!
+    }
+
+    /// "3 Schreibweisen vereinheitlicht · 1 Schreibweisen zu prüfen" and the
+    /// action, or nil when there is nothing to say. Counts variant spellings.
+    static func banner(_ corrections: [EntityCorrection], language: String?) -> (text: String, action: String)? {
+        let live = corrections.filter(\.needsReview)
+        guard !live.isEmpty else { return nil }
+        let w = words(language)
+        let unified = live.filter(\.isApplied).reduce(0) { $0 + $1.fromForms.count }
+        let proposed = live.filter { $0.status == "proposed" }.reduce(0) { $0 + $1.fromForms.count }
+        var parts: [String] = []
+        if unified > 0 { parts.append("\(unified) \(w.unified)") }
+        if proposed > 0 { parts.append("\(proposed) \(w.toReview)") }
+        return (parts.joined(separator: " · "), w.review)
+    }
+
+    /// "vereinheitlicht aus: Andala, Handela"
+    func unifiedFrom(language: String?) -> String {
+        "\(Self.words(language).from): \(fromForms.joined(separator: ", "))"
+    }
+
+    /// The tooltip for a paragraph: where its unified spellings came from.
+    static func paragraphHelp(_ paragraph: String, _ corrections: [EntityCorrection], language: String?) -> String {
+        corrections.filter { $0.isApplied && paragraph.contains($0.toText) }
+            .map { "\($0.toText) — \($0.unifiedFrom(language: language))" }
+            .joined(separator: "\n")
+    }
+}
+
+struct CorrectionsView: Decodable, Sendable {
+    let jobId: String
+    let correctionsRev: Int
+    let corrections: [EntityCorrection]
+
+    enum CodingKeys: String, CodingKey {
+        case corrections
+        case jobId = "job_id"
+        case correctionsRev = "corrections_rev"
+    }
+}
+
+struct CorrectionDecisionRequest: Encodable {
+    let status: String
+    let toText: String?
+    let correctionsRev: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case toText = "to_text"
+        case correctionsRev = "corrections_rev"
+    }
 }

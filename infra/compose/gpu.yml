@@ -19,6 +19,12 @@ services:
     build:
       context: ../..
       dockerfile: services/asr-worker/Dockerfile
+      # Sprint 29: the pyannote community-1 stage fetches a GATED model at
+      # build time. BuildKit secret only — never an ARG/ENV, never in a layer.
+      # Export HF_TOKEN (a token whose account accepted the model terms)
+      # before `make dev-up-gpu`; without it the build fails closed.
+      secrets:
+        - hf_token
     runtime: nvidia
     environment:
       MD_ASR_DEVICE: cuda
@@ -69,3 +75,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN

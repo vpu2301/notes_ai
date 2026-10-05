@@ -6,6 +6,17 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "user_notes",
+      "name": "Meine Notizen",
+      "voice_aliases": ["meine notizen", "notizblock"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Die eigenen Zeilen der schreibenden Person, während der Besprechung getippt.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Diesen Abschnitt niemals umschreiben, umsortieren, zusammenfassen oder korrigieren. Exakt so wiedergeben, wie er getippt wurde."
+    },
+    {
       "id": "contact",
       "name": "Kontakt und Unternehmen",
       "voice_aliases": ["kontakt", "unternehmen", "firma", "mit wem gesprochen"],
@@ -13,7 +24,7 @@
       "field_type": "free_text",
       "asr_prompt": "Ansprechpartner und Unternehmensdaten des Interessenten. Firmenname, Branche, Unternehmensgröße, Name des Kontakts, Position, Entscheider, Fürsprecher, Einkauf.",
       "min_chars": 0,
-      "order": 0,
+      "order": 1,
       "synthesis_prompt": "Eine Zeile pro Person: „Name — Position, Unternehmen“. Festhalten, wer der Entscheider ist."
     },
     {
@@ -24,7 +35,7 @@
       "field_type": "free_text",
       "asr_prompt": "Deal-Kontext. Aktuelle Lösung, Vertragsverlängerung, Budget, Zeitplan, Bewertungskriterien, Wettbewerber, Auslöser, Anwendungsfall.",
       "min_chars": 0,
-      "order": 1,
+      "order": 2,
       "synthesis_prompt": "Kurzer Absatz: warum der Interessent sucht, Signale zu Budget und Zeitplan, konkurrierende Optionen."
     },
     {
@@ -35,7 +46,7 @@
       "field_type": "free_text",
       "asr_prompt": "Kundenbedarf und Schmerzpunkte. Schmerzpunkt, Engpass, manueller Prozess, Integration, Compliance-Anforderung, Muss-Kriterium, Kann-Kriterium.",
       "min_chars": 10,
-      "order": 2,
+      "order": 3,
       "synthesis_prompt": "Stichpunktliste der Bedarfe, jeweils mit dem zugrunde liegenden Problem und seiner geschäftlichen Auswirkung."
     },
     {
@@ -46,7 +57,7 @@
       "field_type": "free_text",
       "asr_prompt": "Einwände und Bedenken. Preis, Sicherheit, Datenstandort, Migrationsaufwand, Lock-in, fehlende Funktion, Freigabeprozess.",
       "min_chars": 0,
-      "order": 3,
+      "order": 4,
       "synthesis_prompt": "Ein Stichpunkt pro Einwand mit der gegebenen Antwort oder dem nötigen Follow-up."
     },
     {
@@ -57,7 +68,7 @@
       "field_type": "choice",
       "asr_prompt": "Deal-Phase. Discovery, qualifiziert, Angebot gesendet, Verhandlung, gewonnen, verloren.",
       "min_chars": 0,
-      "order": 4,
+      "order": 5,
       "options": [
         {"value": "discovery", "label": "Discovery", "voice_aliases": ["discovery", "erstgespräch"]},
         {"value": "qualified", "label": "Qualifiziert", "voice_aliases": ["qualifiziert"]},
@@ -75,7 +86,7 @@
       "field_type": "free_text",
       "asr_prompt": "Vereinbarte nächste Schritte. Angebot senden, Demo planen, Sicherheitsfragebogen, Vorstellung beim Entscheider, nachfassen bis, Testphase.",
       "min_chars": 0,
-      "order": 5,
+      "order": 6,
       "synthesis_prompt": "Ein Stichpunkt pro Schritt: „Verantwortlicher: Schritt — Datum“. Festhalten, wozu sich der Interessent verpflichtet hat."
     }
   ]

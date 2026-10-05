@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { askNote } from "../api/notes";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { AskTurn } from "../api/types";
 import { AlertIcon, ArrowUpIcon, SparkleIcon } from "./icons";
 import { RichText } from "./RichText";
@@ -53,7 +53,7 @@ export function AskNote({ noteId }: { noteId: string }) {
       const res = await askNote(noteId, question, history);
       setThread((t) => [...t, { role: "assistant", text: res.answer }]);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setAsking(false);
     }
@@ -65,11 +65,11 @@ export function AskNote({ noteId }: { noteId: string }) {
         <div className="ask-thread" aria-live="polite">
           {thread.map((turn, i) =>
             turn.role === "user" ? (
-              <div key={i} className="ask-turn you">
+              <div key={`${i}-you`} className="ask-turn you">
                 <span>{turn.text}</span>
               </div>
             ) : (
-              <div key={i} className="ask-turn ai">
+              <div key={`${i}-ai`} className="ask-turn ai">
                 <span className="spark">
                   <SparkleIcon size={15} />
                 </span>
@@ -103,10 +103,8 @@ export function AskNote({ noteId }: { noteId: string }) {
       )}
 
       <div className="ask-dock">
-        <div className="ask-bar">
-          <span className="spark">
-            <SparkleIcon size={16} />
-          </span>
+        {/* Claude's composer: the field on top, a tool row underneath. */}
+        <div className="ask-bar" onClick={() => inputRef.current?.focus()}>
           <textarea
             ref={inputRef}
             className="ask-input"
@@ -123,16 +121,25 @@ export function AskNote({ noteId }: { noteId: string }) {
               }
             }}
           />
-          <button
-            type="button"
-            className="ask-send"
-            aria-label="Send"
-            title="Send (Return)"
-            disabled={asking || draft.trim() === ""}
-            onClick={() => void send()}
-          >
-            <ArrowUpIcon size={15} />
-          </button>
+          <div className="ask-tools">
+            <span className="ask-scope">
+              <SparkleIcon size={14} />
+              This note
+            </span>
+            <button
+              type="button"
+              className="ask-send"
+              aria-label="Send"
+              title="Send (Return)"
+              disabled={asking || draft.trim() === ""}
+              onClick={(e) => {
+                e.stopPropagation();
+                void send();
+              }}
+            >
+              <ArrowUpIcon size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </>

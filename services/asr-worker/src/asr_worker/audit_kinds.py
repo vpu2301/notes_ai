@@ -8,6 +8,10 @@ TRANSCRIPTION_STARTED: Final = "asr.transcription_started"
 TRANSCRIPTION_COMPLETE: Final = "asr.transcription_complete"
 TRANSCRIPTION_FAILED: Final = "asr.transcription_failed"
 JOB_CANCELLED: Final = "asr.job_cancelled"
+# Speaker re-labelling (Sprint 29). Payloads carry counts and the engine,
+# never labels-to-names or text.
+REDIARIZE_COMPLETED: Final = "asr.rediarize_completed"
+REDIARIZE_FAILED: Final = "asr.rediarize_failed"
 
 # Security / startup. Emitted as a CRITICAL structured log (not a tenant-scoped
 # audit row): a missing master key is a system-wide, pre-tenant fail-closed

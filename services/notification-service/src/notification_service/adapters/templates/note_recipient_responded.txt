@@ -1,0 +1,3 @@
+{% extends "_base.txt" %}
+{% block heading %}{{ fields.get('link_label') or 'A recipient' }} responded on note {{ fields.get('note_code', '—') }}{% endblock %}
+{% block body %}A recipient of your shared note responded. Open the note to see the responses.{% endblock %}

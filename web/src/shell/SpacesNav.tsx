@@ -30,7 +30,7 @@ function SpaceRow({ space, collapsed }: { space: Space; collapsed: boolean }) {
   if (draft !== null && !collapsed) {
     return (
       <div className="sb-space-edit">
-        <FolderIcon size={14} />
+        <FolderIcon size={16} />
         <input
           ref={inputRef}
           className="sb-space-input"
@@ -55,7 +55,7 @@ function SpaceRow({ space, collapsed }: { space: Space; collapsed: boolean }) {
           className={({ isActive }) => `sb-link ${isActive ? "on" : ""}`}
           title={collapsed ? space.name : undefined}
         >
-          <FolderIcon size={14} />
+          <FolderIcon size={16} />
           <span className="sb-link-label">{space.name}</span>
           {space.note_ids.length > 0 && <span className="sb-count">{space.note_ids.length}</span>}
         </NavLink>
@@ -137,7 +137,7 @@ export function SpacesNav({ collapsed }: { collapsed: boolean }) {
 
       {adding && !collapsed && (
         <div className="sb-space-edit">
-          <FolderIcon size={14} />
+          <FolderIcon size={16} />
           <input
             ref={inputRef}
             className="sb-space-input"

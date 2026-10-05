@@ -4,18 +4,24 @@
 #   scripts/k8s/egress-allowlist.sh resolve        # print the CIDRs the HF endpoints resolve to today
 #   scripts/k8s/egress-allowlist.sh helm-args      # → --set flags enabling workers-egress-allowlist with those CIDRs
 #   scripts/k8s/egress-allowlist.sh nft > /etc/nftables.d/notes-workers.nft   # host firewall for a compose/VM staging
-#   scripts/k8s/egress-allowlist.sh test           # from inside the cluster/compose: worker must NOT reach example.com
+#   scripts/k8s/egress-allowlist.sh test           # from inside the cluster/compose: worker must NOT reach example.com,
+#                                                  # otel.pyannote.ai or huggingface.co
 #
-# Allowed: HF endpoint hostnames (HF_CHAT_ENDPOINT_URL / HF_ASR_ENDPOINT_URL,
-# the shared api front door endpoints.huggingface.cloud), Postgres,
-# Redis, OTel collector, DNS. Everything else is dropped. Hostname rules
+# Allowed: HF endpoint hostnames (HF_CHAT_ENDPOINT_URL / HF_ASR_ENDPOINT_URL /
+# HF_DIAR_ENDPOINT_URL, the shared api front door endpoints.huggingface.cloud),
+# Postgres, Redis, OTel collector, DNS. Everything else is dropped.
+# Diarization adds ONE host and only in shape B (ADR-0052): the diar-server
+# endpoint the worker posts audio to. The model hub (huggingface.co) and
+# pyannote's usage telemetry (otel.pyannote.ai) stay unreachable from both
+# the worker and that endpoint — weights are baked and loaded offline, and
+# `test` asserts both are refused. Hostname rules
 # need an FQDN-capable CNI (Cilium) — until the hosting decision the list
 # is CIDR-based and must be re-resolved when HF rotates front-door IPs
 # (alert ModelBackendUnavailable will tell you; runbook §unavailable).
 set -euo pipefail
 cmd="${1:-resolve}"
 hosts=()
-for url in "${HF_CHAT_ENDPOINT_URL:-}" "${HF_ASR_ENDPOINT_URL:-}"; do
+for url in "${HF_CHAT_ENDPOINT_URL:-}" "${HF_ASR_ENDPOINT_URL:-}" "${HF_DIAR_ENDPOINT_URL:-}"; do
   [ -n "$url" ] && hosts+=("$(printf '%s' "$url" | sed -E 's#^[a-z]+://##; s#[/:].*$##')")
 done
 hosts+=("api.endpoints.huggingface.cloud")
@@ -52,17 +58,22 @@ table inet notes_workers {
 NFT
     ;;
   test)
-    # Positive + negative: the worker reaches its HF host (TCP connect) but not example.com.
+    # Positive + negative: the worker reaches its HF endpoint host (TCP connect) but not
+    # example.com, the hub, or pyannote's telemetry collector.
     ns="${NS:-notes-staging}"
     pod="$(kubectl -n "$ns" get pod -l app=asr-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    if [ -n "$pod" ]; then run() { kubectl -n "$ns" exec "$pod" -- python3 -c "$1"; }
-    else run() { docker compose exec -T asr-worker python3 -c "$1"; }; fi
+    # "$@": the probe is $1 and the host is $2 (sys.argv[1]); passing only
+    # "$1" left sys.argv[1] unset, so every probe crashed instead of connecting.
+    if [ -n "$pod" ]; then run() { kubectl -n "$ns" exec "$pod" -- python3 -c "$@"; }
+    else run() { docker compose exec -T asr-worker python3 -c "$@"; }; fi
     probe='import socket,sys; h=sys.argv[1]
 try:
     socket.create_connection((h,443),timeout=5); print("reachable")
 except Exception as e: print("blocked", type(e).__name__)'
-    blocked="$(run "$probe" example.com 2>/dev/null || true)"
-    case "$blocked" in *blocked*) echo "  ✓ example.com blocked";; *) echo "  ✗ example.com REACHABLE — egress allowlist not enforced" >&2; exit 1;; esac
+    for h in example.com otel.pyannote.ai huggingface.co; do
+      blocked="$(run "$probe" "$h" 2>/dev/null || true)"
+      case "$blocked" in *blocked*) echo "  ✓ $h blocked";; *) echo "  ✗ $h REACHABLE — egress allowlist not enforced" >&2; exit 1;; esac
+    done
     for h in "${hosts[@]}"; do
       out="$(run "$probe" "$h" 2>/dev/null || true)"
       case "$out" in *reachable*) echo "  ✓ $h reachable";; *) echo "  ✗ $h blocked: $out" >&2; exit 1;; esac

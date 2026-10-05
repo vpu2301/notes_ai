@@ -23,13 +23,20 @@
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: "Avenir Next", "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The bookish serif for the wordmark and the home greeting (Claude's
+     layout); system faces only, nothing to download. */
+  --serif: "Iowan Old Style", "Charter", "Source Serif 4", "Georgia", ui-serif, serif;
 
   /* Ground & surfaces — the Mac's warm paper, with white for raised cards. */
   --bg: #fbfaf7;
   --surface: #ffffff;
   --surface-2: #f3f1ec;
   --surface-hover: #f6f4f0;
-  --sidebar: #f6f4ef;
+  --sidebar: #f8f7f3;
+  /* Sidebar row fills: hover, the active row / "New" row, and pressed. */
+  --sidebar-hover: #efede7;
+  --sidebar-active: #ebe8e1;
+  --sidebar-press: #e3dfd7;
 
   /* Ink scale — warm, never pure black (as on the Mac). */
   --text-1: #1a1816;
@@ -81,6 +88,22 @@
 
   --mark-bg: #f6ecc4;
 
+  /* Toast dots sit on the ink-filled toast, i.e. on a DARK ground in the
+     light theme, so they take the bright end of the ok/rec pairs and swap
+     over in dark mode where the toast is light. */
+  --toast-ok: #7fc394;
+  --toast-err: #f0796d;
+
+  /* Speaker tints: one stable hue per person across the editor, the
+     shared page and the native apps (same list, same hash). Moss first,
+     then slate, plum, teal, olive and a warm taupe — nothing orange. */
+  --speaker-1: #4f7a5e;
+  --speaker-2: #8c7a66;
+  --speaker-3: #8a6d2f;
+  --speaker-4: #4a6d8c;
+  --speaker-5: #7a5a8c;
+  --speaker-6: #3f7f7a;
+
   /* Shadows are for floating things only (menus, modals, toasts). Cards
      and panels are framed by a hairline, never lifted. */
   --shadow-1: none;
@@ -92,6 +115,7 @@
      the browser CAN draw a continuous corner (`corner-shape`, base.css)
      these same numbers turn into true squircles. --radius-pill is the
      fully round end used by the record control and every capsule. */
+  --radius-2xs: 4px;
   --radius-xs: 7px;
   --radius-sm: 9px;
   --radius: 12px;
@@ -112,7 +136,7 @@
   --density: 1;
   --fs: 1;
 
-  --sidebar-w: 256px;
+  --sidebar-w: 272px;
   --topbar-h: calc(52px * var(--density));
 
   /* The dot print behind the home page, sign-in and empty states: small
@@ -136,6 +160,9 @@
   --surface-2: #27231f;
   --surface-hover: #231f1c;
   --sidebar: #131110;
+  --sidebar-hover: #1e1b18;
+  --sidebar-active: #25211d;
+  --sidebar-press: #2e2a25;
 
   --text-1: #ece8e1;
   --text-2: #cfc9c0;
@@ -175,6 +202,16 @@
   --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
 
   --mark-bg: #40401f;
+
+  --toast-ok: #3f7d55;
+  --toast-err: #d9483b;
+
+  --speaker-1: #8fbf9c;
+  --speaker-2: #c2ae98;
+  --speaker-3: #c9a75c;
+  --speaker-4: #8fb0dd;
+  --speaker-5: #b3a4d6;
+  --speaker-6: #7fc0bb;
 
   --shadow-1: none;
   --shadow-2: 0 6px 20px -6px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);

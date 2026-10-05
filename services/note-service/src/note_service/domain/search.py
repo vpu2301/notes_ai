@@ -92,6 +92,8 @@ class SearchHit:
     visibility: str = "private"
     shared_with_count: int = 0
     has_public_link: bool = False
+    # Sprint 20 — live recipient disputes, for the "1 disputed" dot.
+    open_disputes: int = 0
 
 
 def encode_cursor(*, created_at: datetime, note_id: UUID) -> str:
@@ -177,6 +179,10 @@ async def search_notes(
                 WHERE l.note_id = n.id AND l.revoked_at IS NULL
                   AND (l.expires_at IS NULL OR l.expires_at > now())
             ) AS has_public_link,
+            (
+                SELECT count(*) FROM share_link_responses r
+                WHERE r.note_id = n.id AND r.kind = 'dispute' AND r.cleared_at IS NULL
+            ) AS open_disputes,
             {snippet_expr} AS snippet
         FROM notes n
         JOIN note_versions v ON v.id = n.current_version_id
@@ -205,6 +211,7 @@ async def search_notes(
                 visibility=r["visibility"],
                 shared_with_count=r["shared_with_count"] or 0,
                 has_public_link=r["has_public_link"],
+                open_disputes=int(r["open_disputes"] or 0),
             )
         )
     next_cursor: str | None = None

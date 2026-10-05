@@ -53,6 +53,15 @@ KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
 ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     # tenant_admin: tenant-wide admin
     ("tenant_admin", "tenant.read", "tenant"): True,
+    # Sprint 37 — who processes this workspace's meetings. READING it is
+    # every member's business: it is their employer's data and, often,
+    # their own voice. Only an admin may change it.
+    ("tenant_admin", "ai_settings.read", "tenant"): True,
+    ("tenant_admin", "ai_settings.write", "tenant"): True,
+    # Billing (0068): the plan, the month's usage, changing the plan.
+    # An admin's business — what the workspace pays is not every member's.
+    ("tenant_admin", "billing.read", "tenant"): True,
+    ("tenant_admin", "billing.write", "tenant"): True,
     ("tenant_admin", "tenant.update", "tenant"): True,
     ("tenant_admin", "tenant.create", "tenant"): True,
     ("tenant_admin", "tenant.manage_members", "tenant"): True,
@@ -79,11 +88,14 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("tenant_admin", "device.manage", "credential"): True,
     # member: routine authoring user (creates and edits notes)
     ("member", "tenant.read", "tenant"): True,
+    ("member", "ai_settings.read", "tenant"): True,
     # viewer: like member but with less admin capability
     ("viewer", "tenant.read", "tenant"): True,
+    ("viewer", "ai_settings.read", "tenant"): True,
     # auditor: read-only audit access + tenant context. user.read gives the
     # auditor read-only visibility of the tenant's user roster.
     ("auditor", "tenant.read", "tenant"): True,
+    ("auditor", "ai_settings.read", "tenant"): True,
     ("auditor", "user.read", "user"): True,
     # The auditor's ONLY write in the whole matrix, and it is deliberate:
     # an access review that can see an account without a second factor but

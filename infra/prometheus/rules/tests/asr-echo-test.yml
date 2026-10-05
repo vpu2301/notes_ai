@@ -1,0 +1,39 @@
+rule_files:
+  - ../asr.yml
+evaluation_interval: 30s
+tests:
+  # 3 600 s of audio per hour; 10 echoed words per hour is a bad microphone,
+  # 60 per hour is the prompt poisoning transcripts.
+  - interval: 1h
+    name: a few echoed words per hour are normal
+    input_series:
+      - series: 'mdx_asr_prompt_echo_words_total'
+        values: "0+10x30"
+      - series: 'mdx_asr_audio_duration_seconds_sum'
+        values: "0+3600x30"
+    alert_rule_test:
+      - eval_time: 28h
+        alertname: AsrPromptEchoRate
+        exp_alerts: []
+
+  - interval: 1h
+    name: sixty echoed words per audio hour fires after an hour
+    input_series:
+      - series: 'mdx_asr_prompt_echo_words_total'
+        values: "0+60x30"
+      - series: 'mdx_asr_audio_duration_seconds_sum'
+        values: "0+3600x30"
+    alert_rule_test:
+      - eval_time: 27h
+        alertname: AsrPromptEchoRate
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              team: asr
+            exp_annotations:
+              summary: "More than 20 prompt-echo words per audio hour over 24h"
+              description: |
+                The prompt-echo guard removed 60 words per
+                hour of audio in the last day. Check the workspace glossaries
+                (`scripts/admin/glossary_audit.py`), the backend and
+                `MDX_ASR_CONDITION_PREV`. Runbook: docs/runbooks/asr-worker.md#prompt-echo

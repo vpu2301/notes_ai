@@ -80,3 +80,29 @@ retention duties. The platform's per-tenant envelope encryption, RLS
 isolation, tamper-evident audit chain, and PII-free notification
 policy are the foundation; deployment-specific retention and consent
 policy sit above it.
+
+## Call audio on macOS (Sprint 31)
+
+On macOS 14.2+ the capture app can record **call audio** (other
+participants, from this Mac's system output) next to the microphone, as a
+two-channel file. This closes the "headphones = half the meeting" hole and
+lets the transcript keep local and remote voices apart.
+
+Consent posture, as built:
+- **Off until accepted.** The first time a user turns it on, a blocking
+  sheet explains that other participants' voices are recorded from this
+  Mac, that the user is responsible for telling them, and suggests a
+  sentence to say. Declining keeps the app fully working, microphone only.
+  A new version of the notice re-prompts.
+- **Always visible.** The capture view states the mode ("Recording your
+  microphone and call audio" / "… microphone only") and the menu-bar icon
+  carries a call-audio badge for the whole recording.
+- **Nothing new leaves the Mac.** The same single encrypted upload, the
+  same retention and deletion; the file just has two channels.
+- **One automatic name.** When exactly one person speaks on the microphone,
+  that speaker is labelled with the account owner's name, marked "from your
+  microphone", and one click removes it for good (ADR-0053).
+
+Open before GA of this feature: the participant-consent help page is
+reviewed with counsel; a regulated buyer may need an admin switch that
+disables call-audio capture for the whole workspace (not built).

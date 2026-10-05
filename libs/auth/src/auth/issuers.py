@@ -100,9 +100,7 @@ def parse_issuers_json(raw: str) -> list[IssuerConfig]:
             )
         missing = {"issuer", "jwks_url", "audience"} - set(entry)
         if missing:
-            raise IssuerConfigError(
-                f"AUTH_ISSUERS_JSON[{index}] is missing: {sorted(missing)}"
-            )
+            raise IssuerConfigError(f"AUTH_ISSUERS_JSON[{index}] is missing: {sorted(missing)}")
         try:
             configs.append(
                 IssuerConfig(

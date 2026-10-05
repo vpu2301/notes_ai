@@ -5,6 +5,8 @@ description = "Speaker diarization primitives (Silero VAD + ECAPA embeddings + c
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26.0",
+    # Shape B (ADR-0052): the remote engine talks to deploy/diar-server.
+    "httpx>=0.27.0",
     # Heavy speech deps follow the repo-wide macOS-exclusion pattern
     # (see root pyproject [dependency-groups]): dev laptops get them via
     # the root dev group; prod images pin the model weights via each

@@ -215,3 +215,20 @@ viewer,device.manage,credential,false,room devices are workspace infrastructure,
 auditor,device.manage,credential,false,read-only role: sees the credential.* audit trail, changes nothing
 device,device.manage,credential,false,a room device cannot provision another room device
 service,device.manage,credential,false,S2S callers do not manage hardware
+tenant_admin,ai_settings.read,tenant,true,sees who processes this workspace's meetings
+tenant_admin,ai_settings.write,tenant,true,changes model tier/provider; requires MFA and processor acknowledgement
+tenant_admin,billing.read,tenant,true,sees the workspace's plan and this month's usage
+tenant_admin,billing.write,tenant,true,changes the workspace's plan (through the billing provider)
+auditor,billing.read,tenant,false,what the workspace pays is an admin's business
+auditor,billing.write,tenant,false,what the workspace pays is an admin's business
+device,billing.read,tenant,false,what the workspace pays is an admin's business
+device,billing.write,tenant,false,what the workspace pays is an admin's business
+member,billing.read,tenant,false,what the workspace pays is an admin's business
+member,billing.write,tenant,false,what the workspace pays is an admin's business
+service,billing.read,tenant,false,what the workspace pays is an admin's business
+service,billing.write,tenant,false,what the workspace pays is an admin's business
+viewer,billing.read,tenant,false,what the workspace pays is an admin's business
+viewer,billing.write,tenant,false,what the workspace pays is an admin's business
+member,ai_settings.read,tenant,true,every member may see who processes their meetings
+viewer,ai_settings.read,tenant,true,every member may see who processes their meetings
+auditor,ai_settings.read,tenant,true,oversight read of the processor list

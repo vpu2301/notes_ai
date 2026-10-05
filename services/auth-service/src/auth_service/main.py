@@ -40,6 +40,7 @@ from .routers import (
     credentials,
     email_code,
     health,
+    leads,
     login,
     me,
     mfa,
@@ -325,6 +326,9 @@ def create_app() -> FastAPI:
         # the native password surface; until then, native deployments
         # simply do not have this one.
         app.include_router(password.router)
+    # Sprint 19: the shared page's CTA lands on /join, which posts here.
+    # Every mode — it depends on no identity provider at all.
+    app.include_router(leads.router)
     app.include_router(me.router)
     app.include_router(admin.router)
     app.include_router(tenants.router)

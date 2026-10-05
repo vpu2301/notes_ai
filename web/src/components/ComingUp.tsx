@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as calApi from "../api/calendar";
-import { errorMessage } from "../api/http";
+import { messageFor } from "../lib/errorCopy";
 import type { CalendarConnection, CalendarEntry, UpcomingEvent, UpcomingEventsResponse } from "../api/types";
+import { saveCaptureContext } from "../lib/captureContext";
 import { AlertIcon, CalendarClockIcon, CalendarIcon, LinkOffIcon, MicIcon, PlusIcon, RefreshIcon, VideoIcon } from "./icons";
 import { Menu, type MenuItem } from "./Menu";
 import { useToast } from "./Toaster";
@@ -109,7 +110,7 @@ function CalendarPicker({
         .catch((err) => {
           if (cancelled) return;
           setLists((l) => ({ ...l, [c.id]: "error" }));
-          toast.error(errorMessage(err));
+          toast.error(messageFor(err));
         });
     }
     return () => {
@@ -131,7 +132,7 @@ function CalendarPicker({
       onChanged();
     } catch (err) {
       setLists((l) => ({ ...l, [conn.id]: list }));
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     } finally {
       setBusy(null);
     }
@@ -215,7 +216,7 @@ function CalendarLinkDialog({
     try {
       onAdded(await calApi.connectCalendarLink(url.trim()));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(messageFor(err));
     } finally {
       setBusy(false);
     }
@@ -315,7 +316,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
       // A missing backend route or a down service hides the card rather
       // than filling the home page with an error the user cannot act on.
       if (available === null) setAvailable(false);
-      if (!quiet) toast.error(errorMessage(err));
+      if (!quiet) toast.error(messageFor(err));
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -362,7 +363,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
       const { authorize_url } = await calApi.startGoogleConnect(returnTo(), loginHint);
       window.location.assign(authorize_url);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
       setConnecting(false);
     }
   };
@@ -379,11 +380,17 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
       toast.success(conn.provider === "ics" ? `Removed ${conn.account_email}.` : `Disconnected ${conn.account_email}.`);
       void refresh(true);
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(messageFor(err));
     }
   };
 
-  const start = (ev: UpcomingEvent) => navigate(`/meeting/new?title=${encodeURIComponent(ev.title)}`);
+  // The title and the event id ride the URL; the invitees' names never do
+  // (URLs end up in history and logs) — they wait in sessionStorage.
+  const start = (ev: UpcomingEvent) => {
+    saveCaptureContext(ev);
+    const q = new URLSearchParams({ title: ev.title, event: ev.id });
+    navigate(`/meeting/new?${q.toString()}`);
+  };
 
   const menu = useMemo<MenuItem[]>(() => {
     const items: MenuItem[] = [];

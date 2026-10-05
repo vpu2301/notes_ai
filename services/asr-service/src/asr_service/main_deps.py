@@ -16,6 +16,7 @@ from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
 from messaging import RedisStreamsProducer
+from ratelimit import FixedWindowLimiter
 from storage import EncryptedObjectStore, S3Client
 
 from .config import settings
@@ -40,6 +41,7 @@ def auth_issuers() -> list[IssuerConfig]:
         audience=settings.auth_audience,
     )
 
+
 @dataclass
 class ServiceState:
     """Container for runtime singletons. Stored on ``app.state.svc``."""
@@ -56,6 +58,9 @@ class ServiceState:
     transcript_store: EncryptedObjectStore
     envelope: Envelope
     nlp_client: NlpBatchClient
+    # Per-user cap on speaker re-labelling (Sprint 29); keys
+    # mdx:asr:rl:<scope>:<subject>:<window>.
+    limiter: FixedWindowLimiter
 
 
 async def build_state() -> ServiceState:
@@ -74,6 +79,14 @@ async def build_state() -> ServiceState:
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
     )
+    # Sprint I2 T2: store the vocabulary hint on the job only where the
+    # column exists (a service deployed before migration 0061 must not
+    # fail every upload).
+    from .domain import repository
+
+    await repository.probe_hint_column(app_pool)
+    # Sprint F1: the same for the capture-timing columns (migration 0063).
+    await repository.probe_capture_timing_columns(app_pool)
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,
         application_name=f"{settings.service_name}/audit_writer",
@@ -139,6 +152,7 @@ async def build_state() -> ServiceState:
         transcript_store=transcript_store,
         envelope=envelope,
         nlp_client=nlp_client,
+        limiter=FixedWindowLimiter(redis_client, prefix="mdx:asr:rl"),
     )
 
 

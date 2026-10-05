@@ -19,6 +19,8 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from .meeting_doc.agenda import agenda_lines
+
 logger = logging.getLogger(__name__)
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -93,6 +95,11 @@ class CalendarEvent:
     # The user's own RSVP: accepted | tentative | needsAction | declined | None (own event).
     response_status: str | None
     attendees: tuple[str, ...] = field(default=())
+    # Sprint 34: the agenda the organiser wrote in the description, as a
+    # list of topics. Derived at parse time by the deterministic rules in
+    # domain/meeting_doc/agenda.py — the raw description is never kept,
+    # never stored and never returned.
+    agenda_lines: tuple[str, ...] = field(default=())
 
 
 # ── Wire parsing ────────────────────────────────────────────────────
@@ -200,6 +207,7 @@ def normalize_event(raw: dict[str, Any], calendar: CalendarInfo) -> CalendarEven
         organizer=str(organizer) if organizer else None,
         response_status=response_status,
         attendees=names[:12],
+        agenda_lines=agenda_lines(raw.get("description")),
     )
 
 

@@ -29,6 +29,7 @@ import type {
   PasswordPolicy,
   ReauthOptions,
   SignupAccepted,
+  SignupConfig,
 } from "./types";
 
 /**
@@ -71,6 +72,8 @@ export interface SignupBody {
   email: string;
   password: string;
   display_name: string;
+  /** Sprint 21: the referral code a shared note's CTA carried into `/join`. */
+  ref?: string;
 }
 
 /**
@@ -84,6 +87,10 @@ export interface SignupBody {
  * `display_name_required`, `password_policy` (with `min_length` and
  * `reasons[]`), `signup_rate_limited`, `signup_unavailable`.
  */
+export function signupConfig(): Promise<SignupConfig> {
+  return api<SignupConfig>("auth", "/auth/signup/config", { auth: false });
+}
+
 export function signup(body: SignupBody): Promise<SignupAccepted> {
   return api<SignupAccepted>("auth", "/auth/signup", {
     method: "POST",
@@ -221,4 +228,17 @@ export interface ProfilePatch {
 /** Returns the updated `IdentitySummary`. Not gated on recent auth. */
 export function patchMe(patch: ProfilePatch): Promise<Identity> {
   return api<Identity>("auth", "/auth/me", { method: "PATCH", json: patch });
+}
+
+/**
+ * Sprint 19 fake door: the address left on `/join`. No session, no mail —
+ * the row is the whole result. `ref` is the code the shared page's CTA
+ * carried over (absent for a public link's CTA).
+ */
+export function captureLead(email: string, ref: string | null): Promise<{ status: "accepted" }> {
+  return api<{ status: "accepted" }>("auth", "/auth/leads", {
+    method: "POST",
+    json: { email, ref: ref || undefined, consent: true },
+    auth: false,
+  });
 }

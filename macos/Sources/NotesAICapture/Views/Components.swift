@@ -143,6 +143,7 @@ struct DSNotice: View {
             Image(systemName: symbol)
                 .font(.ds(12, .semibold))
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
                 .padding(.top, 1)
             Text(text)
                 .font(.ds(12.5))
@@ -186,7 +187,7 @@ struct DSSkeleton: View {
     @State private var shimmer = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
             .fill(DS.surface2)
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)

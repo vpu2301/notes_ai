@@ -59,6 +59,16 @@ medical vertical; the numbers are retired, not reused.
 | 0045  | [Batch diarization: N-speaker agglomerative clustering, word-level attribution, speaker naming](0045-batch-diarization-nspeaker-and-naming.md) | Accepted |
 | 0046  | [Model hosting is configuration — `libs/models` and the backend registry](0046-model-hosting-is-configuration.md) | Accepted |
 | 0047  | [A bounded dual-issuer period — `MDX_IDP_MODE=dual`](0047-dual-issuer-period.md) (= ADR-IDX-09) | Accepted |
+| 0048  | [Self-serve signup stays on the BE-0 path; referral attribution is a stamp on `referrals`](0048-self-serve-signup-attribution.md) | Accepted |
+| 0049  | [Recipient links are mailed inline by note-service; opt-out is a global hashed suppression](0049-recipient-mail-inline-no-outbox.md) | Accepted |
+| 0050  | [Workspace sharing policy lives on the tenant; the product line is the price of the free tier](0050-sharing-policy-and-cta-on-free.md) | Accepted |
+| 0051  | [A note is a living document: the finalize lifecycle is retired](0051-retire-finalize.md) | Accepted |
+| 0052  | [Diarizer v2 — engine behind a seam, hosted on a GPU endpoint](0052-diarizer-v2-engine-and-hosting.md) | Accepted |
+| 0053  | [Dual-channel capture on macOS (microphone + call audio)](0053-dual-channel-capture-macos.md) | Proposed |
+| 0054  | [The legacy batch clusterer is kept (removal precondition not met)](0054-legacy-batch-clusterer-kept.md) | Accepted |
+| 0055  | [The meeting note is created at record start, not after transcription](0055-meeting-note-created-at-record-start.md) (amended Sprint 35: linkage by `item_key`, corrections, glossary) | Accepted |
+| 0057  | [One client document, and meetings that remember the last one](0057-client-document-and-series.md) | Accepted |
+| 0058  | [The meeting document engine: extract, verify, compose](0058-meeting-document-engine.md) (amended Sprint 37: workspace model settings, acknowledged processors, budgets, fair claim, snapshot retention) | Accepted |
 
 ## Template
 

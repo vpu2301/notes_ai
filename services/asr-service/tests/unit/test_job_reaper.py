@@ -62,7 +62,13 @@ def _stale(status: str) -> repository.StaleJobRow:
 @pytest.fixture
 def db(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Stub the two repository calls the reaper makes."""
-    state: dict[str, Any] = {"candidates": [], "failed": [], "fail_result": True}
+    state: dict[str, Any] = {
+        "candidates": [],
+        "failed": [],
+        "fail_result": True,
+        "rediarize": [],
+        "rediarize_failed": [],
+    }
 
     async def fake_list(_conn: Any, **_kwargs: Any) -> list[repository.StaleJobRow]:
         return list(state["candidates"])
@@ -85,8 +91,22 @@ def db(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         )
         return bool(state["fail_result"])
 
+    async def fake_list_rediarize(_conn: Any, **_kwargs: Any) -> list[Any]:
+        return list(state["rediarize"])
+
+    async def fake_fail_rediarize(
+        _conn: Any, *, job_id: UUID, error: str, only_if_status: str, older_than_seconds: float
+    ) -> bool:
+        state["rediarize_failed"].append(
+            {"job_id": job_id, "error": error, "only_if_status": only_if_status}
+        )
+        state["rediarize_grace"] = older_than_seconds
+        return bool(state["fail_result"])
+
     monkeypatch.setattr(repository, "list_stale_jobs", fake_list)
     monkeypatch.setattr(repository, "fail_job", fake_fail)
+    monkeypatch.setattr(repository, "list_stale_rediarize", fake_list_rediarize)
+    monkeypatch.setattr(repository, "fail_rediarize", fake_fail_rediarize)
 
     @contextlib.asynccontextmanager
     async def fake_tenant_connection(_pool: Any, _tenant_id: UUID) -> Any:
@@ -160,3 +180,38 @@ async def test_one_bad_tenant_does_not_stop_the_sweep(
 
     assert await reaper.sweep_once(state) == 1
     assert calls == [_TENANT, other]
+
+
+# ── Stranded speaker re-runs (Sprint 29) ──────────────────────────────
+
+
+def _stale_rerun(status: str) -> repository.StaleRediarizeRow:
+    return repository.StaleRediarizeRow(
+        id=uuid4(), diarization_status=status, requester_sub=uuid4()
+    )
+
+
+async def test_a_stranded_rerun_fails_as_stranded_and_leaves_the_job(db: dict[str, Any]) -> None:
+    row = _stale_rerun("running")
+    db["rediarize"] = [row]
+    state = _state([_TENANT])
+
+    assert await reaper.sweep_once(state) == 1
+    assert db["rediarize_failed"] == [
+        {"job_id": row.id, "error": "stranded", "only_if_status": "running"}
+    ]
+    assert db["failed"] == [], "the job itself is complete and stays so"
+    # Conditional on still being past the grace window, not only on status.
+    assert db["rediarize_grace"] > 0
+    event = state.audit_writer.events[0]
+    assert event["kind"] == "asr.rediarize_failed"
+    assert event["payload"] == {"error_kind": "stranded", "actor": "reaper"}
+
+
+async def test_a_rerun_that_finished_first_is_not_reaped(db: dict[str, Any]) -> None:
+    db["rediarize"] = [_stale_rerun("queued")]
+    db["fail_result"] = False
+    state = _state([_TENANT])
+
+    assert await reaper.sweep_once(state) == 0
+    assert state.audit_writer.events == []

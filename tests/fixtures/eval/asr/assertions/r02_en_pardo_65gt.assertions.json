@@ -1,0 +1,11 @@
+{
+  "id": "r02_en_pardo_65gt",
+  "about": "The 2026-09-25 Pardo 65 GT recording (dev-stack job f663169c; third-party content, audio in the eval bucket only). Sprint F1 T5: the introduction must be in the transcript and coverage complete. Checked by scripts/eval/coverage_eval.py --incident-job.",
+  "assertions": {
+    "coverage_min_share": 0.98,
+    "must_contain_before_ms": [
+      {"text": "Mitchell", "before_ms": 60000},
+      {"text": "Springbrook", "before_ms": 60000}
+    ]
+  }
+}

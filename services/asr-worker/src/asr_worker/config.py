@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from typing import Annotated
@@ -43,6 +44,92 @@ class Settings(BaseSettings):
     asr_model: str = Field(default="large-v3", alias="MD_ASR_MODEL")
     asr_compute_type: str = Field(default="float16", alias="MD_ASR_COMPUTE_TYPE")
     asr_beam_size: int = Field(default=5, alias="MD_ASR_BEAM_SIZE")
+    # Sprint I2 T5/T7: conditioning each batch chunk on the text decoded
+    # before it is the second amplifier of prompt-echo cascades — but T7
+    # measured the cost of turning it off: conversation chunks (no
+    # punctuation model, G0) come back as lower-case run-ons. With the
+    # vocabulary rule and the word-level guard the cascade is contained, so
+    # it stays ON; the switch remains for a workspace that echoes anyway.
+    # Sprint TQ2 (ADR-0061 d5 amendment): it applies to the in-process
+    # engine only. HTTP backends expose no such switch; their context now
+    # resets at every run group (≤ MDX_ASR_HTTP_GROUP_SECONDS) instead of
+    # running across the whole file.
+    asr_condition_prev: bool = Field(default=True, alias="MDX_ASR_CONDITION_PREV")
+    # Sprint I2 T7: how the vocabulary reaches the decoder — as
+    # `initial_prompt` (today) or as faster-whisper `hotwords` (a variant
+    # measured in T7, not bet on).
+    asr_vocabulary_mode: str = Field(default="prompt", alias="MDX_ASR_VOCABULARY_MODE")
+    # Sprint I2 T4: language identification per VAD chunk, so a passage in
+    # another language is decoded in that language and labelled. Since
+    # Sprint TQ2 the worker does it for every backend (chunks.py).
+    asr_chunk_language_id: bool = Field(default=True, alias="MDX_ASR_CHUNK_LANGUAGE_ID")
+
+    # ── Coverage (Sprint F1) ────────────────────────────────────────────
+    # Decision 5: every VAD speech run starts this much earlier (clamped to
+    # the previous run's end). OFF by default since the T3 measurement
+    # (docs/eval/asr-coverage-2026-10.md): 300 ms moved chunk boundaries,
+    # deleted 3.3 % and substituted 5.2 % of words against today and opened
+    # a gap on one file; the floor and the second pass without it recovered
+    # every gap with no word deleted or substituted.
+    asr_vad_pad_ms: int = Field(default=0, ge=0, le=2000, alias="MD_ASR_VAD_PAD_MS")
+    # Decision 4: a recording in which VAD hears speech in less than
+    # MAX_SPEECH_SHARE of the file while the rest is louder than -45 dBFS is
+    # run through VAD again at a lower threshold (per channel for a
+    # mic/system file) and the union of runs is used — quiet call audio
+    # under a loud microphone.
+    asr_vad_floor_enabled: bool = Field(default=True, alias="MD_ASR_VAD_FLOOR_ENABLED")
+    asr_vad_floor_threshold: float = Field(
+        default=0.35, gt=0.0, lt=1.0, alias="MD_ASR_VAD_FLOOR_THRESHOLD"
+    )
+    asr_vad_floor_max_speech_share: float = Field(
+        default=0.2, ge=0.0, le=1.0, alias="MD_ASR_VAD_FLOOR_MAX_SPEECH_SHARE"
+    )
+    # Decision 3: a speech run the first decode left empty, mostly
+    # uncovered, or mostly echo is decoded once more without the prompt.
+    asr_second_pass_enabled: bool = Field(default=True, alias="MD_ASR_SECOND_PASS_ENABLED")
+
+    # ── Sprint TQ2: the worker plans runs and gates segments ────────────
+    # HTTP backends get runs of one language in groups of at most this many
+    # seconds, 300 ms of silence between runs (one request per group).
+    asr_http_group_seconds: float = Field(default=300.0, alias="MDX_ASR_HTTP_GROUP_SECONDS", gt=0)
+    # The local model that identifies each run's language for HTTP backends
+    # (the in-process engine uses its own). A faster-whisper name or a path;
+    # the CPU image bakes tiny at /opt/models/whisper-tiny.
+    asr_lid_model: str = Field(default="tiny", alias="MDX_ASR_LID_MODEL")
+    # Rollback switch: off = nothing is dropped, and diagnostics still record
+    # what would have been (``dry_run``), so the measurement survives.
+    asr_gates_enabled: bool = Field(default=True, alias="MDX_ASR_GATES_ENABLED")
+    # G1 silence text: no_speech ≥ this, and avg_logprob below the next (or
+    # missing), and VAD speech share inside the segment below the share.
+    asr_gate_no_speech: float = Field(default=0.6, alias="MDX_ASR_GATE_NO_SPEECH")
+    asr_gate_logprob: float = Field(default=-1.0, alias="MDX_ASR_GATE_LOGPROB")
+    asr_gate_speech_share: float = Field(default=0.3, alias="MDX_ASR_GATE_SPEECH_SHARE")
+    # G2 loop: compression ratio above this, or a 2–6-gram repeated this
+    # many times in a row.
+    asr_gate_compression: float = Field(default=2.4, alias="MDX_ASR_GATE_COMPRESSION")
+    asr_gate_loop_repeats: int = Field(default=4, alias="MDX_ASR_GATE_LOOP_REPEATS", ge=3)
+    # G3 low confidence: mean word probability below this on a segment
+    # shorter than the next.
+    asr_gate_low_confidence: float = Field(default=0.25, alias="MDX_ASR_GATE_LOW_CONFIDENCE")
+    asr_gate_low_confidence_max_ms: int = Field(
+        default=1500, alias="MDX_ASR_GATE_LOW_CONFIDENCE_MAX_MS"
+    )
+    # T3: a known artefact phrase is dropped when the decoder itself says
+    # no speech at or above this (or the VAD share is below the G1 share).
+    asr_gate_artefact_no_speech: float = Field(default=0.5, alias="MDX_ASR_GATE_ARTEFACT_NO_SPEECH")
+
+    # ── Sprint TQ4 T4: a candidate engine in the shadow ─────────────────
+    # A backend name from config/models.yaml (e.g. cand_parakeet_asr); empty
+    # = off. It decodes a sample of jobs after the primary, through the same
+    # path; only numeric differences are kept (diagnostics.shadow).
+    asr_shadow_backend: str = Field(default="", alias="MDX_ASR_SHADOW_BACKEND")
+    asr_shadow_rate: float = Field(default=0.2, alias="MDX_ASR_SHADOW_RATE", ge=0.0, le=1.0)
+    # Audio hours a day the shadow may decode (all workers together).
+    asr_shadow_budget_hours: float = Field(default=4.0, alias="MDX_ASR_SHADOW_BUDGET_HOURS", ge=0.0)
+    # The shadow may hold a job back at most this long beyond the primary.
+    asr_shadow_max_wait_seconds: float = Field(
+        default=120.0, alias="MDX_ASR_SHADOW_MAX_WAIT_SECONDS", gt=0
+    )
 
     # ── Streaming-window hallucination guard ────────────────────────────
     # A streaming window is a fixed-length slice, so it regularly contains
@@ -84,8 +171,10 @@ class Settings(BaseSettings):
     )
     asr_model_revision: str = Field(default="", alias="MD_ASR_MODEL_REVISION")
     asr_model_sha256: str = Field(default="", alias="MD_ASR_MODEL_SHA256")
+    # Sprint F1: raised 1.3× (5.0 → 6.5) — the budget now covers the
+    # second pass on chunks that failed the first.
     asr_max_inference_seconds_multiplier: float = Field(
-        default=5.0, alias="MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER"
+        default=6.5, alias="MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER"
     )
     asr_jobs_before_recycle: int = Field(default=100, alias="MD_ASR_JOBS_BEFORE_RECYCLE")
 
@@ -136,6 +225,61 @@ class Settings(BaseSettings):
     diar_model_revision: str = Field(default="", alias="MDX_DIAR_MODEL_REVISION")
     diar_model_sha256: str = Field(default="", alias="MDX_DIAR_MODEL_SHA256")
     diar_meanvar_sha256: str = Field(default="", alias="MDX_DIAR_MEANVAR_SHA256")
+
+    # ── Diarizer v2 + engine selection (Sprint 29) ──────────────────────
+    # `legacy` = ECAPA + agglomeration (above); `pyannote` = community-1,
+    # in-process, baked at diar_v2_model_dir. Rollback is flipping this.
+    # `http` = the same community-1 pipeline on a GPU endpoint
+    # (deploy/diar-server, ADR-0052 shape B), named by
+    # MDX_DIAR_HTTP_BACKEND in config/models.yaml.
+    diar_engine: str = Field(default="legacy", alias="MDX_DIAR_ENGINE")
+    # Run this engine as well, DISCARD its labels, log/emit only the speaker
+    # counts and its wall time. Empty = off.
+    diar_shadow_engine: str = Field(default="", alias="MDX_DIAR_SHADOW_ENGINE")
+    diar_v2_model_dir: str = Field(
+        default="/opt/models/pyannote-community-1", alias="MDX_DIAR_V2_MODEL_DIR"
+    )
+    diar_v2_model_repo: str = Field(
+        default="pyannote/speaker-diarization-community-1", alias="MDX_DIAR_V2_MODEL_REPO"
+    )
+    diar_v2_model_revision: str = Field(default="", alias="MDX_DIAR_V2_MODEL_REVISION")
+    # filename → sha256, JSON (docs/models/PINS.md). Verified at load, fail-closed.
+    diar_v2_pins: str = Field(default="", alias="MDX_DIAR_V2_PINS")
+    # Windows embedded at once — bounds memory on long recordings.
+    # 0 = 16 on CPU, 32 on GPU.
+    diar_v2_batch: int = Field(default=0, alias="MDX_DIAR_V2_BATCH")
+    # Roster guard, both engines (Sprint 28 grid: ≈ 8 s / 3 %). Both 0 =
+    # the guard grades the count but dissolves nothing. On by default as a
+    # recorded exception to the B-4 under-count rule — ADR-0052 has the
+    # per-file trade and the triggers for setting it back to 0.
+    diar_min_speaker_speech_ms: int = Field(default=8000, alias="MDX_DIAR_MIN_SPEAKER_SPEECH_MS")
+    diar_min_speaker_share: float = Field(default=0.03, alias="MDX_DIAR_MIN_SPEAKER_SHARE")
+    # MDX_DIAR_ENGINE=http: which backend in config/models.yaml to call.
+    # Empty = the env's `diarization` override (dev → dev_mac_diar).
+    diar_http_backend: str = Field(default="", alias="MDX_DIAR_HTTP_BACKEND")
+    # The diar-server's own token (header X-MDX-Diar-Token). A managed
+    # endpoint's gateway eats `Authorization`, so the container needs its
+    # own; empty = send the backend's bearer in both places.
+    diar_http_token: str = Field(default="", alias="MDX_DIAR_SERVER_TOKEN")
+    # Timeout slope: seconds of budget per second of audio. 0.5 suits a
+    # GPU endpoint (~0.15 x); a CPU-hosted one runs at 0.64-0.85 x and
+    # needs more, or every recording times out (ADR-0052).
+    diar_http_seconds_per_audio_second: float = Field(
+        default=0.5, alias="MDX_DIAR_HTTP_SECONDS_PER_AUDIO_SECOND"
+    )
+
+    def diar_v2_pin_map(self) -> dict[str, str]:
+        if not self.diar_v2_pins.strip():
+            return {}
+        raw = json.loads(self.diar_v2_pins)
+        if not isinstance(raw, dict):
+            raise ValueError("MDX_DIAR_V2_PINS must be a JSON object of filename → sha256")
+        return {str(k): str(v) for k, v in raw.items()}
+
+    def diar_v2_batch_size(self) -> int:
+        if self.diar_v2_batch > 0:
+            return self.diar_v2_batch
+        return 32 if self.diar_device.startswith("cuda") else 16
 
     # ── Database / queue / storage ──────────────────────────────────────
     db_app_role_dsn: str = Field(
@@ -190,5 +334,17 @@ class Settings(BaseSettings):
 
     worker_consumer_name: str = Field(default="worker-1", alias="MD_ASR_WORKER_NAME")
 
+
+# pyannote.audio 4.x ships usage telemetry ON (posts to otel.pyannote.ai)
+# and its hub client would call huggingface.co. The worker only ever loads
+# a baked local model, so both are pinned off here — in the one module
+# allowed to touch the environment, at import, before anything can import
+# pyannote. Forced, not defaulted: an inherited "true" must not win. The
+# v2 engine re-checks these and refuses to load if they changed.
+PYANNOTE_PROCESS_ENV: Mapping[str, str] = {
+    "PYANNOTE_METRICS_ENABLED": "false",
+    "HF_HUB_OFFLINE": "1",
+}
+os.environ.update(PYANNOTE_PROCESS_ENV)
 
 settings = Settings()

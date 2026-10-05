@@ -89,8 +89,14 @@ async def http_exception_handler(
     # the exception instance before raising:
     #     e = HTTPException(401, detail="…"); e.problem_extras = {"code": "…"}; raise e
     extras = dict(getattr(exc, "problem_extras", None) or {})
+    # The extras may also name the problem ``type`` (asr-service's job
+    # endpoints send ``{"type_uri": …}``). Take it out here: passed on as
+    # ``**extras`` it collided with the ``type_uri=`` keyword below, so
+    # every such 409/410 died in this handler and reached the client as a
+    # 500 "An unexpected error occurred."
+    extra_type = extras.pop("type_uri", None)
     detail = exc.detail
-    type_uri: str | None = None
+    type_uri: str | None = extra_type if isinstance(extra_type, str) else None
     title: str | None = None
     if isinstance(detail, dict):
         # A raiser that built a problem document inline —
@@ -100,7 +106,10 @@ async def http_exception_handler(
         # other key as an extension member, so clients branch on ``type``
         # and show ``detail`` exactly as they do for a plain string.
         body = dict(detail)
-        type_uri = body.pop("type", None) if isinstance(body.get("type"), str) else None
+        if isinstance(body.get("type"), str):
+            type_uri = body.pop("type")
+        else:
+            body.pop("type", None)
         title = body.pop("title", None) if isinstance(body.get("title"), str) else None
         raw_detail = body.pop("detail", None)
         detail = raw_detail if isinstance(raw_detail, str) else None

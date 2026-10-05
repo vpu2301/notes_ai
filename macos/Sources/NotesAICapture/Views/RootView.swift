@@ -11,13 +11,13 @@ struct RootView: View {
             DSDivider()
             content
         }
-        .frame(width: 340)
+        .frame(width: 320)
         .background(DS.bg)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            DSWordmark(size: 14.5)
+            DSWordmark(size: 12)
             Spacer()
             if app.authState == .signedIn {
                 DSMenu(width: 224) {
@@ -45,8 +45,9 @@ struct RootView: View {
                     .foregroundStyle(DS.muted)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -72,32 +73,83 @@ struct RootView: View {
                         .padding(.top, -12)
                 }
                 if case .idle = capture.phase {
-                    NewMeetingButton(fill: true, height: 38)
+                    // The six kinds don't fit across the popover as a
+                    // pill; a menu beside the button keeps it one row.
+                    HStack(spacing: 6) {
+                        NewMeetingButton(fill: true, height: 32)
+                        MeetingTypeMenu()
+                    }
                 } else {
                     ActiveCaptureCard(compact: true)
                         .dsCard(padding: 12)
+                    // Sprint 34: mark a moment without opening the window —
+                    // the lowest-friction way there is to say "this bit".
+                    if capture.isRecording { QuickNoteField() }
                 }
                 if app.recents.isEmpty {
                     MeetingsEmptyState(compact: true)
                 } else {
                     // No ScrollView: inside a MenuBarExtra window it collapses to
                     // zero height, and six rows fit without one.
-                    MeetingList(compact: true, limit: 6)
-                    HStack {
-                        Spacer()
-                        OpenMainWindowButton {
-                            Text("All meetings")
-                        }
-                        .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
-                        .foregroundStyle(DS.accentText)
+                    MeetingList(compact: true, limit: 4)
+                    OpenMainWindowButton {
+                        Text("All meetings")
                     }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                    .foregroundStyle(DS.muted)
                 }
             }
-            .padding(12)
+            .padding(10)
             .task {
                 await app.refreshRecents()
                 await app.refreshWorkspaces()
             }
         }
+    }
+}
+
+/// "Quick note…" in the menu-bar popover.
+///
+/// One line, Return, gone. It appends to the same `user_notes` the capture
+/// window is typing into and is stamped with the moment it was written, so
+/// a thought marked from the menu bar anchors to the same passage as one
+/// typed in the window. Nothing else in the app is this close to hand
+/// during a call, which is exactly when the note is worth the most.
+struct QuickNoteField: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+    @State private var line = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Quick note…", text: $line)
+                .textFieldStyle(.plain)
+                .font(.ds(13))
+                .focused($focused)
+                .onSubmit(add)
+                .accessibilityLabel("Quick note")
+                .accessibilityHint("Adds a timed line to the meeting note")
+            Button(action: add) {
+                Image(systemName: "return")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(line.isEmpty ? DS.muted : DS.accentText)
+            .disabled(line.isEmpty)
+            .help("Add this line to the meeting note")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous).fill(DS.surface2)
+        )
+    }
+
+    private func add() {
+        let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        capture.appendQuickNote(text)
+        line = ""
+        focused = true
     }
 }

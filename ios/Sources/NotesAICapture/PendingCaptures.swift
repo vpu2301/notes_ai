@@ -29,12 +29,63 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         /// The workspace the recording was made for. The upload is sent
         /// with a token scoped to it, not to whatever is active now.
         var tenantId: String?
+        /// The "People" hint (Sprint 29), so a capture made offline still
+        /// uploads with it. Absent from sidecars written before, which
+        /// decode with nil — no hint, as they were recorded.
+        var speakersExpected: Int? = nil
+        /// Sprint 30 — the capture context (calendar invitees as a cap and
+        /// as names to offer, and where the capture started), so a meeting
+        /// kept for later still uploads with it. All absent from older
+        /// sidecars, which decode with nil. The source is kept as a string:
+        /// a value this build does not know must not make the recording
+        /// unreadable.
+        var speakersMax: Int? = nil
+        var nameCandidates: [String]? = nil
+        var captureSource: String? = nil
+        /// Sprint F1 — when Record was pressed and how many milliseconds
+        /// passed before audio reached the file, so a later upload still
+        /// says when the recording really began. Absent from older
+        /// sidecars, which upload without them.
+        var recordPressedAt: Date? = nil
+        var firstFrameOffsetMs: Int? = nil
 
         enum CodingKeys: String, CodingKey {
             case title, language, diarize
             case recordedAt = "recorded_at"
             case identityId = "identity_id"
             case tenantId = "tenant_id"
+            case speakersExpected = "speakers_expected"
+            case speakersMax = "speakers_max"
+            case nameCandidates = "name_candidates"
+            case captureSource = "capture_source"
+            case recordPressedAt = "record_pressed_at"
+            case firstFrameOffsetMs = "first_frame_offset_ms"
+        }
+
+        /// The timing a retry sends: both halves, or nothing.
+        var captureTiming: CaptureTiming? {
+            get {
+                guard let recordPressedAt, let firstFrameOffsetMs else { return nil }
+                return CaptureTiming(recordPressedAt: recordPressedAt, firstFrameOffsetMs: firstFrameOffsetMs)
+            }
+            set {
+                recordPressedAt = newValue?.recordPressedAt
+                firstFrameOffsetMs = newValue?.firstFrameOffsetMs
+            }
+        }
+
+        /// The context the upload carries; nil for a sidecar that has none.
+        var captureContext: CaptureContext? {
+            guard speakersMax != nil || nameCandidates != nil || captureSource != nil else { return nil }
+            return CaptureContext(speakersMax: speakersMax, nameCandidates: nameCandidates ?? [],
+                                  source: captureSource.flatMap(CaptureSource.init(rawValue:)) ?? .manual)
+        }
+
+        /// Write `context` into the sidecar fields.
+        mutating func setCaptureContext(_ context: CaptureContext?) {
+            speakersMax = context?.speakersMax
+            nameCandidates = context.map(\.nameCandidates).flatMap { $0.isEmpty ? nil : $0 }
+            captureSource = context?.source.rawValue
         }
     }
 }
@@ -95,7 +146,7 @@ enum PendingCaptures {
         audioURL.deletingPathExtension().appendingPathExtension("json")
     }
 
-    private static func write(_ info: PendingCapture.Info, beside audioURL: URL) {
+    static func write(_ info: PendingCapture.Info, beside audioURL: URL) {
         guard let data = try? JSONEncoder.pending.encode(info) else { return }
         let url = sidecar(of: audioURL)
         try? data.write(to: url)

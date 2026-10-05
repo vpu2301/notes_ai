@@ -221,3 +221,72 @@ def test_unknown_language_pin_is_rejected(rig: SimpleNamespace) -> None:
         data={"language": "pl"},
     )
     assert resp.status_code == 422
+
+
+# ── Sprint I2 T2: what the transcriber was told is stored with the job ──
+
+
+def test_the_hint_is_stored_on_the_job_and_counted_in_the_audit(rig: SimpleNamespace) -> None:
+    inserted: list[dict[str, Any]] = []
+
+    async def _insert(*_args: Any, **kwargs: Any) -> None:
+        inserted.append(kwargs)
+
+    rig.monkeypatch.setattr(rig.jobs.repository, "insert_job_row", _insert)
+    resp = rig.client.post(
+        "/asr/jobs",
+        files={"audio": ("a.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
+        data={"language": "en", "vocabulary_hint": "Gregor Gysi, Springbrook Marine, Pardo"},
+    )
+    assert resp.status_code == 202, resp.text
+    (row,) = inserted
+    assert row["vocabulary_hint"] == "Gregor Gysi, Springbrook Marine, Pardo"
+    assert resp.json()["vocabulary_hint"] == "Gregor Gysi, Springbrook Marine, Pardo"
+    queued = next(e for e in rig.audit.events if e["kind"] == "asr.job_queued")
+    assert queued["payload"]["hint_terms"] == 3
+    assert "Gysi" not in repr(queued)
+
+
+def test_no_hint_is_stored_as_null_and_counts_zero(rig: SimpleNamespace) -> None:
+    inserted: list[dict[str, Any]] = []
+
+    async def _insert(*_args: Any, **kwargs: Any) -> None:
+        inserted.append(kwargs)
+
+    rig.monkeypatch.setattr(rig.jobs.repository, "insert_job_row", _insert)
+    resp = rig.client.post(
+        "/asr/jobs",
+        files={"audio": ("a.wav", b"RIFF0000WAVE" + b"\x00" * 64, "audio/wav")},
+        data={"language": "en", "vocabulary_hint": ""},
+    )
+    assert resp.status_code == 202
+    assert inserted[0]["vocabulary_hint"] is None
+    assert resp.json()["vocabulary_hint"] is None
+    queued = next(e for e in rig.audit.events if e["kind"] == "asr.job_queued")
+    assert queued["payload"]["hint_terms"] == 0
+
+
+def test_a_job_row_without_the_column_reads_as_no_hint() -> None:
+    """A database ahead of or behind migration 0061 still serves the job."""
+    from asr_service.domain.repository import _row_to_view
+
+    class _Row(dict):
+        pass
+
+    base = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "audio_id": uuid4(),
+        "requester_sub": uuid4(),
+        "language": "en",
+        "model": "large-v3",
+        "status": "queued",
+        "error_kind": None,
+        "error_detail": None,
+        "queued_at": "2026-09-25T00:00:00Z",
+        "started_at": None,
+        "finished_at": None,
+        "attempts": 0,
+    }
+    assert _row_to_view(_Row(base)).vocabulary_hint is None
+    assert _row_to_view(_Row({**base, "vocabulary_hint": "Pardo"})).vocabulary_hint == "Pardo"

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelJob, listJobs } from "../api/asr";
-import { ApiError, errorMessage } from "../api/http";
-import { createFromTranscript, notesBySourceJob } from "../api/notes";
+import { ApiError } from "../api/http";
+import { messageFor } from "./errorCopy";
+import { attachTranscript, createFromTranscript, notesBySourceJob } from "../api/notes";
 import type { AsrJob } from "../api/types";
 import { dismiss, isDismissed, isMine, loadLinks, loadTitles, rememberLink } from "./captures";
 
@@ -23,7 +24,16 @@ const autoAttempted = new Set<string>();
  * notes they turned into, and automatic note creation for the jobs this
  * browser recorded. Polls while anything is still processing.
  */
-export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string) => void } = {}) {
+export function useCaptures(
+  opts: {
+    onNoteReady?: (jobId: string, noteId: string) => void;
+    /** Sprint 34: jobs that already have a note, opened when Record was
+     *  pressed. Those finish with `attachTranscript` (which fills the note
+     *  the author typed in) instead of `from-transcript` (which would make
+     *  a second one and get a 409). */
+    meetingNotes?: Record<string, string>;
+  } = {},
+) {
   const [jobs, setJobs] = useState<AsrJob[] | null>(null);
   const [links, setLinks] = useState<Record<string, string>>(loadLinks);
   const [creating, setCreating] = useState<Set<string>>(new Set());
@@ -32,6 +42,8 @@ export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string
   const [noteErrors, setNoteErrors] = useState<Record<string, string>>({});
   const onNoteReady = useRef(opts.onNoteReady);
   onNoteReady.current = opts.onNoteReady;
+  const meetingNotes = useRef(opts.meetingNotes);
+  meetingNotes.current = opts.meetingNotes;
 
   const refresh = useCallback(async () => {
     let list: AsrJob[];
@@ -73,6 +85,24 @@ export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string
         return rest;
       });
       try {
+        // The note may already exist — the author has been typing in it
+        // since Record. Then the transcript goes INTO it; a second note
+        // would split the meeting in two.
+        const live = meetingNotes.current?.[job.id];
+        if (live) {
+          try {
+            await attachTranscript(live);
+            rememberLink(job.id, live);
+            setLinks(loadLinks());
+            onNoteReady.current?.(job.id, live);
+            return live;
+          } catch (err) {
+            // The live note was moved to the bin while the meeting ran
+            // (it looked empty). The recording is not in the bin: it
+            // gets a fresh note below, like an upload would.
+            if (!(err instanceof ApiError && err.status === 404)) throw err;
+          }
+        }
         const res = await createFromTranscript({
           asr_job_id: job.id,
           template_id: templateId,
@@ -87,6 +117,10 @@ export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string
         if (err instanceof ApiError && err.status === 409) {
           const [l] = await notesBySourceJob([job.id]).catch(() => []);
           if (l) {
+            // The job belongs to a meeting note this browser did not open
+            // (the phone started it). Finishing it is idempotent, and it
+            // is what "closed the laptop" recovery needs.
+            await attachTranscript(l.note_id).catch(() => {});
             rememberLink(job.id, l.note_id);
             setLinks(loadLinks());
             onNoteReady.current?.(job.id, l.note_id);
@@ -96,7 +130,7 @@ export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string
         // A 401 signs the user out via the http layer; anything else is
         // this job's problem and must be visible.
         if (!(err instanceof ApiError && err.status === 401)) {
-          setNoteErrors((e) => ({ ...e, [job.id]: errorMessage(err) }));
+          setNoteErrors((e) => ({ ...e, [job.id]: messageFor(err) }));
         }
         throw err;
       } finally {
@@ -110,11 +144,16 @@ export function useCaptures(opts: { onNoteReady?: (jobId: string, noteId: string
     [],
   );
 
-  // Auto-convert: finished jobs this browser recorded become notes on their own.
+  // Auto-convert: finished jobs this browser recorded become notes on
+  // their own — including one whose note is already open and waiting for
+  // its transcript, which is how a capture survives the laptop being shut
+  // mid-transcription (Sprint 34).
   useEffect(() => {
     if (!jobs) return;
     for (const job of jobs) {
-      if (job.status !== "complete" || links[job.id] || !isMine(job.id) || autoAttempted.has(job.id)) continue;
+      if (job.status !== "complete" || !isMine(job.id) || autoAttempted.has(job.id)) continue;
+      const live = meetingNotes.current?.[job.id];
+      if (links[job.id] && !live) continue;
       autoAttempted.add(job.id);
       // One automatic try; after a failure the user retries from the page,
       // so a broken note write does not hammer the service every poll.

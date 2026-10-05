@@ -158,18 +158,24 @@ ON CONFLICT (tenant_id, email) DO UPDATE
         role         = EXCLUDED.role,
         status       = EXCLUDED.status;
 
--- ── Notes AI owner: member of every tenant ─────────────────────────────────
+-- ── Notes AI owner: member of tenant-a only ───────────────────────────────
 -- The platform-owner console reads its portfolio from GET /tenants, which
--- returns exactly the tenants the caller is a MEMBER of. The cross join is
--- deliberate: every tenant seeded here and any added later gets a
--- membership, so the console never silently misses a workspace. Keyed off
--- the email because the sub is whatever the live Keycloak issued.
+-- returns exactly the tenants the caller is a member of — so the owner
+-- joins tenant-a (where its notes are) and nothing else. It used to be a
+-- cross join over every tenant, and every `make seed` after an integration
+-- run (test_email_code_e2e, test_signup_e2e, test_first_use_guarantee each
+-- sign up a throwaway `e<hex>@…` account with its own workspace) made the
+-- owner the owner of all those leftovers: 263 junk workspaces in the
+-- switcher by 2026-10-03. A workspace the owner creates or accepts an
+-- invitation to gets its membership from the API, not from here.
+-- Keyed off the email because the sub is whatever the live Keycloak issued.
 -- Idempotent on (tenant_id, user_sub).
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 SELECT t.id, u.sub, 'owner', 'active'
 FROM tenants t
 CROSS JOIN users u
 WHERE u.email = 'vpu2301@gmail.com'
+  AND t.name = 'tenant-a'   -- where the owner's notes live
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
 -- ── Identities for every seeded user ──────────────────────────────────────

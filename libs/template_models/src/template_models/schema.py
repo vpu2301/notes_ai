@@ -24,7 +24,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from pydantic import (
     AliasChoices,
@@ -122,6 +122,25 @@ class ChoiceOption(_Strict):
         return tuple(deduped)
 
 
+SectionRole = Literal[
+    "summary",
+    "attendees",
+    "agenda",
+    "topics",
+    "decisions",
+    "action_items",
+    "open_questions",
+    "risks",
+    "next_meeting",
+    "requests",
+    "user_notes",
+    "transcript",
+    "judgement",
+    "custom",
+]
+"""What a section is for. See `note_service.domain.meeting_doc.roles`."""
+
+
 class TemplateSection(_Strict):
     """One section of a template. Each section is dictated separately
     in sprint-06 section-aware mode."""
@@ -140,6 +159,16 @@ class TemplateSection(_Strict):
     # value means "no section-specific synthesis guidance". Editing it is a
     # cosmetic change (see ``classify_edit``).
     synthesis_prompt: str = Field(default="", max_length=2_000)
+    # Sprint 33 — what this section is FOR, independent of what this
+    # template calls it. The generation engine, the shared page, the
+    # action-item projection and the PDF all decide by role rather than
+    # by id, so one template can call a section "Beschlüsse" and still
+    # have its decisions written into it.
+    #
+    # Optional and additive: templates written before roles existed
+    # (schema_version 1) have none, and `meeting_doc.roles.role_of`
+    # falls back to an id map for them.
+    role: SectionRole | None = None
     # Sprint-13: required non-empty (2..50) for choice/multi_choice
     # sections, must be empty for every other field_type.
     options: tuple[ChoiceOption, ...] = Field(default_factory=tuple)
@@ -212,17 +241,22 @@ class TemplateSection(_Strict):
         return self
 
     @model_serializer(mode="wrap")
-    def _omit_empty_options(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Drop ``options`` from dumps when empty.
+    def _omit_absent_optionals(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Drop ``options`` and ``role`` from dumps when they are unset.
 
-        The sprint-13 additive proof: pre-S13 templates must serialize
-        byte-identically to their pre-bump dumps (template dumps flow
-        into JSONB rows and the sprint-06 snapshot path). Emitting
-        ``"options": []`` for every old template would violate that.
+        The sprint-13 additive proof, extended by Sprint 33: a template
+        written before a field existed must serialize byte-identically
+        to its pre-bump dump, because template dumps flow into JSONB
+        rows and into the sprint-06 snapshot path. Emitting
+        ``"options": []`` — or ``"role": null`` — for every old template
+        would violate that.
         """
         data: dict[str, Any] = handler(self)
-        if isinstance(data, dict) and not data.get("options"):
-            data.pop("options", None)
+        if isinstance(data, dict):
+            if not data.get("options"):
+                data.pop("options", None)
+            if data.get("role") is None:
+                data.pop("role", None)
         return data
 
 

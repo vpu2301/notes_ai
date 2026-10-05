@@ -84,10 +84,10 @@ private struct PendingUploadRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.dsSymbol(14, .medium))
                     .foregroundStyle(needsWorkspace ? DS.warn : DS.accentText)
                     .frame(width: 32, height: 32)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
                         .fill(needsWorkspace ? DS.warnSoft : DS.accentSoft))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(capture.info.title)
@@ -113,13 +113,7 @@ private struct PendingUploadRow: View {
                     .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 32))
                     .disabled(isRetrying || needsWorkspace || app.authState != .signedIn)
                 }
-                DSMenu(items: menuItems) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(DS.muted)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
-                }
+                DSMenu(dim: true, items: menuItems)
             }
             if needsWorkspace {
                 DSNotice(tone: .warn, symbol: "person.crop.circle.badge.exclamationmark",

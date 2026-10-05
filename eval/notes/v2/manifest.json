@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "notes": "Sprint SQ1 notes gold set: the same recordings and ids as eval/asr/v1, gold format v3 (scripts/eval/notes_gold.py). Ids only in git; meeting files (ASR snapshot, reference_transcript, gold) live in s3://notes-eval/notes/v2/<id>.json. Empty by owner decision of 2026-10-01: no gold labelling for now; notes are judged on real recordings (ADR-0068).",
+  "recordings": []
+}

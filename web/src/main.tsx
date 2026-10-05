@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { captureMailLink } from "./lib/mailLink";
+import { migrateStorageKeys } from "./lib/storageKeys";
 import { applyThemeNow } from "./shell/theme";
 import "./styles/fonts.css";
 import "./styles/tokens.css";
@@ -17,6 +18,9 @@ applyThemeNow();
 // fragment into a route and take the token out of the URL before the router
 // — or anything else — can see it.
 captureMailLink();
+
+// Values stored under the product's earlier name move to `notesai.*` once.
+migrateStorageKeys();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

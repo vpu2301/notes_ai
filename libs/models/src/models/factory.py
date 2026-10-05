@@ -31,6 +31,7 @@ def build_chat_provider(resolved: ResolvedBackend) -> ChatProvider:
             context_window=cfg.context_window,
             max_concurrency=cfg.max_concurrency,
             request_overrides=cfg.request_overrides,
+            small_model=cfg.small_model,
         )
     if resolved.kind == "recorded":
         return RecordedChatProvider(
@@ -55,6 +56,7 @@ def build_asr_provider(
             auth_token=cfg.bearer_token(),
             timeout_s=cfg.timeout_seconds,
             cold_start_seconds=cfg.cold_start_seconds,
+            server_token=cfg.server_token.get_secret_value() or None,
         )
     if resolved.kind == "asr_inproc":
         if inproc_engine is None:

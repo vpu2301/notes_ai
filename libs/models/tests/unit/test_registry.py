@@ -159,3 +159,164 @@ def test_route_log_has_no_url_or_token(caplog: pytest.LogCaptureFixture) -> None
     )
     assert "hf_secret_token" not in blob
     assert "endpoints.huggingface.cloud" not in blob
+
+
+def test_small_model_reaches_the_resolved_backend_and_the_provider() -> None:
+    """Sprint L1 T2: the flag travels config → Capabilities → provider."""
+    from models import build_chat_provider
+
+    cfg = base_config()
+    cfg["backends"]["dev_mac"]["small_model"] = True
+    cfg["backends"]["dev_mac"]["request_overrides"] = {"reasoning_effort": "${UNSET_L1:-}"}
+    reg = Registry.load(cfg, env="dev", environ={})  # type: ignore[arg-type]
+    resolved = reg.backend("dev_mac", expect_kind="chat")
+    assert resolved.caps.small_model is True
+    provider = build_chat_provider(resolved)
+    assert provider.small_model is True
+    # An override that interpolated to nothing is not sent to the server.
+    assert provider.request_overrides == {}  # type: ignore[attr-defined]
+    test_env = Registry.load(cfg, env="test", environ={})  # type: ignore[arg-type]
+    assert test_env.backend("recorded", expect_kind="chat").caps.small_model is False
+
+
+# ── Sprint L2: default with fallback (dev only), operation routing ──────
+
+MISTRAL = {
+    "kind": "openai_compat",
+    "base_url": "${MISTRAL_API_URL:-https://api.mistral.ai/v1}",
+    "auth": "bearer:${MISTRAL_API_KEY}",
+    "enabled_in_envs": ["dev", "staging", "prod"],
+    "models": {"chat": "${MISTRAL_LARGE_PIN:-mistral-large-2512}"},
+    "structured_output": "probe",
+    "context_window": 131072,
+    "processor": {"name": "Mistral AI", "region": "EU"},
+}
+MISTRAL_ENV = {"MISTRAL_API_KEY": "sk-test"}
+
+
+def _l2_config(**env_dev: object) -> dict:
+    cfg = base_config()
+    cfg["backends"]["mistral_eu"] = dict(MISTRAL)
+    cfg["backends"]["mistral_eu_small"] = {
+        **MISTRAL,
+        "models": {"chat": "${MISTRAL_SMALL_PIN:-mistral-small-2603}"},
+    }
+    for op in ("classify", "title", "entities"):
+        cfg["routing"][op] = {"standard": "hf_eu", "premium": "hf_eu"}
+    cfg["env_overrides"]["dev"] = {
+        "chat": {"primary": "mistral_eu", "fallback": "dev_mac"},
+        "classify": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
+        "title": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
+        "entities": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
+        "asr": "dev_mac_asr",
+        **env_dev,
+    }
+    return cfg
+
+
+def test_key_present_routes_writing_to_the_large_and_short_calls_to_the_small_model() -> None:
+    reg = Registry.load(_l2_config(), env="dev", environ=MISTRAL_ENV)  # type: ignore[arg-type]
+    assert reg.resolve(WS, "summarize").name == "mistral_eu"
+    assert reg.resolve(WS, "understand").name == "mistral_eu"
+    assert reg.resolve(WS, "summarize").model_id == "mistral-large-2512"
+    for op in ("classify", "title", "entities"):
+        assert reg.resolve(WS, op).name == "mistral_eu_small"
+        assert reg.resolve(WS, op).model_id == "mistral-small-2603"
+    active = reg.active_override("chat")
+    assert active is not None and active.name == "mistral_eu" and active.reason is None
+    # Both companies the dev workspace has to acknowledge — computed, not typed.
+    assert {p.name for p in reg.processors_for_env()} == {"Mistral AI", "Developer machine"}
+
+
+def test_key_absent_falls_back_to_the_local_model_with_missing_env(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="models.registry"):
+        reg = Registry.load(_l2_config(), env="dev", environ={})  # type: ignore[arg-type]
+    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    assert reg.resolve(WS, "title").name == "dev_mac"
+    active = reg.active_override("chat")
+    assert active is not None and active.is_fallback and active.reason == "missing_env"
+    assert active.primary == "mistral_eu" and active.fallback == "dev_mac"
+    records = [r for r in caplog.records if r.getMessage() == "models.override_fallback"]
+    assert records and records[0].reason == "missing_env"  # type: ignore[attr-defined]
+    # Log-safe: no URL, no key in the record.
+    assert "sk-" not in str(records[0].__dict__) and "http" not in str(records[0].__dict__)
+
+
+def test_mdx_dev_chat_backend_forces_the_named_backend() -> None:
+    reg = Registry.load(
+        _l2_config(),
+        env="dev",
+        environ=MISTRAL_ENV,
+        forced={
+            "chat": "dev_mac",
+            "classify": "dev_mac",
+            "title": "dev_mac",
+            "entities": "dev_mac",
+        },
+    )  # type: ignore[arg-type]
+    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    assert reg.resolve(WS, "classify").name == "dev_mac"
+    active = reg.active_override("chat")
+    assert active is not None and active.reason == "forced" and active.name == "dev_mac"
+    # Forcing the primary itself is not a fallback.
+    same = Registry.load(
+        _l2_config(), env="dev", environ=MISTRAL_ENV, forced={"chat": "mistral_eu"}
+    )  # type: ignore[arg-type]
+    assert same.active_override("chat").reason is None  # type: ignore[union-attr]
+
+
+def test_a_failed_probe_falls_back_in_dev_and_refuses_on_staging() -> None:
+    reg = Registry.load(_l2_config(), env="dev", environ=MISTRAL_ENV)  # type: ignore[arg-type]
+    assert reg.resolve(WS, "summarize").name == "mistral_eu"
+    switched = reg.fall_back("chat")
+    assert switched.name == "dev_mac" and switched.reason == "probe_failed"
+    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    assert reg.fall_back("chat").name == "dev_mac"  # idempotent
+    # asr has no fallback configured.
+    with pytest.raises(ConfigError) as exc:
+        reg.fall_back("asr")
+    assert exc.value.code == "fallback_not_configured"
+
+    cfg = _l2_config()
+    cfg["env_overrides"]["staging"] = {"chat": {"primary": "mistral_eu", "fallback": "hf_eu"}}
+    staging = Registry.load(cfg, env="staging", environ={**STAGING_ENV, **MISTRAL_ENV})  # type: ignore[arg-type]
+    with pytest.raises(ConfigError) as exc:
+        staging.fall_back("chat")
+    assert exc.value.code == "fallback_not_allowed"
+
+
+def test_on_staging_a_missing_primary_key_refuses_to_boot_as_before() -> None:
+    cfg = _l2_config()
+    cfg["env_overrides"]["staging"] = {"chat": {"primary": "mistral_eu", "fallback": "hf_eu"}}
+    with pytest.raises(ConfigError) as exc:
+        Registry.load(cfg, env="staging", environ=STAGING_ENV)  # type: ignore[arg-type]
+    assert exc.value.code == "missing_env"
+
+
+def test_the_bare_name_form_still_parses_and_routes() -> None:
+    reg = _registry("dev", {})
+    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    active = reg.active_override("chat")
+    assert active is not None and active.name == "dev_mac" and active.reason is None
+    assert reg.override_for("asr") == "dev_mac_asr"
+
+
+def test_the_repo_config_routes_dev_to_mistral_with_the_key_and_to_the_mac_without() -> None:
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[4]
+    path = repo / "config" / "models.yaml"
+    with_key = Registry.load(path, env="dev", environ=MISTRAL_ENV, validate=False)
+    assert with_key.resolve(WS, "summarize").name == "mistral_eu"
+    assert with_key.resolve(WS, "classify").name == "mistral_eu_small"
+    without = Registry.load(path, env="dev", environ={}, validate=False)
+    assert without.resolve(WS, "summarize").name == "dev_mac"
+    assert without.resolve(WS, "title").name == "dev_mac"
+    assert without.active_override("chat").reason == "missing_env"  # type: ignore[union-attr]
+    # test env unchanged: cassettes.
+    assert (
+        Registry.load(path, env="test", environ={}, validate=False).resolve(WS, "classify").name
+        == "recorded"
+    )

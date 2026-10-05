@@ -1,0 +1,690 @@
+{
+  "kind": "notes-pipeline",
+  "backend": "dev_mac",
+  "date": "2026-09-23",
+  "generated_at": "2026-09-23T19:54:20+00:00",
+  "git": "d8cc445+engine-v2/Q1 working tree (uncommitted)",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "arm": "pipeline",
+  "model_id": "notes-chat",
+  "processor": {
+    "name": "Developer machine",
+    "region": "local"
+  },
+  "judge_model_id": null,
+  "corpus": "tests/fixtures/eval/notes",
+  "meetings": 8,
+  "runs": [
+    {
+      "run": 1,
+      "summary": {
+        "key_fact_recall": 0.40540540540540543,
+        "action_recall": 0.2727272727272727,
+        "action_precision": 0.5,
+        "action_f1": 0.3529411764705882,
+        "decision_recall": 0.0,
+        "decision_precision": 0.0,
+        "owner_accuracy": 0.0,
+        "citation_precision": 1.0,
+        "window_failure_rate": 0.125,
+        "seconds_per_meeting_hour": 2678.7,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "unsupported_rate": 0.4186046511627907,
+        "invented_claims": 4,
+        "example_echo": 0,
+        "coverage_ratio": 0.35000000000000003,
+        "recall_by_third": {
+          "1": 0.45,
+          "2": 0.5714285714285714,
+          "3": 0.2
+        },
+        "recall_by_type": {
+          "client": 1.0,
+          "interview": 1.0,
+          "lecture_webinar": 0.16666666666666666,
+          "one_on_one": 0.4,
+          "podcast_broadcast": 0.18181818181818182,
+          "team": 0.4444444444444444
+        },
+        "excluded_speech": 0.33153153153153153,
+        "recording_type_acc": 0.6666666666666666,
+        "redundancy": 0.3380281690140845,
+        "entity_accuracy": 0.5,
+        "entity_accuracy_knowable": 0.5,
+        "hedge_preservation": 0.0,
+        "attribution_rate": null,
+        "date_resolution": null,
+        "meetings_scored": 8,
+        "meetings_failed": 0
+      },
+      "meetings": [
+        {
+          "meeting": "m01_en_product_sync",
+          "language": "en",
+          "key_facts_missed": [
+            0,
+            1,
+            2
+          ],
+          "actions": 0,
+          "decisions": 0,
+          "seconds": 27.5,
+          "unsupported": [
+            0,
+            0
+          ],
+          "invented_claims": 0,
+          "example_echo": 0,
+          "key_fact_recall": [
+            0,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              0,
+              2
+            ],
+            "2": [
+              0,
+              0
+            ],
+            "3": [
+              0,
+              1
+            ]
+          },
+          "excluded_ms": [
+            0,
+            68000
+          ],
+          "redundancy": [
+            0,
+            0
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 0,
+          "stats": {
+            "facts_kept": 0,
+            "facts_dropped_quote": 0,
+            "facts_dropped_noise": 0,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 0,
+            "facts_downgraded": 0,
+            "numbers_removed": 0,
+            "facts_after_merge": 0
+          }
+        },
+        {
+          "meeting": "m02_de_kundenprojekt",
+          "language": "de",
+          "key_facts_missed": [],
+          "actions": 1,
+          "decisions": 0,
+          "seconds": 62.5,
+          "unsupported": [
+            2,
+            4
+          ],
+          "invented_claims": 2,
+          "example_echo": 0,
+          "key_fact_recall": [
+            3,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              2,
+              2
+            ],
+            "2": [
+              1,
+              1
+            ],
+            "3": [
+              0,
+              0
+            ]
+          },
+          "excluded_ms": [
+            8000,
+            52000
+          ],
+          "redundancy": [
+            0,
+            8
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 9,
+          "stats": {
+            "facts_kept": 4,
+            "facts_dropped_quote": 0,
+            "facts_dropped_noise": 1,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 1,
+            "facts_downgraded": 1,
+            "numbers_removed": 4,
+            "facts_after_merge": 4
+          }
+        },
+        {
+          "meeting": "m03_uk_planning",
+          "language": "uk",
+          "key_facts_missed": [
+            2
+          ],
+          "actions": 1,
+          "decisions": 0,
+          "seconds": 77.5,
+          "unsupported": [
+            2,
+            8
+          ],
+          "invented_claims": 0,
+          "example_echo": 0,
+          "key_fact_recall": [
+            2,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              2,
+              2
+            ],
+            "2": [
+              0,
+              0
+            ],
+            "3": [
+              0,
+              1
+            ]
+          },
+          "excluded_ms": [
+            9000,
+            56000
+          ],
+          "redundancy": [
+            11,
+            14
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 15,
+          "stats": {
+            "facts_kept": 5,
+            "facts_dropped_quote": 0,
+            "facts_dropped_noise": 1,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 1,
+            "facts_downgraded": 0,
+            "numbers_removed": 0,
+            "facts_after_merge": 5
+          }
+        },
+        {
+          "meeting": "m04_en_hiring",
+          "language": "en",
+          "key_facts_missed": [],
+          "actions": 4,
+          "decisions": 0,
+          "seconds": 116.8,
+          "unsupported": [
+            5,
+            8
+          ],
+          "invented_claims": 0,
+          "example_echo": 0,
+          "key_fact_recall": [
+            3,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              2,
+              2
+            ],
+            "2": [
+              1,
+              1
+            ],
+            "3": [
+              0,
+              0
+            ]
+          },
+          "excluded_ms": [
+            7000,
+            56000
+          ],
+          "redundancy": [
+            2,
+            18
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 19,
+          "stats": {
+            "facts_kept": 9,
+            "facts_dropped_quote": 0,
+            "facts_dropped_noise": 1,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 1,
+            "facts_downgraded": 1,
+            "numbers_removed": 0,
+            "facts_after_merge": 9
+          }
+        },
+        {
+          "meeting": "m05_en_incident_review",
+          "language": "en",
+          "key_facts_missed": [
+            2
+          ],
+          "actions": 0,
+          "decisions": 1,
+          "seconds": 94.5,
+          "unsupported": [
+            0,
+            11
+          ],
+          "invented_claims": 0,
+          "example_echo": 0,
+          "key_fact_recall": [
+            2,
+            3
+          ],
+          "recall_by_third": {
+            "1": [
+              2,
+              3
+            ],
+            "2": [
+              0,
+              0
+            ],
+            "3": [
+              0,
+              0
+            ]
+          },
+          "excluded_ms": [
+            12000,
+            62000
+          ],
+          "redundancy": [
+            11,
+            12
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 13,
+          "stats": {
+            "facts_kept": 6,
+            "facts_dropped_quote": 2,
+            "facts_dropped_noise": 1,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 1,
+            "facts_downgraded": 0,
+            "numbers_removed": 0,
+            "facts_after_merge": 6
+          }
+        },
+        {
+          "meeting": "m06_de_news_podcast",
+          "language": "de",
+          "key_facts_missed": [
+            0,
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "actions": 0,
+          "decisions": 0,
+          "seconds": 267.9,
+          "unsupported": [
+            1,
+            1
+          ],
+          "invented_claims": 1,
+          "example_echo": 0,
+          "key_fact_recall": [
+            2,
+            11
+          ],
+          "recall_by_third": {
+            "1": [
+              0,
+              4
+            ],
+            "2": [
+              1,
+              1
+            ],
+            "3": [
+              1,
+              6
+            ]
+          },
+          "excluded_ms": [
+            150000,
+            418000
+          ],
+          "recording_type": [
+            0,
+            1
+          ],
+          "redundancy": [
+            0,
+            5
+          ],
+          "entity_accuracy": [
+            1,
+            3
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            1
+          ],
+          "hedge_preservation": [
+            0,
+            1
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [
+            1
+          ],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 6,
+          "stats": {
+            "facts_kept": 4,
+            "facts_dropped_quote": 4,
+            "facts_dropped_noise": 4,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 3,
+            "facts_downgraded": 0,
+            "numbers_removed": 1,
+            "facts_after_merge": 4
+          }
+        },
+        {
+          "meeting": "m07_uk_lecture",
+          "language": "uk",
+          "key_facts_missed": [
+            0,
+            1,
+            3,
+            4,
+            5
+          ],
+          "actions": 0,
+          "decisions": 0,
+          "seconds": 68.5,
+          "unsupported": [
+            3,
+            4
+          ],
+          "invented_claims": 1,
+          "example_echo": 0,
+          "key_fact_recall": [
+            1,
+            6
+          ],
+          "recall_by_third": {
+            "1": [
+              1,
+              3
+            ],
+            "2": [
+              0,
+              2
+            ],
+            "3": [
+              0,
+              1
+            ]
+          },
+          "excluded_ms": [
+            150000,
+            262000
+          ],
+          "recording_type": [
+            1,
+            1
+          ],
+          "redundancy": [
+            0,
+            7
+          ],
+          "entity_accuracy": [
+            0,
+            0
+          ],
+          "entity_accuracy_knowable": [
+            0,
+            0
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 8,
+          "stats": {
+            "facts_kept": 3,
+            "facts_dropped_quote": 0,
+            "facts_dropped_noise": 2,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 2,
+            "facts_downgraded": 0,
+            "numbers_removed": 0,
+            "facts_after_merge": 3
+          }
+        },
+        {
+          "meeting": "m08_en_one_on_one",
+          "language": "en",
+          "key_facts_missed": [
+            0,
+            1,
+            3
+          ],
+          "actions": 0,
+          "decisions": 0,
+          "seconds": 110.6,
+          "unsupported": [
+            5,
+            7
+          ],
+          "invented_claims": 0,
+          "example_echo": 0,
+          "key_fact_recall": [
+            2,
+            5
+          ],
+          "recall_by_third": {
+            "1": [
+              0,
+              2
+            ],
+            "2": [
+              1,
+              2
+            ],
+            "3": [
+              1,
+              1
+            ]
+          },
+          "excluded_ms": [
+            32000,
+            136000
+          ],
+          "recording_type": [
+            1,
+            1
+          ],
+          "redundancy": [
+            0,
+            7
+          ],
+          "entity_accuracy": [
+            1,
+            1
+          ],
+          "entity_accuracy_knowable": [
+            1,
+            1
+          ],
+          "hedge_preservation": [
+            0,
+            0
+          ],
+          "attribution": [
+            0,
+            0
+          ],
+          "date_resolution": null,
+          "must_contain_failed": [],
+          "must_not_contain_failed": [],
+          "windows": 1,
+          "lines": 8,
+          "stats": {
+            "facts_kept": 9,
+            "facts_dropped_quote": 1,
+            "facts_dropped_noise": 2,
+            "facts_dropped_example": 0,
+            "example_echo_dropped": 0,
+            "noise_passages": 1,
+            "facts_downgraded": 0,
+            "numbers_removed": 0,
+            "facts_after_merge": 9
+          }
+        }
+      ]
+    }
+  ],
+  "prompt_version": "2026-10-6",
+  "label": "summary-engine-v2 Q1"
+}

@@ -2,7 +2,7 @@
 FROM python:3.12-slim AS build
 
 WORKDIR /build
-RUN pip install --no-cache-dir uv==0.4.29
+RUN pip install --no-cache-dir uv==0.10.6
 
 COPY pyproject.toml uv.lock /build/
 COPY libs/ /build/libs/
@@ -21,7 +21,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/crypto \
     /build/libs/storage \
     /build/libs/asr_models \
-    /build/libs/secret
+    /build/libs/secret \
+    /build/libs/ratelimit
 
 # ── Stage 2: distroless runtime ──────────────────────────────────────
 # asr-service needs libmagic (for python-magic) + ffmpeg (for duration probe).

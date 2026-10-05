@@ -29,14 +29,23 @@ struct MCPClient {
         case rpc(code: Int, message: String)
         case badResponse(String)
 
+        /// What the connector row says. The server's own words and codes
+        /// stay in the error for a log; the person gets a sentence.
         var errorDescription: String? {
             switch self {
-            case .unauthorized: return "The server wants you to sign in."
-            case .http(let code, let body):
-                let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-                return "HTTP \(code)" + (trimmed.isEmpty ? "" : ": \(trimmed.prefix(160))")
-            case .rpc(let code, let message): return "\(message) (\(code))"
-            case .badResponse(let why): return why
+            case .unauthorized: return "This connector needs you to sign in."
+            case .http(let code, _):
+                switch code {
+                case 401, 403: return "This connector refused the sign-in. Sign in again or check the token."
+                case 404: return "Nothing answers at this address. Check the connector's URL."
+                case 429: return "The connector is busy. Try again in a moment."
+                case 500...599: return "The connector's server had a problem. Try again in a moment."
+                default: return "Couldn't reach this connector. Try again."
+                }
+            case .rpc(_, let message):
+                let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? "The connector answered with an error." : "The connector answered with an error: \(trimmed.prefix(120))"
+            case .badResponse: return "The connector's answer could not be read."
             }
         }
     }

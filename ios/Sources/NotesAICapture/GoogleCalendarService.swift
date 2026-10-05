@@ -231,8 +231,42 @@ struct ComingUpItem: Identifiable, Equatable {
     let meetingURL: URL?
     let detail: String?
     let source: Source
+    /// Sprint 30: everyone invited, and names to offer for speakers.
+    var attendeeCount: Int = 0
+    var attendeeNames: [String] = []
+    /// The Google account the event came from — the current user, whose
+    /// name is left out of the names offered.
+    var accountEmail: String? = nil
+    /// Sprint 34 — what the invite says the meeting is about. A
+    /// server-owned calendar already handed over `agendaLines`; this Mac's
+    /// own calendars hand over the raw `description` instead, which the
+    /// server reads once and never stores.
+    var icalUid: String? = nil
+    var agendaLines: [String] = []
+    var description: String? = nil
 
     var isLive: Bool { start <= Date() && end > Date() }
+
+    /// What a capture started from this event carries (Sprint 30).
+    var captureContext: CaptureContext {
+        .calendarEvent(attendeeCount: attendeeCount, names: attendeeNames,
+                       excluding: accountEmail.map { [$0] } ?? [])
+    }
+
+    /// …and what goes ON the note when the capture opens it (Sprint 34):
+    /// the people and the agenda, so a meeting started from an invite is
+    /// already half written before anyone speaks.
+    var meetingCalendar: MeetingCalendarContext? {
+        let names = captureContext.nameCandidates
+        guard !names.isEmpty || !agendaLines.isEmpty || description != nil else { return nil }
+        return MeetingCalendarContext(
+            source: source == .google ? "google" : "eventkit",
+            title: title,
+            icalUid: icalUid,
+            attendeeNames: names.isEmpty ? nil : names,
+            agendaLines: agendaLines.isEmpty ? nil : agendaLines,
+            description: description)
+    }
 
     /// Both sources, merged and sorted; an event present in both (the
     /// same Google account added to the phone) is kept once.
@@ -255,7 +289,10 @@ struct ComingUpItem: Identifiable, Equatable {
                 title: event.title, start: event.start, end: event.end, isAllDay: event.allDay,
                 color: Color(hexString: event.color),
                 meetingURL: event.meetingUrl.flatMap(URL.init(string:)),
-                detail: parts.joined(separator: " · "), source: .google))
+                detail: parts.joined(separator: " · "), source: .google,
+                attendeeCount: event.attendeeCount, attendeeNames: event.attendees,
+                accountEmail: event.accountEmail,
+                icalUid: event.icalUid, agendaLines: event.agendaLines))
         }
         for event in device {
             let k = key(event.title, event.start)
@@ -263,7 +300,9 @@ struct ComingUpItem: Identifiable, Equatable {
             out.append(ComingUpItem(
                 id: "device:\(event.id)", title: event.title, start: event.start, end: event.end,
                 isAllDay: event.isAllDay, color: event.calendarColor.map { Color(cgColor: $0) },
-                meetingURL: nil, detail: nil, source: .device))
+                meetingURL: nil, detail: nil, source: .device,
+                attendeeCount: event.attendeeCount, attendeeNames: event.attendeeNames,
+                description: event.notes))
         }
         return out.sorted { ($0.start, $0.isAllDay ? 0 : 1) < ($1.start, $1.isAllDay ? 0 : 1) }
     }

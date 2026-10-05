@@ -27,6 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class NoteStatus(StrEnum):
     DRAFT = "draft"
+    # Legacy values: the finalize lifecycle was retired (note-service
+    # migration 0042, ADR-0051). Kept so history decodes; never produced.
     FINALIZED = "finalized"
     AMENDED = "amended"
     CANCELLED = "cancelled"
@@ -45,6 +47,11 @@ class NoteSection(BaseModel):
     text: str = ""
     transcript_segment_ids: list[UUID] = Field(default_factory=list)
     field_specific_metadata: dict[str, Any] = Field(default_factory=dict)
+    """The heading, for a section the template does not name — one the
+    engine made from the conversation ("Transfer strategy"). None means
+    no heading: the block is read as the note itself. A template section
+    is named by the template and leaves this unset."""
+    title: str | None = Field(default=None, max_length=120)
 
 
 class NoteContent(BaseModel):
@@ -76,6 +83,12 @@ def canonical_content_bytes(content: NoteContent) -> bytes:
     - no Pydantic round-trip drift (model_dump → json with sort_keys).
     """
     obj = content.model_dump(mode="json", exclude_none=False)
+    # A section without a title has the canonical form it always had:
+    # the field is absent, not null. Every version hashed before titles
+    # existed re-canonicalises to the same bytes.
+    for section in obj.get("sections", []):
+        if section.get("title") is None:
+            section.pop("title", None)
     return json.dumps(
         obj,
         ensure_ascii=False,
@@ -94,7 +107,7 @@ def rendered_text_from_content(content: NoteContent) -> str:
     if content.title:
         parts.append(content.title)
     for s in content.sections:
-        header = s.section_key
+        header = s.title or s.section_key
         body = s.text.strip()
         if body:
             parts.append(f"{header}\n{body}")

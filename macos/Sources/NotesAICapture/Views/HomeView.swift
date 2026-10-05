@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// The home page: a greeting, then three lists on a dotted ground —
-/// upcoming calendar events (start a meeting from one), meetings still in
-/// flight on this Mac, and every note, grouped by day. The sidebar's
-/// search and space filter narrow the notes.
+/// The home page, as the web's (Granola-style, no hero): one compact
+/// header row — the serif greeting and the date, a search that opens from
+/// a magnifier, New meeting with a ⋯ for the other ways to start — then
+/// the lists on a dotted ground: upcoming calendar events, meetings still
+/// in flight on this Mac, and every note, grouped by day. The search and
+/// the sidebar's space filter narrow the notes.
 struct HomeView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -13,6 +15,12 @@ struct HomeView: View {
     @State private var pendingTrash: NoteSummary?
     @State private var trashError: String?
     @State private var accessError: String?
+    @State private var searchOpen = false
+    @State private var allCaptures = false
+    @FocusState private var searchFocused: Bool
+
+    /// In-progress captures shown before "Show N more" — the notes come first.
+    private static let capturesShown = 3
 
     init(calendar: CalendarService, google: GoogleCalendarService) {
         self.calendar = calendar
@@ -21,9 +29,12 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Color.clear.frame(height: DS.titlebarInset - 12)
+            VStack(alignment: .leading, spacing: 24) {
+                Color.clear.frame(height: DS.titlebarInset - 24)
                 header
+                if app.isFirstRun {
+                    FirstRunCard()
+                }
                 if case .idle = capture.phase {} else {
                     ActiveCaptureCard()
                         .dsCard(padding: 16, radius: DS.radiusXl)
@@ -32,8 +43,18 @@ struct HomeView: View {
                     ComingUpCard(calendar: calendar, google: google)
                 }
                 if app.selectedSpaceId == nil, !pendingCaptures.isEmpty {
-                    section("Meetings") {
-                        rows(pendingCaptures.map { AnyView(CaptureRow(capture: $0)) })
+                    let shown = allCaptures ? pendingCaptures : Array(pendingCaptures.prefix(Self.capturesShown))
+                    section("In progress", count: pendingCaptures.count) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            rows(shown.map { AnyView(CaptureRow(capture: $0)) })
+                            if pendingCaptures.count > Self.capturesShown {
+                                ShowMoreButton(title: allCaptures
+                                               ? "Show fewer"
+                                               : "Show \(pendingCaptures.count - Self.capturesShown) more") {
+                                    withAnimation(.easeOut(duration: 0.2)) { allCaptures.toggle() }
+                                }
+                            }
+                        }
                     }
                 }
                 // Recordings the server never got. Above the notes on
@@ -49,7 +70,7 @@ struct HomeView: View {
             .padding(.bottom, 60)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
-        .task { await app.refreshNotes(); await app.refreshSpaces(); calendar.refresh(); await google.refresh() }
+        .task { await app.refreshNotes(); await app.refreshRecents(); await app.refreshSpaces(); calendar.refresh(); await google.refresh() }
         .alert("Move this note to the trash?", isPresented: Binding(
             get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }
         )) {
@@ -82,30 +103,125 @@ struct HomeView: View {
 
     // MARK: - Header
 
+    /// One row: the title, then search and the ways to start — kept apart
+    /// (finding a note is not starting one) but on one line, so the notes
+    /// themselves start right under it.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(space?.name ?? greeting)
-                    .font(.dsDisplay(30))
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.dsSerif(30))
+                    .tracking(-0.5)
                     .foregroundStyle(DS.text1)
-                Spacer()
-                if case .idle = capture.phase {
-                    NewMeetingButton(height: 32)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                HStack(spacing: 6) {
+                    if space != nil {
+                        Text("\(app.visibleNotes.count) \(app.visibleNotes.count == 1 ? "note" : "notes")")
+                    } else {
+                        Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                    }
+                    if app.notesLoading {
+                        ProgressView().controlSize(.mini)
+                    }
                 }
+                .font(.ds(12.5))
+                .foregroundStyle(DS.muted)
             }
-            HStack(spacing: 6) {
-                if let space {
-                    Text("\(app.visibleNotes.count) \(app.visibleNotes.count == 1 ? "note" : "notes") in \(space.name)")
-                } else {
-                    Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
+            .layoutPriority(searchShown ? 0 : 1)
+            Spacer(minLength: 8)
+            search
+            if case .idle = capture.phase {
+                HStack(spacing: 4) {
+                    NewMeetingButton(height: 34)
+                    DSMenu(width: 236, items: startItems) {
+                        HomeIconLabel(symbol: "ellipsis")
+                    }
+                    .help("More ways to start")
+                    .accessibilityLabel("More ways to start")
                 }
-                if app.notesLoading {
-                    ProgressView().controlSize(.mini)
-                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Start a note")
             }
-            .font(.dsBody)
-            .foregroundStyle(DS.muted)
         }
+        .frame(minHeight: 44)
+    }
+
+    private var title: String {
+        if let space { return space.name }
+        let name = app.identity?.displayName.trimmingCharacters(in: .whitespaces) ?? ""
+        // "Good afternoon, Volodymyr" — the first word of a real name, never an e-mail.
+        let first = name.contains("@") ? "" : String(name.split(separator: " ").first ?? "")
+        return first.isEmpty ? greeting : "\(greeting), \(first)"
+    }
+
+    private var searchShown: Bool { searchOpen || !app.searchQuery.isEmpty }
+
+    /// The magnifier opens a search capsule that takes the row; Escape or
+    /// an empty field closing it hands the room back to the title.
+    @ViewBuilder
+    private var search: some View {
+        if searchShown {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.dsIcon(12, .medium))
+                    .foregroundStyle(DS.muted)
+                TextField("Search notes", text: $app.searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.ds(13.5))
+                    .foregroundStyle(DS.text1)
+                    .focused($searchFocused)
+                    .onExitCommand { closeSearch() }
+                if !app.searchQuery.isEmpty {
+                    Button { app.searchQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.dsIcon(11.5, .regular))
+                            .foregroundStyle(DS.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(minWidth: 220, maxWidth: 340)
+            .frame(height: 34)
+            .background(Capsule().fill(DS.surface))
+            .overlay(Capsule().strokeBorder(searchFocused ? DS.lineActive : DS.line, lineWidth: DS.hairline))
+            .onChange(of: searchFocused) { _, focused in
+                if !focused, app.searchQuery.isEmpty { searchOpen = false }
+            }
+            .transition(.opacity)
+        } else {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) { searchOpen = true }
+                DispatchQueue.main.async { searchFocused = true }
+            } label: {
+                HomeIconLabel(symbol: "magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .help("Search notes")
+            .accessibilityLabel("Search notes")
+        }
+    }
+
+    private func closeSearch() {
+        app.searchQuery = ""
+        searchFocused = false
+        withAnimation(.easeOut(duration: 0.18)) { searchOpen = false }
+    }
+
+    /// The ⋯ beside New meeting: the other ways to start (as the sidebar's
+    /// caret), then what kind of meeting the next one is (Sprint 34).
+    private func startItems() -> [DSMenuItem] {
+        var items = NewNoteMenu.items(app: app, capture: capture)
+        items.append(.separator)
+        items.append(.header("Kind of meeting"))
+        for type in MeetingType.allCases {
+            items.append(.item(type.label, checked: capture.meetingType == type) {
+                capture.meetingType = type
+            })
+        }
+        return items
     }
 
     private var greeting: String {
@@ -151,6 +267,8 @@ struct HomeView: View {
                 }
             }
         } else if notes.isEmpty {
+            // No card behind it: a home page with no notes keeps the same
+            // dotted ground as a home page with notes, only without rows.
             section("Notes") {
                 VStack(spacing: 6) {
                     Text(emptyTitle)
@@ -165,7 +283,6 @@ struct HomeView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 36)
-                .dsCard(padding: 0, radius: DS.radiusLg)
             }
         } else {
             ForEach(groups(notes), id: \.title) { group in
@@ -211,25 +328,35 @@ struct HomeView: View {
 
     // MARK: - Building blocks
 
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DSLabel(title).padding(.leading, 4)
+    /// A sentence-case label (Claude's "Active"), the count beside it when given.
+    private func section(_ title: String, count: Int? = nil,
+                         @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                DSSectionLabel(title)
+                if let count {
+                    Text("\(count)")
+                        .font(.ds(13))
+                        .foregroundStyle(DS.muted.opacity(0.8))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.leading, 4)
             content()
         }
     }
 
-    /// Rows stacked in one hairline card, divided by hairlines.
+    /// The lists, as Claude's: no card around them — rows on the page,
+    /// divided by a hairline, a soft fill under the one you point at.
     private func rows(_ items: [AnyView]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, row in
                 row
                 if index < items.count - 1 {
-                    DSDivider().padding(.leading, 16)
+                    DSDivider().padding(.horizontal, 12)
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous))
-        .dsCard(padding: 0, radius: DS.radiusLg)
     }
 }
 
@@ -252,7 +379,7 @@ private struct NoteRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(note.title.isEmpty ? "Untitled note" : note.title)
-                            .font(.ds(13.5, .semibold))
+                            .font(.ds(14.5, .medium))
                             .foregroundStyle(DS.text1)
                             .lineLimit(1)
                         if let status = note.status, status != .draft {
@@ -269,8 +396,8 @@ private struct NoteRow: View {
                                 .background(Capsule().fill(DS.surface2))
                         }
                     }
-                    Text(note.snippet.isEmpty ? note.code : note.snippet)
-                        .font(.dsMeta)
+                    Text(note.snippet.isEmpty ? "No summary yet" : note.snippet)
+                        .font(.ds(12.5))
                         .foregroundStyle(DS.muted)
                         .lineLimit(1)
                 }
@@ -281,16 +408,19 @@ private struct NoteRow: View {
                     }
                 }
                 Text(note.updatedAt.formatted(date: .omitted, time: .shortened))
-                    .font(.dsMeta)
+                    .font(.ds(12.5))
                     .foregroundStyle(DS.muted)
                     .monospacedDigit()
                 DSMenu(width: 220, dim: true, items: menuItems)
                     .opacity(hover ? 1 : 0)
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 8)
-            .padding(.vertical, 10)
-            .background(hover ? DS.surfaceHover : .clear)
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                    .fill(hover ? DS.text1.opacity(0.04) : .clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -317,6 +447,7 @@ private struct NoteRow: View {
                 if !access.isWorkspace { run { try await app.setVisibility(noteId: id, workspace: true) } }
             },
             .separator,
+            .header("Public link", hint: access.publicLinkHint),
             .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
                 run {
                     if let url = try await app.publicLink(noteId: id) { copy(url.absoluteString) }
@@ -374,12 +505,17 @@ private struct AccessPill: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: access.symbol)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.dsIcon(10, .semibold))
             Text(access.label)
                 .font(.ds(12, .medium))
                 .lineLimit(1)
+            if access.hasPublicLink {
+                Image(systemName: "globe")
+                    .font(.dsIcon(10, .semibold))
+                    .help("A public link is on")
+            }
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
+                .font(.dsIcon(8, .bold))
                 .opacity(0.75)
         }
         .foregroundStyle(access.isPublic ? DS.accentText : DS.text3)
@@ -408,11 +544,11 @@ private struct CaptureRow: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(capture.title)
-                        .font(.ds(13.5, .semibold))
+                        .font(.ds(14.5, .medium))
                         .foregroundStyle(DS.text1)
                         .lineLimit(1)
                     Text(capture.createdAt.formatted(date: .omitted, time: .shortened))
-                        .font(.dsMeta)
+                        .font(.ds(12.5))
                         .foregroundStyle(DS.muted)
                 }
                 Spacer(minLength: 8)
@@ -429,23 +565,32 @@ private struct CaptureRow: View {
                     EmptyView()
                 }
                 DSMenu(width: 200, dim: true) {
-                    [
+                    var items: [DSMenuItem] = [
                         .item("Copy job ID", symbol: "number") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(capture.jobId, forType: .string)
                         },
-                        .separator,
-                        .item("Remove from list", symbol: "trash", danger: true) {
-                            app.removeRecents(jobIds: [capture.jobId])
-                        },
                     ]
+                    if capture.status == .queued || capture.status == .running {
+                        items.append(.item("Cancel transcription", symbol: "xmark.circle", danger: true) {
+                            Task { await app.cancelCapture(jobId: capture.jobId) }
+                        })
+                    }
+                    items.append(.separator)
+                    items.append(.item("Remove from list", symbol: "trash", danger: true) {
+                        app.removeRecents(jobIds: [capture.jobId])
+                    })
+                    return items
                 }
                 .opacity(hover ? 1 : 0)
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 8)
-            .padding(.vertical, 10)
-            .background(hover ? DS.surfaceHover : .clear)
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                    .fill(hover ? DS.text1.opacity(0.04) : .clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -474,7 +619,7 @@ private struct ComingUpCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                DSLabel("Coming up").padding(.leading, 4)
+                DSSectionLabel("Coming up").padding(.leading, 4)
                 Spacer()
                 if google.loading, google.isConnected {
                     ProgressView().controlSize(.mini)
@@ -492,7 +637,8 @@ private struct ComingUpCard: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(16)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
             .dsCard(padding: 0, radius: DS.radiusXl)
         }
         .alert(Text(pendingDisconnect?.isLink == true ? "Remove this calendar link?" : "Disconnect this Google account?"),
@@ -519,7 +665,7 @@ private struct ComingUpCard: View {
         let now = Date()
         return HStack(alignment: .top, spacing: 10) {
             Text(now.formatted(.dateTime.day()))
-                .font(.dsDisplay(34, .medium))
+                .font(.dsSerif(34))
                 .foregroundStyle(DS.text1)
                 .monospacedDigit()
             VStack(alignment: .leading, spacing: 2) {
@@ -540,76 +686,64 @@ private struct ComingUpCard: View {
     @ViewBuilder
     private var content: some View {
         if !anySource {
-            dashed {
-                VStack(spacing: 10) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(DS.muted)
-                    Text("See your next meetings here and start a note from one.")
-                        .font(.dsBody)
-                        .foregroundStyle(DS.muted)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 320)
-                    HStack(spacing: 8) {
-                        if google.available != false {
-                            Button(google.connecting ? "Opening Google…" : "Connect Google Calendar") {
-                                Task { await google.connect() }
-                            }
-                            .buttonStyle(DSButtonStyle(kind: .primary, size: 12.5, height: 30))
-                            .disabled(google.connecting)
+            emptyLine {
+                Text("See your next meetings here and start a note from one.")
+                    .font(.dsBody)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if google.available != false {
+                        Button(google.connecting ? "Opening Google…" : "Connect Google Calendar") {
+                            Task { await google.connect() }
                         }
-                        if google.linkAvailable {
-                            Button("Add calendar link") { addingLink = true }
-                                .buttonStyle(DSButtonStyle(kind: google.available == false ? .primary : .secondary,
-                                                           size: 12.5, height: 30))
-                        }
-                        if calendar.access == .notAsked {
-                            Button("Use this Mac's calendars") { Task { await calendar.requestAccess() } }
-                                .buttonStyle(DSButtonStyle(kind: .secondary, size: 12.5, height: 30))
-                        }
+                        .buttonStyle(DSButtonStyle(kind: .primary, size: 12.5, height: 28))
+                        .disabled(google.connecting)
                     }
-                    if let error = google.error {
-                        Text(error)
-                            .font(.dsMeta)
-                            .foregroundStyle(DS.dangerText)
-                            .multilineTextAlignment(.center)
+                    if google.linkAvailable {
+                        Button("Add calendar link") { addingLink = true }
+                            .buttonStyle(DSButtonStyle(kind: google.available == false ? .primary : .secondary,
+                                                       size: 12.5, height: 28))
                     }
+                    if calendar.access == .notAsked {
+                        Button("Use this Mac's calendars") { Task { await calendar.requestAccess() } }
+                            .buttonStyle(DSButtonStyle(kind: .secondary, size: 12.5, height: 28))
+                    }
+                }
+                if let error = google.error {
+                    Text(error)
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.dangerText)
                 }
             }
         } else if items.isEmpty {
-            dashed {
-                VStack(spacing: 10) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(DS.muted)
-                    Text(google.loading && google.events.isEmpty ? "Loading…" : "No upcoming events")
-                        .font(.dsBody)
-                        .foregroundStyle(DS.muted)
-                }
+            emptyLine {
+                Text(google.loading && google.events.isEmpty ? "Loading…" : "No upcoming events")
+                    .font(.dsBody)
+                    .foregroundStyle(DS.muted)
             }
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     ComingUpRow(item: item)
                     if index < items.count - 1 {
-                        DSDivider().padding(.leading, 16)
+                        DSDivider()
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous))
-            .dsCard(padding: 0, radius: DS.radiusLg)
         }
     }
 
-    private func dashed(@ViewBuilder _ inner: () -> some View) -> some View {
-        inner()
-            .frame(maxWidth: .infinity, minHeight: 150)
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: DS.radiusLg, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
-                    .foregroundStyle(DS.line)
-            )
+    /// A line, not a box: the day column already frames it (Granola's
+    /// "No events today"), so the card stays one row tall.
+    private func emptyLine(@ViewBuilder _ inner: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            inner()
+        }
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(DS.line).frame(width: 3)
+        }
     }
 
     private func problemRow(_ problem: CalendarProblem) -> some View {
@@ -691,8 +825,8 @@ private struct ComingUpRow: View {
                     .foregroundStyle(item.isLive ? DS.accentText : DS.text3)
                     .monospacedDigit()
             }
-            .frame(width: 96, alignment: .leading)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .frame(width: 124, alignment: .leading)
+            Capsule()
                 .fill(item.color ?? DS.accent)
                 .frame(width: 3, height: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -720,7 +854,8 @@ private struct ComingUpRow: View {
                 }
                 if !capture.isRecording, !capture.phase.isBusy {
                     Button {
-                        capture.startNew(title: item.title)
+                        capture.startNew(title: item.title, context: item.captureContext,
+                                         calendar: item.meetingCalendar)
                     } label: {
                         Label("Start", systemImage: "mic.fill")
                     }
@@ -729,9 +864,7 @@ private struct ComingUpRow: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(hover ? DS.surfaceHover : .clear)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
     }
@@ -747,5 +880,78 @@ private struct ComingUpRow: View {
         let start = item.start.formatted(date: .omitted, time: .shortened)
         let end = item.end.formatted(date: .omitted, time: .shortened)
         return "\(start) – \(end)"
+    }
+}
+
+/// "Show 2 more" under a shortened list (`.home-list-more`).
+private struct ShowMoreButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.ds(12.5))
+                .foregroundStyle(hover ? DS.text1 : DS.text3)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                        .fill(hover ? DS.sidebarHover : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .padding(.leading, 4)
+    }
+}
+
+/// A 34 pt square icon on the home header — the magnifier and the ⋯.
+private struct HomeIconLabel: View {
+    let symbol: String
+    @State private var hover = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.dsIcon(13.5, .medium))
+            .foregroundStyle(hover ? DS.text1 : DS.text3)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                    .fill(hover ? DS.surface2 : .clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { hover = $0 }
+    }
+}
+
+/// Sprint 21: the one thing a brand-new workspace should do first.
+/// Shown once per device; `AppState.dismissFirstRun` remembers.
+struct FirstRunCard: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "mic.fill")
+                .foregroundStyle(DS.accent)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Record your first meeting")
+                    .font(.ds(15, .semibold))
+                    .foregroundStyle(DS.text1)
+                Text("Your notes will be ready to share in minutes.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Got it") { app.dismissFirstRun() }
+                .buttonStyle(.plain)
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+        }
+        .dsCard()
     }
 }

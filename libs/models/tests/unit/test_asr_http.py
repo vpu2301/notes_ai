@@ -194,3 +194,75 @@ async def test_warming_beyond_budget_surfaces_as_warming() -> None:
     with pytest.raises(ProviderError) as exc:
         await p.transcribe(np.zeros(1600, dtype=np.float32), language="en", prompt=None)
     assert exc.value.kind is ErrorKind.WARMING and exc.value.retryable
+
+
+def test_whisper_cpp_subword_tokens_become_words() -> None:
+    """Sprint TQ2: whisper.cpp's word list is decoder tokens; a token with
+    no leading space continues the word before it."""
+    body = {
+        "language": "de",
+        "segments": [
+            {
+                "text": " im Nahen Osten.",
+                "start": 0.0,
+                "end": 1.2,
+                "words": [
+                    {"word": " im", "start": 0.0, "end": 0.2, "probability": 0.9},
+                    {"word": " Nah", "start": 0.2, "end": 0.4, "probability": 0.8},
+                    {"word": "en", "start": 0.4, "end": 0.5, "probability": 0.95},
+                    {"word": " O", "start": 0.6, "end": 0.7, "probability": 0.7},
+                    {"word": "sten", "start": 0.7, "end": 1.0, "probability": 0.9},
+                    {"word": ".", "start": 1.0, "end": 1.1, "probability": 0.99},
+                ],
+            }
+        ],
+    }
+    (seg,) = _to_output(
+        body, model="w", requested_language="de", audio_seconds=1.2, infer_seconds=0.1
+    ).segments
+    assert [w.text for w in seg.words] == ["im", "Nahen", "Osten."]
+    assert (seg.words[1].start_ms, seg.words[1].end_ms, seg.words[1].probability) == (200, 500, 0.8)
+
+
+def test_speaches_words_without_spaces_stay_words() -> None:
+    body = {
+        "language": "en",
+        "segments": [{"text": "one two", "start": 0.0, "end": 1.0}],
+        "words": [
+            {"word": "one", "start": 0.0, "end": 0.4, "probability": 0.9},
+            {"word": "two", "start": 0.5, "end": 1.0, "probability": 0.9},
+        ],
+    }
+    (seg,) = _to_output(
+        body, model="w", requested_language="en", audio_seconds=1.0, infer_seconds=0.1
+    ).segments
+    assert [w.text for w in seg.words] == ["one", "two"]
+
+
+def test_a_transducer_reply_is_read_without_its_missing_fields() -> None:
+    """Sprint TQ4: Parakeet (deploy/asr-server) names no language and sends
+    no segment-quality numbers. Recorded from the server, 2026-10-01."""
+    body = cassette("parakeet_verbose.json")
+    out = _to_output(
+        body, model="parakeet", requested_language="auto", audio_seconds=30.0, infer_seconds=1.0
+    )
+    assert out.language_detected is False, "a fallback language is not a detected one"
+    assert out.segments and all(seg.words for seg in out.segments)
+    words = [w for seg in out.segments for w in seg.words]
+    assert all(a.start_ms <= b.start_ms for a, b in zip(words, words[1:], strict=False))
+    assert all(
+        (d.no_speech_prob, d.avg_logprob, d.compression_ratio) == (None, None, None)
+        for d in out.diagnostics.segments
+    )
+    assert "word_probability" not in out.diagnostics.gate_unavailable
+
+
+def test_words_without_probabilities_are_counted_for_the_gates() -> None:
+    body = cassette("parakeet_verbose.json")
+    for w in body["words"]:
+        w.pop("probability", None)
+    out = _to_output(
+        body, model="parakeet", requested_language="en", audio_seconds=30.0, infer_seconds=1.0
+    )
+    assert out.diagnostics.gate_unavailable["word_probability"] == len(body["words"])
+    assert out.language_detected is False and out.language == "en"

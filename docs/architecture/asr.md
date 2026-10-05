@@ -111,6 +111,119 @@ Consumer (asr-worker):
 | Worker: storage put    | S3 put of transcript fails    | Mark failed; XACK; alert                |
 | Worker: ack            | Crashed before XACK           | XAUTOCLAIM reclaims → next consumer      |
 | Worker: ack            | Reclaimed > 3 times           | Move to DLQ; ops investigates           |
+| Worker: diarizer (in-process) | Engine cannot load     | Mark failed, `diarization_unavailable` (retryable) |
+| Worker: diarizer (endpoint)   | Endpoint down / refuses | **Transcript completes without speakers**; `diarization_status='failed'`; the clients offer a re-run (ADR-0052) |
+
+## Where diarization runs (ADR-0052)
+
+The worker calls one `Diarizer` (`libs/diarization/protocol.py`); which
+one is configuration, and the word-level attribution never knows:
+
+```
+asr-worker ── MDX_DIAR_ENGINE ──┬─ legacy    LegacyEcapaDiarizer  (in-process, CPU)
+                                ├─ pyannote  PyannoteDiarizer     (in-process; needs a GPU to fit the budget)
+                                └─ http      HttpDiarizer ──HTTP──▶ deploy/diar-server (GPU endpoint)
+                                                                     └─ the same PyannoteDiarizer
+```
+
+`http` is what ships: community-1 costs 0.64–0.85 × audio on four CPU threads
+against a 0.25 budget. Over that hop go the audio (lossless, in memory
+only), the speaker-count hints and the roster policy; back come labelled
+spans and counts. Never over it: tenant, job, user, filename, transcript
+text — or a speaker embedding, which has no field in the payload.
+
+Because the engine is now a remote dependency, its outage is handled
+like one: the transcript completes, the row says the labelling failed,
+and the user is offered a re-run. That asymmetry (loud in-process,
+forgiving remote) is deliberate — see the failure table above.
+
+## Speaker edits — fold order and index space (Sprint 28–30)
+
+The stored transcript artifact is never rewritten. Speaker corrections are
+rows in `transcription_speaker_edits`, folded onto the segments at every
+read (`asr_service/domain/speaker_edits.py`):
+
+- **Scope.** An edit belongs to one diarization revision (`result_rev` =
+  `transcription_jobs.diarization_rev`). A re-run or an undo of a re-run
+  bumps the revision and leaves older edits inert. `POST …/speakers/reassign`
+  takes the client's `result_rev` and answers 409 `stale_result_rev` when
+  it is not current — indices mean nothing across revisions.
+- **Order.** Live edits apply in `seq` order only, so the fold is
+  deterministic and independent of read time. A `merge` relabels every
+  segment currently carrying `from_label` — including segments an earlier
+  reassign moved there. A `reassign` relabels the segments it names to
+  `to_label` (`NULL` = unattributed); a later merge of that label carries
+  them along. The route resolves `to_label` through preceding merges, so a
+  reassign always targets a surviving label; `"new"` allocates
+  `SPEAKER_{max label ever seen + 1}` (`creates_label`), 8 live at most.
+- **Index space.** `segment_indices` are indices into the STORED
+  ARTIFACT's segments. The read path may fold a punctuation-only segment
+  into its predecessor (NLP enrichment), so a served segment carries
+  `artifact_indices` (all artifact segments it stands for) and a turn's
+  `segment_indices` is the union of its segments' artifact indices. A
+  reassign of a turn therefore moves exactly the artifact segments behind
+  it, punctuation included. Clients treat the indices as opaque.
+- **Roster.** Folded, then pruned: a label every segment was moved away
+  from leaves the roster, names and stats; a created label joins them.
+  A served segment is labelled by its HOST artifact segment
+  (`artifact_index`); punctuation NLP folded into it follows the host. A
+  segment moved to "Unknown" is `speaker_cleared` and never re-absorbed
+  into a neighbouring turn. Undoing a move to a new speaker drops that
+  label's name; allocation skips every label any edit ever used.
+- **Known gap.** Edit responses (and the 8-speaker check) are built from
+  the artifact without the NLP pass, so a label whose only remaining
+  speech is a voice-command-only segment (NLP renders it empty) still
+  counts there while the read view hides it. Rare; the next read is
+  authoritative.
+- **Uncertain turns.** `turn.uncertain` when a segment overlaps the
+  engine's `overlap_ms` (persisted on the artifact since Sprint 30), when
+  the worker smoothed a word's label, or when an unattributed segment was
+  absorbed into the turn.
+- **Anchors elsewhere** (note evidence, workflow-bridge): use
+  `start_ms`/`end_ms` + artifact `segment_indices`, never a turn's
+  position — reassigns reshape turns.
+
+## A conversation reads clean without a word being touched (Sprint I3 T3)
+
+On top of G0's verbatim serving, nlp-service runs one more stage for a
+conversation (`conversation=true` on the batch request, sent for every
+diarized result): `disfluency` hides non-lexical fillers ("uh", "um", "äh",
+"е"; table in `tests/fixtures/nlp/fillers.json`) and the first copy of an
+immediate repeat ("this is this is"), and capitalises the first visible word
+of each segment. Hidden words stay in `words` with `hidden: true` and their
+timings; `text` is rebuilt from the visible ones; `raw_text` is the decoder's
+own text. The note engine's `normalise_quote` drops the same fillers, so a
+quote taken from the displayed text verifies against the raw one and back.
+Dictation is untouched — there a filler may be the person's own word.
+
+`GET /asr/jobs/{id}/result` also says how much the post-processor shaped the
+view — `enrichment: full | partial | raw` (Sprint I3 T2): `partial` means a
+stage failed on some segment, which then shows its raw text (before I3 that
+segment silently looked un-punctuated); `raw` means nlp-service was down, the
+language has no rules, or the transcript is empty. Counted in
+`mdx_asr_result_enrichment_total{state}`.
+
+## A conversation is served verbatim (Sprint G0 / Summary Engine v2 Q3)
+
+`GET /asr/jobs/{id}/result` runs the transcript through nlp-service on every
+read. For dictation that is the point — "Punkt" is punctuation, "heute" in a
+note should be a date. For a **conversation** it rewrote what people said:
+`DateNormStage` turned "heute" into the server's date and "am Montag …
+gewesen" into the NEXT Monday, and the quotes in a generated note no longer
+matched their own timestamps.
+
+A diarized output (`metadata.diarization` set, or a speaker roster) is now
+sent with `stages_disabled = ["abbreviation", "date_norm",
+"field_extraction", "number_norm", "punctuation", "voice_commands"]` — only
+the confidence spans still run. Every read, diarized or not, passes
+`reference_date = job.queued_at.date()`, so a relative word resolves against
+the day of the recording rather than the day it is read. Dates in a
+conversation are resolved by the note engine as an annotation on a fact
+(`meeting_doc.verify.date_mentions`), never by rewriting the words.
+
+Notes generated before this keep their text; a regenerate reads a fresh
+snapshot and quotes the spoken words. nlp-service down → the raw transcript
+is served, as before.
 
 ## Cross-references
 

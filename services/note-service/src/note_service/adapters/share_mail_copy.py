@@ -140,6 +140,10 @@ _COPY: Final[dict[str, dict[str, str]]] = {
     },
 }
 
+# The legal sender line every mail ends with (the HTML template carries
+# the same line in its footer).
+LEGAL_LINE: Final = "3Days Labs Inc, 2166 Market Street, San Francisco, CA 94114"
+
 # The plain-text alternate. Same order as the HTML, so a recipient whose
 # client shows text/plain reads the same mail in the same sequence.
 _TEXT: Final[dict[str, str]] = {
@@ -155,7 +159,8 @@ _TEXT: Final[dict[str, str]] = {
         "--\n"
         "Shared by {sharer}{sharer_email_suffix}\n"
         "Sent {shared_at}\n"
-        "Notes AI"
+        "Notes AI\n"
+        "{legal}"
     ),
     "de": (
         "{kicker}\n"
@@ -169,7 +174,8 @@ _TEXT: Final[dict[str, str]] = {
         "--\n"
         "Geteilt von {sharer}{sharer_email_suffix}\n"
         "Gesendet {shared_at}\n"
-        "Notes AI"
+        "Notes AI\n"
+        "{legal}"
     ),
     "uk": (
         "{kicker}\n"
@@ -183,7 +189,8 @@ _TEXT: Final[dict[str, str]] = {
         "--\n"
         "Поділився: {sharer}{sharer_email_suffix}\n"
         "Надіслано {shared_at}\n"
-        "Notes AI"
+        "Notes AI\n"
+        "{legal}"
     ),
 }
 
@@ -259,6 +266,7 @@ def text_body(
     else:
         message_block = "\n"
     return _TEXT[lang].format(
+        legal=LEGAL_LINE,
         kicker=resolved["kicker"],
         title=note_title.strip() or resolved["title"],
         message_block=message_block,
@@ -268,3 +276,46 @@ def text_body(
         sharer_email_suffix=f" <{sharer_email}>" if sharer_email else "",
         shared_at=format_datetime(shared_at, lang),
     )
+
+
+# ── Sprint 22: the recipient-link mail's extra facts ─────────────────
+
+_RECIPIENT: Final[dict[str, dict[str, str]]] = {
+    "en": {
+        "issuer_label": "Shared from the workspace of",
+        "expires_label": "This link expires on",
+        "unsubscribe": "Don't want e-mails like this? Unsubscribe",
+    },
+    "de": {
+        "issuer_label": "Geteilt aus dem Workspace von",
+        "expires_label": "Dieser Link läuft ab am",
+        "unsubscribe": "Keine solchen E-Mails mehr? Abmelden",
+    },
+    "uk": {
+        "issuer_label": "Поділився робочий простір",
+        "expires_label": "Посилання дійсне до",
+        "unsubscribe": "Не хочете таких листів? Відписатися",
+    },
+}
+
+
+def recipient_strings(lang: str) -> dict[str, str]:
+    return dict(_RECIPIENT[normalize_lang(lang)])
+
+
+def recipient_text_footer(
+    lang: str, *, issuer_name: str, expires_on: str, brand_line: str, unsubscribe_url: str
+) -> str:
+    """Plain-text lines appended under the share mail; empty when the
+    caller passed nothing (the member/public mail)."""
+    t = recipient_strings(lang)
+    lines: list[str] = []
+    if issuer_name:
+        lines.append(f"{t['issuer_label']} {issuer_name}")
+    if expires_on:
+        lines.append(f"{t['expires_label']} {expires_on}")
+    if brand_line:
+        lines.append(brand_line)
+    if unsubscribe_url:
+        lines.append(f"{t['unsubscribe']}: {unsubscribe_url}")
+    return ("\n\n" + "\n".join(lines)) if lines else ""

@@ -1,4 +1,4 @@
-"""Conflict exceptions raised by domain layer + routed to HTTP 409/422."""
+"""Conflict exception raised by the domain layer + routed to HTTP 409."""
 
 from __future__ import annotations
 
@@ -8,14 +8,3 @@ class OptimisticLockMismatchError(Exception):
         self.current_version = current_version
         self.expected_version = expected_version
         super().__init__(f"expected version {expected_version}, current is {current_version}")
-
-
-class RateLimitExceededError(Exception):
-    def __init__(self, retry_after_seconds: int, detail: str) -> None:
-        self.retry_after_seconds = retry_after_seconds
-        self.detail = detail
-        super().__init__(detail)
-
-
-class NoteNotFoundError(Exception):
-    pass

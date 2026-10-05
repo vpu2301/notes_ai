@@ -60,12 +60,18 @@ final class AppState: ObservableObject {
     @Published private(set) var email: String
     @Published private(set) var authState: AuthState = .restoring
     @Published private(set) var recents: [RecentCapture] = []
+    /// Jobs whose speakers are being re-labelled right now (Sprint 29), as
+    /// an open note follows them. Not persisted: a relaunch forgets, and the
+    /// note says so again when it is opened.
+    @Published private(set) var relabelling: Set<String> = []
     /// The Settings sheet in the main window; the popover's menu sets it too.
     @Published var settingsPresented = false
     /// Which tab the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable, CaseIterable { case general, connectors, account, advanced }
+    enum SettingsTab: Hashable, CaseIterable {
+        case general, vocabulary, connectors, dataAI, billing, account, advanced
+    }
 
     /// Open Settings on the Connectors tab (menus, the home page's prompt).
     func showConnectors() {
@@ -75,6 +81,12 @@ final class AppState: ObservableObject {
     }
     /// What the main window's detail pane shows; nil is the home page.
     @Published var selection: Selection?
+    /// Sprint 23: what the workspace admin allows. Permissive until known,
+    /// so an older server changes nothing.
+    @Published private(set) var sharingRules: SharingConstraints = .permissive
+    /// A note id the menu-bar popover asked to "Share with client…";
+    /// `NoteView` opens the sheet when it shows that note and clears it.
+    @Published var pendingClientShare: String?
 
     /// The sidebar shrunk to an icon rail, persisted like the web app's.
     @Published var sidebarCollapsed: Bool {
@@ -87,6 +99,21 @@ final class AppState: ObservableObject {
 
     /// The "Invite people" sheet in the main window.
     @Published var invitePresented = false
+
+    /// The "New from template…" sheet in the main window.
+    @Published var templatePickerPresented = false
+    /// A sentence about an action from the sidebar that did not work; the
+    /// window shows it once as an alert.
+    @Published var actionNotice: String?
+    /// A note being made by hand (blank or from a template).
+    @Published private(set) var creatingNote = false
+
+    // ── notifications (the bell) ─────────────────────────────────────
+    @Published var unreadNotifications = 0
+    @Published var notificationFeed: [NotificationItem] = []
+    @Published var notificationsLoading = false
+    @Published var notificationsError: String?
+    var notificationTask: Task<Void, Never>?
 
     func showInvite() {
         invitePresented = true
@@ -445,15 +472,42 @@ final class AppState: ObservableObject {
     /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
     /// IDX-B2's to extend), so this is a no-op today and the account screen
     /// falls back to the address the Keychain item carries.
+    /// Sprint 21: true for an account younger than a day that has not
+    /// dismissed the "record your first meeting" card on this device.
+    @Published var isFirstRun = false
+
+    private static let firstRunSeenKey = "notesai.first_run_seen"
+
+    func dismissFirstRun() {
+        isFirstRun = false
+        UserDefaults.standard.set(true, forKey: Self.firstRunSeenKey)
+    }
+
+    private func detectFirstRun(_ identity: IdentitySummary) {
+        guard let created = identity.createdAt,
+              Date().timeIntervalSince(created) < 24 * 3600,
+              !UserDefaults.standard.bool(forKey: Self.firstRunSeenKey) else { return }
+        isFirstRun = true
+    }
+
     private func hydrateIdentity() async {
         guard let response = try? await api.me() else { return }
-        if let identity = response.identity { self.identity = identity }
+        if let identity = response.identity {
+            self.identity = identity
+            detectFirstRun(identity)
+        }
         if let memberships = response.memberships { self.memberships = memberships }
     }
 
     func signOut() async {
+        let signedOut = identityId
         await api.logout()
         clearSignedInState()
+        // Sprint 32: the names the account brought to kept recordings and
+        // the per-job answers go with it; the recordings stay.
+        SignOutCleanup.run(identityId: signedOut)
+        capture.forgetContext()
+        pending.reload()
         signedOutNotice = nil
         authState = .signedOut
     }
@@ -606,6 +660,7 @@ final class AppState: ObservableObject {
 
     /// The note is gone (deleted here or from the note view): forget it.
     func noteDeleted(_ noteId: String) {
+        capture.forgetNote(noteId)
         notes.removeAll { $0.noteId == noteId }
         var list = spaces
         for index in list.indices { list[index].noteIds.removeAll { $0 == noteId } }
@@ -761,21 +816,28 @@ final class AppState: ObservableObject {
 
     // MARK: - Recent captures
 
-    func addRecent(jobId: String, title: String) {
+    func addRecent(jobId: String, title: String, meetingNoteId: String? = nil) {
         recents.insert(
             RecentCapture(jobId: jobId, title: title, createdAt: Date(),
-                          status: .queued, noteId: nil, errorMessage: nil),
+                          status: .queued, noteId: nil, errorMessage: nil,
+                          meetingNoteId: meetingNoteId),
             at: 0)
         if recents.count > 10 { recents = Array(recents.prefix(10)) }
         persistRecents()
     }
 
-    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil) {
+    func updateRecent(jobId: String, status: JobStatus? = nil, noteId: String? = nil, errorMessage: String? = nil,
+                      title: String? = nil) {
         guard let index = recents.firstIndex(where: { $0.jobId == jobId }) else { return }
+        if let title, !title.isEmpty { recents[index].title = title }
         if let status { recents[index].status = status }
         if let noteId { recents[index].noteId = noteId }
         if let errorMessage { recents[index].errorMessage = errorMessage }
         persistRecents()
+    }
+
+    func setRelabelling(jobId: String, _ running: Bool) {
+        if running { relabelling.insert(jobId) } else { relabelling.remove(jobId) }
     }
 
     func removeRecents(jobIds: Set<String>) {
@@ -799,11 +861,45 @@ final class AppState: ObservableObject {
                          status: job.status,
                          errorMessage: job.status == .failed ? job.failureText : nil)
         }
+        await resumeUnfinishedCaptures()
+    }
+
+    /// Captures whose transcript finished while nothing was waiting for it
+    /// — the app was quit or relaunched mid-transcription — are picked up
+    /// where the pipeline stopped: the transcript goes into the meeting
+    /// note, and the row becomes that note instead of "No note yet".
+    private func resumeUnfinishedCaptures() async {
+        for recent in recents where recent.status == .complete && recent.noteId == nil
+            && (recent.errorMessage ?? "").isEmpty {
+            // The capture in front of the user finishes on its own.
+            if recent.jobId == capture.activeJobId, capture.phase.isBusy { continue }
+            if let live = recent.meetingNoteId {
+                do {
+                    try await finishMeeting(noteId: live)
+                    updateRecent(jobId: recent.jobId, noteId: live)
+                } catch APIError.http(status: 404, problem: _) {
+                    // The live note went to the bin: draft a fresh one.
+                    await draftNote(for: recent, open: false)
+                } catch {
+                    // Offline or the service is down: the next refresh tries again.
+                }
+            } else {
+                await draftNote(for: recent, open: false)
+            }
+        }
+    }
+
+    /// Hand a finished transcript to its meeting note — unless the note
+    /// was already written up meanwhile (Generate Summary on the web):
+    /// attaching then would start a second run over the first.
+    private func finishMeeting(noteId: String) async throws {
+        if (try? await api.generation(noteId: noteId)) != nil { return }
+        _ = try await api.attachTranscript(noteId: noteId)
     }
 
     /// Draft the note for a capture whose transcript finished without one
     /// (the app was quit mid-pipeline, or the note request failed).
-    func draftNote(for capture: RecentCapture) async {
+    func draftNote(for capture: RecentCapture, open: Bool = true) async {
         guard capture.status == .complete, capture.noteId == nil,
               !drafting.contains(capture.jobId) else { return }
         drafting.insert(capture.jobId)
@@ -817,13 +913,102 @@ final class AppState: ObservableObject {
             let note = try await api.createNoteFromTranscript(
                 asrJobId: capture.jobId, templateId: templateId, title: capture.title)
             updateRecent(jobId: capture.jobId, noteId: note.id, errorMessage: "")
-            openNote(note.id)
+            if open { openNote(note.id) }
+        } catch APIError.http(status: 409, problem: let problem) where problem?.noteId != nil {
+            // The transcript already has a note — the meeting note it was
+            // bound to at upload, or one drafted from the web. That IS this
+            // capture's note; finish the meeting on it rather than fail.
+            let noteId = problem?.noteId ?? ""
+            try? await finishMeeting(noteId: noteId)
+            updateRecent(jobId: capture.jobId, noteId: noteId, errorMessage: "")
+            if open { openNote(noteId) }
         } catch {
             updateRecent(jobId: capture.jobId, errorMessage: error.localizedDescription)
         }
     }
 
     @Published private(set) var drafting: Set<String> = []
+
+    // MARK: - A note by hand (blank, or from a template)
+
+    /// The template a bare "new note" starts from: meeting notes, English
+    /// first (`web/src/lib/createBlankNote.ts`).
+    nonisolated static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
+        let live = list.filter { !$0.isArchived }
+        return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
+            ?? live.first { $0.code.hasPrefix("meeting_notes") }
+            ?? live.first
+    }
+
+    /// Every template the workspace offers, live ones only.
+    func templates() async throws -> [TemplateSummary] {
+        if templateCache == nil { templateCache = try await api.fetchTemplates() }
+        return (templateCache ?? []).filter { !$0.isArchived }
+    }
+
+    /// A note from the default template, opened at once.
+    func createBlankNote() async {
+        guard !creatingNote else { return }
+        creatingNote = true
+        defer { creatingNote = false }
+        do {
+            guard let template = Self.defaultTemplate(try await templates()) else {
+                actionNotice = "Your workspace has no note templates yet."
+                return
+            }
+            try await create(fromTemplate: template.id)
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
+
+    /// A note from the chosen template, opened at once.
+    func createNote(fromTemplate id: String) async {
+        guard !creatingNote else { return }
+        creatingNote = true
+        defer { creatingNote = false }
+        do {
+            try await create(fromTemplate: id)
+            templatePickerPresented = false
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
+
+    private func create(fromTemplate id: String) async throws {
+        // The full definition, so sections seed from their defaults.
+        let detail = try await api.fetchTemplate(id: id)
+        let created = try await api.createNote(content: detail.blankContent())
+        await refreshNotes()
+        openNote(created.id)
+    }
+
+    /// A recording made elsewhere, sent through the same pipeline as one
+    /// made here. The file is copied first: the pipeline deletes what it
+    /// uploads, and the original is the person's.
+    func uploadRecording() {
+        let panel = NSOpenPanel()
+        panel.title = "Upload a recording"
+        panel.prompt = "Upload"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio, .mpeg4Audio, .mp3, .wav, .aiff, .movie, .mpeg4Movie]
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        capture.upload(fileURL: url)
+        NotificationCenter.default.post(name: .openMainWindow, object: nil)
+    }
+
+    /// Stop a transcription that has not finished. The recents row says
+    /// "Cancelled" at once; the pipeline following the job sees the same.
+    func cancelCapture(jobId: String) async {
+        do {
+            try await api.cancelJob(id: jobId)
+            updateRecent(jobId: jobId, status: .cancelled)
+        } catch {
+            actionNotice = AuthCopy.message(for: error)
+        }
+    }
 
     // MARK: - Opening notes
 
@@ -835,6 +1020,13 @@ final class AppState: ObservableObject {
 
     /// Open a note inside this app. A note that came from one of this
     /// Mac's captures opens as that capture (so the transcript tab is there).
+    /// The fastest post-meeting path: open the note and go straight to
+    /// the per-recipient link sheet.
+    func shareWithClient(noteId: String) {
+        pendingClientShare = noteId
+        openNote(noteId)
+    }
+
     func openNote(_ noteId: String) {
         if let recent = recents.first(where: { $0.noteId == noteId }) {
             selection = .capture(jobId: recent.jobId)
@@ -893,8 +1085,10 @@ final class AppState: ObservableObject {
     /// here. The Mac's job is to get the person to it and to be ready when
     /// they come back.
     var signupURL: URL? {
+        // Sprint 21: `/join` picks signup or the lead form by the server's
+        // config, so the app never has to know which one is on.
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
-            .appending(path: "signup")
+            .appending(path: "join")
     }
 
     func openSignup() {
@@ -912,6 +1106,15 @@ final class AppState: ObservableObject {
     /// Where an invited colleague signs in — the web app's login page.
     var inviteURL: URL? {
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
+    }
+
+    /// Settings › Data & AI in the web app — where the tier and the
+    /// processor acknowledgement are actually changed.
+    func openWebSettingsData() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/data") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func openWebApp() {
@@ -1054,6 +1257,10 @@ extension AppState {
     }
 
     func loadWorkspaceData() async {
+        if let rules = try? await api.sharingConstraints() { sharingRules = rules }
+        // Sprint 34: anything typed while this device was offline goes up
+        // now. Idempotent on the capture id, so a repeat costs one request.
+        await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
         await googleCalendar.refresh(force: true)
@@ -1118,6 +1325,8 @@ extension AppState: PendingUploadsHost {
     var uploadIdentityId: String {
         identityId.isEmpty ? (lastIdentity?.identityId ?? "") : identityId
     }
+
+    var uploadLocalSpeakerName: String? { LocalSpeakerName.normalized(identity?.displayName) }
 
     func workspaceName(_ tenantId: String?) -> String {
         guard let tenantId else { return "that workspace" }
