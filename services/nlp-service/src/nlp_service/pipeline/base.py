@@ -34,6 +34,9 @@ class Word:
     end_s: float
     probability: float
     is_voice_command_token: bool = False
+    # Sprint I3: hidden from the displayed text (a filler, the first copy of
+    # an immediate repeat); the word and its timing stay.
+    hidden: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,13 +101,6 @@ class AbbreviationSnapshot:
     entries: tuple[AbbreviationEntry, ...]
     fingerprint: str
 
-    def for_language(self, language: str) -> list[AbbreviationEntry]:
-        # Tenant overrides FIRST, so the matcher's first-match wins.
-        return sorted(
-            self.entries,
-            key=lambda e: 0 if e.is_tenant_override else 1,
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class ChoiceOption:
@@ -167,6 +163,9 @@ class ProcessingContext:
     # editing operations. Callers normalize (dedupe + sort) before
     # constructing; the value participates in the idempotence cache key.
     stages_disabled: tuple[str, ...] = ()
+    # Sprint I3: a recording of people talking (diarized), not dictation —
+    # the disfluency stage runs only then.
+    conversation: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -84,6 +84,86 @@ backends:
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
+  # ── bake-off candidates (Sprint 37 B-1) ────────────────────────────────
+  # Eval only: `enabled_in_envs: [dev, test]` means the harness can reach
+  # them and no customer workspace ever can, whatever `routing` says. They
+  # exist here rather than in the eval script so that a candidate and the
+  # backend it would become are the SAME object — winning the bake-off is
+  # then a two-line routing change, not a port.
+  #
+  # Each URL points at a scratch HF EU endpoint (or a local server) raised
+  # for the run and torn down after it; `make eval-notes` names the backend.
+  cand_gemma_27b:
+    kind: openai_compat
+    base_url: ${CAND_GEMMA_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_GEMMA_MODEL:-google/gemma-3-27b-it}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_mistral_small:
+    kind: openai_compat
+    base_url: ${CAND_MISTRAL_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_MISTRAL_MODEL:-mistralai/Mistral-Small-3.2-24B-Instruct-2506}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_qwen_32b:
+    kind: openai_compat
+    base_url: ${CAND_QWEN_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_QWEN_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  cand_gptoss_20b:
+    kind: openai_compat
+    base_url: ${CAND_GPTOSS_URL:-}
+    auth: bearer:${HF_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_GPTOSS_MODEL:-openai/gpt-oss-20b}" }
+    structured_output: probe
+    context_window: 65536
+    max_concurrency: 2
+    cold_start_seconds: 300
+    timeout_seconds: 600
+    processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
+
+  # The premium candidate: a frontier model behind an EU-resident,
+  # zero-retention endpoint. Registered `enabled: false` and NAMELESS on
+  # purpose — a processor entry is a disclosure, and the Data page reads
+  # these names. It is filled in, with its real company and region, in the
+  # same PR that selects it (ADR-0058), and only then can a workspace
+  # acknowledge it.
+  cand_frontier_eu:
+    kind: openai_compat
+    enabled: false
+    base_url: ${CAND_FRONTIER_URL:-}
+    auth: bearer:${CAND_FRONTIER_TOKEN:-}
+    enabled_in_envs: [dev, test]
+    models: { chat: "${CAND_FRONTIER_MODEL:-}" }
+    structured_output: json_schema
+    context_window: 131072
+    max_concurrency: 2
+    timeout_seconds: 600
+    processor: { name: "Unselected premium candidate", region: "EU" }
+
   # ── our own EU GPU host (vLLM) — registered, disabled until gate H0 ────
   hosted_eu:
     kind: openai_compat

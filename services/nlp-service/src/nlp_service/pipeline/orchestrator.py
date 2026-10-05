@@ -205,7 +205,7 @@ def idempotence_key(ctx: ProcessingContext, initial: StageInput) -> str:
     """Stable hash over (input, ctx). Pipeline_version + snapshot
     fingerprint are part of the hash so a bump invalidates the cache."""
     doc: dict[str, Any] = {
-        "v": "nlp-cache-v5",  # v5: specialty → category (Notes AI)
+        "v": "nlp-cache-v6",  # v6: conversation flag (Sprint I3)
         "pipeline_version": ctx.pipeline_version,
         "tenant_id": str(ctx.tenant_id),
         "language": ctx.language,
@@ -219,6 +219,7 @@ def idempotence_key(ctx: ProcessingContext, initial: StageInput) -> str:
         # A request with a stage disabled must never share a cache entry
         # with one running the full pipeline.
         "stages_disabled": sorted(ctx.stages_disabled),
+        "conversation": ctx.conversation,
         "snapshot_fingerprint": ctx.abbreviation_snapshot.fingerprint,
         "decimal_separator": ctx.decimal_separator,
         "bp_separator": ctx.bp_separator,

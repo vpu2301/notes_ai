@@ -189,3 +189,70 @@ async def test_cancel_and_unhandled() -> None:
     assert await r.run_one(_job("a")) is JobStatus.CANCELLED
     assert await r.run_one(_job("b")) is JobStatus.QUEUED
     assert q.calls == [("cancel", "cancel requested"), ("fail", ("unhandled", True))]
+
+
+async def test_on_dead_fires_when_the_job_will_not_run_again() -> None:
+    """A probe that never passes must not leave the handler's own state
+    'queued' behind a dead job: the last attempt (and a non-retryable
+    error) settle it through `on_dead`; a retry does not."""
+    told: list[tuple[str, str]] = []
+
+    async def probe(ctx: JobContext) -> None:
+        raise ProviderError(ErrorKind.UNAVAILABLE, "connection refused", backend="dev_mac")
+
+    async def handler(ctx: JobContext) -> None:
+        raise AssertionError("never reached")
+
+    async def on_dead(ctx: JobContext, error_kind: str) -> None:
+        told.append((str(ctx.job.id), error_kind))
+
+    class _Queue(FakeQueue):
+        async def fail(
+            self, job: Job, *, error_kind: str, message: str, retryable: bool, conn: Any = None
+        ) -> JobStatus:  # type: ignore[override]
+            self.calls.append(("fail", (error_kind, retryable)))
+            if not retryable:
+                return JobStatus.FAILED
+            return JobStatus.QUEUED if job.attempts < job.max_attempts else JobStatus.DEAD
+
+    q = _Queue([])
+    r = JobRunner(
+        q, {"understand": HandlerSpec(run=handler, probe=probe, on_dead=on_dead)}, worker_id="w1"
+    )  # type: ignore[arg-type]
+
+    assert await r.run_one(_job(attempts=1)) is JobStatus.QUEUED
+    assert told == []
+    last = _job(attempts=5)
+    assert await r.run_one(last) is JobStatus.DEAD
+    assert told == [(str(last.id), "unavailable")]
+
+
+async def test_on_dead_fires_for_non_retryable_and_unhandled_and_never_raises() -> None:
+    told: list[str] = []
+
+    async def auth(ctx: JobContext) -> None:
+        raise ProviderError(ErrorKind.AUTH, "revoked", backend="hf_eu")
+
+    async def boom(ctx: JobContext) -> None:
+        raise ValueError("bug")
+
+    async def on_dead(ctx: JobContext, error_kind: str) -> None:
+        told.append(error_kind)
+        raise RuntimeError("the hook itself is broken")
+
+    class _Queue(FakeQueue):
+        async def fail(
+            self, job: Job, *, error_kind: str, message: str, retryable: bool, conn: Any = None
+        ) -> JobStatus:  # type: ignore[override]
+            self.calls.append(("fail", (error_kind, retryable)))
+            return JobStatus.DEAD if retryable else JobStatus.FAILED
+
+    q = _Queue([])
+    r = JobRunner(
+        q,
+        {"a": HandlerSpec(run=auth, on_dead=on_dead), "b": HandlerSpec(run=boom, on_dead=on_dead)},
+        worker_id="w1",
+    )  # type: ignore[arg-type]
+    assert await r.run_one(_job("a")) is JobStatus.FAILED
+    assert await r.run_one(_job("b")) is JobStatus.DEAD
+    assert told == ["auth", "unhandled"]

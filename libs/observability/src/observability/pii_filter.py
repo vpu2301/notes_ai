@@ -86,6 +86,13 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "name_candidates",
         "speaker_name_candidates",
         "local_speaker_name",
+        # Sprint 34: what the invite knew and what the author typed in
+        # the room. Both are content on the same footing as a transcript.
+        "attendee_names",
+        "agenda_lines",
+        "calendar_context",
+        "user_notes",
+        "my_notes",
         # Generic body / payload
         "body",
         "payload",

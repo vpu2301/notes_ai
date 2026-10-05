@@ -32,8 +32,8 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
-from typing import Protocol
+from datetime import date, time, timedelta
+from typing import Literal, Protocol
 
 from ..share_metrics import action_items_materialised
 from . import action_items_repository as items_repo
@@ -211,27 +211,117 @@ def _with_default_year(month: int, day: int, year: str | None, anchor: date) -> 
 
 
 def parse_due(text: str | None, *, anchor: date) -> date | None:
-    """A due date from free text, or None. Never raises."""
+    """A due date from free text, or None. Never raises.
+
+    Forward-looking, as a deadline is: weekdays resolve to the next one,
+    an undated day long past means next year. Unchanged since Sprint 33;
+    the engine's direction-aware reading is :func:`parse_when`."""
+    when = _resolve(text, anchor=anchor, direction="future", extended=False)
+    return when.date if when else None
+
+
+# ── dates with a direction (Summary Engine v2, Q3) ───────────────────
+
+Direction = Literal["future", "past", "auto"]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedWhen:
+    """A spoken date expression, resolved against the recording day.
+    An annotation: the words themselves are never rewritten."""
+
+    date: date
+    time: time | None
+    direction: str
+
+
+# Words only the direction-aware reading knows. Kept out of parse_due so
+# its behaviour does not move under the items projection.
+_PAST_RELATIVE: dict[str, int] = {
+    "yesterday": -1, "gestern": -1, "вчора": -1, "учора": -1,
+    "the day before yesterday": -2, "vorgestern": -2, "позавчора": -2,
+    "last week": -7, "letzte woche": -7, "vergangene woche": -7, "letzten woche": -7,
+    "vergangenen woche": -7, "минулого тижня": -7,
+}  # fmt: skip
+_EXTRA_WEEKDAYS: dict[str, int] = {
+    "понеділок": 0, "вівторка": 1, "середи": 2, "четверга": 3, "п'ятниці": 4,
+    "п’ятниці": 4, "суботи": 5, "неділі": 6,
+    "montags": 0, "mittwochs": 2, "freitags": 4,
+}  # fmt: skip
+_MIDNIGHT = re.compile(r"\b(?:mitternacht|midnight|опівночі|північ)\b")
+_CLOCK = re.compile(r"(?<![\d.])(\d{1,2})(?::(\d{2}))?\s*(?:uhr|h\b|o'clock|am\b|pm\b|годин[иі]?)")
+_PM = re.compile(r"\bpm\b")
+
+
+def _clock(s: str) -> time | None:
+    if _MIDNIGHT.search(s):
+        return time(0, 0)
+    m = _CLOCK.search(s)
+    if not m:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+    if _PM.search(s[m.start() : m.end() + 1]) and hour < 12:
+        hour += 12
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour, minute)
+
+
+def parse_when(
+    text: str | None, *, anchor: date, direction: Direction = "future"
+) -> ResolvedWhen | None:
+    """A date expression — and the time, when one was said — resolved
+    against ``anchor`` in ``direction``. ``past``: a weekday is the most
+    recent one BEFORE the anchor ("am Montag … gewesen" on a Tuesday is
+    the day before), "last week" is −7, and an undated day is this year's.
+    ``future`` is parse_due's reading; ``auto`` is ``future``. None when
+    nothing resolves ("Ende des Jahres"). Never raises."""
+    return _resolve(text, anchor=anchor, direction=direction, extended=True)
+
+
+def _resolve(
+    text: str | None, *, anchor: date, direction: Direction, extended: bool
+) -> ResolvedWhen | None:
     if not text:
         return None
+    past = direction == "past"
     s = re.sub(r"\s+", " ", text.strip().lower()).strip(" .,;:!")
-    for phrase, offset in _RELATIVE.items():
+    s = s.replace("’", "'") if extended else s
+    at = _clock(s) if extended else None
+
+    def done(d: date | None) -> ResolvedWhen | None:
+        return ResolvedWhen(d, at, "past" if past else "future") if d else None
+
+    relative = {**_RELATIVE, **_PAST_RELATIVE} if extended else _RELATIVE
+    for phrase, offset in relative.items():
         if s == phrase or s.startswith(phrase + " "):
-            return anchor + timedelta(days=offset)
+            return done(anchor + timedelta(days=offset))
     s = re.sub(r"^(?:on|by|due|until|am|bis|у|в|до|next|наступного|nächsten?)\s+", "", s)
     if m := _ISO.search(s):
-        return _safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        return done(_safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
     if m := _NUMERIC.search(s):
-        return _with_default_year(int(m.group(2)), int(m.group(1)), m.group(3), anchor)
+        return done(_dated(int(m.group(2)), int(m.group(1)), m.group(3), anchor, past))
     if (m := _DAY_MONTH.search(s)) and (month := _month(m.group(2))):
-        return _with_default_year(month, int(m.group(1)), m.group(3), anchor)
+        return done(_dated(month, int(m.group(1)), m.group(3), anchor, past))
     if (m := _MONTH_DAY.search(s)) and (month := _month(m.group(1))):
-        return _with_default_year(month, int(m.group(2)), m.group(3), anchor)
+        return done(_dated(month, int(m.group(2)), m.group(3), anchor, past))
     first = s.split(" ")[0] if s else ""
-    if first in _WEEKDAYS:
-        ahead = (_WEEKDAYS[first] - anchor.weekday()) % 7 or 7
-        return anchor + timedelta(days=ahead)
+    weekdays = {**_WEEKDAYS, **_EXTRA_WEEKDAYS} if extended else _WEEKDAYS
+    if first in weekdays:
+        wd = weekdays[first]
+        if past:
+            back = (anchor.weekday() - wd) % 7 or 7
+            return done(anchor - timedelta(days=back))
+        ahead = (wd - anchor.weekday()) % 7 or 7
+        return done(anchor + timedelta(days=ahead))
     return None
+
+
+def _dated(month: int, day: int, year: str | None, anchor: date, past: bool) -> date | None:
+    """A day and month; the next-year roll is for deadlines only."""
+    if past and not year:
+        return _safe_date(anchor.year, month, day)
+    return _with_default_year(month, day, year, anchor)
 
 
 # ── the seam ─────────────────────────────────────────────────────────

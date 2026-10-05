@@ -43,6 +43,10 @@ class Category(StrEnum):
     # arriving half. `exclude_actor` is irrelevant here — the actor is the
     # reviewer, the audience is the subject, and they are never the same.
     SECURITY_MFA_REMINDER = "security.mfa_reminder"
+    # Sprint 37: this workspace has spent its monthly AI budget and notes
+    # have stopped writing themselves. The admins hear, because they are
+    # the only people who can raise it.
+    AI_BUDGET_REACHED = "ai.budget_reached"
     SYSTEM_DIGEST = "system.digest"
 
 

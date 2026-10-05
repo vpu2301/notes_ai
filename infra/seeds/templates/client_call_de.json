@@ -1,0 +1,138 @@
+{
+  "code": "client_call_de",
+  "name": "Kundengespräch",
+  "language": "de",
+  "specialty": "client",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "user_notes",
+      "name": "Meine Notizen",
+      "voice_aliases": [
+        "meine notizen",
+        "notizblock"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Die eigenen Zeilen der schreibenden Person, während der Besprechung getippt.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Diesen Abschnitt niemals umschreiben, umsortieren, zusammenfassen oder korrigieren. Exakt so wiedergeben, wie er getippt wurde."
+    },
+    {
+      "id": "attendees",
+      "name": "Teilnehmende",
+      "voice_aliases": [
+        "teilnehmende",
+        "teilnehmer",
+        "anwesende"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Wer am Gespräch teilgenommen hat, auf beiden Seiten. Namen, Rollen, Firma.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "Eine Person pro Zeile als 'Name — Rolle, Firma'. Die Kundenseite zuerst."
+    },
+    {
+      "id": "summary",
+      "name": "Zusammenfassung",
+      "voice_aliases": [
+        "zusammenfassung",
+        "überblick"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Worum es ging und wie das Gespräch ausging. Zweck, Ergebnis, Stimmung.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Drei bis fünf Sätze, die eine Kundin ohne Kontext lesen kann. Keine internen Anmerkungen."
+    },
+    {
+      "id": "requests",
+      "name": "Kundenwünsche",
+      "voice_aliases": [
+        "wünsche",
+        "anfragen",
+        "forderungen"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Was die Kundenseite verlangt hat. Wünsche, Beschwerden, Änderungen, Fristen.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "Ein Punkt pro Wunsch, in der Formulierung der Kundenseite. Noch nicht Zugesagtes kennzeichnen."
+    },
+    {
+      "id": "decisions",
+      "name": "Entscheidungen",
+      "voice_aliases": [
+        "entscheidungen",
+        "beschlüsse"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Getroffene Entscheidungen. Zugesagt, abgelehnt, verschoben, Umfang, Preis, Termine.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "Ein Punkt pro Entscheidung: was entschieden wurde und von wem."
+    },
+    {
+      "id": "action_items",
+      "name": "Aufgaben",
+      "voice_aliases": [
+        "aufgaben",
+        "to-dos",
+        "nächste schritte"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Wer macht was bis wann, auf beiden Seiten. Verantwortlich, Aufgabe, Frist.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "Ein Punkt pro Aufgabe als 'Verantwortlich: Aufgabe — Frist'. Unsere Zusagen und die der Kundenseite klar zuordenbar halten."
+    },
+    {
+      "id": "open_questions",
+      "name": "Offene Fragen",
+      "voice_aliases": [
+        "offene fragen",
+        "fragen"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Fragen, die niemand beantwortet hat. Unklarheiten, Blocker.",
+      "min_chars": 0,
+      "order": 6,
+      "synthesis_prompt": "Ein Punkt pro offener Frage, mit der Person, von der die Antwort erwartet wird."
+    },
+    {
+      "id": "risks",
+      "name": "Risiken",
+      "voice_aliases": [
+        "risiken",
+        "bedenken"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Risiken für die Arbeit. Termin-, Budget-, Abhängigkeits-, Ressourcenrisiko.",
+      "min_chars": 0,
+      "order": 7,
+      "synthesis_prompt": "Ein Punkt pro Risiko, mit seiner Auswirkung in wenigen Worten."
+    },
+    {
+      "id": "next_meeting",
+      "name": "Nächster Termin",
+      "voice_aliases": [
+        "nächster termin",
+        "folgetermin"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Wann das nächste Gespräch ist. Datum, Uhrzeit, wer, Thema.",
+      "min_chars": 0,
+      "order": 8,
+      "synthesis_prompt": "Eine Zeile: wann, mit wem, wozu. Leer, wenn nichts vereinbart wurde."
+    }
+  ]
+}

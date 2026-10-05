@@ -74,9 +74,7 @@ async def user_email(conn: asyncpg.Connection, user_id: UUID) -> str | None:
     replaces — a sub outside the connection's tenant now returns nothing
     at all rather than relying on the row simply not existing.
     """
-    row = await conn.fetchrow(
-        "SELECT email FROM profile_of_subs(ARRAY[$1]::uuid[])", user_id
-    )
+    row = await conn.fetchrow("SELECT email FROM profile_of_subs(ARRAY[$1]::uuid[])", user_id)
     if row is None:
         return None
     email: str = row["email"]

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToasterProvider } from "../src/components/Toaster";
@@ -28,6 +28,12 @@ function memoryStorage(): Storage {
     removeItem: (k) => void m.delete(k),
     setItem: (k, v) => void m.set(k, String(v)),
   };
+}
+
+/** The "People" segment. Sprint 34 put a meeting-type "Auto" chip on the
+ *  same page, so these queries are scoped to the group. */
+function people() {
+  return within(screen.getByRole("group", { name: "People in the meeting" }));
 }
 
 function renderPage() {
@@ -60,28 +66,28 @@ describe("capture: how many people", () => {
 
   it("defaults to Auto and sends no hint", async () => {
     const container = renderPage();
-    expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+    expect(people().getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
     expect((await upload(container)).speakersExpected).toBeUndefined();
   });
 
   it("sends an exact number", async () => {
     const container = renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "3" }));
+    fireEvent.click(people().getByRole("button", { name: "3" }));
     const params = await upload(container);
     expect(params.speakersExpected).toBe(3);
   });
 
   it("sends no hint for 6+", async () => {
     const container = renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "6+" }));
+    fireEvent.click(people().getByRole("button", { name: "6+" }));
     expect((await upload(container)).speakersExpected).toBeUndefined();
   });
 
   it("is off, and sends nothing, when speakers are not told apart", async () => {
     const container = renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    fireEvent.click(people().getByRole("button", { name: "2" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Tell speakers apart" }));
-    expect(screen.getByRole("button", { name: "2" })).toBeDisabled();
+    expect(people().getByRole("button", { name: "2" })).toBeDisabled();
     const params = await upload(container);
     expect(params.diarize).toBe(false);
     expect(params.speakersExpected).toBeUndefined();

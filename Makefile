@@ -1,4 +1,4 @@
-.PHONY: smoke-ios test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers test-integration-db run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: smoke-ios eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -76,11 +76,23 @@ doctor: ## Diagnose local environment issues
 
 ##@ Models (DEP-S0 — libs/models, config/models.yaml)
 
-dev-model: ## Start/verify the model servers on this Mac: `make dev-model` (start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
+dev-model: $(if $(ARGS),,dev-up) ## Start the docker stack + model servers on this Mac: `make dev-model` (dev-up+start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
 	@bash scripts/dev/dev-model.sh $(ARGS)
 
 eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
 	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
+
+eval-notes: ## Gold-set eval of the document engine: `make eval-notes BACKEND=dev_mac [ARM=pipeline|single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>]`
+	uv run --project services/note-service --with pyyaml python scripts/eval/notes_eval.py \
+	    --backend $(BACKEND) --arm $(or $(ARM),pipeline) --runs $(or $(RUNS),1) \
+	    $(if $(CORPUS),--corpus $(CORPUS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save-notes $(SAVE),)
+
+eval-notes-assert: ## Regression checklists (r01 = the 2026-09-22 audit, m06 = its synthetic twin): `make eval-notes-assert BACKEND=dev_mac [CORPUS=eval/notes/v2]`
+	uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py \
+	    --backend $(or $(BACKEND),dev_mac) $(if $(CORPUS),--corpus $(CORPUS),)
+
+eval-notes-validate: ## Check a notes gold corpus against gold format v2: `make eval-notes-validate [CORPUS=eval/notes/v2]`
+	uv run --project services/note-service python scripts/eval/notes_gold.py $(or $(CORPUS),tests/fixtures/eval/notes)
 
 test-egress: ## Prove the worker egress allowlist: example.com/huggingface.co/otel.pyannote.ai blocked, model endpoints reachable, diarized job completes (needs staging/compose up)
 	RUN_EGRESS_TEST=1 uv run pytest tests/integration/test_worker_egress.py -v
@@ -348,6 +360,9 @@ nightly-verify: ## Run the audit-chain nightly verifier once and emit Prom textf
 weekly-speakers: ## Weekly speaker-quality CSV (reports/speakers-YYYY-WW.csv) as the read-only funnel_reader role
 	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_speakers.py
 
+weekly-notes: ## Weekly notes-quality CSV (reports/notes-quality-YYYY-WW.csv) with kill thresholds, as funnel_reader
+	DATABASE_URL=$${DATABASE_URL:-postgresql://funnel_reader:funnel_reader@localhost:5432/notes} uv run python scripts/jobs/weekly_notes_quality.py
+
 test-integration-db: ## All integration tests against the live dev DB (needs migrate-up)
 	RUN_DB_INTEGRATION=1 uv run --project libs/db pytest libs/db/tests/integration/ -v
 	RUN_DB_INTEGRATION=1 uv run --project libs/audit pytest libs/audit/tests/integration/ -v
@@ -356,7 +371,10 @@ test-integration-db: ## All integration tests against the live dev DB (needs mig
 
 ci: lint typecheck test security lint-imports check-no-os-environ check-no-direct-asyncpg check-audit-insert check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-no-vendor-import check-k8s-rendered check-notification-pii-free validate-templates check-alert-rules check-metric-names ## Mirror CI gates locally
 
-ci-with-db: ci check-rls check-identity-bridge openapi-check ## Full CI mirror — needs `make dev-up && make migrate-up`
+test-isolation: ## Two-workspace isolation suite (I1): hint, job, echoed transcript, id routes, search, Redis, objects, logs, eval — needs `make dev-up && make migrate-up`
+	RUN_DB_INTEGRATION=1 uv run pytest tests/integration/test_two_tenant_isolation.py -v
+
+ci-with-db: ci check-rls check-identity-bridge openapi-check test-isolation ## Full CI mirror — needs `make dev-up && make migrate-up`
 
 pre-commit-install: ## Install the pre-commit hook into git
 	@command -v pre-commit >/dev/null || (echo "Install pre-commit: pip install pre-commit"; exit 1)

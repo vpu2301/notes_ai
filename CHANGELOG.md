@@ -1,5 +1,251 @@
 # Changelog
 
+## Unreleased — A live meeting note writes itself too
+
+### Added
+- **Transcript parity items (Sprint I3 T2–T4)** (nlp-service, asr-service, note-service, web): a
+  conversation's displayed transcript hides fillers and immediate repeats and capitalises each
+  segment's first word, with every word and its timing kept (`words[].hidden`, `raw_text`
+  untouched) and quotes verifying against both texts; the result view says how much the
+  post-processor shaped it (`enrichment: full | partial | raw`, `mdx_asr_result_enrichment_total`)
+  and a segment whose stage failed shows its raw text; a web recording can carry the microphone
+  and the tab's audio as two channels (`channel_layout=mic_system`, `local_speaker_name`), so the
+  author's voice is a separate speaker, with a mono fallback when the browser offers no tab audio
+  or the server refuses the layout.
+- **Nothing enters a transcript that was not said (Sprint I2)** (asr-worker, asr-service,
+  note-service, Mac, iPhone, web; migrations 0061 + 0062, ADR-0061): a glossary term is
+  vocabulary only if it is a name or a term — a role label ("Moderator II", "speaker
+  background") is refused with `term_not_vocabulary`, a stored one is no longer sent and the
+  glossary page says so; the exact hint a job was given is stored on the job and served to its
+  workspace (`GET /asr/jobs/{id}.vocabulary_hint`); words the decoder copied from its prompt are
+  removed by a lexical guard on every backend (runs of ≥ 3 prompt words at a segment start or
+  after a pause), recorded in the result's `diagnostics.prompt_echo` and counted
+  (`AsrPromptEchoRate` alert); a passage in another language is decoded in that language,
+  labelled `language` on its segment and turn, never translated, kept raw by the post-processor,
+  and excluded by the note engine as confirmed `other_language` (the Transcript tab tags it and
+  leaves it out of "copy as text" by default); batch chunks no longer condition on previous text
+  (`MDX_ASR_CONDITION_PREV`, default off). The "Remember this?" offer names the consequence and
+  never fires for a role label; the glossary page shows what the transcriber is told. T7
+  (`docs/eval/asr-echo-2026-09-25.md`): the shipped configuration keeps conditioning on (off made
+  conversation chunks lower-case run-ons) and the guard is term-aware after it removed a product
+  name the presenter said; the incident recording re-transcribed carries none of the seven names.
+- **Isolation audit (Sprint I1)** (`docs/security/2026-09-25-isolation-audit.md`): the names that
+  appeared in the 2026-09-25 transcript came from the same workspace's own glossary (7 terms, 7
+  audit events, the transcript's echo in the hint's exact order); no path was found by which one
+  workspace's words, audio, prompts, caches or jobs reach another's (no P0). A permanent
+  two-workspace suite, `make test-isolation` (in `make ci-with-db`), runs auth, note and asr
+  in process plus the worker with an engine that echoes its prompt, and proves B's hint, job,
+  transcript, search, id routes (every note/job route of the OpenAPI dumps), Redis keys, object
+  keys, logs and eval report carry nothing of A's. Twelve P1 findings for I2 — among them the
+  plaintext hint kept in the `asr:jobs` stream, `jobs_claim_fair` executable by every database
+  role, `funnel_reader` reading note titles and comments, model output in exception logs, and two
+  native paths that file one workspace's recording or offline note into another.
+- **Summary Engine v2 — Q1, measure first** (`note-service`, `scripts/eval`): the notes eval
+  finally measures the engine. Until now the harness sent `turns[].text` and the engine reads
+  `turns[].paragraphs`, so the pipeline arm only ever scored an empty transcript; it now sends the
+  result view the worker snapshots (names, recording date, name candidates, the template's
+  sections) and exits 2 when a non-empty transcript yields no windows. New: every metric of the
+  2026-09-22 audit (`scripts/eval/notes_scoring.py` — unsupported lines, invented claims,
+  prompt-example echo, coverage by third, excluded speech, recording type, redundancy, entities,
+  hedges, attribution), gold format v2 with a validator (`make eval-notes-validate`), three
+  synthetic fixtures (a German news podcast shaped like the audited episode, a Ukrainian lecture,
+  an English one-on-one), regression checklists (`make eval-notes-assert`; r01 = the audit), an
+  eval-only model-judge column (`--judge`), `compare_notes.py` and a nightly workflow. Every
+  written line now carries its kind and the fact ids it rests on (`RenderedSection.lines`; text
+  unchanged, byte for byte). Every prompt example is now about an invented board-game company,
+  and a line or fact that copies one is dropped: the "Der Start im November bleibt das Ziel"
+  sentence was the German summary prompt's own example, not another workspace's recording
+  (`docs/security/2026-09-22-november-sentence.md`). `PROMPT_VERSION` is `2026-10-6`.
+- **Summary Engine v2 — Q2, nothing real dropped, nothing unsupported written** (`note-service`):
+  a monologue's pieces get their own line numbers, so one "noise" flag no longer silences a whole
+  story; the model's noise flags are confirmed by code (short and empty, provably another
+  language, or a duplicate) and capped at 2 % of the speech; a window's fact budget follows its
+  density (8–24); a fact whose text does not mean what its quote says is dropped (actions,
+  decisions, numbers) or flagged; every summary sentence, topic bullet and framing sentence must
+  be supported by the facts it cites (`meeting_doc/support.py`, shared with the eval), with one
+  strict retry and a code-only key-fact overview when the model will not stay on its facts.
+  `GET /v1/notes/{id}/generation` gains `excluded_ranges` and `coverage` (older generations: `[]`
+  / `null`). New metrics and two alerts (`NoteGenerationNoiseOverridden`,
+  `NoteGenerationUnsupportedLines`); `mdx_note_generations_total` is now actually recorded, so
+  `NoteGenerationFailureRate` can fire. `PROMPT_VERSION` is `2026-10-7`.
+- **Summary Engine v2 — Q3, the document fits the recording** (`asr-service`, `note-service`, web;
+  migration 0058): a conversation's transcript is served verbatim — diarized results skip
+  nlp-service's rewriting stages and relative words resolve against the recording day (Sprint G0),
+  so "heute" stays "heute". Before extraction, a recording on the generic template is classified
+  (one small call plus code rules; the author's meeting type or a specific template always wins)
+  into meeting, client/sales call, interview, one-on-one, podcast/broadcast, lecture/webinar or
+  voice memo, and a broadcast or memo is extracted without decisions or tasks
+  (`Family.excluded_kinds`). The render writes each fact once: no key-fact block above topics, no
+  bullet that repeats a summary sentence or another topic, no single-bullet topic, topics in the
+  recording's order. The "Hinweis zum Transkript" paragraph (drawn on the web as a speaker called
+  "HT") is gone: the web shows "Not included: 00:45–00:52 (background speech)" under the status,
+  each range opening the transcript there, and the note's type pill says "Podcast / broadcast"
+  instead of "Meeting notes" when that is what it was. Spoken dates are resolved in the tense they
+  were said in ("am Montag … gewesen" → the Monday before) as an annotation on each fact; the
+  words are never rewritten. `GET …/generation` gains `recording_type`, `recording_type_source`
+  and `language`. `PROMPT_VERSION` is `2026-10-9`.
+- **Summary Engine v2 — Q4, names, attribution, coverage** (`note-service`): names the workspace
+  knows come out right in the note — the calendar's attendees, the roster, the ASR's name
+  candidates and the workspace glossary (`heard_as`) now reach the engine, and a misheard name is
+  respelled in the line (never in the quote; the fact records the correction). Names nobody knows
+  go to the model once per generation, names and subject only, accepted only close to what was
+  heard and never onto another participant; a far proposal leaves the spelling with "(?)"
+  (`MDX_NOTE_ENTITY_MODEL_TIER`, **off by default**: 0/8 precision on the stack model, gate 0.9). Every opinion, forecast, estimate, proposal or
+  allegation carries who holds it (`attributed_to`, verified like an owner; a speaker's own view is
+  theirs; a quoted clip gets none): records end "— laut Reinbold" / "(Vorschlag: Söder)" and get
+  "Voraussichtlich:" / "Schätzung:" when they carried no hedge, all in code; a summary sentence
+  that drops the holder or the hedge is not written. Facts with a number, a date or a person are
+  kept in their nearest topic whatever the model wrote about; two topics over the same stretch of
+  the recording are merged. Blind pairwise rating tooling (`scripts/eval/notes_pairs.py`).
+  The never-called `glossary.canonical_owner` is removed. A window whose facts carry line numbers instead of quotes is asked once more. `PROMPT_VERSION` is `2026-10-11`.
+- **Summary Engine v2 — Q5, every line traceable** (`note-service`, web; migration 0059): every
+  written line of a generated note — summary sentences, the framing, topic bullets, key dates,
+  items — is a row with the evidence of what it cites, keyed the way the corrections routes key a
+  line. On the web, each such line opens its words, when and by whom they were said, and plays the
+  recording around them; a forecast, estimate, opinion, proposal or allegation carries a chip with
+  whose it is; a respelled name shows what was heard. A "Termine & Fristen" / "Key dates" block
+  lists what the recording scheduled or set a deadline for, each with a calendar file
+  (`GET /v1/notes/{id}/dates/{key}.ics`). Short / Standard / Detailed is a view over the same rows,
+  never a new version. A "Names in this note" panel lets the author accept a respelled name (it
+  becomes a glossary term, so the next generation spells it that way) or reject it (the line goes
+  back to what was heard). `GET …/generated-items?generation=current` and the new row fields are
+  additive. Nothing of this reaches the shared page, the client version or the PDF.
+- **Summary Engine v2 — Q6, reconciled with note titles** (`note-service`): one title mechanism
+  (ADR-0059's `title_source`; the engine never writes a title) with the engine's two guards — a
+  suggested title that copies a prompt example or names something the transcript never says is
+  not written (`note_title.skipped`, reason `example` / `unsupported`); one noise policy
+  (ADR-0059's "never most of the window" is now a `confirm_noise` rule, counted as advisory);
+  the job classifies, then names, then extracts; the title prompt joins the pinned prompt
+  fingerprint. `PROMPT_VERSION` is `2026-10-12`. Migrations stay 0057 (title source), 0058
+  (recording types), 0059 (generated lines); the next free number is 0060.
+- **Summary Engine v2 — Q6, closure** (Mac, iPhone, CI, ops; migration 0060, ADR-0060): the Mac
+  and iPhone show what the API already returns — the recording type under the generation status
+  ("Podcast / broadcast", none for a meeting) and "Not included: 00:45–00:52 (background speech)"
+  for up to four passages, each seeking the transcript. A `notes-engine` CI job runs the engine,
+  the eval scorers, the gold-format validator and the m06/m09/m10 checklists against the scripted
+  provider on PRs that touch the engine (`notes_assert.py --backend scripted` gates only what the
+  engine guarantees without a model). A weekly notes-quality report (`make weekly-notes`,
+  CronJob `mdx-weekly-notes`) prints kept-line, dismiss, regenerate and share-without-edit rates
+  next to the concept's kill thresholds, as `funnel_reader`: migration 0060 grants it metadata
+  columns only and three count-only functions for the two text comparisons. The model entity
+  tier is on in staging and off in production (ADR-0060). Closure gates on the synthetic set
+  (`docs/eval/notes-v2-closure-2026-09.md`): faithfulness passes, recall/coverage/recording type/
+  hedges do not, so per the stop rule nothing is deployed until `eval/notes/v2` passes.
+- **A meeting note names itself** (`note-service`, Mac, iPhone; ADR-0059, migration 0057): a
+  recording's placeholder title ("Meeting notes — 2026-09-22") is replaced, once, with a 3–8 word
+  title in the spoken language, taken from across the whole transcript by the `note.generate` job
+  before it writes the document. `notes.title_source` (`default` / `ai` / `user`) records where a
+  title came from; any rename from any client sets `user`, and only `default` is ever replaced,
+  checked again under the row lock at write time. Too little speech keeps the placeholder; a
+  failed call changes nothing. Older notes are left alone. The Mac and iPhone no longer send their
+  own "Meeting <date>" as a title, and pick up the server's title in their recents.
+- **Generate Summary** (Mac, iPhone, web; `note-service`, ADR-0058 §5): the Notes tab of a draft
+  made from a recording that was never written up — older than the engine, or the run never
+  started — now shows one sentence and a *Generate Summary* button instead of nothing. It calls
+  `POST /v1/notes/{id}/generation` as it already existed, the tab follows the run ("Writing this
+  note — 3 of 8 minutes read") and shows the sections when it lands; a failed run says why and
+  offers *Try again* in the same place. The button appears nowhere else. The meeting templates
+  gain an *Overview* section (`summary` role) under *My notes*, because the engine's summary had
+  no section to land in; the writer now fills a section the template has but an older note's
+  content lacks (every client already draws it, empty), and the summary prompt asks for the third
+  person — never *we*, *I* or *our* — with no filler. `PROMPT_VERSION` is `2026-10-2`.
+
+### Changed
+- **Structure follows content** (`note-service`, `note_models`, Mac, iPhone, web; ADR-0058 §6): the
+  note view no longer draws the template. Every client renders the sections the content HAS, in
+  its order, headed only when a section has a name — the template's for a template section, its
+  own `title` (new, optional, on `NoteSection`) for one the engine made — and nothing for the
+  author's pad or the engine's opening block. Empty sections are not drawn; while a note is
+  editable the pad, typed fields and (on form-shaped templates without a pad) the template's own
+  fields stay reachable. No "required" tags. The engine writes an unheaded opening block
+  (`gen:overview`: framing, summary, key points, transcript note) and one `gen:<slug>` section
+  per topic the conversation actually had — none for a single-subject or short conversation (a
+  topic needs five facts and a real change of subject) — instead of a `### `-headed *Discussion*;
+  nobody is listed as an attendee automatically; decisions, actions, open questions, risks and
+  the next meeting go to the template's section when it has one, else to a headed section of
+  their own, and only when there is content. On a re-run, what the engine wrote last time and
+  does not write again is removed (generated) or emptied (template), unless a person edited it.
+  Section labels, the PDF, the shared page, the client version and Markdown exports follow the
+  same rule: no name, no heading. A section without a title has the canonical bytes it always
+  had, so no version hash changes. The meeting templates' *Overview* section from earlier in the
+  day is gone again; the block is the engine's.
+- **Context-aware notes** (`note-service` engine, prompt `2026-10-4`): the engine now reads the
+  verified facts once as a whole before writing — a context pass returns the conversation type,
+  subject, 3–7 themes, one framing sentence and the 3–6 facts a reader must know first — and the
+  topic and summary steps are written against that brief, in parallel. The Overview opens with
+  the framing sentence ("Interview with a defence expert on the war in Ukraine…"), the Discussion
+  opens with a *Key points* block above the topic headings, and topics are ordered by weight,
+  not transcript order. Every fact carries a `certainty` (fact, estimate, prediction, opinion,
+  proposal, allegation) the prompts must keep in the text — an estimate stays "was estimated at";
+  flat openers ("It was noted that", "Es wurde festgestellt, dass", "Було зазначено, що") are
+  stripped in the renderer while hedges that carry certainty are kept. The extractor flags turns
+  that are not the conversation — background speech, another language, an artifact, a duplicate,
+  an unrelated fragment — from a closed vocabulary; facts quoted from them are dropped, and the
+  Overview ends with a one-line *Transcript note* rendered in code, never from model prose. The
+  framing sentence is number-checked against the facts like a summary sentence, and every id the
+  context pass names must be one it was given.
+
+### Fixed
+- **A recording no longer yields an empty note in silence** (`note-service` engine, all clients):
+  NOTE-2026-00040 ran the engine automatically, extracted ten facts and wrote nothing, and the
+  Notes tab showed neither a word nor a button. Three causes. The small model copies the turn
+  header ("[0] Speaker 1 (00:00): ") into every quote, and the verbatim check failed on all of
+  them — the header is now stripped from the quote before it is located, as it already was from
+  the text. The model also flagged the recording's only substantive turn as "background"; a turn
+  that is more than half the window's words is now never noise, because it is the recording. And
+  a finished run that wrote nothing looked, to the clients, like a run that had nothing to say:
+  `GET /v1/notes/{id}/generation` now carries `sections_written`, and web, Mac and iPhone show
+  "Nothing could be written from this recording" with *Try again* when it is zero.
+- **Meeting notes read as a business record, not a retelling** (`note-service` engine, prompt
+  `2026-10-3`): a generated note showed raw fact ids in the Discussion bullets
+  ("…(d96df9628cf97a1b)"), a Decisions section full of verbatim asides ("Man war sehr
+  zögerlich…"), and narration ("man glaubte, dass…"). Three causes, three fixes. The reduce
+  prompts asked for ids "in every bullet" and a small model wrote them into the prose: they
+  now go in `fact_ids` only, and the renderer strips any id it still finds and keeps it as a
+  citation. The agreement test counted "ja", "okay", "passt" and "добре" as consent, so in an
+  interview every proposal near one became a decision: those words are gone from the pattern,
+  and a decision whose text is the quote copied is filed as a key point. The extraction and
+  reduce prompts (en/de/uk) now ask for one neutral third-person or impersonal business
+  statement per fact — never "X said/thinks", never "we", no greetings, filler or repeats, a
+  proposal stays a proposal — with a third worked example showing the rewrite. Clients treat a
+  `superseded` latest run like none, so *Generate Summary* is offered again after an
+  operator reset.
+- **A recording survives its live note being binned** (`note-service`, migration 0056, Mac,
+  iPhone, web): since Sprint 34 the note exists from the first second of a meeting, so an author
+  who opened that still-empty note mid-recording and chose *Move to Trash* left the transcription
+  with nowhere to land — `POST /v1/notes/{id}/transcript` was a 404 (`note not found` on the
+  home page), and `from-transcript` a 409 `already_assigned`, because the unique index on
+  `source_asr_job_id` still counted the trashed row. The index now guards live notes only, the
+  three "who owns this job" lookups skip the bin, and every capture client drafts a fresh note
+  from the transcript when the live one is gone at Stop (a bin on any device also unbinds the
+  running capture, so autosave stops writing into a 404). The trashed row keeps its versions.
+- **No automatic notes on a note opened at Record** (`note-service`): `POST /v1/notes/{id}/transcript`
+  — the route the Mac, iPhone and web capture call when the recording finishes on a note that
+  already existed — still carried Sprint 34's "no generation engine yet" placeholder. It put the
+  transcript in a section and marked the capture `ready`, and no `note.generate` job was ever
+  queued, so the Transcript tab was full while the Notes tab stayed empty. Only `from-transcript`
+  (upload, older clients) started the engine. The route now starts it in the same transaction
+  as the transcript version, with the same rules: off for the workspace or over budget is not
+  an error, a missing object store or model never costs the capture, and silence starts no run.
+  Progress is on `GET /v1/notes/{id}/generation`; the meeting state stays `ready`, since nothing
+  moves a capture out of `generating` and a stalled run must not look like a stuck recording.
+- Regression tests: `services/note-service/tests/unit/test_notes_meeting.py` (engine started,
+  engine failure harmless, silence starts nothing).
+
+## Unreleased — A silent recording is `no_speech`, not a transcript
+
+### Fixed
+- **Silence no longer reaches the decoder** (`asr-worker`): when Silero heard no speech the VAD
+  handed Whisper the whole file as one run, and Whisper given silence plus the workspace
+  glossary as `initial_prompt` wrote the prompt back — NOTE-2026-00033 was 28 minutes of
+  "Gysi, Moderator." from a microphone that delivered zeros. `detect_speech` now returns an
+  empty list, the engine returns no segments without calling the language detector or the
+  decoder, and the processor files the job as `no_speech` (the gate that already existed).
+- **Prompt echoes over non-speech are dropped**: a segment made only of the prompt's words
+  that the decoder itself rates `no_speech_prob ≥ 0.5` is logged (`whisper.prompt_echo_dropped`)
+  and skipped; the same words at a low probability are speech and stay.
+- Regression tests: `services/asr-worker/tests/unit/test_silence_guard.py`.
+
 ## Unreleased — Diarizer v2 decided and hosted (ADR-0052, Sprint 29 B-9)
 
 ### Added

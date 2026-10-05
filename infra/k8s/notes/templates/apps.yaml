@@ -3,7 +3,7 @@ One Deployment (+ Service) per entry in .Values.apps. Special powers are
 value-driven: gpu (node pool + toleration), tmpfs (per-pod RAM emptyDir),
 drain (preStop hook + long grace), masterKey mount, workerId
 (unique-per-pod env via the downward API), probes/service opt-outs for
-queue consumers.
+queue consumers, command (a worker sharing another app's image).
 */ -}}
 {{- range $name, $app := .Values.apps }}
 ---
@@ -76,6 +76,11 @@ spec:
         - name: {{ $name }}
           image: {{ include "notes.image" (dict "root" $ "image" $app.image) }}
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          {{- if $app.command }}
+          # A worker that shares another app's image and differs only in
+          # the process it runs (note-worker: same image as note-service).
+          command:{{ toYaml $app.command | nindent 12 }}
+          {{- end }}
           {{- if or (not (hasKey $app "service")) $app.service }}
           ports:
             - containerPort: 8000

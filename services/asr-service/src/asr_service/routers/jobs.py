@@ -18,8 +18,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime
-from typing import Annotated, Literal
+from datetime import date, datetime
+from typing import Annotated, Any, Final, Literal
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -46,6 +46,7 @@ from asr_models import (
     JobErrorKind,
     JobStatus,
     NameSuggestionView,
+    Segment,
     SpeakerEditView,
     SpeakerStatView,
     TranscriptionJobView,
@@ -89,6 +90,11 @@ _uploads_counter = _meter.create_counter(
 _validation_rejects_counter = _meter.create_counter(
     "mdx_asr_validation_failures_total",
     description="Validation rejections by code",
+    unit="1",
+)
+_enrichment_counter = _meter.create_counter(
+    "mdx_asr_result_enrichment_total",
+    description="Transcript reads by how much nlp-service shaped them (full | partial | raw), Sprint I3",
     unit="1",
 )
 _jobs_counter = _meter.create_counter(
@@ -319,6 +325,8 @@ async def submit_job(
             model="large-v3",
             name_candidates=candidates,
             capture_context=capture_context,
+            # Sprint I2 T2: the exact string the transcriber is told.
+            vocabulary_hint=vocabulary_hint or None,
         )
 
     # Audit the upload + job creation.
@@ -416,6 +424,8 @@ async def submit_job(
             # How many names were offered — never the names (Sprint 30).
             "name_candidates": len(candidates),
             "channel_layout": channel_layout,
+            # How many vocabulary terms — never the terms (Sprint I2).
+            "hint_terms": _hint_terms(vocabulary_hint),
         },
         severity=Severity.INFO,
     )
@@ -434,7 +444,13 @@ async def submit_job(
         queued_at=datetime.fromtimestamp(time.time()),
         diarize=diarize,
         hints_applied=hints_applied,
+        vocabulary_hint=vocabulary_hint or None,
     )
+
+
+def _hint_terms(hint: str | None) -> int:
+    """How many comma-separated terms a hint carries (an audit count)."""
+    return sum(1 for part in (hint or "").split(",") if part.strip())
 
 
 # A service reading a result on a person's behalf (not the person opening
@@ -639,6 +655,7 @@ async def get_job_result(
         job_id=job_id,
         output=output,
         authorization=request.headers.get("authorization"),
+        reference_date=view.queued_at.date() if view.queued_at else None,
         speaker_names=view.speaker_names,
         edits=edits,
         result_rev=view.diarization_rev,
@@ -769,12 +786,35 @@ NLP_LANGUAGES = frozenset({"uk", "en", "de"})
 _PUNCT_ONLY = frozenset(".,:;!?…—–-()[]{}«»“”‘’'\"/\\*#№%&@+−=_|")
 
 
+# A recording of a conversation is kept VERBATIM (Sprint G0, Summary
+# Engine v2 Q3): the rewriting stages exist for dictation, where "Punkt"
+# is punctuation and "heute" in a note should be a date. In a conversation
+# "heute" is what someone said — rewriting it to a date anchored on the
+# server's clock put 22.09.2026 into quotes that say "heute", and "am Montag
+# … gewesen" became the NEXT Monday. The engine resolves dates itself, as an
+# annotation, never as a rewrite. Only confidence spans still run.
+CONVERSATION_STAGES_DISABLED: Final[tuple[str, ...]] = (
+    "voice_commands",
+    "punctuation",
+    "number_norm",
+    "date_norm",
+    "abbreviation",
+    "field_extraction",
+)
+
+
+def _is_conversation(output: TranscriptionOutput) -> bool:
+    """A diarized result — a recording of people talking, not dictation."""
+    return output.metadata.diarization is not None or bool(output.speakers)
+
+
 async def _enriched_result_view(
     state: object,
     *,
     job_id: UUID,
     output: TranscriptionOutput,
     authorization: str | None,
+    reference_date: date | None = None,
     speaker_names: dict[str, str] | None = None,
     edits: list[SpeakerEdit] | None = None,
     result_rev: int = 1,
@@ -807,16 +847,17 @@ async def _enriched_result_view(
         name_candidates=list(name_candidates or []),
         speaker_sides=dict(output.speaker_sides),
         speaker_name_sources=dict(name_sources or {}),
+        diagnostics=output.diagnostics,
     )
     overlap = list(output.overlap_ms)
     if not settings.nlp_enrich_enabled or not output.segments:
-        return _structured(view, speaker_names, edits, overlap)
+        return _raw(view, speaker_names, edits, overlap)
     # The post-processor has per-language rules (dictated punctuation,
     # number words). A language it has no rules for gets the raw Whisper
     # text — which is already punctuated — rather than a 422 from
     # nlp-service that we would then swallow.
     if output.language not in NLP_LANGUAGES:
-        return _structured(view, speaker_names, edits, overlap)
+        return _raw(view, speaker_names, edits, overlap)
 
     payload = [
         {
@@ -838,15 +879,31 @@ async def _enriched_result_view(
         segments=payload,
         language=output.language,
         authorization=authorization,
+        # Relative words resolve against the day it was recorded, never
+        # the day somebody happens to read it.
+        reference_date=reference_date,
+        stages_disabled=sorted(CONVERSATION_STAGES_DISABLED) if _is_conversation(output) else None,
+        conversation=_is_conversation(output),
     )
     if resp is None or len(resp.get("segments", [])) != len(output.segments):
-        return _structured(
-            view, speaker_names, edits, overlap
-        )  # NLP down/mismatched — raw transcript
+        return _raw(view, speaker_names, edits, overlap)  # NLP down/mismatched — raw transcript
+    # Sprint I3 T2: a segment whose stage failed shows its raw text; the
+    # view says so instead of looking half-punctuated for no reason.
+    failed = sum(1 for seg in resp["segments"] if _stage_failed(seg))
+    enrichment = "partial" if failed else "full"
+    _enrichment_counter.add(1, {"state": enrichment})
 
     enriched: list[EnrichedSegment] = []
     for index, (raw_seg, nlp_seg) in enumerate(zip(output.segments, resp["segments"], strict=True)):
         text = str(nlp_seg.get("text", "")).strip()
+        if raw_seg.language and raw_seg.language != output.language:
+            # Sprint I2 T4: the post-processor has the RECORDING's rules; a
+            # passage in another language keeps its raw decoding.
+            enriched.append(_served_segment(raw_seg, index))
+            continue
+        if _stage_failed(nlp_seg):
+            enriched.append(_served_segment(raw_seg, index))
+            continue
         spans = [
             ConfidenceSpanView(
                 start_char=sp["start_char"],
@@ -894,6 +951,7 @@ async def _enriched_result_view(
                 artifact_index=index,
                 artifact_indices=[index],
                 speaker_uncertain=raw_seg.speaker_uncertain,
+                language=raw_seg.language,
             )
         )
     return _structured(
@@ -902,6 +960,7 @@ async def _enriched_result_view(
                 "segments": enriched,
                 "nlp_applied": True,
                 "nlp_pipeline_version": resp.get("pipeline_version"),
+                "enrichment": enrichment,
             }
         ),
         speaker_names,
@@ -910,23 +969,40 @@ async def _enriched_result_view(
     )
 
 
+def _stage_failed(nlp_seg: dict[str, Any]) -> bool:
+    return any(w.get("code") == "stage_failed" for w in nlp_seg.get("warnings") or [])
+
+
+def _raw(
+    view: TranscriptResultView,
+    names: dict[str, str] | None,
+    edits: list[SpeakerEdit] | None,
+    overlap_ms: list[tuple[int, int]],
+) -> TranscriptResultView:
+    """The view without the post-processor, and counted as such."""
+    _enrichment_counter.add(1, {"state": "raw"})
+    return _structured(view.model_copy(update={"enrichment": "raw"}), names, edits, overlap_ms)
+
+
 def _served_segments(output: TranscriptionOutput) -> list[EnrichedSegment]:
     """The stored segments as served, each knowing its artifact index."""
-    return [
-        EnrichedSegment(
-            text=s.text,
-            raw_text=s.text,
-            start_ms=s.start_ms,
-            end_ms=s.end_ms,
-            words=s.words,
-            avg_confidence=s.avg_confidence,
-            speaker=s.speaker,
-            artifact_index=i,
-            artifact_indices=[i],
-            speaker_uncertain=s.speaker_uncertain,
-        )
-        for i, s in enumerate(output.segments)
-    ]
+    return [_served_segment(s, i) for i, s in enumerate(output.segments)]
+
+
+def _served_segment(s: Segment, index: int) -> EnrichedSegment:
+    return EnrichedSegment(
+        text=s.text,
+        raw_text=s.text,
+        start_ms=s.start_ms,
+        end_ms=s.end_ms,
+        words=s.words,
+        avg_confidence=s.avg_confidence,
+        speaker=s.speaker,
+        artifact_index=index,
+        artifact_indices=[index],
+        speaker_uncertain=s.speaker_uncertain,
+        language=s.language,
+    )
 
 
 def _structured(

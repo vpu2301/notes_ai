@@ -3,7 +3,16 @@ import { ASK_HISTORY_LIMIT } from "./types";
 import type {
   AskResponse,
   AskTurn,
+  AttachTranscriptResponse,
+  CarriedItem,
+  CarriedView,
+  ClientVersion,
+  ClientVersionCheck,
+  CorrectionResponse,
+  DismissReason,
   FromTranscriptResponse,
+  LineTime,
+  MeetingView,
   NoteContent,
   NoteCreatedResponse,
   NoteEnvelope,
@@ -21,6 +30,8 @@ import type {
   ShareEmailResponse,
   SharingView,
   SourceJobLink,
+  StartMeetingRequest,
+  StartMeetingResponse,
   TemplateDetail,
   TemplateSummary,
   UpdateDraftResponse,
@@ -118,6 +129,143 @@ export function createFromTranscript(params: {
     method: "POST",
     json: params,
   });
+}
+
+// ── series, carry-over and the client version (Sprint 36) ─────────────
+
+/** What is still open from the previous meeting in this series. */
+export function getCarried(id: string): Promise<CarriedView> {
+  return api<CarriedView>("note", `/v1/notes/${id}/carried`);
+}
+
+/** Tick a carried item off, re-open it, or drop it. */
+export function setCarriedState(
+  id: string,
+  itemKey: string,
+  state: "open" | "done_marked" | "dropped",
+): Promise<CarriedItem> {
+  return api<CarriedItem>("note", `/v1/notes/${id}/carried/${itemKey}`, {
+    method: "POST",
+    json: { state },
+  });
+}
+
+/** "This continues…" — link this meeting to an earlier one by hand. */
+export function setPreviousNote(id: string, previousNoteId: string): Promise<CarriedView> {
+  return api<CarriedView>("note", `/v1/notes/${id}/meeting/previous`, {
+    method: "POST",
+    json: { note_id: previousNoteId },
+  });
+}
+
+/** Exactly what a client would see. 409 for a 1:1 or an interview. */
+export function getClientVersion(id: string): Promise<ClientVersion> {
+  return api<ClientVersion>("note", `/v1/notes/${id}/client-version`);
+}
+
+export function getClientVersionCheck(id: string): Promise<ClientVersionCheck> {
+  return api<ClientVersionCheck>("note", `/v1/notes/${id}/client-version/check`);
+}
+
+// ── corrections (Sprint 35) ───────────────────────────────────────────
+//
+// All three address a line by its `item_key` — the hash of its body with
+// the owner and the due date stripped. That is what lets an owner or a
+// date be fixed without detaching the line from the recipient's
+// confirmation on the shared page, or from its correction history.
+
+/** Take a line out of the note, and say why. */
+export function dismissItem(
+  id: string,
+  itemKey: string,
+  reason: DismissReason,
+  expectedVersion: number,
+): Promise<CorrectionResponse> {
+  return api<CorrectionResponse>("note", `/v1/notes/${id}/items/${itemKey}/dismiss`, {
+    method: "POST",
+    json: { reason, expected_version: expectedVersion },
+  });
+}
+
+/** Put a dismissed line back, exactly as it read. */
+export function restoreItem(
+  id: string,
+  itemKey: string,
+  expectedVersion: number,
+): Promise<CorrectionResponse> {
+  return api<CorrectionResponse>("note", `/v1/notes/${id}/items/${itemKey}/restore`, {
+    method: "POST",
+    json: { expected_version: expectedVersion },
+  });
+}
+
+/**
+ * Fix a line's owner or due date in place. The key does not change, which
+ * is the whole point of the route.
+ *
+ * Addressed under `/items/by-key/` because `PATCH /items/{item_id}` was
+ * already taken by the Sprint 20 status route, which uses the row UUID.
+ */
+export function patchItem(
+  id: string,
+  itemKey: string,
+  changes: {
+    owner_label?: string;
+    due_text?: string;
+    clear_owner?: boolean;
+    clear_due?: boolean;
+  },
+  expectedVersion: number,
+): Promise<CorrectionResponse> {
+  return api<CorrectionResponse>("note", `/v1/notes/${id}/items/by-key/${itemKey}`, {
+    method: "PATCH",
+    json: { ...changes, expected_version: expectedVersion },
+  });
+}
+
+// ── the live meeting note (Sprint 34) ─────────────────────────────────
+
+/**
+ * Open the note as Record is pressed. Idempotent on `client_capture_id`:
+ * a retry, a double click and a second device all get the same note.
+ *
+ * The caller must NOT wait for this and must never let it stop a
+ * recording — a note we failed to create is recoverable, a meeting we
+ * failed to record is not.
+ */
+export function startMeeting(body: StartMeetingRequest): Promise<StartMeetingResponse> {
+  return api<StartMeetingResponse>("note", "/v1/notes/meeting", { method: "POST", json: body });
+}
+
+/** When each typed line was first touched. First report per key wins. */
+export function putLineTimes(id: string, lines: LineTime[]): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/my-notes/timing`, {
+    method: "PUT",
+    json: { lines },
+  });
+}
+
+/** The recording reached asr-service: bind the job to the note. */
+export function attachJob(id: string, asrJobId: string): Promise<MeetingView> {
+  return api<MeetingView>("note", `/v1/notes/${id}/meeting/job`, {
+    method: "POST",
+    json: { asr_job_id: asrJobId },
+  });
+}
+
+/** The transcription finished: put it in the note. Safe from any device. */
+export function attachTranscript(id: string): Promise<AttachTranscriptResponse> {
+  return api<AttachTranscriptResponse>("note", `/v1/notes/${id}/transcript`, { method: "POST" });
+}
+
+/** The recording was discarded or never happened. The note stays. */
+export function markNoAudio(id: string): Promise<MeetingView> {
+  return api<MeetingView>("note", `/v1/notes/${id}/meeting/no-audio`, { method: "POST" });
+}
+
+/** 404 when the note is not a live capture (an upload, or typed by hand). */
+export function getMeeting(id: string): Promise<MeetingView> {
+  return api<MeetingView>("note", `/v1/notes/${id}/meeting`);
 }
 
 /** Which notes were created from which transcription jobs (≤200 ids). */

@@ -79,6 +79,12 @@ async def build_state() -> ServiceState:
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
     )
+    # Sprint I2 T2: store the vocabulary hint on the job only where the
+    # column exists (a service deployed before migration 0061 must not
+    # fail every upload).
+    from .domain import repository
+
+    await repository.probe_hint_column(app_pool)
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,
         application_name=f"{settings.service_name}/audit_writer",

@@ -109,6 +109,58 @@ exposure.
 5. If the old token may have leaked: `make secret-scan` on the repo; check
    HF audit log for endpoint changes; rotate again after the incident.
 
+## tier-flip
+
+Changing which model writes notes for the `standard` (or `premium`) tier.
+It is a config PR, reviewed like a migration — the model that reads every
+customer's meetings is not a deploy-time detail.
+
+**1. Eval parity.** Run the gold set on the candidate and on what is live:
+
+    make eval-notes BACKEND=<candidate> RUNS=3 CORPUS=eval/notes/v1
+    make eval-notes BACKEND=<live>      RUNS=3 CORPUS=eval/notes/v1
+
+No §7 metric may regress. Reports land in `docs/eval/`; attach both.
+
+**2. Shadow.** On the worker deployment:
+
+    MDX_NOTE_GENERATION_SHADOW_BACKEND=<candidate>
+    MDX_NOTE_GENERATION_SHADOW_PERCENT=5
+
+The candidate now runs beside the real backend on one generation in
+twenty and **its output is discarded** — only counts survive
+(`mdx_note_generation_shadow_*`). Nothing is written twice, and no second
+copy of any document or transcript exists. A workspace is shadowed only
+onto a processor it has already acknowledged; the rest are silently
+skipped, which is why the shadow count is lower than 5 % of generations.
+
+Watch for a day: `shadow_runs{outcome="error"}` near zero,
+`shadow_facts{verdict="missed"}` not growing against `kept`, and
+`shadow_seconds` p95 inside the current backend's.
+
+**3. Flip.** One line in `config/models.yaml`:
+
+    routing:
+      summarize: { standard: <candidate>, premium: … }
+
+Deploy. `note_generations.backend` / `.model_id` show the change per note
+from the first generation after the rollout — that is the evidence, not
+the config file.
+
+**4. Acknowledgement.** If the candidate's processor is new, every
+workspace on that tier now resolves to **platform/standard** until its
+admin agrees on Settings → Data & AI. That is the safety valve, not a
+bug: check how many are waiting before announcing the change.
+
+```sql
+SELECT count(*) FROM workspace_model_settings
+WHERE NOT acknowledged_processors @> '[{"name": "<processor>"}]'::jsonb;
+```
+
+**5. Rollback.** Revert the routing line and deploy. In-flight jobs finish
+on whatever they started with; queued ones pick the reverted backend up.
+No data migration, no note rewritten.
+
 ## pin-upgrade
 
 Changing `model.revision` (or the model) in a spec is a model change:

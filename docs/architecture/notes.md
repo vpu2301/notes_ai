@@ -147,6 +147,85 @@ wants a copy marked provisional; cancelled notes are refused (409).
 
 ## Related surfaces
 
+- **Corrections and the workspace glossary (Sprint 35, ADR-0055
+  amendment)**: a generated line is addressed by its `item_key` — the hash
+  of its body with the marker, owner prefix and due phrase stripped, cut by
+  the one splitter in `domain/lines.py`. `POST /v1/notes/{id}/items/{key}/
+  dismiss` (with a closed-vocabulary reason), `…/restore` (which takes the
+  line's text back out of the version chain rather than storing it) and
+  `PATCH /v1/notes/{id}/items/by-key/{key}` (owner and due date, in place)
+  all write ordinary note versions, so History, the diff and the derived
+  action items follow. The key does not change, which is what keeps a
+  recipient's confirmation attached across an owner fix.
+  `note_item_corrections` logs what was fixed and never the text.
+  `workspace_glossary` + `/v1/glossary` hold the spellings this workspace
+  uses; `GET /v1/glossary/hint` is the capture form's `vocabulary_hint`, so
+  the transcriber gets the names before it guesses. Terms are added only by
+  an explicit yes to "Remember this?" after a correction.
+- **The document engine (Sprint 33, ADR-0058)**: a note writes itself.
+  `POST /v1/notes/from-transcript` snapshots the ASR result, inserts a
+  `note_generations` row and enqueues `note.generate` on `libs/jobs`;
+  `python -m note_service.worker` drains it. The pipeline
+  (`domain/meeting_doc/`) is windows → extract → **verify** → merge →
+  reduce → render, and verification is the load-bearing step: a claim
+  whose quote is not in the transcript is dropped, an owner who was not
+  in the room is cleared, a date nobody said is never written, a number
+  that does not match is removed, and a decision nobody agreed to is
+  downgraded to a key point. `writer.py` rewrites only sections that are
+  empty or still hold the last generation's exact text — the author's
+  own writing is never touched, and its facts come back as `suggested`.
+  Verified facts land in `note_generated_items` with their quote and
+  timing (what Sprint 35's evidence chips read). Status and regenerate
+  are `/v1/notes/{id}/generation`; the facts are
+  `/v1/notes/{id}/generated-items`. Section ROLES
+  (`meeting_doc/roles.py`, `TemplateSection.role`) are what the engine,
+  the shared page, the action-item projection and the PDF all decide by.
+- **Type-specific generation (Sprint 36, ADR-0057 amendment)**: the
+  extractor's enum is built per FAMILY from `meeting_doc/types.py`, so a
+  sales call sees `need`/`objection`/`stakeholder` and a client call sees
+  `client_request`/`commitment_ours`/`commitment_theirs`. A `judgement`
+  fact is stored `suggested` + `internal` with its quote and is never
+  written to the field. A `completion` may only reference a carried item
+  by its number in the prompt's list, and without a verified quote the
+  item stays open. A commitment's side comes from the owner's name, not
+  from the kind the model chose; an unresolved side is flagged and
+  rendered in its own group. `note_generated_items.audience` marks
+  internal-by-kind lines, which `client_view` drops.
+- **The client document and series (Sprint 36, ADR-0057)**: every
+  external surface — `GET /v1/shared/{token}`, the shared PDF
+  (`variant="client"`) and the author's preview
+  (`GET /v1/notes/{id}/client-version`) — renders `domain/client_view.py`
+  and nothing else. It is an allow-list by ROLE
+  (`domain/meeting_doc/types.py`): `user_notes` and the transcript can
+  never appear, a section that IS a transcript is excluded whatever slot
+  it sits in, a line prefixed `(internal)` is dropped (and the mark never
+  renders, and does not change the line's `item_key`), and the 1:1 and
+  interview families have no client version at all. Meetings in a series
+  are joined by `note_meetings.series_key` — a hash of the calendar UID,
+  else of the title plus the attendee set — and the previous meeting's
+  open items are restated as "Still open from {date}" check items
+  (`domain/carry_over.py`, `note_carried_items`), keeping the previous
+  note's `item_key`. Reading another note always goes through
+  `access.can_view` for the new note's author.
+- **The live meeting note (ADR-0055)**: `POST /v1/notes/meeting` creates
+  the note when Record is pressed — before there is any audio, let alone a
+  transcript — so the author has somewhere to type while the meeting runs.
+  It is idempotent on `client_capture_id`. The capture's lifecycle lives on
+  the `note_meetings` sidecar (`recording → uploading → transcribing →
+  generating → ready`, plus `no_audio` / `failed`), never on `notes.status`:
+  `PUT /v1/notes/{id}/my-notes/timing` records when each typed line was
+  first touched, `POST /v1/notes/{id}/meeting/job` binds the transcription,
+  `POST /v1/notes/{id}/transcript` fills the note and queues the engine
+  (Sprint 33, same rules as `from-transcript`; the capture is `ready`, the
+  run's progress is on `GET /v1/notes/{id}/generation`), and
+  `GET /v1/notes/{id}/meeting` lets a second device pick up where the first
+  stopped. What the author typed lives in the `user_notes` section of every
+  meeting template and is **never** rewritten by anything downstream.
+  Line timings sit in `note_user_line_times` rather than in `NoteContent`,
+  which is `extra="forbid"` and hash-chained. Attendee names and the
+  invite's agenda (extracted deterministically by
+  `domain/meeting_doc/agenda.py`; the raw description is never stored) are
+  content: tenant-scoped, never logged or audited.
 - **Create-from-transcript**: `POST /v1/notes/from-transcript` turns a
   completed batch transcription into a draft note; template selection
   is deterministic keyword scoring (`domain/template_match.py`) with a

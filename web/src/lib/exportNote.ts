@@ -18,7 +18,8 @@ export function noteToMarkdown(opts: {
   if (meta) lines.push(`_${meta}_`, "");
   for (const s of opts.sections) {
     if (!s.text.trim()) continue;
-    lines.push(`## ${s.name}`, "", s.text.trim(), "");
+    if (s.name.trim()) lines.push(`## ${s.name}`, "");
+    lines.push(s.text.trim(), "");
   }
   return lines.join("\n");
 }

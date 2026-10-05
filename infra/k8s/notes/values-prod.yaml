@@ -53,6 +53,11 @@ commonEnv:
   MDX_PREWARM_ENABLED: "true"
 
 apps:
+  note-worker:
+    env:
+      # ADR-0060: off in production — model_tier_precision was 0/8 on the
+      # synthetic set (Q4) and is unmeasured on eval/notes/v2; gate 0.9.
+      MDX_NOTE_ENTITY_MODEL_TIER: "false"
   auth-service:
     replicas: 2
     hpa: {enabled: true, minReplicas: 2, maxReplicas: 6, cpuUtilisation: 70}

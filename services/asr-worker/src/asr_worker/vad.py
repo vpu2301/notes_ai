@@ -54,7 +54,9 @@ def detect_speech(audio_pcm: np.ndarray, sr: int = 16_000) -> list[SpeechSegment
 
     On hosts where Silero isn't installed (the CPU dev fallback), this
     returns a single segment covering the entire audio so the downstream
-    pipeline still runs and Whisper gets the whole signal.
+    pipeline still runs and Whisper gets the whole signal. With Silero
+    loaded, audio in which it hears nothing yields an empty list — never
+    the whole file (see the note at the end).
     """
     _ensure_loaded()
     if _model == "stub":
@@ -92,4 +94,16 @@ def detect_speech(audio_pcm: np.ndarray, sr: int = 16_000) -> list[SpeechSegment
             end = min(cursor + 30_000, s.end_ms)
             capped.append(SpeechSegment(cursor, end))
             cursor = end
-    return capped or [SpeechSegment(0, max(1, int(len(audio_pcm) / sr * 1000)))]
+    # No speech found is an answer, not a reason to guess. Handing Whisper
+    # the whole file instead (as this used to) meant a silent recording —
+    # a microphone that delivered zeros for half an hour — was decoded end
+    # to end, and Whisper given silence plus an initial_prompt writes the
+    # prompt: the workspace's glossary names, repeated for 28 minutes,
+    # stored as a `complete` transcript. An empty list makes the engine
+    # produce no segments and the processor file the job as `no_speech`.
+    if not capped:
+        logger.info(
+            "vad.no_speech",
+            extra={"audio_seconds": round(len(audio_pcm) / sr, 1)},
+        )
+    return capped

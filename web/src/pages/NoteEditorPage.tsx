@@ -42,7 +42,17 @@ import type {
 } from "../api/types";
 import { defaultSpeakerName } from "../api/types";
 import { AskNote } from "../components/AskNote";
+import { CarriedItems } from "../components/CarriedItems";
+import { GenerationStatus } from "../components/GenerationStatus";
+import { DocTypePill } from "../components/DocTypePill";
+import { ClientVersionPanel } from "../components/ClientVersion";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  RememberTermPrompt,
+  heardAsOf,
+  isWorthRemembering,
+  type PendingTerm,
+} from "../components/RememberTermPrompt";
 import { ResponsesPanel } from "../components/ResponsesPanel";
 import {
   AlertIcon,
@@ -56,13 +66,18 @@ import {
   FolderPlusIcon,
   HistoryIcon,
   ShareIcon,
-  SparkleIcon,
   TrashIcon,
   UserIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
-import { RichText } from "../components/RichText";
+import { RichText, type LineExtra } from "../components/RichText";
+import { LineEvidence } from "../components/EvidencePopover";
+import { CorrectionsPanel } from "../components/CorrectionsPanel";
+import { useGeneratedLines } from "../lib/useGeneratedLines";
+import { lineKey } from "../lib/itemKey";
+import type { GeneratedItem } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
+import { isOtherLanguage, promptEchoLine, transcriptCopyText } from "../lib/transcriptText";
 import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
@@ -76,6 +91,7 @@ import { useAuth } from "../auth/AuthContext";
 import { jobForNote, rememberLink } from "../lib/captures";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
+import { defFor, noteBlocks } from "../lib/noteBlocks";
 import { useDismiss } from "../lib/useDismiss";
 import { useSpaces } from "../spaces/SpacesContext";
 
@@ -118,6 +134,8 @@ interface FieldProps {
   section: NoteSection;
   readOnly: boolean;
   onChange: (next: NoteSection) => void;
+  /** Q5: the evidence of a generated line, drawn at its end. */
+  lineExtra?: LineExtra;
 }
 
 /**
@@ -131,7 +149,7 @@ interface FieldProps {
  * with nothing in it skips straight to the editor — there is no document
  * to read yet, only a prompt to write one.
  */
-function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
+function FreeTextField({ def, section, readOnly, onChange, lineExtra }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const text = section.text ?? "";
@@ -151,7 +169,7 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
     e.target.setSelectionRange(end, end);
   };
 
-  if (readOnly) return <RichText text={text} />;
+  if (readOnly) return <RichText text={text} lineExtra={lineExtra} />;
 
   if (!editing && text.trim() !== "") {
     return (
@@ -168,7 +186,7 @@ function FreeTextField({ def, section, readOnly, onChange }: FieldProps) {
           }
         }}
       >
-        <RichText text={text} placeholder={placeholder} />
+        <RichText text={text} placeholder={placeholder} lineExtra={lineExtra} />
       </div>
     );
   }
@@ -386,6 +404,10 @@ interface TranscriptViewProps {
   onSpeakersRelabelled?: (change: SpeakersRelabelled) => void;
   /** Shown instead of the error when the job cannot be read (the note's own text). */
   fallback?: ReactNode;
+  /** Q3: open at this moment (ms) — a "Not included" range was clicked.
+   *  `seekKey` changes on every click, so the same range can be opened twice. */
+  seekMs?: number | null;
+  seekKey?: number;
 }
 
 /**
@@ -621,6 +643,8 @@ export function TranscriptView({
   onSpeakerMergeUndone,
   onSpeakersRelabelled,
   fallback,
+  seekMs,
+  seekKey,
 }: TranscriptViewProps) {
   const toast = useToast();
   const online = useOnline();
@@ -817,6 +841,11 @@ export function TranscriptView({
   }, [jobId]);
 
   const turns = result?.turns ?? [];
+  // Sprint I2: a copy leaves out turns in another language than the
+  // recording unless asked; the choice lives with this view only.
+  const [includeOtherLanguages, setIncludeOtherLanguages] = useState(false);
+  const hasOtherLanguages = useMemo(() => turns.some(isOtherLanguage), [turns]);
+  const echoLine = promptEchoLine(result?.diagnostics);
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
   const roster = result?.speakers ?? [];
@@ -827,12 +856,10 @@ export function TranscriptView({
   const moveLocked = !canMove || saving;
 
   const copy = async () => {
-    const text = turns
-      .map((t) => {
-        const body = t.paragraphs.join("\n");
-        return diarized ? `${turnName(t, names)}: ${body}` : body;
-      })
-      .join("\n\n");
+    const text = transcriptCopyText(turns, (t) => turnName(t, names), {
+      diarized,
+      includeOtherLanguages,
+    });
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -947,6 +974,21 @@ export function TranscriptView({
       toast.error(copyText("dismissFailed", { reason: messageFor(err) }));
     }
   };
+
+  // Q3: a "Not included" range was clicked on the Notes tab — scroll to
+  // the turn that holds that moment and light it up, as for a suggestion.
+  useEffect(() => {
+    if (seekMs == null || turns.length === 0) return;
+    let i = turns.findIndex((t) => t.start_ms <= seekMs && seekMs < t.end_ms);
+    if (i < 0) i = turns.reduce((best, t, k) => (t.start_ms <= seekMs ? k : best), 0);
+    const el = turnRefs.current[i];
+    if (!el) return;
+    setFocusTurn(i);
+    el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    setHighlight(i);
+    // Re-run on every click (seekKey), and once the turns have loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekMs, seekKey, turns.length]);
 
   /** Scroll to the turn a suggestion quotes, focus it, and light it up for a moment. */
   const showSuggestion = (sg: NameSuggestion) => {
@@ -1080,10 +1122,22 @@ export function TranscriptView({
           </span>
         )}
         <span className="grow" />
+        {hasOtherLanguages && (
+          <label className="help transcript-include-langs">
+            <input
+              type="checkbox"
+              className="chk"
+              checked={includeOtherLanguages}
+              onChange={(e) => setIncludeOtherLanguages(e.target.checked)}
+            />
+            Include other languages
+          </label>
+        )}
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {echoLine && <p className="help transcript-diagnostic">{echoLine}</p>}
       {selection.length > 0 && (
         <div className="turn-actions" role="toolbar" aria-label="Selected turns">
           <span className="grow">{turnsLabel(selection.length)} selected</span>
@@ -1172,6 +1226,11 @@ export function TranscriptView({
                   <span className="turn-speaker unknown">{UNKNOWN_SPEAKER}</span>
                 ))}
               <span className="turn-time mono">{formatElapsed(t.start_ms)}</span>
+              {isOtherLanguage(t) && (
+                <span className="lang-tag turn-lang" title="Spoken in another language than the recording">
+                  {t.language}
+                </span>
+              )}
               {diarized && (
                 <input
                   type="checkbox"
@@ -1310,7 +1369,8 @@ function SpacePill({ noteId }: { noteId: string }) {
 
 // ── the page ──────────────────────────────────────────────────────────
 
-type Tab = "notes" | "transcript" | "responses";
+// Sprint 36: "client" is what someone outside the workspace sees.
+type Tab = "notes" | "transcript" | "responses" | "client";
 
 export function NoteEditorPage() {
   const { noteId = "" } = useParams();
@@ -1324,7 +1384,16 @@ export function NoteEditorPage() {
   const [content, setContent] = useState<NoteContent | null>(null);
   /** The template's display name, for the meta row; null when it could not be read. */
   const [templateName, setTemplateName] = useState<string | null>(null);
+  /** Q3: what the latest generation took the recording to be. */
+  const [recordingType, setRecordingType] = useState<string | null>(null);
+  /** Q3: a moment to open the transcript at ("Not included" link). */
+  const [seek, setSeek] = useState<{ ms: number; key: number } | null>(null);
+
   const [version, setVersion] = useState(0);
+  /** Q5: the evidence rows behind the generated lines, by line key. */
+  const { rows: genRows, byKey: genByKey } = useGeneratedLines(noteId, version);
+  /** Q5: how much of a generated note to show. A view, never an edit. */
+  const [detail, setDetail] = useState<DetailLevel>(() => readDetail(noteId));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1504,7 +1573,17 @@ export function NoteEditorPage() {
   // A speaker renamed in the transcript is renamed in the note too — the
   // note's turn lines start with the name. A cancelled note is a record;
   // its text stays, and only the transcript shows the new name.
+  // Sprint 35: a name the author fixed is worth remembering — offered,
+  // never taken. One term, one question.
+  const [pendingTerm, setPendingTerm] = useState<PendingTerm | null>(null);
+  const offerToRemember = (from: string, to: string) => {
+    if (isWorthRemembering(from, to)) {
+      setPendingTerm({ term: to.trim(), heardAs: heardAsOf(from), noteId });
+    }
+  };
+
   const onSpeakerRenamed = (from: string, to: string) => {
+    offerToRemember(from, to);
     if (!content || !isDraft) {
       toast.success(isDraft ? "Speaker renamed" : "Speaker renamed in the transcript");
       return;
@@ -1602,9 +1681,9 @@ export function NoteEditorPage() {
       title: shownContent.title ?? "",
       code: note?.code ?? "",
       updatedAt: note?.updated_at,
-      sections: sections.map((def) => ({
-        name: def.name,
-        text: sectionOf(shownContent, def.id).text ?? "",
+      sections: noteBlocks(shownContent, sections, { editable: false }).map((block) => ({
+        name: block.title ?? "",
+        text: block.section.text ?? "",
       })),
     });
     saveBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${fileBase()}.md`);
@@ -1656,8 +1735,21 @@ export function NoteEditorPage() {
   const transcriptDefs = (sections ?? []).filter(
     (def) => shownContent !== null && isTranscript(sectionOf(shownContent, def.id).text ?? ""),
   );
-  const noteDefs = (sections ?? []).filter((def) => !transcriptDefs.includes(def));
   const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
+  // What the content has, in its order. Structure follows content: no
+  // template section is drawn for being in the template.
+  const allBlocks = noteBlocks(shownContent, sections ?? [], { editable });
+  // Q5: evidence and the detail toggle only for the note as it stands,
+  // and only when the engine wrote it (it has rows).
+  const generated = !viewing && genRows.length > 0;
+  const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
+  const lineExtra: LineExtra | undefined = generated
+    ? (raw) => {
+        const row = genByKey.get(lineKey(raw));
+        return row ? <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} /> : null;
+      }
+    : undefined;
+  const alsoSaid = generated && detail === "detailed" ? uncitedBySection(genRows, shownContent) : null;
   const saveLabel = useMemo(() => {
     switch (saveState) {
       case "saving":
@@ -1791,12 +1883,7 @@ export function NoteEditorPage() {
             <UserIcon size={13} />
             {readPurpose ? authorName : "Me"}
           </span>
-          {templateName && (
-            <span className="doc-pill tpl" title="The template this note was written from">
-              <SparkleIcon size={13} />
-              {templateName}
-            </span>
-          )}
+          <DocTypePill templateName={templateName} recordingType={recordingType} />
           <SpacePill noteId={noteId} />
           <span className="doc-pill mono" title="This note's code">
             {note.code}
@@ -1813,7 +1900,7 @@ export function NoteEditorPage() {
           </div>
         )}
 
-        {(hasTranscript || hasResponsesTab) && (
+        {(hasTranscript || hasResponsesTab || isDraft) && (
           <div className="tabs doc-tabs" role="tablist">
             <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
               Notes
@@ -1838,15 +1925,29 @@ export function NoteEditorPage() {
                 Responses{responseCount > 0 && <span className="count">{responseCount}</span>}
               </button>
             )}
+            {/* Before sending anything, see what they will actually get. */}
+            <button
+              className={`tab ${tab === "client" ? "on" : ""}`}
+              role="tab"
+              aria-selected={tab === "client"}
+              onClick={() => setTab("client")}
+            >
+              Client version
+            </button>
           </div>
         )}
 
-        {tab === "responses" && hasResponsesTab ? (
+        {tab === "client" ? (
+          <ClientVersionPanel noteId={noteId} />
+        ) : tab === "responses" && hasResponsesTab ? (
           <ResponsesPanel
             noteId={noteId}
             items={items}
             responses={responses}
-            sections={sections}
+            sections={[
+              ...sections,
+              ...blocks.filter((b) => !b.def && b.title).map((b) => ({ id: b.key, name: b.title ?? "" })),
+            ]}
             onItems={setItems}
             onResponses={setResponses}
           />
@@ -1862,6 +1963,10 @@ export function NoteEditorPage() {
               ) : undefined;
             return sourceJobId ? (
               <>
+                <RememberTermPrompt
+                  pending={pendingTerm}
+                  onDone={() => setPendingTerm(null)}
+                />
                 {relabelOffer && (
                   <div className="banner banner-info note-relabel" role="note">
                     <span className="grow">Update speaker names in the note?</span>
@@ -1880,37 +1985,94 @@ export function NoteEditorPage() {
                   onSpeakerMergeUndone={onSpeakerMergeUndone}
                   onSpeakersRelabelled={onSpeakersRelabelled}
                   fallback={textView}
+                  seekMs={seek?.ms ?? null}
+                  seekKey={seek?.key}
                 />
               </>
             ) : textView;
           })()
         ) : (
           <div className="doc-body">
-            {sections.length === 0 && <div className="section-ro empty-val">This note's template has no sections.</div>}
-            {noteDefs.length === 0 && sections.length > 0 && (
-              <div className="section-ro empty-val">No notes yet — the transcript is under the other tab.</div>
+            {/* Sprint 36: unfinished business from the last meeting in
+                this series, above what was agreed in this one. */}
+            {/* Sprint 33/37: what the engine is doing with this note, or
+                why it is not. Never blocks the page — the note is the
+                author's the whole time. */}
+            <GenerationStatus
+              noteId={noteId}
+              canGenerate={editable && sourceJobId !== null}
+              canRegenerate={editable}
+              onFinished={load}
+              onView={(view) => setRecordingType(view?.recording_type ?? null)}
+              onSeek={
+                sourceJobId
+                  ? (ms) => {
+                      setSeek({ ms, key: Date.now() });
+                      setTab("transcript");
+                    }
+                  : undefined
+              }
+            />
+            {generated && (
+              <DetailToggle
+                value={detail}
+                onChange={(next) => {
+                  setDetail(next);
+                  writeDetail(noteId, next);
+                }}
+              />
             )}
-            {noteDefs.map((def) => (
-              <section key={def.id} className="doc-section">
-                <div className="field">
-                  <span className="section-name">
-                    {def.name}
-                    {def.required && <span className="req-tag">required</span>}
-                    {(def.id === "action_items" || def.id === "next_steps") && responseCount > 0 && (
-                      <button type="button" className="chip version response-badge" onClick={() => setTab("responses")}>
-                        {responseCount} response{responseCount === 1 ? "" : "s"}
-                      </button>
+            {generated && editable && (
+              <CorrectionsPanel noteId={noteId} rows={genRows} version={version} onChanged={load} />
+            )}
+            <CarriedItems noteId={noteId} readOnly={!editable} />
+            {blocks.length === 0 && (
+              <div className="section-ro empty-val">
+                {transcriptDefs.length > 0 ? "No notes yet — the transcript is under the other tab." : "Nothing here yet."}
+              </div>
+            )}
+            {blocks.map((block) => {
+              const badge =
+                (block.key === "action_items" || block.key === "next_steps") && responseCount > 0 ? (
+                  <button type="button" className="chip version response-badge" onClick={() => setTab("responses")}>
+                    {responseCount} response{responseCount === 1 ? "" : "s"}
+                  </button>
+                ) : null;
+              return (
+                <section key={block.key} className={`doc-section${block.title ? "" : " untitled"}`}>
+                  <div className="field">
+                    {(block.title || badge) && (
+                      <span className="section-name">
+                        {block.title}
+                        {badge}
+                      </span>
                     )}
-                  </span>
-                  <SectionField
-                    def={def}
-                    section={sectionOf(shownContent, def.id)}
-                    readOnly={!editable}
-                    onChange={(next) => onContentChange(withSection(shownContent, next))}
-                  />
-                </div>
-              </section>
-            ))}
+                    <SectionField
+                      def={defFor(block)}
+                      section={sectionOf(shownContent, block.key)}
+                      readOnly={!editable}
+                      onChange={(next) => onContentChange(withSection(shownContent, next))}
+                      lineExtra={lineExtra}
+                    />
+                    {alsoSaid && (alsoSaid.get(block.key)?.length ?? 0) > 0 && (
+                      <div className="also-said">
+                        <span className="muted">Also said</span>
+                        <ul className="rt-list">
+                          {(alsoSaid.get(block.key) ?? []).map((row) => (
+                            <li key={row.item_key}>
+                              <span>
+                                {row.text}
+                                <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} />
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
           </div>
         )}
 
@@ -1982,4 +2144,75 @@ export function NoteEditorPage() {
       )}
     </div>
   );
+}
+
+
+// ── Q5: Short / Standard / Detailed ─────────────────────────────────
+
+export type DetailLevel = "short" | "standard" | "detailed";
+const DETAIL_KEY = "note-detail:";
+
+function readDetail(noteId: string): DetailLevel {
+  try {
+    const value = window.localStorage.getItem(DETAIL_KEY + noteId);
+    return value === "short" || value === "detailed" ? value : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+function writeDetail(noteId: string, value: DetailLevel): void {
+  try {
+    window.localStorage.setItem(DETAIL_KEY + noteId, value);
+  } catch {
+    // A convenience; a browser that will not store it shows Standard next time.
+  }
+}
+
+/** Short: the overview. Standard: the note as written. Detailed: plus the
+ *  verified facts no line used, under their topic. A view — never an edit,
+ *  never a model call. */
+export function DetailToggle({ value, onChange }: { value: DetailLevel; onChange: (v: DetailLevel) => void }) {
+  const options: [DetailLevel, string][] = [
+    ["short", "Short"],
+    ["standard", "Standard"],
+    ["detailed", "Detailed"],
+  ];
+  return (
+    <div className="seg detail-toggle" role="radiogroup" aria-label="How much to show">
+      {options.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="radio"
+          aria-checked={value === key}
+          className={`seg-opt${value === key ? " on" : ""}`}
+          onClick={() => onChange(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The fact rows no displayed line is, grouped by the section they belong
+ *  under — what "Detailed" adds. */
+export function uncitedBySection(
+  rows: GeneratedItem[],
+  content: { sections?: { section_key: string; text?: string | null }[] } | null,
+): Map<string, GeneratedItem[]> {
+  const shown = new Set<string>();
+  for (const section of content?.sections ?? []) {
+    for (const line of (section.text ?? "").split("\n")) if (line.trim()) shown.add(lineKey(line));
+  }
+  const cited = new Set(rows.flatMap((r) => r.cites ?? []).filter((k) => shown.has(k)));
+  const out = new Map<string, GeneratedItem[]>();
+  for (const row of rows) {
+    if (row.placement !== "suggested" || shown.has(row.item_key) || cited.has(row.item_key)) continue;
+    const list = out.get(row.section_key) ?? [];
+    list.push(row);
+    out.set(row.section_key, list);
+  }
+  return out;
 }

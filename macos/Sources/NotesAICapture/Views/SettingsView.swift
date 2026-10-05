@@ -42,8 +42,12 @@ struct SettingsView: View {
                         switch app.settingsTab {
                         case .general:
                             general
+                        case .vocabulary:
+                            GlossaryView()
                         case .connectors:
                             ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
+                        case .dataAI:
+                            DataAndAIView()
                         case .account:
                             account
                         case .advanced:
@@ -84,7 +88,9 @@ struct SettingsView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 12)
             navRow("General", symbol: "slider.horizontal.3", tab: .general)
+            navRow("Names and terms", symbol: "character.book.closed", tab: .vocabulary)
             navRow("Connectors", symbol: "link", tab: .connectors)
+            navRow("Data & AI", symbol: "lock.shield", tab: .dataAI)
             navRow("Account", symbol: "person.crop.circle", tab: .account)
             navRow("Advanced", symbol: "wrench.and.screwdriver", tab: .advanced)
             Spacer()
@@ -128,7 +134,9 @@ struct SettingsView: View {
     private func title(for tab: AppState.SettingsTab) -> String {
         switch tab {
         case .general: return "General"
+        case .vocabulary: return "Names and terms"
         case .connectors: return "Connectors"
+        case .dataAI: return "Data & AI"
         case .account: return "Account"
         case .advanced: return "Advanced"
         }

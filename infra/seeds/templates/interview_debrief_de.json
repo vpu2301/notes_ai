@@ -6,6 +6,17 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "user_notes",
+      "name": "Meine Notizen",
+      "voice_aliases": ["meine notizen", "notizblock"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Die eigenen Zeilen der schreibenden Person, während der Besprechung getippt.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Diesen Abschnitt niemals umschreiben, umsortieren, zusammenfassen oder korrigieren. Exakt so wiedergeben, wie er getippt wurde."
+    },
+    {
       "id": "candidate",
       "name": "Kandidat und Stelle",
       "voice_aliases": ["kandidat", "kandidatin", "stelle", "position"],
@@ -13,7 +24,7 @@
       "field_type": "free_text",
       "asr_prompt": "Angaben zu Kandidat und Stelle. Name, Stelle, Seniorität, Team, Interviewrunde, Interviewer, Interviewformat.",
       "min_chars": 0,
-      "order": 0,
+      "order": 1,
       "synthesis_prompt": "Ein bis zwei Zeilen: Kandidat, Stelle und Runde, anwesende Interviewer."
     },
     {
@@ -24,7 +35,7 @@
       "field_type": "free_text",
       "asr_prompt": "Zusammenfassung des Interviews. Gestellte Fragen, Übungen, Systemdesign, Fallstudie, Antworten, Kommunikationsstil, besprochene Erfahrung.",
       "min_chars": 20,
-      "order": 1,
+      "order": 2,
       "synthesis_prompt": "Knappe Zusammenfassung, was behandelt wurde und wie der Kandidat abgeschnitten hat, nach Themen gruppiert."
     },
     {
@@ -35,7 +46,7 @@
       "field_type": "free_text",
       "asr_prompt": "Stärken des Kandidaten. Starkes Signal, tiefes Fachwissen, klare Kommunikation, Eigenverantwortung, Führung, relevante Erfahrung, Bereicherung fürs Team.",
       "min_chars": 0,
-      "order": 2,
+      "order": 3,
       "synthesis_prompt": "Stichpunktliste der Stärken, jede mit einer konkreten Beobachtung aus dem Interview belegt."
     },
     {
@@ -46,7 +57,7 @@
       "field_type": "free_text",
       "asr_prompt": "Bedenken und Lücken. Schwaches Signal, Lücke, oberflächliche Antwort, Schwierigkeiten bei, Warnsignal, braucht Unterstützung, Seniorität passt nicht.",
       "min_chars": 0,
-      "order": 3,
+      "order": 4,
       "synthesis_prompt": "Stichpunktliste der Bedenken, jede mit einer konkreten Beobachtung belegt; K.-o.-Kriterien von coachbaren Lücken unterscheiden."
     },
     {
@@ -57,7 +68,7 @@
       "field_type": "choice",
       "asr_prompt": "Einstellungsempfehlung. Klar einstellen, einstellen, nicht einstellen, klar nicht einstellen.",
       "min_chars": 0,
-      "order": 4,
+      "order": 5,
       "options": [
         {"value": "strong_hire", "label": "Klar einstellen", "voice_aliases": ["klar einstellen", "unbedingt einstellen"]},
         {"value": "hire", "label": "Einstellen", "voice_aliases": ["einstellen"]},

@@ -102,6 +102,15 @@ def deep_link(event: NotificationEvent, *, base_url: str) -> str:
     return notification_deep_link(event.resource_type, event.resource_id, base_url=base_url)
 
 
+def _money(cents: object) -> str:
+    """Cents as money. Model pricing is quoted in USD, and so is this —
+    a budget line in a unit nobody recognises is one nobody acts on."""
+    try:
+        return f"${int(str(cents)) / 100:.2f}"
+    except (TypeError, ValueError):
+        return "the budget"
+
+
 _RESPONSE_VERBS: Final[dict[str, str]] = {
     "confirm": "confirmed an item on",
     "done": "marked an item done on",
@@ -138,6 +147,8 @@ def render_title(event: NotificationEvent) -> str:
             return "Audio transcription failed"
         case Category.SECURITY_MFA_REMINDER:
             return "Enable two-factor authentication"
+        case Category.AI_BUDGET_REACHED:
+            return "Automatic note writing has paused"
         case Category.SYSTEM_DIGEST:
             return f"Your notifications: {fields.get('count', '0')}"
     # Unreachable: spec_for() has already rejected unknown categories.
@@ -186,6 +197,14 @@ def render_body(event: NotificationEvent) -> str:
         case Category.TRANSCRIPTION_FAILED:
             kind = fields.get("error_kind", "unknown reason")
             return f"The transcription job did not complete: {kind}. Please try again."
+        case Category.AI_BUDGET_REACHED:
+            spent = _money(fields.get("spent_cents"))
+            budget = _money(fields.get("budget_cents"))
+            return (
+                f"This workspace has used {spent} of its {budget} monthly AI budget, "
+                "so new recordings are transcribed but not written up. "
+                "An admin can raise the budget in Settings › Data."
+            )
         case Category.SECURITY_MFA_REMINDER:
             raw_role = fields.get("requested_by_role", "")
             who = _REMINDER_ROLE_LABELS.get(raw_role, "Your security team")

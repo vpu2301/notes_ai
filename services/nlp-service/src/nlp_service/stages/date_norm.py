@@ -29,6 +29,7 @@ import logging
 import re
 import time
 from datetime import date, timedelta
+from functools import lru_cache
 
 from ..pipeline.base import (
     PipelineWarning,
@@ -345,6 +346,21 @@ _DE_MORNING_AFTER = r"(?!\s+(?:früh|abend|mittag|nachmittag))"
 _REL_TABLES = {"uk": _REL_UK, "en": _REL_EN, "de": _REL_DE}
 
 
+@lru_cache(maxsize=8)
+def _relative_pattern(language: str) -> re.Pattern[str]:
+    """The alternation over a language's relative-day table.
+
+    Built from module-level constants, so it is compiled once per
+    language rather than reassembled on every request.
+    """
+    table = _REL_TABLES.get(language, _REL_EN)
+    alternation = r"\b(" + "|".join(re.escape(k) for k in table) + r")\b"
+    if language == "de":
+        # "morgen" only counts as a date away from the morning readings.
+        alternation = _DE_MORNING_BEFORE + alternation + _DE_MORNING_AFTER
+    return re.compile(alternation, re.IGNORECASE | re.UNICODE)
+
+
 def _apply_relative(text: str, ctx: ProcessingContext) -> tuple[str, list[PipelineWarning]]:
     warnings: list[PipelineWarning] = []
     table = _REL_TABLES.get(ctx.language, _REL_EN)
@@ -357,22 +373,7 @@ def _apply_relative(text: str, ctx: ProcessingContext) -> tuple[str, list[Pipeli
         d = ctx.reference_date + timedelta(days=offset)
         return _format_date(d, ctx)
 
-    if ctx.language == "de":
-        # "morgen" only counts as a date away from the morning readings.
-        pattern = re.compile(
-            _DE_MORNING_BEFORE
-            + r"\b("
-            + "|".join(re.escape(k) for k in table)
-            + r")\b"
-            + _DE_MORNING_AFTER,
-            re.IGNORECASE | re.UNICODE,
-        )
-    else:
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(k) for k in table) + r")\b",
-            re.IGNORECASE | re.UNICODE,
-        )
-    text = pattern.sub(_replace_simple, text)
+    text = _relative_pattern(ctx.language).sub(_replace_simple, text)
 
     # "next/last week|month" + Ukrainian "наступного/минулого тижня/місяця"
     if ctx.language == "uk":

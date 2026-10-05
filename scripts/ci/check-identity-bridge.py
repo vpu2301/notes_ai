@@ -97,7 +97,10 @@ async def main() -> int:
 
     if total:
         failed = True
-        print(f"check-identity-bridge: FAIL — {total} active identity(ies) with no users row", file=sys.stderr)
+        print(
+            f"check-identity-bridge: FAIL — {total} active identity(ies) with no users row",
+            file=sys.stderr,
+        )
         for row in rows:
             origin = "backfilled (legacy_idp)" if row["legacy_idp"] else "native signup"
             print(f"  {row['id']}  {row['email']}  [{origin}]", file=sys.stderr)

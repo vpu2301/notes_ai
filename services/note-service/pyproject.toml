@@ -39,6 +39,9 @@ dependencies = [
     "models",
     # Sprint 19: abuse caps on the anonymous shared-note surface
     "ratelimit",
+    # Sprint 33: the generation queue the API enqueues onto and
+    # `note_service.worker` drains (ADR-0058).
+    "jobs",
 ]
 
 [tool.uv.sources]
@@ -54,6 +57,7 @@ ratelimit = { workspace = true }
 crypto = { workspace = true }
 storage = { workspace = true }
 models = { workspace = true }
+jobs = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

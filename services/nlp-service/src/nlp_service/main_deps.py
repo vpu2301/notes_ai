@@ -20,6 +20,7 @@ from .stages import (
     AbbreviationStage,
     ConfidenceStage,
     DateNormStage,
+    DisfluencyStage,
     FieldExtractionStage,
     NumberNormStage,
     PunctuationStage,
@@ -45,6 +46,7 @@ def auth_issuers() -> list[IssuerConfig]:
         jwks_url=settings.auth_jwks_url,
         audience=settings.auth_audience,
     )
+
 
 @dataclass
 class RedisCacheAdapter:
@@ -115,6 +117,9 @@ async def build_state() -> ServiceState:
         FieldExtractionStage(
             confidence_threshold=settings.extraction_confidence_threshold,
         ),
+        # Sprint I3: conversation only; before confidence so the spans
+        # address the displayed text.
+        DisfluencyStage(),
         ConfidenceStage(),
     ]
     orchestrator = Orchestrator(

@@ -74,3 +74,24 @@ groups:
         annotations:
           summary: "GPU peak memory > 90% of 24 GB card for 3 jobs in a row"
           description: "Consider reducing beam size or chunk length."
+
+      # Sprint I2 T3: the transcriber is writing its prompt back again. The
+      # lexical guard removes the echo, and counts it; more than 20 echoed
+      # words per hour of audio over a day means the vocabulary is
+      # poisoning transcripts (a role label got in, a backend regressed).
+      - alert: AsrPromptEchoRate
+        expr: |
+          increase(mdx_asr_prompt_echo_words_total[24h])
+            /
+          (increase(mdx_asr_audio_duration_seconds_sum[24h]) / 3600) > 20
+        for: 1h
+        labels:
+          severity: warn
+          team: asr
+        annotations:
+          summary: "More than 20 prompt-echo words per audio hour over 24h"
+          description: |
+            The prompt-echo guard removed {{ $value | printf "%.0f" }} words per
+            hour of audio in the last day. Check the workspace glossaries
+            (`scripts/admin/glossary_audit.py`), the backend and
+            `MDX_ASR_CONDITION_PREV`. Runbook: docs/runbooks/asr-worker.md#prompt-echo

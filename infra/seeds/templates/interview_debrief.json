@@ -6,6 +6,17 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "user_notes",
+      "name": "My notes",
+      "voice_aliases": ["my notes", "scratchpad", "my note"],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "The note-taker's own lines, typed during the meeting.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Never rewrite, reorder, summarise or correct this section. Reproduce it exactly as the author typed it."
+    },
+    {
       "id": "candidate",
       "name": "Candidate and role",
       "voice_aliases": ["candidate", "role", "position"],
@@ -13,7 +24,7 @@
       "field_type": "free_text",
       "asr_prompt": "Candidate and role details. Candidate name, role, seniority, team, interview round, interviewers, interview format.",
       "min_chars": 0,
-      "order": 0,
+      "order": 1,
       "synthesis_prompt": "One or two lines: candidate, role and round, interviewers present."
     },
     {
@@ -24,7 +35,7 @@
       "field_type": "free_text",
       "asr_prompt": "Interview summary. Questions asked, exercises, system design, case study, answers, communication style, experience discussed.",
       "min_chars": 20,
-      "order": 1,
+      "order": 2,
       "synthesis_prompt": "Concise summary of what was covered and how the candidate performed, grouped by topic."
     },
     {
@@ -35,7 +46,7 @@
       "field_type": "free_text",
       "asr_prompt": "Candidate strengths. Strong signal, deep knowledge, clear communication, ownership, leadership, relevant experience, culture add.",
       "min_chars": 0,
-      "order": 2,
+      "order": 3,
       "synthesis_prompt": "Bullet list of strengths, each backed by a concrete observation from the interview."
     },
     {
@@ -46,7 +57,7 @@
       "field_type": "free_text",
       "asr_prompt": "Concerns and gaps. Weak signal, gap, shallow answer, struggled with, red flag, needs support, seniority mismatch.",
       "min_chars": 0,
-      "order": 3,
+      "order": 4,
       "synthesis_prompt": "Bullet list of concerns, each backed by a concrete observation; distinguish dealbreakers from coachable gaps."
     },
     {
@@ -57,7 +68,7 @@
       "field_type": "choice",
       "asr_prompt": "Hiring recommendation. Strong hire, hire, no hire, strong no hire.",
       "min_chars": 0,
-      "order": 4,
+      "order": 5,
       "options": [
         {"value": "strong_hire", "label": "Strong hire", "voice_aliases": ["strong hire"]},
         {"value": "hire", "label": "Hire", "voice_aliases": ["hire"]},

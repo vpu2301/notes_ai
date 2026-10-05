@@ -32,12 +32,15 @@ export interface ListItem {
   done?: boolean;
   /** The number the author wrote, for ordered items. */
   num?: number;
+  /** The source line, marker included — what a generated line's evidence
+   *  row is keyed by (Summary Engine v2, Q5). */
+  raw?: string;
 }
 
 export type Block =
   | { kind: "heading"; level: number; spans: Inline[] }
   /** `speaker` is set when the paragraph opens with a short `Name:` label — a transcript turn. */
-  | { kind: "para"; spans: Inline[]; speaker?: string }
+  | { kind: "para"; spans: Inline[]; speaker?: string; raw?: string }
   | { kind: "list"; items: ListItem[] }
   | { kind: "quote"; spans: Inline[] }
   | { kind: "rule" }
@@ -149,7 +152,7 @@ export function parseRichText(text: string): Block[] {
       blocks.push({ kind: "para", spans: inlineSpans(body.slice(turn[0].length)), speaker: turn[1] });
       return;
     }
-    blocks.push({ kind: "para", spans: inlineSpans(body) });
+    blocks.push({ kind: "para", spans: inlineSpans(body), raw: body });
   };
 
   const flushList = () => {
@@ -221,7 +224,7 @@ export function parseRichText(text: string): Block[] {
     const check = CHECK.exec(line);
     if (check) {
       push(
-        { spans: inlineSpans(check[3] ?? ""), ordered: false, done: (check[2] ?? "").toLowerCase() === "x" },
+        { spans: inlineSpans(check[3] ?? ""), ordered: false, done: (check[2] ?? "").toLowerCase() === "x", raw: line },
         indentOf(check[1] ?? ""),
       );
       continue;
@@ -229,14 +232,14 @@ export function parseRichText(text: string): Block[] {
 
     const bullet = BULLET.exec(line);
     if (bullet) {
-      push({ spans: inlineSpans(bullet[2] ?? ""), ordered: false }, indentOf(bullet[1] ?? ""));
+      push({ spans: inlineSpans(bullet[2] ?? ""), ordered: false, raw: line }, indentOf(bullet[1] ?? ""));
       continue;
     }
 
     const ordered = ORDERED.exec(line);
     if (ordered) {
       push(
-        { spans: inlineSpans(ordered[3] ?? ""), ordered: true, num: Number(ordered[2] ?? 1) },
+        { spans: inlineSpans(ordered[3] ?? ""), ordered: true, num: Number(ordered[2] ?? 1), raw: line },
         indentOf(ordered[1] ?? ""),
       );
       continue;
@@ -260,6 +263,7 @@ export function parseRichText(text: string): Block[] {
     const open = items[items.length - 1];
     if (open && /^[ \t]/.test(line)) {
       open.spans = [...open.spans, { text: ` ${line.trim()}` }];
+      open.raw = `${open.raw ?? ""} ${line.trim()}`;
       continue;
     }
 

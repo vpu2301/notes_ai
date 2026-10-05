@@ -85,6 +85,47 @@ Sign in with the dev seed account: **member@tenant-a.example** / **dev-password*
 4. `GET /v1/notes/by-source-job` resolves which note a job became, so the
    editor can offer the **Transcript** tab (`GET /asr/jobs/{id}/result`).
 
+## My notes: typing during the meeting (Sprint 34, ADR-0055)
+
+Pressing **Record** opens the note before there is any audio, and the
+capture page becomes it: a one-line recorder rail on top, the scratchpad
+(the note's `user_notes` section) below.
+
+- The recorder starts **first**; the note is opened beside it. If
+  `POST /v1/notes/meeting` fails, recording carries on and the note is
+  created at Stop, with the same `client_capture_id` so no duplicate
+  appears.
+- Typing autosaves through the existing draft PUT, and each new line's
+  first keystroke is queued as `{line_key, offset_ms}` and flushed with
+  the save. The key is `sha256(normalised line)[:16]` — the same rule the
+  server and the action-item projection use (`src/lib/myNotes.ts`).
+- Text typed on another device is **merged, never overwritten**: it
+  arrives on load and on a 409, appended under a `---` divider.
+- `beforeunload` guards a recording, an upload **and** unsaved scratch text.
+- On reload, a finished job whose note is still waiting is attached
+  automatically (`useCaptures`), so closing the laptop mid-transcription
+  does not strand the meeting.
+
+## Names and terms: the workspace glossary (Sprint 35)
+
+Fixing a speaker's name offers, once, to remember the spelling for the
+workspace. Nothing is learned silently:
+
+- the offer appears only on a real correction — a name typed over a
+  placeholder or over a different spelling. Case, spacing, or clearing a
+  name back to "Speaker 2" teach nothing and are not offered
+  (`src/components/RememberTermPrompt.tsx`);
+- accepted terms are listed under **Workspace settings → Names and terms**,
+  with what each was heard as, and are deletable by whoever added them;
+- the capture page pre-fills **Options → Words to listen for** from
+  `GET /v1/glossary/hint`, so the transcriber has the spellings before it
+  guesses. Editing the field changes that meeting only.
+
+Corrections to a line — dismiss, restore, fix an owner or a due date — go
+through `src/api/notes.ts` (`dismissItem`, `restoreItem`, `patchItem`) and
+address the line by its `item_key`, so a fixed owner keeps the recipient's
+confirmation on the shared page.
+
 ## Configuration
 
 Backend base URLs come from Vite env vars (defaults match the dev stack):

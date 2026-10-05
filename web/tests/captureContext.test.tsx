@@ -184,7 +184,9 @@ describe("capture context helpers", () => {
   });
 
   it("never sends the count as a bound below two", () => {
-    expect(contextFields({ attendee_count: 2, attendees: [] })).toEqual({ speakersMax: 2, nameCandidates: undefined });
+    expect(
+      contextFields({ attendee_count: 2, attendees: [], agenda: [], title: "", ical_uid: "" }),
+    ).toEqual({ speakersMax: 2, nameCandidates: undefined });
     expect(contextFields(null)).toEqual({});
   });
 });
@@ -208,6 +210,8 @@ describe("Start from the home page", () => {
     attendees: ["me@example.com", "Anna Keller", "Tom Berg"],
     organizer: "me@example.com",
     response_status: "accepted",
+    ical_uid: "evt_42@google.com",
+    agenda_lines: ["Colour palette", "Typography"],
   };
 
   function Where() {
@@ -254,9 +258,14 @@ describe("Start from the home page", () => {
     expect(params.get("title")).toBe("Design review");
     expect(params.get("event")).toBe("evt_42");
     expect(url).not.toMatch(/Anna|Tom|Keller|Berg|example/);
+    // Sprint 34: the agenda and the invite's identity ride along too —
+    // they go on the note as the capture starts. Still never in the URL.
     expect(JSON.parse(sessionStorage.getItem("capture.ctx.evt_42") ?? "null")).toEqual({
       attendee_count: 3,
       attendees: ["Anna Keller", "Tom Berg"],
+      agenda: ["Colour palette", "Typography"],
+      title: "Design review",
+      ical_uid: "evt_42@google.com",
     });
   });
 });

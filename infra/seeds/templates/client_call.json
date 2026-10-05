@@ -1,0 +1,140 @@
+{
+  "code": "client_call",
+  "name": "Client call",
+  "language": "en",
+  "specialty": "client",
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "user_notes",
+      "name": "My notes",
+      "voice_aliases": [
+        "my notes",
+        "scratchpad"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "The note-taker's own lines, typed during the meeting.",
+      "min_chars": 0,
+      "order": 0,
+      "synthesis_prompt": "Never rewrite, reorder, summarise or correct this section. Reproduce it exactly as the author typed it."
+    },
+    {
+      "id": "attendees",
+      "name": "Attendees",
+      "voice_aliases": [
+        "attendees",
+        "participants",
+        "who attended"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Who was on the call, on both sides. Names, roles, company, who joined late.",
+      "min_chars": 0,
+      "order": 1,
+      "synthesis_prompt": "List each attendee on its own line as 'Name — role, company'. Put the client's people first."
+    },
+    {
+      "id": "summary",
+      "name": "Summary",
+      "voice_aliases": [
+        "summary",
+        "overview"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "What this call was about and where it ended up. Purpose, outcome, mood, agreement.",
+      "min_chars": 0,
+      "order": 2,
+      "synthesis_prompt": "Three to five sentences a client could read without context. No internal commentary."
+    },
+    {
+      "id": "requests",
+      "name": "What the client asked for",
+      "voice_aliases": [
+        "requests",
+        "client asks",
+        "asks"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "What the client asked for. Requests, wishes, complaints, changes, deadlines they need.",
+      "min_chars": 0,
+      "order": 3,
+      "synthesis_prompt": "One bullet per request, in the client's own framing. Mark anything we have not agreed to yet."
+    },
+    {
+      "id": "decisions",
+      "name": "Decisions",
+      "voice_aliases": [
+        "decisions",
+        "agreed"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Decisions made on the call. Agreed, approved, rejected, postponed, scope, price, dates.",
+      "min_chars": 0,
+      "order": 4,
+      "synthesis_prompt": "One bullet per decision: what was decided and by whom."
+    },
+    {
+      "id": "action_items",
+      "name": "Action items",
+      "voice_aliases": [
+        "action items",
+        "actions",
+        "next steps"
+      ],
+      "required": true,
+      "field_type": "free_text",
+      "asr_prompt": "Who does what by when, on both sides. Assignee, task, due date, dependency.",
+      "min_chars": 0,
+      "order": 5,
+      "synthesis_prompt": "One bullet per action in the form 'Owner: task — due date'. Keep our commitments and the client's clearly attributable to the right side."
+    },
+    {
+      "id": "open_questions",
+      "name": "Open questions",
+      "voice_aliases": [
+        "open questions",
+        "questions",
+        "unresolved"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Questions nobody answered on the call. Unknowns, blockers, things to find out.",
+      "min_chars": 0,
+      "order": 6,
+      "synthesis_prompt": "One bullet per open question. Say who is expected to answer it, when that was said."
+    },
+    {
+      "id": "risks",
+      "name": "Risks",
+      "voice_aliases": [
+        "risks",
+        "concerns"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "Risks to the work. Timeline risk, budget risk, dependency, resourcing, misalignment.",
+      "min_chars": 0,
+      "order": 7,
+      "synthesis_prompt": "One bullet per risk, with its impact in a few words."
+    },
+    {
+      "id": "next_meeting",
+      "name": "Next meeting",
+      "voice_aliases": [
+        "next meeting",
+        "next call",
+        "follow up"
+      ],
+      "required": false,
+      "field_type": "free_text",
+      "asr_prompt": "When the next conversation is. Date, time, who, agenda for it.",
+      "min_chars": 0,
+      "order": 8,
+      "synthesis_prompt": "One line: when, with whom, and what it is for. Empty if nothing was agreed."
+    }
+  ]
+}

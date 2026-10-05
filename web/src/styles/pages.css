@@ -599,6 +599,11 @@ ol.rt-list > li::before {
 .turn-time { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .turn-text { grid-column: 2; margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
 .turn-text + .turn-text { margin-top: calc(6px * var(--density)); }
+/* Sprint I2: a turn in another language than the recording. Neutral — a
+   fact about the passage, not something to act on. */
+.turn-lang { color: var(--text-3); background: var(--surface-2); align-self: center; }
+.transcript-include-langs { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.transcript-diagnostic { margin: calc(-8px * var(--density)) 0 calc(12px * var(--density)); color: var(--text-3); }
 
 /* ─── New meeting ───────────────────────────────────────────────────────── */
 /* ActiveCaptureCard: the stage is a framed card with the xl radius. */
@@ -700,6 +705,173 @@ ol.rt-list > li::before {
   color: var(--accent-text); font-weight: 500;
   pointer-events: none;
   z-index: 5;
+}
+
+/* ─── The live meeting: recorder rail + scratchpad (Sprint 34) ─────────── */
+/* Once Record is pressed the page IS the note. The recorder shrinks to one
+   quiet line and the writing surface takes the room — the meeting is being
+   typed, not watched. */
+.meeting-live { max-width: 760px; gap: calc(12px * var(--density)); }
+.recorder-bar {
+  position: sticky; top: 0; z-index: 4;
+  display: flex; align-items: center; gap: calc(10px * var(--density));
+  min-height: 46px;
+  padding: calc(7px * var(--density)) calc(12px * var(--density));
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  /* The paper must not show through the text scrolling under it. */
+  backdrop-filter: saturate(1.2) blur(6px);
+}
+.recorder-bar .grow { flex: 1; }
+.recorder-bar .rec-timer.sm { font-size: calc(17px * var(--fs)); gap: calc(8px * var(--density)); }
+.recorder-bar .level-meter.sm { height: 24px; }
+.recorder-bar .stage-pulse.sm { width: 9px; height: 9px; flex: none; }
+.rec-status { font-size: calc(13px * var(--fs)); color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
+
+.scratchpad { display: flex; flex-direction: column; gap: calc(8px * var(--density)); }
+.scratchpad .title-input { font-size: calc(22px * var(--fs)); }
+/* Tall enough that the author never feels they are filling a box, and it
+   grows with the window rather than with the text (a jumping textarea
+   under a live meeting is the wrong kind of movement). */
+.scratch-area {
+  min-height: min(52vh, 460px);
+  resize: vertical;
+  font-size: calc(14.5px * var(--fs));
+  line-height: 1.7;
+}
+.scratch-status { min-height: 1.2em; }
+.scratch-context { display: flex; flex-direction: column; gap: calc(6px * var(--density)); }
+.scratch-context-body {
+  padding: calc(10px * var(--density)) calc(14px * var(--density));
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.scratch-context-body ul { margin: calc(6px * var(--density)) 0 0; padding-left: 1.1em; }
+.meeting-foot { text-align: center; }
+
+/* Phone: the rail stays one line and the pad fills what is left. */
+@media (max-width: 640px) {
+  .meeting-live { gap: calc(10px * var(--density)); }
+  .recorder-bar { gap: calc(8px * var(--density)); padding-inline: calc(10px * var(--density)); }
+  .recorder-bar .level-meter.sm { display: none; }
+  .scratch-area { min-height: 44vh; }
+}
+
+/* The meeting-type chips wrap rather than scroll: six short words fit. */
+.seg.chips { flex-wrap: wrap; align-self: center; }
+
+/* ─── Workspace vocabulary (Sprint 35) ─────────────────────────────────── */
+.glossary-add {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: calc(8px * var(--density));
+}
+.glossary-add .input { flex: 1 1 200px; min-width: 0; }
+.glossary-list { list-style: none; margin: calc(12px * var(--density)) 0 0; padding: 0; }
+.glossary-list li {
+  display: flex; align-items: baseline; gap: calc(10px * var(--density));
+  padding: calc(8px * var(--density)) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.glossary-list li .grow { flex: 1; }
+.glossary-term { font-weight: 500; color: var(--text-1); }
+/* The kind is a quiet label, not a badge competing with the name. */
+.glossary-kind {
+  font-size: calc(11.5px * var(--fs)); color: var(--muted);
+  text-transform: lowercase;
+}
+.glossary-heard { min-width: 0; overflow-wrap: anywhere; }
+.glossary-meta { white-space: nowrap; }
+.glossary-meta a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.glossary-add-error { margin: calc(6px * var(--density)) 0 0; }
+.glossary-not-sent { margin-top: calc(12px * var(--density)); }
+/* Sprint I2: a stored role label the server no longer sends. Dimmed, tagged,
+   still removable — the list shows what the transcriber gets, so a line it
+   does not get must look like one. */
+.glossary-list li.not-sent .glossary-term,
+.glossary-list li.not-sent .glossary-kind,
+.glossary-list li.not-sent .glossary-heard { color: var(--text-3); }
+.glossary-list li.not-sent .glossary-term { font-weight: 400; text-decoration: line-through; text-decoration-color: var(--line-hover); }
+.glossary-tag {
+  font-size: calc(10.5px * var(--fs)); font-weight: 500;
+  text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-3); background: var(--surface-2);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-xs);
+  padding: 0 5px; white-space: nowrap; align-self: center;
+}
+/* The prompt, word for word. A neutral frame: this is a fact, not a warning. */
+.glossary-hint {
+  margin-top: calc(16px * var(--density));
+  padding: calc(10px * var(--density)) calc(12px * var(--density));
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.glossary-hint-h {
+  display: flex; align-items: baseline; gap: calc(8px * var(--density));
+  font-size: calc(12px * var(--fs)); color: var(--text-2); font-weight: 500;
+}
+.glossary-hint-h .count { margin-left: auto; font-family: var(--mono); font-weight: 400; color: var(--muted); font-size: calc(11.5px * var(--fs)); }
+.glossary-hint-text {
+  margin: calc(6px * var(--density)) 0 0; padding: 0;
+  font-family: var(--mono); font-size: calc(12px * var(--fs)); line-height: 1.5;
+  color: var(--text-1); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.remember-term { align-items: center; }
+
+/* ─── Still open from last time (Sprint 36) ────────────────────────────── */
+/* Unfinished business reads as a quiet block above the note, not as a
+   second document competing with it. */
+.carried {
+  margin-bottom: calc(20px * var(--density));
+  padding: calc(12px * var(--density)) calc(16px * var(--density));
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+.carried-head {
+  display: flex; align-items: baseline; gap: calc(8px * var(--density));
+  margin: 0 0 calc(8px * var(--density));
+  font-family: var(--display); font-size: calc(13.5px * var(--fs)); font-weight: 600;
+  color: var(--text-2);
+}
+.carried-source { font-size: calc(12px * var(--fs)); font-weight: 400; }
+.carried-list { list-style: none; margin: 0; padding: 0; }
+.carried-list li {
+  display: flex; align-items: baseline; gap: calc(8px * var(--density));
+  padding: calc(4px * var(--density)) 0;
+}
+.carried-list li .chk-row { flex: 1; align-items: baseline; }
+/* Done is quieter, not gone: it is evidence the meeting moved. */
+.carried-list li.done > .chk-row { color: var(--muted); text-decoration: line-through; }
+.carried-list li.done .help { text-decoration: none; }
+.carried-quote {
+  flex-basis: 100%; margin: 0 0 0 calc(24px * var(--density));
+  font-style: italic; overflow-wrap: anywhere;
+}
+
+/* ─── Client version (Sprint 36) ───────────────────────────────────────── */
+.client-version { display: flex; flex-direction: column; gap: calc(14px * var(--density)); }
+.client-warnings {
+  list-style: none; margin: 0; padding: calc(10px * var(--density)) calc(14px * var(--density));
+  border-radius: var(--radius-lg);
+  background: var(--warn-soft, var(--surface-2));
+  display: flex; flex-direction: column; gap: calc(4px * var(--density));
+  font-size: calc(13px * var(--fs)); color: var(--text-2);
+}
+.client-warning-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+/* The preview is the document, so it is typeset like one. */
+.client-doc {
+  padding: calc(28px * var(--density)) calc(32px * var(--density));
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+.client-doc-title { margin: 0 0 calc(18px * var(--density)); font-size: calc(24px * var(--fs)); letter-spacing: -0.02em; }
+.client-doc section + section { margin-top: calc(18px * var(--density)); }
+.client-doc h3 {
+  margin: 0 0 calc(6px * var(--density));
+  font-family: var(--display); font-size: calc(13px * var(--fs)); font-weight: 600;
+  letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted);
 }
 
 /* Inline text-style button */
@@ -1053,3 +1225,91 @@ ol.rt-list > li::before {
 .speaker-roster .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .anchored-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .speaker-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 999px; }
+
+/* ── Sprint 37: Settings › Data & AI ──────────────────────────────── */
+/* The processor table is the disclosure itself, so it reads as a table
+   on a phone too: no horizontal scroll, one card per row below 560px. */
+.data-table { width: 100%; border-collapse: collapse; font-size: calc(13.5px * var(--fs)); }
+.data-table th, .data-table td {
+  text-align: left; padding: calc(8px * var(--density)) calc(10px * var(--density));
+  border-bottom: 1px solid var(--line); vertical-align: top; font-weight: 400;
+}
+.data-table thead th { color: var(--muted); font-size: calc(12px * var(--fs)); }
+.data-table tbody th { font-weight: 600; }
+.data-table tr:last-child th, .data-table tr:last-child td { border-bottom: 0; }
+
+.budget-line { margin: 0; font-size: calc(15px * var(--fs)); }
+.budget-form { display: flex; gap: calc(8px * var(--density)); align-items: flex-end; flex-wrap: wrap; }
+.budget-form .field { flex: 1 1 160px; }
+
+.meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter-fill { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.meter-fill.over { background: var(--warn); }
+
+.ack-list { margin: 0; padding-left: calc(18px * var(--density)); display: flex; flex-direction: column; gap: 4px; }
+
+@media (max-width: 560px) {
+  .data-table, .data-table tbody, .data-table tr, .data-table th, .data-table td { display: block; }
+  .data-table thead { display: none; }
+  .data-table tr { border-bottom: 1px solid var(--line); padding: calc(6px * var(--density)) 0; }
+  .data-table tr:last-child { border-bottom: 0; }
+  .data-table th, .data-table td { border-bottom: 0; padding: 2px 0; }
+  .data-table td { color: var(--muted); }
+}
+.gen-status { margin: 0 0 calc(10px * var(--density)); }
+/* Q3: what the engine left out, as data under the status — never a
+   paragraph in the note. */
+.gen-excluded {
+  display: block;
+  margin: 0 0 calc(10px * var(--density));
+  font-size: calc(12.5px * var(--fs));
+}
+.banner .gen-excluded { flex-basis: 100%; margin: 4px 0 0; }
+/* The Notes tab before a summary exists: one sentence and the button. */
+.gen-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin: 0 0 calc(16px * var(--density));
+  padding: calc(14px * var(--density)) calc(16px * var(--density));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.gen-empty p { margin: 0; flex: 1 1 240px; color: var(--text-2); }
+
+/* ── Summary Engine v2, Q5: evidence on every generated line ──────────
+   Labels are data drawn beside the words, never words in the note: a
+   chip for how sure a line is and whose position it is, a respelled name
+   that shows what was heard, and a quiet quote mark that opens the words
+   and the audio behind the line. */
+.line-evidence { position: relative; display: inline-flex; align-items: baseline; gap: 4px; margin-left: 6px; }
+.certainty-chip, .name-chip {
+  font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .02em;
+  padding: 0 6px; border-radius: var(--radius-xs);
+  background: var(--surface-2); color: var(--text-2);
+  border: var(--hairline) solid var(--line);
+}
+.name-chip { font-weight: 500; border-style: dashed; cursor: help; }
+.line-evidence .icon-btn {
+  background: none; border: 0; padding: 0 2px; cursor: pointer;
+  color: var(--muted); font-size: calc(12px * var(--fs)); line-height: 1;
+}
+.line-evidence .icon-btn:hover, .line-evidence .icon-btn:focus-visible { color: var(--accent-text); }
+.evidence-popover {
+  position: absolute; z-index: 20; top: 1.6em; left: 0; width: min(420px, 80vw);
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--surface); border: var(--hairline) solid var(--line);
+  box-shadow: var(--shadow-2, 0 6px 24px rgba(0, 0, 0, .12));
+}
+.evidence-quote { font-style: italic; color: var(--text-1); }
+.evidence-meta { font-family: var(--mono); font-size: calc(11.5px * var(--fs)); }
+.evidence-problem { color: var(--danger); font-size: calc(12px * var(--fs)); }
+.evidence-more ul { margin: 4px 0 0 16px; padding: 0; font-size: calc(12.5px * var(--fs)); }
+.detail-toggle { margin: 0 0 calc(10px * var(--density)); }
+.also-said { margin-top: 6px; font-size: calc(13px * var(--fs)); }
+.corrections-panel { margin: 0 0 calc(12px * var(--density)); }
+.corrections-panel ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.corrections-panel li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); }
