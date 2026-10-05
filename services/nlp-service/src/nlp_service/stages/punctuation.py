@@ -1,23 +1,7 @@
-"""Stage 2 — punctuation restoration + capitalization.
+"""Stage 2: punctuation restoration + capitalization.
 
-Primary path: Hugging Face transformer
-``oliverguhr/fullstop-punctuation-multilang-large`` (ADR-0014). Runs on
-CPU; loaded once at service startup. Inference is deterministic
-(``torch.no_grad()``, no sampling).
-
-Fallback path: rule-based punctuator (capitalize first word, add a
-period at end of segment if missing, comma at "and"/"і" between
-clauses). Fires when:
-- the model is disabled (``MDX_NLP_PUNCTUATION_DISABLED=true``),
-- the model failed to load (with a warning emitted at startup),
-- a per-call inference exceeded ``MDX_NLP_PUNCTUATION_TIMEOUT_MS``.
-
-Rule-based post-edits ALWAYS run on top of either path:
-- Force capitalization after `.`, `!`, `?`.
-- Capitalize first word of segment.
-- Lowercase known units after a number (мг/мл/см/мм рт. ст. / mg/ml/cm/mmHg).
-- Strip doubled punctuation.
-- Don't insert a period inside an unfinished number expression.
+Transformer (ADR-0014, CPU, deterministic) with a rule-based fallback when
+disabled, failed to load, or over the per-call timeout. Post-edits always run.
 """
 
 from __future__ import annotations
@@ -45,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class PunctuationStage:
-    """Sprint-05 Stage 2."""
+    """Stage 2."""
 
     name = "punctuation"
     runs_on_partials: bool = False  # finals-only by spec §2.4
@@ -57,12 +41,7 @@ class PunctuationStage:
         self._load_failed = False
 
     async def startup(self) -> None:
-        """Eagerly load the model. Called from the service lifespan.
-
-        If load fails we mark ``_load_failed`` and keep the service up
-        with the rule-based fallback. A `/readyz` gate (E10 in spec)
-        flips to 503 until startup retries succeed.
-        """
+        """Eagerly load the model; on failure the rule-based fallback keeps the service up."""
         if settings.punctuation_disabled:
             logger.info("punctuation.disabled_by_config")
             self._load_failed = True
@@ -156,7 +135,7 @@ class PunctuationStage:
                     )
                 )
 
-        # Post-edits — always apply.
+        # Post-edits always apply.
         new_text = strip_double_punctuation(new_text)
         new_text = capitalize_first_letter(new_text)
         new_text = capitalize_post_punctuation(new_text)
@@ -178,8 +157,7 @@ class PunctuationStage:
     # ── Model inference ─────────────────────────────────────────────
 
     async def _model_punctuate(self, text: str, language: str) -> str:
-        # Run the (CPU-bound) inference in a thread so the asyncio loop
-        # stays responsive under concurrent requests.
+        # CPU-bound inference runs in a thread.
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._model_punctuate_sync, text, language)
 
@@ -187,8 +165,7 @@ class PunctuationStage:
         assert self._model is not None and self._tokenizer is not None
         import torch  # type: ignore[import-untyped]
 
-        # Chunking on token-budget. Most segments fit in one chunk; long
-        # batch transcripts split on word boundaries with 16-token overlap.
+        # Token-budget chunking on word boundaries with overlap.
         budget = settings.punctuation_token_budget
         words = text.split()
         chunks: list[str] = []
@@ -247,22 +224,12 @@ def _render_tokens(tokens: list[str], pred_ids: list[int], label_list: dict[int,
 
 
 def _merge_overlap(pieces: list[str]) -> str:
-    """Naive overlap merge for chunked inference.
-
-    Sprint-5 piloting will catch any boundary artefacts; if they're a
-    problem we'll swap this for an alignment-based merge.
-    """
+    """Naive overlap merge for chunked inference."""
     return " ".join(p.strip() for p in pieces if p.strip())
 
 
 def _rule_based_punctuate(text: str, language: str) -> str:
-    """The fallback. Conservative: only insert what we're confident about.
-
-    - Capitalize the first letter.
-    - Append a period if the segment ends with a letter.
-    - Insert a comma before " і "/" та "/" or " in EN that join two clauses
-      (heuristic: long-enough clauses on both sides).
-    """
+    """Conservative fallback: capitalize, terminal period, comma before clause-joining conjunctions."""
     s = text.strip()
     if not s:
         return s

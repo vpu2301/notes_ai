@@ -1,12 +1,4 @@
-"""Audio decoding via ffmpeg subprocess.
-
-Decodes any of the validated containers (WAV/MP3/OGG/WebM/FLAC) into
-mono 16 kHz float32 PCM, which is what the VAD + Whisper expect.
-
-We always invoke ffmpeg with the argument-array form so user-controlled
-bytes never become shell metacharacters. The process is killed on
-timeout and on cancellation.
-"""
+"""ffmpeg decoding to 16 kHz PCM; argument-array form only, killed on timeout/cancel."""
 
 from __future__ import annotations
 
@@ -30,13 +22,8 @@ async def decode_to_pcm(
     timeout_seconds: float = 30.0,
     channels: int = 1,
 ) -> np.ndarray:
-    """Return 16 kHz PCM.
-
-    ``channels=1``: mono float32, 1-D (the mixdown ASR and the mono
-    diarizer use). ``channels=2`` (Sprint 31 ``mic_system``): int16, shape
-    ``(n, 2)`` with ch0 = microphone, ch1 = call audio — int16 because two
-    hours of stereo float32 is ~920 MB next to the models; callers convert
-    per channel on use.
+    """Return 16 kHz PCM: ``channels=1`` mono float32 1-D; ``channels=2`` int16 ``(n, 2)``,
+    ch0 = microphone, ch1 = call audio (int16 to halve memory on long calls).
     """
     if channels not in (1, 2):
         raise ValueError("channels must be 1 or 2")
@@ -78,8 +65,7 @@ async def decode_to_pcm(
         raise AudioDecodeError("ffmpeg produced zero PCM samples")
 
     if channels == 2:
-        # A read-only view over ffmpeg's buffer — no second 460 MB copy for
-        # a 2-hour call. Nothing downstream writes into it.
+        # Read-only view over ffmpeg's buffer; no second copy.
         stereo = np.frombuffer(stdout, dtype=np.int16)
         return stereo[: len(stereo) // 2 * 2].reshape(-1, 2)
     pcm = np.frombuffer(stdout, dtype=np.float32).copy()

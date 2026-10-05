@@ -70,16 +70,7 @@ def test_digest_category_does_not_notify_in_app() -> None:
 
 
 def test_self_addressed_categories_do_not_exclude_the_actor() -> None:
-    """The regression this file exists to prevent.
-
-    These categories are addressed to the person who caused them —
-    a completion receipt for work they started and stopped watching. With
-    the `exclude_actor=True` default, `resolve_recipients` strips the
-    only recipient and the event materialises into zero rows: a user
-    finishes a dictation, finalizes their own note, and the feed they
-    are staring at stays empty. That failure is silent (a debug-level
-    "no recipients" line), which is what made it survive.
-    """
+    """Self-addressed categories must keep the actor, or they silently materialise into zero rows."""
     for category in (
         Category.DICTATION_COMPLETED,
         Category.TRANSCRIPTION_COMPLETED,

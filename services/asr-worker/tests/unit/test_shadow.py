@@ -1,5 +1,4 @@
-"""Sprint TQ4 T4 — the candidate engine in the shadow: numbers only, the
-primary untouched, bounded, within budget."""
+"""The shadow ASR engine: numbers only, primary untouched, bounded, within budget."""
 
 from __future__ import annotations
 

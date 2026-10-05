@@ -1,7 +1,5 @@
 """Create-from-transcript surface: template auto-match + POST /v1/notes/from-transcript.
-
-Mirrors ``test_notes_create``: real handlers, auth overridden, DB /
-asr-service boundaries stubbed — no infra required.
+Real handlers, auth overridden, DB / asr-service stubbed.
 """
 
 from __future__ import annotations

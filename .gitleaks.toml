@@ -1,6 +1,5 @@
-# Secret scan (DEP-S1-05). Runs in CI (secret-scan job) and via `make secret-scan`.
-# Default gitleaks rules cover HF tokens (hf_…), AWS, GitHub, Slack, generic
-# high-entropy keys; the rules below add what this repo specifically handles.
+# Secret scan (CI secret-scan job, `make secret-scan`); the rules below add
+# what this repo specifically handles on top of the gitleaks defaults.
 title = "notes-ai"
 
 [extend]

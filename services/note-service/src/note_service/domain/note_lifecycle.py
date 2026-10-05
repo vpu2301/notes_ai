@@ -1,16 +1,6 @@
-"""Note status state machine — one transition left.
-
-    draft → cancelled   via POST /notes/{id}/cancel
-
-The finalize / revert / amend lifecycle was retired (migration 0042).
-Rows that still carry the old statuses in the database were moved back
-to ``draft`` by that migration; the enum keeps the values so nothing
-that reads history has to change.
-
-The transition is one ``UPDATE notes SET status=... WHERE id=$1 AND
-status=<expected>``: the WHERE clause is the optimistic check, and a
-0-row result means another transition raced — 409 with the observed
-state.
+"""Note status state machine: ``draft → cancelled`` only (finalize/revert/amend
+were retired; the enum keeps the values for history). The WHERE clause on the
+expected status is the optimistic check; a 0-row result is a 409.
 """
 
 from __future__ import annotations

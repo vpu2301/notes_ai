@@ -2,12 +2,8 @@ groups:
   - name: conversation-capacity
     interval: 30s
     rules:
-      # ── Device memory ────────────────────────────────────────────────
-      # Conversation mode puts a SECOND model on the same device: two
-      # resident models plus N sessions must not walk the device into an
-      # OOM mid-meeting.
-      # kind="vram" on CUDA workers, kind="rss" on CPU workers — the alert
-      # covers both because a CPU pilot worker can OOM just as hard.
+      # ── Device memory: a second resident model must not OOM the device
+      # (kind="vram" on CUDA, kind="rss" on CPU).
       - alert: DictationDeviceMemoryHigh
         expr: |
           max by (worker_id, kind) (
@@ -38,11 +34,8 @@ groups:
           summary: "Worker {{ $labels.worker_id }} {{ $labels.kind }} CRITICAL ({{ $value | humanizePercentage }})"
           description: "OOM imminent. Drain conversation sessions from this worker now."
 
-      # ── Weighted saturation ──────────────────────────────────────────
-      # Replaces streaming-dictation.yml's headcount rule. Headcount stopped meaning
-      # anything once a conversation session began costing 2 slots: a worker
-      # full of 2 conversation sessions reads as "2 sessions" and looks
-      # half-idle while it is in fact refusing everything with gpu_full.
+      # ── Weighted saturation (a conversation session costs 2 slots, so
+      # headcount looks half-idle on a full worker).
       - alert: DictationWorkerWeightSaturated
         expr: |
           max by (worker_id) (mdx_dictation_capacity_weight_used)
@@ -68,10 +61,8 @@ groups:
           summary: "Users are being refused sessions (gpu_full) at a sustained rate"
           description: "The fleet is undersized for the current conversation/dictation mix."
 
-      # ── Conversation readiness ───────────────────────────────────────
-      # A worker whose diarizer failed to load stays a healthy DICTATION
-      # worker (readyz 200) — so nothing else would notice. This is the
-      # only signal that conversation capacity has silently vanished.
+      # ── Conversation readiness: a worker whose diarizer failed to load is
+      # still a healthy dictation worker, so this is the only signal.
       - alert: DictationConversationCapacityUnavailable
         expr: |
           max by (worker_id) (mdx_dictation_conversation_ready) == 0
@@ -100,10 +91,8 @@ groups:
           summary: "NO worker in the fleet can take a conversation session"
           description: "Conversation mode is effectively down. Dictation may still be fine."
 
-      # ── Latency under co-tenancy ─────────────────────────────────────
-      # THE co-tenancy claim: dictation latency survives sharing a worker
-      # with conversation sessions. Split by mode so a conversation-driven
-      # regression cannot hide inside a blended p95.
+      # ── Latency under co-tenancy, split by mode so a regression cannot
+      # hide inside a blended p95.
       - alert: DictationPartialLatencyHighByMode
         expr: |
           histogram_quantile(0.95,
@@ -152,14 +141,8 @@ groups:
             Measured budget is ~55 ms/window on CPU (ADR-0034). A 4-5x
             regression means CPU/GPU contention or a model/config change.
 
-      # ── Diarization honesty — the live DER proxy ─────────────────────
-      # True DER is uncomputable in production (no ground truth). ADR-0034
-      # makes UNKNOWN-rate the stand-in: the pipeline is built to answer
-      # UNKNOWN rather than guess, so a RISING UNKNOWN rate means it is
-      # struggling — and a rate near zero paired with rising manual
-      # overrides means it has started guessing. Both are alertable.
-      # Speaker labels are neutral SPEAKER_N with a client-supplied
-      # mapping — no role inference.
+      # ── Diarization honesty: UNKNOWN rate is the live DER proxy (ADR-0034).
+      # Rising = struggling; near zero with rising overrides = guessing.
       - alert: DictationUnknownSpeakerRateHigh
         expr: |
           (sum(increase(mdx_dictation_conversation_words_total{outcome="unknown"}[30m])) or vector(0))

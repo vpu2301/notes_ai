@@ -1,10 +1,6 @@
 import Foundation
 
-/// A minimal Model Context Protocol client over the Streamable HTTP
-/// transport: JSON-RPC 2.0 POSTed to one URL, replies either as plain JSON
-/// or as a short SSE stream. Enough to connect (`initialize`), keep the
-/// session id, and list the server's tools — which is what the Connectors
-/// tab needs to show that HubSpot, Notion, … are really reachable.
+/// A minimal MCP client over Streamable HTTP: JSON-RPC 2.0 POSTed to one URL, replies as JSON or a short SSE stream. Enough to `initialize` and list tools.
 struct MCPClient {
     static let protocolVersion = "2025-06-18"
 
@@ -29,8 +25,7 @@ struct MCPClient {
         case rpc(code: Int, message: String)
         case badResponse(String)
 
-        /// What the connector row says. The server's own words — a body,
-        /// an RPC message — are for `technicalDetail`, not the person.
+        /// What the connector row says; the server's own words go to `technicalDetail`.
         var errorDescription: String? {
             switch self {
             case .unauthorized: return "The connector wants you to sign in."
@@ -71,8 +66,7 @@ struct MCPClient {
 
     // MARK: - Handshake
 
-    /// `initialize` + `notifications/initialized`. Returns the server's
-    /// identity and stores the session id for the calls that follow.
+    /// `initialize` + `notifications/initialized`. Returns the server's identity and stores the session id.
     mutating func initialize(clientName: String = "Notes AI Capture", clientVersion: String = "1.0") async throws -> ServerInfo {
         let params: [String: Any] = [
             "protocolVersion": Self.protocolVersion,
@@ -125,8 +119,7 @@ struct MCPClient {
         _ = try await post(body)
     }
 
-    /// POST and hand back the response as soon as its headers are in; the
-    /// body is read by the caller (an SSE stream may stay open).
+    /// POST and hand back the response once its headers are in; the caller reads the body (SSE may stay open).
     private func post(_ body: [String: Any]) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -152,8 +145,7 @@ struct MCPClient {
         }
     }
 
-    /// The JSON-RPC reply with our id, whether the body is one JSON object
-    /// or an SSE stream of `data:` lines. Stops reading as soon as it has it.
+    /// The JSON-RPC reply with our id, from one JSON object or an SSE stream of `data:` lines.
     private static func firstMessage(in bytes: URLSession.AsyncBytes, response: HTTPURLResponse, matching id: Int) async throws -> [String: Any]? {
         let contentType = (response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
         if contentType.contains("text/event-stream") {
@@ -191,8 +183,7 @@ struct MCPClient {
         return false
     }
 
-    /// `WWW-Authenticate: Bearer resource_metadata="https://…"` (RFC 9728),
-    /// the pointer the OAuth flow starts from.
+    /// `WWW-Authenticate: Bearer resource_metadata="https://…"` (RFC 9728), where the OAuth flow starts.
     static func resourceMetadataURL(from response: HTTPURLResponse) -> URL? {
         guard let header = response.value(forHTTPHeaderField: "WWW-Authenticate") else { return nil }
         guard let range = header.range(of: "resource_metadata=") else { return nil }

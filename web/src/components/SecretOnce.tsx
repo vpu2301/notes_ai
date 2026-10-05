@@ -1,17 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { CheckIcon, CopyIcon, DownloadIcon } from "./icons";
 
-/**
- * A secret shown exactly once — recovery codes, a TOTP key, a device
- * secret.
- *
- * The rules this component exists to keep, in one place rather than
- * re-argued at three call sites: it holds the value in React state only,
- * it is unmounted the moment its screen is left, and the download it
- * offers is built from a `Blob` in the page. Nothing is written to
- * storage, nothing is put in a toast, and there is no way to ask for it
- * again — the server has already stopped being able to answer.
- */
+/** A secret shown exactly once. React state only, unmounted when its screen is left,
+ *  download built from an in-page Blob; never storage, never a toast. */
 export function SecretOnce({
   title,
   hint,
@@ -41,8 +32,7 @@ export function SecretOnce({
   };
 
   const download = () => {
-    // Built here, revoked immediately: the file exists only long enough
-    // for the browser to take it.
+    // Revoked immediately: the file exists only long enough for the browser to take it.
     const url = URL.createObjectURL(new Blob([text + "\n"], { type: "text/plain" }));
     const a = document.createElement("a");
     a.href = url;

@@ -1,13 +1,6 @@
-"""One HTTP contract for every OpenAI-compatible chat server.
+"""One ``ChatProvider`` for every OpenAI-compatible chat server; vendor differences are backend configuration.
 
-Ollama, LM Studio, MLX-serve, llama-server, TGI, vLLM and Hugging Face
-Inference Endpoints all speak ``POST /v1/chat/completions``. What differs —
-how structured output is requested, auth, cold start, context — is
-configuration on the backend, not a class per vendor.
-
-Retry policy (spec §D): retries only for ``warming`` / ``unavailable`` /
-``timeout``; ``warming`` retries are bounded by the backend's
-``cold_start_seconds``; everything else surfaces immediately.
+Retries only ``warming`` (bounded by ``cold_start_seconds``), ``unavailable`` and ``timeout``.
 """
 
 from __future__ import annotations
@@ -62,11 +55,10 @@ class OpenAICompatibleChatProvider:
         small_model: bool = False,
     ) -> None:
         self.backend = backend
-        # An override interpolated to "" (an unset ${VAR:-}) is not sent.
+        # An override interpolated to "" (unset ${VAR:-}) is not sent.
         self.request_overrides: dict[str, Any] = {
             k: v for k, v in (request_overrides or {}).items() if v not in ("", None)
         }
-        # Sprint L1: read by the document engine's small-model profile.
         self.small_model = small_model
         self.model_id = model_id
         self.base_url = base_url.rstrip("/")
@@ -90,7 +82,6 @@ class OpenAICompatibleChatProvider:
     def structured_mode(self) -> str:
         return self._mode
 
-    # ── public API ──────────────────────────────────────────────────────
     async def probe(self) -> None:
         """Liveness + (for ``probe`` mode) which structured-output flavour works."""
         if self._requested_mode == "probe":
@@ -112,7 +103,7 @@ class OpenAICompatibleChatProvider:
                 else:
                     raise
         else:
-            # 64, not 8: a reasoning model spends tokens before answering.
+            # 64: a reasoning model spends tokens before answering.
             await self.complete("Reply with the single word: pong", None, max_tokens=64)
 
     async def complete(
@@ -188,7 +179,6 @@ class OpenAICompatibleChatProvider:
         if self._owns_client:
             await self._client.aclose()
 
-    # ── request ─────────────────────────────────────────────────────────
     def _build_body(
         self,
         prompt: str,
@@ -203,7 +193,6 @@ class OpenAICompatibleChatProvider:
             messages.append({"role": "system", "content": system})
         user = prompt
         if schema is not None and self._mode in ("json_object", "none"):
-            # Servers without schema enforcement get the schema in-band.
             user = f"{prompt}\n\nRespond with a single JSON document matching this JSON Schema, and nothing else:\n{json.dumps(schema)}"
         messages.append({"role": "user", "content": user})
         body: dict[str, Any] = {
@@ -335,7 +324,6 @@ class OpenAICompatibleChatProvider:
             ErrorKind.UNKNOWN, f"HTTP {status} {text}", backend=self.backend, status=status
         )
 
-    # ── response ────────────────────────────────────────────────────────
     def _parse(
         self, data: dict[str, Any], schema: JsonSchema | None, *, latency_ms: int
     ) -> ProviderResult:
@@ -358,8 +346,7 @@ class OpenAICompatibleChatProvider:
         input_tokens = int(usage.get("prompt_tokens") or 0)
         output_tokens = int(usage.get("completion_tokens") or 0)
         if finish == "length":
-            # Output was cut — with a schema that is a truncated JSON document;
-            # the caller re-chunks (S2). Runbook step 2 (num_ctx) for local servers.
+            # A truncated JSON document; the caller re-chunks.
             raise ProviderError(
                 ErrorKind.CONTEXT_EXCEEDED,
                 f"output truncated (finish_reason=length, {input_tokens} in / {output_tokens} out)",
@@ -387,13 +374,11 @@ class OpenAICompatibleChatProvider:
             finish_reason=finish if isinstance(finish, str) else None,
         )
 
-    # ── retry policy ────────────────────────────────────────────────────
     def _should_retry(self, exc: ProviderError, attempts: int, waited_s: float) -> bool:
         if exc.kind not in PROVIDER_RETRY_KINDS:
             return False
         if exc.kind is ErrorKind.WARMING:
-            # Budget is the backend's declared cold start, counted in time we
-            # actually waited (deterministic under an injected sleep).
+            # Budget = declared cold start, counted in time actually waited.
             return waited_s < self._cold_start_seconds
         return attempts < MAX_ATTEMPTS
 
@@ -448,7 +433,7 @@ def _parse_json(content: str) -> JsonValue | None:
 
 
 def _shape_problem(value: JsonValue, schema: JsonSchema) -> str | None:
-    """Cheap top-level check (type + required keys). Full validation is the caller's (S2)."""
+    """Cheap top-level check (type + required keys); full validation is the caller's."""
     expected = schema.get("type")
     if expected == "object" and not isinstance(value, dict):
         return "expected a JSON object"

@@ -1,38 +1,22 @@
 import XCTest
 @testable import NotesAICapture
 
-/// MAC-0 item 2 — the end-to-end proof that a **brand-new** account works
-/// on this Mac: create it through the API, sign in with the app's own
-/// client, upload a second of audio, and find the note in Recents.
+/// End-to-end proof that a brand-new account works on this Mac: create it through
+/// the API, sign in with the app's own client, upload a second of audio, find the
+/// note in Recents. The only test here against a real stack; it catches a signup
+/// that produces an account the Mac cannot use (missing membership, token without `tid`).
 ///
-/// Every other test in this target answers a stubbed server. This one
-/// does not: it is the only place that would catch a signup that produces
-/// an account the Mac cannot actually use — a missing membership, a token
-/// without a `tid`, an ASR service that refuses a first-day tenant. None
-/// of that is visible against a stub.
-///
-/// **It runs only when a stack is pointed at it.** `swift test` on a
-/// laptop and the `macos-app` CI job skip it, so neither goes red for the
-/// absence of a server. The `macos-signup-smoke` job supplies the
-/// environment (see `.github/workflows/ci.yml`).
+/// Runs only when a stack is pointed at it (`swift test` and the `macos-app` CI job skip it;
+/// `macos-signup-smoke` supplies the environment, see `.github/workflows/ci.yml`):
 ///
 ///     MAC_SMOKE_AUTH_URL   http://localhost:8000
 ///     MAC_SMOKE_ASR_URL    http://localhost:8001
 ///     MAC_SMOKE_NOTE_URL   http://localhost:8006
-///     MAC_SMOKE_FIXTURE    the BE-0 fixture token (see below)
+///     MAC_SMOKE_FIXTURE    the test fixture token
 ///
-/// ### What it expects of BE-0
-///
-/// Two endpoints, and this is the only place the Mac side names them:
-///
-/// * `POST /auth/signup` — `{email, password, display_name}` → 201/202,
-///   creating an unconfirmed account with a personal workspace.
-/// * `POST /test/signup/confirm` — `{email}` with `X-Test-Fixture:
-///   <token>`, confirming that address without reading mail. Mounted only
-///   where `MDX_TEST_FIXTURES` is on; never in production.
-///
-/// If BE-0 lands a different shape, change `Signup.create` and
-/// `Signup.confirm` below and nothing else.
+/// Server endpoints used: `POST /auth/signup` (`{email, password, display_name}` → 201/202)
+/// and `POST /test/signup/confirm` (`{email}` with `X-Test-Fixture: <token>`, mounted only
+/// where `MDX_TEST_FIXTURES` is on). If the shape changes, change `Signup.create`/`Signup.confirm` only.
 final class SignupSmokeTests: XCTestCase {
 
     // MARK: - The stack under test
@@ -57,8 +41,7 @@ final class SignupSmokeTests: XCTestCase {
         }
     }
 
-    /// A fresh address every run: this test creates accounts, and a rerun
-    /// must not collide with the one before it.
+    /// A fresh address every run, so a rerun never collides with the one before.
     private let email = "mac-smoke-\(UUID().uuidString.prefix(8).lowercased())@smoke.invalid"
     private let password = "Sm0ke-\(UUID().uuidString.prefix(12))!"
 
@@ -66,11 +49,10 @@ final class SignupSmokeTests: XCTestCase {
         let stack = try Stack.fromEnvironment()
         let signup = Signup(stack: stack)
 
-        // ── 1. the account BE-0 makes ────────────────────────────────
+        // ── 1. the account ───────────────────────────────────────────
         try await signup.create(email: email, password: password, displayName: "Mac Smoke")
 
-        // Before confirmation the app must be told *why* it cannot sign
-        // in, because that is the state the Resend button exists for.
+        // Before confirmation the app must be told *why* it cannot sign in (the Resend button's state).
         let unconfirmed = makeClient(for: stack)
         do {
             _ = try await unconfirmed.login(email: email, password: password)
@@ -107,8 +89,7 @@ final class SignupSmokeTests: XCTestCase {
         let note = try await client.createNoteFromTranscript(
             asrJobId: finished.id, templateId: nil, title: "Mac smoke")
 
-        // Recents is the app's own list, written by the app's own store —
-        // asserting on the server's note list would prove less.
+        // Recents is the app's own list; asserting on the server's note list would prove less.
         let suite = "mac-smoke-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -168,8 +149,7 @@ final class SignupSmokeTests: XCTestCase {
         APIClient(settings: stack.settings, store: SessionStore(storage: storage))
     }
 
-    /// ASR is a queue, not a request: the job is worth waiting for, but
-    /// not forever — a smoke test that hangs tells CI nothing.
+    /// ASR is a queue: worth waiting for, but not forever.
     private func poll(client: APIClient, jobId: String,
                       timeout: TimeInterval = 180) async throws -> TranscriptionJob {
         let deadline = Date().addingTimeInterval(timeout)
@@ -182,9 +162,7 @@ final class SignupSmokeTests: XCTestCase {
         return try await client.jobStatus(id: jobId)
     }
 
-    /// One second of 16 kHz mono PCM — a quiet tone rather than silence,
-    /// because some front-ends drop an all-zero file before it reaches a
-    /// model, and this test is about the pipeline, not the words.
+    /// One second of 16 kHz mono PCM — a quiet tone, since some front-ends drop an all-zero file.
     private func oneSecondOfAudio() throws -> URL {
         let rate = 16_000
         var samples = Data()

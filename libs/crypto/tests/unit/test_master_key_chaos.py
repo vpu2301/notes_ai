@@ -1,11 +1,4 @@
-"""Master-key chaos (spec §4.8): the worker must FAIL CLOSED at startup if
-the master key file is missing, renamed away, the wrong size, or has loose
-permissions — each with a precise error that points an operator to the runbook.
-
-These run as ordinary unit tests (no infra): they drive
-:meth:`FileMasterKeyProvider.startup_self_check` against temp files, which is
-exactly the check ``asr-worker``'s ``build_state`` runs before any traffic.
-"""
+"""Master-key chaos: startup must FAIL CLOSED on a missing, wrong-size or loosely-permissioned key file."""
 
 from __future__ import annotations
 

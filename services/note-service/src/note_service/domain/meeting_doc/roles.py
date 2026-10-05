@@ -1,18 +1,6 @@
-"""What a section is FOR, as opposed to what this template calls it.
-
-A section key is a template's private name: `needs` means something in a
-sales call and nothing anywhere else. A **role** is the same idea across
-every template and every language — `decisions` is decisions whether the
-section is called "Decisions", "Entscheidungen" or "Beschlüsse".
-
-Four things need to agree about this, and before Sprint 33 each had its
-own answer: the engine (where does a decision go?), the shared page
-(which sections may a recipient see?), the action-item projection (which
-sections hold tasks?) and the PDF. They all call :func:`role_of` now.
-
-The role comes from the template when it declares one (`schema_version`
-2 and later). Templates written before roles existed fall back to an id
-map, so a v1 note keeps rendering exactly as it did.
+"""What a section is FOR (its role), as opposed to what this template calls it.
+The engine, the shared page, the action-item projection and the PDF all call
+:func:`role_of`. Templates without a declared role fall back to an id map.
 """
 
 from __future__ import annotations
@@ -38,10 +26,9 @@ USER_NOTES: Final[Role] = "user_notes"
 TRANSCRIPT: Final[Role] = "transcript"
 JUDGEMENT: Final[Role] = "judgement"
 CUSTOM: Final[Role] = "custom"
-# Summary Engine v2, Q5 — the dates and deadlines a recording named.
+# The dates and deadlines a recording named.
 KEY_DATES: Final[Role] = "key_dates"
-# Sprint F3 — the figures a recording gave (a table from three on), and what
-# a broadcast or a presentation asks its audience to do.
+# The figures a recording gave, and what it asks its audience to do.
 SPECIFICATIONS: Final[Role] = "specifications"
 CONTACT: Final[Role] = "contact"
 
@@ -65,9 +52,7 @@ ROLES: Final[tuple[Role, ...]] = (
     CONTACT,
 )
 
-# Section ids of every template written before roles existed. A key that
-# is not here is `custom`: the engine leaves it alone and the client
-# document keeps it inside the workspace.
+# Section ids of templates written before roles existed; anything else is `custom`.
 _BY_ID: Final[dict[str, Role]] = {
     "summary": SUMMARY,
     "status_summary": SUMMARY,
@@ -87,22 +72,18 @@ _BY_ID: Final[dict[str, Role]] = {
     "requests": REQUESTS,
     "user_notes": USER_NOTES,
     "transcript": TRANSCRIPT,
-    # Typed fields a person sets. The engine may SUGGEST a value with a
-    # quote; it never writes one (Sprint 36).
+    # Typed fields a person sets; the engine may SUGGEST a value, never write one.
     "deal_stage": JUDGEMENT,
     "recommendation": JUDGEMENT,
     "overall_status": JUDGEMENT,
     "target_date": JUDGEMENT,
-    # F3 — the engine's own sections for figures and a call to action.
     # Not "contact": templates already use that id for the attendee block.
     "specifications": SPECIFICATIONS,
     "call_to_action": CONTACT,
 }
 
 
-# Sections the engine makes from the conversation rather than from the
-# template: "gen:overview" (the unheaded opening block) and one
-# "gen:<slug>" per topic the conversation actually had.
+# Engine-made sections: "gen:overview" and one "gen:<slug>" per topic.
 GENERATED_PREFIX: Final = "gen:"
 OVERVIEW_KEY: Final = "gen:overview"
 
@@ -125,13 +106,8 @@ def generated_key(title: str, taken: set[str] | frozenset[str] = frozenset()) ->
 
 
 def role_of(section: object) -> Role:
-    """The role of a template section, or of a bare section key.
-
-    Takes the template's own `role` when it declares one and falls back
-    to the id map — so v1 templates, which have no `role` field, behave
-    exactly as they did before Sprint 33. A generated section's role is
-    in its key.
-    """
+    """The role of a template section or bare key: the declared `role`, else the id
+    map; a generated section's role is in its key."""
     if isinstance(section, str):
         if section == OVERVIEW_KEY:
             return SUMMARY
@@ -157,9 +133,7 @@ def role_map(definition: object) -> dict[str, Role]:
 
 
 def keys_with_role(definition: object, role: Role) -> list[str]:
-    """Every section of this template that plays the given role, in
-    template order. More than one is legal: a template may split actions
-    into "ours" and "theirs"."""
+    """Every section of this template with the given role, in template order."""
     return [key for key, value in role_map(definition).items() if value == role]
 
 

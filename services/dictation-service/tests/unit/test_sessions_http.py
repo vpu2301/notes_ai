@@ -1,10 +1,4 @@
-"""GET /dictate/sessions list + detail echo the ambient-capture fields.
-
-Pure handler tests: ``get_state``/``tenant_connection`` are monkeypatched
-on the router module and the repository readers return canned rows, so
-no DB or FastAPI app is needed. The rows are plain dicts — like
-``asyncpg.Record`` they support both ``row["k"]`` and ``row.get("k")``.
-"""
+"""GET /dictate/sessions list + detail echo the ambient-capture fields (pure handler tests, canned rows)."""
 
 from __future__ import annotations
 

@@ -1,14 +1,4 @@
-"""Operations dispatch — map a CommandSlot's intent → frontend Operation.
-
-The frontend (sprint 04 + 06) consumes Operations to mutate editor
-state. This module is the contract between intents (linguistic) and
-operations (UI-side). Adding a new intent without an op is a bug; the
-test suite enforces a 1:1 mapping.
-
-The typed-field ops (``set_choice``, ``add_choice``, ``remove_choice``)
-are additive and FE-stable: a client that ignores them behaves exactly
-as before. Full arg shapes: ``docs/nlp/voice-commands.md``.
-"""
+"""Map a CommandSlot's intent → frontend Operation; the test suite enforces a 1:1 mapping."""
 
 from __future__ import annotations
 
@@ -58,10 +48,7 @@ _TABLE: dict[str, tuple[str, dict[str, str] | None]] = {
     "end_quote": ("insert_quote_marker", {"value": "close"}),
     "insert_template": ("insert_template", None),
     # ── Typed-field commands ───────────────────────────────────────
-    # arg: {section_key, value} — ``value`` is always the option SLUG,
-    # never the spoken words. A voice selection is an explicit user
-    # act, so the FE writes it as ``source: "manual"`` metadata (never
-    # "extracted" — nothing was inferred).
+    # arg: {section_key, value}; ``value`` is the option slug. The FE writes it as source "manual".
     "choice.set": ("set_choice", None),
     "choice.add": ("add_choice", None),
     "choice.remove": ("remove_choice", None),
@@ -69,23 +56,15 @@ _TABLE: dict[str, tuple[str, dict[str, str] | None]] = {
 
 
 def operations_for(slot: CommandSlot) -> Operation:
-    """Translate one CommandSlot into a single Operation.
-
-    Section commands (``section.<name>``) carry their section_id in
-    ``slot.arg``; we pass it through.
-    """
+    """Translate one CommandSlot into a single Operation; ``slot.arg`` passes through."""
     intent = slot.intent
     if intent.startswith("section."):
         return Operation(op="navigate_section", arg=slot.arg or {})
-    # A command whose argument could not be resolved carries a
-    # ``reason`` instead of a value. It becomes the same no-op the FE
-    # already knows how to surface, with a precise reason to toast —
-    # never a guessed selection.
+    # An unresolved argument carries a ``reason``: a no-op with a precise reason, never a guess.
     if slot.arg and "reason" in slot.arg:
         return Operation(op="unknown_intent", arg={"intent": intent, **slot.arg})
     if intent not in _TABLE:
-        # Unknown intent — return a no-op marker so the frontend can
-        # surface a UI warning rather than guessing.
+        # No-op marker so the frontend warns rather than guesses.
         return Operation(op="unknown_intent", arg={"intent": intent})
     op_name, arg = _TABLE[intent]
     if slot.arg:

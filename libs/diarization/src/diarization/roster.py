@@ -1,26 +1,7 @@
-"""Roster guard + count confidence (Sprint 29 B-3), for any engine.
-
-Both engines overcount the same way: a cough, a door, a far-field echo or
-a laugh across the room becomes a "speaker" with a few seconds of speech.
-The guard runs on an engine's chunk-level evidence before it becomes an
-:class:`~diarization.offline.OfflineDiarization`:
-
-**Floor.** A speaker whose speech is below
-``max(min_speaker_speech_ms, min_speaker_share × total)`` is dissolved.
-Where the engine can say what the speaker sounded like (a centroid), the
-dissolved speech moves to the nearest kept speaker when they are alike
-enough (cosine ≥ ``reassign_min_cosine``); otherwise it becomes
-unattributed. With an exact count from a person the floor is OFF — a
-human's count wins, and a quiet participant is still a participant.
-
-**Count confidence.** ``"low"`` when the roster looks shaky: a kept
-speaker holds under 5 % of the speech, a dissolved one held 2 % or more
-(something real may have been folded away), or more than a quarter of the
-speech overlaps. Otherwise ``"high"``. A word, not a number: nothing here
-is calibrated enough to be a probability.
-
-Centroids exist only in memory for the duration of one call; nothing here
-keeps, returns or logs them.
+"""Engine-agnostic roster guard: speakers below ``max(min_speaker_speech_ms, min_speaker_share × total)`` are
+dissolved into the nearest kept voice (cosine ≥ ``reassign_min_cosine``) or made unattributed; the floor is OFF
+with an exact count. ``count_confidence`` is "low" on a tiny kept speaker, a sizeable dissolved one, or heavy overlap.
+Centroids live in memory for one call only.
 """
 
 from __future__ import annotations
@@ -36,7 +17,7 @@ from .protocol import NO_HINTS, DiarizationHints
 
 CountConfidence = Literal["high", "low"]
 
-# count_confidence thresholds (Sprint 29 B-3). Shares of attributed speech.
+# count_confidence thresholds, as shares of attributed speech.
 LOW_KEPT_SHARE = 0.05
 LOW_DISSOLVED_SHARE = 0.02
 LOW_OVERLAP_SHARE = 0.25
@@ -44,12 +25,7 @@ LOW_OVERLAP_SHARE = 0.25
 
 @dataclass(frozen=True)
 class RosterGuardConfig:
-    """Floor knobs. Both zero → the guard never dissolves anything.
-
-    Defaults are the values the Sprint 28 grid pointed at (≈ 8 s / 3 %);
-    the worker passes ``MDX_DIAR_MIN_SPEAKER_SPEECH_MS`` /
-    ``MDX_DIAR_MIN_SPEAKER_SHARE``.
-    """
+    """Floor knobs (MDX_DIAR_MIN_SPEAKER_SPEECH_MS / MDX_DIAR_MIN_SPEAKER_SHARE); both zero = never dissolve."""
 
     min_speaker_speech_ms: int = 8000
     min_speaker_share: float = 0.03
@@ -75,12 +51,7 @@ def guard_roster(
     centroids: Mapping[str, np.ndarray] | None = None,
     overlap_ms: list[tuple[int, int]] | None = None,
 ) -> RosterOutcome:
-    """Apply the floor to engine labels and grade the resulting count.
-
-    ``segments`` carry the engine's own labels (``UNKNOWN`` allowed);
-    returned segments keep them — renumbering to ``SPEAKER_N`` happens
-    afterwards, so numbering follows the roster that survived.
-    """
+    """Apply the floor to the engine's own labels and grade the count; renumbering happens afterwards."""
     speech = _speech_by_label(segments)
     attributed = sum(speech.values())
     overlap = _total_ms(overlap_ms or [])
@@ -92,8 +63,7 @@ def guard_roster(
         floor = max(float(config.min_speaker_speech_ms), config.min_speaker_share * attributed)
         dissolved = [label for label, ms in speech.items() if ms < floor]
         if len(dissolved) == len(speech):
-            # Nothing reached the floor (a short memo). Keep the biggest
-            # voice so the recording still has a speaker.
+            # Nothing reached the floor (a short memo): keep the biggest voice.
             biggest = max(speech, key=lambda label: (speech[label], label))
             dissolved.remove(biggest)
 
@@ -126,7 +96,6 @@ def guard_roster(
         segments=out,
         speakers_kept=len(kept_speech),
         speakers_dissolved=len(dissolved),
-        # A count a person stated is not ours to doubt.
         count_confidence="low" if reasons else "high",
         overlap_share=overlap_share,
         reasons=tuple(reasons),

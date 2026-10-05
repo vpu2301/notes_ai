@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — `app_role` must never reach identity or credential secrets.
+"""CI gate: ``app_role`` must never hold a grant on identity or credential tables
+(a read there is an authentication bypass). Reads the migrations, not a live DB.
 
-`app_role` is the role every product service in the fleet connects as. It
-is the widest-blast-radius database credential in the system, and these
-tables are the ones where a read is equivalent to an authentication
-bypass:
-
-* ``identity_totp``            — second-factor secrets (encrypted, but the
-                                 envelope is not the only control)
-* ``identity_recovery_codes``  — the paper credentials
-* ``service_credential_secrets`` — every room device's client secret hash
-* ``identities`` / ``auth_challenges`` / ``auth_sessions`` — live codes,
-                                 lockout state, every registered address
-
-RLS would already deny them (none has an `app_role` policy), but a grant
-is the thing a future migration is most likely to add absent-mindedly,
-and a `GRANT ... ON ALL TABLES` would sweep them all in at once. This gate
-reads the migrations rather than a live database so it fails in CI, on the
-diff that introduced it, rather than in staging.
-
-Exit codes:
-    0 — no violations
-    1 — violations printed to stderr
+Exit 0 clean, 1 violations on stderr.
 """
 
 from __future__ import annotations

@@ -1,16 +1,6 @@
-"""Abuse caps on the anonymous ``/v1/shared/*`` surface (Sprint 19).
-
-Three fixed windows on ``libs/ratelimit``, each stopping a different thing:
-
-* **per IP, per minute** — one host sweeping tokens, or scraping pages.
-* **per link, per hour** — one leaked link being hammered from many hosts;
-  the sender's revoke is the real fix, this keeps the box up meanwhile.
-* **per IP on the CTA, per hour** — the redirect writes a row and an audit
-  event; a loop of clicks must not become a loop of writes.
-
-Fail-OPEN, like ``ClipRateLimiter``: the shared page is the product's
-front door for people who have no account, and a Redis outage must not
-turn every client-facing link into a 429. The degraded case is logged.
+"""Abuse caps on the anonymous ``/v1/shared/*`` surface: per IP per minute, per
+link per hour, per IP on the CTA per hour. Fail-OPEN: a Redis outage must not
+turn every client-facing link into a 429.
 """
 
 from __future__ import annotations
@@ -86,13 +76,13 @@ class PublicRateLimiter:
         await self._check("cta", self.ip_of(request), limit=self._cta_per_hour, window=3600)
 
     async def check_write(self, link_id: object) -> None:
-        """Sprint 20: responses and flags, per link per hour."""
+        """Responses and flags, per link per hour."""
         await self._check("write", str(link_id), limit=self._write_per_hour, window=3600)
 
     async def check_otp(self, link_id: object) -> None:
-        """Sprint 23: verification codes, 3 per link per hour."""
+        """Verification codes, 3 per link per hour."""
         await self._check("otp", str(link_id), limit=3, window=3600)
 
     async def check_report(self, request: Request) -> None:
-        """Sprint 23: abuse reports, 3 per IP per day."""
+        """Abuse reports, 3 per IP per day."""
         await self._check("report", self.ip_of(request), limit=3, window=86_400)

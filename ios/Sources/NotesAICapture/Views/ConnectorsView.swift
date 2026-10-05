@@ -1,10 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Settings › Connectors: Google Calendar and calendar links on the
-/// server, this phone's own calendars (which accounts feed the home
-/// page's Coming up list), and the remote MCP servers the user has
-/// connected — HubSpot, Notion, a custom one.
+/// Settings › Connectors: server-side calendars, this phone's calendars, and MCP servers.
 struct ConnectorsView: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
@@ -136,8 +133,7 @@ struct ConnectorsView: View {
         }
     }
 
-    /// One connected account or link: its address, a Sign-in-again nudge
-    /// when Google dropped the token, and the calendars to include.
+    /// One connected account or link: address, Sign-in-again nudge, calendars to include.
     private func googleAccount(_ connection: CalendarConnection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -562,9 +558,7 @@ private struct SheetFrame<Content: View>: View {
 
 // MARK: - Calendar link sheet (0020)
 
-/// Paste a calendar's private iCal address. The server fetches it before
-/// answering, so a wrong link fails right here with a readable message.
-/// Shared by the Connectors page and the home page's Coming up card.
+/// Paste a calendar's private iCal address; the server fetches it before answering.
 struct CalendarLinkSheet: View {
     @ObservedObject var google: GoogleCalendarService
     let onClose: () -> Void
@@ -622,8 +616,7 @@ struct CalendarLinkSheet: View {
 
 // MARK: - Editor
 
-/// Name, server URL, how to authenticate. A pasted token goes straight
-/// to the Keychain and is never shown again.
+/// Name, server URL, how to authenticate. A pasted token goes straight to the Keychain.
 private struct ConnectorEditor: View {
     let connector: Connector
     @ObservedObject var store: ConnectorStore

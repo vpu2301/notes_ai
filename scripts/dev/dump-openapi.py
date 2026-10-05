@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Dump the OpenAPI 3.1 specs to docs/api/.
-
-Run via ``make openapi-dump``. The snapshots are committed; CI
-(``make openapi-check``) diffs the live spec against the committed copy and
-fails on drift, so a public-API change must land with a refreshed snapshot.
+"""Dump the OpenAPI 3.1 specs to docs/api/ (``make openapi-dump``); ``make openapi-check``
+fails on drift against the committed snapshots.
 """
 
 from __future__ import annotations
@@ -14,7 +11,6 @@ import os
 import sys
 from pathlib import Path
 
-# Make import-time app construction work without a running server.
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 

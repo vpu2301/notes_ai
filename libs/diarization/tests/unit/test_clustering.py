@@ -1,12 +1,5 @@
-"""Online 2-speaker clusterer tests (pure: synthetic unit vectors only).
-
-Vector geometry: 7-dim unit vectors with exact cosines. Voice A lives
-around axis e0; voice B around ``u = 0.2*e0 + sqrt(0.96)*e1`` (cosine
-0.2 to e0). Per-voice chunks share the base direction with weight
-``sqrt(0.95)`` and differ in a private perturbation axis with weight
-``sqrt(0.05)``, giving intra-voice cosines of 0.90/0.95 and cross-voice
-cosines of exactly 0.95 * 0.2 = 0.19 — comfortably on either side of
-``split_threshold=0.45``.
+"""Online 2-speaker clusterer tests on synthetic 7-dim unit vectors: voice A around e0, voice B around
+``0.2*e0 + sqrt(0.96)*e1``; intra-voice cosines 0.90/0.95, cross-voice 0.19, either side of ``split_threshold``.
 """
 
 from __future__ import annotations

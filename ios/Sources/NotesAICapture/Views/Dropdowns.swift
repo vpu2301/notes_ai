@@ -2,11 +2,7 @@ import SwiftUI
 
 // MARK: - Dropdown menus
 //
-// The Mac app draws its own dropdown panels; on the phone the native
-// context menu is the right thing — it is what every ⋯ button on iOS
-// opens, it handles small screens, and it takes symbols, subtitles,
-// sections and a destructive tint. These wrappers keep the Mac app's
-// `DSMenuItem` shape so the screens describe menus the same way.
+// Native context menus, wrapped to keep the Mac app's `DSMenuItem` shape.
 
 struct DSMenuItem: Identifiable {
     enum Kind { case action, separator, header }

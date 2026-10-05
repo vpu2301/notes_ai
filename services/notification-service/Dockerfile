@@ -1,6 +1,3 @@
-# ── notification-service runtime ───────────────────────────────────
-# Mirrors the autocomplete-service paved-road pattern (see CLAUDE.md
-# "New service Dockerfile" for why sitecustomize re-adds /deps).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -13,9 +10,7 @@ RUN apt-get update \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
 RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
-# PyPI fetches share the link with the torch wheels of the ASR images when
-# `docker compose build` runs everything at once; bump uv's 30s default so a
-# slow index response doesn't fail the build.
+# Parallel compose builds starve PyPI fetches; raise uv's 30s default.
 ENV UV_HTTP_TIMEOUT=600
 
 WORKDIR /build
@@ -23,8 +18,7 @@ COPY pyproject.toml uv.lock /build/
 COPY libs/ /build/libs/
 COPY services/notification-service/ /build/services/notification-service/
 
-# Every workspace lib is listed explicitly: they install as editable
-# .pth entries, which only activate via the sitecustomize below.
+# Workspace libs install as editable .pth entries; sitecustomize below activates them.
 RUN uv pip install --system --no-cache \
     --target /deps \
     /build/services/notification-service \

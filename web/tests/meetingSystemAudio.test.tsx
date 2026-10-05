@@ -7,11 +7,7 @@ import { ToasterProvider } from "../src/components/Toaster";
 import type { RecordedAudio, RecorderOptions } from "../src/lib/useRecorder";
 import { MeetingPage } from "../src/pages/MeetingPage";
 
-/**
- * Sprint I3 T4: the "Me / Them" checkbox on the meeting page, what a
- * 2-channel recording is uploaded with, and the mono retry when the server
- * cannot read it as one.
- */
+/** The "Me / Them" checkbox, what a 2-channel recording uploads with, and the mono retry. */
 
 const asr = vi.hoisted(() => ({ submitJob: vi.fn(), listJobs: vi.fn() }));
 vi.mock("../src/api/asr", async (orig) => ({
@@ -42,7 +38,7 @@ const recorder = vi.hoisted(() => ({
   onDone: null as null | ((audio: RecordedAudio) => void),
   options: null as null | RecorderOptions,
   recording: false,
-  // Sprint F1: null = no frame written yet ("Starting…").
+  // null = no frame written yet ("Starting…").
   firstFrameOffsetMs: 0 as number | null,
 }));
 vi.mock("../src/lib/useRecorder", async (orig) => ({

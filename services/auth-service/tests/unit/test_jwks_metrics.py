@@ -1,10 +1,4 @@
-"""Unit tests for JWKS → OTel observable-counter bridge.
-
-Drives a real ``JwksCache`` over a mocked JWKS endpoint and asserts the OTel
-series collected from an in-memory reader track the cache's in-memory
-counters. Guards the ``JwksCacheHitRatioLow`` alert's series against silently
-disappearing again.
-"""
+"""JWKS → OTel observable-counter bridge: the series track the cache's in-memory counters."""
 
 from __future__ import annotations
 
@@ -21,12 +15,7 @@ _JWKS = {"keys": [{"kid": "k1", "kty": "RSA", "n": "x", "e": "AQAB"}]}
 
 @pytest.fixture(autouse=True)
 def _enable_otel_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests assert real OTel metric series surface, so the SDK must be
-    live. Other test modules (e.g. the integration suite) set
-    ``OTEL_SDK_DISABLED=true`` process-wide at import; that no-ops the
-    MeterProvider and makes ``get_metrics_data()`` return ``None``. Clear it
-    here so the metrics bridge is exercised regardless of collection order.
-    """
+    """Clear ``OTEL_SDK_DISABLED`` (set process-wide by other modules) so real metric series surface."""
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
 

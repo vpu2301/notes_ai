@@ -1,29 +1,11 @@
 #!/usr/bin/env python3
-"""IOS-0 smoke: a web-created account, signing in and capturing on iPhone.
+"""Smoke of the iPhone path: create + verify an account through the API, sign in with
+``X-Client-Type: ios`` (refresh token in the body, no cookie), upload a generated
+one-second WAV, assert the note in Recents.
 
-The path the ticket names — *create + verify an account through the API,
-sign in, record 1 s, assert the note* — as the iPhone app actually sends
-it. Every request carries ``X-Client-Type: ios``, because that header is
-what decides the shape of the answer: `routers/login.py` puts the refresh
-token in the **body** for a native client and sets the ``mdx_rt`` cookie
-only for a browser. A smoke that omitted it would exercise the web's
-branch and prove nothing about the phone.
+    make smoke-ios
 
-    make smoke-ios                       # against `make dev-up`
-    scripts/smoke/ios_signup_e2e.py --help
-
-What it does NOT do is drive the app's UI. The recording is a generated
-one-second WAV rather than a microphone, for a reason that is not
-laziness: a CI runner has no audio input device, and `Recorder` is the one
-part of this pipeline that a machine without a microphone cannot exercise
-at all. Everything downstream of it — the upload, the job, the transcript,
-the note — is the same code either way, and the recorder itself is covered
-by the app's own tests. `ios/Tests/…/LiveStackTests.swift` runs the app
-half of this against the same stack.
-
-Exit 0 = every step passed. Exit 1 = a step failed. Exit 2 = the stack is
-not reachable, which is a missing fixture rather than a failed assertion
-and deserves a different signal.
+Exit 0 passed, 1 a step failed, 2 the stack is not reachable.
 """
 
 from __future__ import annotations
@@ -55,13 +37,8 @@ def skip(name: str, why: str) -> None:
 
 
 def one_second_of_audio(seconds: float = 1.0, rate: int = 16_000) -> bytes:
-    """A WAV the ASR service will accept.
-
-    A 440 Hz tone rather than silence: some pipelines treat an all-zero
-    buffer as a decode failure, and a tone is at least honestly audio.
-    `.wav` is not a compromise for the test's sake — it is the format
-    `Recorder` itself falls back to when FLAC is unavailable, so the
-    upload path being exercised is one the app really uses.
+    """A 440 Hz WAV (not silence: some pipelines treat all-zero as a decode failure; WAV is
+    the app's own FLAC fallback).
     """
     frames = int(rate * seconds)
     samples = b"".join(
@@ -83,14 +60,8 @@ def one_second_of_audio(seconds: float = 1.0, rate: int = 16_000) -> bytes:
 
 
 def create_and_verify(auth: str, mailpit: str, timeout: float) -> tuple[str, str] | None:
-    """A BE-0 account, created and confirmed through the API.
-
-    Returns `(email, password)`, or None when this deployment has no
-    signup surface — in which case the caller falls back to a seeded user
-    and every step after this one still runs. That fallback is the point:
-    until BE-0 lands, "the account is new" is the *only* claim this smoke
-    cannot make, and losing the other five with it would leave the whole
-    path untested for as long as BE-0 takes.
+    """An account created and confirmed through the API: `(email, password)`, or None when
+    this deployment has no signup surface (the caller falls back to a seeded user).
     """
     email = f"ios-smoke-{uuid.uuid4().hex[:10]}@example.test"
     password = f"Sm0ke-{uuid.uuid4().hex[:12]}!"
@@ -124,8 +95,7 @@ def create_and_verify(auth: str, mailpit: str, timeout: float) -> tuple[str, str
         f"{refused.status_code} {refused.text}",
     )
 
-    # Resend, then confirm from the mailbox. The link is the only place
-    # the token appears — by design, exactly as the sign-in code is.
+    # Resend, then confirm from the mailbox (the link is the only place the token appears).
     resent = httpx.post(
         f"{auth}/auth/signup/resend", json={"email": email}, headers=IOS, timeout=timeout
     )
@@ -143,13 +113,7 @@ def create_and_verify(auth: str, mailpit: str, timeout: float) -> tuple[str, str
 
 
 def confirmation_token(mailpit: str, email: str, timeout: float, wait: float = 20.0) -> str | None:
-    """The newest confirmation token Mailpit holds for one address.
-
-    Same shape as `scripts/ci/mailpit-last-code.py`, and for the same
-    reason: there is no response field, header or log line to read it
-    from. Kept here rather than imported because that script prints a
-    six-digit sign-in code and this needs an opaque link token.
-    """
+    """The newest confirmation token Mailpit holds for one address (the only place it appears)."""
     import re
 
     deadline = time.monotonic() + wait
@@ -186,10 +150,8 @@ def sign_in(auth: str, email: str, password: str, timeout: float) -> str | None:
     if not check("POST /auth/login signed the account in", r.status_code == 200, r.text):
         return None
     body = r.json()
-    # The IOS-1 invariant, asserted where it can actually be observed: a
-    # native client is handed the refresh token and never a cookie it has
-    # no jar for. If this ever flips, the phone signs in and is silently
-    # signed out fifteen minutes later.
+    # A native client is handed the refresh token and never a cookie it has no
+    # jar for; if this flips the phone is silently signed out after 15 minutes.
     check("the refresh token came in the body", bool(body.get("refresh_token")), str(body.keys()))
     check(
         "no refresh cookie was set for a native client",
@@ -232,8 +194,7 @@ def capture(asr: str, note: str, token: str, seconds: float, timeout: float) -> 
     ):
         return False
 
-    # What `AppState.draftNote` does once the job completes. The note that
-    # comes back is the one the app files under Recents.
+    # What `AppState.draftNote` does once the job completes.
     drafted = httpx.post(
         f"{note}/v1/notes/from-transcript",
         headers=auth_header,

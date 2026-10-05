@@ -69,11 +69,9 @@ async def suggest(
     t0 = time.perf_counter()
 
     def _observe(path: str) -> None:
-        # Interface for the k6 gate + Grafana p95 panel (steps 07/08):
-        # path ∈ hit | miss | degraded | snippet.
+        # path ∈ hit | miss | degraded | snippet (Grafana/k6 contract).
         state.suggest_latency_metric.record((time.perf_counter() - t0) * 1000.0, {"path": path})
 
-    # Snippet path: leading slash → trigger lookup.
     if sug.is_snippet_prefix(body.prefix):
         trigger = sug.extract_snippet_trigger(body.prefix)
         if not trigger:
@@ -108,7 +106,6 @@ async def suggest(
             ],
         )
 
-    # Trie path.
     async def _build() -> sug.TenantTrie:  # noqa: F821
         from autocomplete_service.trie.builder import build_trie_from_phrases
 

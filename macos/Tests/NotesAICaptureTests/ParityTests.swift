@@ -1,13 +1,9 @@
 import XCTest
 @testable import NotesAICapture
 
-/// The pieces the web client already had, now on the Mac: the line key
-/// that finds a generated line's evidence, the settings blob gaining a
-/// fifth address, and the bell's deep links.
+/// Pieces the web client already had: the line key for a generated line's evidence, the fifth settings address, the bell's deep links.
 final class ParityTests: XCTestCase {
-    /// The same fixtures the web suite reads, generated from the Python
-    /// side (`scripts/dev/item_key_fixtures.py`): the three clients and
-    /// the server must key a line identically or the evidence never opens.
+    /// The same fixtures the web suite reads (`scripts/dev/item_key_fixtures.py`): all clients and the server must key a line identically.
     func testLineKeysMatchTheSharedFixtures() throws {
         let here = URL(fileURLWithPath: #filePath)
         let fixtures = here

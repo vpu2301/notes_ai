@@ -1,4 +1,4 @@
-"""Sprint I2 T1: only names and terms become vocabulary.
+"""Only names and terms become vocabulary.
 
 The role-word and ordinal tables are the fixture every client reads;
 the hint carries only vocabulary, people and companies first.

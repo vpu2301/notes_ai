@@ -1,13 +1,4 @@
-"""HTTP client to ``nlp-service``.
-
-Sprint 14 moved enrichment off the streaming path: the only call left is
-the one batch request made at finalize, over every committed segment. The
-per-call timeout is a hard ceiling — a slower NLP response degrades to the
-raw Whisper output, which always persists regardless.
-
-Why not unix-socket / shared-memory: in sprint 16 nlp-service moves
-to its own pod for horizontal scaling; HTTP keeps the option open.
-"""
+"""HTTP client to ``nlp-service``: one batch call at finalize; a timeout degrades to the raw transcript."""
 
 from __future__ import annotations
 
@@ -56,11 +47,7 @@ class NlpClient:
         bearer: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any] | None:
-        """Finalize-time enrichment: one batch call over all committed
-        segments (sprint 14). Segment dicts follow ``BatchSegmentIn``:
-        {"text": ..., "words": [{"text","start_s","end_s","probability"}]}.
-        Returns the raw response dict or None on any failure — the raw
-        transcript always persists regardless."""
+        """One batch call over committed segments (``BatchSegmentIn`` shape); None on any failure."""
         body: dict[str, Any] = {
             "segments": segments,
             "language": language,

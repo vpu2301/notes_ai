@@ -1,4 +1,4 @@
-"""``workspace_glossary`` + ``note_item_corrections`` (migration 0050).
+"""``workspace_glossary`` + ``note_item_corrections``.
 
 Every function takes an RLS-scoped connection from ``tenant_connection``:
 the tenant predicate is the policy's, not a WHERE clause here.
@@ -24,7 +24,7 @@ class GlossaryRow:
     heard_as: list[str]
     created_by: UUID
     created_at: datetime
-    # Sprint I2 T6: the note whose speaker rename added this term (0062).
+    # The note whose speaker rename added this term.
     source_note_id: UUID | None = None
 
 
@@ -41,8 +41,7 @@ def _row(record: asyncpg.Record) -> GlossaryRow:
 
 
 async def list_terms(conn: asyncpg.Connection) -> list[GlossaryRow]:
-    """Every live term, people first (they are what gets misheard), then
-    alphabetically — a list a person reads, not a dump."""
+    """Every live term, people first, then alphabetically."""
     rows = await conn.fetch(
         """
         SELECT id, term, kind, heard_as, created_by, created_at, source_note_id
@@ -116,13 +115,8 @@ async def note_exists(conn: asyncpg.Connection, *, note_id: UUID) -> bool:
 async def merge_heard_as(
     conn: asyncpg.Connection, *, row: GlossaryRow, heard_as: list[str]
 ) -> GlossaryRow:
-    """Add spellings to a term that is already there.
-
-    Saying "remember John Mayer" twice, after two different mishearings,
-    should teach the second one rather than fail as a duplicate. The
-    merge rules (de-duplication, the cap, never the term itself) are the
-    pure ones in :func:`glossary.clean_heard_as`; this only writes.
-    """
+    """Add spellings to a term that is already there; the merge rules are in
+    :func:`glossary.clean_heard_as`, this only writes."""
     merged = clean_heard_as([*row.heard_as, *heard_as], term=row.term)
     if merged == row.heard_as:
         return row
@@ -194,12 +188,8 @@ async def record_correction(
 
 
 async def dismissed_keys(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]:
-    """Keys whose LAST correction was a dismissal.
-
-    Regeneration must not re-add these: the author has already said this
-    line does not belong. A later ``restore`` cancels it, which is why the
-    query looks at the most recent row per key rather than at any row.
-    """
+    """Keys whose LAST correction was a dismissal (a later ``restore`` cancels it);
+    regeneration must not re-add these."""
     rows = await conn.fetch(
         """
         SELECT DISTINCT ON (item_key) item_key, action
@@ -216,12 +206,8 @@ NAME_TAG_PREFIX = "name:"
 
 
 def name_review_tag(surface: str, canonical: str) -> str:
-    """The flag that says "the author decided on THIS respelling".
-
-    The log holds no text (0050), so the pair goes in as a truncated
-    sha256 — enough to tell this note's respellings apart, nothing a
-    reporting role could read a name back out of.
-    """
+    """The flag that says "the author decided on THIS respelling": a truncated
+    sha256 of the pair, since the log holds no text."""
     digest = hashlib.sha256(f"{surface}\u2192{canonical}".encode()).hexdigest()[:16]
     return f"{NAME_TAG_PREFIX}{digest}"
 

@@ -1,10 +1,6 @@
 """Permission matrix: ``(role, action, target_kind) → allowed``.
 
-The ``ALLOW`` dict is the runtime gate. The CSV at
-``docs/auth/permissions.csv`` is the human-reviewable source of truth.
-The exhaustive test ``libs/auth/tests/unit/test_perms.py`` fails CI if
-the two ever diverge — adding a new permission means editing both, and
-the test verifies they match.
+``ALLOW`` is the runtime gate; ``docs/auth/permissions.csv`` mirrors it and test_perms fails if they diverge.
 """
 
 from __future__ import annotations
@@ -13,9 +9,7 @@ from typing import Final
 
 from .claims import Claims
 
-# ── Domain literals ─────────────────────────────────────────────────────
-# Kept as plain str so we can read them from the CSV without a Literal
-# bridge. The exhaustive test guards against typos.
+# Plain str (not Literal) so the CSV reads straight in; the exhaustive test guards typos.
 
 Role = str  # tenant_admin | member | viewer | auditor | service | device
 Action = str  # e.g. 'user.invite', 'audit.read'
@@ -39,27 +33,21 @@ KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
         "notification",
         "phrase",
         "synonym",
-        # IDX-B1b: credentials for non-human principals (room devices,
-        # service accounts).
+        # Credentials for non-human principals (room devices, service accounts).
         "credential",
     }
 )
 
 
-# ── The matrix ──────────────────────────────────────────────────────────
-# Only "True" entries are listed; ``can`` defaults to deny.
-# Mirror at docs/auth/permissions.csv.
+# Only "True" entries are listed; ``can`` defaults to deny. Mirror at docs/auth/permissions.csv.
 
 ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     # tenant_admin: tenant-wide admin
     ("tenant_admin", "tenant.read", "tenant"): True,
-    # Sprint 37 — who processes this workspace's meetings. READING it is
-    # every member's business: it is their employer's data and, often,
-    # their own voice. Only an admin may change it.
+    # ai_settings: every member may read, only an admin may change.
     ("tenant_admin", "ai_settings.read", "tenant"): True,
     ("tenant_admin", "ai_settings.write", "tenant"): True,
-    # Billing (0068): the plan, the month's usage, changing the plan.
-    # An admin's business — what the workspace pays is not every member's.
+    # Billing is admin-only, read included.
     ("tenant_admin", "billing.read", "tenant"): True,
     ("tenant_admin", "billing.write", "tenant"): True,
     ("tenant_admin", "tenant.update", "tenant"): True,
@@ -71,63 +59,39 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("tenant_admin", "user.deactivate", "user"): True,
     ("tenant_admin", "user.reactivate", "user"): True,
     ("tenant_admin", "user.reset_mfa", "user"): True,
-    # Ask a user to enrol a second factor. Distinct from reset_mfa, which
-    # CLEARS one — this touches nothing about the account, which is why
-    # the auditor holds it too (see the auditor block below).
+    # remind_mfa asks for enrolment and touches nothing about the account (unlike reset_mfa).
     ("tenant_admin", "user.remind_mfa", "user"): True,
     ("tenant_admin", "audit.read", "audit"): True,
     ("tenant_admin", "audit.verify", "audit"): True,
-    # IDX-B1b: register and revoke this workspace's meeting-room devices.
-    # `tenant_admin` is the JWT role an owner/admin MEMBERSHIP maps to
-    # (see auth_service.domain.identity_repository._PLATFORM_ROLES) — the
-    # membership roles themselves are not part of this matrix, which is
-    # keyed on what a token carries. The route additionally checks the
-    # caller's membership in the workspace it is acting on, because a
-    # `tenant_admin` token proves administration of ITS tenant, not of an
-    # arbitrary one named in the path.
+    # Matrix is keyed on token roles, not memberships; a `tenant_admin` token proves
+    # administration of ITS tenant only, so the route also checks workspace membership.
     ("tenant_admin", "device.manage", "credential"): True,
-    # member: routine authoring user (creates and edits notes)
     ("member", "tenant.read", "tenant"): True,
     ("member", "ai_settings.read", "tenant"): True,
-    # viewer: like member but with less admin capability
     ("viewer", "tenant.read", "tenant"): True,
     ("viewer", "ai_settings.read", "tenant"): True,
-    # auditor: read-only audit access + tenant context. user.read gives the
-    # auditor read-only visibility of the tenant's user roster.
     ("auditor", "tenant.read", "tenant"): True,
     ("auditor", "ai_settings.read", "tenant"): True,
     ("auditor", "user.read", "user"): True,
-    # The auditor's ONLY write in the whole matrix, and it is deliberate:
-    # an access review that can see an account without a second factor but
-    # cannot ask for one produces a finding nobody acts on. The act changes
-    # nothing about the account — no role, no status, no credential — it
-    # records a request that only the SUBJECT can close, by enrolling. That
-    # asymmetry is what keeps the read-only role read-only.
+    # The auditor's only write, deliberate: it changes nothing about the account.
     ("auditor", "user.remind_mfa", "user"): True,
     ("auditor", "audit.read", "audit"): True,
     ("auditor", "audit.verify", "audit"): True,
-    # ── Batch transcription (ASR) ──────────────────────────────────────
-    # tenant_admin is DELIBERATELY absent from asr.* — see the
-    # admin/content separation block at the bottom of this matrix.
+    # ── Batch transcription (ASR); tenant_admin deliberately absent (admin ⟂ content) ──
     ("member", "asr.write", "asr_job"): True,
     ("member", "asr.read", "asr_job"): True,
     ("member", "asr.cancel", "asr_job"): True,
-    # Viewers can submit and read their own; cancel still goes through
-    # member/admin.
     ("viewer", "asr.write", "asr_job"): True,
     ("viewer", "asr.read", "asr_job"): True,
-    # Service tokens (asr-worker → audit/storage) need read+write:
     ("service", "asr.read", "asr_job"): True,
     ("service", "asr.write", "asr_job"): True,
-    # ── Streaming dictation ────────────────────────────────────────────
-    # tenant_admin is DELIBERATELY absent — see the admin/content block.
+    # ── Streaming dictation; tenant_admin deliberately absent ──────────
     ("member", "dictation.start", "dictation_session"): True,
     ("member", "dictation.read", "dictation_session"): True,
     ("member", "dictation.finalize", "dictation_session"): True,
     ("viewer", "dictation.start", "dictation_session"): True,
     ("viewer", "dictation.read", "dictation_session"): True,
     ("viewer", "dictation.finalize", "dictation_session"): True,
-    # Service tokens (S2S between dictation-service and NLP):
     ("service", "dictation.read", "dictation_session"): True,
     # ── NLP post-processing ────────────────────────────────────────────
     ("tenant_admin", "nlp.process", "nlp_text"): True,
@@ -148,23 +112,14 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("member", "template.read", "template"): True,
     ("viewer", "template.read", "template"): True,
     ("auditor", "template.read", "template"): True,
-    # Service tokens read templates to load them for dictation/nlp:
     ("service", "template.read", "template"): True,
-    # ── Notes (versioning, diff, search) ───────────────────────────────
-    # Authors (member, viewer) read+write; auditors denied content;
-    # service tokens read-only (PDF/export pipeline S2S reads).
-    # tenant_admin is DELIBERATELY absent — see the admin/content block.
+    # ── Notes; auditors denied content, service read-only, tenant_admin deliberately absent ──
     ("member", "note.write", "note"): True,
     ("member", "note.read", "note"): True,
     ("viewer", "note.write", "note"): True,
     ("viewer", "note.read", "note"): True,
     ("service", "note.read", "note"): True,
-    # ── Notifications ──────────────────────────────────────────────────
-    # Every role that can hold a session gets both, INCLUDING auditor:
-    # these act only on the caller's OWN notification rows (the endpoints
-    # take no user_id and the queries filter on recipient_user_id), so
-    # this grants no visibility into note content. Withholding it would
-    # leave an auditor unable to read or dismiss alerts addressed to them.
+    # ── Notifications: every session-holding role, auditor included; rows are the caller's own ──
     ("tenant_admin", "notification.read", "notification"): True,
     ("tenant_admin", "notification.write", "notification"): True,
     ("member", "notification.read", "notification"): True,
@@ -173,27 +128,11 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("viewer", "notification.write", "notification"): True,
     ("auditor", "notification.read", "notification"): True,
     ("auditor", "notification.write", "notification"): True,
-    # ── Admin ⟂ content separation ─────────────────────────────────────
-    # A tenant_admin runs the workspace, not its content. The blocks above
-    # deliberately drop tenant_admin from `asr.*`, `dictation.*` and
-    # `note.*`: an administrator has no standing need to read members'
-    # dictations or notes.
-    #
-    # Note this is a matrix over ROLES, not people: a member who also
-    # administers the tenant holds BOTH `tenant_admin` and `member`, and
-    # `check()` passes on any granting role — so their authoring access is
-    # unchanged. It is the admin-ONLY account that loses the content
-    # surfaces.
-    #
-    #   stats.read — PII-free aggregate reads. Gates the list endpoints
-    #                the business dashboard aggregates (note search,
-    #                dictation sessions, ASR jobs) in a stripped mode:
-    #                no title, no snippet, no transcript, no result URL.
-    #                Counts and timings only.
+    # ── Admin ⟂ content: tenant_admin has no `asr.*`/`dictation.*`/`note.*`. Roles, not people:
+    # an admin who is also a member keeps authoring access via `member`.
+    # stats.read gates PII-free aggregate reads (counts and timings only).
     ("tenant_admin", "stats.read", "tenant"): True,
     # ── Autocomplete phrases (decoupled from note.*) ───────────────────
-    # Curating the tenant phrase library is administration, not authorship;
-    # members/viewers write their own user-scope phrases.
     ("tenant_admin", "autocomplete.read", "phrase"): True,
     ("tenant_admin", "autocomplete.write", "phrase"): True,
     ("member", "autocomplete.read", "phrase"): True,
@@ -201,26 +140,14 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("viewer", "autocomplete.read", "phrase"): True,
     ("viewer", "autocomplete.write", "phrase"): True,
     ("service", "autocomplete.read", "phrase"): True,
-    # ── Synonyms (search query expansion, ADR-0038) ────────────────────
-    # The dictionary is search metadata, not note content: reading it
-    # rides along with searching; writing tenant entries is an admin
-    # curation act — synonym rows carry dictionary terms, never note
-    # content.
+    # ── Synonyms (ADR-0038): search metadata, never note content ───────
     ("member", "synonym.read", "synonym"): True,
     ("viewer", "synonym.read", "synonym"): True,
     ("service", "synonym.read", "synonym"): True,
     ("tenant_admin", "synonym.read", "synonym"): True,
     ("tenant_admin", "synonym.write", "synonym"): True,
-    # ── Ambient capture devices ────────────────────────────────────────
-    # `device` is room-capture hardware (a meeting-room microphone box)
-    # authenticating via Keycloak client credentials. It CAPTURES only:
-    # it can upload audio and stream/finalize dictation sessions, and
-    # read back its own transcription jobs to confirm delivery — but it
-    # holds no note, user, audit or notification surface. The threat
-    # model is a stolen/compromised box on an office shelf: with this
-    # grant set it cannot read any tenant content, only add new
-    # audio/transcripts. template.read is needed because a conversation
-    # session loads its template on start.
+    # ── Ambient capture devices: capture only, no content surface (threat model: a stolen box).
+    # template.read because a conversation session loads its template on start.
     ("device", "tenant.read", "tenant"): True,
     ("device", "asr.write", "asr_job"): True,
     ("device", "asr.read", "asr_job"): True,
@@ -232,12 +159,7 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
 
 
 class AuthzDeniedError(Exception):
-    """Raised by ``requires()``-shaped deps when a role check fails.
-
-    Distinct from ``HTTPException`` so callers can choose to emit an audit
-    event before mapping to 403. The auth-service does exactly that — see
-    ``services/auth-service/src/auth_service/deps.py``.
-    """
+    """Role check failed. Distinct from ``HTTPException`` so callers can audit before mapping to 403."""
 
     def __init__(
         self,
@@ -265,13 +187,7 @@ def can(role: Role, action: Action, target_kind: TargetKind) -> bool:
 
 
 def can_claims(claims: Claims, action: Action, target_kind: TargetKind) -> bool:
-    """``True`` iff any of the caller's roles grants the tuple.
-
-    The predicate form of :func:`check` — for handlers that must *branch*
-    on a permission rather than refuse without it (a note search that
-    answers in stripped, PII-free form when the caller only holds
-    ``stats.read``).
-    """
+    """``True`` iff any of the caller's roles grants the tuple (the predicate form of :func:`check`)."""
     return any(can(role, action, target_kind) for role in claims.roles)
 
 
@@ -280,14 +196,7 @@ def check_any(
     *,
     options: tuple[tuple[Action, TargetKind], ...],
 ) -> None:
-    """Pass if ANY of the ``(action, target_kind)`` pairs is granted.
-
-    For endpoints reachable by two different standings — a member's full
-    content read, or an admin's PII-free aggregate read. The denial is
-    reported against the FIRST option, which is by convention the
-    primary/most-privileged one, so the audit row and the 403 name the
-    permission the caller was most likely reaching for.
-    """
+    """Pass if ANY pair is granted; a denial is reported against the FIRST (primary) option."""
     if not options:
         raise ValueError("check_any requires at least one option")
     for action, target_kind in options:
@@ -309,12 +218,7 @@ def check(
     target_kind: TargetKind,
     scope: str | None = None,
 ) -> None:
-    """Raise :class:`AuthzDeniedError` if none of the caller's roles allow
-    the action, or if ``scope`` is required but missing from ``claims.scope``.
-
-    Pure / framework-free — both libs/auth tests and the auth-service dep
-    call this same function.
-    """
+    """Raise :class:`AuthzDeniedError` unless a role allows the action and ``scope`` (if given) is held."""
     if not any(can(role, action, target_kind) for role in claims.roles):
         raise AuthzDeniedError(
             action=action,

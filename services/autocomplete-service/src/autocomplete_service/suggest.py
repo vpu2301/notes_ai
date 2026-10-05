@@ -63,14 +63,11 @@ def suggest_from_trie(
             last_accepted_at=c.last_accepted_at,
         )
         s = score(rec, now=now)
-        # Suffix = what the FE will surface as ghost-text.
         phrase_lower = c.phrase.lower()
         suffix = c.phrase[len(prefix) :] if phrase_lower.startswith(full_prefix) else c.phrase
         ranked.append((rec, s, suffix))
 
-    # Deterministic total order: the text tiebreak makes equal-score results
-    # stable across runs, machines, and candidate input orderings — response
-    # stability for identical corpus+counters is an API property.
+    # Text tiebreak: equal-score results must be stable across runs (API property).
     ranked.sort(key=lambda t: (-t[1], t[0].phrase))
     deduped = diversity_filter(ranked, levenshtein_threshold=3)
     top = deduped[:limit]

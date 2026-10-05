@@ -1,8 +1,4 @@
-"""Service-wide singletons: JWKS cache, DB pools, audit components.
-
-Created at process start (in main.py's lifespan). Routers consume them
-via :func:`auth_service.deps.get_state`.
-"""
+"""Service-wide singletons (JWKS cache, DB pools, audit), built in the lifespan."""
 
 from __future__ import annotations
 
@@ -79,55 +75,36 @@ class ServiceState:
     audit_writer: AuditWriter
     audit_verifier: AuditVerifier
     keycloak: KeycloakClient
-    # ── Sprint 16: session-revocation denylist (None = feature off) ─────
+    # Session-revocation denylist (None = feature off).
     denylist: RedisSessionDenylist | None = None
-    # IDX-A2 native issuer. Both None in `keycloak` mode.
+    # Native issuer; both None in `keycloak` mode.
     signing_keys: KeySet | None = None
     token_service: TokenService | None = None
     # ── Password recovery (None = feature off) ──────────────────────────
     email_provider: EmailProvider | None = None
     password_rate_limiter: PasswordResetRateLimiter | None = None
-    # IDX-A3 email one-time codes. None in keycloak mode, or when native
-    # mode has no mail provider — the routes 404 rather than half-work.
+    # Email one-time codes; None in keycloak mode or without a mail provider (routes 404).
     email_code_service: EmailCodeService | None = None
-    # IDX-A5 second factors and the account surface. Same posture.
+    # Second factors and the account surface; same posture.
     account_services: AccountServices | None = None
-    # IDX-A2's session half (carried by IDX-M1): rotation and revocation
-    # for `/auth/refresh` and `/auth/logout`. Native mode only, and —
-    # unlike the two above — it needs no mail provider: a deployment that
-    # cannot send a code can still renew a session that already exists.
+    # Rotation/revocation for `/auth/refresh` and `/auth/logout`; needs no mail provider.
     session_service: SessionService | None = None
-    # BE-0 self-serve signup. None unless MDX_SIGNUP_ENABLED and a mail
-    # provider are both set — an endpoint that accepts a signup and can
-    # never send the code is worse than one that is not there.
+    # Self-serve signup; None unless MDX_SIGNUP_ENABLED and a mail provider are set.
     onboarding_service: Any = None
     _redis: Any = None
 
     @property
     def notification_bus(self) -> Any:
-        """The Redis client S21's notification producer publishes on.
-
-        None when notifications are off or the client failed to build —
-        `emit_mfa_reminder` treats that as "don't publish", which is the
-        correct posture: the reminder's durable half is the DB row.
-        """
+        """Redis client the notification producer publishes on; None = don't publish."""
         return self._redis if settings.notifications_enabled else None
 
-    # ── Sprint 16 MFA: lazy envelope wiring ──────────────────────────────
-    # The TOTP secret store needs libs/crypto, which needs the master key
-    # and the crypto_writer pool. Built on FIRST use so an auth-service
-    # deployment that never enables MFA never needs the master key mounted.
+    # Lazy envelope wiring: built on first use so MFA-less deployments need no master key.
     crypto_pool: asyncpg.Pool | None = None
     envelope: Envelope | None = None
     _envelope_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def get_envelope(self) -> Envelope:
-        """Build (once) and return the envelope for TOTP-secret crypto.
-
-        Raises ``crypto.MasterKeyError`` if the configured master-key
-        provider is unusable — callers surface that as 503 with the
-        runbook pointer, never as a silent fallback.
-        """
+        """Build (once) and return the envelope for TOTP-secret crypto; raises MasterKeyError (callers → 503)."""
         async with self._envelope_lock:
             if self.envelope is not None:
                 return self.envelope
@@ -152,15 +129,7 @@ class ServiceState:
 
 
 def build_issuer() -> tuple[KeySet | None, TokenService | None]:
-    """The native issuer's key set + minter, or (None, None) in keycloak mode.
-
-    In `dual` and `native` a missing or invalid key list is a startup
-    failure: an issuer that cannot sign is not a degraded issuer, it is no
-    issuer. In `dual` in particular, booting without keys would leave the
-    fleet configured to trust an issuer that never produces a token —
-    silent, and indistinguishable from a working rollout until the first
-    signup fails.
-    """
+    """Native issuer key set + minter, or (None, None) in keycloak mode; missing keys fail startup."""
     if not settings.native_issuer_enabled:
         return None, None
     raw = settings.signing_keys_json()
@@ -194,20 +163,7 @@ def native_issuer_config() -> IssuerConfig:
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers THIS service trusts on its own protected endpoints.
-
-    Not simply the fleet-wide ``AUTH_ISSUERS_JSON``: auth-service's list
-    is decided by its mode, because it is the one service whose mode says
-    which issuers actually exist.
-
-    - ``keycloak`` — the configured list (in practice Keycloak alone).
-    - ``dual``     — the configured list plus its own native issuer. Both
-      are live, so both open a protected endpoint; that is the whole
-      point of the period (ADR-0047).
-    - ``native``   — its own issuer ONLY. Keycloak no longer mints, and a
-      Keycloak-signed token left in a browser must not outlive the
-      cut-over by opening a native endpoint.
-    """
+    """Issuers this service trusts, by mode: keycloak = configured list, dual = list + own, native = own only."""
     configured = issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -219,51 +175,27 @@ def auth_issuers() -> list[IssuerConfig]:
         return [native]
     if settings.idp_mode == "keycloak":
         return configured
-    # dual: both, with the native entry appended only if the fleet-wide
-    # config has not already named it.
+    # dual: append the native entry unless the fleet-wide config already names it.
     if any(entry.issuer == native.issuer for entry in configured):
         return configured
     return [*configured, native]
 
 
 def build_jwks_cache(signing_keys: KeySet | None) -> JwksCache:
-    """The cache ``current_user`` verifies bearer tokens against.
-
-    Keycloak's document is fetched over HTTP like every other service in
-    the fleet does it.
-
-    Its OWN document is not. auth-service is that issuer, so fetching it
-    would be a self-call over the network — one that fails during startup,
-    behind a load balancer that has not yet marked the pod healthy, or any
-    time the pod cannot resolve its own public name. The keys are already
-    in memory, so the same document is served in-process. The verification
-    path is otherwise byte for byte the one note-service uses: same cache,
-    same `verify_token`, same issuer and audience checks. Anything else
-    would mean auth-service accepting tokens the rest of the fleet rejects.
-
-    In `dual` both are needed at once, so the transport routes: the
-    service's own JWKS URL is answered from memory, everything else goes
-    to the real network.
-    """
+    """JWKS cache for ``current_user``; our own JWKS URL is served from memory (no self-call), others over HTTP."""
     issuers = auth_issuers()
     urls = issuer_url_map(issuers)
 
     if signing_keys is None:
         return JwksCache(issuer_to_url=urls)
 
-    # The URL to answer from memory is the one THIS service's issuer entry
-    # actually names, not the one `native_issuer_config()` derives from
-    # `AUTH_ISSUER_URL`. Those differ whenever the fleet is configured with
-    # an in-cluster JWKS address behind a browser-facing `iss` — the normal
-    # shape once anything but the SPA's own origin can reach this service.
-    # Matching the derived URL there would send auth-service out over the
-    # network to fetch its own keys.
+    # Match the JWKS URL the configured issuer entry names, not the one derived from
+    # AUTH_ISSUER_URL (they differ with an in-cluster JWKS address).
     native = native_issuer_config()
     self_jwks_url = urls.get(native.issuer, native.jwks_url)
 
     def _serve(request: httpx.Request) -> httpx.Response:
-        # Read through to the live key set on every call, so a rotation is
-        # picked up at the cache's next refresh rather than at restart.
+        # Read the live key set on every call so rotation needs no restart.
         return httpx.Response(
             200, json=signing_keys.jwks(access_ttl_seconds=settings.auth_access_ttl_seconds)
         )
@@ -279,11 +211,7 @@ def build_jwks_cache(signing_keys: KeySet | None) -> JwksCache:
 
 
 class _SelfServingTransport(httpx.AsyncBaseTransport):
-    """Answer our own JWKS URL from memory; send everything else to the network.
-
-    Only reachable in `dual`, where the cache holds two issuers and only
-    one of them is us.
-    """
+    """Answer our own JWKS URL from memory; send everything else to the network (dual only)."""
 
     def __init__(self, self_url: str, serve: Callable[[httpx.Request], httpx.Response]) -> None:
         self._self_url = self_url
@@ -301,21 +229,14 @@ class _SelfServingTransport(httpx.AsyncBaseTransport):
 
 @dataclass
 class AccountServices:
-    """Everything the IDX-A5 routers resolve through one attribute.
-
-    A bundle rather than five fields on ``ServiceState`` because the five
-    are useless apart: a deployment either has the native account surface
-    or it does not, and ``native_services()`` needs one thing to check.
-    """
+    """Bundle the native account routers resolve through one attribute (all or nothing)."""
 
     identities: Any
     challenges: Any
     sessions: Any
     mfa: MfaService
     account: AccountService
-    # None when there is no Redis: the client-credentials lock fails
-    # closed, and a grant endpoint that cannot enforce its lock must not
-    # be reachable at all.
+    # None without Redis: the client-credentials lock fails closed.
     credentials: CredentialService | None
     platform_tenant_id: str
 
@@ -326,16 +247,8 @@ def build_account_services(
     token_service: TokenService | None,
     redis_client: Any = None,
 ) -> AccountServices | None:
-    """Wire IDX-A5, or return None so its routes 404.
-
-    Needs everything IDX-A3 needs plus a mail provider for the security
-    notices. The envelope for TOTP secrets is NOT built here: it is
-    resolved on first use, so a deployment where nobody has enrolled a
-    second factor never needs the master key mounted.
-    """
-    # `dual` gets these too: the welcome step writes the browser's
-    # timezone through `PATCH /auth/me`, which lives in this bundle. What
-    # `dual` does NOT get is the native MFA router — see `create_app`.
+    """Wire the native account surface, or return None so its routes 404 (TOTP envelope is lazy)."""
+    # `dual` gets these too (PATCH /auth/me); it does NOT get the native MFA router.
     if not settings.native_issuer_enabled or token_service is None:
         return None
     if state.email_provider is None:
@@ -354,10 +267,7 @@ def build_account_services(
         state.email_provider,
         reply_to=settings.auth_email_reply_to,
         timeout_seconds=settings.email_send_timeout_seconds,
-        # The revert link lands on THIS service, not the SPA: the page has
-        # to restore the address and end every session before it can show
-        # anything, and routing that through the app would hand the SPA a
-        # one-shot credential it has no other use for.
+        # The revert link lands on THIS service, not the SPA (one-shot credential).
         public_base_url=settings.auth_issuer_url,
     )
     lockout = LockoutPolicy(
@@ -395,9 +305,7 @@ def build_account_services(
         reauth_window_seconds=settings.auth_reauth_window_seconds,
         mfa_service=mfa_service,
     )
-    # IDX-B1b. Built only with a Redis client, because the guessing lock
-    # fails closed: without a backend every grant would answer 503, and an
-    # endpoint that can only fail is worse than one that is not mounted.
+    # Only with Redis: the guessing lock fails closed, so every grant would 503.
     credentials: CredentialService | None = None
     if redis_client is not None:
         credentials = CredentialService(
@@ -430,8 +338,7 @@ def build_account_services(
 
 async def build_state() -> ServiceState:
     """Construct every async resource the service needs."""
-    # Built before the pools because in native mode it needs the key set,
-    # and a missing key is a startup failure rather than a 503 later.
+    # Before the pools: a missing key is a startup failure, not a 503 later.
     signing_keys, token_service = build_issuer()
     jwks_cache = build_jwks_cache(signing_keys)
     instrument_jwks_cache(jwks_cache)
@@ -470,26 +377,13 @@ async def build_state() -> ServiceState:
         admin_client_secret=settings.keycloak_admin_client_secret,
     )
 
-    # ── Password recovery ────────────────────────────────────────────
-    # Built only when the feature is on, so a deployment that never
-    # enables it needs no mail relay, no Redis for the limiter, and
-    # cannot trip the MockProvider production guard at startup.
+    # ── Password recovery (built only when on) ───────────────────────
     email_provider: EmailProvider | None = None
     password_rate_limiter: PasswordResetRateLimiter | None = None
 
-    # One connection for both Redis users in this service — the recovery
-    # rate limiter and (S21) the notification publisher. Built when EITHER
-    # is on: a deployment that mails no password resets but does remind
-    # users about MFA still needs a bus, and two clients to one server
-    # would be two connection pools for no reason. (The revocation
-    # denylist keeps its own client: it is built by libs/auth behind
-    # `build_session_denylist` and has its own failure posture.)
-    # IDX-A3 adds a third user: the OTP rate limiter, whose start scopes
-    # fail CLOSED. It needs the same client for the same reason.
+    # One Redis client shared by the rate limiters, the notification publisher
+    # and the OTP limiter (the revocation denylist keeps its own, via libs/auth).
     native_email_code = settings.native_issuer_enabled
-    # BE-0 adds a fourth: signup's per-IP and per-email caps, which fail
-    # CLOSED. Without the client they would fail by omission — the one
-    # posture an unauthenticated mail-sending endpoint must never have.
     signup = settings.signup_enabled and settings.idp_mode != "native"
     redis_client: Any = None
     if (
@@ -505,8 +399,7 @@ async def build_state() -> ServiceState:
         except Exception:  # noqa: BLE001 — both users are fail-open
             logging.getLogger(__name__).warning("auth.redis_unavailable_fail_open")
 
-    # Signup needs a relay for the same reason the code login does: the
-    # mail IS the proof of the address.
+    # The mail IS the proof of the address.
     if settings.password_reset_enabled or native_email_code or signup:
         email_provider = build_provider(
             kind=settings.email_provider,
@@ -531,10 +424,7 @@ async def build_state() -> ServiceState:
                 email_salt=settings.password_reset_ip_hash_salt.value(),
             )
         except Exception:  # noqa: BLE001
-            # The limiter is fail-open by design; failing to construct it
-            # at all is the same posture, so it must not stop the service
-            # from starting. The router treats None as "no limit" and
-            # logs it once here rather than on every request.
+            # Fail-open limiter: construction failure must not stop startup.
             logging.getLogger(__name__).warning("auth.password.rate_limiter_unavailable_fail_open")
 
     state = ServiceState(
@@ -571,8 +461,7 @@ async def build_state() -> ServiceState:
 
 
 def _free_limits() -> dict[str, int]:
-    """`MDX_SIGNUP_FREE_LIMITS` as a dict; a malformed value falls back to
-    the documented default rather than taking signup down with it."""
+    """`MDX_SIGNUP_FREE_LIMITS` as a dict; malformed values fall back to the default."""
     try:
         parsed = json.loads(settings.signup_free_limits)
         return {str(k): int(v) for k, v in dict(parsed).items()}
@@ -582,19 +471,9 @@ def _free_limits() -> dict[str, int]:
 
 
 def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -> Any:
-    """Wire BE-0 self-serve signup, or return None so its routes 404.
+    """Wire self-serve signup, or return None so its routes 404.
 
-    Three conditions, and each of them would otherwise produce an endpoint
-    that accepts a request it cannot finish:
-
-    * ``MDX_SIGNUP_ENABLED`` — an explicit opt-in. Signup creates Keycloak
-      users and sends mail to addresses nobody has verified; a deployment
-      should not discover it is open because a router happened to be
-      mounted.
-    * a mail provider — the code is the only proof of the address, so a
-      deployment that cannot send one has no signup.
-    * ``keycloak`` or ``dual`` mode — in ``native`` Keycloak no longer
-      holds credentials and BE-3's ``/auth/email/*`` is the way in.
+    Needs MDX_SIGNUP_ENABLED, a mail provider and keycloak/dual mode.
     """
     if not settings.signup_enabled:
         return None
@@ -613,9 +492,7 @@ def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -
         FixedWindowLimiter(redis_client, prefix="mdx:auth:rl") if redis_client is not None else None
     )
     if limiter is None:
-        # The per-IP and per-email caps fail CLOSED, and a limiter that is
-        # absent rather than merely unavailable would fail OPEN by
-        # omission — the one posture signup must never have.
+        # The caps fail CLOSED; an absent limiter must not fail open by omission.
         logger.error("auth.signup.disabled_no_redis")
         return None
 
@@ -651,12 +528,7 @@ def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -
 
 
 def _audit_writer_for(state: ServiceState) -> Any:
-    """Adapt the audit writer to the callable OnboardingService expects.
-
-    A callable rather than the writer itself so the domain module never
-    imports libs/audit — the severity vocabulary is translated here, at
-    the seam, and the service stays testable with a list.
-    """
+    """Adapt the audit writer to the callable OnboardingService expects (domain never imports libs/audit)."""
 
     async def _write(
         *,
@@ -684,12 +556,7 @@ def build_session_service(
     *,
     token_service: TokenService | None,
 ) -> SessionService | None:
-    """Wire rotation, or return None so `/auth/refresh` 404s.
-
-    Deliberately independent of `build_account_services`: that one needs
-    a mail provider and returns None without one, and a deployment with
-    no relay must still be able to keep its existing sessions alive.
-    """
+    """Wire rotation, or return None so `/auth/refresh` 404s; needs no mail provider."""
     if not settings.native_issuer_enabled or token_service is None:
         return None
     identities, _challenges, sessions_repo = build_repositories(state.tenant_writer_pool)
@@ -710,14 +577,7 @@ def build_email_code_service(
     redis_client: Any,
     mfa: MfaService | None = None,
 ) -> EmailCodeService | None:
-    """Wire IDX-A3's sign-in flow, or return None so the routes 404.
-
-    Every ingredient is required. A deployment in native mode with no
-    signing key cannot mint a session; one with no mail provider cannot
-    send a code. Half-wiring either would produce an endpoint that
-    accepts requests and can never complete them, which is worse than an
-    endpoint that says it is not there.
-    """
+    """Wire the email-code sign-in flow, or return None so the routes 404; every ingredient is required."""
     if not settings.native_issuer_enabled:
         return None
     if token_service is None or state.email_provider is None:
@@ -735,20 +595,11 @@ def build_email_code_service(
     if redis_client is not None:
         limiter = FixedWindowLimiter(redis_client, prefix="mdx:auth:rl")
     else:
-        # The start scopes fail closed, so "no limiter" must not become a
-        # silent downgrade to "unlimited": the service treats a missing
-        # limiter exactly like an unreachable one and refuses to send.
-        # Loud, because the symptom is every signup returning 503.
+        # Start scopes fail closed: a missing limiter refuses to send (every signup 503s).
         logger.error("auth.otp.no_rate_limiter")
 
     async def _audit_account_locked(*, identity_id: UUID, locked_until: datetime) -> None:
-        """`auth.account_locked` on the platform tenant.
-
-        The platform rather than the account's own workspace: a lock is
-        reached by failing to sign in, and the failing party is not
-        established to be the account holder — which is the entire reason
-        the event is worth recording.
-        """
+        """`auth.account_locked` on the platform tenant (the failing party is not proven to be the holder)."""
         try:
             await state.audit_writer.write_event(
                 tenant_id=UUID(settings.auth_platform_tenant_id),
@@ -798,8 +649,7 @@ def build_email_code_service(
             ),
         ),
         on_account_locked=_audit_account_locked,
-        # IDX-A5: a passed email code does not become a session while a
-        # second factor is owed.
+        # A passed email code does not become a session while a second factor is owed.
         mfa=mfa,
     )
 

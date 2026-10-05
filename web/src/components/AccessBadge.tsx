@@ -58,13 +58,7 @@ export function withSharing(hit: SearchHit, view: SharingView): SearchHit {
   };
 }
 
-/**
- * Private or public, shown while the pointer is on the row (CSS): the lock
- * (or globe), the word, and a chevron that opens who-can-open-it. On a
- * touch screen, with no pointer to hover, the glyph stays on its own.
- * The server decides whether this person may change it; a refusal is a
- * toast.
- */
+/** Row badge (hover-revealed by CSS) with a menu; the server decides who may change it. */
 export function AccessMenu({
   hit,
   access,

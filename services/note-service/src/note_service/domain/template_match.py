@@ -1,16 +1,6 @@
-"""Template auto-selection for transcript-to-note assignment.
-
-Given a raw transcript and the job language, pick the template the
-dictation most likely follows. Deterministic keyword scoring — no model
-call, no network: template *name* words weigh most, per-section
-``voice_aliases`` next, section names least. Ukrainian inflection is
-handled with a crude but effective prefix truncation («зустріч»
-matches «зустрічі»).
-
-The caller falls back to the tenant's general meeting-notes default
-when no template clears the score threshold, and always notes WHICH mode
-picked the template («explicit» | «auto» | «fallback») so the UI can
-surface low-confidence picks for review.
+"""Template auto-selection for transcript-to-note assignment: deterministic keyword
+scoring (name words, then ``voice_aliases``, then section names; Ukrainian
+inflection by prefix truncation). The caller falls back below the threshold.
 """
 
 from __future__ import annotations

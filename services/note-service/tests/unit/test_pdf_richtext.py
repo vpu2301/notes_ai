@@ -1,9 +1,5 @@
-"""The markdown-lite layer under the exported PDF.
-
-A generated meeting note arrives as bullets, numbered decisions and
-checkbox action items. These assert it lands in the document as real
-block structure — and that nothing a note can contain escapes the
-escaping.
+"""The markdown-lite layer under the exported PDF: real block structure, and
+nothing a note can contain escapes the escaping.
 """
 
 from __future__ import annotations

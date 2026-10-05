@@ -1,10 +1,5 @@
-"""Public share-link tokens (0016).
-
-A token is *derived* from the link row's id with a server-side HMAC key
-rather than generated and stored: the database holds only a hash, so a
-leaked dump does not yield working links, yet the service can always
-show the author their current link again without keeping the secret
-around. Rotating the key invalidates every link at once.
+"""Public share-link tokens, derived from the link row's id with a server-side
+HMAC key: the database holds only a hash, and rotating the key invalidates every link.
 """
 
 from __future__ import annotations

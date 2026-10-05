@@ -1,20 +1,7 @@
-"""S21 — MFA reminders: the access review's one action.
+"""MFA reminders: the access review's one action, with `mfa_reminders` doubled by a dict.
 
-The whole point of this endpoint is that an `auditor` — a role that may
-not invite, deactivate, change a role or reset a credential — can raise a
-standing request that a user enrols a second factor. So the tests below
-are as much about what the act does NOT do as about what it does:
-
-  · an auditor may raise one (the only write in their whole matrix row),
-  · a member and a viewer may not,
-  · it refuses a user who is already enrolled, deactivated, or is you,
-  · a repeat ask escalates the SAME row rather than stacking rows,
-  · every ask lands on the audit trail at `sec`.
-
-The DB is doubled with a dict standing in for `mfa_reminders`, which is
-enough to assert the upsert's shape (one row per user, count climbing)
-without a live Postgres — the migration's own constraints are covered by
-the schema tests.
+An auditor may raise one, a member/viewer may not; refused for an enrolled, deactivated or
+self target; a repeat ask escalates the SAME row; every ask lands on the audit trail at `sec`.
 """
 
 from __future__ import annotations
@@ -176,8 +163,7 @@ def test_auditor_can_raise_a_reminder(make_client: Any) -> None:
     assert events[0]["actor_role"] == "auditor"
     assert events[0]["target_id"] == str(TARGET)
 
-    # …and the arriving half went to the subject alone, carrying a role
-    # rather than a name.
+    # The arriving half went to the subject alone, carrying a role rather than a name.
     assert len(client.published) == 1
     assert client.published[0]["subject_sub"] == TARGET
     assert client.published[0]["actor_role"] == "auditor"
@@ -206,8 +192,7 @@ def test_tenant_admin_may_also_remind_and_is_recorded_as_admin(make_client: Any)
 def test_an_auditor_who_also_administers_is_recorded_as_the_auditor(
     make_client: Any,
 ) -> None:
-    # Precedence, not alphabetical luck: the reminder is an access-review
-    # act, so the review role is the one the finding is filed under.
+    # Filed under the review role by precedence, not alphabetical luck.
     client = make_client(_claims(roles=["tenant_admin", "auditor"], sub=ADMIN))
     assert client.post(f"/admin/users/{TARGET}/mfa-reminder").status_code == 201
     assert client.db.reminders[TARGET]["requested_by_role"] == "auditor"
@@ -248,12 +233,7 @@ def test_unknown_user_is_404(make_client: Any) -> None:
 
 
 def test_the_reminder_is_not_mfa_gated(make_client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The bootstrap case: a company where nobody has enrolled yet.
-
-    Every other admin mutation demands a verified-MFA session. If this one
-    did too, the first reviewer would need a second factor to ask anyone
-    else for a second factor, and a company with none could never start.
-    """
+    """Bootstrap: this endpoint must not demand verified MFA, or a company with none could never start."""
     from auth_service.config import settings
 
     monkeypatch.setattr(settings, "require_mfa", True)

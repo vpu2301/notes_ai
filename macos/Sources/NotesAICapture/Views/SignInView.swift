@@ -1,13 +1,6 @@
 import SwiftUI
 
-/// Signing in, in as few steps as the server allows.
-///
-/// The default way in is an address and a code from the mail: no password
-/// to remember, no password to lose, and one path that both signs up and
-/// signs in (the server deliberately never says which of the two just
-/// happened). A password screen is one link away for accounts that have
-/// one, and the second factor and the welcome step appear only when the
-/// server says they are owed.
+/// Signing in, in as few steps as the server allows: address + mailed code by default (the server never says whether it signed up or in); password one link away; second factor and welcome step only when owed.
 struct SignInView: View {
     @EnvironmentObject private var app: AppState
     var compact = false
@@ -33,13 +26,9 @@ struct SignInView: View {
     /// Seconds until "Send again" becomes available.
     @State private var resendIn = 0
     @State private var showServer = false
-    /// Set when the server has no password endpoint (native mode before
-    /// IDX-A4): the link stops being offered rather than failing again.
+    /// Set when the server has no password endpoint: the link stops being offered.
     @State private var passwordUnavailable = false
-    /// MAC-0: the account exists but its address is unconfirmed
-    /// (`403 email_not_verified`). Nothing on this screen can finish the
-    /// sign-in — only the code in the mail can — so the one thing offered
-    /// is another copy of that mail.
+    /// The account exists but its address is unconfirmed (`403 email_not_verified`); the only offer is another copy of the mail.
     @State private var needsVerification = false
     @State private var resendBusy = false
 
@@ -55,9 +44,7 @@ struct SignInView: View {
             } else if let notice {
                 DSNotice(tone: .info, symbol: "envelope.fill", text: notice)
             }
-            // Outside the branch above on purpose: a successful resend
-            // replaces the error with a confirmation, and the button has
-            // to survive that swap in case the second mail is slow too.
+            // Outside the branch above on purpose: a successful resend replaces the error with a confirmation and the button must survive.
             if needsVerification { resendRow }
             if showsSignupPrompt { signupPrompt }
             footer
@@ -77,8 +64,7 @@ struct SignInView: View {
         }
     }
 
-    /// Changes every second while the resend countdown runs, so the task
-    /// above re-fires; a plain `.task` would run once and stop.
+    /// Changes every second while the resend countdown runs, so the task re-fires.
     private var resendTick: String { "\(resendIn)-\(stepId)" }
 
     private var stepId: String {
@@ -109,9 +95,7 @@ struct SignInView: View {
     private var title: String {
         switch step {
         case .email: return compact ? "Sign in" : "Welcome"
-        // Deliberately not "Create account": the server answers the same way
-        // for a known and an unknown address, so the screen cannot promise
-        // one of the two before the code comes back.
+        // Deliberately not "Create account": the server answers the same for known and unknown addresses.
         case .code: return "Check your mail"
         case .password: return "Your password"
         case .mfa: return "One more step"
@@ -260,9 +244,7 @@ struct SignInView: View {
 
     // MARK: - Signup (MAC-0)
 
-    /// Only where a person could be starting out. Offering "create an
-    /// account" beside a code field, a second factor or the welcome step
-    /// would be offering it to somebody who plainly already has one.
+    /// Only where a person could be starting out, never beside a code field, second factor or welcome step.
     private var showsSignupPrompt: Bool {
         switch step {
         case .email, .password: return true
@@ -279,9 +261,7 @@ struct SignInView: View {
         }
     }
 
-    /// The way out of an unconfirmed account. `email` is whatever the
-    /// person typed, which is the address the server just refused — the
-    /// resend cannot drift onto a different one.
+    /// The way out of an unconfirmed account. `email` is what the person typed — the address the server just refused.
     private var resendRow: some View {
         HStack(spacing: 10) {
             Button("Resend") {
@@ -302,10 +282,7 @@ struct SignInView: View {
 
     // MARK: - Footer (which server this is)
 
-    /// Release builds show nothing about the server here: the addresses
-    /// are shipped, and Settings › Advanced is where an operator changes
-    /// them. A debug build keeps the editor, because a developer's Mac
-    /// talks to a stack that moves.
+    /// Release builds show nothing about the server (Settings › Advanced is for operators); debug builds keep the editor.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             #if DEBUG
@@ -405,9 +382,7 @@ struct SignInView: View {
             resendIn = challenge.resendAfter
             step = .code(challengeId: challenge.challengeId, resendAfter: challenge.resendAfter)
         } catch let error as APIError where error.code == "use_password" {
-            // The address is known and has a password; the server will not
-            // mail it a code. Show the password form already filled in
-            // rather than an error about a form the person cannot see.
+            // Known address with a password: show the password form filled in rather than an error.
             email = address
             notice = nil
             passwordUnavailable = false
@@ -446,15 +421,13 @@ struct SignInView: View {
             password = ""
             advance(to: next)
         } catch let error as APIError where error.isNotFound {
-            // This deployment has no password endpoint (native mode before
-            // IDX-A4). Say so once and take the person back to the code.
+            // No password endpoint on this deployment: say so once and go back to the code.
             passwordUnavailable = true
             password = ""
             step = .email
             errorMessage = "This server signs in with a code sent by email."
         } catch let error as APIError where error.isMFARequired {
-            // The Keycloak-era login asks for the one-time code in a 401
-            // rather than in the body.
+            // The Keycloak-era login asks for the one-time code in a 401 rather than in the body.
             errorMessage = AuthCopy.message(for: error)
             step = .mfa(challengeId: "", methods: ["totp"])
         } catch {
@@ -470,8 +443,7 @@ struct SignInView: View {
         defer { isBusy = false }
         do {
             if challengeId.isEmpty {
-                // Keycloak's login takes the second factor as `otp` on the
-                // same request rather than on a challenge of its own.
+                // Keycloak's login takes the second factor as `otp` on the same request.
                 let next = try await app.signIn(email: email, password: password, otp: entered)
                 advance(to: next)
             } else {
@@ -489,9 +461,7 @@ struct SignInView: View {
         }
     }
 
-    /// One place that decides what a failure means for this screen, so
-    /// that every way in offers the same way out of an unconfirmed
-    /// account rather than four screens disagreeing about it.
+    /// One place that decides what a failure means for this screen, so every way in offers the same way out.
     private func show(_ error: Error) {
         errorMessage = AuthCopy.message(for: error)
         needsVerification = (error as? APIError)?.code == "email_not_verified"
@@ -504,9 +474,7 @@ struct SignInView: View {
         defer { resendBusy = false }
         do {
             try await app.resendSignupVerification(email: address)
-            // Keep `needsVerification`: the account is still unconfirmed
-            // until the person acts on the mail, and a second copy may yet
-            // be wanted. Only the sentence changes.
+            // Keep `needsVerification`: the account is still unconfirmed; only the sentence changes.
             errorMessage = nil
             notice = "We sent another code to \(address). Confirm it, then sign in."
         } catch {

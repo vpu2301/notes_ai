@@ -1,22 +1,8 @@
-"""Speaker-labeling load + soak (Sprint 32 B-5). Staging only.
+"""Speaker-labeling load + soak, staging only: 20 concurrent 60-min diarized jobs
+(queue wait p95 <= 10 min, diarization <= 0.25x audio p95, notes stay fast), 50 re-runs
+across 10 tenants (only 202/409/429, no starvation), and a soak loop.
 
-    RUN_SPEAKER_LOAD=1 ASR_BASE=https://api.staging… \\
-    SPEAKER_LOAD_TOKENS=<bearer per tenant, comma-separated> \\
-    SPEAKER_LOAD_AUDIO=<60-min meeting file> NOTES_BASE=https://api.staging… \\
-      uv run pytest tests/load/diarization -s
-
-Scenarios (pass bars from the sprint plan; the report is
-docs/testing/load/speakers-<date>.md):
-
-1. 20 concurrent 60-min diarized jobs: queue wait p95 ≤ 10 min, diarization
-   ≤ 0.25 × audio p95 (0.4 dual), and a notes smoke (GET /v1/notes) stays
-   fast while they run — a transcription backlog must not block notes.
-2. 50 re-run requests in 5 min across 10 tenants: only 202/409/429, every
-   accepted run completes < 15 min, no tenant starves.
-5. Soak: scenario 1 on a loop for SPEAKER_SOAK_HOURS (default 12) — read
-   worker RSS drift from the dashboard (< 5 %); this driver keeps load on.
-3 (cold start, diar_http only) is not applicable in the in-process shape.
-4 (2 h / 8 speakers) runs in-process: tests/load/diarization/long_recording.py.
+    RUN_SPEAKER_LOAD=1 ASR_BASE=... SPEAKER_LOAD_TOKENS=... SPEAKER_LOAD_AUDIO=... NOTES_BASE=... uv run pytest tests/load/diarization -s
 """
 
 from __future__ import annotations

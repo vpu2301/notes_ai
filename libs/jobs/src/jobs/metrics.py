@@ -1,7 +1,4 @@
-"""OpenTelemetry instruments for the job queue and the model backends (DEP-S1 §S).
-
-Names are referenced by infra/prometheus/rules/model-backends.yml — keep stable.
-"""
+"""OpenTelemetry instruments for the job queue and model backends; names are referenced by Prometheus rules."""
 
 from __future__ import annotations
 

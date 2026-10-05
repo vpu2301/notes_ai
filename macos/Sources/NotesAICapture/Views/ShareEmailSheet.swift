@@ -1,17 +1,9 @@
 import SwiftUI
 
-/// "Send this note" — pick who gets it, add a line, press Send.
-///
-/// This replaces the old `mailto:` hand-off. That opened the Mac's mail
-/// client with an unstyled draft the sender still had to send, and Mail
-/// brings whatever it already had open to the front with it — which is
-/// how sharing a link ended up showing somebody an old message with an
-/// old attachment. Nothing here touches the mail client: the server
-/// sends the mail, and the sheet reports what happened to each address.
+/// "Send this note" — pick who gets it, add a line, press Send. Replaces the `mailto:` hand-off: the server sends the mail and the sheet reports per address.
 struct ShareEmailSheet: View {
     let noteTitle: String
-    /// Sends, and hands back one outcome per recipient (nil = the call
-    /// itself failed; the reason is already on the view model's error).
+    /// Sends, and hands back one outcome per recipient (nil = the call itself failed; the reason is on the view model).
     let send: ([String], String) async -> [ShareEmailOutcome]?
     let onClose: () -> Void
 
@@ -25,8 +17,7 @@ struct ShareEmailSheet: View {
 
     @FocusState private var addressFocused: Bool
 
-    /// Loose shape check — the real test is whether a relay accepts it,
-    /// and this only has to keep obvious typos out of the chip list.
+    /// Loose shape check; only has to keep obvious typos out of the chip list.
     static func looksLikeEmail(_ value: String) -> Bool {
         guard !value.contains(where: \.isWhitespace) else { return false }
         let parts = value.split(separator: "@", omittingEmptySubsequences: false)
@@ -39,9 +30,7 @@ struct ShareEmailSheet: View {
         draft.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ",;"))
     }
 
-    /// Everything typed so far, including the address still in the box —
-    /// pressing Send with one address typed and not committed must not
-    /// send to nobody.
+    /// Everything typed so far, including the address still in the box, so Send with one uncommitted address does not send to nobody.
     private var allRecipients: [String] {
         var all = recipients
         let typed = trimmedDraft
@@ -132,9 +121,7 @@ struct ShareEmailSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             DSLabel("Send to")
             if !recipients.isEmpty {
-                // A wrapping row of chips. `FlowLayout` is overkill for
-                // the handful of addresses this sheet accepts, so they
-                // stack in a grid that wraps at the sheet's width.
+                // A wrapping row of chips; a grid that wraps at the sheet's width is enough here.
                 DSChipWrap(items: recipients) { address in
                     RecipientChip(address: address, disabled: sending) {
                         recipients.removeAll { $0 == address }
@@ -147,8 +134,7 @@ struct ShareEmailSheet: View {
                     .onSubmit { _ = commitDraft() }
                     .onChange(of: draft) { _, value in
                         draftError = nil
-                        // A separator means the address before it is
-                        // finished — the same reflex as any mail client.
+                        // A separator means the address before it is finished.
                         if value.hasSuffix(",") || value.hasSuffix(";") || value.hasSuffix(" ") {
                             _ = commitDraft()
                         }
@@ -231,8 +217,7 @@ struct ShareEmailSheet: View {
         }
         sentCount = results.filter(\.sent).count
         failures = results.filter { !$0.sent }
-        // Only the addresses that failed stay in the box, so pressing
-        // Send again retries exactly those and not the ones that went.
+        // Only the failed addresses stay in the box, so Send again retries exactly those.
         recipients = failures.map(\.email)
         draft = ""
         if failures.isEmpty { message = "" }
@@ -278,8 +263,7 @@ private struct RecipientChip: View {
     }
 }
 
-/// A row of chips that wraps. Small enough to keep here rather than grow
-/// a layout component for the one place that needs one.
+/// A row of chips that wraps; small enough to keep here.
 private struct DSChipWrap<Item: Hashable, Content: View>: View {
     let items: [Item]
     @ViewBuilder let content: (Item) -> Content

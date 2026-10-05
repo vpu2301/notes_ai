@@ -37,11 +37,7 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # JSON list of trusted issuers `[{"issuer", "jwks_url", "audience"}]`; unset = the three above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
@@ -66,9 +62,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
     # ── Ingest ───────────────────────────────────────────────────────
-    # Consumer identity within the group. MUST be unique per replica —
-    # two replicas sharing a name share a pending-entries list, so a
-    # crash on one silently hands the other's in-flight work to it.
+    # MUST be unique per replica: shared names share a pending-entries list.
     consumer_name: str = Field(default="notification-1", alias="MDX_NOTIFICATION_CONSUMER_NAME")
     ingest_enabled: bool = Field(default=True, alias="MDX_NOTIFICATION_INGEST")
     ingest_max_retries: int = Field(default=3, alias="MDX_NOTIFICATION_INGEST_MAX_RETRIES")
@@ -76,11 +70,7 @@ class Settings(BaseSettings):
         default=60_000, alias="MDX_NOTIFICATION_INGEST_RECLAIM_IDLE_MS"
     )
 
-    # ── Storm control (E1) ───────────────────────────────────────────
-    # A misbehaving producer — or a reconciler flagging thousands of rows
-    # at once — must not be able to bury every user's feed. Beyond the
-    # cap, same-category events inside the window coalesce into one
-    # "N notes finalized" row instead of N rows.
+    # Storm control: beyond the cap, same-category events in the window coalesce into one row.
     rate_cap_per_category: int = Field(default=20, alias="MDX_NOTIFICATION_RATE_CAP")
     rate_cap_window_s: int = Field(default=300, alias="MDX_NOTIFICATION_RATE_WINDOW_S")
 
@@ -112,10 +102,7 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment in {"production", "staging"}
 
-    # ── Session revocation check (sprint 16) ────────────────────────────
-    # When on, current_user rejects tokens whose sid/sub is on the Redis
-    # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
-    # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
+    # Redis session denylist check; fail-OPEN on Redis outage (ADR-0040).
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 

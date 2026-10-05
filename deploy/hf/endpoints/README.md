@@ -28,6 +28,5 @@ After `apply`, the endpoint URL goes into the environment's secret store as
 `HF_CHAT_ENDPOINT_URL` / `HF_ASR_ENDPOINT_URL` (suffix `/v1` for the chat
 endpoint; `config/models.yaml` adds the route). `status` prints the URLs.
 
-Model choice, sizes and cold-start expectations: `docs/adr/0046-*.md`
-(family) and `docs/runbooks/model-backends.md` (runbook: warming, outage in
-a region, token rotation, pin upgrade).
+Warming, outage in a region, token rotation and pin upgrade:
+`docs/runbooks/model-backends.md`.

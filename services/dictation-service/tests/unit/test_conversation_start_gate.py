@@ -1,16 +1,6 @@
-"""Conversation (meeting) mode start behaviour in ``_new_session`` (pure).
+"""Conversation-mode start in ``_new_session`` (pure): the only gate is a loadable diarizer.
 
-Conversation mode has no precondition beyond auth: a v2 client asks for
-``mode: "conversation"`` and gets a weighted session with a diarization
-stream and neutral speaker naming. The only start-time gate left is the
-diarizer itself — it must be loadable, or the start fails loudly.
-Dictation mode must be entirely unaffected.
-
-Everything below the handler is faked: ``tenant_connection`` is replaced
-with an async CM over a dummy connection and the domain readers
-(``repository.count_active_for_tenant``, ``repository.insert_session``)
-are monkeypatched on their own modules. The tmpfs ring buffer and the
-Opus decoder are stubbed so no OS resources are touched.
+Everything below the handler is faked (tenant_connection, repository readers, buffer, decoder).
 """
 
 from __future__ import annotations

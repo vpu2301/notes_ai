@@ -12,28 +12,9 @@ import { browserTimezone } from "../../lib/time";
 import { Banner, LoginShell, useCountdown } from "./LoginShell";
 
 /**
- * `/signup` — self-serve account creation (BE-0).
- *
- * The route macOS and iOS open in a browser when somebody taps "Create
- * one", and the only way into the product on a `keycloak` or `dual`
- * deployment, where `/auth/email/*` is not mounted and `/login` cannot
- * create anything.
- *
- * Two steps, one screen each: name + address + password, then the 6-digit
- * code that confirms the address. Verification hands back no session
- * (`{verified: true}` is the whole body), so this page signs in with the
- * password it is still holding and lands the person in the app — the
- * alternative is asking somebody to type a password they chose forty
- * seconds ago.
- *
- * ── What this screen must not say ────────────────────────────────────
- *
- * `POST /auth/signup` answers the same 202 whether or not the address
- * already has an account, so that it cannot be used to ask "is this
- * person a customer?". The code step is worded to match: *if* the address
- * is new, a code is on its way. Any copy here that implies the server
- * recognised the address gives away exactly what the uniform 202 protects,
- * and `tests/signup.test.tsx` holds that line.
+ * `/signup` — self-serve account creation; verification returns no session, so step 2 signs in
+ * with the held password. Copy must never imply the server recognised the address: `POST
+ * /auth/signup` is a uniform 202 (tests/signup.test.tsx holds that line).
  */
 export function SignupPage() {
   useDocumentTitle("Create your account");
@@ -41,20 +22,9 @@ export function SignupPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /**
-   * `/login/password` sends people here when `/auth/login` answered
-   * `email_not_verified` — the account exists and only the confirmation is
-   * missing, so this page opens on the code step.
-   *
-   * It deliberately arrives without the password. Router state is written
-   * into the browser's history entry, which outlives the tab, and a
-   * password does not belong there. The cost is one retype on that path
-   * only: verifying goes back to the password form rather than into the
-   * app.
-   */
+  /** `email_not_verified` hand-off: opens on the code step, without the password (router state outlives the tab). */
   const handover = (location.state ?? null) as { email?: string; verifyOnly?: boolean } | null;
-  // Sprint 21: the shared page's CTA parks its referral code in the URL
-  // and in sessionStorage (JoinPage). Read once; never stored elsewhere.
+  // Referral code from the URL or sessionStorage (JoinPage); read once, never stored elsewhere.
   const [params] = useSearchParams();
   const ref = readRef(params.get("ref"));
   const verifyOnly = handover?.verifyOnly === true;
@@ -75,9 +45,7 @@ export function SignupPage() {
 
   useCountdown(resendIn, setResendIn);
 
-  // Public and cheap, and it keeps the `minLength` on the field in step
-  // with `domain/password_policy.py` instead of drifting from it. The
-  // server enforces the real number either way.
+  // Keeps the field's `minLength` in step with the server policy; the server enforces it anyway.
   useEffect(() => {
     let cancelled = false;
     void authApi
@@ -128,14 +96,7 @@ export function SignupPage() {
 
   // ── step 2: the mailed code ─────────────────────────────────────────
 
-  /**
-   * Verified, and now signed in with the password from step 1.
-   *
-   * The sign-in is a second call that can fail on its own; when it does,
-   * the account is still made and confirmed, so the person is sent to the
-   * password form rather than left staring at an error on a screen with
-   * nothing left to do.
-   */
+  /** Verified; sign in with the step-1 password. If that fails the account still exists, so go to the password form. */
   const signInAfterVerify = async () => {
     const address = email.trim();
     try {
@@ -148,15 +109,10 @@ export function SignupPage() {
       return;
     }
     void offerToSavePassword(address, password);
-    // `/welcome` exists to ask a new identity for its name and to send the
-    // browser's time zone. The name was step 1, so only the second half is
-    // left — and it is worth doing silently rather than showing a screen
-    // with one prefilled box on it. Best-effort: `PATCH /auth/me` is not
-    // mounted in `keycloak` mode, and a 404 here must not block the way in.
+    // Send the time zone silently (the name was step 1). Best-effort: 404 in keycloak mode must not block.
     const zone = browserTimezone();
     if (zone) void saveProfile({ timezone: zone }).catch(() => {});
-    // A referred person came for the thing they saw: land them on
-    // "record your first meeting" rather than an empty list.
+    // A referred person lands on "record your first meeting".
     if (ref) {
       navigate("/meeting/new?first_run=1", { replace: true });
       return;
@@ -200,9 +156,6 @@ export function SignupPage() {
       const accepted = await authApi.signupResend(email.trim());
       setResendIn(accepted.resend_after);
       setCode("");
-      // Nothing else on this screen changes, and silence after a click
-      // reads as broken — so the one button whose effect is invisible says
-      // so itself.
       setResent(true);
     } catch (err) {
       failed(err);
@@ -267,9 +220,6 @@ export function SignupPage() {
             </button>
           )}
         </div>
-        {/* The one thing the uniform 202 cannot tell them, said plainly
-            rather than left to be discovered by waiting for a code that
-            is never coming. */}
         <p className="login-foot">
           <span>
             Already have an account?{" "}

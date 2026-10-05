@@ -1,17 +1,4 @@
-"""Permission-matrix exhaustive test.
-
-The CSV at ``docs/auth/permissions.csv`` is the human-reviewable source of
-truth. ``libs/auth.perms.ALLOW`` is the runtime gate. This file fails CI
-if the two diverge — adding a permission means editing both.
-
-Strategy:
-
-1. Parse the CSV.
-2. For every row, assert ``can(role, action, target) == row.allowed``.
-3. Reject duplicate keys in the CSV.
-4. Reject any (role, action, target) referenced by ``ALLOW`` that the CSV
-   doesn't list — the CSV must be the *complete* allowlist documentation.
-"""
+"""Permission-matrix exhaustive test: ``docs/auth/permissions.csv`` and ``ALLOW`` must agree in both directions."""
 
 import csv
 from pathlib import Path
@@ -230,11 +217,7 @@ def test_check_empty_roles_is_deny():
         check(claims, action="tenant.read", target_kind="tenant")
 
 
-# ── Admin ⟂ content separation ──────────────────────────────────────────
-#
-# A tenant_admin runs the workspace, not its content. These tests pin the
-# boundary: an admin-only account holds no note/dictation/ASR content
-# permission and reaches the dashboard only through `stats.read`.
+# ── Admin ⟂ content separation: an admin-only account holds no content permission ──
 
 
 def test_admin_holds_no_content_permissions():

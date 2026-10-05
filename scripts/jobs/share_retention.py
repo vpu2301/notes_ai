@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Nightly share retention (Sprint 23).
+"""Nightly share retention: links expired longer than ``--days`` lose responses,
+recipient address and verification codes. Per tenant on a tenant-scoped connection;
+idempotent; prints counts only.
 
-    DATABASE_URL=postgresql://app_role:...@host/notes \\
-        uv run python scripts/jobs/share_retention.py [--days 30]
-
-For every link expired longer than `--days` (default
-`MDX_SHARE_RETENTION_DAYS`, 30): responses are cleared, the recipient
-address dropped, any verification code deleted. Runs per tenant on a
-tenant-scoped connection so RLS applies exactly as it does online.
-Idempotent; prints counts per kind and emits nothing else.
+    DATABASE_URL=postgresql://app_role:...@host/notes uv run python scripts/jobs/share_retention.py [--days 30]
 """
 
 from __future__ import annotations

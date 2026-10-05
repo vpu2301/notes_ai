@@ -8,12 +8,7 @@ class AuditError(Exception):
 
 
 class CanonicalizationError(AuditError):
-    """The payload could not be JCS-canonicalized.
-
-    Causes: non-JSON-serialisable types in the payload (e.g. raw datetime,
-    UUID — callers must pre-convert), or values that JCS rejects (NaN,
-    Infinity).
-    """
+    """The payload could not be JCS-canonicalized (non-JSON type, or NaN/Infinity)."""
 
 
 class ChainWriteError(AuditError):

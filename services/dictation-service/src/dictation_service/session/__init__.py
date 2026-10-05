@@ -1,8 +1,4 @@
-"""Session-lifecycle primitives.
-
-State machine is exported eagerly (pure stdlib). Manager / resume /
-heartbeat / finalize are lazy because they pull in numpy or redis.
-"""
+"""Session-lifecycle primitives; heavy modules are imported lazily."""
 
 from .state import SessionState, StateTransitionError, can_transition
 

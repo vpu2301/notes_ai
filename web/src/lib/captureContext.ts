@@ -1,7 +1,5 @@
-// A calendar event's people, handed from the home page's "Start" button to
-// the capture screen (Sprint 30). Names never go in the URL — only the
-// event id does — so they travel through sessionStorage, keyed by that id,
-// and stay in this tab.
+// A calendar event's people, handed from "Start" to the capture screen via
+// sessionStorage keyed by event id: names never go in the URL.
 
 import type { MeetingCalendarContext, UpcomingEvent } from "../api/types";
 
@@ -18,8 +16,7 @@ const MAX_AGENDA_LINE_LEN = 160;
 export interface CaptureContext {
   attendee_count: number;
   attendees: string[];
-  /** Sprint 34: the agenda the server derived from the invite, and the
-   *  invite's own identity — both go on the note when the capture starts. */
+  /** The server-derived agenda and the invite's identity; both go on the note. */
   agenda: string[];
   title: string;
   ical_uid: string;
@@ -37,11 +34,7 @@ function cleanName(raw: unknown): string | null {
   return name;
 }
 
-/**
- * The names to offer for speakers: the invitees minus the person capturing
- * (whose calendar this is — `self` holds their address and name as far as
- * the page knows them), cleaned and de-duplicated, at most 12.
- */
+/** Speaker name candidates: invitees minus `self`, cleaned, de-duplicated, ≤ 12. */
 export function nameCandidates(attendees: readonly unknown[], self: ReadonlyArray<string | null | undefined> = []): string[] {
   const mine = new Set(self.filter((s): s is string => Boolean(s)).map((s) => s.trim().toLocaleLowerCase()));
   const seen = new Set<string>();
@@ -100,11 +93,7 @@ export function readCaptureContext(eventId: string | null | undefined): CaptureC
   }
 }
 
-/**
- * What a capture from this context sends: an upper bound on the speakers
- * only when at least two people were invited (never as the exact count),
- * and the invitees' names to offer when renaming.
- */
+/** Speaker upper bound (only with ≥ 2 invitees, never exact) plus name candidates. */
 export function contextFields(ctx: CaptureContext | null): { speakersMax?: number; nameCandidates?: string[] } {
   if (!ctx) return {};
   return {
@@ -123,12 +112,7 @@ function agendaLines(raw: unknown): string[] {
     .slice(0, MAX_AGENDA_LINES);
 }
 
-/**
- * What `POST /v1/notes/meeting` gets from the event the capture started
- * from (Sprint 34): who was invited and what the invite said to talk
- * about. `description` is never sent from the browser — the server already
- * derived `agenda_lines` from it when it served the event.
- */
+/** `POST /v1/notes/meeting` body from the event. `description` is never sent from the browser. */
 export function meetingCalendar(ctx: CaptureContext | null): MeetingCalendarContext | undefined {
   if (!ctx) return undefined;
   if (ctx.attendees.length === 0 && ctx.agenda.length === 0 && !ctx.title) return undefined;

@@ -1,32 +1,7 @@
-"""`POST /auth/signup`, `/auth/signup/verify`, `/auth/signup/resend` (BE-0).
+"""`POST /auth/signup`, `/auth/signup/verify`, `/auth/signup/resend` (keycloak/dual modes).
 
-Self-serve account creation on the current stack. Keycloak stays the
-identity provider, so a person who finishes this flow signs in with
-``POST /auth/login`` on web, macOS and iOS with no client change at all —
-which is the whole reason BE-0 exists ahead of the native path.
-
-Thin, like every router in this service: deciding lives in
-:mod:`auth_service.domain.onboarding_service`. Here we resolve who is
-asking, translate refusals into RFC 9457 problems carrying the machine
-codes ``docs/api/error-codes.md`` names, and nothing else.
-
-── The uniform 202 ─────────────────────────────────────────────────────
-
-`POST /auth/signup` answers ``202 {status: "verification_sent"}`` whether
-or not the address already has an account, and `/resend` answers ``202``
-whether or not there is anything to resend. Neither the body, the status,
-nor the shape of the work distinguishes the branches — both do one lookup
-and send one mail. Without that, signup is a membership oracle: point it
-at a list of addresses and read off which ones are customers.
-
-The cost is that a person who genuinely mistyped their address gets a 202
-and no account. That is the right trade for an endpoint no one has to
-authenticate to reach, and the mail they receive tells them which of the
-two happened.
-
-Mounted in ``keycloak`` and ``dual`` modes. Not in ``native``: there
-Keycloak no longer holds credentials, and BE-3's ``/auth/email/*`` is the
-way in.
+Uniform 202 whether or not the address has an account; deciding lives in
+:mod:`auth_service.domain.onboarding_service`.
 """
 
 from __future__ import annotations
@@ -56,17 +31,13 @@ class _Strict(BaseModel):
 
 class SignupRequest(_Strict):
     email: EmailStr
-    # Bounded so a megabyte of "password" cannot be fed to the hasher.
-    # The lower bound is deliberately NOT the policy minimum: the policy
-    # answers with a field-level reason, and a 422 from Pydantic would
-    # bypass it and say "string too short" instead.
+    # Upper bound guards the hasher; the lower bound is NOT the policy minimum
+    # (the policy gives a field-level reason, Pydantic would 422 first).
     password: str = Field(min_length=1, max_length=256)
     display_name: str = Field(min_length=1, max_length=120)
-    # The interface language for the mail. There is no session to infer it
-    # from — the person does not have an account yet.
+    # Mail language (no session to infer it from).
     lang: Literal["en", "de", "uk"] | None = None
-    # Sprint 21: the referral code a shared note's CTA carried into /join.
-    # Opaque; 12 base32 characters (note-service share_links).
+    # Referral code from a shared note's CTA; opaque, 12 base32 characters.
     ref: str | None = Field(default=None, pattern=r"^[a-z2-7]{12}$")
 
 
@@ -79,8 +50,7 @@ class SignupResponse(_Strict):
 
 class VerifyRequest(_Strict):
     email: EmailStr
-    # Accepts the grouped form the mail shows ("482 913"); the service
-    # strips separators before comparing.
+    # Accepts the grouped form the mail shows ("482 913").
     code: str = Field(min_length=1, max_length=32)
 
 
@@ -105,12 +75,7 @@ class SignupPublicConfig(_Strict):
 
 
 def _resolve_ip(request: Request) -> str:
-    """The address the per-IP cap is keyed on.
-
-    ``X-Forwarded-For`` is believed only when the peer is one of
-    ``TRUSTED_PROXY_CIDRS``; otherwise it is client-supplied text and the
-    cap would be a formality.
-    """
+    """The address the per-IP cap is keyed on; ``X-Forwarded-For`` only from ``TRUSTED_PROXY_CIDRS`` peers."""
     resolved: str = client_ip(
         peer=request.client.host if request.client else None,
         forwarded_for=request.headers.get("x-forwarded-for"),
@@ -120,13 +85,7 @@ def _resolve_ip(request: Request) -> str:
 
 
 def _service() -> Any:
-    """The wired :class:`OnboardingService`, or 404 when there is none.
-
-    404 rather than 503, the posture the other optional routers take: a
-    deployment with no mail relay, or one in native mode, should look
-    like one that has no such endpoint, so a prober learns nothing about
-    what is switched off.
-    """
+    """The wired :class:`OnboardingService`, or 404 (not 503) when there is none."""
     service = getattr(get_state(), "onboarding_service", None)
     if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
@@ -171,20 +130,12 @@ async def signup(body: SignupRequest, request: Request) -> SignupResponse:
         )
     except SignupError as exc:
         if exc.code == "email_taken":
-            # Keycloak knew the address even though our lookup did not.
-            # Answering 409 here would leak exactly what the uniform 202
-            # exists to hide, so it is swallowed into the same reply. The
-            # person has an account; the "you already have one" mail is
-            # sent by the service on the branch it could detect, and this
-            # is the narrow race where it could not.
+            # Keycloak knew the address though our lookup did not: a 409 would leak.
             logger.info("auth.signup.race_existing")
             await _hold_until_floor(started)
             return SignupResponse(resend_after=settings.signup_resend_seconds)
         raise _as_problem(exc) from exc
-    # Sprint 21: the branches behind the uniform 202 do different amounts
-    # of work (a disposable address does none; a new one talks to
-    # Keycloak). A floor on the response time keeps the clock from
-    # telling what the body will not.
+    # The branches do different amounts of work; a response-time floor hides that.
     await _hold_until_floor(started)
     return SignupResponse(resend_after=settings.signup_resend_seconds)
 

@@ -1,38 +1,9 @@
-"""Assemble the pinned pyannote community-1 diarization model dir (Sprint 29 B-7).
+"""Assemble the pinned pyannote community-1 model dir: fetch at an immutable revision
+from the GATED repo, verify SHA-256 fail-closed, load fully offline. The token
+(``--token-file`` or huggingface_hub's lookup) is never printed or written.
 
-Mirrors prepare_ecapa.py and the bake contract in docs/models/PINS.md: fetch
-at an immutable revision, verify SHA-256 fail-closed, and produce a directory
-that ``Pipeline.from_pretrained(<dir>)`` loads FULLY OFFLINE. Used both by
-developers (default target under ~/.cache/mdx-models, which is also where
-scripts/eval/engines/pyannote_c1.py looks) and by the worker Dockerfile's
-``pyannote-fetch`` stage (target /opt/models/pyannote-community-1).
-
-The upstream repo is GATED (accept the CC-BY-4.0 terms on the model page with
-the account whose token you use). The token is read from ``--token-file`` (the
-Docker build mounts the BuildKit secret there), else from huggingface_hub's own
-lookup (``HF_TOKEN`` env, ``~/.cache/huggingface/token``). It is never printed,
-logged, or written anywhere.
-
-The directory layout it produces:
-
-    <target>/
-      config.yaml                      <- repo-owned (infra/models/pyannote-community-1/)
-      segmentation/pytorch_model.bin   <- upstream, checksum-verified
-      embedding/pytorch_model.bin      <- upstream, checksum-verified
-      plda/plda.npz                    <- upstream, checksum-verified
-      plda/xvec_transform.npz          <- upstream, checksum-verified
-      MODEL_CARD.md                    <- upstream README (CC-BY-4.0 attribution)
-      MANIFEST.json                    <- provenance: repo, revision, every digest
-
-Usage:
     uv run python scripts/models/prepare_pyannote.py [--target DIR]
-
-First-time pinning / re-pinning (downloads and prints digests, installs NOTHING):
     uv run python scripts/models/prepare_pyannote.py --resolve-pins [--revision <commit>]
-
-Re-pinning without editing this file (what the Dockerfile passes):
-    uv run python scripts/models/prepare_pyannote.py \
-        --revision <commit> --pins-json '{"segmentation/pytorch_model.bin": "<sha256>", ...}'
 """
 
 from __future__ import annotations
@@ -48,14 +19,12 @@ from pathlib import Path
 from typing import Any
 
 REPO = "pyannote/speaker-diarization-community-1"
-# Immutable commit (the repo's `main` on 2026-09-19, from the public HF model
-# API — docs/models/PINS.md). Never a branch or tag.
+# Immutable commit (docs/models/PINS.md); never a branch or tag.
 REVISION = "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee"
 
-# Weight artifact -> pinned SHA-256. An EMPTY digest means "not pinned yet":
-# the install refuses (fail-closed) until someone with access to the gated
-# repo runs --resolve-pins and commits the values here, in the Dockerfile's
-# MDX_DIAR_V2_PINS default and in docs/models/PINS.md.
+# Weight artifact -> pinned SHA-256. An EMPTY digest = not pinned yet: the
+# install refuses until --resolve-pins values are committed (here, the
+# Dockerfile's MDX_DIAR_V2_PINS default, docs/models/PINS.md).
 PINNED: dict[str, str] = {
     "segmentation/pytorch_model.bin": "7ad24338d844fb95985486eb1a464e32d229f6d7a03c9abe60f978bacf3f816e",
     "embedding/pytorch_model.bin": "6f10ff60898a1d185fa22e1d11e0bfa8a92efec811f11bca48cb8cafebefd929",
@@ -63,17 +32,14 @@ PINNED: dict[str, str] = {
     "plda/xvec_transform.npz": "325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f",
 }
 
-# Sizes and git blob ids are public repo metadata (HF tree API at REVISION);
-# they are NOT a substitute for the SHA-256 pins above, only an early,
-# human-readable "wrong file" signal.
+# Public repo metadata: an early "wrong file" signal, NOT a substitute for the pins.
 EXPECTED_SIZES: dict[str, int] = {
     "segmentation/pytorch_model.bin": 5_906_507,
     "embedding/pytorch_model.bin": 26_646_242,
     "plda/plda.npz": 133_852,
     "plda/xvec_transform.npz": 134_376,
 }
-# Small non-LFS files: verified by their git blob id (sha1 of the git object),
-# which the public tree API exposes even for gated repos.
+# Small non-LFS files, verified by git blob id (public even for gated repos).
 UPSTREAM_GIT_BLOBS: dict[str, str] = {
     "config.yaml": "4022db43960736338378fdb6b5a85cfdae198910",
     "README.md": "8356d6634d7b1074581dd36e2225887ec809326e",
@@ -90,9 +56,8 @@ DEFAULT_TARGET = Path.home() / ".cache" / "mdx-models" / "speaker-diarization-co
 LICENSE = "CC-BY-4.0"
 
 
-# Exit code for a refusal that retrying cannot fix (unpinned, checksum or
-# config mismatch, gated-repo 401/403). The Dockerfile retries only other
-# failures (a broken download stream).
+# Refusal retrying cannot fix (unpinned, checksum/config mismatch, 401/403);
+# the Dockerfile retries only other failures.
 EXIT_REFUSED = 3
 
 
@@ -118,8 +83,7 @@ def _read_token(token_file: Path | None) -> str | None:
     if token_file is None:
         return None
     if not token_file.is_file():
-        # The Docker secret is optional at mount time; the gated download
-        # then fails with a clear 401 below rather than here.
+        # Optional at mount time; the gated download then 401s below.
         return None
     token = token_file.read_text(encoding="utf-8").strip()
     return token or None
@@ -232,7 +196,7 @@ def prepare(
 
     snapshot = _download(revision, [*sorted(PINNED), *sorted(UPSTREAM_GIT_BLOBS)], token)
 
-    # Verify everything BEFORE anything is written to the target.
+    # Verify everything BEFORE writing to the target.
     for name, want in sorted(pinned.items()):
         src = snapshot / name
         if not src.is_file():
@@ -264,9 +228,8 @@ def prepare(
             "Update MDX_DIAR_V2_PINS (Dockerfile) together with the config."
         )
 
-    # Assemble in a sibling temp dir and swap it in: a half-written target
-    # must never look like a model dir. Only a previous model dir (or an
-    # empty one) is ever replaced — a mistyped --target is not deleted.
+    # Assemble in a sibling temp dir and swap: a half-written target must never
+    # look like a model dir, and only a previous model dir is ever replaced.
     if target.exists() and any(target.iterdir()) and not (target / "MANIFEST.json").is_file():
         raise PrepareError(f"{target} exists and is not a model dir this script wrote")
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -1,28 +1,7 @@
-"""Remote engine: diarization on a GPU endpoint (Sprint 29 B-9, shape B).
+"""Remote engine: the same ``PyannoteDiarizer`` on a GPU endpoint (``deploy/diar-server``, ADR-0052).
 
-Same :class:`~diarization.protocol.Diarizer` seam as the two in-process
-engines, so the worker's word attribution, stats and re-run path are
-unchanged — only the compute moves. The endpoint is our own image
-(``deploy/diar-server``) running the very same ``PyannoteDiarizer``, so
-labels do not depend on where the model ran.
-
-Why this shape exists (ADR-0052): community-1 needs far more compute
-than the legacy clusterer, and the staging worker is four CPU cores with
-no GPU. Shape A (in-process) misses the turnaround budget there.
-
-Rules this client keeps:
-
-- **Audio is a request body, never a file on the endpoint.** It is sent
-  losslessly (FLAC when ``soundfile`` is available, WAV otherwise), the
-  server holds it in memory for the call, and no key, tenant id or
-  filename goes with it.
-- **The reply carries labels, never embeddings** — see ``wire.py``.
-- **Blocking, like the other engines.** ``diarize()`` is called off the
-  event loop by the worker, so it drives its own ``httpx`` client
-  synchronously rather than pretending to be async.
-- **A cold endpoint is normal.** Scale-to-zero means the first call of
-  the day waits; the timeout budget is the recording's own length plus
-  the backend's cold start, and 5xx/timeouts are retried twice.
+Audio goes losslessly in the request body with no key, tenant id or filename; the reply carries labels, never
+embeddings. Blocking like the other engines; scale-to-zero cold starts are covered by the timeout and retries.
 """
 
 from __future__ import annotations
@@ -51,24 +30,14 @@ from .wire import (
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 5.0
-# Wall-clock budget for one call: community-1 runs at roughly 0.15 ×
-# audio on a T4 (0.64–0.85 × on four CPU threads — ADR-0052), so the
-# default leaves triple headroom over a GPU pass. A CPU-hosted endpoint needs a
-# slope above its own rate or every recording times out; that is what
-# `seconds_per_audio_second` is for.
+# community-1 runs at ~0.15 × audio on a T4 (0.64–0.85 × on 4 CPU threads); a CPU endpoint needs a higher slope.
 TIMEOUT_PER_AUDIO_SECOND = 0.5
 MIN_TIMEOUT_S = 60.0
-# Retries for 5xx and timeouts. A scale-to-zero endpoint answers 503
-# while it wakes, so retrying must cover the cold start the backend
-# declares, not a couple of seconds: the delays grow 2, 4, 8 … and the
-# loop keeps going until that budget is spent.
+# 5xx/timeout retries with growing delays, continued until the declared cold start is covered (503 while waking).
 MIN_RETRIES = 2
 RETRY_BACKOFF_S = 2.0
 MAX_RETRY_DELAY_S = 30.0
-# Tracing headers identify the worker's trace, and its spans carry job
-# and tenant ids. The endpoint gets audio and nothing that ties it to a
-# person, so they are stripped even though httpx is instrumented
-# globally (observability.tracing).
+# Stripped despite global httpx instrumentation: the worker's spans carry job and tenant ids.
 CORRELATION_HEADERS = ("traceparent", "tracestate", "baggage")
 
 
@@ -108,10 +77,7 @@ class HttpDiarizer:
         self._sleep = sleep or time.sleep
         headers = {}
         if auth_token:
-            # Both: a managed endpoint's gateway consumes `Authorization`
-            # for its own check, so the server reads our token from its
-            # own header and falls back to the bearer for a bare
-            # container (deploy/diar-server).
+            # Both: a managed gateway consumes `Authorization`; the bare container reads the bearer.
             headers["Authorization"] = f"Bearer {auth_token}"
             headers[TOKEN_HEADER] = auth_token
         if server_token:
@@ -121,8 +87,6 @@ class HttpDiarizer:
             headers=headers,
             timeout=httpx.Timeout(timeout_seconds, connect=CONNECT_TIMEOUT_S),
             event_hooks={"request": [_strip_correlation_headers]},
-            # A caller may hand in the transport (tests) and still get the
-            # headers and hooks this class is responsible for.
             transport=transport,
         )
 
@@ -135,14 +99,7 @@ class HttpDiarizer:
         return self._last_error
 
     async def ensure_loaded(self) -> None:
-        """Health-check the endpoint; a scaled-to-zero one counts as ready.
-
-        The endpoint loads its own weights, so there is nothing to load
-        here. What this checks is that the worker can reach it at all —
-        a wrong URL or a revoked token is a configuration error and must
-        surface before a job is attributed to a broken backend, not as a
-        mysterious failure per recording.
-        """
+        """Health-check the endpoint (a scaled-to-zero one counts as ready); a bad URL/token surfaces at startup."""
         if self._ready:
             return
         import asyncio  # noqa: PLC0415 — only this method needs the loop
@@ -161,17 +118,13 @@ class HttpDiarizer:
         if response.status_code in (401, 403):
             self._last_error = "auth"
             raise DiarizationUnavailableError(f"{self.engine} refused the token")
-        # 503 while a scaled-to-zero endpoint wakes up is not a failure:
-        # the diarize call itself waits out the cold start.
+        # 503 while waking is not a failure: the diarize call waits out the cold start.
         if response.status_code >= 400 and response.status_code != 503:
             self._last_error = f"health_{response.status_code}"
             raise DiarizationUnavailableError(
                 f"{self.engine} health check returned {response.status_code}"
             )
-        # A wrong token would otherwise show up as speakerless
-        # transcripts, job after job, with nobody paged: the endpoint
-        # answers whether it would accept us, and a `false` here is a
-        # configuration error that belongs at startup.
+        # A wrong token would otherwise show up as speakerless transcripts job after job.
         if response.status_code < 400 and _rejects_us(response):
             self._last_error = "auth"
             raise DiarizationUnavailableError(
@@ -197,9 +150,7 @@ class HttpDiarizer:
             max(MIN_TIMEOUT_S, audio_seconds * TIMEOUT_PER_AUDIO_SECOND) + self._cold_start_seconds,
         )
         data = hint_fields(hints) | {
-            # The floor is the worker's policy; it is applied where the
-            # embeddings are so a dissolved speaker can still be moved to
-            # the voice it belongs to (roster.py).
+            # The worker's floor, applied where the embeddings are (roster.py).
             "min_speaker_speech_ms": str(self._roster.min_speaker_speech_ms),
             "min_speaker_share": str(self._roster.min_speaker_share),
             "reassign_min_cosine": str(self._roster.reassign_min_cosine),
@@ -212,10 +163,7 @@ class HttpDiarizer:
     def _post(self, *, files: dict[str, Any], data: dict[str, str], timeout: float) -> Any:
         last: Exception | None = None
         attempt = 0
-        # A scaled-to-zero endpoint answers 503 until it is up, so the
-        # retry window covers the cold start the backend declares —
-        # otherwise the first job after every idle spell loses its
-        # speakers to a wake-up we knew was coming.
+        # The retry window covers the declared cold start (503 until up).
         waited = 0.0
         while True:
             try:
@@ -230,8 +178,7 @@ class HttpDiarizer:
             else:
                 if response.status_code < 400:
                     return response.json()
-                # 4xx is us (a hint the server rejects, a revoked token);
-                # retrying cannot help and would multiply the cost.
+                # 4xx is us; retrying cannot help.
                 if response.status_code < 500:
                     self._ready = False
                     self._last_error = f"rejected_{response.status_code}"
@@ -257,12 +204,7 @@ class HttpDiarizer:
 
 
 class DiarizationRequestError(DiarizationUnavailableError):
-    """The endpoint refused this recording (4xx) — retrying will not help.
-
-    A subclass, so every caller that already handles "the diarizer is not
-    available" handles this too; only code that wants to tell a refusal
-    from an outage needs to know the difference.
-    """
+    """The endpoint refused this recording (4xx); a subclass so "unavailable" handlers cover it too."""
 
 
 def _rejects_us(response: httpx.Response) -> bool:

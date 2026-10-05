@@ -1,9 +1,4 @@
-"""``field_extraction`` stage contracts (ADR-0028).
-
-Stage-level invariants: text neutrality, finals-only, deterministic
-metadata, no emission when there is nothing to extract, and typed
-construction (no raw dicts).
-"""
+"""``field_extraction`` stage contracts (ADR-0028): text-neutral, finals-only, deterministic, typed."""
 
 from __future__ import annotations
 

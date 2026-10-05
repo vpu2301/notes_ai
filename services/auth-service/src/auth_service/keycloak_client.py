@@ -1,21 +1,4 @@
-"""Thin async wrapper over the Keycloak HTTP API.
-
-Only the endpoints auth-service actually calls are exposed:
-
-- :meth:`password_grant`  — POST /token with grant_type=password (mdx-backend secret)
-- :meth:`refresh`         — POST /token with grant_type=refresh_token
-- :meth:`logout`          — POST /logout to revoke a refresh
-- :meth:`admin_token`     — internal: caches a service-account access token
-- :meth:`create_user`     — POST /admin/realms/{realm}/users
-- :meth:`logout_user`     — POST /admin/realms/{realm}/users/{sub}/logout (revoke all sessions)
-- :meth:`set_user_enabled` — PUT /admin/realms/{realm}/users/{sub}
-- :meth:`get_realm_roles`  — GET /admin/realms/{realm}/users/{sub}/role-mappings/realm
-- :meth:`set_realm_roles`  — diff add/remove realm roles for a user (manage-roles)
-
-Errors are surfaced as :class:`KeycloakError` with the HTTP status and the
-upstream body so callers can discriminate (e.g. 401 invalid creds vs 423
-account locked).
-"""
+"""Thin async wrapper over the Keycloak HTTP API; errors surface as :class:`KeycloakError`."""
 
 from __future__ import annotations
 
@@ -33,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class KeycloakError(Exception):
-    """Wraps an unexpected Keycloak response. The ``status`` field carries
-    the HTTP code; ``body`` is the parsed JSON or the raw text."""
+    """Unexpected Keycloak response: ``status`` is the HTTP code, ``body`` the JSON or raw text."""
 
     def __init__(self, *, status: int, body: Any, message: str | None = None) -> None:
         super().__init__(message or f"Keycloak responded {status}: {body!r}")
@@ -168,11 +150,8 @@ class KeycloakClient:
         realm_role: str,
         send_invite_email: bool = False,
     ) -> UUID:
-        """POST /admin/realms/{realm}/users — returns the new user's sub.
-
-        We then GET the user back by username to get the assigned id.
-        """
-        username = email  # one-to-one with email in our model
+        """POST /admin/realms/{realm}/users — returns the new user's sub."""
+        username = email
         payload: dict[str, Any] = {
             "username": username,
             "email": email,
@@ -203,7 +182,6 @@ class KeycloakClient:
         if resp.status_code != 201:
             raise KeycloakError(status=resp.status_code, body=_body(resp))
 
-        # Keycloak returns 201 with a Location header containing the new id.
         location = resp.headers.get("Location") or ""
         sub_str = location.rsplit("/", 1)[-1] if location else ""
         if not sub_str:
@@ -214,7 +192,6 @@ class KeycloakClient:
             )
         sub = UUID(sub_str)
 
-        # Assign the realm role.
         await self._assign_realm_role(sub, realm_role)
         return sub
 
@@ -228,41 +205,12 @@ class KeycloakClient:
         realm_roles: list[str],
         enabled: bool = False,
     ) -> UUID:
-        """Create a user who can sign in with a password, once enabled (BE-0).
+        """Create a password user, disabled until verified.
 
-        Three things differ from :meth:`create_user`, and each of them is
-        the reason this is a separate method rather than a flag:
-
-        * **A non-empty ``lastName``.** The realm's declarative user
-          profile marks ``firstName`` and ``lastName`` required. A user
-          whose profile is incomplete gets ``VERIFY_PROFILE`` added at
-          *authentication* time — not at creation — and the password grant
-          then refuses with "Account is not fully set up", the same
-          message a pending required action produces. The user record
-          shows ``requiredActions: []`` the whole time, which is what
-          makes this one expensive to find. See :func:`split_display_name`.
-        * **No ``requiredActions``.** ``create_user`` sets
-          ``["UPDATE_PASSWORD"]`` because it is an admin invite: the person
-          has no password yet and Keycloak's own page gives them one. A
-          pending required action makes the password grant refuse with
-          "Account is not fully set up", so a self-serve user who just
-          chose a password would be unable to use it. This is the single
-          most load-bearing line in the method.
-        * **A credential in the create payload.** One round trip, and the
-          password never sits in a user record that has no password —
-          there is no window in which the account exists and is
-          unauthenticatable.
-        * **``enabled=False`` by default.** Verification enables it. An
-          account that is disabled in Keycloak cannot obtain a token by
-          ANY grant — not our proxy, not a direct ROPC call, not the dev
-          CLI. That is a stronger guarantee than a status column in our
-          own database, which only binds the paths that check it.
-
-        ``realm_roles`` is a list because a self-serve signup needs both
-        ``tenant_admin`` (it is their workspace) and ``member`` (S14 gives
-        ``tenant_admin`` no content permission at all, so without
-        ``member`` the account cannot write a note — see
-        ``docs/auth/roles.md`` and ``platform_roles_for``).
+        Keycloak quirks: an empty ``lastName`` or any pending required action
+        makes the password grant refuse with "Account is not fully set up", so
+        both names are set and ``requiredActions`` is explicitly empty.
+        ``realm_roles`` needs ``member`` too — ``tenant_admin`` grants no content permission.
         """
         first_name, last_name = split_display_name(display_name)
         payload: dict[str, Any] = {
@@ -276,9 +224,7 @@ class KeycloakClient:
                 "tenant_id": [str(tenant_id)],
                 "mfa_enrolled_at": [],
             },
-            # Explicitly empty, not omitted: an empty list is a statement
-            # that this account has nothing pending, and a future edit
-            # that adds one here breaks password login silently.
+            # Explicitly empty: any pending action breaks password login silently.
             "requiredActions": [],
             "credentials": [{"type": "password", "value": password, "temporary": False}],
         }
@@ -312,14 +258,7 @@ class KeycloakClient:
         return sub
 
     async def set_email_verified(self, sub: UUID, *, verified: bool = True) -> None:
-        """Mark the address confirmed, and enable the account in one call.
-
-        The two go together on purpose. They are the same fact stated
-        twice — "this person proved they read mail at this address" — and
-        a code path that could set one without the other would eventually
-        produce a verified account nobody can sign in to, or an enabled
-        account that never proved anything.
-        """
+        """Mark the address confirmed and enable the account in one call (never one without the other)."""
         resp = await self._client.put(
             self._admin_users_url(str(sub)),
             json={"emailVerified": verified, "enabled": verified},
@@ -329,12 +268,7 @@ class KeycloakClient:
             raise KeycloakError(status=resp.status_code, body=_body(resp))
 
     async def delete_user(self, sub: UUID) -> None:
-        """Remove a user. The compensation half of the signup transaction.
-
-        404 is success: the thing we are undoing is already undone, and a
-        compensation that raises when its target is missing turns a
-        recovered failure into an unrecovered one.
-        """
+        """Remove a user (signup compensation); 404 counts as success."""
         resp = await self._client.delete(
             self._admin_users_url(str(sub)),
             headers=await self._admin_headers(),
@@ -358,12 +292,7 @@ class KeycloakClient:
             raise KeycloakError(status=ar.status_code, body=_body(ar))
 
     async def get_realm_roles(self, sub: UUID) -> list[str]:
-        """Return the names of every realm role currently mapped to ``sub``.
-
-        Includes Keycloak's built-in roles (``offline_access``,
-        ``uma_authorization``, ``default-roles-…``); callers that only care
-        about application roles should intersect with ``KNOWN_ROLES``.
-        """
+        """Names of every realm role mapped to ``sub``, built-ins included (intersect with ``KNOWN_ROLES``)."""
         url = f"{self._admin_users_url(str(sub))}/role-mappings/realm"
         resp = await self._client.get(url, headers=await self._admin_headers())
         if resp.status_code != 200:
@@ -373,14 +302,7 @@ class KeycloakClient:
     async def set_realm_roles(
         self, sub: UUID, *, desired: Sequence[str], managed: frozenset[str]
     ) -> None:
-        """Make ``sub``'s realm roles equal ``desired`` within the ``managed``
-        universe of application roles.
-
-        Roles outside ``managed`` (Keycloak built-ins) are never touched. The
-        diff adds roles in ``desired`` that aren't mapped yet and removes
-        mapped ``managed`` roles that aren't in ``desired`` — so the call is
-        idempotent and safe to retry.
-        """
+        """Make ``sub``'s realm roles equal ``desired`` within ``managed``; built-ins untouched, idempotent."""
         current = set(await self.get_realm_roles(sub))
         desired_set = set(desired)
         to_add = sorted(desired_set - current)
@@ -418,19 +340,10 @@ class KeycloakClient:
         return rep
 
     async def set_user_attributes(self, sub: UUID, updates: dict[str, list[str]]) -> None:
-        """Merge ``updates`` into the user's attributes (sprint 16 MFA).
+        """GET, merge ``updates``, PUT the FULL representation (empty list removes a key).
 
-        Keycloak's PUT replaces the WHOLE attributes map, so a blind write
-        would drop ``tenant_id`` and break every future token. We GET,
-        merge, and PUT. A key mapped to an empty list is removed.
-
-        The PUT body is the **full fetched representation**, not just
-        ``{"attributes": …}`` — Keycloak 24's declarative user profile
-        treats a representation without ``email``/``firstName``/… as
-        *clearing* those fields (verified live: an attributes-only PUT
-        nulled the user's email and broke their login). Last-writer-wins
-        on races — acceptable for the MFA surface, where a user only
-        mutates their own attributes.
+        Keycloak's PUT replaces the whole attributes map, and Keycloak 24
+        clears email/firstName/… when they are absent from the body.
         """
         rep = await self.get_user(sub)
         attrs: dict[str, Any] = rep.get("attributes") or {}
@@ -459,14 +372,7 @@ class KeycloakClient:
     # ── Password recovery ────────────────────────────────────────────────
 
     async def find_user_by_email(self, email: str) -> dict[str, Any] | None:
-        """Exact, case-insensitive email lookup. ``None`` when absent.
-
-        ``exact=true`` matters: without it Keycloak does an infix search,
-        so "an@x.com" would also match "juan@x.com" and a reset could be
-        aimed at the wrong account. The realm sets
-        ``duplicateEmailsAllowed=false``, so at most one row comes back —
-        but we still index [0] defensively rather than asserting.
-        """
+        """Exact, case-insensitive email lookup (``exact=true``: Keycloak otherwise infix-matches)."""
         resp = await self._client.get(
             self._admin_users_url(),
             params={"email": email, "exact": "true", "max": 2},
@@ -478,13 +384,7 @@ class KeycloakClient:
         return rows[0] if rows else None
 
     async def list_sessions(self, sub: UUID) -> list[dict[str, Any]]:
-        """Active Keycloak sessions for a user.
-
-        Used by the settings screen so somebody can see where they are
-        signed in before deciding to sign out everywhere. Keycloak
-        returns ``{id, ipAddress, start, lastAccess, clients}``; the
-        caller decides how much of that a user should see.
-        """
+        """Active Keycloak sessions for a user: ``{id, ipAddress, start, lastAccess, clients}``."""
         resp = await self._client.get(
             f"{self._admin_users_url(str(sub))}/sessions",
             headers=await self._admin_headers(),
@@ -495,20 +395,7 @@ class KeycloakClient:
         return rows
 
     async def set_password(self, sub: UUID, *, new_password: str, temporary: bool = False) -> None:
-        """Replace the user's password.
-
-        ``temporary=False`` — a reset that lands the user on Keycloak's
-        "you must change your password" screen immediately after they
-        just chose one is a dead end in this topology: the SPA proxies
-        login through auth-service and never renders Keycloak's forms.
-
-        Keycloak enforces the realm password policy here and answers 400
-        with ``error_description`` when it refuses. That is surfaced as a
-        KeycloakError so the caller can turn it into a field-level
-        message rather than a 500 — but note the realm currently has no
-        password policy configured, so our own strength check in
-        ``domain/password_policy.py`` is the one that actually bites.
-        """
+        """Replace the user's password; ``temporary=False`` because the SPA never renders Keycloak's forms."""
         url = f"{self._admin_users_url(str(sub))}/reset-password"
         resp = await self._client.put(
             url,
@@ -520,20 +407,7 @@ class KeycloakClient:
 
 
 def split_display_name(display_name: str) -> tuple[str, str]:
-    """One name field → the two Keycloak's user profile requires.
-
-    Signup asks for one name because that is what a person has; Keycloak's
-    realm profile requires ``firstName`` AND ``lastName``, and an empty
-    one is not "absent", it is "incomplete" — which Keycloak resolves by
-    demanding VERIFY_PROFILE at the next sign-in, refusing the password
-    grant with a message that says nothing about names.
-
-    So a single-word name is written to both fields rather than leaving
-    one blank. "Ada" becomes ("Ada", "Ada"); "Ada Lovelace" becomes
-    ("Ada", "Lovelace"); "Ada Byron King" becomes ("Ada", "Byron King").
-    The duplication is visible only in Keycloak's admin console, and the
-    alternative is an account nobody can sign in to.
-    """
+    """One name → (firstName, lastName); a single word fills both (an empty lastName blocks login)."""
     parts = (display_name or "").strip().split()
     if not parts:
         return "", ""

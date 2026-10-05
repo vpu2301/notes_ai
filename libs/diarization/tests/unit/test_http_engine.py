@@ -1,10 +1,4 @@
-"""The remote engine (Sprint 29 B-9, shape B): what it sends, what it
-accepts, and what it does when the endpoint misbehaves.
-
-No network and no model: an ``httpx.MockTransport`` plays the endpoint,
-and the payloads are built with the same ``wire`` module the real server
-uses — which is the point of having one.
-"""
+"""The remote engine against an ``httpx.MockTransport`` endpoint, payloads built with the shared ``wire`` module."""
 
 from __future__ import annotations
 

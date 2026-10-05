@@ -1,8 +1,6 @@
-"""Step-05 integration — roll-up idempotence + partition retention.
+"""Roll-up idempotence + partition retention (synthetic past day; restores every artifact).
 
-Skipped unless ``RUN_DB_INTEGRATION=1``. Uses a synthetic day far in
-the past so the tests never collide with live dev telemetry, and
-restores every artifact it creates.
+Skipped unless ``RUN_DB_INTEGRATION=1``.
 """
 
 from __future__ import annotations
@@ -43,9 +41,7 @@ class CountingRedis:
 
 
 async def test_rollup_idempotent_single_vtag_bump_and_greatest():
-    """Seed one accepted event on a synthetic past day → roll up twice:
-    counters bump once, vtag INCR exactly once, and last_accepted_at is
-    NOT regressed by the old-day run (GREATEST, migration 0040)."""
+    """Roll up twice: counters bump once, vtag INCR once, last_accepted_at never regresses (GREATEST)."""
     from audit import AuditWriter
 
     day = date(2026, 6, 15)  # inside the seeded 2026_06 partition
@@ -61,8 +57,7 @@ async def test_rollup_idempotent_single_vtag_bump_and_greatest():
     )
     newer_accept = datetime(2026, 7, 1, tzinfo=UTC)
     try:
-        # Give the phrase a NEWER last_accepted_at than the synthetic day —
-        # the old-day roll-up must not move it backwards.
+        # Newer last_accepted_at than the synthetic day; the roll-up must not move it backwards.
         await su.execute(
             "UPDATE autocomplete_phrases SET last_accepted_at=$2, "
             "impression_count=impression_count+1, acceptance_count=acceptance_count+1 "
@@ -126,10 +121,7 @@ async def test_rollup_idempotent_single_vtag_bump_and_greatest():
 
 
 async def test_bump_counters_never_stores_infinity():
-    """Impressions-only bump (p_accepts=0, p_last_accepted=NULL) on a
-    never-accepted row must leave last_accepted_at NULL — not the
-    '-infinity' GREATEST sentinel (migration 0041). A real accept
-    timestamp then applies, and GREATEST still never moves it backwards."""
+    """Impressions-only bump on a never-accepted row keeps last_accepted_at NULL, not '-infinity'."""
     su = await asyncpg.connect(SU_DSN)
     phrase_id = await su.fetchval(
         "SELECT id FROM autocomplete_phrases WHERE source='system' AND language='uk' "
@@ -218,8 +210,7 @@ async def test_retention_drops_only_expired_partitions():
             APP_DSN, application_name="retention-itest", min_size=1, max_size=1
         )
         try:
-            # S16 changed the return shape to (dropped, archived); archiving
-            # is flag-gated off in this test, so archived stays empty.
+            # archiving is flag-gated off here, so archived stays empty.
             dropped1, _archived1 = await enforce_retention(app_pool)
             dropped2, _archived2 = await enforce_retention(app_pool)  # idempotent
         finally:
@@ -244,8 +235,7 @@ async def test_retention_drops_only_expired_partitions():
 
 
 async def test_layer_c_rows_ignored_by_phrase_counters_but_feed_acceptance_rate():
-    """Sprint 15: layer_c telemetry rides the same table but (a) never bumps
-    phrase counters and (b) feeds the acceptance-rate gauge state."""
+    """layer_c telemetry never bumps phrase counters but feeds the acceptance-rate gauge."""
     from autocomplete_service.jobs import rollup as rollup_mod
 
     from audit import AuditWriter

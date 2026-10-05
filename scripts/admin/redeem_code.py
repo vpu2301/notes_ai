@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Make, list and retire redeem codes (0069).
+"""Make, list and retire redeem codes (0069). Only the SHA-256 is stored, so ``create``
+prints the code ONCE. Runs as the database owner (app_role has no grant on the tables).
 
-    DATABASE_URL=postgresql://postgres:...@host/notes \\
-        uv run python scripts/admin/redeem_code.py create --plan pro --days 90 [--max 1]
-            [--expires 2026-12-31] [--note "Webinar October"]
-    ... redeem_code.py list
-    ... redeem_code.py retire <code>
-
-``create`` prints the code ONCE — only its SHA-256 is stored, so a lost
-code cannot be shown again; make a new one. ``--days`` omitted = the plan
-stays until someone changes it. ``--max`` omitted = any number of
-workspaces. ``retire`` sets the code's expiry to now.
-
-app_role has no grant on the code tables (the API reaches them only
-through ``redeem_code()``), so this runs as the database owner, as the
-migrations do.
+    DATABASE_URL=postgresql://postgres:...@host/notes uv run python scripts/admin/redeem_code.py create --plan pro --days 90 [--max 1] [--expires 2026-12-31] [--note "..."]
+    ... redeem_code.py list | retire <code>
 """
 
 from __future__ import annotations

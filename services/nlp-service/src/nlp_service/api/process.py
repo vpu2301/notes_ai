@@ -1,9 +1,4 @@
-"""``POST /nlp/process`` and ``POST /nlp/process/batch``.
-
-Request shape mirrors the Pydantic models below — ``extra='forbid'``
-on every input model. Sprint 7's eval harness replays inputs against
-these endpoints byte-for-byte; field naming is a contract.
-"""
+"""``POST /nlp/process`` and ``POST /nlp/process/batch``. Field names are a replay contract."""
 
 from __future__ import annotations
 
@@ -60,10 +55,7 @@ class TemplateSectionIn(_StrictModel):
     id: UUID
     name: str
     aliases: list[str] = Field(default_factory=list)
-    # Typed-extraction fields — optional, so navigation-only callers are
-    # unaffected. ``section_key`` is the template's section slug and
-    # becomes the key of the extracted-metadata map (note content keys
-    # sections by it).
+    # Typed-extraction fields; ``section_key`` keys the extracted-metadata map.
     section_key: str = Field(default="", max_length=64)
     field_type: str = Field(default="free_text", max_length=32)
     options: list[ChoiceOptionIn] = Field(default_factory=list)
@@ -73,21 +65,17 @@ class ProcessRequest(_StrictModel):
     text: str
     words: list[WordIn] = Field(default_factory=list)
     language: Literal["uk", "en", "de"]
-    # ``specialty`` is the pre-rename wire key — tolerated so an
-    # un-upgraded caller keeps working.
+    # ``specialty`` is the pre-rename wire key.
     category: str | None = Field(
         default=None, validation_alias=AliasChoices("category", "specialty")
     )
     reference_date: date | None = None
     is_partial: bool = False
     template_sections: list[TemplateSectionIn] = Field(default_factory=list)
-    # Optional per-request overrides (default to tenant settings).
     decimal_separator: str | None = None
     bp_separator: str | None = None
     date_format: Literal["DD.MM.YYYY", "YYYY-MM-DD", "WORD"] | None = None
-    # Additive: pipeline stages to skip for this request. Conversation
-    # mode passes ["voice_commands"] so other participants' speech can
-    # never trigger editing operations.
+    # Conversation mode passes ["voice_commands"] so other speakers cannot trigger edits.
     stages_disabled: list[
         Literal[
             "voice_commands",
@@ -242,7 +230,7 @@ class BatchSegmentIn(_StrictModel):
 class BatchProcessRequest(_StrictModel):
     segments: list[BatchSegmentIn]
     language: Literal["uk", "en", "de"]
-    # Legacy wire key ``specialty`` accepted — see ProcessRequest.
+    # Legacy wire key ``specialty`` accepted.
     category: str | None = Field(
         default=None, validation_alias=AliasChoices("category", "specialty")
     )
@@ -251,9 +239,7 @@ class BatchProcessRequest(_StrictModel):
     decimal_separator: str | None = None
     bp_separator: str | None = None
     date_format: Literal["DD.MM.YYYY", "YYYY-MM-DD", "WORD"] | None = None
-    # Additive, request-level: applies to ALL segments. Conversation
-    # mode passes ["voice_commands"] so other participants' speech can
-    # never trigger editing operations.
+    # Applies to all segments; conversation mode passes ["voice_commands"].
     stages_disabled: list[
         Literal[
             "voice_commands",
@@ -309,8 +295,7 @@ async def process_batch(
         decimal_separator=body.decimal_separator or _default_decimal(body.language),
         bp_separator=body.bp_separator or "/",
         date_format=body.date_format or _default_date_format(body.language),
-        # Batch consumers have no editor to run Operations — dictated
-        # punctuation is applied straight into the text.
+        # No editor on the batch path: punctuation ops are applied into the text.
         apply_operations_inline=True,
         stages_disabled=tuple(sorted(set(body.stages_disabled))),
     )
@@ -387,9 +372,7 @@ def _section(s: TemplateSectionIn) -> TemplateSection:
     )
 
 
-# German shares Ukrainian's conventions here: decimal comma ("37,2 °C")
-# and DD.MM.YYYY — the forms a German reader reads back without
-# re-parsing. A caller can still override both per request.
+# German shares Ukrainian's decimal comma and DD.MM.YYYY.
 def _default_decimal(language: str) -> str:
     return "," if language in {"uk", "de"} else "."
 

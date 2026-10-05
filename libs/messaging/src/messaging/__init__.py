@@ -1,23 +1,4 @@
-"""libs/messaging — Protocol contracts + Redis Streams concrete impl.
-
-Sprint 03 ships the Redis Streams producer/consumer pair. Sprint 14 will
-add a Kafka pair that satisfies the same Protocols.
-
-Public surface:
-
-- :class:`Message`              — wire-stable frozen dataclass.
-- :class:`ProducerProtocol`     — typing.Protocol for any producer.
-- :class:`ConsumerProtocol`     — typing.Protocol for any consumer.
-- :class:`RedisStreamsProducer` — Redis Streams ``XADD`` producer.
-- :class:`RedisStreamsConsumer` — Redis Streams consumer with
-                                  ``XREADGROUP`` + ``XAUTOCLAIM`` reclaim
-                                  + DLQ-on-retries policy.
-
-The redis-streams classes import ``redis.asyncio`` at module import; in
-environments where ``redis`` isn't installed (e.g., the sprint-01/02
-test rigs that only use the Protocols), accessing those names raises
-``ImportError`` with a clear message.
-"""
+"""Messaging Protocol contracts + the Redis Streams implementation (importable without ``redis`` installed)."""
 
 from .protocols import ConsumerProtocol, Message, ProducerProtocol
 

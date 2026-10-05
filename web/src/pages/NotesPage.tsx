@@ -117,10 +117,7 @@ function CaptureRow({
   );
 }
 
-/**
- * One note in the list. A div, not a button, so the ⋯ menu can live inside
- * the row without nesting one button in another.
- */
+/** One list row. A div, not a button, so the ⋯ menu is not a nested button. */
 function NoteRow({
   hit,
   spaceName,
@@ -143,8 +140,7 @@ function NoteRow({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => {
-        // Only the row itself opens the note — not the ⋯ button inside it,
-        // whose Escape has to reach the document to close the menu.
+        // Only the row itself opens the note; the ⋯ button's Escape must reach the document.
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -202,7 +198,7 @@ export function NotesPage() {
   const [trashing, setTrashing] = useState(false);
   const [trashError, setTrashError] = useState<string | null>(null);
   const space = spaces.find((s) => s.id === spaceId);
-  // "Good afternoon, Volodymyr" — the first word of a real name, never an e-mail.
+  // First word of a real name, never an e-mail.
   const realName = useAuthOptional()?.identity?.display_name?.trim() ?? "";
   const firstName = realName.includes("@") ? "" : realName.split(/\s+/)[0];
   useDocumentTitle(space ? space.name : "Notes");
@@ -224,9 +220,7 @@ export function NotesPage() {
         const res = await searchNotes({ q: query, limit, signal: controller.signal });
         let page = res.hits;
         let cursor = res.next_cursor;
-        // The space filter runs on the client, so a space's notes could be
-        // sitting behind the first page. Pull the rest (bounded) so the count
-        // in the header and "nothing here yet" tell the truth.
+        // The space filter is client-side: pull more pages (bounded) so the count is honest.
         for (let i = 0; spaceId && cursor && i < SPACE_PAGES; i++) {
           const more = await searchNotes({ q: query, limit, cursor, signal: controller.signal });
           page = [...page, ...more.hits];
@@ -270,14 +264,7 @@ export function NotesPage() {
     }
   };
 
-  /**
-   * `/welcome` sends people here with the caret owed to the recorder.
-   *
-   * The state is cleared as it is read: this is a handover for one
-   * navigation, and leaving it on the entry would re-steal focus every
-   * time the browser's Back button returned to this page — from a note the
-   * person was reading, which is exactly where they wanted to be.
-   */
+  /** `/welcome` hands over focus once; the state is cleared on read so Back does not re-steal it. */
   useEffect(() => {
     if (!(location.state as { focusNewMeeting?: boolean } | null)?.focusNewMeeting) return;
     newMeetingRef.current?.focus();
@@ -316,10 +303,7 @@ export function NotesPage() {
     return out;
   }, [visible, searching]);
 
-  /**
-   * The row's ⋯ menu: "Move to …" for every space (the note's own one
-   * unfiling it again), then "Move to trash" — as the Mac app's row.
-   */
+  /** Row ⋯ menu: "Move to …" per space (its own one unfiles), then "Move to trash". */
   const menuItems = useCallback(
     (hit: SearchHit): MenuItem[] => {
       const current = spaceOf[hit.note_id];
@@ -365,28 +349,12 @@ export function NotesPage() {
   const empty =
     !loading && hits !== null && visible.length === 0 && (!!spaceId || (captures?.length ?? 0) === 0);
 
-  /**
-   * Whether this workspace is known to hold anything at all.
-   *
-   * Deliberately false while `hits` is null, i.e. while the search is still
-   * in flight: "we don't know yet" must not render as "there is nothing",
-   * or the calendar invitation flashes up and vanishes on the one page load
-   * where that is most jarring.
-   *
-   * `firstUse` narrows it to the case the panel below answers. On `/` it
-   * coincides with `empty` — an empty all-notes list with no captures is by
-   * definition a workspace with nothing in it — but the two ask different
-   * questions, and `hasSomething` is the one `<ComingUp>` needs, because it
-   * has to be right *before* the list has loaded.
-   */
+  /** Known to hold anything; deliberately false while `hits` is null so "unknown" never renders as "empty". */
   const hasSomething = (hits?.length ?? 0) > 0 || (captures?.length ?? 0) > 0;
   const firstUse = !searching && !spaceId && !hasSomething && !loadError;
 
   return (
     <div className="home">
-      {/* One compact row: the title, then search and the ways to start —
-          kept apart (finding a note is not starting one) but on one line,
-          so the notes themselves start right under it. */}
       <div className="home-top">
         <div className="home-title">
           <h1>{space ? space.name : firstName ? `${greeting()}, ${firstName}` : greeting()}</h1>
@@ -402,10 +370,7 @@ export function NotesPage() {
           busy={searching && loading}
           status={searching && !loading && hits ? resultCount : undefined}
         />
-        {/* Named as a group: the sidebar carries its own "New meeting", and
-            without this the two are indistinguishable to a screen reader
-            moving by landmark — and to anything else asking for "the New
-            meeting button on this page". */}
+        {/* Named as a group so it is distinguishable from the sidebar's "New meeting". */}
         <div className="home-start" role="group" aria-label="Start a note">
           <button ref={newMeetingRef} className="btn accent" onClick={() => navigate("/meeting/new")} title="New meeting (N)">
             <MicIcon size={14} /> New meeting
@@ -489,12 +454,7 @@ export function NotesPage() {
         />
       )}
 
-      {/* First use. One sentence and one button — not a list with nothing
-          in it, and not a tour. The whole product is "press record and
-          talk", so the screen that introduces it should be readable in the
-          time it takes to decide to try. The blank note stays a quiet
-          second line rather than a matching button: offering two equal
-          choices here is how a one-click product becomes a menu. */}
+      {/* First use: one sentence, one button; the blank note stays a quiet second line. */}
       {empty && firstUse && (
         <section className="first-use" aria-label="Get started">
           <span className="first-use-art" aria-hidden="true">

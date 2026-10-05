@@ -1,17 +1,6 @@
-"""Sprint-14 deployment: weighted capacity as the WS handler enforces it.
+"""Weighted capacity on the wire: the handler refuses with a recoverable ``gpu_full`` (close 1013).
 
-``test_capacity_weighted.py`` covers the SessionManager arithmetic. This
-covers the thing an operator actually sees: what the handler does on the
-wire when the budget is gone. The sprint-14 deployment VERIFY is precisely
-"caps admit 4 dictation OR 2 conversation OR the measured mix; the 3rd
-conversation session → ``gpu_full``".
-
-The refusal must be RECOVERABLE (close 1013 "try again later") — a client
-retries when another session ends; it is not a client error.
-
-Everything below the handler is faked, same approach as
-``test_conversation_start_gate.py``: the real admission logic runs, the DB
-and OS resources do not.
+Everything below the handler is faked, as in ``test_conversation_start_gate.py``.
 """
 
 from __future__ import annotations

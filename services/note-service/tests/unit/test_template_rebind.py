@@ -1,4 +1,4 @@
-"""Sprint-17 re-bind surface: bound-notes listing + rebind endpoint.
+"""Re-bind surface: bound-notes listing + rebind endpoint.
 
 Real handlers, auth overridden, repository monkeypatched (router tests);
 plus a scripted fake connection driving the repository decision tree.

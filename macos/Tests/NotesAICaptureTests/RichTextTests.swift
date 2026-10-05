@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// The note body's markdown-lite grammar. The web twin of these cases is
-/// `web/tests/richText.test.ts`; the two parsers are meant to agree, so a
-/// case added on one side belongs on the other.
+/// The markdown-lite grammar. The web twin is `web/tests/richText.test.ts`; a case added on one side belongs on the other.
 final class RichTextTests: XCTestCase {
     /// The flat text of a run, ignoring where the emphasis fell.
     private func flat(_ spans: [RichSpan]) -> String {
@@ -34,8 +32,7 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(flat(spans(of: blocks[1])), "three")
     }
 
-    /// h1 and h2 belong to the document's own chrome — its title and the
-    /// section name — so the body starts a level down.
+    /// h1 and h2 belong to the document's own chrome, so the body starts a level down.
     func testBodyHeadingsStartAtH3() {
         let levels = RichText.parse("# Top\n## Under\n###### Deep").map { block -> Int in
             if case .heading(let level, _) = block.kind { return level }
@@ -110,19 +107,14 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(RichText.preview(""), "")
     }
 
-    /// Cyrillic is the common case here, and NSRegularExpression works in
-    /// UTF-16 units — a body that starts in Ukrainian must not lose a
-    /// character to an offset computed against the wrong length.
+    /// NSRegularExpression works in UTF-16 units; a body starting in Ukrainian must not lose a character.
     func testNonLatinTextSurvivesTheSpanSplit() {
         let runs = RichText.spans("Вертикаль 1: **комунікаційна** система")
         XCTAssertEqual(runs.map(\.text), ["Вертикаль 1: ", "комунікаційна", " система"])
         XCTAssertEqual(flat(runs), "Вертикаль 1: комунікаційна система")
     }
 
-    /// Sprint SQ3 T1 — a generated line opening with a certainty word or
-    /// an older "Gast: X" line is plain text: these renderers have no
-    /// speaker rule for note text, so nothing is drawn as a turn and no
-    /// letter is doubled. The web twin is `web/tests/generatedSections.test.tsx`.
+    /// A generated line opening with a certainty word or an older "Gast: X" line is plain text: no speaker rule for note text. Web twin: `web/tests/generatedSections.test.tsx`.
     func testCertaintyWordsAndGuestLinesStayText() {
         let phrases = [
             "Voraussichtlich", "Schätzung", "Vorschlag", "Vorwurf", "Einschätzung",

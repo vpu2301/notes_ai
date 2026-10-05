@@ -1,16 +1,5 @@
-"""Sprint TQ2 T1 — planned speech runs as HTTP request groups.
-
-An HTTP backend is sent the worker's speech runs, not the recording: runs
-of one language are concatenated, in time order, into groups of at most
-``group_seconds``, with ``JOIN_MS`` of silence between runs. One request per
-group keeps the request count low (an HF scale-to-zero endpoint's cold
-start dominates small requests), and the silence the decoder never sees
-cannot be transcribed as "Vielen Dank.".
-
-``Group.to_recording`` maps a time in the group's audio back to the
-recording. A time inside the joining silence belongs to the run before it;
-a time past the group's audio (whisper.cpp stamps its last segment up to
-the next 30 s boundary) is clamped to the last run's end.
+"""Planned speech runs as HTTP request groups: same-language runs joined with ``JOIN_MS`` of silence, at most
+``group_seconds`` each. ``Group.to_recording`` maps group time back to the recording (clamped to the last run's end).
 """
 
 from __future__ import annotations
@@ -52,8 +41,7 @@ class Group:
             if k:
                 parts.append(gap)
             chunk = pcm[run.start_ms * SAMPLES_PER_MS : run.end_ms * SAMPLES_PER_MS]
-            # A run can end past the decoded samples by rounding; pad so the
-            # offset table stays exact.
+            # Pad a run that ends past the samples by rounding so the offset table stays exact.
             want = (run.end_ms - run.start_ms) * SAMPLES_PER_MS
             if chunk.shape[0] < want:
                 chunk = np.concatenate([chunk, np.zeros(want - chunk.shape[0], dtype=np.float32)])
@@ -61,10 +49,7 @@ class Group:
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
     def to_recording(self, t_ms: int) -> int:
-        """A time inside a joining silence snaps to the nearer run edge: an
-        engine with 80 ms frames (Parakeet) stamps a word a few frames
-        before the run it belongs to, and putting it at the end of the run
-        before would move its sentence ahead of everything said between."""
+        """A time inside a joining silence snaps to the nearer run edge (80 ms-frame engines stamp words early)."""
         starts = [p[0] for p in self.pieces]
         k = max(0, bisect_right(starts, t_ms) - 1)
         g0, r0, length = self.pieces[k]
@@ -84,9 +69,7 @@ class Group:
 
 
 def plan_groups(runs: Sequence[SpeechRun], group_seconds: float) -> list[Group]:
-    """Runs → request groups: one open group per language, filled in time
-    order, closed when the next run would pass ``group_seconds``. A run
-    longer than the limit is a group of its own."""
+    """Runs → request groups per language, closed at ``group_seconds``; an over-long run is a group of its own."""
     limit = max(1, int(group_seconds * 1000))
     open_: dict[str, Group] = {}
     done: list[Group] = []
@@ -107,8 +90,7 @@ def plan_groups(runs: Sequence[SpeechRun], group_seconds: float) -> list[Group]:
 
 
 def remap(output: TranscriptionOutput, group: Group, *, label: str | None) -> TranscriptionOutput:
-    """A group's transcript on the recording's clock. ``label`` is the
-    segment language to stamp (``None`` = the recording's)."""
+    """A group's transcript on the recording's clock; ``label`` is the segment language (``None`` = the recording's)."""
     segments: list[Segment] = []
     for seg in output.segments:
         words = [

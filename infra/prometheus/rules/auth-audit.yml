@@ -1,13 +1,5 @@
-# Alert rules — auth / audit.
-#
-# Mount this file in Prometheus and reference from prometheus.yml under
-# `rule_files:`. The accompanying Grafana dashboard
-# (infra/grafana/dashboards/auth-audit.json) consumes the same
-# metrics for the visual panels.
-#
-# Severity convention:
-#   - `critical` pages the on-call security lead immediately.
-#   - `warning`  posts to #sec-alerts (handled within the next business day).
+# Alert rules: auth / audit. `critical` pages the security lead; `warning`
+# posts to #sec-alerts.
 
 groups:
   - name: auth
@@ -52,12 +44,8 @@ groups:
 
       # ── JWKS cache hit-ratio: caching IS the perf budget ────────────
       - alert: JwksCacheHitRatioLow
-        # NOTE: no clamp_min on the denominator — clamping to 1 turned the
-        # ratio into "absolute hits/sec" whenever traffic < 1 lookup/s, so the
-        # alert fired continuously in quiet environments with a healthy cache.
-        # Instead, gate on a minimum lookup rate (0.2/s ≈ 60 lookups per 5m
-        # window): below that the ratio isn't statistically meaningful and the
-        # expression returns no data, so the alert stays green.
+        # No clamp_min on the denominator (it false-fired in quiet environments);
+        # gated on a minimum lookup rate instead.
         expr: |
           (
             sum(rate(mdx_jwks_cache_hits_total[5m]))
@@ -91,8 +79,7 @@ groups:
     rules:
       # ── Tamper-evident chain ────────────────────────────────────────
       - alert: AuditChainBroken
-        # The nightly verify job writes one row per tenant. Min == 0 means
-        # at least one tenant's chain diverged.
+        # Min == 0 means at least one tenant's chain diverged.
         expr: min(mdx_audit_chain_ok) == 0
         for: 0m
         labels:
@@ -143,25 +130,14 @@ groups:
             pathological payload. Check pg_stat_activity for blocked
             audit-writer transactions.
 
-  # A group of its own: these are auth rules, and the `audit` group above
-  # is about the hash chain. Sharing a group would also share its
-  # evaluation interval, which is not a property anyone should inherit by
-  # accident.
+  # Own group so the evaluation interval is not inherited by accident.
   - name: auth-idx
     interval: 30s
     rules:
-      # ══════════════════════════════════════════════════════════════
-      # IDX-B3 — the native identity platform.
-      #
-      # Every metric named below is emitted by auth-service code today;
-      # `tests/unit/test_alert_rules.py` asserts it, because a rule
-      # naming a metric nothing exports fails silently (it never fires,
-      # which on a dashboard is indistinguishable from "no problem") and
-      # was the root cause in sprints 08 and 10.
-      # ══════════════════════════════════════════════════════════════
+      # Native identity platform. Every metric below is asserted exported by
+      # `tests/unit/test_alert_rules.py` (an unexported metric never fires).
 
-      # A high share of sign-in codes being rejected is either an attack
-      # or a broken client. Both need a human the same day.
+      # Many rejected sign-in codes: an attack or a broken client.
       - alert: OtpVerifyFailureRatioHigh
         expr: |
           sum(rate(mdx_auth_otp_verify_total{result!~"ok|new_identity"}[10m]))
@@ -207,8 +183,7 @@ groups:
             counts toward that identity's lockout. A burst is a campaign,
             not a bad week.
 
-      # IDX-B1b. A room device holds one secret and retries with backoff;
-      # a burst of failures is a wrong config or somebody guessing.
+      # A room device retries with backoff; a burst is a wrong config or guessing.
       - alert: ClientCredentialsFailureBurst
         expr: sum(increase(mdx_auth_client_credentials_total{result="invalid"}[5m])) > 20
         for: 0m
@@ -223,9 +198,7 @@ groups:
             auth.client_credentials_failed audit rows. A single room that
             was rotated away from is the common cause.
 
-      # Critical: the DB row stops the next refresh, but a failed denylist
-      # push means the token already in someone's hands stays live for its
-      # full lifetime. That is the window revocation exists to close.
+      # Critical: a failed denylist push leaves an issued token live for its full lifetime.
       - alert: DenylistPushFailed
         expr: sum(increase(mdx_auth_sessions_revoked_total[5m])) > 0
           and on() sum(increase(mdx_auth_denylist_push_failed_total[5m])) > 0
@@ -241,9 +214,7 @@ groups:
             until it is healthy, treat revocations as taking up to
             AUTH_ACCESS_TTL_SECONDS to bite.
 
-      # Freshness, not failure: a job erroring every run keeps its
-      # last-success gauge frozen, which is exactly what this catches.
-      # The gauge is set ONLY on success for that reason.
+      # Freshness, not failure: the gauge is set ONLY on success.
       - alert: AuthMaintenanceStale
         expr: |
           time() - max by (job_name) (mdx_auth_maint_last_success_timestamp) > 10800

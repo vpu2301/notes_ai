@@ -1,15 +1,10 @@
-"""Dependency wiring for the template service.
-
-Kept separate from main.py so router modules can import the dependencies
-without triggering a circular import at module-load time.
-"""
+"""Dependency wiring, separate from main.py to avoid circular imports from routers."""
 
 from auth import JwksCache, build_current_user, issuer_url_map, issuers_from_env
 
 from .config import settings
 
-# FND-1 / ADR-0047: the issuer list, not a single issuer string. The cache
-# and the dependency are built from the same list so they cannot drift.
+# Cache and dependency share one issuer list so they cannot drift.
 _issuers = issuers_from_env(
     settings.auth_issuers_json,
     issuer=settings.auth_issuer,

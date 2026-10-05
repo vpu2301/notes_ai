@@ -1,4 +1,4 @@
-"""Behavioural tests for ``GET /notes/{id}/pdf`` (M1·A3).
+"""Behavioural tests for ``GET /notes/{id}/pdf``.
 
 The actual weasyprint render is stubbed — these assert the lifecycle
 gate, content negotiation and audit, not the renderer.

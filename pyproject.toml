@@ -2,18 +2,14 @@
 members = ["services/*", "libs/*"]
 
 [dependency-groups]
-# Dev-only. faster-whisper / silero-vad / speechbrain are intentionally
-# excluded from asr-worker's and dictation-service's *runtime* deps on macOS
-# (see their pyprojects) so dev installs stay light and the CPU path is mocked
-# in tests; prod images pin them via the Dockerfiles. Pulled into the shared
-# dev venv on macOS only so the speech pipeline can be exercised on a dev
-# laptop. macOS-gated: Linux/CI resolution and production images are unchanged.
+# Dev-only, macOS-gated: the speech libs are excluded from the workers' runtime
+# deps on macOS (prod images pin them via the Dockerfiles).
 dev = [
     "faster-whisper>=1.0.0 ; sys_platform == 'darwin'",
     "silero-vad>=6.0.0 ; sys_platform == 'darwin'",
     "speechbrain>=1.0.0 ; sys_platform == 'darwin'",
     "pyyaml>=6.0",
-    # Sprint TQ1: WER for the ASR gold-set harness (scripts/eval/asr_eval.py).
+    # WER for the ASR gold-set harness (scripts/eval/asr_eval.py).
     "jiwer>=3.0,<5",
 ]
 
@@ -28,9 +24,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
-# FastAPI's dependency/parameter markers are designed to be evaluated as
-# argument defaults; they are effectively immutable singletons, so B008 does
-# not apply to them.
+# FastAPI dependency markers are immutable singletons as argument defaults (B008).
 extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.Depends",
@@ -80,9 +74,7 @@ exclude = ["dist/", ".venv/"]
 exclude_dirs = ["tests", ".venv"]
 skips = ["B101"]
 
-# ── import-linter ────────────────────────────────────────────────────
-# Architectural contracts: enforced in CI. Adding a new contract is fine;
-# relaxing an existing one requires an ADR amendment.
+# import-linter contracts, enforced in CI; relaxing one requires an ADR amendment.
 [tool.importlinter]
 root_packages = [
     "template_service",
@@ -152,16 +144,8 @@ layers = [
     "dictation_service.adapters",
 ]
 
-# Layering reflects the as-built dependency graph (verified against the
-# import edges, S01 hardening): api/routers sit on top of `domain`, which
-# orchestrates `stages`; every stage and the orchestrator depend on the
-# `pipeline.base` kernel (frozen StageOutput records + the Stage Protocol),
-# which is the lowest layer. The kernel is split out from `pipeline`
-# (`pipeline.base` below `stages`, `pipeline.orchestrator` above it) because
-# the orchestrator threads stages while stages import only the kernel.
-# (Corrects the previously-inverted ordering that placed `domain` below
-# `stages` despite `domain.repository` importing `stages` — an ADR-0001/0014
-# amendment is warranted to record this.)
+# `pipeline.base` (the kernel) is split out below `stages`; the orchestrator
+# sits above them because it threads stages while stages import only the kernel.
 [[tool.importlinter.contracts]]
 name = "nlp-service: api/routers → domain → orchestrator → stages → kernel; reverse forbidden"
 type = "layers"
@@ -184,15 +168,8 @@ layers = [
     "note_service.adapters",
 ]
 
-# `ws` sits BELOW the two drivers, not above them. Both the stream
-# consumer (`ingest`) and the outbox worker (`delivery`) publish
-# WebSocket fan-out, so `ws.fanout` is a shared downstream dependency —
-# the first cut of this contract had `ws` on top and import-linter
-# correctly rejected it.
-#
-# `delivery` and `ingest` have no edge between them: dead-lettering,
-# which both need, lives in `domain.dead_letters` rather than in
-# whichever one happened to write it first.
+# `ws` sits BELOW `ingest` and `delivery`: both publish WebSocket fan-out.
+# `delivery` and `ingest` have no edge; dead-lettering lives in `domain.dead_letters`.
 [[tool.importlinter.contracts]]
 name = "notification-service: routers → delivery → ingest → ws → domain → adapters; reverse forbidden"
 type = "layers"
@@ -205,14 +182,8 @@ layers = [
     "notification_service.adapters",
 ]
 
-# auth-service: the password-recovery slice introduced domain/ and
-# adapters/ to a service that previously kept everything in routers. The
-# contract is declared now, while there are three modules to keep honest,
-# rather than after the next feature adds a shortcut.
-#
-# Only the new packages are layered. The service's older modules
-# (keycloak_client, tenants_repository, totp) sit at the package root and
-# predate the split; folding them in would be a refactor, not a contract.
+# auth-service: only domain/ and adapters/ are layered; the older root modules
+# predate the split.
 [[tool.importlinter.contracts]]
 name = "auth-service: routers → delivery → domain → adapters; reverse forbidden"
 type = "layers"
@@ -291,16 +262,9 @@ forbidden_modules = [
     "notification_service",
 ]
 
-# Services are mutually independent: shared concerns live in libs/*, never
-# in a sibling service. Cross-service imports couple deploy units and defeat
-# the per-service layering contracts above.
-#
+# Services are mutually independent; shared concerns live in libs/*.
 # One recorded exception: dictation-service reuses asr-worker's `WhisperEngine`
-# directly rather than over the wire (streaming and batch share one CTranslate2
-# model loader). This is known coupling debt — the engine should be hoisted to
-# a `libs/asr_inference` package so both services depend on the lib, not each
-# other. Until that extraction lands it is pinned here as a single explicit
-# ignore so the contract still bans every OTHER service↔service edge.
+# (coupling debt; should become a `libs/asr_inference` package).
 [[tool.importlinter.contracts]]
 name = "Services may not import other services"
 type = "independence"
@@ -317,8 +281,7 @@ ignore_imports = [
     "dictation_service.main_deps -> asr_worker.inference",
 ]
 
-# libs/models is the ONLY package allowed to know a model vendor (decision
-# 11). It layers on asr_models (transcript types) and nothing else internal.
+# libs/models is the ONLY package allowed to know a model vendor.
 [[tool.importlinter.contracts]]
 name = "models depends on asr_models only — never on auth/db/storage/services"
 type = "forbidden"
@@ -328,8 +291,7 @@ forbidden_modules = [
     "template_models", "note_models", "notification_events", "diarization",
 ]
 
-# libs/jobs layers on db + models + observability; never on tenancy/auth,
-# storage, crypto or messaging (a transport is never the source of truth).
+# libs/jobs never layers on tenancy/auth, storage, crypto or messaging.
 [[tool.importlinter.contracts]]
 name = "jobs depends on db, models, observability only"
 type = "forbidden"
@@ -375,11 +337,8 @@ type = "forbidden"
 source_modules = ["storage"]
 forbidden_modules = ["auth", "audit", "db", "messaging", "observability"]
 
-# Config for the workspace-root `tests/` tree (chaos, load) — invoked from the
-# repo root by `make chaos-dictation` / `make load-dictation`. Per-package test
-# config lives in each member's own pyproject; this only covers the cross-cutting
-# root suites, which are async and would otherwise be silently skipped under
-# pytest-asyncio's default strict mode.
+# Root `tests/` tree only (async suites that strict mode would silently skip);
+# per-package test config lives in each member's own pyproject.
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

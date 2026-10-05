@@ -1,21 +1,9 @@
 """Fail when the notes eval regressed against a committed baseline report.
 
-    uv run python scripts/eval/compare_notes.py \\
-        --baseline docs/eval/notes-baseline-pipeline.json \\
-        --current  docs/eval/notes-pipeline-2026-09-24-dev_mac.json
+    uv run python scripts/eval/compare_notes.py --baseline <baseline.json> --current <report.json>
 
-Summary Engine v2, Q1 T8 — the nightly job's gate, mirroring
-``compare_der.py``. It compares the first run's summary of each report
-and fails (exit 1) when:
-
-* ``unsupported_rate`` rose by more than ``--max-unsupported-rise`` (0.01),
-* ``invented_claims`` is above zero,
-* ``example_echo`` is above zero,
-* ``key_fact_recall`` dropped by more than ``--max-recall-drop`` (0.02).
-
-A metric missing from either report exits 2: a comparison that cannot be
-made is not a pass. The baseline changes only in a PR that carries the
-new report.
+Exit 1 on a regression (unsupported rise, invented claim, example echo, recall drop);
+exit 2 when a metric is missing (never a pass).
 """
 
 from __future__ import annotations

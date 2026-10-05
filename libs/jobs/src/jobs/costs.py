@@ -1,9 +1,4 @@
-"""Cost estimate per model call from ``config/model_costs.yaml`` (DEP-S1-06).
-
-Rates are first estimates (list price ÷ measured throughput); DEP-S6
-replaces them. A backend without a rate costs 0 and is flagged so the
-rollup can show "unpriced" rather than "free".
-"""
+"""Cost estimate per model call from ``config/model_costs.yaml``; an unpriced backend costs 0 and is flagged."""
 
 from __future__ import annotations
 

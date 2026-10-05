@@ -1,14 +1,6 @@
-"""IDX-A2 acceptance: a token auth-service mints is accepted by every service's
-own ``current_user`` dependency, with zero changes to ``libs/auth``.
-
-Each service's ``deps.current_user`` builds ``libs/auth``'s dependency from
-``state.jwks_cache`` + ``settings.auth_audience/auth_issuer``. Here the state
-is a stub whose JWKS cache is served in-memory from the *auth-service key
-set*, so the whole path — header parsing, RS256 verification, ``Claims``
-parsing, denylist hook — runs for real against a real auth-service token.
-
-Run from the repo root (`uv run pytest tests/contract/`), where every
-service is importable.
+"""A token auth-service mints is accepted by every service's own ``current_user``
+dependency, with the JWKS cache served in-memory from the auth-service key set.
+Run from the repo root (``uv run pytest tests/contract/``).
 """
 
 from __future__ import annotations
@@ -104,8 +96,7 @@ def service_current_user(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     keys, _ = issuer
     cache = _jwks_cache_from(keys)
     state = SimpleNamespace(jwks_cache=cache, app_pool=object(), audit_writer=None)
-    # notification-service builds its dependency once in build_state
-    # (the others build lazily from state.jwks_cache); mirror that wiring.
+    # notification-service builds its dependency once in build_state; mirror that.
     state.current_user_dep = build_current_user(
         jwks_cache=cache, expected_audience=AUDIENCE, expected_issuer=ISSUER
     )

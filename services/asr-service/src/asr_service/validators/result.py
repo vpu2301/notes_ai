@@ -7,15 +7,7 @@ from enum import StrEnum
 
 
 class ValidationCode(StrEnum):
-    """Stable rejection codes — also the RFC 9457 ``type`` URI suffix.
-
-    Every submit-time rejection names one of these, including the ones the
-    router raises itself (rate limits). They used to be bare
-    string literals inline, which meant the wire vocabulary was whatever
-    the last edit happened to type; a client matching on ``code`` needs it
-    in one place, and so does the docs table in
-    ``docs/api/asr-job-errors.md``.
-    """
+    """Stable rejection codes, also the RFC 9457 ``type`` URI suffix (see docs/api/error-codes.md)."""
 
     # ── Identity / authorization ─────────────────────────────────────
     SCOPE_MISSING = "scope_missing"
@@ -50,11 +42,7 @@ class ValidationResult:
 
 @dataclass(slots=True)
 class UploadFacts:
-    """Accumulated facts about the upload after a successful run.
-
-    Populated incrementally by the pipeline; passed to the
-    persistence + queue layers.
-    """
+    """Facts about the upload, accumulated by the pipeline."""
 
     mime_type: str = ""
     size_bytes: int = 0

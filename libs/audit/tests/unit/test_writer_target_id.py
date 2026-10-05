@@ -1,11 +1,4 @@
-"""Regression: AuditWriter must coerce a UUID target_id to str.
-
-The ``audit.events.target_id`` column is TEXT and the JCS canonicalizer only
-serializes JSON-native types, so a caller passing a ``uuid.UUID`` (e.g. the
-``asyncpg.pgproto.UUID`` returned by ``fetchval``) must be stringified before
-both the canonical hash record and the INSERT bind. This is exercised with a
-fake pool/connection so it needs no live database.
-"""
+"""Regression: AuditWriter must coerce a UUID target_id to str (TEXT column, JCS). Fake pool, no DB."""
 
 from __future__ import annotations
 

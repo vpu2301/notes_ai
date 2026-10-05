@@ -3,34 +3,18 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page } from "@playwright/test";
 
-// `web/package.json` is `"type": "module"`, so Playwright loads these specs
-// as real ESM and `__dirname` does not exist. Derive it.
+// ESM specs: no `__dirname`.
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAILPIT_READER = resolve(HERE, "../../scripts/ci/mailpit-last-code.py");
 
-/**
- * A fresh address, unused by construction.
- *
- * `@example.test` because RFC 6761 reserves `.test` for exactly this and it
- * can never resolve — a fixture that leaks into a real send should bounce
- * rather than reach a stranger.
- */
+/** A fresh address; `.test` (RFC 6761) can never resolve, so a leaked send bounces. */
 export function freshEmail(prefix = "first-use"): string {
-  // Digits only in the unique half, deliberately. `/welcome` prefills the
-  // name box from the local part and drops any word containing a digit, so
-  // a numeric stamp makes the suggestion predictable — `first-use-1725…`
-  // is always "First Use" — and a test can assert on it exactly.
+  // Digits only: `/welcome` drops digit words from the name suggestion, so it stays "First Use".
   const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   return `${prefix}-${stamp}@example.test`;
 }
 
-/**
- * The sign-in code Mailpit received for `email`.
- *
- * Shelling out to the FND-2 script rather than reimplementing the read:
- * one definition of "which mail is the code mail" means the CI gate and
- * these tests cannot disagree about it.
- */
+/** The sign-in code Mailpit received for `email`, via the same script the CI gate uses. */
 export function codeFor(email: string, waitSeconds = 25): string {
   try {
     return execFileSync("python3", [MAILPIT_READER, email, "--wait", String(waitSeconds)], {
@@ -49,14 +33,7 @@ export function codeFor(email: string, waitSeconds = 25): string {
   }
 }
 
-/**
- * Types a six-digit code into the boxed input; it submits on its own.
- *
- * Into the FIRST box, as a single insert. That is a paste, which is how
- * most people move a code out of a mail client, and it is the path that
- * exercises the component's spread-across-six-boxes handling rather than
- * six independent keystrokes.
- */
+/** Pastes a six-digit code into the first box (exercises the spread-across-boxes path); it submits on its own. */
 export async function enterCode(page: Page, code: string): Promise<void> {
   await page.getByRole("group", { name: /sign-in code/i }).getByRole("textbox").first().click();
   await page.keyboard.insertText(code);
@@ -67,11 +44,7 @@ export function newMeetingButton(page: Page) {
   return page.getByRole("group", { name: /start a note/i }).getByRole("button", { name: /new meeting/i });
 }
 
-/**
- * Sign up (or in) with an emailed code, from `/login` to wherever the app
- * puts them next. Returns nothing: the caller asserts on the destination,
- * because "where does a new identity land" is the thing under test.
- */
+/** Sign up (or in) with an emailed code; the caller asserts on the destination. */
 export async function signInWithCode(page: Page, email: string): Promise<void> {
   await page.goto("/login");
   await page.getByLabel(/email/i).fill(email);
@@ -86,10 +59,7 @@ export async function fetchMe(page: Page): Promise<{
   memberships: { kind: string; role: string }[];
 }> {
   return page.evaluate(async () => {
-    // The page's own transport holds the bearer in a closure, so the test
-    // cannot borrow it. The refresh cookie is a cookie, though, so a fresh
-    // access token is one call away — and using it proves the cookie is
-    // doing its job, which is worth asserting anyway.
+    // The bearer lives in a closure; mint a fresh one from the refresh cookie.
     const base = "http://localhost:8000";
     const refreshed = await fetch(`${base}/auth/refresh`, {
       method: "POST",
@@ -106,16 +76,9 @@ export async function fetchMe(page: Page): Promise<{
 }
 
 /**
- * Records every URL the app puts in the address bar, in order.
- *
- * Hooking `history` rather than listening for Playwright's
- * `framenavigated`: React Router changes screens with `pushState` and
- * `replaceState`, which are same-document navigations, and how faithfully
- * a given Playwright version reports those is not something a claim about
- * "≤ 3 screens" should rest on. This counts what the router actually did.
- *
- * Must be called before the first `goto` — an init script runs on every
- * new document, but only from the point it is installed.
+ * Records every URL the router puts in the address bar, in order. Hooks `history`
+ * because `framenavigated` does not reliably report same-document navigations.
+ * Call before the first `goto`.
  */
 export async function trackScreens(page: Page): Promise<() => Promise<string[]>> {
   await page.addInitScript(() => {

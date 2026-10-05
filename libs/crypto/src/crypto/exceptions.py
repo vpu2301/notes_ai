@@ -1,9 +1,4 @@
-"""Exception hierarchy for libs/crypto.
-
-Distinct classes so callers can branch on failure mode and so security
-metrics can be attributed cleanly. Never expose plaintext or key bytes
-in any exception message.
-"""
+"""Exception hierarchy for libs/crypto; messages never carry plaintext or key bytes."""
 
 from __future__ import annotations
 
@@ -25,11 +20,8 @@ class EnvelopeFormatError(CryptoError):
 
 
 class DecryptError(CryptoError):
-    """Decryption failed — wrong key, tampered ciphertext, bad AAD, or
-    GCM tag mismatch. Message never includes plaintext or key material."""
+    """Decryption failed: wrong key, tampered ciphertext, bad AAD or tag mismatch."""
 
 
 class TenantMismatchError(CryptoError):
-    """The envelope's recorded ``tenant_id`` does not match the caller's
-    expected tenant. Defends against confused-deputy attacks where one
-    tenant's blob is decrypted under another tenant's context."""
+    """The envelope's ``tenant_id`` does not match the caller's (confused-deputy defence)."""

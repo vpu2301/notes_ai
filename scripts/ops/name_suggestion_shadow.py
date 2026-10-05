@@ -1,30 +1,8 @@
-"""Name-suggestion shadow run (Sprint 32 B-2) — counts only, no UI.
+"""Name-suggestion shadow run: precision of the endpoint's suggestions against what
+people actually named, per language. Reads transcript text, so it prints ONE JSON
+line of counts and nothing else (enforced by tests/unit/test_name_suggestion_shadow.py).
 
-    # in the cluster, with the asr-service environment (DB, S3, master key):
     uv run --project services/asr-service python scripts/ops/name_suggestion_shadow.py --days 30
-
-For every completed job of the last ``--days`` that has calendar name
-candidates AND at least one speaker a person named (source typed or
-picklist), compute suggestions with the endpoint's suggestion code on the
-structured turns (decrypt → edits folded → ``name_suggestions.suggest``)
-with the person's names hidden — on the raw transcript text, WITHOUT the
-NLP enrichment the endpoint adds (that needs a user bearer) — then compare
-with what they actually chose:
-
-    offered   labels a suggestion was made for
-    agree     the suggestion equals the person's name (normalised)
-    disagree  the person named that speaker something else
-    unnamed   the person never named that speaker (not scored)
-
-precision = agree / (agree + disagree), per language. Decision rule
-(docs/product/speaker-decisions.md): ≥ 95 % with ≥ 100 compared labels →
-enable; 85–95 % → pilots only; < 85 % → stays dark.
-
-It reads transcript text, so it prints ONE JSON line of counts and nothing
-else; `tests/unit/test_name_suggestion_shadow.py` fails the build if any
-other output call appears. Tenants come from `funnel_reader` (tenant ids
-of calendar-event captures only); each tenant is read inside its own
-`tenant_connection`.
 """
 
 from __future__ import annotations
@@ -86,8 +64,8 @@ async def _tenants(days: int) -> list[UUID]:
 async def main(days: int) -> int:
     import logging
 
-    # Nothing but the one counts line may leave this process: service
-    # libraries log, and a failed parse would print transcript snippets.
+    # Nothing but the one counts line may leave this process (a failed parse
+    # would print transcript snippets).
     logging.disable(logging.CRITICAL)
     from asr_models import TranscriptionOutput
     from asr_service.domain import repository

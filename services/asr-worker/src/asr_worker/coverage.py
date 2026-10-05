@@ -1,27 +1,9 @@
-"""Coverage of speech by the transcript (Sprint F1).
+"""Coverage of speech by the transcript: pure functions over VAD runs and segments.
 
-Pure functions over VAD speech runs and the (echo-guarded) segments: which
-runs the first decode lost and deserve a second one (decision 3), which
-stretches are still uncovered afterwards and why (decision 1), and the
-totals shown to the person and exported as metrics.
-
-Backend-agnostic on purpose, like the echo guard: the dev and hosted
-backends decode the whole file over HTTP and never see the worker's VAD,
-so coverage is measured in the processor on every backend's output.
-
-Definitions (decision 1):
-
-* ``speech_ms`` — the length of every VAD speech run (unpadded).
-* A run is **covered** where a surviving word, widened by ``WORD_REACH_MS``
-  on both sides to bridge the pauses between words, lies inside it.
-* A **gap** is a run of at least ``MIN_GAP_MS`` covered for less than half
-  its length. Shorter runs (a cough, a breath, a chair) are never gaps and
-  never second-passed: decoding them without a prompt is where Whisper
-  invents "Thank you."
-* ``transcribed_ms`` — ``speech_ms`` minus the length of every gap.
-* ``no_audio`` — the client reported a Record-to-first-frame latency of at
-  least ``MIN_GAP_MS``: that stretch never reached the file. It is a gap in
-  Record-press time (``0 … offset``), outside both totals.
+A run is covered where a surviving word (widened by ``WORD_REACH_MS``) lies in it;
+a gap is a run of at least ``MIN_GAP_MS`` covered for less than half (shorter runs are
+never second-passed: that is where Whisper invents "Thank you."). ``no_audio`` is the
+client's Record-to-first-frame latency, outside both totals. Backend-agnostic.
 """
 
 from __future__ import annotations
@@ -38,9 +20,7 @@ LOW_COVERAGE: Final = 0.5
 ECHO_SHARE: Final = 0.3
 WORD_REACH_MS: Final = 500
 NO_AUDIO_TOLERANCE_MS: Final = 2_000
-# A second attempt is kept only when it is not itself a guess: Whisper's
-# prompt-free decode over noise writes stock phrases at low word
-# probability.
+# A second attempt is kept only when it is not itself a guess (stock phrases at low prob).
 MIN_SECOND_PASS_CONFIDENCE: Final = 0.4
 
 # Why a run is decoded again (``SecondPass.by_cause`` keys, metric label).
@@ -48,7 +28,7 @@ LOW_COVERAGE_CAUSE: Final = "low_coverage"
 PROMPT_ECHO_CAUSE: Final = "prompt_echo"
 DECODER_EMPTY_CAUSE: Final = "decoder_empty"
 TIMEOUT_CAUSE: Final = "timeout"
-# Sprint TQ2 G2: a repetition loop the gate truncated.
+# A repetition loop the gate truncated.
 LOOP_CAUSE: Final = "loop"
 
 
@@ -61,8 +41,7 @@ def _inside(run: SpeechSegment, start_ms: int, end_ms: int) -> bool:
 
 
 def _words(segment: Segment) -> list[WordTiming]:
-    """A segment's words; a backend without word timings gets one
-    pseudo-word per token, all at the segment's own span."""
+    """A segment's words; without word timings, one pseudo-word per token at the segment span."""
     if segment.words:
         return segment.words
     return [
@@ -162,12 +141,9 @@ def _rebuild(words: list[WordTiming]) -> str:
 def splice(
     segments: list[Segment], start_ms: int, end_ms: int, replacement: list[Segment]
 ) -> list[Segment]:
-    """``segments`` with every word centred in ``[start_ms, end_ms)`` taken
-    out and ``replacement`` put in. Word-level, not segment-level: an HTTP
-    backend decodes the whole file, and one of its segments can straddle a
-    well-decoded run and the lost one next to it — the words outside the
-    slice stay. A segment without word timings goes when its middle is in
-    the slice."""
+    """Replace the words centred in ``[start_ms, end_ms)`` with ``replacement``.
+
+    Word-level: a backend segment can straddle the slice; words outside it stay."""
     span = SpeechSegment(start_ms, end_ms)
     kept: list[Segment] = []
     for seg in segments:
@@ -211,7 +187,7 @@ class RunOutcome:
     echo_removed: bool = False
     other_language: bool = False
     second_pass_words: int | None = None  # None = no second pass ran
-    # Sprint TQ2: the backend request for this run's group failed.
+    # The backend request for this run's group failed.
     backend_error: bool = False
 
 
@@ -237,8 +213,7 @@ def gap_cause(outcome: RunOutcome, *, first_frame_offset_ms: int | None) -> GapC
 
 
 def _merge(gaps: list[CoverageGap]) -> list[CoverageGap]:
-    """Adjacent gaps with one cause become one (a long lost passage is
-    several 30 s VAD pieces)."""
+    """Adjacent gaps with one cause become one."""
     out: list[CoverageGap] = []
     for g in gaps:
         if out and out[-1].cause == g.cause and g.start_ms - out[-1].end_ms < WORD_REACH_MS:
@@ -264,8 +239,7 @@ def measure(
     if first_frame_offset_ms is not None and first_frame_offset_ms >= MIN_GAP_MS:
         lead.append(CoverageGap(start_ms=0, end_ms=first_frame_offset_ms, cause="no_audio"))
     if stub:
-        # No real VAD: the whole file is one run and coverage is complete by
-        # construction (documented dev fallback).
+        # No real VAD (dev fallback): one run, coverage complete by construction.
         return Coverage(
             speech_ms=speech_ms,
             transcribed_ms=speech_ms,

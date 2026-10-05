@@ -1,12 +1,7 @@
-"""Schema for ``config/models.yaml`` — fails fast on unknown keys.
+"""Schema for ``config/models.yaml`` (unknown keys fail fast).
 
-Environment interpolation: ``${VAR}`` and ``${VAR:-default}`` are resolved
-from the mapping the caller passes in (libs never read ``os.environ``;
-the service's ``config.py`` does and hands it over). A placeholder with no
-value and no default is *tolerated while parsing* and recorded per backend;
-the registry turns it into a ``ConfigError(missing_env)`` only if that
-backend is enabled in the current environment. That is what lets one file
-describe dev, staging and prod without every developer holding an HF token.
+``${VAR}``/``${VAR:-default}`` resolve from the caller's mapping (libs never read ``os.environ``); an unresolved
+placeholder is recorded per backend and becomes ``missing_env`` only if that backend is enabled in the env.
 """
 
 from __future__ import annotations
@@ -27,13 +22,11 @@ BackendKind = Literal[
 StructuredMode = Literal["json_schema", "json_object", "guided_json", "probe", "none"]
 OperationKind = Literal["chat", "asr", "embed", "diarization"]
 
-# operation -> kind. Adding an operation is a code change here and a routing
-# row in models.yaml; the registry refuses operations it does not know.
+# operation -> kind; a new operation needs an entry here and a routing row in models.yaml.
 OPERATION_KINDS: dict[str, OperationKind] = {
     "understand": "chat",
     "summarize": "chat",
-    # Sprint L2 — the short calls around a generation, routed on their own
-    # so a small hosted model can take them while a large one writes.
+    # Short calls around a generation, routed on their own so a small model can take them.
     "classify": "chat",
     "title": "chat",
     "entities": "chat",
@@ -46,10 +39,7 @@ BACKEND_KIND_FOR: dict[BackendKind, OperationKind] = {
     "recorded": "chat",
     "asr_http": "asr",
     "asr_inproc": "asr",
-    # Sprint 29 B-9 (shape B, ADR-0052): speaker diarization on a GPU
-    # endpoint. It has no routing row — the worker names the backend
-    # directly (MDX_DIAR_HTTP_BACKEND) — but it lives here so every
-    # processor the platform talks to is declared in one file.
+    # No routing row (the worker names it via MDX_DIAR_HTTP_BACKEND); declared here so every processor is in one file.
     "diar_http": "diarization",
 }
 KNOWN_ENVS = ("dev", "test", "staging", "prod")
@@ -74,11 +64,9 @@ class BackendConfig(BaseModel):
     enabled: bool = True
     enabled_in_envs: list[str] = Field(default_factory=lambda: list(KNOWN_ENVS))
     base_url: str | None = None
-    # "none" or "bearer:<token>". Held as a SecretStr so a dumped config or a
-    # traceback never shows the token.
+    # "none" or "bearer:<token>"; SecretStr so a dump or traceback never shows it.
     auth: SecretStr = SecretStr("none")
-    # Sprint TQ4: a token for our own model server (deploy/asr-server), sent in
-    # its own header next to the platform's bearer. Empty = not sent.
+    # Token for our own model server, sent in its own header; empty = not sent.
     server_token: SecretStr = SecretStr("")
     models: dict[str, str] = Field(default_factory=dict)  # {"chat": ..., "asr": ...}
     structured_output: StructuredMode = "json_schema"
@@ -86,15 +74,11 @@ class BackendConfig(BaseModel):
     max_concurrency: int = Field(default=1, ge=1)
     cold_start_seconds: int = Field(default=0, ge=0)
     timeout_seconds: float = Field(default=120.0, gt=0)
-    # Sprint L1 T2: a small local model gets simpler work from the document
-    # engine (fewer facts per window, one example, no noise field, smaller
-    # reduce calls, the strict summary rung first). Only dev_mac sets it.
+    # A small local model gets simpler work from the document engine.
     small_model: bool = False
     processor: ProcessorInfo | None = None
     cassette_dir: str | None = None  # kind=recorded only
-    # Extra OpenAI-API fields merged into every chat request, e.g.
-    # {reasoning_effort: none} to keep a reasoning model (Qwen3) from
-    # spending the token budget on <think>. Configuration, not code.
+    # Extra OpenAI-API fields merged into every chat request (e.g. {reasoning_effort: none}).
     request_overrides: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("enabled_in_envs")
@@ -154,7 +138,7 @@ class ModelsConfig(BaseModel):
     version: Literal[1]
     backends: dict[str, BackendConfig]
     routing: dict[str, dict[str, str]]  # operation -> tier -> backend name
-    # env -> kind (or operation, Sprint L2) -> backend name or {primary, fallback}.
+    # env -> kind (or operation) -> backend name or {primary, fallback}.
     env_overrides: dict[str, dict[str, OverrideValue]] = Field(default_factory=dict)
 
     @field_validator("routing")
@@ -237,8 +221,6 @@ def parse_config(
     try:
         config = ModelsConfig.model_validate(data)
     except ValidationError as exc:
-        # Pydantic's message names the offending key path; that is the
-        # whole point of extra="forbid".
         raise ConfigError(
             "invalid_config",
             f"{source}: {exc.errors()[0]['msg']} at {'.'.join(str(p) for p in exc.errors()[0]['loc'])}",
@@ -250,9 +232,7 @@ def parse_config(
 def _check_static_invariants(config: ModelsConfig, source: str) -> None:
     """Invariants that hold regardless of which env we are in."""
     for name, backend in config.backends.items():
-        # A processor in region "local" (the founder's Mac) can never be
-        # selected on staging/prod, not even by a config typo: the file
-        # itself is rejected if it says so.
+        # A "local" processor can never be selected on staging/prod, not even by a typo.
         if backend.processor is not None and backend.processor.region == "local":
             illegal = [e for e in backend.enabled_in_envs if e not in LOCAL_ONLY_ENVS]
             if illegal:
@@ -260,9 +240,7 @@ def _check_static_invariants(config: ModelsConfig, source: str) -> None:
                     "backend_not_allowed_in_env",
                     f"{source}: backend {name!r} is a local processor and may not list {illegal}",
                 )
-        # A missing env var leaves base_url == "" — tolerated here, the
-        # registry decides whether this backend matters in this env. A
-        # *missing key* is a config bug regardless.
+        # A missing env var leaves base_url == "" (tolerated); a missing key is a config bug regardless.
         if backend.kind in ("openai_compat", "asr_http", "diar_http") and backend.base_url is None:
             raise ConfigError(
                 "invalid_config", f"{source}: backend {name!r} ({backend.kind}) needs base_url"

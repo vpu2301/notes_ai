@@ -28,10 +28,8 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        # Same-namespace traffic only. namespaceSelector on the standard
-        # metadata.name label rather than a bare podSelector — identical
-        # semantics, and it also matches source pods whose labels the
-        # policy controller hasn't indexed (job pods, kubectl-run debug).
+        # Same-namespace only; namespaceSelector also matches source pods the
+        # policy controller has not indexed (job pods, kubectl-run debug).
         - namespaceSelector:
             matchLabels: {"kubernetes.io/metadata.name": {{ .Release.Namespace | quote }}}
       ports:
@@ -52,13 +50,9 @@ spec:
 {{- end }}
 {{- if and .Values.networkPolicies.enabled .Values.networkPolicies.egress.enabled }}
 ---
-# Worker egress allowlist (DEP-S1-04). Pods labelled mdx-egress: models may
-# reach: DNS, in-namespace stateful stores (Postgres/Redis), the
-# in-cluster OTel collector, and the model-endpoint CIDRs listed in values —
-# nothing else. A prompt injection that tries to exfiltrate to an arbitrary
-# host is stopped at the CNI. Hostname-based rules need a CNI that supports
-# FQDN policies (Cilium); until the hosting decision (docs/deploy/hosting-gap.md)
-# the allowlist is CIDR-based and refreshed by scripts/k8s/egress-allowlist.sh.
+# Pods labelled mdx-egress: models may reach only DNS, in-namespace stores,
+# the OTel collector and the model CIDRs from values (exfiltration stops at
+# the CNI). CIDR-based until a CNI with FQDN policies is chosen.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

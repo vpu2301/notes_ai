@@ -1,13 +1,7 @@
-"""POST /v1/completions/inline — Layer C ghost text (sprint 15, ADR-0036).
+"""POST /v1/completions/inline: Layer C ghost text.
 
-Flow: authz → feature gate → rate limit → (slot → inference) under the
-hard end-to-end budget → safety filter → 200 or 204. Silence (204) is a
-valid answer at every gate: a typing author must never see an error
-because ghost text failed to materialise.
-
-Scope: the sprint spec's ``autocomplete.suggest`` maps to the live
-``("autocomplete.read", "phrase")`` permission (the same one the
-suggest endpoint checks — see ADR-0036).
+Flow: authz, feature gate, rate limit, (slot + inference) under the budget, safety
+filter, then 200 or 204. Silence (204) is a valid answer at every gate.
 """
 
 from __future__ import annotations
@@ -39,10 +33,7 @@ router = APIRouter(prefix="/v1/completions", tags=["completions"])
 class InlineCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Context pointers only — carried into telemetry correlation, never
-    # dereferenced here: the completion depends solely on the typed text,
-    # and a foreign note_id resolves to nothing a caller couldn't already
-    # see (RLS), so a DB round-trip would buy latency, not security.
+    # Context pointers only: never dereferenced here (RLS makes a foreign note_id harmless).
     note_id: UUID
     section_key: str = Field(min_length=1, max_length=64)
     text_before_cursor: str = Field(min_length=1, max_length=1000)
@@ -52,7 +43,7 @@ class InlineCompletionRequest(BaseModel):
 class InlineCompletionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Echoed by SPA telemetry (shown/accepted/rejected) for correlation.
+    # Echoed by SPA telemetry for correlation.
     request_id: UUID
     completion: str
     model: str
@@ -97,8 +88,7 @@ async def inline_completion(
 
     started = time.perf_counter()
     try:
-        # Slot wait is INSIDE the budget: if both slots are busy past the
-        # deadline the request 204s instead of queueing a stale ghost.
+        # Slot wait is inside the budget.
         async with asyncio.timeout(settings.gen_timeout_ms / 1000.0):
             async with state.slot_pool:
                 result = await state.inference.complete(
@@ -111,8 +101,7 @@ async def inline_completion(
         return _no_completion("backend_error")
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    # Ghost text continues the sentence in place — leading ellipses/dashes
-    # the model likes to emit («...плечі») would render mid-word garbage.
+    # Leading ellipses/dashes the model emits would render mid-word.
     completion = result.text.strip().lstrip(".…-–— ").rstrip()
     if not completion:
         return _no_completion("empty")

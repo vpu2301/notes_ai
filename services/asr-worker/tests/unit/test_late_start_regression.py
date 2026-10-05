@@ -1,12 +1,5 @@
-"""Sprint F1 T5: the late-start twin (``m12_en_late_start``) in CI.
-
-The audio is synthesised from the fixture (the bundled probe clip at the
-fixture's levels, room noise on the microphone), VAD is the real Silero, and
-the decoder is scripted from the fixture's ``truth``: the first decode writes
-the prompt back over the quiet introduction, a second decode returns what
-was said in the slice it is given. The processor's echo guard and coverage
-step are the real ones.
-"""
+"""The late-start fixture (``m12_en_late_start``): synthesised audio, real Silero,
+scripted decoder; the processor's echo guard and coverage step are the real ones."""
 
 from __future__ import annotations
 

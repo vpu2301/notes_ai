@@ -1,13 +1,6 @@
-"""Conversation finalize → note draft via POST /v1/notes (sprint 14).
+"""Conversation finalize → note draft via POST /v1/notes, authored as the caller.
 
-The sprint-08 hand-off: drafts go through the EXISTING note-service
-surface, authored as the caller (their bearer), linked back via
-``source_session_id`` and ``transcript_segment_ids`` (the sprint-08
-field, fed by the segment UUIDs minted in the conversation transcript).
-
-Failure policy: the transcript is already persisted when this runs; a
-missed draft degrades to a ``conversation.draft.create_failed`` audit
-row — never a failed finalize.
+A missed draft degrades to a ``conversation.draft.create_failed`` audit row, never a failed finalize.
 """
 
 from __future__ import annotations
@@ -32,14 +25,7 @@ _DRAFT_TITLES = {
 
 
 def dialogue_text(transcript: list[dict[str, Any]], language: str) -> str:
-    """Render the diarized transcript as reviewable speaker-turn lines.
-
-    Names are the finalize-time mapping (neutral ``SPEAKER_N`` defaults
-    or the client-supplied naming); an unresolved speaker renders as the
-    honesty label ``UNKNOWN``, never silently merged into a participant.
-    ``language`` is accepted for symmetry with the draft titles; speaker
-    names are client-supplied and not localised.
-    """
+    """Render the diarized transcript as speaker-turn lines; unresolved speakers stay ``UNKNOWN``."""
     del language  # names are client-supplied, not localised
     lines: list[str] = []
     prev_key: object = object()
@@ -88,9 +74,7 @@ async def create_conversation_draft(
         await _fail("no_bearer")
         return
     if ctx.template_id is None or ctx.template_doc is None or not ctx.template_doc.sections:
-        # POST /v1/notes requires an explicit template; a conversation
-        # started without one keeps its transcript and the user creates
-        # the note manually. Documented in dictation-ws-v2.md.
+        # POST /v1/notes requires a template; without one the user creates the note manually.
         await _fail("no_template")
         return
 

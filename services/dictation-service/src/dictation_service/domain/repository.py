@@ -136,12 +136,7 @@ async def update_status(
 async def list_stale_sessions(
     conn: asyncpg.Connection, *, grace_seconds: float, limit: int
 ) -> list[asyncpg.Record]:
-    """Non-terminal sessions untouched for ``grace_seconds``, oldest first.
-
-    Candidates only — the reaper still has to confirm the owning worker is
-    actually dead before collecting any of them. A long pause on a healthy
-    worker lands in this list and is correctly skipped.
-    """
+    """Non-terminal sessions untouched for ``grace_seconds``, oldest first (candidates only)."""
     return list(
         await conn.fetch(
             """
@@ -162,13 +157,7 @@ async def list_stale_sessions(
 async def abandon_if_still_stale(
     conn: asyncpg.Connection, *, session_id: UUID, expected_status: str
 ) -> bool:
-    """CAS the session to ``abandoned``; True if this call is what moved it.
-
-    The status predicate keeps the reaper from stomping a session that came
-    back to life between the candidate scan and the write — a resumed
-    session must not be collected by a sweep that started before it
-    reconnected.
-    """
+    """CAS the session to ``abandoned``; True if this call moved it (guards a session that resumed meanwhile)."""
     result = await conn.execute(
         """
         UPDATE dictation_sessions

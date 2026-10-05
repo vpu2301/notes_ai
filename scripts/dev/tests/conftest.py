@@ -1,10 +1,4 @@
-"""Load the hyphenated gate scripts as importable modules for unit tests.
-
-``scripts/dev/check-no-os-environ.py`` cannot be imported with a normal
-``import`` (the hyphens aren't valid identifiers), so we load each by file
-path via importlib and expose them as pytest fixtures. Tests then call the
-real ``main()`` entry point directly — same code pre-commit and ``make`` run.
-"""
+"""Load the hyphenated gate scripts by file path and expose them as pytest fixtures."""
 
 from __future__ import annotations
 

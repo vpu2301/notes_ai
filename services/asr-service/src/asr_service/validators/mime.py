@@ -21,15 +21,8 @@ ALLOWED_MIME_TYPES: Final[frozenset[str]] = frozenset(
 
 
 def normalize_mime(mime_type: str) -> str:
-    """Reduce a Content-Type to its bare type/subtype.
-
-    Browsers declare the codec they actually picked: ``MediaRecorder``
-    hands us ``audio/webm;codecs=opus``, which is the same media type as
-    ``audio/webm`` plus a parameter (RFC 9110 §8.3). Comparing the raw
-    header against the allow-list rejected every browser recording, so
-    the parameters are dropped here — the codec is verified for real in
-    step 6 from the ffprobe output, not from what the client claims.
-    """
+    """Reduce a Content-Type to its bare type/subtype (``audio/webm;codecs=opus`` →
+    ``audio/webm``); the codec is verified in step 6 from ffprobe, not the header."""
     return mime_type.split(";", 1)[0].strip().lower()
 
 

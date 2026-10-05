@@ -1,22 +1,16 @@
-# ── notes chart — PRODUCTION overrides ───────────────────────────────
-#
-# Renders the production posture. What still needs the human's hosting
-# decision before `helm install` can run for real is listed in
-# docs/deploy/hosting-gap.md (cluster, GPU nodes, operators, domain/DNS,
-# Vault endpoint). Rendering + the config gates run on THIS file in CI
-# so drift is caught before any cluster exists.
+# PRODUCTION overrides; hosting is still open, so CI renders and gates this
+# file before any cluster exists.
 
 global:
   environment: production
   imageRegistry: registry.notes.internal/notes   # registry close to the cluster
 
 stateful:
-  # Operator-managed / external stores (CloudNativePG, Redis operator
-  # — or managed equivalents per hosting choice).
+  # Operator-managed / external stores.
   inCluster: false
 
 observability:
-  # kube-prometheus-stack owns prod metrics (docs/deploy/observability.md).
+  # kube-prometheus-stack owns prod metrics.
   otelCollector: {enabled: true, image: otel/opentelemetry-collector-contrib:0.100.0}
   prometheus: {enabled: false}
 
@@ -41,7 +35,7 @@ commonEnv:
   CORS_ALLOWED_ORIGINS: https://app.notes.example.invalid   # REPLACE with the SPA origin
   DB_APP_ROLE_DSN: postgresql://app_role@postgres:5432/notes
   DB_AUDIT_WRITER_DSN: postgresql://audit_writer@postgres:5432/notes
-  # ── Backend hardening — ON in production ───────────────────────────
+  # Backend hardening, ON in production
   MDX_REQUIRE_MFA: "true"
   MDX_MFA_ENROLMENT_ENABLED: "true"
   MDX_SESSION_REVOCATION_ENABLED: "true"
@@ -55,8 +49,7 @@ commonEnv:
 apps:
   note-worker:
     env:
-      # ADR-0060: off in production — model_tier_precision was 0/8 on the
-      # synthetic set (Q4) and is unmeasured on eval/notes/v2; gate 0.9.
+      # Off until model_tier_precision >= 0.9 (ADR-0060).
       MDX_NOTE_ENTITY_MODEL_TIER: "false"
   auth-service:
     replicas: 2
@@ -73,14 +66,13 @@ apps:
     env:
       MD_ASR_DEVICE: cuda
       MD_ASR_COMPUTE_TYPE: float16
-      # Baked model dir — NEVER a bare HF id in offline images (CLAUDE.md).
+      # Baked model dir; NEVER a bare HF id in offline images.
       MD_ASR_MODEL: /opt/models/whisper-large-v3
   dictation-service:
     gpu: true
     replicas: 2
     resources:
-      # One worker pod per GPU (device plugin); capacity math per the
-      # measured weight budget (MDX_PER_WORKER_MAX_SESSIONS).
+      # One worker pod per GPU.
       requests: {cpu: "2", memory: 6Gi, nvidia.com/gpu: 1}
       limits: {cpu: "6", memory: 10Gi, nvidia.com/gpu: 1}
     env:

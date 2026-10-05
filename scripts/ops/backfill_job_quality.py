@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""Fill ``transcription_jobs.quality`` for jobs that completed before 0067.
+"""Fill ``transcription_jobs.quality`` for jobs completed before 0067, through the
+worker's own read path. Only NULL rows are touched; prints counts, never content.
 
-    uv run python scripts/ops/backfill_job_quality.py            # dry run: counts only
-    uv run python scripts/ops/backfill_job_quality.py --apply    # write the summaries
-
-The admin "Meeting quality" dashboard reads the numbers-only summary the
-worker now writes on completion (asr_worker/quality.py). Older jobs have
-none; this reads each one's stored transcript through the worker's own read
-path (libs/storage + libs/crypto, AAD = job id), computes the same summary
-and writes it. Only jobs whose ``quality`` is NULL are touched, so a re-run
-is a no-op. It prints counts, never transcript content.
+    uv run python scripts/ops/backfill_job_quality.py [--apply]
 """
 
 from __future__ import annotations
@@ -37,8 +30,7 @@ async def run(
 
     reader = await create_pool(reader_dsn, application_name="quality-backfill")
     try:
-        # funnel_reader sees every tenant's job ids (0046/0067); the app role
-        # below reads each one inside its own tenant.
+        # funnel_reader lists every tenant's job ids; app_role reads each inside its tenant.
         jobs = await reader.fetch(
             """
             SELECT id, tenant_id FROM transcription_jobs

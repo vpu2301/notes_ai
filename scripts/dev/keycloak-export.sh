@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Re-extract the realm definition from the running Keycloak container.
-# Use this after making changes through the Keycloak admin UI to capture
-# them back into infra/keycloak/realm-export.json (the source of truth).
-#
-# Usage: scripts/dev/keycloak-export.sh
-#
-# The exported file overwrites infra/keycloak/realm-export.json. Diff before
-# committing — Keycloak's export adds many auto-generated IDs that we'd
-# rather not churn unless intentional.
+# Re-export the realm from the running Keycloak container into
+# infra/keycloak/realm-export.json. Diff before committing: the export adds
+# many auto-generated IDs.
 set -euo pipefail
 
 REALM="${REALM:-notes}"

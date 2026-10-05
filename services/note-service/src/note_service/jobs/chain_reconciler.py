@@ -1,16 +1,6 @@
-"""Daily amendment-chain reconciler — cron 04:30 UTC.
-
-For each tenant: load every note and its versions, run the same
-pure-Python chain verifier the property test uses, and:
-
-- INSERT one row into ``audit.note_chain_failures`` per anomaly.
-- Emit one ``note.chain_integrity_failure`` audit event per anomaly
-  (hash-chained — sprint-02 audit log is the ultimate source of truth).
-- Bump the ``mdx_notes_chain_integrity_check_failures_total``
-  counter.
-
-Designed to be safe to run from a cron job in-process or as a
-standalone CLI (``uv run python -m note_service.jobs.chain_reconciler``).
+"""Daily amendment-chain reconciler: per tenant, verify every note's chain; one
+``audit.note_chain_failures`` row and audit event per anomaly, plus the
+``mdx_notes_chain_integrity_check_failures_total`` counter. In-process or as a CLI.
 """
 
 from __future__ import annotations
@@ -96,8 +86,7 @@ async def _persist_anomalies(
     anomalies: Iterable,
     redis: object | None = None,
 ) -> None:
-    # Materialised: the body walks this three times, and a bare Iterable
-    # (a generator) would be empty on the second pass.
+    # Materialised: walked three times; a generator would be empty on the second pass.
     anomalies_list = list(anomalies)
     async with audit_pool.acquire() as conn, conn.transaction():
         for a in anomalies_list:
@@ -125,11 +114,8 @@ async def _persist_anomalies(
             severity=Severity.SEC,
         )
 
-    # Sprint-12: page the tenant's admins. ONE event per note, not one
-    # per anomaly — a broken chain typically trips several checks at
-    # once, and a user-facing storm is the last thing an integrity
-    # incident needs (E1). No recipient hints: the audience is
-    # role-derived, and notification-service resolves it.
+    # ONE event per note, not per anomaly (a broken chain trips several checks).
+    # No recipient hints: the audience is role-derived.
     if redis is not None and anomalies_list:
         await publish_event(
             redis,
@@ -164,22 +150,15 @@ async def reconcile_all() -> int:
         max_size=2,
     )
     audit_writer = AuditWriter(audit_pool)
-    # Sprint-12: admins hear about integrity failures. Its own client —
-    # the reconciler runs as a standalone job with no ServiceState.
+    # Its own client: the reconciler runs as a standalone job with no ServiceState.
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
     total = 0
     try:
         async with app_pool.acquire() as conn:
-            # PRE-EXISTING BUG (found running sprint 12 against a live DB):
-            # the column is `is_active`, not `active`, so this raised
-            # UndefinedColumnError and the daily reconciler never ran.
             tenants = await conn.fetch("SELECT id FROM tenants WHERE is_active = true")
         if not tenants:
-            # Still latent here: `tenants` is RLS-guarded and this is an
-            # UNSCOPED app_role connection, so the read can legitimately
-            # return zero rows and the job would "succeed" having checked
-            # nothing. Make that visible rather than silent — the real fix
-            # is a SECURITY DEFINER enumerator like migration 0051's.
+            # `tenants` is RLS-guarded and this connection is UNSCOPED, so zero rows is
+            # legitimate; say so rather than "succeed" having checked nothing.
             logger.warning(
                 "chain_reconciler.no_tenants_visible",
                 extra={"hint": "RLS may be filtering the tenants read; nothing was checked"},

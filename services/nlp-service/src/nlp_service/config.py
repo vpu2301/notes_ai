@@ -34,19 +34,13 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # ADR-0047: JSON list `[{"issuer", "jwks_url", "audience"}, …]`; the token's
+    # `iss` selects the entry. Unset = one-element list from the values above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     # ── CORS (SPA integration) ──────────────────────────────────────────
-    # Comma-separated browser origins allowed to call this service WITH
-    # credentials (the HttpOnly refresh cookie). Must be explicit origins —
-    # never "*" — because allow_credentials=True forbids the wildcard. Mirror
-    # of the auth-service allow-list (sprint A3).
+    # Explicit origins, never "*": allow_credentials=True forbids the wildcard.
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
         alias="CORS_ALLOWED_ORIGINS",
@@ -82,16 +76,12 @@ class Settings(BaseSettings):
     rate_limit_per_ip_rps: int = Field(default=50, alias="MDX_NLP_RATE_LIMIT_PER_IP_RPS")
 
     # ── Stage 2: punctuation ───────────────────────────────────────────
-    # `punctuation_model` is a HF id in dev (downloaded on first request) or
-    # the baked local dir "/opt/models/punctuation" in the pinned image, in
-    # which case the runtime is fully offline (ADR-0021, Sprint B1 Day 2).
+    # HF id in dev, or the baked local dir in the pinned image (offline, ADR-0021).
     punctuation_model: str = Field(
         default="oliverguhr/fullstop-punctuation-multilang-large",
         alias="MDX_NLP_PUNCTUATION_MODEL",
     )
-    # Build-time provenance (no-op for the runtime; the dir above selects the
-    # weights). Lets a running service log which pinned revision it was built
-    # from.
+    # Build-time provenance, logged only; the dir above selects the weights.
     punctuation_model_repo: str = Field(
         default="oliverguhr/fullstop-punctuation-multilang-large",
         alias="MDX_NLP_PUNCTUATION_MODEL_REPO",
@@ -115,20 +105,15 @@ class Settings(BaseSettings):
         default=0.65, alias="MDX_NLP_CONFIDENCE_MODERATE_BELOW"
     )
 
-    # ── Field extraction (sprint 13, ADR-0028) ─────────────────────────
-    # Below this, a typed field stays EMPTY and the prose stands. Raising
-    # it trades recall for safety; lowering it does the reverse and must
-    # be argued against the override-rate dashboard, not intuition.
-    # Pilot-tunable — changing it changes extraction output, so treat a
-    # change like a pipeline change (bump MDX_NLP_PIPELINE_VERSION).
+    # ── Field extraction (ADR-0028) ────────────────────────────────────
+    # Below this a typed field stays empty. Changing it changes extraction
+    # output: bump MDX_NLP_PIPELINE_VERSION.
     extraction_confidence_threshold: float = Field(
         default=0.8, ge=0.0, le=1.0, alias="MDX_NLP_EXTRACTION_CONFIDENCE_THRESHOLD"
     )
 
-    # ── Session revocation check (sprint 16) ────────────────────────────
-    # When on, current_user rejects tokens whose sid/sub is on the Redis
-    # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
-    # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
+    # ── Session revocation check (ADR-0040) ─────────────────────────────
+    # Rejects tokens on the Redis denylist; fail-OPEN on Redis outage.
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 

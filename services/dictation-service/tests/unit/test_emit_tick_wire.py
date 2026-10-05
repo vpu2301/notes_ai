@@ -1,24 +1,9 @@
-"""``_emit_tick`` must actually serialize a windower tick onto the wire.
+"""``_emit_tick`` serializes a windower tick onto the wire.
 
-Regression for the defect found by running conversation mode end-to-end
-against the deployed stack (sprint 14): the handler passed the
-windower's ``asr_models.WordTiming`` objects straight into the protocol
-models' ``words`` field, which is typed ``list[TokenTiming]``. The two
-are field-identical but are DIFFERENT classes, and pydantic v2 does not
-coerce one BaseModel instance into another — so constructing the
-``Partial``/``PartialV2`` raised ``ValidationError``.
-
-That exception escaped ``_emit_tick`` into ``_window_loop``, which ran
-as a bare ``create_task`` with no error path: the window loop died on
-the very FIRST partial of every session, in both protocol versions.
-The session kept accepting audio, kept looking healthy, stored its
-audio — and finalized an empty transcript. Nothing was logged.
-
-So these tests assert two things that together make that failure
-impossible to reintroduce silently:
-  1. a tick carrying real ``WordTiming``s serializes for v1 AND v2;
-  2. a tick that raises does not kill the loop, and repeated failures
-     fail the session loudly instead of transcribing nothing.
+Regression: ``WordTiming`` is not a ``TokenTiming`` (pydantic v2 does not
+coerce across models) and the window loop once died silently on the first
+partial. A tick with real timings serializes for v1 and v2; a raising tick
+does not kill the loop, and repeated failures fail the session loudly.
 """
 
 from __future__ import annotations
@@ -166,16 +151,7 @@ def test_window_loop_fails_the_session_when_every_tick_fails() -> None:
 
 
 def test_transcript_jsonb_decodes_from_a_json_string() -> None:
-    """``GET /dictate/sessions/{id}`` must survive asyncpg's jsonb shape.
-
-    No jsonb codec is registered on the pool (finalize writes the column
-    with ``json.dumps`` for exactly that reason), so the column reads
-    back as a JSON *string*. Passing it straight to the response model
-    raised ``ValidationError`` → 500 on every read of the endpoint. The
-    conversation review swallows that error and falls back to what it
-    rendered live, which is why it stayed hidden until there was a
-    transcript worth reading back.
-    """
+    """``GET /dictate/sessions/{id}`` must survive asyncpg returning jsonb as a JSON string."""
     from dictation_service.routers.sessions import _transcript_from_row
 
     segments = [{"text": "Доброго дня", "start_ms": 0, "end_ms": 980, "speaker": "S1"}]

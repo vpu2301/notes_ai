@@ -1,17 +1,4 @@
-"""Prompt-building for Whisper's ``initial_prompt`` across windows.
-
-First window: use the session's free-text vocabulary hint (an optional
-start_session param or config default — product terms, names, jargon).
-
-Subsequent windows: append the last N tokens of the FINALIZED transcript
-so Whisper has decoded-context biasing without re-feeding the audio.
-Voice-command tokens (sprint 05) are stripped — they're rendered text,
-not literal dictation.
-
-The combined prompt is capped at 224 tokens (Whisper's hard limit) via
-``truncate_to_tokens`` — a coarse whitespace tokenisation that's close
-enough to BPE for biasing purposes.
-"""
+"""Whisper ``initial_prompt`` per window: vocabulary hint + finalized tail, capped at 224 tokens."""
 
 from __future__ import annotations
 
@@ -63,5 +50,4 @@ def _strip_voice_commands(text: str) -> str:
     out = text
     for pat in _VOICE_COMMAND_PATTERNS:
         out = out.replace(pat, "")
-    # Also strip Whisper special tokens defensively.
     return re.sub(r"<\|[^|]+\|>", "", out).strip()

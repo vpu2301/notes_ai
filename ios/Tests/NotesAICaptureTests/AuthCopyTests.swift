@@ -1,11 +1,9 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-I1 I1-04 — every failure these flows can raise says something a
-/// person can act on, and the ones nobody planned for say where to look.
+/// Every auth failure says something a person can act on; unknown ones say where to look.
 final class AuthCopyTests: XCTestCase {
-    /// The codes `docs/api/error-codes.md` lists for the endpoints this app
-    /// calls while signing in, refreshing or stepping up.
+    /// The codes `docs/api/error-codes.md` lists for sign-in, refresh and step-up.
     private let handled = [
         "invalid_email", "code_invalid", "challenge_expired", "challenge_consumed",
         "too_many_attempts", "rate_limited", "rate_limiter_unavailable",
@@ -13,7 +11,7 @@ final class AuthCopyTests: XCTestCase {
         "mfa_enrolment_required", "auth_refresh_replay", "session_expired",
         "session_revoked", "no_refresh_token", "account_disabled", "no_workspace",
         "origin_not_allowed", "reauth_required", "challenge_required",
-        // The two the dual-issuer period adds (ADR-0047), and BE-0's.
+        // The two the dual-issuer period adds (ADR-0047), and the signup one.
         "use_password", "legacy_session", "email_not_verified",
     ]
 
@@ -53,9 +51,7 @@ final class AuthCopyTests: XCTestCase {
                           SessionLostReason.securityRevoked.message)
     }
 
-    /// An unknown failure is one generic sentence plus a short reference —
-    /// never the server's own wording or its code, which are written for a
-    /// developer reading a log.
+    /// An unknown failure is one generic sentence plus a short reference, never the server's wording.
     func testAnUnknownCodeCarriesTheRequestId() {
         let message = AuthCopy.message(for: error("something_new", status: 500,
                                                   detail: "unexpected", requestId: "req-9"))

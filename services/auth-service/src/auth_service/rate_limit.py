@@ -1,26 +1,4 @@
-"""Abuse caps for the unauthenticated password-recovery endpoints.
-
-Same fixed-window Redis shape every other service in this repo uses
-(``signing_service.rate_limit``, ``autocomplete_service.rate_limit``,
-``generation_service.domain.rate_limit``) and, like all of them,
-**fail-open**: if Redis is down, requests are allowed and a warning is
-logged. Locking every user out of account recovery because a cache is
-unavailable would be a worse outage than the abuse the limiter prevents.
-
-Two independent windows, because they stop different things:
-
-  * **per IP** — one host sweeping many addresses to find which ones
-    have accounts, or to generate mail volume from our domain.
-  * **per email** — many hosts (or one behind a proxy pool) aimed at a
-    single mailbox. Without this, a botnet can flood one person's inbox
-    with reset mail until they stop reading it, which is a real
-    technique for hiding the one notification that matters.
-
-The email key is hashed, not stored raw. Redis here is shared
-infrastructure with its own operational access, and a key namespace
-that enumerates every address that ever asked for a reset is a user
-list waiting to be dumped.
-"""
+"""Fail-open fixed-window caps for the password-recovery endpoints: per IP and per email (key hashed, never raw)."""
 
 from __future__ import annotations
 
@@ -74,14 +52,7 @@ class PasswordResetRateLimiter:
         return int(count) <= limit
 
     async def check(self, *, ip: str, email: str) -> bool:
-        """True when the request may proceed.
-
-        Both windows are bumped even when the first one already refused.
-        Short-circuiting would let an attacker who has exhausted the IP
-        budget keep hammering one mailbox for free once they rotate
-        address — the per-email counter has to see every attempt to be
-        the control it is meant to be.
-        """
+        """True when the request may proceed; both windows are bumped even when the first refused."""
         bucket = int(time.time() // _WINDOW_SECONDS)
         ip_ok = True
         if ip:

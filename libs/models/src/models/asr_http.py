@@ -1,14 +1,6 @@
-"""``ASRProvider`` over ``POST /v1/audio/transcriptions``-compatible servers.
+"""``ASRProvider`` over ``POST /v1/audio/transcriptions``-compatible servers (whisper.cpp, Speaches, vLLM, HF).
 
-Works against whisper.cpp's server (``--inference-path /v1/audio/transcriptions``),
-Speaches / faster-whisper-server, vLLM's Whisper route and a Hugging Face
-Inference Endpoint deployed behind an OpenAI-compatible handler. Requests
-``response_format=verbose_json`` with word granularity and accepts both
-response shapes in the wild: words nested per segment (whisper.cpp) and a
-top-level ``words[]`` (OpenAI / Speaches).
-
-Word timings are a contract (ADR-0037): ``warm_up`` sends the bundled probe
-clip and refuses the backend if the reply carries no ``words``.
+Accepts words nested per segment or top-level ``words[]``; ``warm_up`` refuses a backend without word timings (ADR-0037).
 """
 
 from __future__ import annotations
@@ -88,9 +80,7 @@ class HTTPASRProvider:
         register_secret(auth_token)
         register_secret(server_token)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
-        # Sprint TQ4: our own server's token (deploy/asr-server) rides its own
-        # header — behind a managed endpoint the gateway consumes
-        # `Authorization` (same rule as diar-server's x-mdx-diar-token).
+        # Own header: behind a managed endpoint the gateway consumes `Authorization`.
         if server_token:
             headers[SERVER_TOKEN_HEADER] = server_token
         self._client = client or httpx.AsyncClient(
@@ -143,9 +133,7 @@ class HTTPASRProvider:
         should_cancel: ShouldCancel | None = None,
         second_pass: bool = False,
     ) -> TranscriptionOutput:
-        # ``second_pass``: an OpenAI-compatible server takes no beam or
-        # conditioning switch; the caller already sends no prompt, which is
-        # the part of decision 3 this backend can honour.
+        # No beam/conditioning switch on this API; "no prompt" is the part of second_pass it can honour.
         del second_pass
         if not self._loaded:
             raise RuntimeError("HTTPASRProvider.warm_up() must succeed before transcribe()")
@@ -198,13 +186,8 @@ class HTTPASRProvider:
         should_cancel: ShouldCancel | None = None,
         group_seconds: float = 300.0,
     ) -> TranscriptionOutput:
-        """Sprint TQ2 T1: the worker's runs, one request per language group
-        (``run_groups``), each sent with its ``language`` and the prompt.
-
-        A group whose request fails after the warming wait is recorded in
-        ``diagnostics.backend_errors`` and becomes a coverage gap — unless
-        nothing has been decoded yet and the error is retryable, in which
-        case the job is retried whole (a cold endpoint is not a gap)."""
+        """One request per language group (``run_groups``). A failed group becomes a ``backend_errors`` coverage
+        gap, unless nothing was decoded yet and the error is retryable: then the job is retried whole."""
         started = time.monotonic()
         groups = plan_groups(runs, group_seconds)
         segments: list[Segment] = []
@@ -280,16 +263,10 @@ class HTTPASRProvider:
         if self._owns_client:
             await self._client.aclose()
 
-    # ── request / response ──────────────────────────────────────────────
     async def _transcribe_with_warming(
         self, pcm: np.ndarray, *, language: str, prompt: str | None
     ) -> TranscriptionOutput:
-        """Absorb a scale-to-zero wake-up: retry `warming` within cold_start_seconds.
-
-        asr-worker consumes Redis Streams (no delayed re-queue), so the wait
-        happens here; the job's attempt is not consumed. Anything else
-        surfaces immediately for the job policy to classify.
-        """
+        """Retry `warming` within cold_start_seconds (Redis Streams has no delayed re-queue); anything else surfaces."""
         waited = 0.0
         while True:
             try:
@@ -429,9 +406,7 @@ def _word(raw: dict[str, Any]) -> WordTiming | None:
 
 
 def _merge_punctuation(words: list[WordTiming]) -> list[WordTiming]:
-    """whisper.cpp emits "," / "." as their own tokens; faster-whisper glues
-    them to the preceding word ("three,"). Match the in-process shape so
-    downstream turn/paragraph logic sees one convention."""
+    """whisper.cpp emits punctuation as its own tokens; glue it to the preceding word like faster-whisper does."""
     merged: list[WordTiming] = []
     for w in words:
         if merged and _PUNCT_ONLY.match(w.text):
@@ -452,11 +427,8 @@ def _raw_text(raw: dict[str, Any]) -> str:
 
 
 def _merge_subwords(raw_list: list[dict[str, Any]]) -> list[WordTiming]:
-    """whisper.cpp's ``words`` are decoder tokens: one that starts with a
-    space begins a word, one that does not continues it (" Nah" + "en",
-    " Д" + "обр" + "ого"). Sprint TQ2 found the transcript's words — and
-    so WER, word timings and clip replay — were sub-word pieces. Joined
-    here: first token's start, last token's end, the lowest probability."""
+    """whisper.cpp ``words`` are decoder tokens (a leading space begins a word); join them: first start, last end,
+    lowest probability."""
     merged: list[WordTiming] = []
     for raw in raw_list:
         w = _word(raw)
@@ -479,8 +451,7 @@ def _words(raw_list: Any) -> list[WordTiming]:
     if not isinstance(raw_list, list):
         return []
     items = [x for x in raw_list if isinstance(x, dict)]
-    # The space-marked token convention (whisper.cpp) is recognised by its
-    # leading spaces; OpenAI / Speaches words carry none and are words.
+    # Leading spaces mark whisper.cpp's token convention; OpenAI / Speaches words carry none.
     if any(_raw_text(x)[:1].isspace() for x in items):
         return _merge_punctuation(_merge_subwords(items))
     return _merge_punctuation([w for w in (_word(x) for x in items) if w])
@@ -499,7 +470,6 @@ def _to_output(
     segments: list[Segment] = []
     seg_diagnostics: list[SegmentDiagnostics] = []
     if not raw_segments and (body.get("text") or top_words):
-        # Server returned text + words but no segments: one segment.
         text = str(body.get("text") or " ".join(w.text for w in top_words)).strip()
         start = top_words[0].start_ms if top_words else 0
         end = top_words[-1].end_ms if top_words else _ms(body.get("duration", audio_seconds))
@@ -509,8 +479,7 @@ def _to_output(
             continue
         start, end = _ms(raw.get("start")), _ms(raw.get("end"))
         end = max(start, end)
-        # Sprint TQ1 T5: the decoder's own numbers for every segment it
-        # returned, empty ones included; None where the server omits them.
+        # Recorded for every returned segment, empty ones included.
         seg_diagnostics.append(
             SegmentDiagnostics(
                 start_ms=start,
@@ -535,9 +504,7 @@ def _to_output(
     language = _normalise_language(
         body.get("language") or body.get("detected_language"), requested_language
     )
-    # Sprint TQ4: a server that names no language (Parakeet has no language
-    # identification) has not detected one — "en" above is only a fallback,
-    # and the worker must not take it for the recording's language.
+    # A server that names no language (Parakeet) has not detected one; "en" is only a fallback.
     detected = requested_language == AUTO_LANGUAGE and bool(
         body.get("language") or body.get("detected_language")
     )
@@ -548,10 +515,8 @@ def _to_output(
         infer_seconds=infer_seconds,
         beam_size=1,
     )
-    # The whole file is decoded in one language on this path.
     seg_diagnostics = [d.model_copy(update={"language": language}) for d in seg_diagnostics]
-    # Sprint TQ4: words with no probability (a transducer server may send
-    # none) read as 1.0 above; the low-confidence gate (G3) must know.
+    # Words with no probability read as 1.0 above; the low-confidence gate must know.
     raw_words = list(body.get("words") or []) + [
         w for seg in raw_segments if isinstance(seg, dict) for w in (seg.get("words") or [])
     ]

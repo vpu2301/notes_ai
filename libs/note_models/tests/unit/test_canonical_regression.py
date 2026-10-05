@@ -1,10 +1,4 @@
-"""Hash-chain regression guard (canonical bytes).
-
-The version hash-chain commits to ``canonical_content_bytes``. The S13
-metadata contract must not change a single byte of any pre-S13
-content's canonical form — frozen fixtures pin that. New-shape content
-must canonicalize deterministically.
-"""
+"""Hash-chain regression guard: frozen fixtures pin the canonical bytes of older content."""
 
 from __future__ import annotations
 

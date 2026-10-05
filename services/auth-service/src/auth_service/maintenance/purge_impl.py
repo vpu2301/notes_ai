@@ -1,23 +1,7 @@
-"""The account purge, in one place (IDX-A5 F6 / IDX-B3 D).
+"""The account purge, shared by the scheduled job and the operator CLI.
 
-Imported by both callers — the scheduled job in :mod:`.jobs` and the
-operator CLI `scripts/ops/idx-purge-deleted-identities.py`. An account
-deletion that behaved differently depending on whether a timer or a
-person triggered it is the worst kind of bug to find out about from a
-subject-access request.
-
-What "purge" means, and does not:
-
-* Credentials are destroyed — TOTP secret, recovery codes, password hash.
-* The address is rewritten to ``deleted:<id>``, so it can never match a
-  login lookup again and the real address is free for reuse.
-* Notes keep their author id. A note written in a shared workspace is
-  that workspace's history; deleting the person must not silently rewrite
-  what colleagues can still see. The author renders as unknown because
-  ``profile_of_subs`` returns no row for a ``deleted`` identity.
-* The audit trail survives. It is hash-chained, so a deletion inside it
-  would break verification for every event after — and by this point it
-  refers to nothing but an opaque UUID.
+Credentials are destroyed; the address becomes ``deleted:<id>``; notes keep
+their author id; the hash-chained audit trail survives.
 """
 
 from __future__ import annotations
@@ -49,15 +33,9 @@ async def due_identities(
 
 
 async def purge_one(conn: asyncpg.Connection, identity_id: UUID) -> None:
-    """Everything for one identity, in one transaction.
-
-    Per-identity rather than one big transaction so a crash leaves
-    earlier identities purged and later ones untouched, and a re-run is a
-    no-op for the ones already done.
-    """
+    """Everything for one identity, in one transaction (a re-run is a no-op for ones already done)."""
     async with conn.transaction():
-        # Credentials first: if anything later fails, the account is
-        # already unusable rather than half-shredded but still loggable-in.
+        # Credentials first: a partial failure leaves the account unusable, not loggable-in.
         await conn.execute("DELETE FROM identity_totp WHERE identity_id = $1", identity_id)
         await conn.execute(
             "DELETE FROM identity_recovery_codes WHERE identity_id = $1", identity_id
@@ -73,8 +51,7 @@ async def purge_one(conn: asyncpg.Connection, identity_id: UUID) -> None:
             "UPDATE tenant_memberships SET status = 'suspended' WHERE user_sub = $1",
             identity_id,
         )
-        # The address goes last, because it is what makes the row findable
-        # if any of the above needs re-running.
+        # The address goes last: it keeps the row findable for a re-run.
         await conn.execute(
             """
             UPDATE identities

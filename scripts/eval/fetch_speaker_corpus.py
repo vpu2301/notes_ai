@@ -1,13 +1,7 @@
-"""Download the speaker gold-set audio into ``eval/speakers/v1/audio/``.
+"""Download the speaker gold-set audio into ``eval/speakers/v1/audio/``, verified
+against ``audio_sha256``; in-house files need the eval role (never a vendor, never git).
 
     uv run python scripts/eval/fetch_speaker_corpus.py [--only ami-] [--pin]
-
-Public files (AMI, VoxConverse) come from their official hosts over
-HTTPS; ``<archive-url>#<member>`` (VoxConverse) downloads the archive
-once into ``audio/_archives/`` and extracts the member. In-house files (``s3://notes-eval/...``) need the eval role:
-``aws s3 cp`` with the caller's credentials — never a vendor, never git.
-Every file is checked against ``audio_sha256``; ``--pin`` records the
-hash and duration of files that have none yet (first fetch only).
 """
 
 from __future__ import annotations

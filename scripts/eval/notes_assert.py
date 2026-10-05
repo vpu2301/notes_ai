@@ -1,26 +1,11 @@
 #!/usr/bin/env python3
-"""Regression checklists for the document engine (Summary Engine v2, Q1 T7).
+"""Regression checklists for the document engine: run the pipeline arm on every corpus
+meeting with an ``<id>.assertions.json`` and check the findings as data.
 
     make eval-notes-assert BACKEND=dev_mac CORPUS=eval/notes/v2
 
-For every meeting ``<id>.json`` in the corpus that has a checklist —
-``<id>.assertions.json`` beside it, or in ``tests/fixtures/eval/notes/
-assertions/`` — run the pipeline arm and check the audit's findings as
-data. ``r01_de_zeit_was_jetzt`` is the 2026-09-22 audit itself; its
-transcript is third-party content and lives only in the eval bucket and
-``scripts/eval/local/`` (gitignored). The repo holds its checklist.
-
-A checklist may say which sprint owns each check (``"sprint": {check:
-"Q3"}``); the output reports it, so a failing check that belongs to a
-later sprint reads as planned rather than as a regression.
-
-Each check prints its error-taxonomy codes (``scripts/eval/taxonomy.py``,
-``docs/eval/error-taxonomy.md``); a checklist may pin them per check under
-``"codes"``.
-
-Output is check names, indices, codes and PASS/FAIL — never the string a check
-looks for, so a run against the real corpus is safe to paste anywhere.
-Exit 1 when any check fails.
+Output is check names, indices, taxonomy codes and PASS/FAIL, never the string a check
+looks for. Exit 1 when any check fails.
 """
 
 from __future__ import annotations
@@ -157,7 +142,7 @@ def check(
     if checklist.get("every_line_cited"):
         add("every_line_cited", all(ln.get("fact_ids") for ln in content), "every_line_cited")
 
-    # F2 — statements, not quotes.
+    # Statements, not quotes.
     language = (meeting or {}).get("language", "en")
     if checklist.get("no_copied_lines") and meeting is not None:
         sentences = transcript_sentences(meeting)
@@ -176,8 +161,7 @@ def check(
     if checklist.get("no_marks"):
         text = "\n".join([produced.get("note_text") or "", *(ln["text"] for ln in lines)])
         add("no_marks", not _MARKS.search(text), "no_marks")
-    # F3 — figures with their values and qualifiers, the presenter line,
-    # the contact line.
+    # Figures with values and qualifiers, the presenter line, the contact line.
     if "figures" in checklist:
         from notes_scoring import _name_match, _value
 
@@ -197,9 +181,7 @@ def check(
         rows = [ln for ln in lines if ln.get("kind") == "figure"]
         add("figures_cited", bool(rows) and all(ln.get("fact_ids") for ln in rows), "figures")
     if "presenter_line" in checklist:
-        # SQ3 T1/T2: the presenter is named in paragraph 1 ("With Name (role
-        # with organisation, qualifier)"), from the same verified fields the
-        # F3 line had; the check is that every one of them is there.
+        # The presenter is named in paragraph 1 from the verified fields; every one must be there.
         want = checklist["presenter_line"].split(":", 1)[-1]
         name, _, rest = want.partition(",")
         fields = [name.strip(), *re.split(r"[(),]", rest)]
@@ -211,15 +193,13 @@ def check(
         )
     if checklist.get("contact_line"):
         add("contact_line", any(ln.get("kind") == "next_step" for ln in lines), "contact_line")
-    # F3 amendment after r03 — adverts cut, the guest line, chapters, and
-    # the overview as two paragraphs of prose.
+    # Adverts cut, the guest line, chapters, the overview as prose.
     stats = produced.get("stats") or {}
     for i, reason in enumerate(checklist.get("excluded_reasons", [])):
         reasons = {r[2] for r in stats.get("excluded_ranges") or [] if len(r) > 2}
         add(f"excluded_reasons[{i}]", reason in reasons, "excluded_reasons")
     if "guest_line" in checklist:
-        # SQ3 T2: the guest is named once, among who speaks in paragraph 1
-        # ("Es sprechen …, als Gast Name (…)") — not merely mentioned.
+        # The guest is named once among who speaks in paragraph 1, not merely mentioned.
         add("guest_line", _has(speaker_clause(lines), checklist["guest_line"]), "guest_line")
     headed = [
         s
@@ -230,7 +210,7 @@ def check(
         add("chapters_min", len(headed) >= int(checklist["chapters_min"]), "chapters_min")
     if "overview" in checklist:
         add_overview(checklist["overview"], produced, add)
-    # D1 — at most this many lint findings per taxonomy code.
+    # At most this many lint findings per taxonomy code.
     if checklist.get("lint") and meeting is not None:
         from notes_scoring import lint_produced
 
@@ -291,17 +271,11 @@ def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> No
         )
 
 
-# `--backend scripted`: the engine tests' deterministic stand-in for the
-# model (no network, same answers every run) — what CI's notes-engine job
-# runs, so a checklist check that passes there fails only when the ENGINE
-# changed, never the model.
+# The deterministic stand-in model CI runs: a check that passes there fails
+# only when the ENGINE changed.
 SCRIPTED = "scripted"
-# What the engine guarantees whatever a model says: no label or default name
-# for a named speaker, none of the audit's strings, every line cited. The
-# other checks measure what a model extracted and are shown, not gated.
+# What the engine guarantees whatever a model says; other checks are shown, not gated.
 ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited", "no_marks"})
-# F3 amendment: code writes the overview as prose and cuts adverts by cue,
-# whatever the model says.
 ENGINE_CHECK_NAMES = frozenset(
     {
         "overview.prose_paragraphs_min",

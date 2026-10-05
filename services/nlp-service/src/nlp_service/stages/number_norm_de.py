@@ -1,24 +1,9 @@
-"""German number normalization.
+"""German number normalization (pass through when doubtful, ADR-0015).
 
-Same contract as the UK/EN modules — tag + pattern-match, and pass
-through unchanged whenever the reading is doubtful (ADR-0015). Two
-things make German structurally different from the other two:
-
-1. **Numerals are single compound tokens.** "einhundertvierzig",
-   "zweiundzwanzig", "dreitausendfünfhundert" arrive from Whisper as ONE
-   word, so the parser is word-internal (``_parse_compound``) rather
-   than a multi-token run. The unit-position order is inverted too:
-   "vierundzwanzig" is *four-and-twenty*.
-2. **Folding a bare numeral is riskier, not safer.** As in EN, a
-   standalone spelled numeral passes through as words; it is only
-   rewritten as digits when a unit follows or the numeral is a compound
-   (contains und/hundert/tausend). "Der Gast kam um acht" keeps its
-   "acht" — that is prose, not a measurement.
-
-Paired "X über Y" readings are the one place where an aggressive
-rewrite silently corrupts a dictated figure, so the slash form is only
-emitted with an explicit mmHg unit, a cue word in front, or two
-plausible paired values — exactly the gate the UK/EN modules use.
+Numerals are single compound tokens with inverted unit order
+("vierundzwanzig"), so parsing is word-internal. A bare spelled numeral
+stays words unless a unit follows or it is a compound. "X zu Y" becomes a
+slash only with a unit, a cue word, or two plausible paired values.
 """
 
 from __future__ import annotations
@@ -26,8 +11,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
-# Canonical German unit vocabulary. Keys are what a speaker says (or
-# what Whisper writes); values are what lands in the note.
+# Spoken form → what lands in the note.
 _UNITS: Final[dict[str, str]] = {
     "mg": "mg",
     "milligramm": "mg",
@@ -57,8 +41,7 @@ _UNITS: Final[dict[str, str]] = {
     "%": "%",
 }
 
-# Multi-word units, longest first. Matched as a token sequence after a
-# number ("120 Millimeter Quecksilbersäule" → "120 mmHg").
+# Multi-word units, longest first, matched after a number.
 _UNIT_SEQUENCES: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
     (("millimeter", "quecksilbersäule"), "mmHg"),
     (("millimeter", "quecksilber"), "mmHg"),
@@ -187,9 +170,7 @@ def _parse_compound(word: str) -> int | None:
 
 
 def _is_compound(word: str) -> bool:
-    """True when the numeral carries its own structure ("zweiundzwanzig",
-    "einhundertvierzig"). A bare "acht" is not — folding it would rewrite
-    prose."""
+    """True for a structured compound ("zweiundzwanzig"); a bare "acht" is prose."""
     w = _fold(word)
     return ("und" in w or "hundert" in w or "tausend" in w) and not w.isdigit()
 
@@ -206,12 +187,7 @@ def _digit_value(token: str) -> int | None:
 
 
 def _parse_number(tokens: list[str], i: int) -> tuple[int | None, int, bool]:
-    """Return ``(value, tokens_consumed, foldable)``.
-
-    ``foldable`` says whether the value may be WRITTEN as digits on its
-    own: digits already are, and a compound numeral is unambiguous. A
-    bare spelled numeral is not — see the module docstring.
-    """
+    """Return ``(value, tokens_consumed, foldable)``; a bare spelled numeral is not foldable."""
     if i >= len(tokens):
         return None, 0, False
     tok = tokens[i]
@@ -224,11 +200,7 @@ def _parse_number(tokens: list[str], i: int) -> tuple[int | None, int, bool]:
 
 
 def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
-    """Spoken decimal tail as a literal digit string.
-
-    "null fünf" → "05". Summing would collapse it to 5 and silently turn
-    5,05 into 5,5 — a dropped digit silently corrupts a dictated figure.
-    """
+    """Spoken decimal tail as a literal digit string ("null fünf" → "05"; summing would drop the zero)."""
     digits: list[str] = []
     cursor = i
     while cursor < len(tokens):
@@ -345,9 +317,7 @@ def normalize_de(text: str, *, decimal_separator: str, bp_separator: str) -> str
             continue
 
         # ── Rate: "achtzig pro Minute" → "80/min" ───────────────────
-        # The rate phrase is itself the disambiguator, so a bare spelled
-        # numeral is safe to fold here (pulse and respiratory rate are
-        # dictated exactly this way).
+        # The rate phrase disambiguates, so a bare spelled numeral is safe to fold.
         if (
             v1 is not None
             and i + c1 + 1 < n

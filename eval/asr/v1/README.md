@@ -2,7 +2,7 @@
 
 Real recordings with human-corrected transcripts, scored by
 `scripts/eval/asr_eval.py` against the criteria TR-01 to TR-13
-(`docs/sprints/transcript-summary-quality/01-quality-criteria.md` §2).
+(`scripts/eval/taxonomy.py`).
 
 **Only this README and `manifest.json` are in git.** Everything else is
 personal data or third-party content and lives in the private eval bucket.
@@ -23,8 +23,8 @@ eval/asr/v1/
     alignment.json       # forced alignment of the reference, cached (TR-08)
 ```
 
-Formats are the pydantic models in `scripts/eval/asr_gold.py`. The labelling
-rules, with worked examples per language, are in `docs/eval/asr-labelling.md`.
+Formats are the pydantic models in `scripts/eval/asr_gold.py`; the labelling
+rules (verbatim-lite) are encoded in `scripts/eval/asr_scoring.py`.
 
 ## Fetch (eval role)
 

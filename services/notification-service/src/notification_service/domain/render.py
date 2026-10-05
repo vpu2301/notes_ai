@@ -1,17 +1,7 @@
-"""Renders a fact into the content-free text a user actually sees.
+"""Renders a fact into the content-free text a user sees.
 
-The content boundary (no note content, no personal data — pointers only,
-ADR-0031) is enforced by ALLOW-LISTING payload keys per category rather
-than by scrubbing what a producer sent. Scrubbing is a losing game — it
-can only remove the patterns someone thought of, and a person's surname
-is not a pattern. An allow-list inverts the burden: a producer that adds
-`author_name` to a payload finds it silently unused here, and adding it
-to a template requires an explicit edit that shows up in the diff a
-privacy review reads (ADR-0031).
-
-Every string that reaches this module is additionally clamped, so even
-an allow-listed field cannot become an exfiltration channel by being
-very long.
+Content boundary (pointers only, ADR-0031) is enforced by ALLOW-LISTING payload keys
+per category, never by scrubbing; every field is also length-clamped.
 """
 
 from __future__ import annotations
@@ -24,40 +14,23 @@ from notification_events import Category, NotificationEvent
 
 from .catalog import spec_for
 
-# The ONLY payload keys any template may read, per category. A key not
-# listed here is invisible to rendering no matter what a producer sends.
+# The ONLY payload keys rendering may read, per category.
 ALLOWED_PAYLOAD_KEYS: Final[dict[Category, frozenset[str]]] = {
     Category.NOTE_FINALIZED: frozenset({"note_code"}),
     Category.NOTE_AMENDED: frozenset({"note_code", "version"}),
     Category.NOTE_CHAIN_FAILURE: frozenset({"note_code", "detected_at", "check_name"}),
     Category.NOTE_SHARED_WITH_YOU: frozenset({"note_code", "shared_by_display"}),
-    # Sprint 20. `link_label` is what the SENDER typed when minting the
-    # link ("Tom @ Client"), never recipient input; `kind` is a closed
-    # vocabulary. The recipient's comment is read in the app only.
+    # `link_label` is sender-typed, never recipient input; `kind` is a closed vocabulary.
     Category.NOTE_RECIPIENT_RESPONDED: frozenset({"note_code", "link_label", "kind"}),
     Category.NOTE_LINK_STATUS_CHANGED: frozenset({"note_code", "link_label", "delivery_status"}),
     Category.SHARE_REPORTED: frozenset({"note_code", "reason"}),
-    # Counts and durations only. The transcript is the sensitive content
-    # here, and no amount of it — not even a leading fragment as a
-    # "preview" — is admissible: this row is read back by the digest
-    # renderer too.
+    # Counts and durations only; no transcript fragment, ever.
     Category.DICTATION_COMPLETED: frozenset({"duration_ms", "segments"}),
-    # Same counts-only rule as a dictation. Deliberately NOT the audio
-    # filename: a user naming an upload `ivanenko_2026-04-12.wav`
-    # would put a surname and a date in a notification title.
+    # Counts only; NOT the audio filename (may carry a surname and a date).
     Category.TRANSCRIPTION_COMPLETED: frozenset({"duration_ms", "segments", "language", "model"}),
-    # `error_kind` is a closed vocabulary (corrupt_audio / timeout /
-    # gpu_oom). `error_detail` is NOT admitted: it is free text built
-    # from an exception, and an exception that quotes the transcript it
-    # choked on would carry note content straight into the feed.
+    # `error_kind` is a closed vocabulary; `error_detail` is free text that may quote the transcript.
     Category.TRANSCRIPTION_FAILED: frozenset({"error_kind"}),
-    # No third party ever appears in this one — it is about the
-    # recipient's own account. `requested_by_role` is the closed
-    # vocabulary from the mfa_reminders CHECK (tenant_admin | auditor),
-    # not a name: who filed an access-review finding is between the
-    # reviewer and the audit log, and naming them turns a security ask
-    # into an interpersonal one. `reminder_count` is admitted so a
-    # second ask reads as a second ask.
+    # `requested_by_role` is a closed vocabulary, never the reviewer's name.
     Category.SECURITY_MFA_REMINDER: frozenset({"requested_by_role", "reminder_count"}),
     Category.SYSTEM_DIGEST: frozenset({"count", "period"}),
 }
@@ -68,8 +41,7 @@ _REMINDER_ROLE_LABELS: Final[dict[str, str]] = {
     "auditor": "An auditor",
 }
 
-# Field clamp. Long enough for a note code or an error kind, far too
-# short to carry a narrative.
+# Field clamp: enough for a note code, too short for a narrative.
 MAX_FIELD_LEN: Final = 120
 
 
@@ -88,12 +60,7 @@ def safe_payload(event: NotificationEvent) -> dict[str, str]:
 
 
 def _code(fields: Mapping[str, str]) -> str:
-    """The note's human-facing code — a pointer, never a title.
-
-    Note titles are NOT used: a user-authored title routinely contains
-    the very content this boundary exists to keep out of an email
-    subject line.
-    """
+    """The note's code; never the user-authored title (content boundary)."""
     return fields.get("note_code", "—")
 
 
@@ -103,8 +70,7 @@ def deep_link(event: NotificationEvent, *, base_url: str) -> str:
 
 
 def _money(cents: object) -> str:
-    """Cents as money. Model pricing is quoted in USD, and so is this —
-    a budget line in a unit nobody recognises is one nobody acts on."""
+    """Cents as USD."""
     try:
         return f"${int(str(cents)) / 100:.2f}"
     except (TypeError, ValueError):
@@ -151,7 +117,6 @@ def render_title(event: NotificationEvent) -> str:
             return "Automatic note writing has paused"
         case Category.SYSTEM_DIGEST:
             return f"Your notifications: {fields.get('count', '0')}"
-    # Unreachable: spec_for() has already rejected unknown categories.
     raise KeyError(event.category)
 
 
@@ -256,10 +221,7 @@ def notification_deep_link(resource_type: str, resource_id: UUID, *, base_url: s
         return f"{base}/dictations/{resource_id}"
     if resource_type == "transcription_job":
         return f"{base}/asr/jobs/{resource_id}"
-    # The MFA reminder's resource is the USER — and the only useful place to
-    # send them is enrolment, not a profile page. `{sub}` is deliberately not
-    # in the path: the SPA enrols whoever is signed in, and a link carrying
-    # somebody's id would be a link that looks actionable by anyone.
+    # MFA reminder: link to enrolment; `{sub}` deliberately not in the path.
     if resource_type == "user":
         return f"{base}/mfa"
     return base

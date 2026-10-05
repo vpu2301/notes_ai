@@ -1,12 +1,8 @@
-"""Second factors on the native identity (IDX-A5 F2/F3).
+"""Second factors on the native identity.
 
-Route note: ``POST /auth/mfa/verify`` means the **login challenge** here —
-the unauthenticated step between a passed first factor and a session.
-Sprint 16 used that path to mean "complete my enrolment"; that behaviour
-moved to ``POST /auth/mfa/totp/confirm``, which the pack defines anyway.
-The old router still serves the old meaning in ``keycloak`` mode, so no
-client breaks before the cut-over; ``main.py`` mounts exactly one of the
-two.
+``POST /auth/mfa/verify`` means the login challenge here (enrolment confirm is
+``/auth/mfa/totp/confirm``); the `mfa` router gives the path its old meaning in
+keycloak mode, and ``main.py`` mounts exactly one of the two.
 """
 
 from __future__ import annotations
@@ -171,8 +167,7 @@ async def verify(body: ChallengeVerifyRequest, request: Request, response: Respo
         is_new_identity=False,
     )
     if result.recovery_codes_left is not None:
-        # The client shows "you have N left" and, at zero, insists on a
-        # new set — the user has just spent their last way back in.
+        # The client shows "N left" and insists on a new set at zero.
         return out.model_copy(
             update={
                 "recovery_codes_left": result.recovery_codes_left,
@@ -228,9 +223,7 @@ async def confirm(
     except ApiError as exc:
         raise as_problem(exc) from exc
 
-    # Turning MFA on means every other session predates the second factor.
-    # Ending them is what makes enrolment a remedy for "I think somebody
-    # is in my account", rather than a lock fitted to a door left open.
+    # Every other session predates the second factor: end them.
     revoked = await services.account.revoke_other_sessions(
         identity, current_sid=_sid_or_none(claims), reason="mfa_change"
     )

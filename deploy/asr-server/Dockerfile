@@ -1,12 +1,6 @@
-# asr-server — Parakeet-TDT-0.6B-v3 (NeMo) behind /v1/audio/transcriptions.
-#
-# Arm C of the TQ4 bake-off (ADR-0067). Built from the repo root:
-#
+# asr-server: Parakeet-TDT-0.6B-v3 (NeMo) behind /v1/audio/transcriptions.
 #   DOCKER_BUILDKIT=1 docker build -f deploy/asr-server/Dockerfile -t asr-server:dev .
-#
-# The weights are baked at a pinned revision and digest-checked; nothing is
-# downloaded at runtime (HF_HUB_OFFLINE=1). The repo is not gated, so no
-# token is needed; the secret mount is honoured if given (rate limits).
+# Weights baked at a pinned revision and digest-checked; nothing downloads at runtime.
 
 # ── Stage 1: fetch + verify the .nemo ──────────────────────────────────
 FROM python:3.12-slim AS parakeet-fetch

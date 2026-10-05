@@ -1,9 +1,7 @@
 """FastAPI dependency: 401 + WWW-Authenticate on every failure mode.
 
-NOTE: deliberately *no* ``from __future__ import annotations`` here. With
-PEP 563 deferred evaluation, FastAPI cannot resolve ``Depends(current_user)``
-when ``current_user`` is a fixture-local closure — ``typing.get_type_hints``
-runs at introspection time in module scope and can't see the local.
+Deliberately no ``from __future__ import annotations``: under PEP 563 FastAPI cannot resolve a fixture-local
+``Depends(current_user)``.
 """
 
 from collections.abc import Callable

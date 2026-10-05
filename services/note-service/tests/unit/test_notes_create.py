@@ -1,9 +1,4 @@
-"""POST /v1/notes — create path with the DB/audit boundary stubbed.
-
-Exercises the real ``notes.create_note`` handler with the auth
-dependency overridden — no infra required (mirrors
-``test_notes_section_labels``).
-"""
+"""POST /v1/notes — the real ``create_note`` handler, auth overridden, DB/audit stubbed."""
 
 from __future__ import annotations
 

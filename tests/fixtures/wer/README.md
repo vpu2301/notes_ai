@@ -33,4 +33,4 @@ Each subdirectory holds a manifest + audio file pair:
 
 Files are **not committed** until the content lead approves them.
 For local testing, generate synthetic audio via the team-internal TTS
-pipeline (see `docs/onboarding.md § wer-fixtures`).
+pipeline.

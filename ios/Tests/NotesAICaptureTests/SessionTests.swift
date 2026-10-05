@@ -2,7 +2,7 @@ import CryptoKit
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-I1 — the session this phone keeps, and how it is spent.
+/// The session this phone keeps, and how it is spent.
 final class SessionTests: XCTestCase {
 
     // MARK: - The store
@@ -39,8 +39,7 @@ final class SessionTests: XCTestCase {
             try await store.save(Fixtures.storedSession())
             XCTFail("a refused write must not look like a stored session")
         } catch {
-            // The message names the Keychain, because that is what the
-            // person has to go and unlock.
+            // The message names the Keychain.
             XCTAssertTrue(error.localizedDescription.contains("Keychain"))
         }
     }
@@ -108,8 +107,7 @@ final class SessionTests: XCTestCase {
         try await store.setGate(enabled: true)
         let sealed = storage.record!
 
-        // Another gate key entirely — what an attacker who copied the item
-        // to another phone would be working with.
+        // Another gate key entirely (a copied item on another phone).
         let otherGate = FakeGate()
         _ = try otherGate.create()
         let other = SessionStore(storage: InMemorySessionStorage(seed: sealed), gate: otherGate)
@@ -193,10 +191,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testSigningInAgainKeepsTheGateOn() async throws {
-        // Signing out drops the key this launch held but leaves the gate
-        // item — the person asked for a gate, not for one session. The
-        // next sign-in must be sealed too, or the preference has silently
-        // turned itself off.
+        // Signing out drops the key but leaves the gate item; the next sign-in must be sealed too.
         let storage = InMemorySessionStorage()
         let gate = FakeGate()
         let store = SessionStore(storage: storage, gate: gate)
@@ -228,9 +223,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testASessionWithNoRefreshTokenIsRefused() async {
-        // What a server that took this app for a browser answers: the token
-        // is in a `Set-Cookie` the app has nowhere to put. Signing in
-        // "successfully" here would end fifteen minutes later.
+        // A server that took this app for a browser: the token is in a `Set-Cookie`.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -325,10 +318,7 @@ final class SessionTests: XCTestCase {
         let results = try? await [first, second]
 
         XCTAssertEqual(results?.count, 2)
-        // Two refreshes in total: one because the app had no access token
-        // at all, one shared by the two 401s. Not three, which is what a
-        // client without single-flight would send — and what the server
-        // would read as a replayed refresh token.
+        // Two refreshes: one for no access token, one shared by the two 401s. Not three (a replay).
         XCTAssertEqual(StubServer.requests(to: "/auth/refresh").count, 2)
     }
 
@@ -419,12 +409,7 @@ final class SessionTests: XCTestCase {
     // MARK: - The password that still lives here, during `dual`
 
     func testTheMigrationLeavesTheSavedPasswordAlone() {
-        // IDX-I1 wrote this migration to delete the password vault. IOS-1
-        // holds it back: during the dual-issuer period that password is
-        // still how every pre-existing user signs in, so deleting it would
-        // sign them out of their own phone in the release that was meant
-        // to add email codes. The default `purgeCredentials` is a no-op,
-        // and that default is the behaviour under test.
+        // The migration is held back during `dual`: the default `purgeCredentials` is a no-op.
         let defaults = UserDefaults(suiteName: "migration-\(UUID().uuidString)")!
         var cookiePurges = 0
 
@@ -438,13 +423,8 @@ final class SessionTests: XCTestCase {
     }
 
     func testTheSavedPasswordSurvivesTheMigrationInTheRealKeychain() throws {
-        // The acceptance criterion the other way round from IDX-I1's:
-        // against the real Keychain, a seeded password user still has
-        // their password after the first launch of this build.
-        //
-        // `CredentialStore.save` needs enrolled biometry for
-        // `.biometryCurrentSet`; where there is none — a plain simulator —
-        // there is nothing to seed and nothing to assert.
+        // Against the real Keychain a seeded password survives the first launch.
+        // `CredentialStore.save` needs enrolled biometry; a plain simulator has none.
         try XCTSkipUnless(Biometrics.name != nil, "no enrolled biometry on this device")
         defer { CredentialStore.delete() }
         try CredentialStore.save(email: "olena@acme.example", password: "hunter2")
@@ -458,9 +438,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testTheOldCutOverStillWorksWhenA4A5TurnsItBackOn() {
-        // The delete side is kept and kept tested, because IDX-A4/A5 turns
-        // it on by changing one default. A migration nobody exercised for
-        // two sprints is one nobody trusts on the day it matters.
+        // The delete side stays tested: it is turned on by changing one default.
         let defaults = UserDefaults(suiteName: "migration-\(UUID().uuidString)")!
         var credentialPurges = 0
 
@@ -528,12 +506,8 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testALongRecordingCostsExactlyOneRefresh() async throws {
-        // A native session idles for thirty days, not thirty minutes, so
-        // it arms no keepalive. A 45-minute recording followed by an
-        // upload therefore looks like this: nothing at all while
-        // recording, then one refresh because the access token expired,
-        // then the upload. (The Keycloak half of `dual` does arm one —
-        // `DualSessionTests`.)
+        // A native session arms no keepalive: nothing while recording, one
+        // refresh for the expired access token, then the upload.
         let storage = InMemorySessionStorage(seed: Fixtures.record())
         let client = makeClient(storage: storage)
         StubServer.install { request in
@@ -549,9 +523,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testAnUploadRefreshesBeforeItStartsWhenTheTokenIsNearlySpent() async throws {
-        // `expires_in: 60` — under the five-minute floor `submitJob` asks
-        // for, so the upload must take a fresh token with it rather than
-        // discover the expiry with the audio already on the wire.
+        // `expires_in: 60` is under `submitJob`'s five-minute floor: the upload must take a fresh token.
         let storage = InMemorySessionStorage(seed: Fixtures.record())
         let client = makeClient(storage: storage)
         let refreshes = Counter()
@@ -577,9 +549,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testTheKeycloakLoginShapeStillParses() throws {
-        // `/auth/login` answers the three token fields and nothing else.
-        // It must decode — and then be refused for having no refresh token,
-        // which is a different failure with a different fix (IDX-A4).
+        // `/auth/login` answers the three token fields only: must decode, then be refused for no refresh token.
         let data = Fixtures.json(["access_token": "at", "expires_in": 900, "token_type": "Bearer"])
         let dto = try JSONDecoder().decode(AuthResultDTO.self, from: data)
 

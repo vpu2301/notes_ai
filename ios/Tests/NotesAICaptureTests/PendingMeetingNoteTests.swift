@@ -1,12 +1,8 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 34 — the scratchpad must not lose a character.
-///
-/// The one failure this feature cannot have is losing what somebody typed
-/// in a room they will not be in again. These tests are that promise:
-/// written to disk, survives a relaunch, comes back in the right workspace,
-/// and merges with another device rather than overwriting it.
+/// The scratchpad must not lose a character: on disk, survives a relaunch,
+/// right workspace, merges rather than overwrites.
 final class PendingMeetingNoteTests: XCTestCase {
     private var dir: URL!
 
@@ -102,8 +98,7 @@ final class PendingMeetingNoteTests: XCTestCase {
     }
 
     func testMergeDoesNotDuplicateALineTheServerAlreadyHas() {
-        // A reconnect re-sends what it already sent; the divider must not
-        // fill the note with copies.
+        // A reconnect re-sends; the divider must not fill the note with copies.
         let merged = PendingMeetingNotes.merge(remote: "- Ask about budget\nTom hesitated",
                                                local: "ask about budget.\nnew thought")
         XCTAssertEqual(merged, "- Ask about budget\nTom hesitated\n\n---\nnew thought")

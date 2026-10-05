@@ -1,5 +1,4 @@
-# promtool unit tests for the Layer C / replay alerts.
-# Run: make check-alert-rules
+# promtool unit tests for the Layer C / replay alerts (make check-alert-rules).
 
 rule_files:
   - ../layer-c-replay-search.yml

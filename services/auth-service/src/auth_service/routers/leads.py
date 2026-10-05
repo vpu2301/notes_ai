@@ -1,15 +1,7 @@
-"""`POST /auth/leads` — the shared page's fake door (Sprint 19).
+"""`POST /auth/leads` — the shared page's lead capture.
 
-A recipient of a shared note clicked "Create your own workspace free",
-landed on `/join?ref=<code>` and left an address. No account is created
-this sprint: the row IS the result, and the rate at which rows appear
-per CTA click is the number Sprint 21 is gated on.
-
-No authentication, no session, no mail. Two things the endpoint owes the
-person and the product: the address goes into one table and nowhere
-else (not the audit log, not a log line), and a repeat submit is not a
-repeat lead. The e-mail is validated for shape only — nothing is sent to
-it, so nothing needs proving.
+No auth, no mail. The address goes into one table and nowhere else (not the
+audit log, not a log line); a repeat submit is not a repeat lead.
 """
 
 from __future__ import annotations
@@ -33,10 +25,9 @@ from ..domain import referrals
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/leads", tags=["auth"])
 
-# Per IP per hour. Generous for a person, useless for a script.
+# Per IP per hour.
 _PER_IP_PER_HOUR = 20
-# A ref code is 12 base32 characters (note-service share_links); a
-# missing one is a public link's CTA and still a lead.
+# A ref code is 12 base32 characters; a missing one is still a lead.
 _REF_PATTERN = r"^[a-z2-7]{12}$"
 
 
@@ -45,8 +36,7 @@ class LeadRequest(BaseModel):
 
     email: EmailStr
     ref: str | None = Field(default=None, pattern=_REF_PATTERN)
-    # A checkbox on the page. Only `true` is accepted: an unchecked box
-    # must be a refused request, not a stored lead with a false flag.
+    # Only `true` is accepted: an unchecked box is a refused request.
     consent: Literal[True]
 
 

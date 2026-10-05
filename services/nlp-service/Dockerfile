@@ -1,30 +1,19 @@
 # ── nlp-service runtime image ──────────────────────────────────────
-# CPU-only. The punctuation transformer is pinned to an immutable HF
-# revision, checksum-verified, and BAKED at build time (Sprint B1 Day 2,
-# ADR-0021). There is no first-request download and no Hugging Face egress
-# at runtime (HF_HUB_OFFLINE=1) — the previous "download on first request"
-# behaviour is removed.
+# CPU-only. The punctuation model is pinned, checksum-verified and baked at
+# build time; no HF egress at runtime (ADR-0021, docs/models/PINS.md).
 
 # ── Stage 1: fetch + verify the punctuation weights (build-time only) ──
 FROM python:3.12-slim AS model-fetch
 
-# Pins resolved from the HF API on 2026-06-10. We verify model.safetensors
-# (what transformers loads by preference) against its LFS SHA-256.
+# model.safetensors (what transformers loads) is verified against its LFS SHA-256.
 ARG MDX_NLP_PUNCTUATION_MODEL_REPO=oliverguhr/fullstop-punctuation-multilang-large
 ARG MDX_NLP_PUNCTUATION_MODEL_REVISION=345e80adc07e761d3a35feafd20f2f44a151f453
 ARG MDX_NLP_PUNCTUATION_MODEL_SHA256=270f27d7398a5fdad43bdf9953ea532fbe62c5f5227ed5f5316e9bd64a9255e1
 
 RUN pip install --no-cache-dir "huggingface_hub[cli]==0.25.2"
 
-# Fetch only what transformers needs (skip the duplicate onnx/, tf, and
-# pytorch_model.bin payloads to keep the image lean), then fail-closed on a
-# SHA-256 mismatch of the safetensors weights.
-#
-# The safetensors payload is ~2.2 GB and several images fetch models in
-# parallel, so a mid-stream ChunkedEncodingError is a routine build failure
-# on a home link. Retry: hf_hub resumes from the .incomplete file in this
-# same layer, so each attempt continues where the last one broke. If every
-# attempt fails the file is absent/short and sha256sum -c still fails closed.
+# Fetch only what transformers needs (skip onnx/, tf, pytorch_model.bin), then
+# fail closed on a SHA-256 mismatch. Retried: hf_hub resumes from .incomplete.
 ENV HF_HUB_DOWNLOAD_TIMEOUT=60
 RUN --mount=type=secret,id=hf_token \
     set -eu; \
@@ -67,9 +56,7 @@ COPY pyproject.toml uv.lock /build/
 COPY libs/ /build/libs/
 COPY services/nlp-service/ /build/services/nlp-service/
 
-# Punctuation model is heavy; install transformers + torch via pip here
-# rather than from the workspace pyproject (which keeps the workspace
-# lockfile small).
+# transformers + torch are installed here, not via the workspace pyproject, to keep the lockfile small.
 # torch is a large wheel; bump uv's 30s default so slow links don't time out
 ENV UV_HTTP_TIMEOUT=600
 RUN uv pip install --system --no-cache \
@@ -83,15 +70,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/secret \
     /build/libs/note_models
 
-# This image is CPU-only (the punctuation model runs under torch.no_grad on
-# CPU — nothing here ever touches a GPU), so torch comes from the PyTorch CPU
-# index. The default PyPI torch drags in ~2.9 GB of nvidia-* CUDA wheels that
-# are never loaded; besides bloating the image, that download is what broke
-# builds mid-stream on a home link. unsafe-best-match lets everything except
-# torch still resolve from PyPI.
-#
-# Retried like the model fetches above: uv has no internal retry for a
-# connection dropped mid-body, and losing one here costs the whole build.
+# +cpu torch lives only on the PyTorch index (PyPI torch drags in ~2.9 GB of
+# CUDA wheels), hence unsafe-best-match. Retried: uv has no mid-body retry.
 RUN for attempt in 1 2 3 4 5; do \
       uv pip install --system --no-cache \
         --target /deps \
@@ -105,17 +85,14 @@ RUN for attempt in 1 2 3 4 5; do \
       [ "${attempt}" = "5" ] && exit 1; \
     done
 
-# Bake the verified punctuation weights from the fetch stage.
 COPY --from=model-fetch /opt/models/punctuation /opt/models/punctuation
 
 LABEL mdx.model.repo="${MDX_NLP_PUNCTUATION_MODEL_REPO}" \
       mdx.model.revision="${MDX_NLP_PUNCTUATION_MODEL_REVISION}" \
       mdx.model.sha256="${MDX_NLP_PUNCTUATION_MODEL_SHA256}"
 
-# Editable workspace libs install as .pth files, which Python only honors
-# in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
-# /deps is on PYTHONPATH; it re-registers /deps as a site dir so the editable
-# .pth files (asr_models, audit, observability, …) actually activate.
+# Editable libs install as .pth files, honoured only in a site dir; sitecustomize
+# re-registers /deps as one so they activate.
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
 ENV PYTHONPATH=/deps \

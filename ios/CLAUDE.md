@@ -6,7 +6,8 @@
 - The Xcode project is hand-written (`NotesAICapture.xcodeproj/project.pbxproj`,
   Xcode 16 synchronized-folder format): every file under
   `Sources/NotesAICapture` is picked up automatically, so adding a Swift file
-  needs no project edit.
+  needs no project edit. `clients/Shared` (code identical to the macOS app) is a
+  second synchronized folder compiled into the same module.
 - `scripts/check.sh` type-checks and compiles the module against the iOS SDK
   with `swiftc` alone; it works even when Xcode has no iOS platform
   downloaded. Run it after every change.

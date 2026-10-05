@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""DEP-S0 smoke eval: five synthetic meetings through one chat backend.
+"""Smoke eval: five synthetic meetings through one chat backend; every ``evidence``
+quote must be a verbatim transcript substring or the run fails.
 
-    make eval-smoke BACKEND=dev_mac        # founder's Mac (ENV=dev)
-    ENV=staging make eval-smoke BACKEND=hf_eu
+    make eval-smoke BACKEND=dev_mac
 
-Per meeting the backend must return a schema-valid JSON object with a
-summary, ≥ N action items and ≥ 1 decision, where every `evidence` quote is
-a verbatim substring of the transcript (the S2 provenance invariant, checked
-early). A quote that is not in the transcript is a hallucination; the run
-fails if any meeting has one. Latency and token counts are recorded to
-docs/eval/smoke-<date>-<backend>.json. No prompt or transcript text is logged.
+Writes docs/eval/smoke-<date>-<backend>.json. No prompt or transcript text is logged.
 """
 
 from __future__ import annotations

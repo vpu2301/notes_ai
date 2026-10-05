@@ -1,18 +1,9 @@
 """POST /v1/audio-clips + GET /v1/audio-clips/{id} — replay clip pipeline.
 
-Sprint 15, ADR-0037. Creation: resolve the note's audio → fetch the
-ENCRYPTED object → decrypt whole (GCM envelope has no range mode) →
-slice PCM by ms (+300 ms pad) → encode Ogg/Opus → store encrypted in the
-ephemeral clips bucket → answer with a tokenised stream URL (5-min TTL).
-Clips are derivatives, never a second permanent copy of the recording:
-Redis registry TTL kills the pointer, bucket ILM (1 day) kills the
-ciphertext, and the tenant-KEK envelope means deletion crypto-shreds
-them with everything else.
-
-Honesty contract: 410 + problem code when the audio cannot be served —
-``no_audio_source`` / ``audio_not_retained`` / ``audio_erased`` /
-``audio_partially_retained`` (truncated ring, range predates the
-surviving window). Caps: span ≤ 60 s, 30 clips/user/hour (429).
+ADR-0037: fetch the encrypted object, decrypt whole (GCM has no range mode),
+slice, encode Ogg/Opus, store encrypted in the ephemeral clips bucket, answer
+with a tokenised stream URL. Clips are derivatives (Redis TTL + bucket ILM).
+410 + problem code when the audio cannot be served; caps on span and per-user rate.
 """
 
 from __future__ import annotations
@@ -47,9 +38,7 @@ router = APIRouter(prefix="/v1/audio-clips", tags=["audio-clips"])
 class CreateClipRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Note-anchored (deviation from the sprint spec's session_or_audio_ref,
-    # ADR-0037): the purpose gate and author check live on the note; a raw
-    # session ref would bypass both.
+    # Note-anchored: the purpose gate and author check live on the note.
     note_id: UUID
     start_ms: int
     end_ms: int
@@ -108,7 +97,7 @@ async def create_clip(
 
     started = time.perf_counter()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404 (0016).
+        # A private note the caller was not given is a 404.
         note = access.require_view(await repo.fetch_note(conn, note_id=body.note_id), claims)
         is_author = _enforce_read_purpose(note, claims, purpose)
         try:
@@ -117,8 +106,7 @@ async def create_clip(
             state.clips_created_metric.add(1, {"source_kind": "unknown", "outcome": exc.code})
             raise _gone(exc) from None
 
-    # Truncated sessions: the requested range must lie inside the window
-    # that survived the tmpfs ring (everything earlier is gone for good).
+    # The range must lie inside the window that survived the tmpfs ring.
     if body.start_ms < source.retained_from_ms:
         state.clips_created_metric.add(
             1, {"source_kind": source.kind, "outcome": "audio_partially_retained"}

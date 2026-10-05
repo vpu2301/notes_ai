@@ -13,8 +13,7 @@ export interface NameCorrection {
 
 const MARKED = /([A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+(?:\s[A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+)?) \(\?\)/gu;
 
-/** The names the engine respelled in this generation, once each, and the
- *  names it doubted ("Emil (?)"). */
+/** Names the engine respelled (once each) and the ones it doubted ("Emil (?)"). */
 export function correctionsOf(rows: GeneratedItem[]): { fixed: NameCorrection[]; doubted: string[] } {
   const fixed = new Map<string, NameCorrection>();
   const doubted = new Set<string>();
@@ -28,15 +27,8 @@ export function correctionsOf(rows: GeneratedItem[]): { fixed: NameCorrection[];
   return { fixed: [...fixed.values()], doubted: [...doubted] };
 }
 
-/**
- * Names the engine respelled, for the author to accept or reject
- * (Summary Engine v2, Q5).
- *
- * Accept: the name becomes a workspace glossary term with the heard
- * spelling as a mishearing — the next generation spells it that way
- * without asking anyone. Reject: the line goes back to what the recording
- * heard. Nothing is learned without a person saying so.
- */
+/** Accept = glossary term with the heard spelling as a mishearing; reject = line reverts.
+ *  Nothing is learned without a person saying so. */
 export function CorrectionsPanel({
   noteId,
   rows,

@@ -1,14 +1,10 @@
-# hf_eu_diar — speaker diarization (ADR-0052 shape B).
-#
-# Our own image (deploy/diar-server): pyannote community-1 with the
-# weights baked and digest-verified. Unlike the chat/ASR endpoints there
-# is no upstream `model.repository` to serve — the model ships inside the
-# image, which is also what keeps the hub unreachable at runtime.
+# hf_eu_diar: speaker diarization (ADR-0052), our own deploy/diar-server image
+# with the weights baked (no upstream `model.repository` to serve).
 name: notes-diar-{env}
 task: custom
 type: protected
 model:
-  # Recorded for provenance; the weights are baked, not fetched here.
+  # Provenance only; the weights are baked.
   repository: pyannote/speaker-diarization-community-1
   revision: 3533c8cf8e369892e6b79ff1bf80f7b0286a54ee   # docs/models/PINS.md
   framework: pytorch
@@ -23,8 +19,7 @@ model:
         MDX_DIAR_V2_BATCH: "32"
         PYANNOTE_METRICS_ENABLED: "false"   # pyannote.audio 4.x defaults this ON
         HF_HUB_OFFLINE: "1"
-        # MDX_DIAR_SERVER_TOKEN comes from the endpoint's secret store
-        # (docs/deploy/inventory.md); the process refuses to start without it.
+        # From the endpoint's secret store; the process refuses to start without it.
 provider:
   vendor: aws
   region: eu-west-1

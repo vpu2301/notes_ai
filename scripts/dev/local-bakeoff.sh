@@ -1,23 +1,12 @@
 #!/usr/bin/env bash
-# Sprint L1 T3 — the local bake-off: every candidate model on one corpus,
-# through the production pipeline, one report.
+# The local bake-off: every candidate model on one corpus through the
+# production pipeline; `scripts/eval/local_bakeoff_report.py` folds the
+# day's manifest entries into one report.
 #
-#   make local-bakeoff                                     # synthetic corpus, default candidates
-#   make local-bakeoff CORPUS=scripts/eval/local/real      # r01–r03 (never committed)
-#   make local-bakeoff CANDIDATES="gemma3:4b qwen3:8b"
+#   make local-bakeoff [CORPUS=...] [CANDIDATES="gemma3:4b qwen3:8b"]
 #
-# For each tag: fit check (memory budget from dev-model.sh), pull, create
-# `notes-chat-<slug>` from the 16K Modelfile, run `make eval-notes` and
-# `make eval-notes-assert` against it while sampling `ollama ps`, and keep
-# one manifest entry. `scripts/eval/local_bakeoff_report.py` turns every
-# entry of the day into docs/eval/notes-local-bakeoff-<date>.md.
-#
-# The "before" row: --before <tag> (default gemma3:4b) also runs that tag
-# with the small-model profile OFF — the engine as it was before L1.
-#
-# Env: DEV_MAC_DOCKER_GIB overrides the Docker limit the budget subtracts
-# (e.g. the VM's real size when the stack is down); BAKEOFF_DATE pins the
-# report date so a run over midnight lands in one file.
+# --before <tag> also runs that tag with the small-model profile OFF.
+# Env: DEV_MAC_DOCKER_GIB (Docker limit the budget subtracts), BAKEOFF_DATE.
 set -uo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
@@ -37,8 +26,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# The harness runs on the host: config/models.yaml's default URL is the
-# Docker-side name, which does not resolve here.
+# The harness runs on the host; the Docker-side default URL does not resolve here.
 export DEV_MAC_MODEL_URL="${DEV_MAC_MODEL_URL:-http://localhost:11434/v1}"
 export PYTHONUNBUFFERED=1  # per-meeting lines as they happen, through tee
 DATE="${BAKEOFF_DATE:-$(date -u +%Y-%m-%d)}"
@@ -46,8 +34,7 @@ OUT="scripts/eval/local/bakeoff-$DATE"; mkdir -p "$OUT"
 corpus_name="$(basename "$CORPUS")"
 say_() { printf '%s\n' "$*"; }
 
-# Default candidates for 16–24 GB. Newer families are appended only when the
-# registry actually serves the tag (a HEAD on the manifest, no download).
+# Default candidates for 16-24 GB; newer families only when the registry serves the tag.
 if [ -z "$CANDIDATES" ]; then
   CANDIDATES="gemma3:4b qwen3:8b gemma3:12b-it-qat qwen3:14b llama3.1:8b"
   for t in gemma4:e4b gemma4:12b qwen3.6:4b qwen3.6:8b qwen3.6:14b; do
@@ -99,7 +86,7 @@ run_candidate() {  # tag profile(on|off)
   label="$slug"
   eval_log="$OUT/$slug-$corpus_name.eval.log"; assert_log="$OUT/$slug-$corpus_name.assert.log"; sampler_log="$OUT/$slug-$corpus_name.ps.log"
   say_ ""; say_ "── $tag (profile $profile) → $model"
-  # Fit by the size table before pulling gigabytes for nothing; again after the pull with the real size.
+  # Fit check before pulling, again after with the real size.
   if ! DEV_MAC_BASE_MODEL="$tag" bash scripts/dev/dev-model.sh fit; then
     write_entry "$slug" "$tag" "$model" "$profile" "skipped: over budget" "" "" "" "" "$corpus_name" "$ARM"; return
   fi
@@ -113,9 +100,7 @@ run_candidate() {  # tag profile(on|off)
     write_entry "$slug" "$tag" "$model" "$profile" "skipped: over budget after pull" "" "" "" "" "$corpus_name" "$ARM"; return
   fi
   local small="true"; [ "$profile" = "off" ] && small="false"
-  # `ollama ps` lists a resident model under the first name that shares its
-  # digest (notes-chat and notes-chat-<slug> are the same layers), so the
-  # sampler matches the ID, not the name.
+  # `ollama ps` lists a resident model under the first name sharing its digest: match the ID.
   local model_id; model_id="$(ollama list 2>/dev/null | awk -v m="$model:latest" '$1==m {print $2; exit}')"
   ( while :; do ollama ps 2>/dev/null | awk -v id="$model_id" 'NR>1 && (id=="" || $2==id) {print $3" "$4"|"$5" "$6" "$7}'; sleep 10; done ) >"$sampler_log" 2>/dev/null &
   sampler_pid=$!

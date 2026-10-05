@@ -119,7 +119,7 @@ in the recording's language, and `language_id` reads `unavailable`.
 **Mac binaries for TQ4.** `parakeet.cpp` and the FluidAudio CoreML CLI, both named in the
 sprint, are **not pinned or used**. The Mac arm runs the same `deploy/asr-server` code as the
 endpoint, with its ONNX runtime, so the Mac and EU-GPU paths share one server. The FluidAudio
-measurement that Sprint C5 needs is open (`docs/eval/asr-bakeoff-2026-11.md`).
+measurement that Sprint C5 needs is open.
 
 ## How the pin is enforced
 
@@ -150,7 +150,7 @@ product entrusted with confidential audio.
 
 Whisper is not yet startup-verified — `MD_ASR_MODEL_SHA256` is logged as
 provenance only. Extending the same assertion to the ASR weights is a
-follow-up (todo.md).
+follow-up.
 
 `HF_TOKEN` is consumed only as a BuildKit `--secret` (`--mount=type=secret,id=hf_token`)
 and never lands in any layer, env, or log. The public Systran/oliverguhr

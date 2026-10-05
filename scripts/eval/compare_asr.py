@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-"""Sprint TQ1 T4 — the nightly ASR gate (ADR-0019, amended).
+"""The nightly ASR gate (ADR-0019): per language, ``wer`` may not rise by more
+than ``DEFAULT_MAX_DROP`` and the TR-02 / TR-03 metrics may not worsen.
 
-    python scripts/eval/compare_asr.py --baseline docs/eval/asr-baseline-inproc_cpu_asr-test.json \\
-        --current docs/eval/asr-<date>-inproc_cpu_asr-test-nightly.json [--max-drop '{"wer": 0.01}']
+    python scripts/eval/compare_asr.py --baseline <baseline.json> --current <nightly.json> [--max-drop '{"wer": 0.01}']
 
-Per language (de, uk, en) and for the whole split:
-
-- ``wer`` may not rise by more than 1.0 pp (``0.010``);
-- TR-02 (``halluc_chars_per_nonspeech_min``, ``artefact_hits``) and TR-03
-  (``speech_coverage``, ``unexplained_gaps``) may not worsen.
-
-The tolerances are ``DEFAULT_MAX_DROP``; ``--max-drop`` (or ``MAX_DROP`` in
-the environment, JSON) overrides single metrics. A comparison it cannot make
-(another backend, split or corpus manifest; a language measured on one side
-only) is refused with exit 2 — never read as a pass. Exit 1 on a regression.
-Output is metric names and numbers.
+Exit 1 on a regression; exit 2 when the comparison cannot be made (never a pass).
 """
 
 from __future__ import annotations

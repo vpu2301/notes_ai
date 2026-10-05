@@ -1,9 +1,8 @@
 # ruff: noqa: F811 — the imported `rig` fixture is injected by name.
-"""Turn-level correction (Sprint 30): reassign, reset, fold order.
+"""Turn-level correction: reassign, reset, fold order.
 
-Runs on the Sprint 28 speaker-edit rig: an in-memory repository scoped by
-tenant the way RLS scopes it, over a four-segment transcript
-(S1 "Hello there." · S2 "Hi." · S3 "Yes." · S1 "Good.").
+Runs on the speaker-edit rig: an in-memory tenant-scoped repository over a
+four-segment transcript (S1 "Hello there." · S2 "Hi." · S3 "Yes." · S1 "Good.").
 """
 
 from __future__ import annotations
@@ -345,7 +344,7 @@ def test_a_note_building_read_is_not_an_opening(
     assert marked == [job]
 
 
-# ── Sprint 31: name provenance ────────────────────────────────────────
+# ── Name provenance ───────────────────────────────────────────────────
 
 
 def test_clearing_a_channel_name_is_remembered_and_sources_persist(rig: SimpleNamespace) -> None:

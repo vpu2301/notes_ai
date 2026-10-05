@@ -1,10 +1,5 @@
-"""RLS isolation for ``tenant_memberships`` (Sprint 12).
-
-Contract: an ``app_role`` connection scoped to tenant B must never see the
-membership rows of tenant A; writes to memberships are ``tenant_writer``-only
-(app_role holds SELECT only). Mirrors ``test_rls_isolation.py`` fixtures.
-
-Skipped unless ``RUN_DB_INTEGRATION=1`` with the dev stack up + migrated.
+"""RLS isolation for ``tenant_memberships`` (app_role SELECT only, writes are ``tenant_writer``). Skipped unless
+``RUN_DB_INTEGRATION=1``.
 """
 
 from __future__ import annotations

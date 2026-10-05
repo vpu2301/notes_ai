@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 31 — which side of a call a speaker was heard on, and names the
-/// server gave from the microphone channel. (No capture changes on iOS.)
+/// Which side of a call a speaker was heard on, and names from the microphone channel.
 final class CallSidesTests: XCTestCase {
     func testResultSidesAndSourcesDecodeAndOlderResultsStillDo() throws {
         let result = try JSONDecoder().decode(TranscriptResult.self, from: Data("""

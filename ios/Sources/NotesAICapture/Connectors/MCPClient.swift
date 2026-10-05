@@ -1,10 +1,7 @@
 import Foundation
 
-/// A minimal Model Context Protocol client over the Streamable HTTP
-/// transport: JSON-RPC 2.0 POSTed to one URL, replies either as plain JSON
-/// or as a short SSE stream. Enough to connect (`initialize`), keep the
-/// session id, and list the server's tools — which is what the Connectors
-/// tab needs to show that HubSpot, Notion, … are really reachable.
+/// A minimal MCP client over Streamable HTTP (JSON-RPC 2.0, JSON or SSE replies):
+/// `initialize`, keep the session id, list tools.
 struct MCPClient {
     static let protocolVersion = "2025-06-18"
 
@@ -29,8 +26,7 @@ struct MCPClient {
         case rpc(code: Int, message: String)
         case badResponse(String)
 
-        /// What the connector row says. The server's own words and codes
-        /// stay in the error for a log; the person gets a sentence.
+        /// What the connector row says.
         var errorDescription: String? {
             switch self {
             case .unauthorized: return "This connector needs you to sign in."

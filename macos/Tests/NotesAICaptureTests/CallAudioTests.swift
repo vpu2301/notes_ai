@@ -3,10 +3,7 @@ import CoreAudio
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 31 — channel-aware capture: microphone on ch0, call audio on ch1.
-/// Nothing here touches audio hardware or asks for a permission: the Core
-/// Audio tap sits behind `SystemAudioSource`, and `TapSink` is fed
-/// synthetic buffers.
+/// Channel-aware capture: microphone on ch0, call audio on ch1. No hardware or permission: `TapSink` is fed synthetic buffers.
 final class CallAudioTests: XCTestCase {
     private var scratch: URL!
 
@@ -26,9 +23,7 @@ final class CallAudioTests: XCTestCase {
         return AVAudioPCMBuffer.mono([Float](repeating: value, count: frames), format: format)!
     }
 
-    /// A sink writing a two-channel file. The test must not hold the
-    /// `AVAudioFile`: like the recorder, only the sink does, so `finish()`
-    /// finalizes the container.
+    /// A sink writing a two-channel file. Only the sink holds the `AVAudioFile`, so `finish()` finalizes the container.
     private func dualSink(_ format: RecordingFormat = RecordingFormat.wav.withChannels(2)) throws -> (TapSink, URL) {
         let url = scratch.appending(path: "rec-\(UUID().uuidString).\(format.fileExtension)")
         let sink = TapSink()
@@ -80,8 +75,7 @@ final class CallAudioTests: XCTestCase {
 
         let back = try readBack(url)
         XCTAssertEqual(back.channels, 2, "the FLAC writer takes two channels")
-        // The resampler holds back its filter latency at the edges (tens of
-        // ms, the same on the mono path) — not a per-buffer loss.
+        // The resampler holds back its filter latency at the edges (tens of ms) — not a per-buffer loss.
         XCTAssertEqual(Double(back.ch0.count), 64_000, accuracy: 1_000)
         // Away from the resampler's start-up edge the levels are exact.
         let middle = 4_000..<60_000

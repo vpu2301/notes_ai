@@ -43,8 +43,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.svc = state
     install_state(state)
 
-    # Gauges the sprint-12 alerts read. Registered here, once, with
-    # callbacks over live state.
+    # Observable gauges, registered once with callbacks over live state.
     from .jobs.digest import last_success_unix
     from .metrics import register_gauges
 
@@ -74,8 +73,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     tasks: list[asyncio.Task[None]] = []
     if not settings.testing:
-        # Every worker subscribes, so a notification materialised here
-        # reaches a socket pinned to a sibling worker (ADR-0030).
+        # Every worker subscribes so sockets on sibling workers are reached (ADR-0030).
         state.fanout.set_handler(make_fanout_handler(state))
         await state.fanout.start()
 

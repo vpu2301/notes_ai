@@ -1,15 +1,7 @@
 import SwiftUI
 
-/// "Confirm it is really you" — the step-up sheet.
-///
-/// An access token proves someone signed in on this phone at some point in
-/// the last thirty days. The endpoints behind this sheet — turning off a
-/// second factor, moving the sign-in address, deleting the account, ending
-/// every other session — can take the account away from its owner, and an
-/// unlocked phone is an access token. So the server asks again, and this
-/// is where the answer is typed.
-///
-/// The plumbing lands in IDX-I1; the endpoints that use it are IDX-I2's.
+/// "Confirm it is really you" — the step-up sheet for endpoints that can take
+/// the account away (an unlocked phone is an access token).
 struct ReauthSheet: View {
     @EnvironmentObject private var app: AppState
     let prompt: ReauthPrompt
@@ -116,12 +108,7 @@ struct ReauthSheet: View {
 
 // MARK: - Reconnecting
 
-/// Shown when the app came up with a session it could not check.
-///
-/// The alternative — signing the person out because the server did not
-/// answer at boot — makes a flaky connection look like a security event,
-/// and is the one thing IDX-I1 says never to do. On a phone it would also
-/// be the common case, not the rare one.
+/// Shown when the app came up with a session it could not check; never sign out for a network error.
 struct ReconnectingBanner: View {
     @EnvironmentObject private var app: AppState
 

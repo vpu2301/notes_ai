@@ -1,21 +1,9 @@
-// The auth-service surface the web client uses (IDX-W1 §G).
-//
-// Two things every function here honours, and neither is optional:
-//
-//  * `credentials: true` on `/auth/*`, because the refresh token lives in
-//    the HttpOnly `mdx_rt` cookie and nowhere else. Nothing in this file
-//    reads a `refresh_token` out of a response body — that field is for
-//    macOS and iOS, and a browser that parsed it would be putting a
-//    long-lived credential into JavaScript's reach.
-//  * `auth: false` on anything a signed-out person calls, so the wrapper
-//    does not attempt a silent refresh on a 401 that simply means
-//    "wrong code".
-//
-// Mode note: `/auth/email/*`, `/auth/mfa/*` (native), `/auth/reauth*` and
-// `PATCH /auth/me` are mounted only under `MDX_IDP_MODE=native`, and
-// `/auth/password/*` only under `keycloak`. The unmounted half answers 404
-// by design, so a prober cannot tell a switched-off feature from an absent
-// one — `isUnavailableHere` is how the UI tells the difference.
+// The auth-service surface the web client uses.
+// Invariants: `credentials: true` on `/auth/*` (the refresh token lives only in
+// the HttpOnly `mdx_rt` cookie; never read `refresh_token` from a body), and
+// `auth: false` on signed-out calls so a 401 does not trigger a silent refresh.
+// Native-only routes (`/auth/email/*`, `/auth/mfa/*`, `/auth/reauth*`, `PATCH
+// /auth/me`) and keycloak-only `/auth/password/*` answer 404 when unmounted.
 
 import { ApiError, api } from "./http";
 import type {
@@ -32,22 +20,14 @@ import type {
   SignupConfig,
 } from "./types";
 
-/**
- * A 404 from a native-only or keycloak-only route means "this deployment
- * does not serve that flow", not "you asked for something that is gone".
- * See `docs/api/error-codes.md`, closing note.
- */
+/** A 404 from a mode-specific route means "this deployment does not serve that flow". */
 export function isUnavailableHere(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404;
 }
 
-// ── email one-time code: signup and login on one path (IDX-A3) ─────────
+// ── email one-time code: signup and login on one path ──────────────────
 
-/**
- * Always 202 for a syntactically valid address — known, unknown, locked
- * and undeliverable are indistinguishable by construction. Do not write UI
- * that implies otherwise.
- */
+/** Always 202 for a valid address — known/unknown are indistinguishable by design. */
 export function emailStart(email: string): Promise<EmailChallenge> {
   return api<EmailChallenge>("auth", "/auth/email/start", {
     method: "POST",
@@ -66,31 +46,21 @@ export function emailVerify(challengeId: string, code: string): Promise<AuthResu
   });
 }
 
-// ── self-serve signup (BE-0, keycloak and dual modes) ─────────────────
+// ── self-serve signup (keycloak and dual modes) ───────────────────────
 
 export interface SignupBody {
   email: string;
   password: string;
   display_name: string;
-  /** Sprint 21: the referral code a shared note's CTA carried into `/join`. */
+  /** Referral code a shared note's CTA carried into `/join`. */
   ref?: string;
 }
 
-/**
- * Create an account. Answers 202 for an address that already has one, and
- * for one that does not — the reply is byte-identical either way, so this
- * endpoint is not a "does X have an account here?" oracle. The screen that
- * calls it must not claim a code is on its way; only that one is if the
- * address is new.
- *
- * Refusals that *are* the caller's to see: `invalid_email`,
- * `display_name_required`, `password_policy` (with `min_length` and
- * `reasons[]`), `signup_rate_limited`, `signup_unavailable`.
- */
 export function signupConfig(): Promise<SignupConfig> {
   return api<SignupConfig>("auth", "/auth/signup/config", { auth: false });
 }
 
+/** 202 whether or not the address has an account — not an enumeration oracle; the UI must not claim a code is on its way. */
 export function signup(body: SignupBody): Promise<SignupAccepted> {
   return api<SignupAccepted>("auth", "/auth/signup", {
     method: "POST",
@@ -99,10 +69,7 @@ export function signup(body: SignupBody): Promise<SignupAccepted> {
   });
 }
 
-/**
- * Spend the mailed code and enable the account. No session comes back —
- * `verified: true` is the whole body — so the caller signs in afterwards.
- */
+/** No session comes back; the caller signs in afterwards. */
 export function signupVerify(email: string, code: string): Promise<{ verified: true }> {
   return api<{ verified: true }>("auth", "/auth/signup/verify", {
     method: "POST",
@@ -111,11 +78,7 @@ export function signupVerify(email: string, code: string): Promise<{ verified: t
   });
 }
 
-/**
- * Another code. Unauthenticated by necessity: the person who needs this
- * cannot sign in, which is the problem. 202 whether or not there was
- * anything to send, for the same reason `signup` is.
- */
+/** 202 whether or not there was anything to send. */
 export function signupResend(email: string): Promise<SignupAccepted> {
   return api<SignupAccepted>("auth", "/auth/signup/resend", {
     method: "POST",
@@ -124,7 +87,7 @@ export function signupResend(email: string): Promise<SignupAccepted> {
   });
 }
 
-// ── password (Keycloak-backed until IDX-A4) ───────────────────────────
+// ── password (Keycloak-backed) ────────────────────────────────────────
 
 export function login(email: string, password: string, otp?: string): Promise<LoginResponse> {
   return api<LoginResponse>("auth", "/auth/login", {
@@ -148,11 +111,7 @@ export function passwordForgot(email: string): Promise<void> {
   });
 }
 
-/**
- * `token` comes from the mailed link's fragment, never from a form. The
- * server peeks before it consumes, so a rejected password does not burn
- * the link — a second attempt with a stronger one still works.
- */
+/** `token` comes from the mailed link's fragment; a rejected password does not burn it. */
 export function passwordReset(token: string, newPassword: string): Promise<void> {
   return api<void>("auth", "/auth/password/reset", {
     method: "POST",
@@ -170,7 +129,7 @@ export function accountLockdown(token: string): Promise<LockdownResult> {
   });
 }
 
-// ── second factor (IDX-A5) ────────────────────────────────────────────
+// ── second factor ─────────────────────────────────────────────────────
 
 /** Unauthenticated by design — the caller has no session yet. */
 export function mfaVerify(
@@ -186,14 +145,9 @@ export function mfaVerify(
   });
 }
 
-// ── step-up (IDX-A5) ──────────────────────────────────────────────────
+// ── step-up ───────────────────────────────────────────────────────────
 
-/**
- * The server chooses the methods: an MFA account is asked for its
- * authenticator, everyone else is mailed a code (and gets the
- * `challenge_id` to quote back). The client does not get to pick the
- * weaker one.
- */
+/** The server chooses the methods; the client cannot pick a weaker one. */
 export function reauthStart(): Promise<ReauthOptions> {
   return api<ReauthOptions>("auth", "/auth/reauth/start", { method: "POST" });
 }
@@ -230,11 +184,7 @@ export function patchMe(patch: ProfilePatch): Promise<Identity> {
   return api<Identity>("auth", "/auth/me", { method: "PATCH", json: patch });
 }
 
-/**
- * Sprint 19 fake door: the address left on `/join`. No session, no mail —
- * the row is the whole result. `ref` is the code the shared page's CTA
- * carried over (absent for a public link's CTA).
- */
+/** Fake door: the address left on `/join`. No session, no mail. */
 export function captureLead(email: string, ref: string | null): Promise<{ status: "accepted" }> {
   return api<{ status: "accepted" }>("auth", "/auth/leads", {
     method: "POST",

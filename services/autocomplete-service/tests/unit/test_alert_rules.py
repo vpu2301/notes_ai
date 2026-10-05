@@ -1,11 +1,4 @@
-"""Step-07 §8 — sprint-10 alert rules stay loadable and on-contract.
-
-promtool is not in the venv; this validates what CI can: the YAML
-parses, the five contract rule names exist with the fixed severities,
-and every referenced metric is one the service actually emits (the
-sprint-10 root-cause was exactly this drift: dashboards/alerts naming
-metrics nothing exported).
-"""
+"""Alert rules parse, the contract rule names exist with fixed severities, and every metric is one the service emits."""
 
 from __future__ import annotations
 
@@ -42,8 +35,7 @@ def test_five_rules_with_fixed_names_and_severities():
 
 
 def test_rules_are_loaded_from_the_directory_prometheus_actually_reads():
-    # The compose Prometheus loads /etc/prometheus/rules/*.yml which mounts
-    # infra/prometheus/rules — a rules file anywhere else never loads.
+    # Prometheus mounts infra/prometheus/rules; a rules file anywhere else never loads.
     assert RULES.exists()
 
 

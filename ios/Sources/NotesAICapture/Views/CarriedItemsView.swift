@@ -1,11 +1,7 @@
 import SwiftUI
 
-/// "Still open from 12 Sep" — the previous meeting's unfinished business,
-/// at the top of this one (Sprint 36).
-///
-/// The items keep the PREVIOUS note's key, so ticking one here does not
-/// detach it from the meeting where it was agreed, or from the
-/// recipient's confirmation on that meeting's shared page.
+/// "Still open from 12 Sep" — the previous meeting's unfinished business.
+/// Items keep the PREVIOUS note's key, so ticking one here does not detach it.
 struct CarriedItemsView: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var model: NoteViewModel

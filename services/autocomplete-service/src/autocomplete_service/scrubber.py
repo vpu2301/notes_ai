@@ -16,14 +16,9 @@ Patterns redacted (generic — no locale-specific ID formats):
 - Long digit runs: any unbroken run of 7+ digits (covers unformatted
   phones, tax numbers, account numbers).
 
-Known limitations: date-shaped strings with 2+-digit components
-("01.02.2026") are eaten by the phone pattern — accepted over-scrub;
-digit pairs like "2026 2027" (two groups only) are NOT caught.
-
-Replacement: ``<redacted_PII>``.
-
-Pattern set documented in ``docs/security/autocomplete-pii-scrubber.md``;
-regex updates require privacy re-review.
+Known limitations: date-shaped strings ("01.02.2026") are eaten by the phone
+pattern (accepted over-scrub); two-group digit pairs ("2026 2027") are not caught.
+Regex updates require privacy re-review.
 """
 
 from __future__ import annotations
@@ -35,25 +30,19 @@ from typing import Any, Final
 
 REDACTED: Final = "<redacted_PII>"
 
-# Order matters: more-specific patterns first so they win the
-# substitution (and keep the redaction counts attributed) before the
-# generic digit_run sweep eats them.
+# Order matters: specific patterns first so counts attribute before digit_run sweeps.
 _PATTERNS: Final[list[tuple[str, re.Pattern[str]]]] = [
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
-    # 13-19 digits, optional single space/dash between digits — catches
-    # both "4111111111111111" and "4111 1111 1111 1111".
+    # 13-19 digits, optional single space/dash between digits.
     ("card_like", re.compile(r"(?<![\d-])(?:\d[ -]?){12,18}\d(?!\d)")),
-    # Standalone 1-3 letter token + 6-9 digits ("AB 123456", "ABC1234567").
-    # The \b keeps it from firing inside ordinary words.
+    # Standalone 1-3 letter token + 6-9 digits ("AB 123456").
     ("national_id", re.compile(r"\b[A-Za-z]{1,3}\s?\d{6,9}\b")),
-    # "+" international form, or 3+ separator-broken groups. Contiguous
-    # local numbers without "+" fall through to digit_run below.
+    # "+" international form, or 3+ separator-broken groups.
     (
         "phone",
         re.compile(r"(?<![\d+])(?:\+\d{7,15}|\+?\(?\d{1,4}\)?(?:[ .-]\d{2,4}){2,5})(?!\d)"),
     ),
-    # Catch-all: any unbroken run of 7+ digits (phones, tax/account
-    # numbers, government IDs of any length).
+    # Catch-all: any unbroken run of 7+ digits.
     ("digit_run", re.compile(r"(?<!\d)\d{7,}(?!\d)")),
 ]
 
@@ -88,10 +77,7 @@ def scrub_context(ctx: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def contains_pii(text: str) -> list[str]:
-    """Lightweight detector used by phrase-write rejection.
-
-    Returns the list of pattern names that match (empty = clean).
-    """
+    """Pattern names that match (empty = clean); used by phrase-write rejection."""
     found: list[str] = []
     for name, pat in _PATTERNS:
         if pat.search(text):

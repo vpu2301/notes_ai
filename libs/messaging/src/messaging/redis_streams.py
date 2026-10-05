@@ -1,31 +1,8 @@
-"""Redis Streams producer/consumer with at-least-once + DLQ semantics.
+"""Redis Streams producer/consumer with at-least-once + DLQ semantics (ADR-0010).
 
-Why Redis Streams (and not Kafka) for ASR jobs (sprint 03)?
-  - Lower latency: workers want to pick up jobs in tens of milliseconds.
-  - We don't need partition-level ordering across tenants here.
-  - We already run Redis for caching; one fewer broker to operate.
-See ADR-0010.
-
-Consumer-group lifecycle handled here:
-
-1. ``XGROUP CREATE`` on first use (idempotent; tolerates BUSYGROUP).
-2. ``XREADGROUP`` blocks up to 5 s for new messages.
-3. Stuck-consumer recovery via ``XAUTOCLAIM`` every 60 s. Claimed
-   entries are re-delivered through the iterator (``XREADGROUP '>'``
-   only returns never-delivered entries, so they cannot come back that
-   way).
-4. Per-message retry counter held in Redis under
-   ``mdx:streams:<stream>:<group>:attempts``; max 3 retries by default,
-   then the message is XADD'd to a sibling DLQ stream and XACK'd. The
-   counter cannot live in the message headers: a failed entry is
-   re-delivered with its original fields, so a header-borne count always
-   reads back as 0 and the DLQ cap is never reached.
-5. Consumer crash: messages remain in the pending-entries list until
-   reclaim, then re-delivered to another consumer.
-
-Idempotency is the *caller's* responsibility — workers consult the
-``transcription_jobs`` row before doing work and skip if it's already
-``complete``/``failed``.
+XAUTOCLAIM-reclaimed entries are re-delivered through the iterator (``XREADGROUP '>'`` never returns them); the
+retry counter lives in Redis, not in headers (a re-delivered entry carries its ORIGINAL fields). Idempotency is
+the caller's responsibility.
 """
 
 from __future__ import annotations
@@ -56,12 +33,7 @@ _ATTEMPTS_TTL_S: Final = 7 * 24 * 3600
 
 
 class RedisStreamsProducer:
-    """``XADD`` producer for a single primary stream + optional override.
-
-    All sprint-03 callers use the same primary stream; the ``send``
-    method allows passing an explicit ``topic`` so a single producer
-    instance can also serve the DLQ path.
-    """
+    """``XADD`` producer for a default stream; ``send(topic=…)`` also serves the DLQ path."""
 
     def __init__(
         self,
@@ -102,36 +74,16 @@ class RedisStreamsProducer:
         return msg_id
 
     async def flush(self) -> None:
-        # XADD is synchronous from the client's perspective — nothing to flush.
         return None
 
     async def aclose(self) -> None:
-        # Connection is shared with the readiness-probe client; do not close
-        # the underlying Redis here. Symmetry method only.
+        # The Redis connection is shared; never closed here.
         return None
 
 
 class RedisStreamsConsumer:
-    """``XREADGROUP`` consumer with reclaim + DLQ semantics.
-
-    Iteration protocol::
-
-        async with RedisStreamsConsumer(...) as consumer:
-            async for message in consumer:
-                try:
-                    await handle(message)
-                    await consumer.ack(message)
-                except RetryableError:
-                    # Don't ack — message stays in the pending list and is
-                    # reclaimed by XAUTOCLAIM after the idle interval.
-                    pass
-                except Exception:
-                    await consumer.fail(message, error_kind="...")
-                    # Bumps attempts; DLQ on max-retries.
-
-    The ``__aiter__`` loop transparently runs the reclaim task in the
-    background so callers don't have to plumb it themselves.
-    """
+    """``XREADGROUP`` consumer with reclaim + DLQ: ``ack`` on success, ``fail`` to bump attempts (DLQ at the cap),
+    no ack to leave the entry pending for XAUTOCLAIM. The reclaim task runs in the background."""
 
     def __init__(
         self,
@@ -159,16 +111,9 @@ class RedisStreamsConsumer:
         self._max_retries = max_retries
         self._stop = asyncio.Event()
         self._reclaim_task: asyncio.Task[None] | None = None
-        # Retry counters must outlive the in-memory Message: a failed entry
-        # stays in the PEL and is re-delivered with its ORIGINAL fields, so a
-        # counter carried in the message headers always reads back as 0 and
-        # the DLQ cap is never reached. Keep it in Redis, keyed by stream+
-        # group so a reclaim by a different consumer sees the same count.
+        # Keyed by stream+group so a reclaim by another consumer sees the same count.
         self._attempts_key = f"mdx:streams:{stream}:{group}:attempts"
-        # Entries reclaimed by XAUTOCLAIM are handed to __aiter__ through this
-        # queue. XREADGROUP with '>' only ever returns never-delivered
-        # entries, so a reclaimed message would otherwise be claimed and then
-        # silently dropped — the crash-recovery path would lose messages.
+        # Reclaimed entries reach __aiter__ through this queue (XREADGROUP '>' would never return them).
         self._reclaimed: asyncio.Queue[Message] = asyncio.Queue()
 
     async def __aenter__(self) -> RedisStreamsConsumer:
@@ -185,8 +130,6 @@ class RedisStreamsConsumer:
 
     async def _ensure_group(self) -> None:
         try:
-            # `$` = only messages produced after this group is created.
-            # `mkstream=True` creates the stream if it doesn't exist yet.
             await self._client.xgroup_create(self._stream, self._group, id="$", mkstream=True)
             logger.info(
                 "redis_streams.group_created",
@@ -195,12 +138,9 @@ class RedisStreamsConsumer:
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
-            # Group already exists — common case on restart.
 
     def subscribe(self, topics: list[str]) -> None:
-        # Single-stream consumer; the topic was supplied at construction.
-        # Implemented to satisfy ConsumerProtocol; would raise if multiple
-        # topics are given.
+        # Single-stream consumer bound at construction; satisfies ConsumerProtocol.
         if list(topics) != [self._stream]:
             raise ValueError(
                 f"RedisStreamsConsumer is bound to {self._stream!r}; "
@@ -209,21 +149,17 @@ class RedisStreamsConsumer:
 
     async def _bump_attempts(self, msg_id: str) -> int:
         """Increment and return the durable delivery-attempt count."""
-        # redis-py types its hash commands `Awaitable[int] | int` — one
-        # signature shared by the sync and async clients — so --strict
-        # rejects the bare await. The client here is always the async one.
+        # redis-py types hash commands `Awaitable[int] | int` (shared sync/async signature); the client is async.
         attempts = int(
             await cast("Awaitable[int]", self._client.hincrby(self._attempts_key, msg_id, 1))
         )
-        # Bound the counter hash: a stream whose consumers all die would
-        # otherwise leak a field per poisoned message forever.
+        # Bounds the counter hash so poisoned messages do not leak fields forever.
         await self._client.expire(self._attempts_key, _ATTEMPTS_TTL_S)
         return attempts
 
     async def __aiter__(self) -> AsyncIterator[Message]:
         while not self._stop.is_set():
-            # Drain reclaimed entries first — they are strictly older than
-            # anything XREADGROUP will hand back.
+            # Reclaimed entries first: strictly older than anything XREADGROUP returns.
             while not self._reclaimed.empty():
                 yield self._reclaimed.get_nowait()
                 if self._stop.is_set():
@@ -237,10 +173,7 @@ class RedisStreamsConsumer:
                     block=self._block_ms,
                 )
             except RedisTimeoutError:
-                # The blocking XREADGROUP hit its BLOCK deadline with no new
-                # messages. redis-py >=8 raises here instead of returning
-                # None (older versions returned an empty reply). This is the
-                # idle path, not an error — keep polling.
+                # redis-py >=8 raises on the BLOCK deadline instead of returning None: the idle path.
                 continue
             except ResponseError as exc:
                 logger.warning(
@@ -257,32 +190,20 @@ class RedisStreamsConsumer:
                     yield _to_message(self._stream, msg_id_raw, fields)
 
     async def commit(self) -> None:
-        # libs/messaging.ConsumerProtocol's ``commit`` is a no-op for
-        # Redis Streams: acks happen per-message via ``ack``. Kept to
-        # satisfy the Protocol.
+        # No-op: acks happen per message via ``ack``.
         return None
 
     async def ack(self, message: Message) -> None:
-        # The Redis Streams message id lives in ``headers["_id"]``, NOT in
-        # ``Message.offset``: stream ids are "<ms>-<seq>" strings and
-        # ``offset`` is typed ``int | None``, so it is always None here.
-        # Guarding on ``offset`` would make every ack a no-op.
+        # The stream id lives in ``headers["_id"]``; ``offset`` is always None here.
         msg_id = message.headers.get("_id")
         if msg_id is None:
             return
         await self._client.xack(self._stream, self._group, msg_id)
-        # Drop the retry counter — this id will never be retried again.
         await cast("Awaitable[int]", self._client.hdel(self._attempts_key, msg_id))
 
     async def fail(self, message: Message, *, error_kind: str) -> bool:
-        """Increment the retry counter; on max retries push to DLQ + ack.
-
-        Returns whether this call dead-lettered the message — i.e. whether
-        the work is now permanently off the stream. A caller that keeps its
-        own record of the job (asr-worker keeps a ``transcription_jobs``
-        row) needs that signal to close the record out; without it the
-        queue gives up quietly and the record waits forever.
-        """
+        """Increment the retry counter; at the cap push to DLQ + ack. Returns whether the message was dead-lettered
+        (a caller with its own job record needs that to close it out)."""
         msg_id = message.headers.get("_id")
         if msg_id is None:
             return False
@@ -313,9 +234,7 @@ class RedisStreamsConsumer:
                 },
             )
             return True
-        # Not at the cap yet — leave the message in the pending entries
-        # list. Reclaim or a subsequent XREADGROUP after consumer restart
-        # will re-deliver it.
+        # Below the cap: the message stays pending for reclaim.
         logger.info(
             "redis_streams.retry",
             extra={
@@ -328,12 +247,7 @@ class RedisStreamsConsumer:
         return False
 
     async def _reclaim_loop(self) -> None:
-        """Background reclaim of stuck pending messages.
-
-        ``XAUTOCLAIM`` reassigns ownership of any message that has been
-        idle in the pending list for ``reclaim_idle_ms``. Idle messages
-        usually indicate a crashed consumer that didn't ack.
-        """
+        """Background XAUTOCLAIM of messages pending longer than ``reclaim_idle_ms`` (a crashed consumer)."""
         while not self._stop.is_set():
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._reclaim_interval_s)
@@ -353,11 +267,7 @@ class RedisStreamsConsumer:
                 )
 
     async def reclaim_once(self) -> int:
-        """Run one XAUTOCLAIM cycle; queue what it claims. Returns the count.
-
-        Split out from the loop so the reclaim path can be driven
-        deterministically in a test instead of by racing a timer.
-        """
+        """Run one XAUTOCLAIM cycle and queue what it claims; returns the count (test-drivable)."""
         _cursor, claimed, _deleted = await self._client.xautoclaim(
             name=self._stream,
             groupname=self._group,
@@ -367,9 +277,6 @@ class RedisStreamsConsumer:
         )
         if not claimed:
             return 0
-        # Hand them to the iterator. XREADGROUP '>' will never return these
-        # (they are already delivered), so dropping them here would strand
-        # every message a crashed consumer was holding.
         for msg_id_raw, fields in claimed:
             self._reclaimed.put_nowait(_to_message(self._stream, msg_id_raw, fields))
         logger.info(
@@ -400,7 +307,6 @@ def _to_message(
             headers[k_str[2:]] = v.decode("utf-8")
         else:
             headers[k_str] = v.decode("utf-8")
-    # Redis stream IDs encode ms timestamp + sequence.
     try:
         ts_ms = int(msg_id.split("-", 1)[0])
     except ValueError:

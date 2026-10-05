@@ -7,11 +7,7 @@ import { Skeleton } from "../components/Skeleton";
 import { messageFor } from "../lib/errorCopy";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 
-/**
- * `/admin/sharing` — the workspace's recipient loop in four tiles (Sprint 22).
- * Counts only; the API refuses anyone without `stats.read`, so this
- * page is also only linked for a workspace admin.
- */
+/** `/admin/sharing` — counts only; the API requires `stats.read`. */
 export function SharingStatsPage() {
   useDocumentTitle("Sharing");
   const [days, setDays] = useState<30 | 90>(30);

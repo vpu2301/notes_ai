@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// MAC-0 — the two pieces of signup this app owns: the link out to the
-/// web app's form, and the one button that rescues an account whose
-/// address was never confirmed.
+/// The two pieces of signup this app owns: the link out to the web form, and the button that rescues an unconfirmed account.
 final class SignupTests: XCTestCase {
 
     // MARK: - The link out
@@ -14,9 +12,7 @@ final class SignupTests: XCTestCase {
         XCTAssertEqual(url(for: settings)?.absoluteString, "https://app.example.com/signup")
     }
 
-    /// Settings are typed by hand, and a pasted address usually arrives
-    /// with a space or a trailing slash on it. Neither may produce a URL
-    /// that 404s in the browser.
+    /// A hand-typed or pasted address may carry a space or a trailing slash; neither may produce a URL that 404s.
     func testSignupURLToleratesAHandTypedServerAddress() {
         var settings = BackendSettings.default
         settings.webAppURL = "  https://app.example.com/  "
@@ -39,14 +35,11 @@ final class SignupTests: XCTestCase {
         let sent = try XCTUnwrap(StubServer.requests(to: "/auth/signup/resend").first)
         XCTAssertEqual(sent.method, "POST")
         XCTAssertEqual(sent.json()["email"] as? String, "olena@acme.example")
-        // Nobody is signed in yet by definition — a token here would be a
-        // stale one from a previous account on this Mac.
+        // Nobody is signed in yet; a token here would be a stale one from a previous account.
         XCTAssertNil(sent.headers["Authorization"])
     }
 
-    /// The endpoint is rate limited (it sends mail). The screen has to be
-    /// able to say why, so the error must survive as an `APIError` with
-    /// its code rather than being swallowed.
+    /// The endpoint is rate limited; the error must survive as an `APIError` with its code.
     func testResendSurfacesTheRateLimit() async {
         let client = makeClient(storage: InMemorySessionStorage(seed: Fixtures.storedSession()))
         StubServer.install { _ in
@@ -65,8 +58,7 @@ final class SignupTests: XCTestCase {
         }
     }
 
-    /// The failure that makes the button appear in the first place: a
-    /// password that was right, on an account that is not confirmed.
+    /// The failure that makes the button appear: a right password on an unconfirmed account.
     func testLoginRefusesAnUnconfirmedAddressWithACodeTheScreenKnows() async {
         let client = makeClient(storage: InMemorySessionStorage())
         StubServer.install { _ in

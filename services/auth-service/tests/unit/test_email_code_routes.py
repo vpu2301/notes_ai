@@ -1,17 +1,10 @@
-"""IDX-A3 — the email one-time-code HTTP surface.
+"""Email one-time-code HTTP surface.
 
-Written around the properties the pack's acceptance criteria name, not
-around the happy path:
-
-  * ``/start`` is an enumeration dead end — a known address and an
-    unknown one produce the same status, the same body shape, and
-    exactly one mail each.
-  * The sixth wrong code is impossible: the fifth consumes the challenge.
-  * A brand-new address ends up with an identity, a personal workspace,
-    an owner membership, and a token scoped to that workspace.
-  * With the rate limiter down, ``/start`` refuses and mails nothing,
-    while ``/verify`` keeps working.
-  * No log record contains an address or a code.
+/start is an enumeration dead end (same status, body shape and one mail for known
+and unknown addresses); the fifth wrong code consumes the challenge; a new address
+gets an identity, personal workspace, owner membership and a scoped token; a down
+rate limiter refuses /start and mails nothing while /verify keeps working; no log
+record contains an address or a code.
 """
 
 from __future__ import annotations
@@ -339,8 +332,7 @@ def env(monkeypatch: pytest.MonkeyPatch):
     from auth_service.config import settings
     from auth_service.main import create_app
 
-    # The A3 routes exist only in native mode, and so does the origin
-    # check the requests below must satisfy.
+    # The routes and the origin check exist only in native mode.
     monkeypatch.setattr(settings, "idp_mode", "native")
 
     identities = FakeIdentities()
@@ -400,13 +392,7 @@ def env(monkeypatch: pytest.MonkeyPatch):
 
 
 def _code_of(env: Any, challenge_id: str) -> str:
-    """Recover the plaintext code by brute-forcing the stored hash.
-
-    Six digits is 10^6 candidates, which is exactly why the production
-    path needs a five-attempt budget — here it is the cheapest way to
-    read the code without a mailbox. In practice the mail is captured, so
-    parse that instead when it is available.
-    """
+    """Recover the plaintext code by brute-forcing the stored hash (10^6 candidates)."""
     row = env.challenges.rows[UUID(challenge_id)]
     for message in env.provider.sent:
         digits = "".join(ch for ch in message.text_body if ch.isdigit())
@@ -430,13 +416,7 @@ def _verify(env: Any, challenge_id: str, code: str, headers: dict[str, str] | No
 
 
 def _skip_cooldown(env: Any) -> None:
-    """Step past the sixty-second resend window — both halves of it.
-
-    The cooldown is enforced twice on purpose: a Redis counter (fast, and
-    fails open) and the newest open challenge's ``created_at`` (slow, and
-    authoritative). A test that only moved one of them would be measuring
-    the other.
-    """
+    """Step past the resend window: both the Redis counter and the newest challenge's created_at."""
     for row in list(env.challenges.rows.values()):
         env.challenges.rows[row.id] = replace(row, created_at=row.created_at - timedelta(minutes=5))
     for key in [k for k in env.redis.counts if ":otp_cooldown:" in k]:
@@ -444,14 +424,7 @@ def _skip_cooldown(env: Any) -> None:
 
 
 def _skip_start_window(env: Any) -> None:
-    """As ``_skip_cooldown``, plus the 15-minute per-address start window.
-
-    Only for tests that need many rounds of start-and-fail. The caps are
-    what make that slow in reality — reaching a lockout through exhausted
-    codes takes over half an hour, because only five codes per address
-    are issued per quarter hour. That is the intended cost, not an
-    obstacle to the lockout arithmetic this exercises.
-    """
+    """As ``_skip_cooldown``, plus the 15-minute per-address start window."""
     _skip_cooldown(env)
     for key in [k for k in env.redis.counts if ":otp_start_" in k]:
         del env.redis.counts[key]
@@ -490,8 +463,7 @@ def test_start_is_identical_for_known_and_unknown_addresses(env: Any) -> None:
     assert known.json()["expires_in"] == unknown.json()["expires_in"] == 600
     assert known.json()["resend_after"] == unknown.json()["resend_after"] == 60
     assert known.json()["challenge_id"] != unknown.json()["challenge_id"]
-    # Exactly one mail each — the unknown address gets a code too, because
-    # that is the signup path.
+    # Exactly one mail each; the unknown address gets a code too (signup path).
     assert len(env.provider.sent) == 2
 
 
@@ -539,13 +511,11 @@ def test_a_resend_inside_the_cooldown_is_refused(env: Any) -> None:
 
 
 def test_the_sixth_start_for_one_address_in_the_window_is_refused(env: Any) -> None:
-    # The per-address cap is 5 / 15 min; the 60 s cooldown would fire
-    # first, so it is stepped over by ageing each challenge.
+    # The 60 s cooldown would fire before the 5 / 15 min cap, so it is stepped over.
     for i in range(5):
         response = _start(env, f"person{i}@acme.example")
         assert response.status_code == 202
-    # Now the same address five times, with the cooldown stepped over so
-    # the cap is the only thing that can refuse.
+    # Same address five times; the cap is the only thing that can refuse.
     for _ in range(5):
         assert _start(env, UNKNOWN).status_code == 202
         _skip_cooldown(env)
@@ -567,8 +537,7 @@ def test_start_fails_closed_when_redis_is_down_and_verify_still_works(env: Any) 
     assert refused.json()["code"] == "rate_limiter_unavailable"
     assert len(env.provider.sent) == sent_before, "a refused start sends no mail"
 
-    # Verify's per-IP cap fails OPEN: the challenge's own attempt budget
-    # is the real bound, and it does not need Redis.
+    # Verify's per-IP cap fails OPEN: the challenge's attempt budget is the real bound.
     ok = _verify(env, opened["challenge_id"], code)
     assert ok.status_code == 200
 
@@ -620,14 +589,7 @@ def test_an_unknown_address_signs_up_and_lands_in_its_own_workspace(env: Any) ->
     claims = jwt.get_unverified_claims(body["access_token"])
     assert claims["tid"] == str(workspace.id)
     assert claims["sub"] == body["identity"]["id"]
-    # `tenant_admin` AND `member`, because whoever owns a workspace also
-    # works in it. S14's admin/content separation gives `tenant_admin` no
-    # content permission at all, so the first token of every self-serve
-    # account used to be one that could not write a note, submit an ASR
-    # job or dictate — `403 deny: roles=['tenant_admin'] cannot
-    # 'asr.write'` on the first thing the person tried
-    # (docs/auth/roles.md § "a person who administers a workspace and
-    # takes notes holds both").
+    # `tenant_admin` AND `member`: `tenant_admin` alone holds no content permission.
     assert claims["roles"] == ["tenant_admin", "member"]
     assert body["tenant_id"] == body["default_tenant_id"] == str(workspace.id)
 
@@ -726,14 +688,7 @@ def test_a_disabled_account_cannot_sign_in(env: Any) -> None:
 
 
 def test_an_identity_with_no_workspace_gets_one_back(env: Any) -> None:
-    """BE-2 F3, replacing the `no_workspace` refusal on this path.
-
-    An account whose last membership was removed used to be told 409 and
-    left with nothing to act on — signing in again could not fix it, and
-    neither could the person. It now gets the personal workspace every
-    identity is entitled to. Their existing notes are wherever they were;
-    this restores a place to stand, not any content.
-    """
+    """An account whose last membership was removed gets a personal workspace instead of 409."""
     identity = env.identities.seed(KNOWN)
     opened = _start(env, KNOWN).json()
     response = _verify(env, opened["challenge_id"], _code_of(env, opened["challenge_id"]))
@@ -741,19 +696,12 @@ def test_an_identity_with_no_workspace_gets_one_back(env: Any) -> None:
     body = response.json()
     assert body["is_new_identity"] is False
     assert [w["kind"] for w in body["memberships"]] == ["personal"]
-    # The bridge `users` row goes with it — without one the account holds
-    # a valid token and cannot save a note (migration 0031).
+    # The bridge `users` row goes with it; without one a valid token cannot save a note.
     assert any(sub == identity.id for sub, _ in env.identities.users)
 
 
 def test_a_keycloak_account_with_mfa_is_sent_to_the_password_form(env: Any) -> None:
-    """BE-3 F3 — `409 use_password`.
-
-    An emailed code is a single factor. This person's second factor lives
-    in Keycloak, where auth-service can neither see nor challenge it, so
-    minting a native session from a code alone would quietly downgrade an
-    account whose owner deliberately turned two-factor on.
-    """
+    """`409 use_password`: a Keycloak second factor cannot be challenged here, so a code alone must not mint a session."""
     identity = env.identities.seed(KNOWN, legacy_idp=True, mfa_enabled=True)
     env.identities.add_membership(
         identity.id,
@@ -766,11 +714,7 @@ def test_a_keycloak_account_with_mfa_is_sent_to_the_password_form(env: Any) -> N
 
 
 def test_a_keycloak_account_without_mfa_gets_a_native_session(env: Any) -> None:
-    """The ordinary migrated user: `legacy_idp` alone is not a refusal.
-
-    That is the whole point of the dual period — they sign in with a code
-    today and their password keeps working tomorrow.
-    """
+    """`legacy_idp` alone is not a refusal."""
     identity = env.identities.seed(KNOWN, legacy_idp=True, mfa_enabled=False)
     env.identities.add_membership(
         identity.id,
@@ -783,12 +727,7 @@ def test_a_keycloak_account_without_mfa_gets_a_native_session(env: Any) -> None:
 
 
 def test_a_native_account_with_mfa_is_challenged_not_refused(env: Any) -> None:
-    """`mfa_enabled` alone must not trigger `use_password`.
-
-    A native second factor is one this service CAN challenge; routing it
-    to the password form would send the person to a form they may have no
-    password for.
-    """
+    """`mfa_enabled` alone must not trigger `use_password`: a native second factor can be challenged here."""
     identity = env.identities.seed(KNOWN, legacy_idp=False, mfa_enabled=True)
     env.identities.add_membership(
         identity.id,
@@ -884,8 +823,7 @@ def test_ten_exhausted_challenges_lock_the_account_and_mail_once(env: Any) -> No
     assert locked.locked_until > datetime.now(UTC)
     assert env.locks_audited == [identity.id], "one auth.account_locked security event"
 
-    # A start while locked still returns the uniform 202 — but mails the
-    # lock notice instead of a code, and only once.
+    # A start while locked still returns the uniform 202 but mails the lock notice once.
     codes_before = len(env.provider.sent)
     for _ in range(3):
         assert _start(env, KNOWN).status_code == 202
@@ -957,12 +895,7 @@ def test_the_routes_do_not_exist_in_keycloak_mode(monkeypatch: pytest.MonkeyPatc
 def test_the_routes_exist_in_dual_mode_beside_the_keycloak_ones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """BE-3 F2 — the headline of the batch.
-
-    `dual` is the mode where a stranger can sign up while every existing
-    user's password login is still mounted and unchanged. Both halves are
-    asserted here because either one alone is a different feature.
-    """
+    """In `dual` a stranger can sign up while password login stays mounted and unchanged."""
     monkeypatch.setenv("TESTING", "true")
     from auth_service.config import settings
     from auth_service.main import create_app
@@ -971,17 +904,14 @@ def test_the_routes_exist_in_dual_mode_beside_the_keycloak_ones(
     paths = {route.path for route in create_app().routes}  # type: ignore[attr-defined]
     assert {"/auth/email/start", "/auth/email/verify"} <= paths
     assert {"/auth/login", "/auth/password/change", "/auth/mfa/verify"} <= paths
-    # session_native claims these; login.py's copies are shadowed and its
-    # handler is reached by delegation instead (`_belongs_to_keycloak`).
+    # session_native claims these; login.py's copies are reached by delegation.
     assert {"/auth/refresh", "/auth/logout", "/auth/token"} <= paths
-    # `PATCH /auth/me` is needed by the welcome step (BE-3 F4).
+    # `PATCH /auth/me` is needed by the welcome step.
     assert "/auth/me" in paths
 
 
 def test_a_new_workspace_takes_its_locale_from_accept_language(env: Any) -> None:
-    """BE-3 F4. A guess, and a better one than `en` for a product with
-    Ukrainian and German customers — but only from a header the browser
-    actually sends, and only for a language we have copy for."""
+    """Language guess only from a header the browser sends, and only for a language with copy."""
     started = _start(env, UNKNOWN)
     assert started.status_code == 202, started.text
     opened = started.json()

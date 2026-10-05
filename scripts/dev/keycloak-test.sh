@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test: login → introspect → refresh against the dev Keycloak realm.
-# Used by CI and by humans to confirm `make dev-up` produced a working IdP.
-#
-# Exits non-zero on any failure. Prints concise PASS/FAIL lines.
-#
-# Required tools: curl, jq.
+# Needs curl, jq. Exits non-zero on any failure.
 set -euo pipefail
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8088}"

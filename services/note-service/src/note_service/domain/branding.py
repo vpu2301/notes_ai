@@ -1,14 +1,5 @@
-"""Tenant branding for exported documents (PDF header / letters).
-
-The branding data lives on the ``tenants`` row (extended in migration 0032).
-note-service can read its *own* tenant under RLS (``tenants_self_select``),
-so :func:`load_tenant_branding` takes an already tenant-scoped connection and
-returns a small, content-free value object the PDF pipeline can consume.
-
-This keeps the "prepare branding data" concern separate from the renderer:
-today only ``issuer_name`` is threaded into the existing PDF
-template (so no golden-PDF churn), but the full :class:`TenantBranding` is
-available for richer letterhead work and for the SPA's PDF-preview endpoint.
+"""Tenant branding for exported documents, read from the ``tenants`` row under
+``tenants_self_select``; today only ``issuer_name`` reaches the PDF template.
 """
 
 from __future__ import annotations

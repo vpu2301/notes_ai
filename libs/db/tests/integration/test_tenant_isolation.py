@@ -1,13 +1,4 @@
-"""End-to-end RLS isolation test against the dev Compose Postgres.
-
-Skipped unless RUN_DB_INTEGRATION=1 and the dev stack is up. The test:
-
-1. Creates a temp table with RLS enabled.
-2. Inserts rows under tenant A.
-3. Re-opens a tenant_connection as tenant B and confirms it sees zero rows.
-4. Re-opens as tenant A and confirms it sees its own rows.
-5. Tears down the table.
-"""
+"""End-to-end RLS isolation on a temp table. Skipped unless RUN_DB_INTEGRATION=1 and the dev stack is up."""
 
 from __future__ import annotations
 
@@ -24,10 +15,7 @@ pytestmark = pytest.mark.skipif(
     reason="RUN_DB_INTEGRATION not set — start dev stack and re-run with the flag.",
 )
 
-# Must NOT default to the postgres superuser — `postgres` has BYPASSRLS,
-# which silently makes ENABLE ROW LEVEL SECURITY a no-op (FORCE is needed
-# to apply policies to superusers). Use app_role so we actually exercise
-# the RLS path that production traffic flows through.
+# Not the postgres superuser: BYPASSRLS would silently make RLS a no-op.
 DSN = os.environ.get(
     "TEST_DSN",
     "postgresql://app_role:app_role@localhost:5432/notes",

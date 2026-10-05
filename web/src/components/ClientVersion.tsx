@@ -4,16 +4,7 @@ import { getClientVersion, getClientVersionCheck } from "../api/notes";
 import type { ClientVersion as ClientVersionData, ClientVersionCheck } from "../api/types";
 import { RichText } from "./RichText";
 
-/**
- * "Client version" — what this note looks like to someone outside the
- * workspace.
- *
- * It is a preview of the real thing, not a mock-up of it: the server
- * builds it with the same pure function the shared page and the client
- * PDF use, so what the author sees here and what the client receives
- * cannot drift apart. That is the whole point — the author is about to
- * make an irreversible decision about someone else's inbox.
- */
+/** Client version preview, built server-side by the same function as the shared page/PDF. */
 export function ClientVersionPanel({ noteId }: { noteId: string }) {
   const [doc, setDoc] = useState<ClientVersionData | null>(null);
   const [check, setCheck] = useState<ClientVersionCheck | null>(null);
@@ -43,8 +34,7 @@ export function ClientVersionPanel({ noteId }: { noteId: string }) {
 
   if (loading) return <p className="help">Building the client version…</p>;
 
-  // A 1:1 or an interview debrief has no client version at all, and the
-  // server says so with a 409 rather than an empty document.
+  // 409 = this document type has no client version.
   if (error) {
     return (
       <div className="banner banner-info" role="status">

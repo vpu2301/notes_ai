@@ -1,15 +1,7 @@
 """Inline-completion prompt builder.
 
-The frame is deliberately narrow: continue the author's CURRENT
-sentence in the note's own register — never introduce new facts. The
-"no new facts" instruction is belt; the output safety filter
-(``safety_filter.py``) is suspenders — the model is never trusted to
-follow the instruction (sprint-12 anti-hallucination framing carried
-into Layer C: the model proposes, the author disposes).
-
-``section_key`` is the template section the cursor sits in (business
-note templates — e.g. "Action items", "Decisions"); it is passed
-through verbatim as context, never interpreted here.
+The "no new facts" instruction is belt; ``safety_filter.py`` is suspenders. The model
+is never trusted to follow the instruction.
 """
 
 from __future__ import annotations

@@ -1,8 +1,4 @@
-"""Safety filter — completions are linguistic, never factual.
-
-Table-driven: every money amount / percent / date-like / bare number in
-the completion must appear verbatim in the typed text, else filtered.
-"""
+"""Safety filter: risky values must appear verbatim in the typed text."""
 
 from __future__ import annotations
 

@@ -1,18 +1,6 @@
-"""Session finalization — flush windower, package audio, persist.
+"""Session finalization: flush windower, package + upload audio, persist transcript.
 
-End-of-life for every session that didn't fail or abandon:
-
-1. Stop accepting new audio (state → finalized).
-2. Run a last windower tick to flush partials → finals.
-3. Concatenate the tmpfs ring into an in-memory WAV (PCM 16 kHz mono).
-4. Encrypt + upload via ``EncryptedObjectStore`` (sprint 03 lib).
-5. Insert ``audio_files`` row + update ``dictation_sessions``.
-6. Free tmpfs / decoder / Whisper context.
-7. Send ``SessionTerminated`` to the client.
-
-The function is idempotent for the row UPDATEs: if a second
-finalize is called on an already-finalized session, the second call
-short-circuits.
+Idempotent: a second finalize on a finalized session short-circuits.
 """
 
 from __future__ import annotations
@@ -48,14 +36,9 @@ class FinalizeResult:
     audio_file_id: UUID | None
     truncated: bool
     transcript_segments: int
-    # Stored audio length. Reported to the caller because the ring buffer
-    # it was derived from is closed by the time this returns, so a
-    # caller that wants it (the sprint-12 completion notification) has no
-    # way to recompute it.
+    # Reported because the ring buffer is closed by the time this returns.
     duration_ms: int
-    # Sprint-14: the persisted transcript (post-NLP), returned so the
-    # conversation draft path can build note sections without
-    # re-reading the row it just wrote.
+    # Persisted (post-NLP) transcript for the conversation draft path.
     transcript: list[dict[str, Any]] | None = None
 
 
@@ -72,31 +55,20 @@ async def finalize_session(
 ) -> FinalizeResult:
     """Idempotently finalize a session.
 
-    ``reason`` is one of: ``normal``, ``cap_reached``, ``token_expired``,
-    ``worker_failure``. The DB row's status becomes ``finalized`` (or
-    ``failed`` for worker_failure — caller picks).
-
-    ``purge_audio`` (sprint 07, ADR-0018): the demo privacy envelope.
-    When set (``DEMO_AUDIO_PURGE_ON_FINALIZE``), the finalized audio is
-    never written to object storage *and* the in-memory PCM is zeroed
-    before the buffer is freed — a "no audio at rest" posture independent
-    of whether the object store itself is disabled.
+    ``purge_audio`` (ADR-0018): audio never reaches object storage and the
+    in-memory PCM is zeroed before the buffer is freed.
     """
     pcm = _flush_buffer(ctx)
     pcm_bytes_len = pcm.nbytes
     duration_ms = pcm.shape[0] * 1000 // 16_000
 
-    # Truncation detection: if the producer cursor went beyond the ring
-    # (e.g., 60 min cap + retransmit abuse), audio_file may be shorter
-    # than ``ctx.buffer.total_ms``. Flag it.
+    # Ring wrapped: audio_file shorter than buffer.total_ms.
     truncated = False
     if ctx.buffer is not None:
         truncated = ctx.buffer.total_ms > duration_ms
 
     audio_file_id: UUID | None = None
     object_store_disabled = audio_store.is_disabled
-    # No-audio-at-rest when the store is disabled OR purge-on-finalize is
-    # set for this session (sprint 07, ADR-0018).
     skip_persist = object_store_disabled or purge_audio
     if pcm_bytes_len > 0 and not skip_persist:
         wav_bytes = _pcm_to_wav(pcm)
@@ -114,7 +86,6 @@ async def finalize_session(
 
             if isinstance(exc, ObjectStoreDisabledError):
                 # Race: env flipped between is_disabled check and put.
-                # Fall through to the demo path.
                 object_store_disabled = True
                 audio_file_id = None
             else:
@@ -135,9 +106,7 @@ async def finalize_session(
                     len(wav_bytes),
                     duration_ms,
                     hashlib.sha256(wav_bytes).digest(),
-                    # asyncpg binds jsonb from a JSON string, not a dict
-                    # (no dict→jsonb codec is registered on the pool) — see
-                    # asr-service's insert_audio_row for the same pattern.
+                    # asyncpg binds jsonb from a JSON string, not a dict.
                     json.dumps(_header_to_json(header)),
                     f"minio://{audio_store.bucket}/{storage_key}",
                 )
@@ -170,21 +139,12 @@ async def finalize_session(
             severity=Severity.WARN,
         )
 
-    # End of session: nothing will revise the still-provisional words and no
-    # further audio will produce the silence boundary they are waiting on, so
-    # commit them now or lose them. Purely a promotion of already-decoded
-    # words — no inference here, so this cannot slow finalize down.
+    # Commit still-provisional words now (no inference) or lose them.
     _flush_provisional_tail(ctx)
 
-    # Persist the transcript + timing metrics.
     transcript_jsonb = _transcript_to_jsonb(ctx)
 
-    # Sprint-14: run the NLP pipeline over the committed segments before
-    # persistence — filling the slot sprint-05 reserved. Conversation
-    # sessions disable the voice-commands stage: a meeting participant
-    # saying «новий абзац» stays verbatim text, never an editing
-    # operation. Any NLP failure degrades to the raw transcript (never
-    # blocks finalize).
+    # NLP failure degrades to the raw transcript, never blocks finalize.
     if nlp_client is not None and transcript_jsonb:
         enriched = await _enrich_with_nlp(ctx, transcript_jsonb, nlp_client)
         if enriched is not None:
@@ -200,9 +160,7 @@ async def finalize_session(
                 severity=Severity.WARN,
             )
 
-    # Real VAD-derived speech time for conversation sessions (the
-    # sprint-04 approximation marker); dictation keeps the approximation
-    # until it, too, runs a full-session VAD pass.
+    # VAD-derived speech time for conversation; dictation keeps the approximation.
     total_speech_ms = duration_ms
     if ctx.mode == "conversation" and ctx.diarization is not None:
         total_speech_ms = sum(s.end_ms - s.start_ms for s in ctx.diarization.segments)
@@ -238,9 +196,7 @@ async def finalize_session(
         severity=Severity.INFO,
     )
 
-    # Privacy envelope (sprint 07, ADR-0018): overwrite the decrypted PCM
-    # still in memory before we drop it, so a no-audio-at-rest session
-    # leaves no residual plaintext behind.
+    # ADR-0018: zero the decrypted PCM so no plaintext audio lingers.
     if skip_persist:
         if pcm.size:
             pcm[:] = 0.0
@@ -252,7 +208,6 @@ async def finalize_session(
             object_store_disabled,
         )
 
-    # Free per-session resources.
     if ctx.buffer is not None:
         ctx.buffer.close()
         ctx.buffer = None
@@ -269,12 +224,7 @@ async def finalize_session(
 
 
 def _flush_buffer(ctx: SessionContext) -> np.ndarray:
-    """Read the entire session buffer as a contiguous float32 ndarray.
-
-    If the ring wrapped, the readable portion is the most-recent
-    ring-length samples; older audio is unrecoverable here (transcript
-    already committed for the lost range).
-    """
+    """Read the session buffer as a contiguous float32 ndarray (most-recent ring length if wrapped)."""
     if ctx.buffer is None:
         return np.zeros(0, dtype=np.float32)
     total = ctx.buffer.total_samples
@@ -314,13 +264,7 @@ def _pcm_to_wav(pcm: np.ndarray) -> bytes:
 
 
 def _flush_provisional_tail(ctx: SessionContext) -> None:
-    """Promote the windower's remaining provisional words into the transcript.
-
-    Best-effort: a session that never reached the window loop (immediate
-    failure, resume that never re-armed) has no windower, and a flush that
-    somehow raises must not cost the user the transcript that IS
-    committed.
-    """
+    """Promote the windower's remaining provisional words; best-effort, never raises."""
     windower = getattr(ctx, "windower", None)
     if windower is None:
         return
@@ -346,19 +290,10 @@ def _flush_provisional_tail(ctx: SessionContext) -> None:
 
 
 def _transcript_to_jsonb(ctx: SessionContext) -> list[dict[str, Any]]:
-    """Project finalized_segments → JSON-safe list of segment dicts.
+    """Project finalized_segments → JSON-safe segment dicts.
 
-    Dictation mode keeps the EXACT pre-sprint-14 shape (sprint-03's
-    TranscriptionOutput.segments + the sprint-05 voice_command slot) —
-    byte-compatible with every existing consumer.
-
-    Conversation mode (sprint 14) ADDS per-segment ``id`` (minted UUIDs
-    → note drafts' transcript_segment_ids), segment- and word-level
-    ``speaker``/``speaker_confidence`` proposals, and ``speaker_name``
-    (the display name at finalize — SPEAKER_1..N default or the
-    client-supplied naming; the direct feed for note synthesis). Labels
-    remain proposals: UNKNOWN and null survive into persistence rather
-    than being papered over.
+    Conversation mode adds ``id``, ``speaker``/``speaker_confidence`` and
+    ``speaker_name``; UNKNOWN and null labels survive into persistence.
     """
     conversation = ctx.mode == "conversation" and ctx.diarization is not None
     mapping: dict[str, str] = {}
@@ -381,9 +316,7 @@ def _transcript_to_jsonb(ctx: SessionContext) -> list[dict[str, Any]]:
                 }
                 for w in (seg.words or [])
             ],
-            # populated by the finalize-time NLP pass; null when NLP is
-            # unavailable (graceful degradation) or nothing matched.
-            "voice_command": None,
+            "voice_command": None,  # filled by the NLP pass
         }
         if conversation:
             assert ctx.diarization is not None
@@ -405,14 +338,10 @@ async def _enrich_with_nlp(
     transcript: list[dict[str, Any]],
     nlp_client: Any,
 ) -> list[dict[str, Any]] | None:
-    """One batch NLP call over all committed segments. Returns the
-    enriched list, or None on failure (caller audits + keeps raw).
+    """One batch NLP call; None on failure (caller keeps raw).
 
-    Conversation passes ``stages_disabled=["voice_commands"]`` — the
-    server-side guarantee that another participant's speech can never
-    fire an editing operation. Dictation gets the full pipeline:
-    enriched text plus the voice_command slot
-    ({"voice_commands": [...], "operations": [...]}).
+    Conversation disables voice_commands server-side so another
+    participant's speech can never fire an editing operation.
     """
     payload = [
         {
@@ -448,8 +377,7 @@ async def _enrich_with_nlp(
         commands = list(nlp_seg.get("voice_commands", []))
         operations = list(nlp_seg.get("operations", []))
         if ctx.mode == "conversation" and operations:
-            # Defence in depth: the server disabled the stage; anything
-            # arriving anyway is dropped, loudly.
+            # Defence in depth: stage was disabled; drop loudly.
             logger.error(
                 "nlp.operations_in_conversation_mode_dropped",
                 extra={"session_id": str(ctx.session_id), "count": len(operations)},

@@ -128,9 +128,7 @@ async def test_dlq_after_max_retries(redis_client: Redis) -> None:
             await consumer.fail(msg, error_kind="boom-1")
             break
 
-        # Re-read the same message after reclaim wouldn't suit a unit-style
-        # test; we manually bump attempts in the headers to simulate retries.
-        # The 3rd fail() pushes to DLQ.
+        # Attempts are bumped by hand to simulate retries; the 3rd fail() pushes to DLQ.
         attempts = 1
         while attempts < 3:
             attempts += 1

@@ -1,30 +1,10 @@
-"""asr-server — Parakeet-TDT-0.6B-v3 behind an OpenAI-style transcription
-route (Sprint TQ4 T1, the bake-off's arm C).
+"""asr-server: Parakeet-TDT-0.6B-v3 behind an OpenAI-style ``POST /v1/audio/transcriptions``
+(``verbose_json`` with words), the worker's ``asr_http`` contract (ADR-0046).
+No storage, no identifiers, no network (weights baked, hub offline); logs carry
+timings and counts only. Bearer ``MDX_ASR_SERVER_TOKEN`` or ``x-mdx-asr-token``;
+refuses to start without one unless ``MDX_ASR_SERVER_ALLOW_ANONYMOUS=1``.
 
-The worker talks to it like any ``asr_http`` backend (ADR-0046):
-``POST /v1/audio/transcriptions`` with ``file``, ``language``,
-``response_format=verbose_json`` and ``timestamp_granularities[]=word`` →
-``{text, segments[], words[]}``. The worker sends speech runs grouped by
-language (TQ2), so a request is at most a few minutes; long files are
-handled anyway (local attention, ``parakeet_engines.py``).
-
-What it does NOT do, by design (same contract as ``deploy/diar-server``):
-
-* **No storage.** The audio lives in the request's memory only.
-* **No identifiers.** No tenant, job, user or filename reaches it.
-* **No network.** Weights are baked and digest-checked at build time;
-  ``HF_HUB_OFFLINE=1`` and the other hub switches are pinned before any
-  model library is imported. NeMo has no usage telemetry to turn off
-  (checked for 3.0.0: no analytics client in the package); the pins stop
-  the hub, NGC and Transformers lookups a model library can make.
-
-Logs carry timings and counts only. Authentication is a bearer token
-(``MDX_ASR_SERVER_TOKEN``, or the ``x-mdx-asr-token`` header behind a
-gateway); with none set the server refuses to start unless
-``MDX_ASR_SERVER_ALLOW_ANONYMOUS=1`` (a laptop).
-
-    MDX_ASR_RUNTIME=nemo uvicorn app:app --host 0.0.0.0 --port 8082   # endpoint
-    MDX_ASR_RUNTIME=onnx MDX_ASR_SERVER_ALLOW_ANONYMOUS=1 uvicorn app:app --port 8082   # Mac
+    MDX_ASR_RUNTIME=nemo uvicorn app:app --host 0.0.0.0 --port 8082
 """
 
 from __future__ import annotations
@@ -154,8 +134,7 @@ async def transcribe(
     model: Annotated[str | None, Form()] = None,
     prompt: Annotated[str | None, Form()] = None,
 ) -> Any:
-    # ``prompt``: accepted and ignored — Parakeet has no prompt biasing
-    # (TQ4 fact 4); the worker's glossary and the TQ3 unifier carry names.
+    # ``prompt`` is accepted and ignored: Parakeet has no prompt biasing.
     del model, prompt
     if response_format != "verbose_json":
         raise HTTPException(status_code=400, detail="only verbose_json is served")

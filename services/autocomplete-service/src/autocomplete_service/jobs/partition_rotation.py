@@ -1,21 +1,9 @@
 """Monthly partition rotation for autocomplete_telemetry.
 
-Runs in-process (service lifespan, MDX_BACKGROUND_JOBS) daily and at
-startup: ensures the CURRENT + NEXT TWO months' partitions exist, then
-enforces the 90-day retention by DETACH+DROP of partitions whose range
-ended more than 90 days ago (via the SECURITY DEFINER function from
-migration 0040 — app_role owns no DDL). Every dropped partition is
-logged by name.
-
-Sprint 16 pays the sprint-10 IOU: with
-``MDX_TELEMETRY_COLD_ARCHIVE_ENABLED`` the partition's rows are exported
-to encrypted object storage (gzip JSONL through
-``EncryptedObjectStore``, rule 3) BEFORE the drop — and an archive
-failure BLOCKS the drop, so retention is never silently destructive
-again. Archives live under the reserved global tenant's envelope
-(telemetry partitions span tenants; each row keeps its own tenant_id
-column in the export). With the flag off, behaviour is exactly
-pre-sprint-16.
+Ensures current + next two months' partitions, then DETACH+DROPs partitions past
+90-day retention via a SECURITY DEFINER function (app_role owns no DDL). With
+``MDX_TELEMETRY_COLD_ARCHIVE_ENABLED`` rows are archived (gzip JSONL, encrypted
+under the global tenant) before the drop; an archive failure blocks the drop.
 """
 
 from __future__ import annotations
@@ -37,11 +25,10 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-MONTHS_AHEAD = 2  # ensure current + next two months
+MONTHS_AHEAD = 2
 RETENTION_DAYS = 90
 
-# Reserved global tenant (migration 0068) — the envelope identity for
-# cross-tenant archive blobs and the audit home for scheduler runs.
+# Reserved global tenant: envelope identity for cross-tenant archives, audit home for scheduler runs.
 GLOBAL_TENANT = UUID("00000000-0000-0000-0000-000000000000")
 
 
@@ -52,12 +39,7 @@ def _month_start(year: int, month: int) -> datetime:
 
 
 def _partition_bounds(now: datetime) -> list[tuple[datetime, datetime]]:
-    """Month boundaries for the CURRENT and next ``MONTHS_AHEAD`` months.
-
-    Covering the current month (not just future ones) lets a service that
-    was down over a month boundary self-heal on startup instead of
-    dropping every telemetry row until a human intervenes.
-    """
+    """Month boundaries for the current and next ``MONTHS_AHEAD`` months (current included so a restart self-heals)."""
     return [
         (
             _month_start(now.year, now.month + offset),
@@ -120,11 +102,7 @@ def _jsonable(value: Any) -> Any:
 
 
 async def archive_partition(conn: asyncpg.Connection, store: Any, name: str) -> str:
-    """Export one partition as gzip JSONL to the encrypted archive.
-
-    Returns the object key. Raises on any failure — the caller treats
-    that as "do NOT drop".
-    """
+    """Export one partition as gzip JSONL; returns the object key, raises on failure (caller must not drop)."""
     rows = await conn.fetch(f'SELECT * FROM "{name}"')  # noqa: S608 — relname from pg_class
     lines = "\n".join(
         json.dumps({k: _jsonable(v) for k, v in dict(r).items()}, ensure_ascii=False) for r in rows
@@ -145,13 +123,9 @@ async def archive_partition(conn: asyncpg.Connection, store: Any, name: str) -> 
 
 
 async def enforce_retention(app_pool: asyncpg.Pool) -> tuple[list[str], list[str]]:
-    """Archive (flag-gated) then DETACH+DROP partitions past retention.
+    """Archive (flag-gated) then DETACH+DROP partitions past retention; returns ``(dropped, archived)``.
 
-    Returns ``(dropped, archived)``. Idempotent: the 0040 function
-    returns NULL for already-absent partitions and refuses anything
-    inside the retention window; re-archiving overwrites the same key.
-    An archive failure skips the drop for that partition — it is retried
-    next run.
+    Idempotent: the DB function returns NULL for absent partitions; an archive failure skips that drop until next run.
     """
     today = datetime.now(UTC).date()
     dropped: list[str] = []
@@ -241,8 +215,6 @@ async def run_forever(*, interval_seconds: float = 86400.0) -> None:  # pragma: 
             try:
                 ensured = await ensure_partitions(app_pool)
                 dropped, archived = await enforce_retention(app_pool)
-                # Sprint 16: per-run audit row (global tenant) — the drop
-                # log used to be the only record; now the chain is.
                 await audit_writer.write_event(
                     tenant_id=GLOBAL_TENANT,
                     kind=audit_kinds.SCHEDULER_JOB_COMPLETED,

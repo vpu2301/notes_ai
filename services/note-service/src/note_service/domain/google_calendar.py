@@ -1,12 +1,6 @@
-"""Google Calendar — OAuth and the read-only events API (0019).
-
-A thin, testable client over Google's REST endpoints (no google-* SDK:
-four requests do not justify a dependency tree). The HTTP transport is
-injected, so tests drive it with ``httpx.MockTransport``.
-
-Scopes: ``calendar.readonly`` (events and the calendar list) plus
-``openid email`` so the account can be named in the UI. Nothing here can
-write to the user's calendar.
+"""Google Calendar: OAuth and the read-only events API, a thin client over the
+REST endpoints with an injected transport. Scopes: ``calendar.readonly`` plus
+``openid email``; nothing here can write to the user's calendar.
 """
 
 from __future__ import annotations
@@ -77,8 +71,7 @@ class CalendarInfo:
 @dataclass(frozen=True, slots=True)
 class CalendarEvent:
     id: str
-    # iCalUID is stable across the copies an invite makes in several
-    # calendars; used to drop duplicates when merging.
+    # Stable across the copies an invite makes in several calendars; dedupe key.
     ical_uid: str
     calendar_id: str
     calendar_name: str
@@ -95,10 +88,7 @@ class CalendarEvent:
     # The user's own RSVP: accepted | tentative | needsAction | declined | None (own event).
     response_status: str | None
     attendees: tuple[str, ...] = field(default=())
-    # Sprint 34: the agenda the organiser wrote in the description, as a
-    # list of topics. Derived at parse time by the deterministic rules in
-    # domain/meeting_doc/agenda.py — the raw description is never kept,
-    # never stored and never returned.
+    # Derived from the description at parse time; the raw description is never kept.
     agenda_lines: tuple[str, ...] = field(default=())
 
 
@@ -129,9 +119,7 @@ def _parse_when(part: dict[str, Any] | None) -> tuple[datetime, bool] | None:
 
 
 def find_meeting_url(raw: dict[str, Any]) -> str | None:
-    """A video-call link: Google's own fields first, then anything that
-    looks like Zoom/Teams/Meet in the location or description. Shared with
-    the ICS path (domain/ics_calendar), which only has the text fields."""
+    """A video-call link: Google's own fields first, then Zoom/Teams/Meet in the text fields."""
     if raw.get("hangoutLink"):
         return str(raw["hangoutLink"])
     conference = raw.get("conferenceData") or {}
@@ -141,7 +129,6 @@ def find_meeting_url(raw: dict[str, Any]) -> str | None:
     for entry in conference.get("entryPoints") or []:
         if entry.get("uri", "").startswith("http"):
             return str(entry["uri"])
-    # Zoom / Teams links usually sit in the location or description.
     for key in ("location", "description"):
         text = str(raw.get(key) or "")
         for token in text.split():
@@ -215,9 +202,7 @@ def normalize_event(raw: dict[str, Any], calendar: CalendarInfo) -> CalendarEven
 
 
 class GoogleCalendarClient:
-    """OAuth + Calendar API calls. ``configured`` is False when the
-    deployment has no Google client id — every route then answers 503
-    for connect and ``available: false`` for reads."""
+    """OAuth + Calendar API calls. ``configured`` is False without a Google client id."""
 
     def __init__(
         self,
@@ -247,8 +232,7 @@ class GoogleCalendarClient:
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
             "scope": " ".join(SCOPES),
-            # offline + consent: Google only issues a refresh token on a
-            # consent screen; without it a reconnect returns none.
+            # Google only issues a refresh token on a consent screen.
             "access_type": "offline",
             "prompt": "consent",
             "include_granted_scopes": "true",
@@ -314,8 +298,7 @@ class GoogleCalendarClient:
         )
 
     async def revoke(self, token: str) -> None:
-        """Best effort: Google answers 400 for an already-dead token, which
-        is the outcome we wanted anyway."""
+        """Best effort: Google answers 400 for an already-dead token."""
         try:
             await self._http.post(REVOKE_ENDPOINT, data={"token": token})
         except httpx.HTTPError as exc:

@@ -1,15 +1,5 @@
-"""Cancelling a job that is already running.
-
-``DELETE /asr/jobs/{id}`` on a RUNNING job cannot stop anything by itself:
-asr-service sets ``cancel_requested`` and leaves the status alone. Acting on
-it is the worker's job, and before this it only ever looked twice — once
-before claiming the message, once after decoding the audio. Anything
-cancelled after inference started ran to completion and came back
-``complete``, so from the user's side the Cancel button did nothing.
-
-These cover the two checkpoints that were missing: between inference chunks,
-and the last look before a transcript becomes a fact.
-"""
+"""Cancelling a running job: the checkpoints between inference chunks and before the
+transcript is stored."""
 
 from __future__ import annotations
 
@@ -23,11 +13,7 @@ from asr_worker.processor import _cancel_poller
 
 
 class _FakeEngine(WhisperEngine):
-    """A WhisperEngine with the model swapped out.
-
-    VAD and the chunk loop are the parts under test; faster-whisper is not
-    (and is not installed on CI's CPU image).
-    """
+    """A WhisperEngine with the model swapped out; VAD and the chunk loop are under test."""
 
     def __init__(self, chunks: int) -> None:
         super().__init__()
@@ -56,8 +42,7 @@ async def test_cancel_between_chunks_stops_inference(
     _speech(engine, monkeypatch)
     pcm = np.zeros(16_000 * 5, dtype=np.float32)
 
-    # Cancelled from the third check onwards — the run must stop there, not
-    # grind through the remaining chunks.
+    # Cancelled from the third check onwards: the run must stop there.
     calls = {"n": 0}
 
     async def should_cancel() -> bool:
@@ -73,8 +58,7 @@ async def test_cancel_between_chunks_stops_inference(
 async def test_without_a_callback_the_run_is_uninterruptible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The streaming path (transcribe_window) and any caller that does not pass
-    # a poller must behave exactly as before.
+    # No poller: the run is uninterruptible.
     engine = _FakeEngine(chunks=3)
     _speech(engine, monkeypatch)
     out = await engine.transcribe(
@@ -85,8 +69,7 @@ async def test_without_a_callback_the_run_is_uninterruptible(
 
 
 async def test_poller_rate_limits_the_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    """VAD can cut a consultation into hundreds of runs; one query each would
-    cost more than stopping saves."""
+    """One query a second, not one per run."""
     from asr_worker import processor
 
     queries = {"n": 0}
@@ -104,8 +87,7 @@ async def test_poller_rate_limits_the_database(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_poller_latches_once_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Once the answer is yes it stays yes: the caller is about to raise, and
-    a flag that could flap back to False would let inference continue."""
+    """Once the answer is yes it stays yes."""
     from asr_worker import processor
 
     queries = {"n": 0}

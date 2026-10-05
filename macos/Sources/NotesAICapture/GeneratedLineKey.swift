@@ -1,14 +1,8 @@
 import CryptoKit
 import Foundation
 
-/// A generated line's key — the server's rule, ported (Summary Engine v2, Q5).
-///
-/// The note shows lines; the evidence behind each lives in a row keyed by
-/// `lines.key_of(lines.strip_marker(line))` in note-service: the marker off,
-/// an "Owner:" prefix and a "— due" tail stripped (so fixing an owner or a
-/// date keeps the line's evidence), the rest normalised and hashed —
-/// sha256, first 16 hex characters. The client hashes the line it displays
-/// the same way to find its row: no positional mapping, nothing to drift.
+/// A generated line's key — the server's rule, ported: marker off, "Owner:" prefix and
+/// "— due" tail stripped, normalised, sha256 first 16 hex. No positional mapping.
 /// The web twin is `web/src/lib/itemKey.ts`; both read the same fixtures.
 enum GeneratedLineKey {
     // lines.py _MARKER

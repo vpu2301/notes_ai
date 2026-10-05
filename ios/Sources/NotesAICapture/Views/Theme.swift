@@ -3,11 +3,8 @@ import UIKit
 
 // MARK: - Design tokens
 //
-// Paper, ink, and a moss accent — the same palette as the Mac app and the
-// web: a warm off-white ground, hairline (½ pt) borders instead of shadows,
-// generous radii, Avenir Next for everything you read. Every colour is a
-// dynamic UIColor so the same token resolves for light and dark; the dark
-// side is the same warm palette turned over.
+// Paper, ink, moss accent — the same palette as the Mac app and the web.
+// Every colour is a dynamic UIColor (light/dark).
 
 enum DS {
     // Ground & surfaces
@@ -16,8 +13,7 @@ enum DS {
     static let surface2     = Color.ds("f3f1ec", "27231f")
     static let surfaceHover = Color.ds("f6f4f0", "231f1c")
     static let sidebar      = Color.ds("f8f7f3", "131110")
-    /// Neutral row fills from the web's Claude-style sidebar: hover / the
-    /// row you are on, the filled "New" row, and pressed.
+    /// Neutral row fills: hover / current row, the filled "New" row, pressed.
     static let sidebarHover = Color.ds("efede7", "1e1b18")
     static let sidebarActive = Color.ds("ebe8e1", "25211d")
     static let sidebarPress = Color.ds("e3dfd7", "2e2a25")
@@ -32,8 +28,7 @@ enum DS {
     // Hairlines
     static let line         = Color.ds("e6e2db", "2c2824")
     static let line2        = Color.ds("efece6", "241f1c")
-    /// The same warm neutral walked a step darker, so a live frame is
-    /// felt rather than coloured (`--line-hover` / `--line-active`).
+    /// A step darker, for a live frame (`--line-hover` / `--line-active`).
     static let lineHover    = Color.ds("d9d3c9", "3b352f")
     static let lineActive   = Color.ds("c8c1b5", "4a433b")
     /// Border weight for every hairline: half a point on Retina.
@@ -75,9 +70,7 @@ enum DS {
     static let radiusLg: CGFloat = 16
     static let radiusXl: CGFloat = 22
 
-    // Speaker tints: a stable function of the name picks one (same hash
-    // as the web and the Mac), so a person keeps their colour everywhere.
-    // Each is a light/dark pair, and none of them is orange.
+    // Speaker tints: picked by a stable hash of the name (same as web and Mac). No orange.
     static let speakerTints: [Color] = [
         Color.ds("4f7a5e", "8fbf9c"), Color.ds("6b7f5a", "a6b892"), Color.ds("8a6d2f", "c9ad6b"),
         Color.ds("4a6d8c", "8fb0d0"), Color.ds("7a5a8c", "b59fc7"), Color.ds("3f7f7a", "83bdb7"),
@@ -92,13 +85,8 @@ enum DS {
 
 // MARK: - Type scale
 //
-// Avenir Next — ships with iOS — for everything you read; SF Mono for
-// codes and timers. Display sizes use the DemiBold cut. Sizes are a notch
-// above the Mac's for a phone held at arm's length.
-//
-// The bookish serif (Iowan Old Style, the web's `--serif`) is kept to the
-// few places the web sets it since its Claude-style layout: the wordmark,
-// the home greeting, the note's title and its section headings.
+// Avenir Next for text, SF Mono for codes and timers, Iowan Old Style
+// (the web's `--serif`) for wordmark, greeting, note title and headings.
 
 enum DSType {
     static let family = "AvenirNext"
@@ -134,15 +122,12 @@ extension Font {
     static func dsSerif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .custom(DSType.serifFace(weight), size: size)
     }
-    /// SF Mono for codes and timers, scaled with Dynamic Type — a system
-    /// font given a point size is fixed, so the size is put through the
-    /// same metrics the text styles use.
+    /// SF Mono scaled with Dynamic Type (a sized system font is fixed otherwise).
     static func dsMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight, design: .monospaced)
     }
 
-    /// A symbol (or a system-font glyph) at a design size, scaled with
-    /// Dynamic Type — for the `.font(.system(size:))` an icon used to get.
+    /// A symbol at a design size, scaled with Dynamic Type.
     static func dsSymbol(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
         .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight)
     }
@@ -171,8 +156,7 @@ extension Color {
 }
 
 extension UIColor {
-    /// A light/dark pair as one dynamic colour — the `Color.ds` twin, for
-    /// the UIKit appearance proxies that cannot take a SwiftUI `Color`.
+    /// The `Color.ds` twin for UIKit appearance proxies.
     static func ds(_ light: String, _ dark: String) -> UIColor {
         UIColor { traits in
             traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
@@ -247,8 +231,7 @@ extension View {
     }
 }
 
-/// The ground behind sign-in and loading: flat paper with the faintest
-/// warm glow at the top — no colour washes.
+/// The ground behind sign-in and loading: flat paper with a faint warm glow at the top.
 struct DSWash: View {
     var body: some View {
         ZStack {
@@ -260,8 +243,7 @@ struct DSWash: View {
     }
 }
 
-/// A print of small dots over the ground, fading out from the top — the
-/// texture behind the home page, sign-in, and empty states.
+/// Small dots over the ground, fading out from the top.
 struct DSDots: View {
     var spacing: CGFloat = 20
     var dot: CGFloat = 1.1
@@ -311,8 +293,7 @@ struct DSButtonStyle: ButtonStyle {
             .font(.ds(size, .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, 14)
-            // A minimum, not a height: at large Dynamic Type sizes the
-            // label grows and the button with it instead of clipping.
+            // A minimum, not a height, so large Dynamic Type grows instead of clipping.
             .frame(minHeight: height)
             .frame(maxWidth: fill ? .infinity : nil)
             .background(
@@ -328,8 +309,7 @@ struct DSButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
-    // `.primary` and `.dark` are both the ink pill — Granola has one filled
-    // button and it is black; the accent is for tints and text.
+    // `.primary` and `.dark` are both the ink pill; the accent is for tints and text.
     private var foreground: Color {
         switch kind {
         case .primary, .dark: return DS.inkText
@@ -377,30 +357,20 @@ struct DSIconButtonStyle: ButtonStyle {
 
 // MARK: - UIKit appearance
 
-/// The one surface SwiftUI's tokens cannot reach.
-///
-/// `.searchable` is a UIKit `UISearchBar`, and the fill of its field is
-/// translucent grey by default. Over an opaque list that is invisible;
-/// here the ground is dotted paper and the notes scroll *behind* the
-/// navigation bar, so the moment the field goes active the dots and the
-/// rows sliding under it read straight through the box being typed into.
-/// An opaque fill is the fix — `HomeView` supplies the other half, an
-/// opaque bar behind the field while the search is active.
+/// `.searchable` is a UIKit `UISearchBar` whose translucent field shows the
+/// dotted ground through it; an opaque fill is the fix (`HomeView` makes the bar opaque).
 enum DSAppearance {
     /// Called once, from the app's `init`.
     static func apply() {
         let field = UISearchTextField.appearance(whenContainedInInstancesOf: [UISearchBar.self])
-        // `DS.surface2`, not `surface`: the field stays a well pressed
-        // into the paper rather than a card floating on it — the grey the
-        // resting bar already had, only opaque.
+        // `DS.surface2`: the grey the resting bar already had, only opaque.
         field.backgroundColor = .ds("f3f1ec", "27231f")
     }
 }
 
 // MARK: - Fields
 
-/// Text field in the web's `.input` clothing: surface, hairline, ink ring
-/// on focus.
+/// Text field in the web's `.input` clothing: surface, hairline, ink ring on focus.
 struct DSTextField: View {
     var placeholder: String
     @Binding var text: String
@@ -521,8 +491,7 @@ struct DSSegmentedPill<T: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // Sprint 32: a segment says its name, what it does, and
-                // whether it is the one chosen.
+                // A segment says its name, what it does, and whether it is chosen.
                 .accessibilityLabel(option.label ?? option.help ?? "")
                 .accessibilityHint(option.label == nil ? "" : (option.help ?? ""))
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -552,8 +521,7 @@ struct DSLabel: View {
     }
 }
 
-/// Sentence-case section label (`.home-group-h`), as Claude's "Active" —
-/// the home page uses it; forms keep the tracked `DSLabel`.
+/// Sentence-case section label (`.home-group-h`) for the home page; forms keep `DSLabel`.
 struct DSSectionLabel: View {
     let text: String
     var size: CGFloat = 14
@@ -592,8 +560,7 @@ struct DSChip: View {
     }
 }
 
-/// Initials avatar (`.avatar`): a quiet neutral disc with ink initials,
-/// as Claude's.
+/// Initials avatar (`.avatar`): a neutral disc with ink initials.
 struct DSAvatar: View {
     let name: String
     var size: CGFloat = 32
@@ -692,11 +659,8 @@ extension JobStatus {
     }
 }
 
-/// An item on the note's meta line (`.doc-pill` on the web): an icon and a
-/// short fact — when the note was taken, what wrote it, where it is
-/// filed. Unframed, as the web's since its Claude-style pass; sized for a
-/// fingertip. The ones that are also controls are wrapped in a Button by
-/// the caller. The accent tone keeps its tint.
+/// An item on the note's meta line (`.doc-pill`): an icon and a short fact,
+/// unframed; the caller wraps controls in a Button.
 struct DSMetaPill: View {
     var symbol: String?
     let text: String

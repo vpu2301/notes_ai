@@ -1,10 +1,4 @@
-"""Chunking of VAD speech regions before embedding (shared helper).
-
-Both the streaming diarizer (dictation-service) and the offline diarizer
-split speech regions into near-equal ≤ ``target_ms`` chunks so every
-embedding sees comparable evidence; a chunk shorter than ``min_ms``
-carries too little voice to embed reliably.
-"""
+"""Chunking of VAD speech regions before embedding, shared by the streaming and offline diarizers."""
 
 from __future__ import annotations
 

@@ -1,23 +1,8 @@
-"""I1 — two workspaces on one stack: nothing of A's ever reaches B.
-
-The 2026-09-25 incident (`docs/security/2026-09-25-isolation-audit.md`) put
-names from earlier notes into a new transcript. They came from the same
-workspace's own glossary, fed to Whisper as its prompt and echoed back. This
-suite makes the other half of that verdict permanent: the same mechanism,
-run for two workspaces side by side, never carries one workspace's words
-into the other's hint, job, transcript, search, logs, Redis, object keys or
-eval report — and B cannot open anything of A's by id.
-
-Workspace A gets three distinctive nonsense names in its glossary, a note
-that contains them, a generation with a written line, a public share link
-and an ASR job. Workspace B gets one name of its own and a recording job.
-The worker runs in process against the real Redis, Postgres and MinIO with
-an engine that ECHOES ITS PROMPT verbatim — the incident's failure mode,
-made deterministic — so B's transcript is exactly what B's hint was.
-
-Runs the services in process (the `test_first_use_guarantee.py` wiring)
-against the dev stack. Requires ``RUN_DB_INTEGRATION=1``, ``make dev-up``,
-``make migrate-up``. Target: ``make test-isolation``.
+"""Two workspaces on one stack: nothing of A's (glossary names, note, generation, share
+link, ASR job) reaches B's hint, job, transcript, search, logs, Redis, object keys or
+eval report, and B cannot open anything of A's by id. The in-process worker uses an
+engine that ECHOES ITS PROMPT (the incident's failure mode, made deterministic).
+Requires ``RUN_DB_INTEGRATION=1``, ``make dev-up``, ``make migrate-up``; ``make test-isolation``.
 """
 
 from __future__ import annotations
@@ -56,15 +41,12 @@ pytestmark = pytest.mark.skipif(
 
 REPO = Path(__file__).resolve().parents[2]
 API_DOCS = REPO / "docs" / "api"
-# The suite's own queue: the dev stack's asr-worker container consumes
-# `asr:jobs`, and a real Whisper racing the echo engine would make the
-# transcript test depend on which worker won.
+# The suite's own queue, so the dev stack's asr-worker cannot race the echo engine.
 STREAM = f"asr:jobs:isolation-{secrets.token_hex(4)}"
 
 
 def _nonsense(stem: str) -> str:
-    # Letters only, capitalised like a surname, unique per run so a leftover
-    # from an earlier run can never make a later one pass or fail.
+    # Surname-shaped and unique per run, so leftovers cannot affect a later run.
     return stem + "".join(secrets.choice("bdfgklmnprstvz") for _ in range(5))
 
 
@@ -164,8 +146,7 @@ def watch(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(S3Client, "put_object", recording_put)
 
     handler = _Capture(seen.records)
-    # Services configure their own loggers, some without propagation: the
-    # handler goes on the root AND on every logger that exists.
+    # Some service loggers do not propagate: attach to the root AND every logger.
     loggers = [logging.getLogger()] + [
         lg for lg in logging.Logger.manager.loggerDict.values() if isinstance(lg, logging.Logger)
     ]
@@ -309,8 +290,7 @@ async def _build(auth_app, note_app, asr_app, su) -> World:  # noqa: ANN001, F81
         "SELECT id FROM note_share_links WHERE note_id = $1 ORDER BY created_at DESC LIMIT 1",
         uuid.UUID(a_note),
     )
-    # A generation with one written line: the generated-items and dates
-    # routes need rows to have something to refuse.
+    # One written line, so the generated-items and dates routes have rows to refuse.
     generation = await su.fetchval(
         "INSERT INTO note_generations (tenant_id, note_id, job_id, requested_by, reason, status,"
         " prompt_version, finished_at) VALUES ($1, $2, $3, $4, 'auto', 'complete', 'isolation',"
@@ -409,8 +389,7 @@ async def _run_worker(job_id: str, monkeypatch: pytest.MonkeyPatch) -> EchoEngin
     from messaging.redis_streams import _to_message
 
     engine = EchoEngine()
-    # The worker's defaults are compose hostnames; the in-process
-    # asr-service already points at the dev stack from this machine.
+    # The worker's defaults are compose hostnames.
     for name in ("db_app_role_dsn", "db_audit_writer_dsn", "db_crypto_writer_dsn", "redis_url"):
         monkeypatch.setattr(worker_settings, name, getattr(service_settings, name))
     monkeypatch.setattr(worker_settings, "s3_endpoint", service_settings.s3_endpoint)
@@ -488,10 +467,9 @@ def test_one_engine_instance_gives_each_call_only_its_own_prompt() -> None:
 
 
 def _id_routes(service: str) -> list[tuple[str, str, dict[str, str]]]:
-    """Every (method, path, required query) of a service's committed OpenAPI
-    dump that takes a note or a job id — generated, not hand-picked. The
-    required query parameters are filled, so a route answers from its
-    ownership check rather than from request validation."""
+    """Every (method, path, required query) of a service's OpenAPI dump that takes a note
+    or job id, with required query parameters filled so ownership checks answer.
+    """
     spec = json.loads((API_DOCS / f"{service}-openapi.json").read_text("utf-8"))
     out = []
     for path, ops in spec["paths"].items():
@@ -551,8 +529,7 @@ async def test_b_cannot_open_anything_of_a_by_id(
     )
     ids = (uuid.UUID(world.a_note), uuid.UUID(world.a_tenant))
     before = tuple(await su.fetchrow(state_sql, *ids))
-    # The ids are real: A opens them. Without this a typo would make every
-    # route "refuse" B.
+    # The ids are real (A opens them), so a typo cannot make a route "refuse" B.
     own = f"/v1/notes/{world.a_note}" if service == "note-service" else f"/asr/jobs/{world.a_job}"
     async with _client(app, **world.bearer("a")) as client:
         assert (await client.get(own)).status_code == 200
@@ -616,7 +593,7 @@ async def test_suspending_a_leaves_b_working_and_a_unreachable_to_b(
 # ── 7–8: Redis and object keys ────────────────────────────────────────────
 
 # Keys with tenant data that do NOT start with `workspace:<tid>:`, each with
-# the reason it is acceptable (docs/security/2026-09-25-isolation-audit.md).
+# the reason it is acceptable.
 REDIS_ALLOWED: dict[str, str] = {
     r"^asr:jobs(:isolation-[0-9a-f]+)?(:dlq)?$": "the ASR queue stream; tenant_id is in every "
     "entry and the worker scopes by it (F-1: plaintext hint retention)",

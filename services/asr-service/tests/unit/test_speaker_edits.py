@@ -1,4 +1,4 @@
-"""Speaker edit overlay (Sprint 28): pure folding + merge/undo routes.
+"""Speaker edit overlay: pure folding + merge/undo routes.
 
 Routes run against an in-memory repository that scopes rows by tenant the
 way RLS does, so cross-tenant calls see nothing.

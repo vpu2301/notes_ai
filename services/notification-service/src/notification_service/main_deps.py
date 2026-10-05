@@ -1,8 +1,4 @@
-"""Service state: pools, redis, auth, the socket registry, the fan-out bridge.
-
-Kept out of main.py so routers can import the accessors without a
-circular import at module-load time.
-"""
+"""Service state: pools, redis, auth, the socket registry, the fan-out bridge."""
 
 from __future__ import annotations
 
@@ -39,14 +35,7 @@ CurrentUserDep = Callable[[Request, str | None], Awaitable[Claims]]
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
-
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
-    """
+    """Trusted issuers; both the JWKS cache and ``current_user`` must build from this list."""
     return issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -64,14 +53,10 @@ class ServiceState:
     jwks_cache: JwksCache
     socket_registry: SocketRegistry
     fanout: FanoutBridge
-    # Built once at startup rather than lazily attached to the state
-    # object on first request — this dataclass uses slots, and more to
-    # the point a dependency that appears mid-flight is harder to reason
-    # about than one that exists from boot.
+    # Built once at boot (slots dataclass; no lazy attach).
     current_user_dep: CurrentUserDep
     email_provider: EmailProvider
-    # Mutable holder the ingest loop updates with the consumer-group
-    # backlog, read by the mdx_notification_stream_pending gauge.
+    # Updated by the ingest loop, read by the stream_pending gauge.
     stream_pending_ref: dict[str, int] = field(default_factory=lambda: {"value": 0})
 
 
@@ -90,7 +75,6 @@ async def build_state() -> ServiceState:
     )
     redis: Redis = Redis.from_url(settings.redis_url, decode_responses=False)
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept — see above.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
 
@@ -115,8 +99,6 @@ async def build_state() -> ServiceState:
         ),
         current_user_dep=build_current_user(
             jwks_cache=jwks_cache,
-            # FND-1: the list, not a single string. The token's `iss`
-            # picks the entry it is verified against.
             issuers=issuers,
             clock_skew_seconds=settings.auth_clock_skew_seconds,
             denylist=build_session_denylist(

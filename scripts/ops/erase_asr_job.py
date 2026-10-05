@@ -1,15 +1,8 @@
-"""Erase one ASR job: transcript + every re-labelled revision, audio, rows.
+"""Erase one ASR job: transcript, every re-labelled revision, audio, rows. Dry run
+unless --apply; every statement filters by the given tenant; refuses a running job;
+prints counts only.
 
-    DB_ERASE_DSN=postgresql://<operator role>:...@host/notes \\
-    S3_ENDPOINT=... S3_ACCESS_KEY=... S3_SECRET_KEY=... \\
-      uv run --project services/asr-service python scripts/ops/erase_asr_job.py \\
-        --tenant-id <uuid> --job-id <uuid> [--apply]
-
-Dry run unless --apply. A privileged operator flow (migration 0004: app_role
-never deletes): every statement filters by the given tenant, so a job id of
-another tenant is "not found". Refuses a job that is still running. Every
-object delete is verified before any row goes. Prints counts only — never
-names or text. See docs/runbooks/asr-dsar.md.
+    DB_ERASE_DSN=... S3_ENDPOINT=... uv run --project services/asr-service python scripts/ops/erase_asr_job.py --tenant-id <uuid> --job-id <uuid> [--apply]
 """
 
 from __future__ import annotations

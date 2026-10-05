@@ -1,9 +1,5 @@
-"""Sprint I2 — nothing enters a transcript that was not said.
-
-T3: the lexical prompt-echo guard on the 2026-09-25 incident's own
-segments; T4: a chunk is decoded in its own language only when the
-detector is sure; T5/T7: the decode options follow the settings.
-"""
+"""Nothing enters a transcript that was not said: the lexical prompt-echo guard, chunk
+language switching, and the decode options."""
 
 from __future__ import annotations
 
@@ -43,7 +39,7 @@ def _text(words: list[WordTiming]) -> str:
     return " ".join(w.text for w in words)
 
 
-# ── T3: the incident's two segments ─────────────────────────────────
+# ── The incident's two segments ─────────────────────────────────────
 
 
 def test_the_first_incident_segment_keeps_only_the_speech() -> None:
@@ -200,7 +196,7 @@ def test_the_old_whole_segment_rule_still_holds() -> None:
     assert not inference._is_prompt_echo("Gysi, Moderator", INCIDENT_PROMPT, 0.1)
 
 
-# ── T4: a chunk in another language ─────────────────────────────────
+# ── A chunk in another language ─────────────────────────────────────
 
 
 def test_a_chunk_is_decoded_in_another_language_only_when_the_detector_is_sure() -> None:
@@ -267,7 +263,7 @@ def test_chunks_in_another_language_are_labelled_and_counted(
     assert output.diagnostics == Diagnostics(other_language_chunks=1, language_id="engine")
 
 
-# ── T5 / T7: the decode options follow the settings ─────────────────
+# ── The decode options follow the settings ──────────────────────────
 
 
 def test_conditioning_and_vocabulary_mode_follow_the_settings(
@@ -292,8 +288,7 @@ def test_the_defaults_are_conditioning_and_the_prompt() -> None:
     from asr_worker.config import Settings
 
     fresh = Settings(_env_file=None)  # type: ignore[call-arg]
-    # T7: off makes conversation chunks lower-case run-ons; the guard
-    # contains the cascade instead.
+    # Off makes conversation chunks lower-case run-ons; the guard contains the cascade.
     assert fresh.asr_condition_prev is True
     assert fresh.asr_vocabulary_mode == "prompt"
     assert fresh.asr_chunk_language_id is True

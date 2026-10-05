@@ -1,17 +1,8 @@
-"""IDX-A3 against a real Postgres — the half the fakes cannot prove.
+"""Email code against a real Postgres: what only a database can answer.
 
-The unit suite exercises the decision logic with in-memory stores. What
-only a database can answer:
-
-  * the signup transaction is genuinely atomic, and genuinely writes all
-    four rows (identity, tenant, membership, user);
-  * ``consume`` is a conditional UPDATE, so two concurrent verifies of
-    the same code produce one winner;
-  * ``app_role`` — the role every other service in the fleet connects as —
-    cannot read ``identities`` at all;
-  * a new identity's tenant is invisible from another tenant's scope.
-
-Requires: ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
+The signup transaction is atomic and writes all four rows; ``consume`` is a conditional
+UPDATE with one winner; ``app_role`` cannot read ``identities``; a new identity's tenant
+is invisible from another scope. Requires ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -229,8 +220,7 @@ async def test_the_tenth_failure_locks_and_the_notice_is_claimed_once(writer_poo
     claims = await asyncio.gather(*(repo.claim_lock_notice(identity.id) for _ in range(5)))
     assert sum(claims) == 1
 
-    # A successful sign-in clears the counters (but not the lock history,
-    # which is what makes the next lock longer).
+    # A successful sign-in clears the counters but not the lock history (next lock is longer).
     fresh = await repo.get(identity.id)
     assert fresh is not None and fresh.lock_count == 1
     await repo.note_successful_login(identity.id, tenant_id=identity.last_tenant_id)
@@ -242,11 +232,7 @@ async def test_the_tenth_failure_locks_and_the_notice_is_claimed_once(writer_poo
 
 
 async def test_concurrent_failures_cannot_skip_past_the_threshold(writer_pool) -> None:
-    """Ten simultaneous wrong codes must still produce a lock.
-
-    Without ``FOR UPDATE`` each would read the same count and the account
-    would sit at 1 failure, unlocked, having just absorbed ten guesses.
-    """
+    """Ten simultaneous wrong codes must still lock; without ``FOR UPDATE`` each would read the same count."""
     repo = IdentityRepository(writer_pool)
     identity, _ = await repo.create_with_personal_workspace(_email())
     policy = ec.LockoutPolicy()
@@ -288,12 +274,7 @@ async def test_a_session_stores_only_the_hash_of_its_refresh_token(writer_pool, 
 
 
 async def test_app_role_cannot_read_the_identity_tables() -> None:
-    """The rest of the fleet connects as ``app_role``. It gets nothing here.
-
-    These tables carry every registered address in the system and the
-    live one-time-code hashes; the grant is the boundary, and RLS with no
-    app_role policy is the second one behind it.
-    """
+    """``app_role`` gets nothing here: the grant is the boundary, RLS without an app_role policy the second."""
     conn = await asyncpg.connect(APP_DSN)
     try:
         for table in ("identities", "auth_challenges", "auth_sessions"):
@@ -309,8 +290,7 @@ async def test_a_new_workspace_is_invisible_from_another_tenants_scope(writer_po
 
     conn = await asyncpg.connect(APP_DSN)
     try:
-        # Scoped to the seeded dev tenant, exactly as a note-service
-        # request would be.
+        # Scoped to the seeded dev tenant, as a note-service request would be.
         await conn.execute("SELECT set_config('app.tenant_id', $1, false)", str(TENANT_A))
         assert (
             await conn.fetchval("SELECT count(*) FROM tenants WHERE id = $1", membership.tenant_id)

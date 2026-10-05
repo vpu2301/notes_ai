@@ -1,9 +1,4 @@
-"""POST /admin/users/invite, POST /admin/users/{sub}/deactivate.
-
-These are tenant_admin-only operations. Day 7 wires the formal
-``requires(action="user.invite", target_kind="user")`` matrix; for Day 6
-we gate inline on the `tenant_admin` role.
-"""
+"""Admin user management: invite, deactivate/reactivate, list/get, MFA reminders, roles."""
 
 from __future__ import annotations
 
@@ -31,9 +26,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 _ROLE_VALUES: frozenset[str] = frozenset({"tenant_admin", "member", "viewer", "auditor"})
 
-# Highest-privilege-wins order used to collapse a multi-role set into the
-# single ``users.role`` column (the table stores one role; Keycloak holds the
-# full set). Keep in sync with the realm role catalogue.
+# Highest-privilege-wins order for collapsing a role set into ``users.role``.
 _ROLE_PRECEDENCE: tuple[str, ...] = ("tenant_admin", "member", "viewer", "auditor", "service")
 
 
@@ -46,9 +39,7 @@ def _primary_role(roles: set[str]) -> str:
 
 
 class InviteRequest(BaseModel):
-    # Basic email shape — we don't enforce reserved-TLD rules here so that
-    # @example.test / @e2e.test work in integration tests. Production
-    # tenants can layer additional validation upstream if needed.
+    # Basic shape only: reserved TLDs (@example.test) must work in integration tests.
     email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     display_name: str = Field(min_length=1, max_length=200)
     role: str
@@ -68,7 +59,6 @@ class InviteResponse(BaseModel):
     response_model=InviteResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Invite a new user; creates the Keycloak user and the DB row",
-    # MFA gate fires only when MDX_REQUIRE_MFA=true (off in sprint-02 pilot).
     dependencies=[Depends(requires_mfa())],
 )
 async def invite_user(
@@ -81,7 +71,6 @@ async def invite_user(
     state = get_state()
     tenant_id = claims.tid
 
-    # 1. Create the Keycloak user (admin API). Returns the new sub.
     try:
         sub = await state.keycloak.create_user(
             email=body.email,
@@ -95,7 +84,6 @@ async def invite_user(
             raise HTTPException(status_code=409, detail="email already registered") from exc
         raise HTTPException(status_code=502, detail=f"keycloak error: {exc}") from exc
 
-    # 2. Mirror in the local users table (tenant_writer-scoped).
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         await conn.execute(
             """
@@ -109,7 +97,6 @@ async def invite_user(
             body.role,
         )
 
-    # 3. Audit (severity info — invite is a routine admin action).
     await state.audit_writer.write_event(
         tenant_id=tenant_id,
         kind=audit_kinds.USER_INVITED,
@@ -137,31 +124,26 @@ async def deactivate_user(
     state = get_state()
     tenant_id = claims.tid
 
-    # 1. Verify the target user belongs to the caller's tenant (RLS will
-    #    refuse to return it otherwise, but we want an explicit 404).
+    # Explicit 404 for a target outside the caller's tenant.
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         existing = await conn.fetchrow("SELECT sub, status FROM users WHERE sub = $1", sub)
     if existing is None:
         raise HTTPException(status_code=404, detail="user not found in this tenant")
 
-    # 2. Flip status in the DB.
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         await conn.execute("UPDATE users SET status = 'deactivated' WHERE sub = $1", sub)
 
-    # 3. Disable + revoke sessions in Keycloak.
     try:
         await state.keycloak.set_user_enabled(sub, enabled=False)
         await state.keycloak.logout_user(sub)
     except KeycloakError as exc:
-        # The local DB change has already committed; log and continue.
+        # The DB change has already committed; log and continue.
         logger.warning(
             "admin.deactivate.kc_partial_failure",
             extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
         )
 
-    # 3b. Sprint 16: kill the user's outstanding ACCESS tokens too —
-    # Keycloak logout only stops refreshes; without this, issued tokens
-    # stay valid up to 15 more minutes.
+    # Keycloak logout only stops refreshes; denylist the outstanding ACCESS tokens too.
     if state.denylist is not None:
         try:
             await state.denylist.revoke_sub(str(sub), ttl_seconds=settings.revoked_sub_ttl_seconds)
@@ -180,7 +162,6 @@ async def deactivate_user(
                 extra={"sub": str(sub), "error": str(push_exc)},
             )
 
-    # 4. Audit (severity sec — deactivation is sensitive).
     await state.audit_writer.write_event(
         tenant_id=tenant_id,
         kind=audit_kinds.USER_DEACTIVATED,
@@ -204,13 +185,9 @@ class UserSummary(BaseModel):
     display_name: str
     role: str
     status: str
-    # S21: MFA state belongs in the LIST, not only in the per-user detail.
-    # The access review's whole question is "which of these accounts has a
-    # second factor" — answering it used to take one GET per row, so no
-    # screen asked it and the column did not exist.
+    # MFA state belongs in the list: the access review asks exactly this.
     mfa_enrolled_at: datetime | None = None
-    # The open reminder, if any. Nullable timestamps rather than a flag so
-    # a reviewer can see "asked, and it has been three weeks".
+    # The open reminder, if any.
     mfa_reminded_at: datetime | None = None
     mfa_reminder_count: int = 0
 
@@ -279,8 +256,7 @@ async def get_user(
     claims: Annotated[Claims, Depends(requires("user.read", "user"))],
 ) -> UserDetail:
     state = get_state()
-    # RLS restricts visibility to the caller's tenant; a cross-tenant sub is
-    # simply invisible → 404 (we do not leak its existence).
+    # RLS makes a cross-tenant sub invisible → 404.
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await conn.fetchrow(
             """
@@ -332,7 +308,6 @@ async def reactivate_user(
             "UPDATE users SET status = 'active', updated_at = now() WHERE sub = $1", sub
         )
 
-    # Re-enable the Keycloak account so the user can log in again.
     try:
         await state.keycloak.set_user_enabled(sub, enabled=True)
     except KeycloakError as exc:
@@ -341,8 +316,7 @@ async def reactivate_user(
             extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
         )
 
-    # Sprint 16: lift the deactivation's sub-level deny so the user's next
-    # login isn't rejected by a still-live denylist entry.
+    # Lift the deactivation's sub-level deny.
     if state.denylist is not None:
         try:
             await state.denylist.clear_sub(str(sub))
@@ -352,7 +326,6 @@ async def reactivate_user(
                 extra={"sub": str(sub), "error": str(push_exc)},
             )
 
-    # Audit (severity sec — re-granting access is sensitive).
     await state.audit_writer.write_event(
         tenant_id=tenant_id,
         kind=audit_kinds.USER_REACTIVATED,
@@ -367,7 +340,7 @@ async def reactivate_user(
     return {"sub": str(sub), "status": "active"}
 
 
-# ── MFA reminders (S21 — the access review's one action) ─────────────────
+# ── MFA reminders ─────────────────────────────────────────────────────────
 
 
 class MfaReminderResponse(BaseModel):
@@ -377,9 +350,7 @@ class MfaReminderResponse(BaseModel):
     reminder_count: int
 
 
-# Who may be recorded as having raised a reminder. Mirrors the CHECK on
-# `mfa_reminders.requested_by_role`; a caller holding both roles is
-# recorded as the more specific one for this act — the auditor.
+# Mirrors the CHECK on `mfa_reminders.requested_by_role`; auditor wins when both held.
 _REMINDER_ROLES: tuple[str, ...] = ("auditor", "tenant_admin")
 
 
@@ -388,9 +359,7 @@ def _reminder_role(claims: Claims) -> str:
     for role in _REMINDER_ROLES:
         if role in held:
             return role
-    # Unreachable in practice: `requires("user.remind_mfa")` admits only
-    # those two roles. Fail loudly rather than writing a value the CHECK
-    # would reject at 3am.
+    # Unreachable in practice; fail loudly rather than trip the CHECK.
     raise HTTPException(status_code=403, detail="no role eligible to raise a reminder")
 
 
@@ -399,12 +368,8 @@ def _reminder_role(claims: Claims) -> str:
     response_model=MfaReminderResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Ask a user to enrol MFA; the request stands until they do",
-    # NOT MFA-gated, and that is deliberate. Every other mutation here
-    # demands a verified-MFA session — but this one is how a company climbs
-    # OUT of having no second factors, and an auditor who has not yet
-    # enrolled would otherwise be unable to raise the very finding that
-    # gets everyone enrolled. The act grants nothing and changes no
-    # account state, so the gate buys no safety and costs the bootstrap.
+    # Deliberately NOT MFA-gated: this is how a company bootstraps out of having no
+    # second factors, and it grants nothing.
 )
 async def remind_mfa(
     sub: UUID,
@@ -414,9 +379,7 @@ async def remind_mfa(
     tenant_id = claims.tid
 
     if sub == claims.sub:
-        # Reminding yourself is not oversight, it is noise in someone
-        # else's review — and it would put a banner in front of the only
-        # person who could already just enrol.
+        # Reminding yourself is noise, not oversight.
         raise HTTPException(status_code=422, detail="cannot remind yourself")
 
     async with tenant_connection(state.app_pool, tenant_id) as conn:
@@ -426,9 +389,7 @@ async def remind_mfa(
     if target is None:
         raise HTTPException(status_code=404, detail="user not found in this tenant")
     if target["mfa_enrolled_at"] is not None:
-        # 409, not a silent no-op: the roster the caller was looking at is
-        # stale, and the UI should say so rather than show a reminder that
-        # will never render anywhere.
+        # 409, not a silent no-op: the caller's roster is stale.
         raise HTTPException(status_code=409, detail="user already has MFA enrolled")
     if target["status"] == "deactivated":
         raise HTTPException(
@@ -438,10 +399,7 @@ async def remind_mfa(
 
     actor_role = _reminder_role(claims)
 
-    # Upsert: one standing row per user. A repeat ask bumps the count and
-    # the timestamp, and REOPENS a row that a since-reset enrolment had
-    # resolved (resolved_at → NULL), which is exactly the lost-phone case:
-    # the user was enrolled, an admin reset it, they never re-enrolled.
+    # Upsert: one row per user; a repeat ask bumps the count and REOPENS a resolved row.
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         row = await conn.fetchrow(
             """
@@ -477,8 +435,7 @@ async def remind_mfa(
         severity=Severity.SEC,
     )
 
-    # The bell/email half. Fire-and-forget: the row above is what makes
-    # the reminder stand, and a bus outage must not fail the request.
+    # Bell/email half, fire-and-forget: a bus outage must not fail the request.
     await emit_mfa_reminder(
         state.notification_bus,
         tenant_id=tenant_id,
@@ -496,7 +453,7 @@ async def remind_mfa(
     )
 
 
-# ── Role management (the sprint-02 deferred endpoint) ─────────────────────
+# ── Role management ───────────────────────────────────────────────────────
 
 
 class RolesRequest(BaseModel):
@@ -519,7 +476,6 @@ async def set_user_roles(
     body: RolesRequest,
     claims: Annotated[Claims, Depends(requires("user.manage_roles", "user"))],
 ) -> RolesResponse:
-    # 1. Validate the requested roles against the known realm-role catalogue.
     desired = sorted(set(body.roles))
     unknown = [r for r in desired if r not in KNOWN_ROLES]
     if unknown:
@@ -532,20 +488,19 @@ async def set_user_roles(
     tenant_id = claims.tid
     desired_set = set(desired)
 
-    # 2. The target must exist in the caller's tenant (RLS → 404 otherwise).
+    # RLS → 404 for a target outside the caller's tenant.
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         existing = await conn.fetchrow("SELECT sub, role FROM users WHERE sub = $1", sub)
     if existing is None:
         raise HTTPException(status_code=404, detail="user not found in this tenant")
 
-    # 3. Read the current realm roles (old set, for the audit + last-admin guard).
     try:
         old_all = await state.keycloak.get_realm_roles(sub)
     except KeycloakError as exc:
         raise HTTPException(status_code=502, detail=f"keycloak error: {exc}") from exc
     old_app_roles = sorted(set(old_all) & KNOWN_ROLES)
 
-    # 4. Guardrail: never strip the last tenant_admin of a tenant.
+    # Never strip the last tenant_admin of a tenant.
     if "tenant_admin" in old_app_roles and "tenant_admin" not in desired_set:
         async with tenant_connection(state.app_pool, tenant_id) as conn:
             n_admins = await conn.fetchval(
@@ -557,13 +512,12 @@ async def set_user_roles(
                 detail="cannot remove the last tenant_admin of the tenant",
             )
 
-    # 5. Apply the role change in Keycloak (managed = our app roles only).
+    # managed = our app roles only.
     try:
         await state.keycloak.set_realm_roles(sub, desired=desired, managed=KNOWN_ROLES)
     except KeycloakError as exc:
         raise HTTPException(status_code=502, detail=f"keycloak error: {exc}") from exc
 
-    # 6. Mirror the collapsed primary role in the local users table.
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         await conn.execute(
             "UPDATE users SET role = $2, updated_at = now() WHERE sub = $1",
@@ -571,7 +525,6 @@ async def set_user_roles(
             _primary_role(desired_set),
         )
 
-    # 7. Audit (severity sec — role changes are security-relevant; old → new).
     await state.audit_writer.write_event(
         tenant_id=tenant_id,
         kind=audit_kinds.USER_ROLE_CHANGED,

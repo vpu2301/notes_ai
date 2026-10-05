@@ -1,15 +1,7 @@
-"""Origin check for browser state changes on auth-service (IDX-A2, F5).
+"""Origin check for browser state changes: a mutating request must carry an allowed ``Origin``/``Referer``.
 
-Cookie-authenticated endpoints (``/auth/refresh``, ``/auth/logout``) are
-reachable cross-site by construction — the browser attaches ``mdx_rt`` to
-any request for ``/auth``. ``SameSite=Lax`` already blocks cross-site
-POSTs in modern browsers; this middleware is the explicit second line:
-a ``POST/PUT/PATCH/DELETE`` from a web client must carry an ``Origin``
-(or ``Referer``) whose origin is in ``CORS_ALLOWED_ORIGINS``.
-
-Native clients are exempt **only** when they say so (``X-Client-Type:
-macos|ios``) *and* send no ``Origin`` — a browser cannot suppress its own
-Origin header, so a forged header alone does not open the door.
+Native clients are exempt only with ``X-Client-Type: macos|ios`` AND no ``Origin``
+(a browser cannot suppress its own Origin header).
 """
 
 from __future__ import annotations
@@ -29,16 +21,8 @@ logger = logging.getLogger(__name__)
 STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 ERROR_CODE = "origin_not_allowed"
 
-# Paths where the check would be wrong, not merely inconvenient.
-#
-# `/auth/oauth/token` (IDX-B1b) authenticates with a client secret carried
-# in the request itself. CSRF is the attack this middleware exists to
-# stop, and it is structurally impossible here: a browser can be made to
-# POST cross-site, but it cannot be made to attach a secret it does not
-# have, and the endpoint uses no ambient credential — no cookie, no
-# session. Meanwhile a meeting-room device sends no `Origin` and no
-# `X-Client-Type`, so without this exemption every room in the estate
-# would be refused a token the moment the issuer cut over.
+# `/auth/oauth/token` uses no ambient credential (CSRF is impossible) and room
+# devices send neither `Origin` nor `X-Client-Type`.
 EXEMPT_PREFIXES: tuple[str, ...] = ("/auth/oauth/",)
 
 

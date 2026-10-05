@@ -1,22 +1,8 @@
 import SwiftUI
 
-/// Signing in, in as few steps as the server allows.
-///
-/// The default way in is an address and a code from the mail: no password
-/// to remember, no password to lose, and one path that both signs up and
-/// signs in (the server deliberately never says which of the two just
-/// happened). A password screen is one link away for accounts that have
-/// one, and the second factor and the welcome step appear only when the
-/// server says they are owed.
-///
-/// During the dual-issuer period (ADR-0047) both ways in are real, so both
-/// are here. A new account gets a code and a native session; an account
-/// that predates the period keeps its Keycloak password — and keeps the
-/// Face ID button that signs in with the one saved on this phone, because
-/// taking that away in the release that adds email codes would be a
-/// regression for every existing user and a benefit to none of them. The
-/// server can also say so itself: `409 use_password` moves this screen to
-/// the password form for an address that has one.
+/// Signing in: an address and a mailed code by default (the server never says
+/// whether it was a sign-up); the password form one link away, or forced by
+/// `409 use_password` (ADR-0047). Second factor and welcome step only when owed.
 struct SignInView: View {
     @EnvironmentObject private var app: AppState
 
@@ -40,25 +26,17 @@ struct SignInView: View {
     @State private var notice: String?
     /// Seconds until "Send again" becomes available.
     @State private var resendIn = 0
-    /// The server card, shown when the addresses cannot work (localhost on
-    /// a phone) or the last attempt could not connect.
+    /// The server card: addresses that cannot work, or a failed connection.
     @State private var showServer = false
     @State private var host = ""
-    /// Set when the server has no password endpoint (native mode before
-    /// IDX-A4): the link stops being offered rather than failing again.
+    /// Set when the server has no password endpoint: the link stops being offered.
     @State private var passwordUnavailable = false
-    /// Keep the password in the Keychain behind Face ID for next time.
-    /// Only ever written for a Keycloak session — a native one has no
-    /// password, and `SessionKind.canSavePassword` is the check.
+    /// Keep the password in the Keychain behind Face ID; Keycloak sessions only (`canSavePassword`).
     @State private var rememberPassword = Biometrics.name != nil
     @State private var hasSavedPassword = CredentialStore.hasSaved
-    /// The saved-password sign-in is offered once per appearance, not on
-    /// every redraw of the password step.
+    /// The saved-password sign-in is offered once per appearance.
     @State private var biometricTried = false
-    /// Set when `/auth/login` answered `403 email_not_verified`: the
-    /// address whose confirmation link can be sent again. Cleared as soon
-    /// as anything else is tried, so the button never offers to resend
-    /// for an address the person has since changed.
+    /// The address whose confirmation link can be resent (after `403 email_not_verified`); cleared on any other attempt.
     @State private var unverified: String?
     @State private var resending = false
     @FocusState private var focus: Field?
@@ -71,10 +49,7 @@ struct SignInView: View {
             heading
             content
             if let message = errorMessage {
-                // An unconfirmed address is not a wrong password: the
-                // account is fine and the only thing missing is a click in
-                // an inbox, so this reads as information with a way
-                // forward rather than as a refusal.
+                // An unconfirmed address is information with a way forward, not a refusal.
                 DSNotice(tone: unverified == nil ? .danger : .info,
                          symbol: unverified == nil ? "exclamationmark.triangle.fill" : "envelope.badge",
                          text: message)
@@ -90,9 +65,7 @@ struct SignInView: View {
                     }
                 }
             } else if let notice {
-                // An envelope for "we mailed you a code"; a key for "this
-                // account signs in with a password" — the same slot, two
-                // different pieces of news.
+                // Envelope for "we mailed you a code", key for "signs in with a password".
                 DSNotice(tone: .info,
                          symbol: step == .password ? "key.fill" : "envelope.fill",
                          text: notice)
@@ -114,13 +87,9 @@ struct SignInView: View {
             hasSavedPassword = CredentialStore.hasSaved
         }
         .onChange(of: stepId) { _, id in
-            // Whatever the step change was, the offer to resend a
-            // confirmation belongs to the attempt that provoked it.
+            // The resend offer belongs to the attempt that provoked it.
             unverified = nil
-            // A saved password: offer the face as soon as the password
-            // step is reached, once, and never over an address the phone
-            // cannot reach anyway — a Face ID prompt in front of a
-            // connection error explains nothing.
+            // Offer the face once when the password step is reached, never over a connection error.
             guard id == "password", hasSavedPassword, !biometricTried,
                   Biometrics.name != nil, password.isEmpty,
                   !(isPhysicalDevice && app.settings.pointsAtLocalhost)
@@ -141,8 +110,7 @@ struct SignInView: View {
         }
     }
 
-    /// Changes every second while the resend countdown runs, so the task
-    /// above re-fires; a plain `.task` would run once and stop.
+    /// Changes every second during the resend countdown so the task re-fires.
     private var resendTick: String { "\(resendIn)-\(stepId)" }
 
     private var stepId: String {
@@ -225,9 +193,7 @@ struct SignInView: View {
                     Text("Don't have an account?")
                         .font(.ds(13))
                         .foregroundStyle(DS.muted)
-                    // Out to the web app: signup is a form with terms, a
-                    // workspace name and an address to confirm, and it
-                    // lives where there is a keyboard (BE-0 / IOS-0).
+                    // Out to the web app: signup is a web form.
                     linkButton("Create one") { app.openSignup() }
                 }
             }
@@ -409,8 +375,7 @@ struct SignInView: View {
         URL(string: app.settings.authBaseURL)?.host() ?? app.settings.authBaseURL
     }
 
-    /// "Could not connect to the server." says nothing about why. On a
-    /// phone the usual reason is that the addresses still say localhost.
+    /// Why a connection failed; on a phone usually addresses that still say localhost.
     static func describe(_ error: URLError, settings: BackendSettings) -> String {
         let host = URL(string: settings.authBaseURL)?.host() ?? settings.authBaseURL
         switch error.code {
@@ -422,8 +387,7 @@ struct SignInView: View {
         case .notConnectedToInternet:
             return "This phone is offline."
         case .appTransportSecurityRequiresSecureConnection:
-            // A release build talks https only (IDX-I1 F): a session token
-            // over plain http in a shipped app is not acceptable.
+            // A release build talks https only.
             return "\(host) is plain http, which this build does not allow. Use an https address."
         default:
             return error.localizedDescription
@@ -504,15 +468,9 @@ struct SignInView: View {
         }
     }
 
-    /// The server has said this address signs in with a password. Not an
-    /// error to recover from — a different door, already unlocked, so the
-    /// address is kept and only the step changes.
-    ///
-    /// Only `/auth/email/verify` can say this, never `/auth/email/start`:
-    /// the start endpoint answers 202 for every address by construction
-    /// (`docs/api/error-codes.md`), and a redirection there would tell an
-    /// unauthenticated caller which addresses exist. By the time this is
-    /// reached the person has proved they hold the mailbox.
+    /// The server said this address signs in with a password: keep the address,
+    /// change the step. Only `/auth/email/verify` may say so (start answers 202
+    /// for every address, so it cannot leak which exist).
     private func usePassword(saying message: String) {
         passwordUnavailable = false
         errorMessage = nil
@@ -521,9 +479,7 @@ struct SignInView: View {
         focus = .password
     }
 
-    /// Face ID → the password saved on this phone → the normal sign-in.
-    /// Silent when the person cancels the prompt; a password the server no
-    /// longer accepts is forgotten, so the form is back to typing.
+    /// Face ID → saved password → the normal sign-in. Silent on cancel; a rejected password is forgotten.
     private func signInWithSavedPassword() async {
         guard !isBusy, let biometry = Biometrics.name else { return }
         errorMessage = nil
@@ -545,9 +501,7 @@ struct SignInView: View {
         defer { isBusy = false }
         do {
             let next = try await app.signIn(email: email, password: password, otp: nil)
-            // Only after the server has accepted it, and only for the kind
-            // of session that has a password at all: a native sign-in that
-            // somehow arrived here must not leave one on the phone.
+            // Only after the server accepted it, and never for a native session.
             if rememberPassword, !hasSavedPassword, Biometrics.name != nil,
                app.sessionKind?.canSavePassword == true {
                 try? CredentialStore.save(email: email, password: password)
@@ -556,32 +510,24 @@ struct SignInView: View {
             password = ""
             advance(to: next)
         } catch let error as APIError where error.isEmailNotVerified {
-            // A BE-0 account that has not followed the link in its mail.
-            // Checked before the saved-password branch too: this is a 403,
-            // not a 401, but keeping the two together makes the ordering
-            // rule visible — nothing that is *not* a rejected password may
-            // be allowed to delete a saved one.
+            // Unconfirmed account. Ordering rule: nothing that is *not* a
+            // rejected password may delete a saved one.
             unverified = email
             password = ""
             errorMessage = AuthCopy.message(for: error)
         } catch let error as APIError where error.isMFARequired {
-            // Checked BEFORE the saved-password branch below: Keycloak
-            // asks for the second factor with a 401 too, and reading that
-            // as "the saved password is wrong" would delete a password
-            // that is perfectly good.
+            // BEFORE the saved-password branch: Keycloak's MFA 401 must not delete a good password.
             errorMessage = AuthCopy.message(for: error)
             step = .mfa(challengeId: "", methods: ["totp"])
         } catch let error as APIError where fromKeychain && error.status == 401 {
-            // The password changed since it was saved. Forget it rather
-            // than offering a face that unlocks a rejected password.
+            // The password changed since it was saved: forget it.
             CredentialStore.delete()
             hasSavedPassword = false
             password = ""
             errorMessage = "The saved password no longer works — sign in with the new one."
             focus = .password
         } catch let error as APIError where error.isNotFound {
-            // This deployment has no password endpoint (native mode before
-            // IDX-A4). Say so once and take the person back to the code.
+            // No password endpoint here: say so once, back to the code.
             passwordUnavailable = true
             password = ""
             step = .email
@@ -598,8 +544,7 @@ struct SignInView: View {
         defer { isBusy = false }
         do {
             if challengeId.isEmpty {
-                // Keycloak's login takes the second factor as `otp` on the
-                // same request rather than on a challenge of its own.
+                // Keycloak takes the second factor as `otp` on the same request.
                 let next = try await app.signIn(email: email, password: password, otp: entered)
                 advance(to: next)
             } else {
@@ -645,9 +590,7 @@ struct SignInView: View {
         step = .email
     }
 
-    /// A connection failure is a different problem from a rejected code,
-    /// and on a phone it is usually the server address — so say which, and
-    /// open the field that fixes it.
+    /// A connection failure is usually the server address: say so and open the field.
     private func report(_ error: Error) {
         if let urlError = error as? URLError {
             errorMessage = Self.describe(urlError, settings: app.settings)
@@ -660,11 +603,7 @@ struct SignInView: View {
 
 // MARK: - Locked
 
-/// The gate, when the person cancelled the prompt.
-///
-/// There is a session on this phone; it is simply unreadable until a face
-/// or a passcode says so. The two ways out are the two honest ones: try
-/// again, or give the session up.
+/// The gate, when the person cancelled the prompt: try again, or give the session up.
 struct LockedView: View {
     @EnvironmentObject private var app: AppState
 

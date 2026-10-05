@@ -1,9 +1,4 @@
-"""Neutral speaker naming (pure logic, no models).
-
-Diarization labels stay anonymous (S1/S2/UNKNOWN); display names are
-the SPEAKER_1..N defaults until the client supplies its own via
-``set_speaker_mapping``. There is no server-side identity inference.
-"""
+"""Neutral speaker naming (pure): SPEAKER_N defaults until the client names speakers."""
 
 from __future__ import annotations
 

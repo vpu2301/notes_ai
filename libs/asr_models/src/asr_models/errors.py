@@ -1,39 +1,7 @@
-"""The batch-ASR failure vocabulary — one closed set, shared by both sides.
+"""The closed ``transcription_jobs.error_kind`` vocabulary: stage, retryable (worker ack/DLQ), resubmittable (user can fix).
 
-``transcription_jobs.error_kind`` is a bare ``TEXT`` column and every
-producer of it lived in a different file, so "closed vocabulary" was a
-docstring promise nothing enforced: the worker wrote three kinds, the
-notification fan-out documented three, the API re-exported whatever the
-column held, and a client had no way to tell a transient infrastructure
-blip from an upload it should never send again.
-
-This module is that vocabulary. Each kind carries the three facts a
-caller actually needs:
-
-``stage``
-    Where in the job's life it died. Answers *why* it can happen: a
-    ``decode`` failure is about the bytes, an ``inference`` failure is
-    about the GPU, a ``lifecycle`` failure is about the fleet.
-``retryable``
-    Whether re-running the SAME job could plausibly succeed. Drives the
-    worker's ack/DLQ decision — a corrupt file will be just as corrupt on
-    the fourth delivery, and re-running it three more times only delays
-    the failure the user is waiting for.
-``resubmittable``
-    Whether the person who uploaded can do something about it. ``true``
-    for "fix the file and send it again"; ``false`` when the fix is an
-    operator's, and telling the user to try again would be a lie.
-
-``message`` is an English one-liner free of sensitive content. It is deliberately built
-from the kind alone and never from an exception string: the detail column
-is free text assembled from whatever ffmpeg or CUDA said, which can quote
-the audio it choked on (ADR-0031 — the same reason the notification
-fan-out ships ``error_kind`` and nothing else).
-
-No DB CHECK constraint mirrors this enum on purpose. The worker deploys
-independently of the migrations; a CHECK would turn "new worker, old
-schema" into an unwritable failure path — the one path that must always
-be writable. Unknown values decode to :data:`UNKNOWN_SPEC` instead.
+``message`` is built from the kind alone, never from an exception string (detail may quote audio, ADR-0031).
+No DB CHECK mirrors this enum on purpose: the worker deploys independently; unknown values decode to :data:`UNKNOWN_SPEC`.
 """
 
 from __future__ import annotations
@@ -246,10 +214,7 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
         _spec(
             JobErrorKind.DIARIZATION_UNAVAILABLE,
             ErrorStage.INFERENCE,
-            # Mirrors model_unavailable: the recording is fine; the worker
-            # that claimed the job cannot load the speaker model (image
-            # without the baked weights, digest mismatch, cold fleet). A
-            # redelivery may land on a worker that can.
+            # Retryable: a redelivery may land on a worker that has the speaker model.
             retryable=True,
             resubmittable=False,
             message=(
@@ -260,9 +225,7 @@ ERROR_SPECS: Final[dict[str, ErrorSpec]] = {
         _spec(
             JobErrorKind.DIARIZATION_FAILED,
             ErrorStage.INFERENCE,
-            # Deterministic for a given recording: the model loaded and
-            # choked on these samples. Re-delivering redoes a full Whisper
-            # pass to reach the same crash — not worth the GPU time.
+            # Deterministic per recording; a redelivery would redo Whisper to reach the same crash.
             retryable=False,
             resubmittable=True,
             message=(
@@ -321,11 +284,7 @@ UNKNOWN_SPEC: Final = ErrorSpec(
     resubmittable=False,
     message="The job failed for a reason this build does not recognise.",
 )
-"""Decoded shape for a kind written by a newer worker than the reader.
-
-Deliberately ``retryable=False``: a reader that cannot name the failure is
-in no position to promise the failure is temporary.
-"""
+"""Shape for a kind written by a newer worker; ``retryable=False`` since the reader cannot name the failure."""
 
 
 def spec_for(kind: str | None) -> ErrorSpec | None:

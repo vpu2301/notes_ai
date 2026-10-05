@@ -25,10 +25,8 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Read by the observable gauge ``mdx_autocomplete_rollup_last_run_unix_ts``
-# (registered in main_deps; the RollupStale alert fires on its age).
+# Read by the observable gauges registered in main_deps.
 _last_success_unix: float = 0.0
-# Read by ``mdx_autocomplete_corpus_size{source}`` — refreshed each roll-up.
 _corpus_size: dict[str, int] = {}
 
 
@@ -40,10 +38,7 @@ def corpus_size_by_source() -> dict[str, int]:
     return dict(_corpus_size)
 
 
-# Sprint 15: Layer C acceptance rate — the feature's quality metric and the
-# kill-switch input (ADR-0036). Refreshed each roll-up from layer_c telemetry
-# rows; global (not per-tenant) to bound label cardinality. Read by the
-# observable gauges registered in main_deps.
+# Layer C acceptance rate (ADR-0036); global, not per-tenant, to bound label cardinality.
 _layer_c_events: dict[str, int] = {}
 
 
@@ -65,8 +60,7 @@ async def rollup_all(
     redis,
     day: date | None = None,
 ) -> int:
-    # asyncpg binds ``$1::date`` params as dates — a str raises DataError,
-    # so the day travels as a ``date`` object end-to-end.
+    # asyncpg needs a ``date`` for ``$1::date`` (a str raises DataError).
     day_obj = day or (datetime.now(UTC).date() - timedelta(days=1))
     day_iso = day_obj.isoformat()
     total_updated = 0
@@ -82,8 +76,6 @@ async def rollup_all(
             updated = await repo.rollup_tenant_day(conn, tenant_id=tid, day=day_obj)
         total_updated += updated
         if updated > 0:
-            # Bump the trie cache version_tag so the next request
-            # rebuilds with the new counters.
             await redis.incr(f"autocomplete:tenant_phrase_version:{tid}")
         await audit_writer.write_event(
             tenant_id=tid,
@@ -95,21 +87,15 @@ async def rollup_all(
             payload={"rollup_date": day_iso, "phrases_updated": updated},
             severity=Severity.INFO,
         )
-    # Corpus-size gauge refresh (dashboard row 4: corpus by source).
-    # MUST go through tenant_connection: querying an RLS table on a bare
-    # pooled connection evaluates the policy with the GUC's session reset
-    # value — an EMPTY STRING once any prior txn set it — and ''::uuid
-    # aborts the whole roll-up. The nil tenant matches no tenant rows, so
-    # this counts exactly the system corpus.
+    # Must use tenant_connection: on a bare pooled connection the RLS GUC may be '' and ''::uuid aborts.
+    # The nil tenant matches no tenant rows, so this counts the system corpus only.
     nil_tenant = UUID("00000000-0000-0000-0000-000000000000")
     async with tenant_connection(app_pool, nil_tenant) as conn:
         rows = await conn.fetch(
             "SELECT source::text, count(*) AS n FROM autocomplete_phrases "
             "WHERE enabled = TRUE GROUP BY source"
         )
-    # Layer C acceptance-rate refresh (sprint 15). The telemetry table has
-    # no RLS (ADR-0025 exception), so a bare pooled connection is correct
-    # here — same as the TelemetryBuffer's insert path.
+    # Telemetry table has no RLS (ADR-0025 exception): bare pooled connection is correct.
     async with app_pool.acquire() as conn:
         lc_rows = await conn.fetch(
             "SELECT event_type, count(*) AS n FROM autocomplete_telemetry "
@@ -162,13 +148,9 @@ async def run_forever(*, interval_seconds: float = 86400.0) -> None:  # pragma: 
 
 
 def _main() -> None:  # pragma: no cover — manual ops entrypoint
-    """Manual run: uv run --project services/autocomplete-service \
-    python -m autocomplete_service.jobs.rollup [--day YYYY-MM-DD]
+    """Manual run (``python -m autocomplete_service.jobs.rollup [--day YYYY-MM-DD]``).
 
-    NEVER bypass the ``autocomplete_rollup_progress`` guard for a re-run —
-    counters are monotonic increments; replaying a day double-counts.
-    Delete the progress row for (tenant, day) ONLY when the original run
-    is known to have failed before updating counters (see the runbook).
+    Never bypass the ``autocomplete_rollup_progress`` guard: replaying a day double-counts.
     """
     import argparse
 

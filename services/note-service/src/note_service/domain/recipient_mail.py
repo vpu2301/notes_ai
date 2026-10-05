@@ -1,19 +1,7 @@
-"""Sending a recipient link from the product (Sprint 22, migration 0039).
-
-Inline, through the SMTP adapter ``/share/email`` already uses: the
-request renders, sends, records the outcome on the link row and
-answers. No outbox, no worker, no share URL at rest — a slow relay costs
-the sender a few seconds (bounded by ``share_email_timeout_s``), which
-is the same trade sprint 16 made and documented for the other route.
-
-What the mail says: who shared (display name + workspace), when the link
-expires, the product line, an unsubscribe link — and nothing from the
-note. No title, no section text. The recipient learns what was agreed
-by opening the page, where the sender's own trust gate applies.
-
-Opt-out is global and hashed: ``sha256(pepper || lower(email))`` is the
-only thing stored, and a suppressed address is refused at send time
-with a 409 the sender can act on (copy the link by hand).
+"""Sending a recipient link from the product: inline through the SMTP adapter, no
+outbox, no share URL at rest. The mail carries who shared, the expiry, the
+product line and an unsubscribe link; nothing from the note. Opt-out is global
+and hashed (``sha256(pepper || lower(email))``), refused at send time with a 409.
 """
 
 from __future__ import annotations
@@ -86,9 +74,7 @@ def unsubscribe_url(link_id: UUID) -> str:
 
 
 class ShareMailCaps:
-    """Per link, per sender, per workspace — each stopping a different
-    abuse. Fail-open like the other note-service limiters; the tenant
-    cap is the one that keeps the endpoint from being a relay."""
+    """Per link, per sender, per workspace; fail-open. The tenant cap keeps the endpoint from being a relay."""
 
     def __init__(self, redis: object) -> None:
         self._limiter = FixedWindowLimiter(redis, prefix="note:share-mail")
@@ -198,7 +184,7 @@ def repo_token(link: repo.ShareLinkRow) -> str:
     return token_for(link.id, key_hex=settings.share_link_hmac_key_hex)
 
 
-# ── Sprint 23: the verification code ─────────────────────────────────
+# ── The verification code ────────────────────────────────────────────
 
 
 def otp_hash(code: str, link_id: UUID) -> bytes:

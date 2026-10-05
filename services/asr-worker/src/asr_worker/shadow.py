@@ -1,16 +1,6 @@
-"""Sprint TQ4 T4 — a candidate ASR engine in the shadow.
+"""Candidate ASR engine in the shadow: a sample of jobs, within a shared daily budget.
 
-On a sample of jobs (``MDX_ASR_SHADOW_RATE``, within a daily budget of audio
-hours shared by all workers through Redis), the candidate named by
-``MDX_ASR_SHADOW_BACKEND`` decodes the same audio through the same path as
-the primary (``processor.decode_recording``: chunker, guards, coverage). It
-runs alongside diarization and may hold the job back at most
-``MDX_ASR_SHADOW_MAX_WAIT_SECONDS``; then it is dropped.
-
-What is kept: :class:`asr_models.ShadowDiagnostics` — counts and rates. The
-shadow's transcript exists inside :func:`compare` and nowhere else: never
-stored, logged or returned. The primary result is the same with the shadow
-on or off, except for ``diagnostics.shadow``.
+Only counts and rates are kept; the shadow transcript is never stored, logged or returned.
 """
 
 from __future__ import annotations
@@ -67,8 +57,7 @@ def _edit_distance(a: list[str], b: list[str]) -> int:
 def compare(
     primary: TranscriptionOutput, shadow: TranscriptionOutput, *, backend: str, rtf: float
 ) -> ShadowDiagnostics:
-    """Numbers only. Long transcripts are compared on their first 4 000
-    words each (the distance is quadratic); the counts are whole."""
+    """Numbers only; the distance is computed on the first 4 000 words (quadratic)."""
     a, b = _tokens(primary), _tokens(shadow)
     distance = _edit_distance(a[:4000], b[:4000])
     return ShadowDiagnostics(

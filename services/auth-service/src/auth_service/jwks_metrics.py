@@ -1,15 +1,4 @@
-"""OTel instrumentation for ``libs/auth``'s :class:`JwksCache`.
-
-``JwksCache`` keeps pure in-memory counters on its ``.metrics`` field so the
-library stays free of any observability dependency (it is a leaf-ish lib).
-This module lives in the *service* — which already depends on OpenTelemetry —
-and bridges those counters to OTel **observable** counters: on every metric
-collection the callbacks read the current cumulative values off the cache.
-
-The metric names match the ``JwksCacheHitRatioLow`` Prometheus alert authored
-in Sprint 02 Day 9 (``infra/prometheus/rules/sprint-02-auth-audit.yml``), which
-until now had no series feeding it.
-"""
+"""Bridge ``JwksCache.metrics`` to OTel observable counters (names match the ``JwksCacheHitRatioLow`` alert)."""
 
 from __future__ import annotations
 
@@ -22,17 +11,7 @@ from auth import JwksCache
 
 
 def instrument_jwks_cache(cache: JwksCache, *, meter: Meter | None = None) -> None:
-    """Register OTel observable counters that report ``cache.metrics``.
-
-    Called once from ``build_state`` at lifespan startup. The counters are
-    cumulative (monotonic), so an observable counter is the correct
-    instrument — each collection reports the latest absolute value of the
-    in-memory counter.
-
-    The meter is resolved at call time (not import time) so it binds to the
-    global ``MeterProvider`` configured during startup; tests may inject an
-    SDK-backed ``meter`` to read the series back.
-    """
+    """Register observable counters reporting ``cache.metrics``; the meter is resolved at call time (tests inject one)."""
     m = meter or metrics.get_meter("mdx.auth.jwks")
 
     def _hits(_: CallbackOptions) -> Iterable[Observation]:

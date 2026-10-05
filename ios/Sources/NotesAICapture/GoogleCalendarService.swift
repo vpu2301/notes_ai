@@ -1,31 +1,22 @@
 import Foundation
 import SwiftUI
 
-/// The calendar connections that live on the server (note-service, 0019
-/// and 0020): which Google accounts and calendar links are connected,
-/// their next days' events, and the connect / add-link / disconnect /
-/// choose-calendars actions.
-///
-/// Connect opens Google's consent page in an `ASWebAuthenticationSession`;
-/// note-service does the OAuth exchange and sends the browser back to
-/// `notesai://calendar/connected`, which the session intercepts. Tokens
-/// never touch this phone — the same account then shows up in the web app.
+/// Server-side calendar connections (Google accounts, calendar links) and
+/// their events. OAuth happens on note-service; tokens never touch this phone.
 @MainActor
 final class GoogleCalendarService: ObservableObject {
     static let returnTo = "notesai://calendar/connected"
 
     /// nil until the first answer; false when the server has no Google client.
     @Published private(set) var available: Bool?
-    /// The server takes calendar links (private iCal addresses; 0020) —
-    /// the way in that needs no Google client at all.
+    /// The server takes calendar links (private iCal addresses) — needs no Google client.
     @Published private(set) var linkAvailable = false
     @Published private(set) var connections: [CalendarConnection] = []
     @Published private(set) var events: [UpcomingEvent] = []
     @Published private(set) var problems: [CalendarProblem] = []
     @Published private(set) var loading = false
     @Published private(set) var connecting = false
-    /// The last refresh's failure, for the Connectors tab. The home page
-    /// stays quiet about it — a stale list is better than a red banner.
+    /// The last refresh's failure, for the Connectors tab only.
     @Published private(set) var error: String?
     /// Calendars per connection, loaded on demand for the picker.
     @Published private(set) var calendars: [String: [RemoteCalendar]] = [:]
@@ -43,8 +34,7 @@ final class GoogleCalendarService: ObservableObject {
 
     // MARK: - Reading
 
-    /// Reload connections and events. Quiet refreshes within a minute of
-    /// the last one are skipped — the home page asks on every appearance.
+    /// Reload connections and events; quiet refreshes within a minute are skipped.
     func refresh(force: Bool = false) async {
         if !force, let last = lastRefresh, Date().timeIntervalSince(last) < 60 { return }
         loading = true
@@ -72,8 +62,7 @@ final class GoogleCalendarService: ObservableObject {
         }
     }
 
-    /// Every five minutes while signed in, so a meeting added on another
-    /// device shows up without a tap.
+    /// Every five minutes while signed in.
     private func startTicker() {
         guard ticker == nil else { return }
         ticker = Task { [weak self] in
@@ -99,8 +88,7 @@ final class GoogleCalendarService: ObservableObject {
 
     // MARK: - Connecting
 
-    /// Google sign-in in a sheet; on success the list refreshes. `loginHint`
-    /// pre-selects an account (used by "Sign in again").
+    /// Google sign-in in a sheet; `loginHint` pre-selects an account.
     func connect(loginHint: String? = nil) async {
         guard !connecting else { return }
         connecting = true
@@ -133,9 +121,7 @@ final class GoogleCalendarService: ObservableObject {
         }
     }
 
-    /// 0020: add a calendar link. The server fetches it before answering,
-    /// so a wrong address fails right here. Returns the message to show,
-    /// or nil when the calendar was added (and the list refreshed).
+    /// Add a calendar link (the server fetches it first). Returns the message to show, or nil on success.
     func addLink(url: String) async -> String? {
         do {
             _ = try await api.connectCalendarLink(url: url.trimmingCharacters(in: .whitespacesAndNewlines), label: nil)
@@ -217,8 +203,7 @@ extension Color {
 
 // MARK: - One list for the home page
 
-/// A row of the "Coming up" card, whichever calendar it came from: the
-/// server-side Google connection or this phone's own calendars (EventKit).
+/// A row of the "Coming up" card, from the server-side connection or EventKit.
 struct ComingUpItem: Identifiable, Equatable {
     enum Source: Equatable { case google, device }
 
@@ -231,31 +216,25 @@ struct ComingUpItem: Identifiable, Equatable {
     let meetingURL: URL?
     let detail: String?
     let source: Source
-    /// Sprint 30: everyone invited, and names to offer for speakers.
+    /// Everyone invited, and names to offer for speakers.
     var attendeeCount: Int = 0
     var attendeeNames: [String] = []
-    /// The Google account the event came from — the current user, whose
-    /// name is left out of the names offered.
+    /// The Google account the event came from (left out of the names offered).
     var accountEmail: String? = nil
-    /// Sprint 34 — what the invite says the meeting is about. A
-    /// server-owned calendar already handed over `agendaLines`; this Mac's
-    /// own calendars hand over the raw `description` instead, which the
-    /// server reads once and never stores.
+    /// What the invite says: `agendaLines` from a server calendar, raw `description` from EventKit.
     var icalUid: String? = nil
     var agendaLines: [String] = []
     var description: String? = nil
 
     var isLive: Bool { start <= Date() && end > Date() }
 
-    /// What a capture started from this event carries (Sprint 30).
+    /// What a capture started from this event carries.
     var captureContext: CaptureContext {
         .calendarEvent(attendeeCount: attendeeCount, names: attendeeNames,
                        excluding: accountEmail.map { [$0] } ?? [])
     }
 
-    /// …and what goes ON the note when the capture opens it (Sprint 34):
-    /// the people and the agenda, so a meeting started from an invite is
-    /// already half written before anyone speaks.
+    /// …and what goes ON the note when the capture opens it: the people and the agenda.
     var meetingCalendar: MeetingCalendarContext? {
         let names = captureContext.nameCandidates
         guard !names.isEmpty || !agendaLines.isEmpty || description != nil else { return nil }
@@ -268,8 +247,7 @@ struct ComingUpItem: Identifiable, Equatable {
             description: description)
     }
 
-    /// Both sources, merged and sorted; an event present in both (the
-    /// same Google account added to the phone) is kept once.
+    /// Both sources, merged and sorted; an event present in both is kept once.
     static func merge(google: [UpcomingEvent], device: [CalendarService.Event]) -> [ComingUpItem] {
         var seen = Set<String>()
         var out: [ComingUpItem] = []

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// "Action items" above the sections (Sprint 20): a disclosure with one
-/// row per item; a click opens the responses in a popover.
+/// "Action items" above the sections: a disclosure with one row per item; a click opens the responses in a popover.
 struct ActionItemsSection: View {
     @ObservedObject var model: NoteViewModel
     @State private var expanded = true
@@ -84,8 +83,7 @@ struct ActionItemRow: View {
     }
 }
 
-/// The responses on one item, each with the sender's label for the link
-/// and the recipient's comment as plain text. "Mark done" and "Clear".
+/// The responses on one item: the sender's label for the link and the recipient's comment as plain text. "Mark done" and "Clear".
 struct ItemDetailPopover: View {
     @ObservedObject var model: NoteViewModel
     let itemId: String

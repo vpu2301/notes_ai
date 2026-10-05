@@ -1,9 +1,4 @@
-"""``ChatProvider`` that replays recorded results — the ``test`` env backend.
-
-A cassette is one JSON file per (model, prompt, schema) key. Missing keys
-fail loudly (``ProviderError(unavailable)``) rather than inventing text, so
-a test that reaches the network by accident cannot pass by luck.
-"""
+"""``ChatProvider`` replaying cassettes (one JSON per (model, prompt, schema) key); a missing key fails loudly."""
 
 from __future__ import annotations
 

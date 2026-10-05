@@ -9,10 +9,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_spelling_overlay(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Route tests stand in for the database with fakes that know nothing of
-    Sprint TQ3's ``transcript_corrections``; the overlay reads as "migration
-    not applied" (no rows, nothing changes) unless a test asks for it with
-    ``@pytest.mark.overlay``."""
+    """The fakes know nothing of ``transcript_corrections``: the overlay reads as "no rows"
+    unless a test asks for it with ``@pytest.mark.overlay``."""
     if request.node.get_closest_marker("overlay"):
         return
     from asr_service.domain import corrections

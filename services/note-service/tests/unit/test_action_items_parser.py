@@ -1,9 +1,5 @@
-"""The action-line grammar and the due-date rules (Sprint 20, G-1).
-
-Deterministic by construction: the same section text yields the same
-items, keys and dates every time, which is what lets responses attach
-across amendments. The fixture covers en/uk/de, with and without owner
-and date, bulleted, numbered and glued lines.
+"""The action-line grammar and the due-date rules: deterministic, so responses
+attach across edits. The fixture covers en/uk/de, with and without owner and date.
 """
 
 from __future__ import annotations

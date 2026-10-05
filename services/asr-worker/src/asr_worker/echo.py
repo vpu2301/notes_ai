@@ -1,31 +1,8 @@
-"""The prompt-echo guard (Sprint I2 T3): words the decoder copied from its
-prompt come out of the transcript, word by word.
+"""Prompt-echo guard: words the decoder copied from its prompt come out, word by word.
 
-Whisper is given the workspace vocabulary as ``initial_prompt``. Over audio
-it cannot decode — silence that passed VAD, a breath, speech in another
-language — it writes the prompt back, as a run of prompt terms in prompt
-order with repeats and case changes, usually at the start of a segment, and
-sometimes with real speech glued on after it. The 2026-09-25 transcript:
-"Gysi, Moderator II, moderatorin, narrator, speaker background Questions or
-inquiries about this Pardo 65 GT".
-
-The old rule (``inference._is_prompt_echo``) dropped a segment only when it
-was NOTHING but prompt words and the decoder rated it as non-speech; an
-echo fused with speech passed both tests. This one is lexical and
-positional and does not depend on a confidence: a run of at least
-``MIN_ECHO_RUN`` consecutive prompt tokens — immediate repeats allowed, one
-non-prompt filler allowed inside the run — that starts within the first
-``LEAD_WORDS`` words of the segment or after a pause of ``GAP_MS`` is an
-echo and is removed. A prompt term said once in the middle of a sentence
-("my name is Mitchell") is speech and stays.
-
-The guard only ever removes words; it never adds or rewrites one. Removed
-spans are returned with their timestamps so the job's diagnostics can say
-where and how much — and so a person can disagree.
-
-Pure, backend-agnostic: it runs in the processor on every backend's output,
-not inside one engine, because the dev and hosted backends are HTTP
-services that never see this code otherwise.
+Lexical and positional: a run of at least ``MIN_ECHO_RUN`` prompt tokens (one filler
+allowed) within the first ``LEAD_WORDS`` words or after a ``GAP_MS`` pause is removed.
+Only removes words; returns removed spans with timestamps. Pure and backend-agnostic.
 """
 
 from __future__ import annotations
@@ -64,11 +41,7 @@ def prompt_terms(prompt: str | None) -> list[tuple[str, ...]]:
 
 
 def _is_echo(run_tokens: list[str], terms: list[tuple[str, ...]]) -> bool:
-    """A run of prompt tokens is an echo when it spans two or more distinct
-    prompt terms, or repeats a token straight away. One multi-word term said
-    once — "of Williams Jet Tender that you can have" (T7, the incident
-    recording) — is the presenter naming the product, not the decoder
-    copying its prompt."""
+    """Echo = spans two or more distinct prompt terms, or repeats a token straight away."""
     if len(set(run_tokens)) < len(run_tokens):
         return True  # a word the decoder wrote twice: "Gysi, Moderator. Gysi, Moderator."
     occurrences = 0
@@ -107,8 +80,7 @@ def _runs(
         if not is_prompt or not (i < LEAD_WORDS or gap_before >= GAP_MS):
             i += 1
             continue
-        # Extend: prompt tokens, or one filler that is followed by a prompt
-        # token. The run ends on the last prompt token.
+        # Extend over prompt tokens (one filler allowed); the run ends on the last prompt token.
         j = i
         last_prompt = i
         count = 0
@@ -161,16 +133,12 @@ def strip_prompt_echo(
 
 def _rebuild_text(words: list[WordTiming]) -> str:
     text = " ".join(w.text.strip() for w in words if w.text.strip())
-    # A removed run leaves its trailing comma on the first kept word only
-    # when the decoder attached it there; a leading punctuation mark on a
-    # transcript line is noise, not a word.
+    # Leading punctuation left by a removed run is noise, not a word.
     return text.lstrip(" ,;:—-–").strip()
 
 
 def _words_from_text(segment: Segment) -> list[WordTiming]:
-    """A backend without word timings: one synthetic word per token, all
-    stamped with the segment's own time so gaps never fire and only the
-    lead-word rule applies."""
+    """Without word timings: one synthetic word per token at the segment's time."""
     return [
         WordTiming(text=t, start_ms=segment.start_ms, end_ms=segment.end_ms, probability=1.0)
         for t in segment.text.split()
@@ -180,8 +148,7 @@ def _words_from_text(segment: Segment) -> list[WordTiming]:
 def guard_segments(
     segments: list[Segment], prompt: str | None
 ) -> tuple[list[Segment], list[EchoSpan], int]:
-    """Apply the guard to a transcript: ``(segments kept, spans removed,
-    segments dropped)``. A segment left without words is dropped."""
+    """``(segments kept, spans removed, segments dropped)``; a wordless segment is dropped."""
     if not prompt_tokens(prompt):
         return list(segments), [], 0
     kept_segments: list[Segment] = []

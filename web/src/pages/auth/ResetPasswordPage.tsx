@@ -8,19 +8,8 @@ import { messageFor } from "../../lib/errorCopy";
 import { Banner, LoginShell } from "./LoginShell";
 
 /**
- * `/reset` — forgotten password, both halves.
- *
- * The pack describes an email → code → password flow. The server does not
- * have one: `POST /auth/password/forgot` mails a **link**, and
- * `POST /auth/password/reset` takes the `{token, new_password}` that link
- * carries. So this page is the same two halves, split by whether the load
- * came from that link:
- *
- *   no token  → ask for the address, always answer neutrally;
- *   token     → set the new password.
- *
- * A token can also arrive from `/account-recovery`, which hands one over
- * after ending every session.
+ * `/reset` — no token: ask for the address (always a neutral answer); token (from the
+ * mailed link or `/account-recovery`): set the new password.
  */
 export function ResetPasswordPage({
   token: injected,
@@ -41,8 +30,7 @@ export function ResetPasswordPage({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // The policy is public and cheap; asking for it beats hard-coding a
-  // number that then drifts from `domain/password_policy.py`.
+  // Ask for the policy rather than hard-code a number that drifts.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;

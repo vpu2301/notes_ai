@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# IDX-I1 L: a Release build must not allow arbitrary loads.
-#
-# Asserted on the built product rather than on the source plist, because
-# the policy is produced by the Info.plist preprocessor (Support/Config/*.xcconfig)
-# and a change there is exactly the kind of thing that would go unnoticed.
+# A Release build must not allow arbitrary loads. Asserted on the built
+# product: the policy comes from the Info.plist preprocessor (Support/Config/*.xcconfig).
 #
 #   ios/scripts/check-ats.sh [path/to/Info.plist]
 set -euo pipefail

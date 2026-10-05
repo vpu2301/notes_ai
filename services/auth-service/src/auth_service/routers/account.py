@@ -1,14 +1,7 @@
-"""Sessions, step-up, email change, deletion and the profile (IDX-A5 F4–F6).
+"""Sessions, step-up, email change, deletion and the profile.
 
-Everything a person can do to their own account from the settings screen,
-plus the step-up check the dangerous half of it is gated on.
-
-The step-up rule, in one place: ``/auth/reauth`` re-stamps the session's
-``last_authenticated_at``, and anything that could take the account away
-from its owner — turning off the second factor, moving the login address,
-deleting the account, ending every other session — carries
-``Depends(recent_auth)``. An access token on its own is never enough for
-those, because an unlocked laptop is an access token.
+``/auth/reauth`` re-stamps ``last_authenticated_at``; anything that could take
+the account away carries ``Depends(recent_auth)``.
 """
 
 from __future__ import annotations
@@ -179,7 +172,7 @@ async def reauth(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ── sessions (F4) ────────────────────────────────────────────────────────
+# ── sessions ─────────────────────────────────────────────────────────────
 
 
 @router.get(
@@ -260,7 +253,7 @@ async def revoke_others(
     return RevokeOthersResponse(revoked=revoked)
 
 
-# ── email change (F5) ────────────────────────────────────────────────────
+# ── email change ─────────────────────────────────────────────────────────
 
 
 @router.post(
@@ -324,8 +317,7 @@ async def email_change_confirm(
     await audit(
         tenant_id=claims.tid,
         kind=audit_kinds.AUTH_EMAIL_CHANGED,
-        # The addresses themselves stay out of the payload: the audit
-        # trail records that the login moved, not what it moved to.
+        # The addresses stay out of the audit payload.
         payload={"identity_id": str(identity.id), "notify_failed": not notified},
         severity=Severity.SEC,
         actor_sub=identity.id,
@@ -384,7 +376,7 @@ def _revert_page(*, ok: bool, detail: str) -> str:
 </div></body></html>"""
 
 
-# ── deletion (F6) ────────────────────────────────────────────────────────
+# ── deletion ─────────────────────────────────────────────────────────────
 
 
 @router.post(

@@ -1,8 +1,4 @@
-"""Focused extractors behind the single ``field_extraction`` stage.
-
-One stage, one module per field-type family: ``choice`` for
-choice/multi_choice, ``numeric_date`` for numeric/date binding.
-"""
+"""Extractors behind the ``field_extraction`` stage: ``choice`` and ``numeric_date``."""
 
 from .choice import extract_choice, extract_multi_choice
 

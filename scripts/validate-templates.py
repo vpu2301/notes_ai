@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
-"""CI gate — validate every template JSON file in ``infra/seeds/templates/``.
-
-Each file must:
-- Parse against the ``TemplateDefinition`` Pydantic model (which enforces
-  the options rules: choice/multi_choice sections carry 2..50 options,
-  other field types carry none; values/labels/aliases unique).
-- Have ``asr_prompt`` ≤ 224 tokens per section (tiktoken cl100k_base).
-- Have unique ``voice_aliases`` across sections (the model enforces this).
-- File name must match ``code.json``.
-- Contain no personal data in option labels/aliases: template options are
-  shared vocabulary, same rule as the autocomplete corpus.
-
-Run::
+"""CI gate: every template JSON in ``infra/seeds/templates/`` parses as ``TemplateDefinition``,
+keeps ``asr_prompt`` <= 224 tokens per section, matches ``code.json``, and carries no
+personal data in option labels/aliases.
 
     python scripts/validate-templates.py
 """
@@ -40,9 +30,7 @@ except ImportError:
 SEED_DIR = Path(__file__).resolve().parents[1] / "infra" / "seeds" / "templates"
 ASR_PROMPT_MAX_TOKENS = 224
 
-# Mirror of autocomplete_service.scrubber patterns — template options must
-# never contain personal data (emails, phone numbers, national id numbers,
-# dates of birth).
+# Mirror of autocomplete_service.scrubber: options must never carry personal data.
 PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
     ("national_id", re.compile(r"\b\d{10}\b")),

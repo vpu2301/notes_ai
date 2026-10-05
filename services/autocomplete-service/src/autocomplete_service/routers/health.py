@@ -1,4 +1,4 @@
-"""Liveness + readiness probes (Kubernetes naming, per the template)."""
+"""Liveness + readiness probes."""
 
 from __future__ import annotations
 

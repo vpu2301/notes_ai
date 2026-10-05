@@ -1,15 +1,4 @@
-"""Vault KV-v2 secret fetch — the KMS seam for system HMAC keys (sprint 16).
-
-The signing runbook's ``SIGNER_IPN_HMAC_KEY`` / ``PUBLIC_VERIFY_IP_HMAC_KEY``
-placeholders move onto the same Vault trust root as the master KEK: when a
-service enables it, these values are fetched from Vault KV at startup
-instead of being pasted into env files. Fail-closed — an enabled-but-
-unreachable Vault refuses startup, same posture as the master key.
-
-Deliberately tiny: one GET against ``{addr}/v1/{mount}/data/{path}``
-(KV v2 read). Rotation stays an operator action in Vault + a rolling
-restart; no in-process re-fetch loop (the keys rotate yearly, not hourly).
-"""
+"""Vault KV-v2 secret fetch for system HMAC keys at startup; fail-closed, no in-process re-fetch."""
 
 from __future__ import annotations
 
@@ -26,12 +15,7 @@ async def fetch_kv_secrets(
     mount: str = "secret",
     timeout_seconds: float = 5.0,
 ) -> dict[str, str]:
-    """Return the ``data.data`` mapping of a KV-v2 secret.
-
-    ``token`` accepts ``Secret[str]`` (house style) or ``str``. Raises
-    :class:`MasterKeyError` on any transport / auth / shape failure —
-    callers treat that as fail-closed startup.
-    """
+    """The ``data.data`` mapping of a KV-v2 secret; :class:`MasterKeyError` on any failure (fail-closed)."""
     import httpx
 
     from .master import _reveal

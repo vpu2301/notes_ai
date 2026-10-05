@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the frozen replay fixtures.
-
-Run ONLY when a pipeline change is intentional and the ADR records it.
-Regenerating to make a red test green is how a determinism contract
-dies — the failing test is the contract doing its job.
+"""Regenerate the frozen replay fixtures. Only for an intentional pipeline change, never to green a red test.
 
     uv run --project services/nlp-service python \
         services/nlp-service/tests/fixtures/replay/regenerate.py

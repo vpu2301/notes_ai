@@ -1,9 +1,4 @@
-"""Streaming inference primitives.
-
-Pure-logic submodules (aligner, committer, prompt) export eagerly so
-their tests don't have to install numpy. Windower + concurrency + vad
-touch numpy and are lazy.
-"""
+"""Streaming inference primitives; numpy-touching submodules are lazy."""
 
 from typing import TYPE_CHECKING, Any
 

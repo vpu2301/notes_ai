@@ -1,11 +1,7 @@
-# Model backends and routing — the single place a backend is named.
-# Foundation plan decision 11: switching a tier's backend is a config PR
-# reviewed like a migration (eval parity → shadow run → flip → rollback).
-#
-# ${VAR} / ${VAR:-default} are resolved from the process environment by the
-# service's config.py at startup. A backend whose variables are unset is fine
-# as long as it is not enabled in the current ENV; if it IS, the process
-# refuses to start (ConfigError: missing_env). Never commit values here.
+# Model backends and routing: the single place a backend is named; switching
+# one is a config PR reviewed like a migration.
+# ${VAR} / ${VAR:-default} resolve from the environment at startup; an enabled
+# backend with unset variables refuses to start (missing_env). Never commit values here.
 version: 1
 
 backends:
@@ -17,17 +13,13 @@ backends:
     enabled_in_envs: [dev]
     models: { chat: "${DEV_MAC_CHAT_MODEL:-notes-chat}" }
     structured_output: json_schema
-    # Sprint L1: 16K is what infra/models/dev-mac/Modelfile bakes; the
-    # single-pass eval arm sets DEV_MAC_CONTEXT=32768 with notes-chat-long.
+    # 16K is what infra/models/dev-mac/Modelfile bakes.
     context_window: ${DEV_MAC_CONTEXT:-16384}
     max_concurrency: 1
     timeout_seconds: 900
-    # Sprint L1 T2: the engine gives a small local model simpler work
-    # (meeting_doc small-model profile). Off for every hosted backend.
+    # The engine gives a small local model simpler work; off for every hosted backend.
     small_model: ${DEV_MAC_SMALL_MODEL:-true}
-    # Ollama's /v1 route honours `reasoning_effort`: `none` keeps a
-    # reasoning family (Qwen3) from spending the budget on <think>; a
-    # non-reasoning family (Gemma) ignores it. Empty = not sent.
+    # `none` keeps a reasoning family (Qwen3) from spending the budget on <think>; empty = not sent.
     request_overrides: { reasoning_effort: "${DEV_MAC_REASONING_EFFORT:-none}" }
     processor: { name: "Developer machine", region: "local" }
 
@@ -40,13 +32,9 @@ backends:
     timeout_seconds: 3600
     processor: { name: "Developer machine", region: "local" }
 
-  # ── Mistral AI, EU-hosted API (Sprint L2: the dev default; M2 flips
-  # staging/prod). Two backends, one key: the large model writes
-  # (understand/summarize), the small one classifies, names and corrects
-  # (classify/title/entities). Ids are pinned to a dated version — never a
-  # `-latest` alias — and recorded in docs/models/PINS.md. Prices in
-  # config/model_costs.yaml. Zero data retention + training opt-out are
-  # account settings (docs/runbooks/model-backends.md §mistral-account).
+  # ── Mistral AI, EU-hosted API: the large model writes, the small one
+  # classifies/names/corrects. Ids pinned to a dated version, never `-latest`
+  # (docs/models/PINS.md); zero retention is an account setting.
   mistral_eu:
     kind: openai_compat
     base_url: ${MISTRAL_API_URL:-https://api.mistral.ai/v1}
@@ -95,14 +83,9 @@ backends:
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
-  # ── speaker diarization (Sprint 29 B-9, shape B — ADR-0052) ───────────
-  # Our own image (deploy/diar-server), pyannote community-1 on a GPU.
-  # Audio is sent as FLAC, held in memory for the request and never
-  # stored; the server returns labelled spans, never embeddings.
-  # TWO tokens: the `auth:` bearer below satisfies the endpoint gateway,
-  # and MDX_DIAR_SERVER_TOKEN (worker setting, sent as X-MDX-Diar-Token)
-  # satisfies the container itself. On a bare server they are the same
-  # value and the bearer alone is enough.
+  # ── speaker diarization (ADR-0052): deploy/diar-server on a GPU ────────
+  # TWO tokens: the `auth:` bearer for the endpoint gateway, and
+  # MDX_DIAR_SERVER_TOKEN (X-MDX-Diar-Token) for the container itself.
   dev_mac_diar:
     kind: diar_http
     base_url: ${DEV_MAC_DIAR_URL:-http://host.docker.internal:8081}
@@ -124,12 +107,8 @@ backends:
     timeout_seconds: 1800
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
-  # ── ASR bake-off candidates (Sprint TQ4, ADR-0067) ─────────────────────
-  # Same rule as the chat candidates below: a candidate and the backend it
-  # would become are the same object, so winning is a routing change. ASR
-  # candidates are also enabled on staging — the worker's shadow run
-  # (MDX_ASR_SHADOW_BACKEND) is where an adopted arm earns its switch — but
-  # `routing` never names them until ADR-0067 is accepted.
+  # ── ASR bake-off candidates (ADR-0067): enabled on staging for the
+  # worker's shadow run; `routing` never names them until the rule adopts one.
   cand_parakeet_asr:          # arm C: nvidia/parakeet-tdt-0.6b-v3 in deploy/asr-server (NeMo, T4)
     kind: asr_http
     base_url: ${CAND_PARAKEET_URL:-}
@@ -160,15 +139,8 @@ backends:
     timeout_seconds: 3600
     processor: { name: "Developer machine", region: "local" }
 
-  # ── bake-off candidates (Sprint 37 B-1) ────────────────────────────────
-  # Eval only: `enabled_in_envs: [dev, test]` means the harness can reach
-  # them and no customer workspace ever can, whatever `routing` says. They
-  # exist here rather than in the eval script so that a candidate and the
-  # backend it would become are the SAME object — winning the bake-off is
-  # then a two-line routing change, not a port.
-  #
-  # Each URL points at a scratch HF EU endpoint (or a local server) raised
-  # for the run and torn down after it; `make eval-notes` names the backend.
+  # ── chat bake-off candidates: eval only (`enabled_in_envs: [dev, test]`),
+  # so no customer workspace can reach them; winning is a routing change.
   cand_gemma_27b:
     kind: openai_compat
     base_url: ${CAND_GEMMA_URL:-}
@@ -221,12 +193,8 @@ backends:
     timeout_seconds: 600
     processor: { name: "Hugging Face Inference Endpoints", region: "EU" }
 
-  # The premium candidate: a frontier model behind an EU-resident,
-  # zero-retention endpoint. Registered `enabled: false` and NAMELESS on
-  # purpose — a processor entry is a disclosure, and the Data page reads
-  # these names. It is filled in, with its real company and region, in the
-  # same PR that selects it (ADR-0058), and only then can a workspace
-  # acknowledge it.
+  # The premium candidate: disabled and NAMELESS on purpose (a processor entry
+  # is a disclosure the Data page reads); named in the PR that selects it.
   cand_frontier_eu:
     kind: openai_compat
     enabled: false
@@ -272,10 +240,7 @@ backends:
     enabled_in_envs: [test]
     cassette_dir: ${MODELS_CASSETTE_DIR:-tests/fixtures/eval/cassettes}
 
-# operation -> tier -> backend. `premium` flips to hosted_eu at gate H0 by PR.
-# These rows are what staging/prod run (dev is overridden below); M2 T7
-# flips understand/summarize to mistral_eu and classify/title/entities to
-# mistral_eu_small there, after the acknowledgement rollout.
+# operation -> tier -> backend, as staging/prod run it (dev is overridden below).
 routing:
   understand: { standard: hf_eu,     premium: hf_eu }
   summarize:  { standard: hf_eu,     premium: hf_eu }
@@ -284,14 +249,9 @@ routing:
   entities:   { standard: hf_eu,     premium: hf_eu }
   asr:        { standard: hf_eu_asr, premium: hf_eu_asr }
 
-# Per-environment override of an operation *kind*, applied before routing.
-# Sprint L2: dev chat is Mistral by default with the Mac as the fallback —
-# taken when MISTRAL_API_KEY is unset (missing_env), when the service's
-# MDX_DEV_CHAT_BACKEND names another backend (forced), or when the API does
-# not answer the startup probe (probe_failed). An override may name an
-# operation as well as a kind: the short operations (classify/title/
-# entities) go to the small model, and to dev_mac when the fallback is
-# active, so a laptop without the key still names its notes.
+# Per-environment override of an operation kind (or operation), applied
+# before routing. The fallback is taken on missing_env, forced
+# (MDX_DEV_CHAT_BACKEND) or probe_failed.
 env_overrides:
   dev:
     chat: { primary: mistral_eu, fallback: dev_mac }

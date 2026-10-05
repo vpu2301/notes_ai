@@ -1,8 +1,4 @@
-"""SQLAlchemy async engine factory and shared declarative base.
-
-asyncpg is preferred for hot-path tenant-scoped queries via ``tenant_connection``;
-this module exists for ORM-driven services that need SQLAlchemy.
-"""
+"""SQLAlchemy async engine factory and shared declarative base (asyncpg via ``tenant_connection`` is the hot path)."""
 
 from __future__ import annotations
 
@@ -15,9 +11,5 @@ class Base(DeclarativeBase):
 
 
 def make_engine(database_url: str, **kwargs: object) -> AsyncEngine:
-    """Create an async SQLAlchemy engine.
-
-    ``database_url`` must be asyncpg-compatible, e.g.
-    ``postgresql+asyncpg://user:pass@host/db``.
-    """
+    """Create an async SQLAlchemy engine from an asyncpg-compatible URL."""
     return create_async_engine(database_url, **kwargs)

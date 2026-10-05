@@ -1,12 +1,4 @@
-"""asr-service entry point.
-
-Sprint 03 surface:
-- ``/healthz`` / ``/readyz``
-- ``/asr/jobs``   POST upload, GET list, GET id, DELETE id
-
-Use ``create_app()`` for tests; production runs via
-``uvicorn asr_service.main:app --host 0.0.0.0 --port 8000``.
-"""
+"""asr-service entry point. ``create_app()`` for tests; uvicorn ``asr_service.main:app``."""
 
 from __future__ import annotations
 
@@ -49,9 +41,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.svc = state
     install_state(state)
 
-    # Out-of-process backstop for jobs stranded by a dead worker — the
-    # worker is the only writer of a job's terminal status, and it cannot
-    # write one for the crash that killed it.
+    # Backstop for jobs stranded by a dead worker.
     reaper_stop = asyncio.Event()
     reaper_task: asyncio.Task[None] | None = None
     if settings.job_reaper_enabled:
@@ -82,12 +72,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 async def _object_store_not_configured(
     request: Request, exc: ObjectStoreNotConfiguredError
 ) -> JSONResponse:
-    """The service runs without an object store when ``S3_ENDPOINT`` is
-    empty, but a transcript (or audio) then cannot be fetched or stored.
-    Say so with a 503 and a machine-readable code instead of the 500
-    "An unexpected error occurred" that hid the cause (request
-    39BEEB90-…, NOTE-2026-00016). The stored transcript is not gone —
-    that is the 410 — the service just has nowhere to read it from."""
+    """No object store configured (empty ``S3_ENDPOINT``): a 503 with a code, not a 500.
+    The transcript is not gone (that is the 410); there is nowhere to read it from."""
     logger.warning(
         "object_store_not_configured",
         extra={"path": str(request.url.path), "method": request.method},
@@ -113,9 +99,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
     app.add_exception_handler(ObjectStoreNotConfiguredError, _object_store_not_configured)  # type: ignore[arg-type]
-    # CORS for the SPA. allow_credentials=True is required so the browser sends
-    # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
-    # origin, so origins are an explicit allow-list (mirror auth-service A3).
+    # allow_credentials=True (HttpOnly cookie) forbids a wildcard origin: explicit allow-list.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

@@ -1,17 +1,9 @@
-"""IDX-A5 end to end: the real app, real pools, real Redis, real envelope.
+"""MFA + account end to end: real app, pools, Redis and envelope.
 
-The acceptance criteria this file exists to prove:
-
-  * once MFA is on, **no** login path yields a session without a second
-    factor;
-  * a TOTP code is accepted at most once;
-  * changing the email needs a code delivered to the NEW address, and the
-    old one gets a link that restores it and ends every session;
-  * an identity that is the only owner of a shared workspace cannot
-    delete its account.
-
-Requires ``RUN_DB_INTEGRATION=1``, ``make migrate-up``, the dev stack's
-Postgres and Redis, and ``infra/dev/master.key``.
+Once MFA is on no login path yields a session without a second factor; a TOTP code is
+accepted at most once; an email change needs a code at the NEW address and the old one
+gets a revert link; the only owner of a shared workspace cannot delete its account.
+Requires ``RUN_DB_INTEGRATION=1``, ``make migrate-up`` and ``infra/dev/master.key``.
 """
 
 from __future__ import annotations
@@ -156,13 +148,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 def _next_code(secret: str) -> str:
-    """A code for the NEXT time step.
-
-    The step that confirmed enrolment is already spent, and the drift
-    window means "now" is often still that same step. Real users are
-    minutes apart; a test is milliseconds, so it asks for tomorrow's code
-    — which the ±1 drift accepts and which carries a higher step.
-    """
+    """A code for the NEXT time step: the enrolment step is spent and the test is still inside it."""
     import time
 
     return totp.totp_at(secret, at_unix=time.time() + totp.TOTP_PERIOD_SECONDS)
@@ -317,12 +303,7 @@ async def test_a_totp_code_is_accepted_at_most_once(client, app, su) -> None:
 
 
 async def test_the_code_that_confirmed_enrolment_cannot_also_sign_you_in(client, app, su) -> None:
-    """Step accounting does not care that the two uses are different acts.
-
-    A code proves possession of the device for one time step, and that
-    step is spent by whatever used it first. Someone watching an enrolment
-    over a shoulder cannot turn the code they saw into a session.
-    """
+    """A step is spent by whatever used it first, enrolment included."""
     email = _email()
     session = await _sign_up(client, app, su, email)
     enrolled = await client.post("/auth/mfa/totp/enroll", headers=_auth(session["access_token"]))
@@ -476,8 +457,7 @@ async def test_the_old_address_can_undo_the_change_and_everything_is_revoked(
         headers=_auth(token),
     )
 
-    # The notice to the OLD address carries the revert link, and does not
-    # spell out where the account went.
+    # The notice to the OLD address carries the revert link and withholds the destination.
     notice = [m for m in app.state.svc.email_provider.sent if m.to_address == old][-1]
     assert "/auth/email/revert/" in notice.text_body
     assert new not in notice.text_body

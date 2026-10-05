@@ -1,4 +1,4 @@
-"""Sprint TQ3 T3: an accepted spelling teaches the glossary.
+"""An accepted spelling teaches the glossary.
 
 The clients send an accepted correction's variants to ``POST /v1/glossary``
 as ``heard_as`` of its spelling; for an existing term that merges (the route

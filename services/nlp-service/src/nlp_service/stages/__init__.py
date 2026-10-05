@@ -1,10 +1,5 @@
-"""7-stage NLP pipeline implementations.
-
-Order is the contract (ADR-0028): voice_commands → punctuation →
-number_norm → date_norm → abbreviation → field_extraction →
-confidence. Replay determinism and note drafting both assume this
-order; changing it is an ADR-level event.
-"""
+"""NLP pipeline stages. Order is the contract (ADR-0028): voice_commands → punctuation →
+number_norm → date_norm → abbreviation → field_extraction → confidence."""
 
 from .abbreviation import AbbreviationStage
 from .confidence import ConfidenceStage

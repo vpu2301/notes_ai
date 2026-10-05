@@ -1,4 +1,4 @@
-"""Every line traceable (Summary Engine v2, Q5).
+"""Every line traceable.
 
 Every written line becomes a row with the evidence of what it cites; the
 key dates a recording named form their own block, each downloadable as a
@@ -37,7 +37,7 @@ def _fact(text: str, start: int, **kw: object) -> VerifiedFact:
     return VerifiedFact(**base)  # type: ignore[arg-type]
 
 
-# ── T1: every written line is a row ─────────────────────────────────
+# ── every written line is a row ─────────────────────────────────
 
 
 def _document() -> pipeline.DocumentResult:
@@ -109,7 +109,7 @@ def test_every_kind_the_engine_can_write_is_one_the_database_accepts() -> None:
     assert engine <= allowed, engine - allowed
 
 
-# ── T3: key dates ───────────────────────────────────────────────────
+# ── key dates ───────────────────────────────────────────────────
 
 
 def _dated(
@@ -150,7 +150,7 @@ def test_english_dates_read_the_iso_way() -> None:
     assert render.format_when(date(2026, 9, 23), time(0, 0), "uk") == "23.09.2026 00:00"
 
 
-# ── T3: the calendar file ───────────────────────────────────────────
+# ── the calendar file ───────────────────────────────────────────
 
 NOW = datetime(2026, 9, 22, 8, 0, tzinfo=UTC)
 
@@ -184,7 +184,7 @@ def test_the_summary_is_capped() -> None:
 
 
 def test_the_python_item_key_fixtures_are_current() -> None:
-    """The web hashes a displayed line to find its row (Q5 T2). Both suites
+    """The web hashes a displayed line to find its row. Both suites
     read `web/tests/fixtures/item-keys.json`; regenerate it with
     `scripts/dev/item_key_fixtures.py` when the key rule changes."""
     import json

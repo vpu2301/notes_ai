@@ -2,8 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Port 5173 is allow-listed (with credentials) in every backend's CORS
-// configuration — keep it pinned and fail loudly if it is taken.
+// 5173 is the origin every backend's CORS allow-list names; fail loudly if taken.
 export default defineConfig({
   plugins: [react()],
   server: {

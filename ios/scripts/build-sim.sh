@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build the .app for the iOS Simulator with xcodebuild (no signing needed).
-# Requires the iOS platform to be installed in Xcode
-# (Xcode › Settings › Components, or `xcodebuild -downloadPlatform iOS`).
+# Build the .app for the iOS Simulator (no signing). Needs the iOS platform
+# installed in Xcode (`xcodebuild -downloadPlatform iOS`).
 #
 #   ios/scripts/build-sim.sh                 # Debug
 #   ios/scripts/build-sim.sh Release

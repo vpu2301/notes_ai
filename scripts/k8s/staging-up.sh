@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
-# ── Bring up the k3d STAGING cluster ──────────────────────────────────
-#
-# Stands up the full product on a local k3d cluster from the locally
-# built compose images (the fallback posture while the hosting decision
-# is pending — docs/deploy/hosting-gap.md). Same chart, same gates,
-# laptop-sized cluster.
-#
+# Bring up the k3d STAGING cluster from the locally built compose images.
 #   scripts/k8s/staging-up.sh            # create + deploy everything
 #   scripts/k8s/staging-up.sh --delete   # tear the cluster down
-#
-# Prereqs: k3d, helm, kubectl, docker; compose images built.
-# RAM: stop the compose app stack first (docker compose stop).
+# Prereqs: k3d, helm, kubectl, docker; compose images built; compose app stack stopped.
 
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -23,9 +15,7 @@ if [[ "${1:-}" == "--delete" ]]; then
   exit 0
 fi
 
-# 1. Cluster. Traefik is DISABLED — nothing in the namespace is meant to
-#    be reachable from outside the cluster (public exposure is a hosting
-#    decision, docs/deploy/hosting-gap.md).
+# 1. Cluster. Traefik is DISABLED: nothing is reachable from outside the cluster.
 if ! k3d cluster list | grep -q "^$CLUSTER"; then
   k3d cluster create "$CLUSTER" \
     --agents 1 \
@@ -33,8 +23,7 @@ if ! k3d cluster list | grep -q "^$CLUSTER"; then
     --wait
 fi
 
-# 2. Import the locally built images (no registry in staging) + the
-#    stateful/utility images the chart pins.
+# 2. Import the locally built images (no registry in staging) + pinned stateful images.
 docker pull pgvector/pgvector:pg16 >/dev/null || true
 docker pull busybox:1.36 >/dev/null || true
 IMAGES=(
@@ -68,11 +57,9 @@ kubectl -n "$NS" create secret generic mdx-keycloak-clients \
 kubectl -n "$NS" create secret generic mdx-master-key \
   --from-file=master.key=infra/dev/master.key \
   --dry-run=client -o yaml | kubectl apply -f -
-# Hugging Face Inference Endpoints (DEP-S1). Values come from the shell
-# environment (secret manager / .env.local), never from a file in the repo.
-# With HF_ASR_ENDPOINT_URL set, asr-worker is routed to hf_eu_asr; without
-# it the worker keeps the baked CPU whisper (inproc_cpu_asr) so staging
-# still comes up on a laptop with no HF account.
+# HF endpoint values come from the shell environment, never a repo file.
+# With HF_ASR_ENDPOINT_URL set asr-worker routes to hf_eu_asr; without it
+# staging still comes up on the baked CPU whisper.
 kubectl -n "$NS" create secret generic mdx-hf-endpoints \
   --from-literal=HF_CHAT_ENDPOINT_URL="${HF_CHAT_ENDPOINT_URL:-}" \
   --from-literal=HF_ASR_ENDPOINT_URL="${HF_ASR_ENDPOINT_URL:-}" \
@@ -84,14 +71,12 @@ ASR_BACKEND_VALUE=inproc_cpu_asr
 if [ -n "${HF_ASR_ENDPOINT_URL:-}" ] && [ -n "${HF_TOKEN:-}" ]; then ASR_BACKEND_VALUE=hf_eu_asr; fi
 echo "asr-worker ASR_BACKEND=$ASR_BACKEND_VALUE"
 
-# Realm import (staging: the dev realm export; production: the realm is
-# produced by scripts/k8s/gen-prod-realm.py).
+# Realm import (staging: the dev export; production: scripts/k8s/gen-prod-realm.py).
 kubectl -n "$NS" create configmap mdx-keycloak-realm \
   --from-file=realm-export.json=infra/keycloak/realm-export.json \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 4. Deploy. The post-install hooks run migrate (with the idempotent
-#    init.sql initContainer) → seed.
+# 4. Deploy. Post-install hooks run migrate → seed.
 helm upgrade --install notes infra/k8s/notes -n "$NS" --timeout 15m \
   --set "apps.asr-worker.env.ASR_BACKEND=$ASR_BACKEND_VALUE" "$@"
 

@@ -1,11 +1,6 @@
 import SwiftUI
 
-/// "Share with client…" — one link per recipient (Sprint 19).
-///
-/// A label so the sender knows who has which link, an optional address
-/// (a label too, and Sprint 22's delivery address), and an expiry. On
-/// success the system share sheet opens with the URL so it can go by
-/// Mail, Messages or WhatsApp.
+/// "Share with client…" — one link per recipient: label, optional address, expiry; then the share sheet.
 struct ShareWithClientSheet: View {
     @ObservedObject var model: NoteViewModel
     let webAppURL: String
@@ -18,7 +13,7 @@ struct ShareWithClientSheet: View {
     @State private var emailError: String?
 
     private static let allExpiryOptions = [30, 90, 180]
-    /// Clipped to what the workspace allows (Sprint 23).
+    /// Clipped to what the workspace allows.
     private var expiryOptions: [Int] {
         let allowed = Self.allExpiryOptions.filter { $0 <= model.rules.maxLinkDays }
         return allowed.isEmpty ? [min(model.rules.maxLinkDays, 30)] : allowed

@@ -1,33 +1,8 @@
-"""Chaos scenarios for the batch ASR pipeline (sprint-03 spec §4.7 + §4.9).
-
-Two scenarios, both proving the queue is crash-safe:
-
-1. **SIGKILL mid-job → reclaim** (§4.7): a worker is `kill -9`'d after it has
-   picked up a job but before it acks. A *second* worker must reclaim the job
-   via `XAUTOCLAIM` once the idle threshold elapses, and the row must end
-   ``complete`` or ``failed`` — never stuck ``running``. Spec bound: ≤ 90 s.
-
-2. **3-retry → DLQ** (§4.9): a job that keeps failing reclaim lands on
-   ``asr:jobs:dlq`` and is XACKed off the main stream. (The fast, infra-light
-   version of this lives in
-   ``libs/messaging/tests/integration/test_redis_streams.py``; here we assert
-   the end-to-end worker path honours it.)
-
-These require the full dev stack (`make dev-up && make migrate-up && seed`), a
-running **asr-service**, a baked CPU Whisper model, and a valid token. They are
-skipped unless ``RUN_ASR_CHAOS=1``. The harness spawns/kills the workers itself
-so it controls exactly which process dies — workers are NOT in compose.
-
-Required env:
-  RUN_ASR_CHAOS=1
-  ASR_BASE_URL        (default http://localhost:8001)
-  ASR_TOKEN           bearer token with asr.write + asr.read (see `make seed`)
-  ASR_SAMPLE_AUDIO    path to a short wav/m4a clip to transcribe
-  ASR_WORKER_CMD      (default: "uv run --project services/asr-worker
-                       python -m asr_worker.main")
-The spawned workers inherit the current environment (DSNs, REDIS_URL, S3_*,
-MDX_MASTER_KEY_PATH); the harness overrides device, consumer name, and the
-idle-reclaim threshold per worker.
+"""Chaos scenarios for the batch ASR pipeline: SIGKILL mid-job -> a second worker
+reclaims via XAUTOCLAIM (never stuck ``running``), and 3 failed reclaims -> DLQ.
+Needs the dev stack, asr-service, a baked CPU model and a token; skipped unless
+``RUN_ASR_CHAOS=1``. Env: ASR_BASE_URL, ASR_TOKEN, ASR_SAMPLE_AUDIO, ASR_WORKER_CMD.
+The harness spawns and kills the workers itself.
 """
 
 from __future__ import annotations
@@ -55,8 +30,7 @@ WORKER_CMD = os.environ.get(
     "uv run --project services/asr-worker python -m asr_worker.main",
 )
 
-# Short reclaim so the test doesn't actually wait a full 60 s; the §4.7 bound is
-# 90 s, but with a 5 s idle threshold reclaim fires well inside it.
+# Short idle threshold so reclaim fires well inside the 90 s bound.
 RECLAIM_MS = 5_000
 TERMINAL = {"complete", "failed"}
 

@@ -1,4 +1,4 @@
-"""Sprint I2 T4/T6: a passage in another language is excluded by code, from
+"""A passage in another language is excluded by code, from
 the ASR's own per-segment language, and the extractor sees it tagged."""
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ def test_split_pieces_keep_the_turns_language() -> None:
     assert len(pieces) > 1 and all(p.language == "uk" for p in pieces)
 
 
-# ── Sprint I3 T3: quotes verify against the displayed and the raw text ──
+# ── T3: quotes verify against the displayed and the raw text ──
 
 
 def test_normalise_quote_drops_the_fillers_the_display_hides() -> None:

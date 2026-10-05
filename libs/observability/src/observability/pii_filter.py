@@ -1,27 +1,7 @@
-"""PII / secret-safe logging filter.
+"""PII / secret-safe logging filter: drop-list keys are deleted, mask-list keys become ``<redacted>``.
 
-Two policies, applied to log-record extras and to nested dict / list /
-structlog event-dict payloads:
-
-* **Drop list** — fields whose key matches (case-insensitive) are deleted
-  outright. Used for high-sensitivity values (passwords, tokens, raw audio,
-  transcripts, full request/response bodies).
-
-* **Mask list** — fields whose key matches are replaced with the string
-  ``<redacted>``. Used for PII whose presence/absence is informative but
-  whose value is not (email, phone, name, …).
-
-The filter does **not** parse free-form ``message`` strings for content;
-mask your message templates explicitly. Best-effort regex masking on JSON
-fragments embedded inside string messages is provided as a safety net.
-
-Design notes:
-
-* The matcher is exact-or-known-suffix on field names (e.g. ``access_token``,
-  ``refresh_token``, ``client_secret``). Substring matching would create
-  false positives — ``token_count`` in a metric should not be dropped.
-* Recursion depth is capped at 10 to prevent pathological nested logs from
-  blowing the stack.
+Exact key matching (substring matching would drop ``token_count``); free-form messages get only best-effort
+JSON-fragment masking; recursion is capped at 10.
 """
 
 from __future__ import annotations
@@ -30,9 +10,7 @@ import logging
 import re
 from typing import Any
 
-# ──────────────────────────────────────────────────────────────────────
-# Drop list — values are removed entirely.
-# ──────────────────────────────────────────────────────────────────────
+# Drop list: values are removed entirely.
 _DROP_NAMES: frozenset[str] = frozenset(
     {
         # Authentication / authorization
@@ -54,7 +32,7 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "session_id",
         "session_token",
         "csrf_token",
-        # Signup / verification (Sprint 21)
+        # Signup / verification
         "verify_url",
         "verification_code",
         "otp_code",
@@ -81,13 +59,12 @@ _DROP_NAMES: frozenset[str] = frozenset(
         "transcription",
         "note",
         "note_body",
-        # Speaker names are content (Sprint 30: calendar invitee picklist)
+        # Speaker names are content
         "speaker_names",
         "name_candidates",
         "speaker_name_candidates",
         "local_speaker_name",
-        # Sprint 34: what the invite knew and what the author typed in
-        # the room. Both are content on the same footing as a transcript.
+        # Invite context and the author's own notes are content too
         "attendee_names",
         "agenda_lines",
         "calendar_context",
@@ -101,9 +78,7 @@ _DROP_NAMES: frozenset[str] = frozenset(
     }
 )
 
-# ──────────────────────────────────────────────────────────────────────
-# Mask list — values replaced with <redacted>.
-# ──────────────────────────────────────────────────────────────────────
+# Mask list: values replaced with <redacted>.
 _MASK_NAMES: frozenset[str] = frozenset(
     {
         # Generic PII
@@ -133,20 +108,8 @@ _JSON_PATTERN: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
-# ──────────────────────────────────────────────────────────────────────
-# Value patterns — redacted wherever they appear, whatever the field is
-# called (IDX-B1b I).
-#
-# The key-based lists above cannot help when a secret is interpolated
-# into a message ("configured client %s"), pasted into a free-text field,
-# or logged under a name nobody predicted. A client credential is a
-# machine-generated string with a deliberate, unmistakable tag, so it can
-# be recognised by shape — which is exactly why the tag exists.
-#
-# Reserved for values that cannot occur legitimately in a log line. A
-# pattern for something people also type (an email, a name) would redact
-# real content, which is why this list is one entry long.
-# ──────────────────────────────────────────────────────────────────────
+# Value patterns, redacted whatever the field is called. Reserved for shapes that cannot occur
+# legitimately in a log line (a pattern for something people type would redact real content).
 _VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # mdx_sk_<8 hex>_<43 url-safe chars> — see auth_service.domain.credentials
     re.compile(r"mdx_sk_[A-Za-z0-9]{4,16}_[A-Za-z0-9_\-]{20,}"),
@@ -174,11 +137,7 @@ def _classify(name: str) -> str:
 
 
 def scrub(value: Any, depth: int = 0) -> Any:
-    """Return a copy of ``value`` with PII / secrets removed or masked.
-
-    Pure function — used both by the logging filter and directly by structlog
-    processors (see ``logging.py``).
-    """
+    """Return a copy of ``value`` with PII / secrets removed or masked (pure; also used by structlog processors)."""
     if depth >= _MAX_DEPTH:
         return value
     if isinstance(value, dict):

@@ -1,11 +1,5 @@
-"""OTel instruments for notification-service.
-
-Every metric named by `infra/prometheus/rules/sprint-12-alerts.yml` is
-created HERE, and `tests/unit/test_alert_rules.py` asserts the two sets
-match in both directions. Sprint 10's post-mortem was precisely this
-drift: dashboards and alerts referring to metrics nothing exported, so
-the alerts could never fire and nobody noticed until the feature had
-been silently broken for weeks.
+"""OTel instruments. Every metric named by the Prometheus alert rules is created
+here; ``tests/unit/test_alert_rules.py`` asserts the two sets match both ways.
 """
 
 from __future__ import annotations
@@ -68,8 +62,7 @@ fanout_latency_ms = _meter.create_histogram(
 )
 
 # ── observable gauges ───────────────────────────────────────────────
-# These are registered by main_deps with callbacks, because their value
-# is read from live state rather than accumulated.
+# Registered with callbacks at startup; values come from live state.
 STREAM_PENDING_GAUGE: Final = "mdx_notification_stream_pending"
 DIGEST_LAST_RUN_GAUGE: Final = "mdx_notification_digest_last_run_unix_ts"
 CONNECTED_SOCKETS_GAUGE: Final = "mdx_notification_connected_sockets"

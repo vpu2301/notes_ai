@@ -3,11 +3,8 @@ import SwiftUI
 
 // MARK: - Design tokens
 //
-// Paper, ink, and a moss accent. The look is Granola's / Codex's: a warm
-// off-white ground, hairline (½ pt) borders instead of shadows, generous
-// radii, serif display type over a quiet sans. Every colour is a dynamic
-// NSColor so the same token resolves for light and dark appearance; the
-// dark side is the same warm palette turned over.
+// Paper, ink, a moss accent: warm off-white ground, hairline borders, generous radii,
+// serif display over a quiet sans. Every colour is a dynamic NSColor (light/dark pair).
 
 enum DS {
     // Ground & surfaces
@@ -16,8 +13,7 @@ enum DS {
     static let surface2     = Color.ds("f3f1ec", "27231f")
     static let surfaceHover = Color.ds("f6f4f0", "231f1c")
     static let sidebar      = Color.ds("f8f7f3", "131110")
-    /// Sidebar row fills, as the web's Claude-style sidebar: hover (and
-    /// the row you are on), the filled "New meeting" row, and pressed.
+    /// Sidebar row fills: hover (and the active row), the filled "New meeting" row, pressed.
     static let sidebarHover = Color.ds("efede7", "1e1b18")
     static let sidebarActive = Color.ds("ebe8e1", "25211d")
     static let sidebarPress = Color.ds("e3dfd7", "2e2a25")
@@ -32,8 +28,7 @@ enum DS {
     // Hairlines
     static let line         = Color.ds("e6e2db", "2c2824")
     static let line2        = Color.ds("efece6", "241f1c")
-    /// The same warm neutral walked a step darker, so a live frame is
-    /// felt rather than coloured (`--line-hover` / `--line-active`).
+    /// The same warm neutral a step darker, so a live frame is felt rather than coloured.
     static let lineHover    = Color.ds("d9d3c9", "3b352f")
     static let lineActive   = Color.ds("c8c1b5", "4a433b")
     /// Border weight for every hairline: half a point on Retina.
@@ -68,17 +63,14 @@ enum DS {
     static let info         = Color.ds("4b6f9e", "8fb0dd")
     static let infoSoft     = Color.ds("4b6f9e", "8fb0dd", lightAlpha: 0.10, darkAlpha: 0.12)
 
-    // Radii — rounder than the web's, the organic half of the look.
-    // Every corner is one of these, drawn `.continuous` (a squircle).
+    // Radii — every corner is one of these, drawn `.continuous` (a squircle).
     static let radiusXs: CGFloat = 4
     static let radiusSm: CGFloat = 7
     static let radius: CGFloat = 10
     static let radiusLg: CGFloat = 14
     static let radiusXl: CGFloat = 20
 
-    /// A stable tint per speaker (same order as the web's `speakers.ts`),
-    /// each a light/dark pair so an avatar reads on both grounds. Moss,
-    /// clay, ochre, slate, plum, teal — no orange.
+    /// A stable tint per speaker (same order as the web's `speakers.ts`), each a light/dark pair. No orange.
     static let speakerTints: [Color] = [
         Color.ds("4f7a5e", "8fbf9c"),
         Color.ds("7d6b4f", "c2ad8a"),
@@ -94,11 +86,9 @@ enum DS {
     }
 
     // Layout
-    /// The note document's column — the web's `--doc-w`. The body, the
-    /// ask composer and the loading skeleton all measure against it.
+    /// The note document's column (the web's `--doc-w`).
     static let docWidth: CGFloat = 720
-    /// The note document's reading size. A note is a page, not a pane of
-    /// chrome, so its body sits a step above the 13.5 pt UI text.
+    /// The note document's reading size, a step above the 13.5 pt UI text.
     static let docText: CGFloat = 16
 
     static let topbarHeight: CGFloat = 52
@@ -109,13 +99,9 @@ enum DS {
 
 // MARK: - Type scale
 //
-// Avenir Next — a geometric, modern sans that ships with every Mac — for
-// everything you read; SF Mono for codes and timers. Display sizes use the
-// DemiBold cut. 13.5 body, 13 ui, 11.5 meta, 10.5 tracked labels.
-//
-// The bookish serif (Iowan Old Style, the web's `--serif`) is kept to the
-// few places the web sets it since its Claude-style layout: the wordmark,
-// the home greeting, the note's title and its section headings.
+// Avenir Next for everything you read; SF Mono for codes and timers. 13.5 body,
+// 13 ui, 11.5 meta, 10.5 tracked labels. The serif (Iowan Old Style) only where
+// the web sets it: wordmark, home greeting, note title and section headings.
 
 enum DSType {
     static let family = "AvenirNext"
@@ -154,9 +140,7 @@ extension Font {
     static func dsMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
     }
-    /// SF Symbols beside text: the system face at the size the glyph
-    /// needs. Every icon goes through here rather than an inline
-    /// `.system(size:)`, so the scale is one table.
+    /// SF Symbols beside text. Every icon goes through here, so the scale is one table.
     static func dsIcon(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
         .system(size: size, weight: weight)
     }
@@ -257,8 +241,7 @@ extension View {
     }
 }
 
-/// The ground behind sign-in and loading: flat paper with the faintest
-/// warm glow at the top — no colour washes.
+/// The ground behind sign-in and loading: flat paper with the faintest warm glow at the top.
 struct DSWash: View {
     var body: some View {
         ZStack {
@@ -270,8 +253,7 @@ struct DSWash: View {
     }
 }
 
-/// A print of small dots over the ground, fading out from the top — the
-/// texture behind the home page, sign-in, and empty states.
+/// Small dots over the ground, fading out from the top — behind the home page, sign-in and empty states.
 struct DSDots: View {
     var spacing: CGFloat = 20
     var dot: CGFloat = 1.1
@@ -378,8 +360,7 @@ struct DSButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
-    // `.primary` and `.dark` are both the ink pill now — Granola has one
-    // filled button and it is black; the accent is for tints and text.
+    // `.primary` and `.dark` are both the ink pill; the accent is for tints and text.
     private var foreground: Color {
         switch kind {
         case .primary, .dark: return DS.inkText
@@ -532,8 +513,7 @@ struct DSSegmentedPill<T: Hashable>: View {
                             Text(label).font(.ds(13)).lineLimit(1)
                         }
                     }
-                    // A segment is always as wide as its label: without this
-                    // the row is squeezed and "Notes" comes out clipped.
+                    // A segment is always as wide as its label, else "Notes" comes out clipped.
                     .fixedSize()
                     .foregroundStyle(on ? DS.text1 : DS.muted)
                     .padding(.horizontal, option.label == nil ? 7 : segmentPadding)
@@ -551,8 +531,7 @@ struct DSSegmentedPill<T: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .help(option.help ?? option.label ?? "")
-                // Sprint 32: a segment says its name, what it does, and
-                // whether it is the one chosen.
+                // A segment says its name, what it does, and whether it is chosen.
                 .accessibilityLabel(option.label ?? option.help ?? "")
                 .accessibilityHint(option.label == nil ? "" : (option.help ?? ""))
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -582,9 +561,7 @@ struct DSLabel: View {
     }
 }
 
-/// Sentence-case section label (`.home-group-h`, `.sb-section-h`), as
-/// Claude's "Pinned" / "Active" — the home page and the sidebar use it;
-/// forms keep the tracked `DSLabel`.
+/// Sentence-case section label (`.home-group-h`, `.sb-section-h`) for the home page and the sidebar; forms keep `DSLabel`.
 struct DSSectionLabel: View {
     let text: String
     var size: CGFloat = 13
@@ -646,8 +623,7 @@ struct DSChip: View {
     }
 }
 
-/// Initials avatar (`.avatar`): a quiet neutral disc with ink initials,
-/// as Claude's.
+/// Initials avatar (`.avatar`): a quiet neutral disc with ink initials.
 struct DSAvatar: View {
     let name: String
     var size: CGFloat = 30
@@ -746,11 +722,7 @@ extension JobStatus {
     }
 }
 
-/// An item on the note's meta line (`.doc-pill` on the web): an icon and a
-/// short fact — when the note was taken, what wrote it, where it is
-/// filed. Unframed, as the web's since its Claude-style pass; the ones
-/// that are also controls (`interactive`) take a soft fill on hover, the
-/// plain facts stay still. The accent tone keeps its tint.
+/// An item on the note's meta line (`.doc-pill`): an icon and a short fact. Unframed; `interactive` ones take a soft fill on hover.
 struct DSMetaPill: View {
     var symbol: String?
     let text: String

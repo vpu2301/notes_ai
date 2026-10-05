@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Worker egress allowlist (DEP-S1-04).
+# Worker egress allowlist.
 #
 #   scripts/k8s/egress-allowlist.sh resolve        # print the CIDRs the HF endpoints resolve to today
 #   scripts/k8s/egress-allowlist.sh helm-args      # → --set flags enabling workers-egress-allowlist with those CIDRs
@@ -7,17 +7,10 @@
 #   scripts/k8s/egress-allowlist.sh test           # from inside the cluster/compose: worker must NOT reach example.com,
 #                                                  # otel.pyannote.ai or huggingface.co
 #
-# Allowed: HF endpoint hostnames (HF_CHAT_ENDPOINT_URL / HF_ASR_ENDPOINT_URL /
-# HF_DIAR_ENDPOINT_URL, the shared api front door endpoints.huggingface.cloud),
-# Postgres, Redis, OTel collector, DNS. Everything else is dropped.
-# Diarization adds ONE host and only in shape B (ADR-0052): the diar-server
-# endpoint the worker posts audio to. The model hub (huggingface.co) and
-# pyannote's usage telemetry (otel.pyannote.ai) stay unreachable from both
-# the worker and that endpoint — weights are baked and loaded offline, and
-# `test` asserts both are refused. Hostname rules
-# need an FQDN-capable CNI (Cilium) — until the hosting decision the list
-# is CIDR-based and must be re-resolved when HF rotates front-door IPs
-# (alert ModelBackendUnavailable will tell you; runbook §unavailable).
+# Allowed: the HF endpoint hosts, Postgres, Redis, OTel collector, DNS;
+# everything else is dropped. huggingface.co and otel.pyannote.ai stay
+# unreachable (`test` asserts it). CIDR-based until an FQDN-capable CNI:
+# re-resolve when HF rotates front-door IPs (alert ModelBackendUnavailable).
 set -euo pipefail
 cmd="${1:-resolve}"
 hosts=()
@@ -58,12 +51,10 @@ table inet notes_workers {
 NFT
     ;;
   test)
-    # Positive + negative: the worker reaches its HF endpoint host (TCP connect) but not
-    # example.com, the hub, or pyannote's telemetry collector.
+    # Positive + negative: reaches the HF endpoint host, not example.com, the hub or telemetry.
     ns="${NS:-notes-staging}"
     pod="$(kubectl -n "$ns" get pod -l app=asr-worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    # "$@": the probe is $1 and the host is $2 (sys.argv[1]); passing only
-    # "$1" left sys.argv[1] unset, so every probe crashed instead of connecting.
+    # "$@", not "$1": the host is $2 (sys.argv[1]).
     if [ -n "$pod" ]; then run() { kubectl -n "$ns" exec "$pod" -- python3 -c "$@"; }
     else run() { docker compose exec -T asr-worker python3 -c "$@"; }; fi
     probe='import socket,sys; h=sys.argv[1]

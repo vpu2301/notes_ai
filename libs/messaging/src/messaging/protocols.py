@@ -1,9 +1,4 @@
-"""Producer / consumer Protocols and the wire ``Message`` type.
-
-These are pure ``typing.Protocol`` definitions. They have no runtime
-behaviour; they exist so services can depend on a shape, not on a
-specific transport, while we negotiate transport choices across sprints.
-"""
+"""Producer / consumer Protocols and the wire ``Message`` type (shape, not transport)."""
 
 from __future__ import annotations
 

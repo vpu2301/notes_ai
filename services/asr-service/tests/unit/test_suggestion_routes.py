@@ -1,6 +1,5 @@
 # ruff: noqa: F811 — the imported `rig` fixture is injected by name.
-"""Sprint 32 routes: name suggestions on the result, dismiss, accept, and
-the "re-label with the current engine" offer. Runs on the speaker-edit rig."""
+"""Name suggestion routes (result, dismiss, accept) and the re-label offer."""
 
 from __future__ import annotations
 

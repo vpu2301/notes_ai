@@ -1,26 +1,7 @@
-"""What is still open from last time.
-
-When a meeting belongs to a series, the previous instalment's open action
-items are restated in the new note before anyone speaks — as check items
-under a **"Still open from {date}"** heading:
-
-    ## Still open from 12 Sep
-    - [ ] Tom: send the brand assets — by the 20th
-    - [ ] Anna: confirm the budget
-
-Deterministic: a join on structured items the recipient loop already
-maintains (`note_action_items`, Sprint 20), not retrieval and not a model.
-Two rules make it safe:
-
-* a carried item keeps the **previous note's** `item_key`, so the
-  recipient's confirmation on that meeting's shared page — and, when
-  Sprint 33 lands, the evidence behind it — stay reachable;
-* items still open are **not** copied into the new note's own action
-  items. They belong to the meeting where they were agreed; duplicating
-  them would double every task in a long-running series.
-
-The visibility rule is the caller's (ADR-0057): a previous note is used
-only when the author of the new note may view it.
+"""What is still open from last time: the previous instalment's open action items,
+restated as check items under a "Still open from {date}" heading. A carried item
+keeps the PREVIOUS note's `item_key` and is never copied into the new note's own
+items. Visibility (ADR-0057) is the caller's.
 """
 
 from __future__ import annotations

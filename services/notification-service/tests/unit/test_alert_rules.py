@@ -1,14 +1,5 @@
-"""Notification alert rules stay loadable and on-contract.
-
-promtool is not in the venv, so this validates what CI can: the YAML
-parses, the contract rule names exist with fixed severities, and — the
-important one — every metric an alert references is a metric the service
-actually creates.
-
-That last check is the sprint-10 post-mortem encoded as a test. There,
-alerts named metrics nothing exported, so they could never fire and the
-feature was silently broken for weeks. An alert that cannot fire is
-worse than no alert: it reads as coverage.
+"""Notification alert rules stay loadable and on-contract: the YAML parses, contract
+rule names exist with fixed severities, and every referenced metric is one the service creates.
 """
 
 from __future__ import annotations
@@ -80,12 +71,7 @@ def test_alert_metrics_are_actually_emitted() -> None:
 
 
 def test_failure_ratio_alert_does_not_clamp_the_denominator() -> None:
-    """clamp_min(…, 1) turns a ratio into absolute rate and false-fires.
-
-    Same defect as sprint-10's JwksCacheHitRatioLow: below one event per
-    second the clamped denominator makes the expression read as
-    failures/sec, which trips overnight when traffic is near zero.
-    """
+    """clamp_min(…, 1) on the denominator turns a ratio into an absolute rate and false-fires at low traffic."""
     expr = next(r["expr"] for r in _rules() if r["alert"] == "NotificationDeliveryFailureRateHigh")
     assert "clamp_min" not in expr
     assert "or vector(0)" in expr

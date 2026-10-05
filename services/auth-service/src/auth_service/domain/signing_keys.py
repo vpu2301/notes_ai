@@ -1,25 +1,7 @@
-"""RS256 signing keys for the native issuer (IDX-A2, F1).
+"""RS256 signing keys for the native issuer, from the JSON list ``config.py`` hands in.
 
-Keys come from ``AUTH_SIGNING_KEYS_JSON`` — a JSON list of
-``{"kid", "private_pem", "not_after"}`` — or, on a developer machine only,
-from the file named by ``AUTH_SIGNING_KEYS_FILE``. Nothing here reads the
-environment; ``config.py`` hands the raw text in.
-
-Rules (ADR-IDX-02 as summarised in the sprint pack):
-
-* the **active** key is the one whose ``not_after`` lies furthest in the
-  future and is not yet past — new tokens are signed with it;
-* the JWKS publishes every key whose ``not_after + access_ttl`` is still
-  in the future, so a token signed just before a key retired keeps
-  verifying until it expires itself;
-* ``kid`` is derived from the public key (``sha256(SPKI DER)[:12]``) by
-  ``scripts/ops/gen-signing-key.py``; a configured kid that does not match
-  its key is refused at load time — a mislabelled key would break every
-  verifier's cache in a way that is very hard to see from the outside.
-
-Private material never leaves this module except as the ``private_pem``
-attribute the :class:`TokenService` signs with; ``public_jwk`` carries only
-``kty/kid/use/alg/n/e``.
+Active key = furthest ``not_after`` still ahead; JWKS publishes keys while
+``not_after + access_ttl`` is ahead; ``kid`` must equal ``sha256(SPKI DER)[:12]``.
 """
 
 from __future__ import annotations

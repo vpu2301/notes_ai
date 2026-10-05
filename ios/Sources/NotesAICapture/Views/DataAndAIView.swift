@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Settings › Data & AI — who processes this workspace's meetings.
-///
-/// Read-only on the phone, and deliberately so. Changing the tier means
-/// agreeing, by name and region, to the companies the change lets in;
-/// that acknowledgement belongs on one surface with one dialog, and it
-/// is the web page. What the app owes the person is the answer to "who
-/// sees my meetings", wherever they happen to be standing.
+/// Settings › Data & AI — who processes this workspace's meetings. Read-only
+/// on purpose: the acknowledgement dialog lives on the web page.
 struct DataAndAIView: View {
     @EnvironmentObject private var app: AppState
     @State private var settings: AISettings?

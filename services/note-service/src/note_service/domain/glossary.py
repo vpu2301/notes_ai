@@ -1,21 +1,6 @@
-"""The workspace glossary: names this workspace spells a particular way.
-
-A person fixes "Jon Meyer" to "John Mayer" once. Without this table they
-fix it again next week, and the week after — the recording says the same
-thing every time and the transcriber hears it the same way. So a
-correction can be remembered, **opt-in, one term at a time**, and then
-used three ways:
-
-* as the capture form's ``vocabulary_hint`` (:func:`hint_text`), so the
-  transcriber has the spelling before it guesses;
-* in the generation prompt, so the model writes it the way the workspace
-  writes it (blocked on the engine — Sprint 33);
-* to canonicalise an owner label that came back as a known mishearing
-  (``meeting_doc.entities``, Summary Engine v2 Q4).
-
-Quotes are never touched by any of it. A quote is what was said.
-
-Everything here is pure; the table lives in ``glossary_repository``.
+"""The workspace glossary: names this workspace spells a particular way, opt-in
+one term at a time; used as the capture vocabulary hint, in the generation
+prompt and to canonicalise owner labels. Quotes are never touched. Pure.
 """
 
 from __future__ import annotations
@@ -37,12 +22,9 @@ MAX_PROMPT_TERMS: Final = 60
 
 KINDS: Final = ("person", "company", "product", "term")
 
-# Sprint I2 T1 — vocabulary is a whitelist of things worth spelling, not a
-# log of renames. A term whose tokens are ALL role words or ordinals is a
-# label a person gave a voice ("Moderator II", "speaker background"), not a
-# name: the 2026-09-25 transcript was these labels, echoed by the
-# transcriber. The same tables live in the native apps and the web; every
-# copy is asserted against tests/fixtures/glossary/role_words.json.
+# A term whose tokens are ALL role words or ordinals is a voice label ("Moderator II"),
+# not vocabulary. Mirrored in the native apps and the web; every copy is asserted
+# against tests/fixtures/glossary/role_words.json.
 ROLE_WORDS: Final[dict[str, frozenset[str]]] = {
     "en": frozenset(
         {
@@ -132,12 +114,8 @@ _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def is_vocabulary(term: str, kind: str) -> bool:
-    """Whether a term belongs in the transcriber's vocabulary.
-
-    No: every token is a role word or an ordinal; a person with no
-    capital letter anywhere ("moderatorin"). Yes: anything else — the rule
-    only has to keep labels out, not judge names.
-    """
+    """Whether a term belongs in the transcriber's vocabulary: not when every token
+    is a role word or ordinal, nor a person with no capital letter."""
     tokens = [tok.casefold() for tok in _WORD.findall(term)]
     if not tokens:
         return False
@@ -150,18 +128,9 @@ def is_vocabulary(term: str, kind: str) -> bool:
 # What the hint sends first: the kinds the transcriber mishears most.
 _HINT_ORDER: Final = {"person": 0, "company": 1, "product": 2, "term": 3}
 
-# Characters a term may not contain. Written as code-point RANGES rather
-# than as a literal character class on purpose: half of these are
-# invisible, and a source file that contains a bidi override in order to
-# reject bidi overrides is a file nobody can review.
-#
-#   C0 / C1 controls, DEL      a term is one line of plain text
-#   U+200B..U+200F             zero-width space, joiners, LRM/RLM
-#   U+2028..U+202E             line/paragraph separators, bidi embedding
-#   U+2066..U+2069             bidi isolates
-#
-# The last three groups are what makes one string RENDER as another, and
-# a glossary term is rendered in three clients and put inside a prompt.
+# Forbidden code points as RANGES (a literal bidi override in source is unreviewable):
+# C0/C1 controls and DEL, U+200B..200F (zero-width, LRM/RLM), U+2028..202E
+# (separators, bidi embedding), U+2066..2069 (bidi isolates).
 _FORBIDDEN_RANGES: Final[tuple[tuple[int, int], ...]] = (
     (0x0000, 0x001F),
     (0x007F, 0x009F),
@@ -184,13 +153,8 @@ class GlossaryError(ValueError):
 
 
 def clean_term(raw: str) -> str:
-    """A storable term, or raise.
-
-    Whitespace collapsed, NFKC-normalised (so a look-alike Cyrillic "А"
-    and a Latin "A" do not become two entries that shadow each other),
-    control characters refused rather than stripped — a term that needed
-    stripping is not the term the person typed.
-    """
+    """A storable term, or raise: whitespace collapsed, NFKC-normalised (look-alike
+    letters), control characters refused rather than stripped."""
     if _CONTROL.search(raw):
         raise GlossaryError("term_invalid", "a term cannot contain control characters")
     term = " ".join(unicodedata.normalize("NFKC", raw).split())
@@ -229,13 +193,8 @@ class Term:
 
 
 def hint_text(terms: list[Term], *, limit: int = MAX_HINT_CHARS) -> str:
-    """The capture form's vocabulary hint: the terms, comma-separated,
-    truncated at a term boundary so the transcriber never gets half a name.
-
-    Only the canonical spellings go — the point is to teach the
-    transcriber the right one, and feeding it the wrong spellings too
-    would do the opposite.
-    """
+    """The capture form's vocabulary hint: canonical spellings only, comma-separated,
+    truncated at a term boundary."""
     out: list[str] = []
     length = 0
     for entry in hint_terms(terms):
@@ -248,21 +207,14 @@ def hint_text(terms: list[Term], *, limit: int = MAX_HINT_CHARS) -> str:
 
 
 def hint_terms(terms: list[Term]) -> list[Term]:
-    """The terms that go to the transcriber, in the order they go: only
-    vocabulary (:func:`is_vocabulary` — a stored role label from before
-    the rule is skipped, no data migration needed), people and companies
-    first. Stable within a kind."""
+    """The terms that go to the transcriber: only vocabulary, people and companies first, stable within a kind."""
     kept = [entry for entry in terms if is_vocabulary(entry.term, entry.kind)]
     return sorted(kept, key=lambda entry: _HINT_ORDER.get(entry.kind, 9))
 
 
 def terms_in(text: str, terms: list[Term], *, limit: int = MAX_PROMPT_TERMS) -> list[Term]:
-    """The terms that actually occur in this text, canonical spelling or
-    mishearing, case-insensitively.
-
-    The generation prompt gets these and not the whole glossary: 500 names
-    in a prompt is noise that costs accuracy on the 3 that matter.
-    """
+    """The terms that occur in this text (canonical or mishearing, case-insensitive);
+    the prompt gets these, not the whole glossary."""
     haystack = " ".join(unicodedata.normalize("NFKC", text).casefold().split())
     out: list[Term] = []
     for entry in terms:
@@ -275,12 +227,7 @@ def terms_in(text: str, terms: list[Term], *, limit: int = MAX_PROMPT_TERMS) -> 
 
 
 def prompt_block(terms: list[Term]) -> str:
-    """The block the generation prompt carries.
-
-    It is **data, not instruction**: the caller puts it inside the prompt's
-    data delimiters, and the wording here never tells the model to do
-    anything a term could redirect.
-    """
+    """The block the generation prompt carries: data, not instruction (inside the data delimiters)."""
     if not terms:
         return ""
     lines = [

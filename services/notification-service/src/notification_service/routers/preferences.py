@@ -1,9 +1,4 @@
-"""Preferences CRUD — always scoped to the CALLING user.
-
-There is deliberately no `user_id` path parameter. Editing someone
-else's notification preferences is not a feature; omitting the parameter
-means the endpoint cannot be made to do it by a missing check.
-"""
+"""Preferences CRUD, always scoped to the calling user (no `user_id` parameter by design)."""
 
 from __future__ import annotations
 
@@ -32,8 +27,7 @@ class CategoryPreference(BaseModel):
     category: Category
     in_app_enabled: bool
     email_mode: EmailMode
-    # Echoed so a client can render "(default)" without embedding a copy
-    # of the catalog, which would drift.
+    # Lets a client render "(default)" without a catalog copy.
     is_default: bool = False
     digest_eligible: bool = False
 
@@ -73,9 +67,7 @@ class PreferencesUpdate(BaseModel):
     @field_validator("timezone")
     @classmethod
     def _known_zone(cls, v: str) -> str:
-        # Validated on write, not on read: a rejected save tells the user
-        # immediately, whereas a bad value discovered at send time would
-        # silently fall back and mis-time every future email.
+        # Validated on write so a bad zone never silently mis-times mail.
         try:
             ZoneInfo(v)
         except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:

@@ -1,8 +1,4 @@
-"""FastAPI dependency wiring for asr-service.
-
-Mirrors the auth-service pattern: a module-level ``ServiceState`` filled
-during the lifespan, plus thin Depends-callable wrappers.
-"""
+"""FastAPI dependency wiring for asr-service."""
 
 from __future__ import annotations
 
@@ -53,12 +49,10 @@ async def current_user(
 
         state._current_user_dep = build_current_user(  # type: ignore[attr-defined]
             jwks_cache=state.jwks_cache,
-            # FND-1: the list, not a single string. The token's `iss`
-            # picks the entry it is verified against.
+            # The token's `iss` picks the entry it is verified against.
             issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
-            # Sprint 16: session-revocation denylist (None when the flag is
-            # off — pre-sprint-16 behaviour, no Redis dependency at runtime).
+            # Session-revocation denylist (None when the flag is off).
             denylist=build_session_denylist(
                 enabled=settings.session_revocation_enabled,
                 redis_url=settings.redis_url,
@@ -91,12 +85,7 @@ def requires(
 def requires_any(
     *options: tuple[Action, TargetKind],
 ) -> Callable[..., Awaitable[Claims]]:
-    """Admit a caller holding ANY of the given permissions (S14).
-
-    The job list is reachable both by a member with `asr.read` and by
-    a tenant_admin with only `stats.read`. Put the primary permission
-    first — a denial is reported against it.
-    """
+    """Admit a caller holding ANY of the permissions; a denial is reported against the first."""
 
     async def dep(claims: Annotated[Claims, Depends(current_user)]) -> Claims:
         try:

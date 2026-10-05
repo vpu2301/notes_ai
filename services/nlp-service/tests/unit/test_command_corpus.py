@@ -1,11 +1,4 @@
-"""TP/FP corpus gate — the typed-field commands must not degrade matching.
-
-Every added spec widens the matcher's surface. The risk is not that a
-command fails to fire; it is that ordinary prose gets EATEN as a
-command, silently deleting words from a note. So the corpus is measured
-twice — base catalogue alone, then with the typed-field specs — and the
-two runs are compared.
-"""
+"""TP/FP corpus gate: the corpus is measured with and without the typed-field specs and compared."""
 
 from __future__ import annotations
 
@@ -80,13 +73,7 @@ def _sections() -> tuple[TemplateSection, ...]:
 
 
 def _words(tokens: list[str], *, lead_pause_ms: int = 500, p: float = 0.95) -> list[Word]:
-    """Words with a leading pause so command gates can fire.
-
-    The pause is what makes a command a command; prose in mid-sentence
-    lacks it. Every corpus utterance is given the pause so the negatives
-    are tested under the MOST permissive conditions — if they stay quiet
-    here, they stay quiet in real speech.
-    """
+    """Words with a leading pause so command gates can fire (negatives tested under permissive conditions)."""
     out: list[Word] = []
     t = lead_pause_ms / 1000.0
     for token in tokens:

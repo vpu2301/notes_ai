@@ -1,10 +1,4 @@
-"""Sprint-16 deployment — scale-in drain semantics.
-
-The contract KEDA/K8s rely on: a draining worker admits nothing new
-(clients get the gpu_full reconnect semantics), keeps its live sessions
-to completion, reports 503 on /readyz (Service stops routing), and the
-internal drain surface is loopback-only.
-"""
+"""Scale-in drain: admits nothing new, live sessions finish, /readyz 503, drain surface loopback-only."""
 
 from __future__ import annotations
 

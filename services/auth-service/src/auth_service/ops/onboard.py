@@ -1,34 +1,7 @@
-"""``python -m auth_service.ops.onboard`` — concierge onboarding (OPS-0).
+"""``python -m auth_service.ops.onboard --email … --display-name … [--locale uk] [--dry-run]`` — concierge onboarding.
 
-    python -m auth_service.ops.onboard --email ada@acme.com --display-name "Ada Lovelace"
-    python -m auth_service.ops.onboard --email ada@acme.com --display-name "Ada" --locale uk
-    python -m auth_service.ops.onboard --email ada@acme.com --display-name "Ada" --dry-run
-
-Creates an account the way self-serve signup does — same
-``OnboardingService``, same Keycloak call, same transaction, same
-workspace — and then marks it verified, because an operator vouched for
-the address. The person gets one mail with a temporary password and a
-link to change it.
-
-Live from day 3, which is the point: demand should not wait for the public
-endpoints, and the first twenty users teach more through a person than
-through a funnel metric.
-
-── What the operator never does ─────────────────────────────────────────
-
-Never sets a password by hand. Never opens the Keycloak console. Never
-writes SQL. Those three rules are why this exists at all — each of them is
-a way to create an account that works until the first save and then fails
-on a missing row, and each has happened before.
-
-The temporary password is generated here, sent once, and **printed
-nowhere**. The operator does not see it, so they cannot paste it into a
-chat window, and there is no copy of it outside the recipient's mailbox.
-If the mail does not arrive, the fix is to run the command again for a
-fresh password — not to go looking for the old one.
-
-Exit codes: 0 created, 1 the command failed (nothing half-created —
-``OnboardingService`` compensates), 2 bad arguments.
+Same ``OnboardingService`` as self-serve signup, marked verified. The temporary
+password is mailed once and printed nowhere. Exit codes: 0 created, 1 failed, 2 bad arguments.
 """
 
 from __future__ import annotations
@@ -107,8 +80,7 @@ async def _run(args: argparse.Namespace) -> int:
                 display_name=display_name,
                 locale=args.locale,
                 source="concierge",
-                # The operator is the verification. No code is sent, and
-                # the account is enabled at creation.
+                # The operator is the verification: enabled at creation, no code sent.
                 verified=True,
             )
         except SignupError as exc:
@@ -132,10 +104,7 @@ async def _run(args: argparse.Namespace) -> int:
                 lang=args.locale,
             )
         except Exception as exc:  # noqa: BLE001
-            # The account exists and is usable; only the mail failed. Say
-            # so precisely, because the recovery differs: the person needs
-            # a password, and the way to give them one is "Forgot
-            # password?" — never a second copy of this one.
+            # The account exists; only the mail failed. Recovery is "Forgot password?".
             print(
                 f"account created ({account.sub}) but the welcome mail FAILED: {exc}",
                 file=sys.stderr,

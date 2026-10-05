@@ -225,15 +225,8 @@ func relativeTime(_ date: Date) -> String {
 
 // MARK: - One-time code
 
-/// Six boxes for a six-digit code.
-///
-/// Drawn over a single hidden field rather than as six real ones: the
-/// code arrives from the mail app by paste far more often than it is
-/// typed, and six separate fields turn one ⌘V into six keystrokes in the
-/// wrong boxes. Typing still works — the boxes fill left to right — and
-/// the field auto-submits on the sixth digit, because asking someone to
-/// press Return after entering a code they were just told to enter is a
-/// step with no content.
+/// Six boxes for a six-digit code, drawn over a single hidden field: the code is
+/// usually pasted, and six real fields would break ⌘V. Auto-submits on the sixth digit.
 struct DSCodeField: View {
     @Binding var code: String
     var length = 6
@@ -243,8 +236,7 @@ struct DSCodeField: View {
 
     var body: some View {
         ZStack {
-            // The real field: invisible, but it holds the caret, the paste
-            // and the keyboard.
+            // The real field: invisible, but it holds the caret, the paste and the keyboard.
             TextField("", text: $code)
                 .textFieldStyle(.plain)
                 .textContentType(.oneTimeCode)
@@ -286,5 +278,51 @@ struct DSCodeField: View {
                                   lineWidth: isNext ? 1 : DS.hairline)
             )
             .animation(.easeOut(duration: 0.12), value: isNext)
+    }
+}
+
+/// Lays children out left to right and wraps to a new row when the width runs out.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var rowSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arranged = arrange(width: bounds.width, subviews: subviews)
+        for (index, origin) in arranged.origins.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                                  proposal: .unspecified)
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var rows: [[(index: Int, size: CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for (index, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                rows.append([])
+                x = 0
+            }
+            rows[rows.count - 1].append((index, size))
+            x += size.width + spacing
+        }
+        var origins = [CGPoint](repeating: .zero, count: subviews.count)
+        var y: CGFloat = 0
+        var maxWidth: CGFloat = 0
+        for (rowIndex, row) in rows.enumerated() {
+            let rowHeight = row.map(\.size.height).max() ?? 0
+            var rowX: CGFloat = 0
+            for item in row {
+                origins[item.index] = CGPoint(x: rowX, y: y + (rowHeight - item.size.height) / 2)
+                rowX += item.size.width + spacing
+            }
+            maxWidth = max(maxWidth, rowX - spacing)
+            y += rowHeight + (rowIndex < rows.count - 1 ? rowSpacing : 0)
+        }
+        return (CGSize(width: max(maxWidth, 0), height: y), origins)
     }
 }

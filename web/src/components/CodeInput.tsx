@@ -14,18 +14,9 @@ interface CodeInputProps {
 }
 
 /**
- * The six-box one-time-code field.
- *
- * One real `<input>` per digit, because that is what gives iOS and macOS
- * the "From Messages" autofill and Android the SMS Retriever prompt — a
- * single masked field gets neither. The cost is that paste, backspace and
- * arrow keys all have to be re-implemented, which is what most of this
- * file is.
- *
- * Autofill lands the whole code in box 0 rather than one digit per box, so
- * every input spreads a multi-character value across its successors rather
- * than truncating it. That one rule covers paste, autofill and a fast
- * typist equally.
+ * Six-box one-time-code field. One `<input>` per digit is what earns iOS/macOS
+ * "From Messages" autofill and Android's SMS prompt. Autofill lands the whole
+ * code in box 0, so every box spreads a multi-character value rightwards.
  */
 export function CodeInput({
   value,
@@ -38,8 +29,7 @@ export function CodeInput({
   describedBy,
 }: CodeInputProps) {
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
-  // Guards against firing twice when the last digit both completes the code
-  // and triggers a re-render.
+  // Guards against a double fire when the last digit completes and re-renders.
   const completed = useRef(false);
 
   useEffect(() => {
@@ -65,7 +55,6 @@ export function CodeInput({
   const onBoxChange = (index: number, raw: string) => {
     const digits = raw.replace(/\D/g, "");
     if (!digits) return;
-    // Splice this box's digits in, then let anything extra flow rightwards.
     const next = (value.slice(0, index) + digits + value.slice(index + digits.length)).slice(
       0,
       length,
@@ -78,10 +67,7 @@ export function CodeInput({
   const onKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Backspace") {
       e.preventDefault();
-      // The value is a compact digit string, so there is no way to hold a
-      // hole in the middle. Backspace therefore truncates from the caret —
-      // which is also what people expect from a code field: it rubs out
-      // what you just typed rather than leaving a gap behind.
+      // The value is a compact digit string (no holes), so Backspace truncates from the caret.
       if (value[index]) {
         onChange(value.slice(0, index));
       } else {
@@ -100,8 +86,7 @@ export function CodeInput({
 
   const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
-    // The mail shows the code grouped ("482 913"); strip anything that is
-    // not a digit so a copied group still lands correctly.
+    // The mail groups the code ("482 913"): keep digits only.
     const digits = commit(e.clipboardData.getData("text"));
     focusBox(digits.length);
   };
@@ -121,8 +106,7 @@ export function CodeInput({
           }}
           type="text"
           inputMode="numeric"
-          // Only the first box claims the autofill hint: naming it on all
-          // six makes Safari offer the same code six times.
+          // Only box 0 gets the autofill hint: on all six, Safari offers the code six times.
           autoComplete={i === 0 ? "one-time-code" : "off"}
           maxLength={length}
           disabled={disabled}

@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Q3 — what the engine made of a recording: the recording type and the
-/// passages it left out, decoded from `GET …/generation` and put into the
-/// same words the web client uses.
+/// What the engine made of a recording, decoded from `GET …/generation` in the web client's words.
 final class GenerationViewTests: XCTestCase {
     private func decode(_ json: String) throws -> GenerationView {
         try JSONDecoder().decode(GenerationView.self, from: Data(json.utf8))

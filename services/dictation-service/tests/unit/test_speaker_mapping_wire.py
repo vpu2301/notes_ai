@@ -1,16 +1,4 @@
-"""Speaker-naming wire contract (handler helpers, pure).
-
-The naming state itself is proven in ``test_diarization_mapping.py``;
-this pins how it reaches the wire:
-
-* ``_current_mapping_hint`` — what rides along on every v2 partial/final
-  (neutral SPEAKER_N defaults, then the client's names).
-* the ``SetSpeakerMapping`` branch of ``_on_text`` — the manual naming
-  is authoritative from the moment received: audited, acknowledged with
-  ``manual=true, confidence=1.0``, and reflected in later hints.
-
-No DB, no WebSocket, no models.
-"""
+"""Speaker-naming wire contract (pure): the v2 mapping hint and the ``SetSpeakerMapping`` branch."""
 
 from __future__ import annotations
 

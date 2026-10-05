@@ -1,12 +1,6 @@
-"""``calendar_connections`` rows and the token envelope around them (0019).
-
-Every read is scoped twice: RLS to the tenant (the connection is
-tenant-scoped), and ``user_sub`` here — a connection is personal and a
-colleague's rows never come back.
-
-Tokens go through ``libs/crypto``'s envelope before they reach the row.
-``token_blob`` is a self-describing JSON document (header fields +
-base64 ciphertext) so a future key rotation can re-wrap in place.
+"""``calendar_connections`` rows and the token envelope around them. Every read
+is scoped by RLS AND ``user_sub`` (connections are personal). ``token_blob`` is a
+self-describing JSON envelope so a key rotation can re-wrap in place.
 """
 
 from __future__ import annotations

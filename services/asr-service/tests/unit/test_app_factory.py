@@ -22,14 +22,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_healthz_returns_ok(client: TestClient) -> None:
-    # We use the TestClient context manager so lifespan runs; but with
-    # TESTING=true the dependencies that need network are skipped.
-    # However, the lifespan does call build_state() which needs DB/Redis.
-    # We therefore bypass lifespan via the raw app.router by hitting the
-    # healthz route directly through the underlying ASGI.
+    # Lifespan needs DB/Redis, so check route registration without it.
     from asr_service.routers.health import router as health_router  # noqa: F401
 
-    # The simplest verification: route registration is intact.
     routes = [r.path for r in client.app.routes]  # type: ignore[attr-defined]
     assert "/healthz" in routes
     assert "/readyz" in routes

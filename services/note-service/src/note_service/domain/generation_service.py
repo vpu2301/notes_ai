@@ -1,25 +1,9 @@
-"""Starting a generation: snapshot, row, job.
+"""Starting a generation: snapshot, row, job, in that order.
 
-Three things happen in a fixed order, and the order is the point.
-
-1. **The snapshot is written first**, before the transaction commits. An
-   orphaned object beats an orphaned row — the same rule `submit_job`
-   follows for audio. A row pointing at an object that is not there is a
-   generation that can never run and never explains itself; an object no
-   row points at is swept in a day.
-2. **The generation row and the job go in the same transaction** as the
-   note. Either the note exists with a job queued for it, or neither
-   does.
-3. **The job payload carries ids only.** Not the transcript, not the
-   title, not a name — a job row is read by operators and shipped to
-   metrics, and `jobs.last_error` is scrubbed to an error kind for the
-   same reason.
-
-Why a snapshot at all: note-service has no service identity, so it cannot
-read another service's artifact on its own behalf later. It reads the
-transcript once, in the user's own request, with the user's own bearer —
-and keeps what it read, so a re-labelling in asr-service afterwards does
-not silently change what a finished note was built from.
+The snapshot is written before the transaction commits (an orphan object beats
+an orphan row); the row and the job share the note's transaction; the job
+payload carries ids only. The snapshot exists because note-service has no
+service identity to read the transcript later on its own behalf.
 """
 
 from __future__ import annotations
@@ -44,10 +28,7 @@ MAX_ATTEMPTS = 3
 MAX_REGENERATIONS_PER_DAY = 10
 
 
-# Sprint 37 — a queue that is FIFO by priority alone lets one workspace
-# uploading fifty recordings starve everyone else's single meeting.
-# A person pressing Regenerate is waiting on the screen; an automatic run
-# after an upload is not.
+# A person pressing Regenerate is waiting on the screen; an automatic run is not.
 PRIORITY_REGENERATE: Final = 5
 PRIORITY_FOLLOWUP: Final = 3
 PRIORITY_AUTO: Final = 0
@@ -62,11 +43,7 @@ class GenerationDisabledError(Exception):
 
 
 class BudgetExceededError(Exception):
-    """This workspace has spent its monthly AI budget.
-
-    The note still works; it simply is not written for them this month,
-    and they are told so rather than left watching a spinner.
-    """
+    """This workspace has spent its monthly AI budget; the note still works."""
 
     def __init__(self, spent: int, budget: int) -> None:
         super().__init__(f"{spent} of {budget} cents")
@@ -79,8 +56,7 @@ class GenerationRateLimitedError(Exception):
 
 
 def snapshot_key(tenant_id: UUID, note_id: UUID, generation_id: UUID) -> str:
-    """Tenant-prefixed, so a key cannot address another tenant's object
-    even if one leaked into a log."""
+    """Tenant-prefixed, so a key cannot address another tenant's object."""
     return f"{tenant_id}/generation/{note_id}/{generation_id}.json"
 
 
@@ -99,19 +75,13 @@ async def start(
     priority: int | None = None,
     required_processors: list[Any] | None = None,
 ) -> tuple[UUID, str]:
-    """Snapshot, row, job. Returns ``(generation_id, status)``.
-
-    The caller holds the transaction; on any failure after this returns,
-    the row and the job roll back with it and the object is swept.
-    """
+    """Snapshot, row, job. Returns ``(generation_id, status)``. The caller holds the transaction."""
     if enforce_limit:
         used = await gen_repo.regenerations_today(conn, note_id=note_id)
         if used >= MAX_REGENERATIONS_PER_DAY:
             raise GenerationRateLimitedError
 
-    # Sprint 37: the workspace's own settings decide whether this runs at
-    # all, and what it may cost. Checked HERE rather than in the worker so
-    # a workspace over budget never queues work it cannot pay for.
+    # Checked HERE, not in the worker, so a workspace over budget never queues work.
     await check_allowed(conn, tenant_id=tenant_id, required_processors=required_processors)
 
     generation_id = uuid4()
@@ -127,9 +97,7 @@ async def start(
             aad=generation_id.bytes,
         )
     except Exception:  # noqa: BLE001
-        # No object store (the privacy-first posture, or a dev Mac with
-        # MinIO down). The note is still a note; it simply has no
-        # generation, and the client says so rather than spinning.
+        # No object store: the note is still a note, it simply has no generation.
         logger.warning("generation.snapshot_failed", extra={"note_id": str(note_id)})
         raise
 
@@ -144,9 +112,7 @@ async def start(
             prompt_version=PROMPT_VERSION,
             transcript_rev=transcript_rev,
             snapshot_key=key,
-            # The same id the snapshot was sealed with (AAD + object key).
-            # Before this was passed, the database picked a different id
-            # and the worker failed every run with "DEK unwrap failed".
+            # Must be the id the snapshot was sealed with (AAD + object key), or the DEK unwrap fails.
             generation_id=generation_id,
         )
     except asyncpg.UniqueViolationError as exc:
@@ -156,8 +122,7 @@ async def start(
     await queue.enqueue(
         tenant_id,
         JOB_KIND,
-        # Ids only. A job row is read by operators and shipped to
-        # metrics; nothing about the meeting belongs in it.
+        # Ids only: a job row is read by operators and shipped to metrics.
         {"generation_id": str(stored_id), "note_id": str(note_id)},
         max_attempts=MAX_ATTEMPTS,
         priority=PRIORITY_REGENERATE
@@ -175,15 +140,8 @@ async def check_allowed(
     tenant_id: UUID,
     required_processors: list[Any] | None = None,
 ) -> None:
-    """Raise when this workspace may not generate right now.
-
-    Three reasons, all the workspace's own choice or its plan's: the admin
-    turned generation off, a processor in the data path has not been
-    agreed to (`required_processors`, from the registry — Sprint L2), or
-    the month's budget is spent. None is a fault in the note — the note is
-    fine, and the caller says which it is rather than leaving a spinner
-    that never resolves.
-    """
+    """Raise when this workspace may not generate right now: generation turned off,
+    a processor not agreed to (`required_processors`), or the month's budget spent."""
     row = await ai_settings.fetch(conn, tenant_id=tenant_id)
     if not row.generation_enabled:
         raise GenerationDisabledError
@@ -203,13 +161,8 @@ async def check_allowed(
 
 
 class ProcessorUnacknowledgedError(Exception):
-    """A processor in this environment's data path that no admin of this
-    workspace has agreed to (Sprint L2: Mistral AI (EU) is a new identity).
-
-    Nothing is sent anywhere until they do: the create call answers
-    `generation_blocked: processor_unacknowledged` and the Data page shows
-    the dialog. `processors` is the list to show, by (name, region).
-    """
+    """A processor in the data path no admin of this workspace has agreed to; nothing
+    is sent until they do. `processors` is the list to show, by (name, region)."""
 
     def __init__(self, processors: list[Any]) -> None:
         super().__init__("processor_unacknowledged")

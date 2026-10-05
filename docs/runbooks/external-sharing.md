@@ -1,8 +1,7 @@
 # Runbook — External sharing (recipient loop), GA
 
 Covers Sprints 19–23. Related: `docs/runbooks/notes.md` (recipient
-links, responses, product mail), `docs/runbooks/sharing-dsar.md`,
-`docs/product/loop-metrics.md`, ADR-0048/0049/0050.
+links, responses, product mail), ADR-0048/0049/0050.
 
 ## Flags
 
@@ -54,8 +53,7 @@ audit rows per tenant and the SMTP provider's log.
 ## Operating cadence
 
 Weekly loop review on the funnel CSV (`scripts/jobs/weekly_funnel.py`)
-and the Grafana "Viral loop" dashboard; decisions go to
-`docs/product/loop-decisions.md`.
+and the Grafana "Viral loop" dashboard.
 
 ## GA checklist
 

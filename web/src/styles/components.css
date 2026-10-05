@@ -1,7 +1,5 @@
 /* ─── Buttons ───────────────────────────────────────────────────────────── */
-/* DSButtonStyle: 32px tall, a continuous radius, a warm-neutral hairline on
-   the secondary, the ink pill for primary. Hover deepens the neutral — the
-   accent never touches a frame. */
+/* DSButtonStyle. The accent never touches a frame. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: calc(7px * var(--density));
   height: 32px;
@@ -34,16 +32,15 @@
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-1); }
 .btn.ghost:hover:not([disabled]) { background: var(--surface-2); border-color: transparent; color: var(--text-1); }
 .btn.ghost[aria-pressed="true"] { background: var(--surface-2); color: var(--text-1); }
-/* Destructive: filled red, as on the Mac. */
-/* Moss: the one action that matters in a sheet (Send, Done), and its
-   outlined companion (Copy link). */
+/* Destructive */
+/* Moss: the one action that matters in a sheet, and its outlined companion. */
 .btn.moss { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink); }
 .btn.moss:hover:not([disabled]) { background: var(--accent-2); border-color: var(--accent-2); color: var(--accent-ink); }
 .btn.moss-outline { background: transparent; border-color: var(--accent); color: var(--accent-text); }
 .btn.moss-outline:hover:not([disabled]) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover:not([disabled]) { background: var(--danger-2); border-color: var(--danger-2); color: #fff; }
-/* The one loud red: the recording control. */
+/* Recording control */
 .btn.rec { background: var(--rec); color: #fff; border-color: var(--rec); }
 .btn.rec:hover:not([disabled]) { background: color-mix(in srgb, var(--rec) 88%, #000); border-color: color-mix(in srgb, var(--rec) 88%, #000); color: #fff; }
 .btn.sm { height: 26px; padding: 0 calc(10px * var(--density)); font-size: calc(12px * var(--fs)); gap: calc(5px * var(--density)); border-radius: var(--radius-sm); }
@@ -52,10 +49,8 @@
 .btn kbd { background: transparent; border: 0; color: inherit; opacity: .55; padding: 0; }
 
 /* ─── Forms ─────────────────────────────────────────────────────────────── */
-/* DSTextField: surface, quiet hairline; focus is the only place a field
-   takes colour, and it takes it as a moss ring, not as a frame tint. */
-/* A bare <input> inside a .field is a text field too: the settings forms
-   were written without the class and fell back to the browser's box. */
+/* DSTextField: focus is a moss ring, never a frame tint. */
+/* A bare <input> inside a .field is a text field too. */
 .input, .select, .textarea, .field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {
   width: 100%;
   background: var(--surface);
@@ -83,7 +78,7 @@
 .select option { color: var(--text-1); background: var(--surface); }
 
 .field { display: flex; flex-direction: column; gap: calc(6px * var(--density)); }
-/* Field labels are the Mac's tracked uppercase DSLabel. */
+/* Field labels (DSLabel) */
 .label {
   font-size: calc(10.5px * var(--fs)); font-weight: 600;
   text-transform: uppercase; letter-spacing: .08em;
@@ -124,9 +119,7 @@
   cursor: pointer; user-select: none;
 }
 
-/* Segmented control (DSSegmentedPill): a warm track with a white raised
-   segment. The raised one is told apart by its surface and a soft lift, not
-   by a coloured frame. */
+/* Segmented control (DSSegmentedPill) */
 .seg {
   display: inline-flex;
   background: var(--surface-2);
@@ -154,7 +147,7 @@
 .seg.wrap { flex-wrap: wrap; }
 
 /* ─── Cards / panels ────────────────────────────────────────────────────── */
-/* DSCard: a surface in a warm hairline, never a shadow. */
+/* DSCard: hairline, never a shadow. */
 .card {
   background: var(--surface);
   border: var(--hairline) solid var(--line);
@@ -195,7 +188,7 @@
 }
 
 /* ─── Chips / badges ────────────────────────────────────────────────────── */
-/* DSChip: soft-tinted capsule, semibold 11, no frame. */
+/* DSChip */
 .chip {
   display: inline-flex; align-items: center; gap: calc(5px * var(--density));
   padding: calc(3px * var(--density)) calc(8px * var(--density)); border-radius: var(--radius-pill);
@@ -221,8 +214,7 @@
 }
 .chip.version { font-family: var(--mono); text-transform: none; }
 
-/* Filter chip (toggle): a framed capsule; pressed fills with the moss tint
-   and drops its frame altogether rather than colouring it. */
+/* Filter chip (toggle): pressed drops its frame rather than colouring it. */
 .filter-chip {
   display: inline-flex; align-items: center; gap: calc(6px * var(--density));
   padding: calc(4px * var(--density)) calc(11px * var(--density)); border-radius: var(--radius-pill);
@@ -260,17 +252,8 @@
 /* ─── Toolbar / search ──────────────────────────────────────────────────── */
 .toolbar { display: flex; gap: calc(8px * var(--density)); align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 
-/* DSSearchField, expandable (components/SearchField.tsx).
-
-   At rest it is one magnifier in a capsule the size of a button. A click,
-   a `/` or ⌘K grows the capsule to the width of its row — only the capsule
-   moves; the magnifier keeps its box at the left, so the icon stays exactly
-   where it was and the field appears to open FROM it. Every other part —
-   the caret, the hint, the tail — fades in behind the growing edge.
-
-   The frame stays a warm neutral throughout (resting, hovered, focused);
-   focus is a moss ring around it and moss in the magnifier, never in the
-   hairline itself. */
+/* DSSearchField, expandable (components/SearchField.tsx). Only the capsule grows; the
+   magnifier keeps its box so the field opens FROM the icon. Focus is a ring, never the hairline. */
 .sf {
   --sf-h: calc(44px * var(--density));
   --sf-w: 780px;
@@ -291,8 +274,7 @@
 .sf:hover:not(.on) { background: var(--surface-hover); border-color: var(--line-hover); }
 .sf:focus-within { border-color: var(--line-active); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-/* The magnifier's box is the collapsed capsule, so it is centred while shut
-   and optically inset by the same amount once open. */
+/* The magnifier's box is the collapsed capsule. */
 .sf-ico {
   flex: none;
   width: calc(var(--sf-h) - 2px); height: 100%;
@@ -317,7 +299,7 @@
 .sf.on .sf-input { opacity: 1; }
 .sf-input::-webkit-search-cancel-button { -webkit-appearance: none; }
 
-/* Result count, spinner, clear — the quiet right end. */
+/* Tail: result count, spinner, clear */
 .sf-tail {
   flex: none;
   display: flex; align-items: center; gap: calc(7px * var(--density));
@@ -327,8 +309,7 @@
 }
 .sf.on .sf-tail { opacity: 1; pointer-events: auto; }
 .sf-status { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* The hint shows only while the caret is in an empty field — a full field
-   carries the clear button in its place. */
+/* Hint only while the caret is in an empty field. */
 .sf-kbd {
   background: transparent; border-color: transparent;
   color: var(--muted); opacity: 0;
@@ -355,8 +336,6 @@
 .toolbar .grow { flex: 1; }
 
 /* ─── Row lists (notes, jobs, versions) ─────────────────────────────────── */
-/* Rows stacked in one framed card, divided by hairlines inset from the
-   left, as the Mac's home lists are. */
 .row-list { padding: 0; }
 .row {
   display: flex; align-items: center; gap: calc(12px * var(--density));
@@ -394,9 +373,7 @@
 .row-meta { display: flex; align-items: center; gap: calc(8px * var(--density)); font-size: calc(11.5px * var(--fs)); color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
 .row-side { display: flex; align-items: center; gap: calc(8px * var(--density)); flex: none; }
 .row-chev { color: var(--muted); flex: none; }
-/* Private / shared / public — appears while the pointer is on the row,
-   and stays while its menu is open. It keeps its place at rest (opacity,
-   not display) so nothing jumps and a screen reader still finds it. */
+/* Access badge: opacity, not display, so nothing jumps and a screen reader still finds it. */
 .access-menu { display: inline-flex; flex: none; }
 .access-badge {
   display: inline-flex; align-items: center; gap: 5px;
@@ -445,7 +422,7 @@ button.stat-card:hover { border-color: var(--line-hover); background: var(--surf
 button.stat-card:hover .stat-i { color: var(--accent); }
 
 /* ─── Tabs ──────────────────────────────────────────────────────────────── */
-/* Tabs are the segmented pill too (the Mac has no underline tabs). */
+/* Tabs are the segmented pill too. */
 .tabs {
   display: inline-flex; gap: 2px;
   padding: 3px;
@@ -547,9 +524,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .banner-info svg { color: var(--info); }
 
 /* ─── Empty states ──────────────────────────────────────────────────────── */
-/* No frame and no fill: a page with nothing in it keeps the same ground as
-   the page with notes in it, so the app doesn't change appearance the moment
-   the list empties. Only the title and the hint sit on the paper. */
+/* No frame, no fill: the empty page keeps the same ground. */
 .empty {
   text-align: center;
   padding: calc(36px * var(--density)) calc(24px * var(--density));
@@ -622,13 +597,12 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-/* ─── Share dialog (0016) ───────────────────────────────────────────────── */
+/* ─── Share dialog ──────────────────────────────────────────────────────── */
 .share-modal { max-width: 560px; }
 .share-modal .modal-h { position: relative; padding-right: calc(52px * var(--density)); }
 .share-modal .modal-b > * + * { margin-top: 0; }
 .modal-x { position: absolute; top: calc(12px * var(--density)); right: calc(14px * var(--density)); }
-/* Three blocks — send, people, access — each a column with one rhythm,
-   separated by a hairline rather than by whitespace alone. */
+/* Three blocks: send, people, access */
 .share-sec { display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
 .share-sec + .share-sec { margin-top: calc(20px * var(--density)); padding-top: calc(18px * var(--density)); border-top: var(--hairline) solid var(--line-2); }
 .share-sec .banner { margin-top: 0; }
@@ -659,7 +633,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .share-access-sub .share-access-body { gap: 6px; }
 
 .share-access-spacer { width: 36px; flex: none; }
-/* The app's own dropdown trigger: a field, or a bare sentence with a chevron. */
+/* Dropdown trigger: a field, or a bare sentence with a chevron. */
 .select-btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: calc(32px * var(--density)); padding: 0 calc(9px * var(--density)) 0 calc(11px * var(--density));
@@ -690,10 +664,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 }
 .danger-text { color: var(--danger-text); }
 
-/* The recipient box: a field that happens to contain chips. It borrows
-   the .input look rather than inheriting it, because a <div> holding an
-   <input> cannot be one — and the focus ring has to belong to the box,
-   not to the bare caret inside it. */
+/* Recipient box: a <div> of chips that borrows the .input look; the focus ring belongs to the box. */
 .chip-input {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: calc(6px * var(--density));
@@ -738,7 +709,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .share-people li + li { border-top: var(--hairline) solid var(--line-2); }
 .share-person { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 
-/* The space a note is filed in, on its row in the notes list. */
+/* Space pill on a notes-list row */
 .chip.space-chip {
   text-transform: none;
   background: var(--surface-2); color: var(--text-3);
@@ -747,10 +718,8 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .chip.space-chip svg { color: var(--muted); }
 
 
-/* ─── Link-styled button (IDX-W1) ───────────────────────────────────────── */
-/* A button that reads as a link: used for "Use a password instead", "Send a
-   new code", and every other secondary action on the signed-out screens.
-   It stays a <button> because it acts rather than navigates. */
+/* ─── Link-styled button ────────────────────────────────────────────────── */
+/* A <button> that reads as a link (it acts rather than navigates). */
 .link-btn {
   border: 0; background: transparent; padding: 0;
   color: var(--accent-text); font: inherit; cursor: pointer;
@@ -763,7 +732,7 @@ button.stat-card:hover .stat-i { color: var(--accent); }
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* ─── Share sheet: client links (Sprint 19) ─────────────────────────── */
+/* ─── Share sheet: client links ─────────────────────────────────────── */
 @media (min-width: 560px) { .client-link-form { grid-template-columns: 1.2fr 1.2fr auto; } }
 .cta-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;

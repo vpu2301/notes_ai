@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-I1 — what leaves this phone on every request, and what does not.
+/// What leaves this phone on every request, and what does not.
 final class TransportTests: XCTestCase {
 
     func testEveryRequestDeclaresItselfAsThisApp() async {
@@ -25,8 +25,7 @@ final class TransportTests: XCTestCase {
     }
 
     func testNoCookieIsEverSentToTheAuthHost() async {
-        // A cookie planted in the shared jar, of the kind the app used to
-        // rely on. The session must not carry it.
+        // A cookie planted in the shared jar; the session must not carry it.
         let jar = HTTPCookieStorage.shared
         let cookie = HTTPCookie(properties: [
             .domain: "localhost", .path: "/", .name: "planted", .value: "v",

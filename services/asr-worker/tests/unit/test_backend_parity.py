@@ -1,20 +1,8 @@
-"""Sprint TQ2 T1 (TR-10): the three backends get the same plan and the same
-guards.
+"""The three backends get the same plan and the same guards.
 
-The cassette (``tests/fixtures/eval/asr/cassettes/mixed_de_en_whispercpp.json``)
-is a mixed German / English recording: its real Silero runs and the replies
-whisper-server gave for its two language groups. Through
-``processor.decode_recording`` on
-
-- ``dev_mac_asr`` — the recorded whisper.cpp replies,
-- ``hf_eu_asr`` — the same replies in the shape Speaches serves (top-level
-  ``words``, ``compression_ratio`` per segment),
-- ``inproc_cpu_asr`` — the engine with a stand-in model that returns, per
-  run, what the HTTP decode found in that run,
-
-the runs, their languages, the segments' language labels and the markers
-must be identical — and the guard stage must run once per decode, for each
-backend (asserted with a spy on ``guards.apply``, not by reading code).
+The cassette is a mixed German / English recording; through ``decode_recording`` on
+``dev_mac_asr``, ``hf_eu_asr`` and ``inproc_cpu_asr`` the runs, languages, labels and
+markers must be identical, and ``guards.apply`` must run once per decode.
 """
 
 from __future__ import annotations

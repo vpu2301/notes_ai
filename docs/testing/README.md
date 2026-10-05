@@ -311,7 +311,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8002/dictate/ws/dict
 ```
 
 For a real session use `websocat` (send the `start` frame with your token, then
-binary Opus frames). See `docs/api/dictation-ws-v1.md` and the dictation client
+binary Opus frames). See `dictation_service.protocol.messages` and the dictation client
 fixtures under `tests/` for the exact frame sequence.
 
 ### 5e. Autocomplete (autocomplete-service)

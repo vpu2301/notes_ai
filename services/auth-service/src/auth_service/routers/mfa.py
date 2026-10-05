@@ -1,26 +1,7 @@
-"""TOTP enrolment + admin reset (sprint 16 — the sprint-02 MFA IOU).
+"""TOTP enrolment + admin reset on the Keycloak attribute store (ADR-0039).
 
-Flow (ADR-0039):
-
-1. ``POST /auth/mfa/enrol``  — any authenticated user. Generates a fresh
-   TOTP secret, stores it envelope-encrypted in the user's Keycloak
-   attributes under ``totp_secret_enc_pending``, returns the
-   ``otpauth://`` provisioning URI (the SPA renders the QR) plus the
-   base32 secret for manual entry. Enrolment is *pending* until verified
-   — a half-finished enrolment never locks anyone out.
-2. ``POST /auth/mfa/verify`` — completes enrolment: a valid code
-   promotes the pending secret to ``totp_secret_enc``, stamps
-   ``mfa_enrolled=true`` (the protocol mapper turns that into the
-   ``mfa``/``mfa_enrolled`` claims), and audits ``auth.mfa.enrolled``.
-   From the next login on, auth-service refuses to release a token
-   without a valid TOTP code.
-3. ``DELETE /auth/mfa/{sub}`` — admin-assisted reset (lost phone).
-   ``user.reset_mfa`` permission, audited ``sec`` as ``user.reset_mfa``,
-   revokes the user's live Keycloak sessions.
-
-The endpoints exist regardless of ``MDX_REQUIRE_MFA`` so a tenant can
-stage enrolment before enforcement; the surface itself is switched by
-``MDX_MFA_ENROLMENT_ENABLED`` (off in dev by default).
+Enrolment is pending until a code verifies it (never locks anyone out); the
+surface is switched by ``MDX_MFA_ENROLMENT_ENABLED``, independent of ``MDX_REQUIRE_MFA``.
 """
 
 from __future__ import annotations
@@ -209,12 +190,8 @@ async def verify(
     except KeycloakError as exc:
         raise HTTPException(status_code=503, detail="identity provider error") from exc
 
-    # Keep the roster's mfa_enrolled_at column in step (admin listing), and
-    # close any standing access-review reminder in the SAME transaction.
-    #
-    # This is the only way an `mfa_reminders` row is ever closed — there is
-    # no dismiss button anywhere in the product. Enrolling is what makes the
-    # banner go away, which is the entire design of the reminder.
+    # Stamp mfa_enrolled_at and close any standing reminder in the SAME transaction
+    # (enrolling is the only way a reminder is ever closed).
     try:
         async with (
             tenant_connection(state.tenant_writer_pool, claims.tid) as conn,
@@ -258,8 +235,7 @@ async def reset(
 ) -> None:
     state = get_state()
 
-    # Tenant scoping: the target must be a user of the caller's tenant —
-    # the RLS-scoped read is the check (same pattern as reactivate).
+    # The RLS-scoped read is the tenant check.
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await conn.fetchrow("SELECT sub FROM users WHERE sub = $1", sub)
     if row is None:
@@ -275,18 +251,12 @@ async def reset(
                 ATTR_ENROLLED_AT: [],
             },
         )
-        # A reset without session revocation would leave a live mfa=true
-        # session usable by whoever holds it.
+        # Without revocation a live mfa=true session stays usable.
         await state.keycloak.logout_user(sub)
     except KeycloakError as exc:
         raise HTTPException(status_code=503, detail="identity provider error") from exc
 
-    # A resolved `mfa_reminders` row is deliberately left resolved here. A
-    # reset is the lost-phone path — the user is mid-recovery and the grace
-    # flow already walks them into enrolment — so silently reopening an old
-    # finding would put a scolding banner in front of someone who is doing
-    # the right thing. If they still have not enrolled by the next review, a
-    # reviewer raises it again and the upsert reopens the same row.
+    # A resolved `mfa_reminders` row is deliberately left resolved (lost-phone path).
     try:
         async with tenant_connection(state.tenant_writer_pool, claims.tid) as conn:
             await conn.execute(

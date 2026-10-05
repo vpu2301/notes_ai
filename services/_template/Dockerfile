@@ -4,13 +4,10 @@ FROM python:3.12-slim AS build
 WORKDIR /build
 
 RUN pip install --no-cache-dir uv==0.10.6
-# PyPI fetches share the link with the torch wheels of the ASR images when
-# `docker compose build` runs everything at once; bump uv's 30s default so a
-# slow index response doesn't fail the build.
+# Parallel compose builds starve PyPI fetches; raise uv's 30s default.
 ENV UV_HTTP_TIMEOUT=600
 
 COPY pyproject.toml .
-# Install production deps only into /deps so we can copy them cleanly
 RUN uv pip install --system --no-cache \
     --target /deps \
     .
@@ -22,14 +19,10 @@ FROM gcr.io/distroless/python3-debian12:nonroot
 
 WORKDIR /app
 
-# Copy installed packages and application source
 COPY --from=build /deps /deps
 COPY --from=build /app /app
 
-# Editable workspace libs install as .pth files, which Python only honors
-# in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
-# /deps is on PYTHONPATH; it re-registers /deps as a site dir so the editable
-# .pth files (asr_models, audit, observability, …) actually activate.
+# Editable-lib .pth files only activate in a site dir, not via PYTHONPATH.
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
 ENV PYTHONPATH=/deps
@@ -37,5 +30,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-# distroless ENTRYPOINT is /usr/bin/python3; CMD provides arguments
 CMD ["-m", "uvicorn", "template_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

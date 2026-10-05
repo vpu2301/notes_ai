@@ -1,15 +1,8 @@
 """Fail when speaker-count accuracy regressed against a committed DER report.
 
-    uv run python scripts/eval/compare_der.py \
-        --baseline docs/eval/der-2026-09-19-legacy-test.json \
-        --current  docs/eval/der-2026-09-20-legacy-test.json \
-        --n-speakers 2 --max-drop 0.05
+    uv run python scripts/eval/compare_der.py --baseline <a.json> --current <b.json> --n-speakers 2 --max-drop 0.05
 
-Sprint 29 B-10: the nightly job re-runs the gold set for both engines and
-compares ``count_exact`` on one speaker-count bucket (2-speaker recordings
-by default — the case the product promises 95 % on). A drop of more than
-``--max-drop`` (absolute, 0.05 = 5 points) exits 1. A bucket missing from
-either report exits 2: a comparison that cannot be made is not a pass.
+Exit 1 on a drop beyond ``--max-drop`` (absolute); exit 2 when a bucket is missing (never a pass).
 """
 
 from __future__ import annotations

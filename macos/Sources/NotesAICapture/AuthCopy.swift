@@ -1,19 +1,10 @@
 import Foundation
 
-/// What a failed auth request says to the person in front of the Mac.
+/// What a failed auth request says to the person.
 ///
-/// One map, keyed on the machine-readable `code` the server sends
-/// (`docs/api/error-codes.md`), because the alternative — each screen
-/// inventing its own wording from `detail` — produces a different
-/// sentence for the same failure on every screen, and `detail` is
-/// explicitly allowed to change.
-///
-/// Anything unrecognised falls through to a generic line **with a short
-/// reference** taken from the request id, which is the whole point of
-/// sending `X-Request-Id`: an unknown failure the person can quote is one
-/// somebody can look up. The server's `detail` and its code never reach
-/// the screen — they are written for logs, not for the person in front of
-/// the Mac.
+/// One map keyed on the server's `code` (`docs/api/error-codes.md`); `detail` may
+/// change and never reaches the screen. Anything unrecognised falls through to a
+/// generic line with a short reference from the request id.
 enum AuthCopy {
     static func message(for error: Error) -> String {
         guard let apiError = error as? APIError else { return error.localizedDescription }
@@ -34,15 +25,8 @@ enum AuthCopy {
         case 401:
             return "Wrong sign-in details."
         case 403:
-            // A role denial (`libs/auth` answers `deny: roles=[…] cannot
-            // 'note.read' on 'note'`) carries no code, and its `detail` is
-            // a sentence about the permission matrix, not about the person
-            // reading it. `APIClient` has already refreshed once by the
-            // time this is reached — the roles a token carries are re-read
-            // from the membership on every rotation — so what is left is a
-            // real refusal: this account holds `viewer`, or the membership
-            // it is asking through does not cover this. Say that, in a
-            // sentence that names who can change it.
+            // A role denial (`deny: roles=[…] cannot …`) carries no code. `APIClient`
+            // has already refreshed once, so this is a real refusal: name who can change it.
             if let detail = problem?.detail, detail.hasPrefix("deny:") {
                 return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access."
             }
@@ -94,10 +78,7 @@ enum AuthCopy {
             return "The code could not be sent. Try again in a moment."
         // ── passwords and second factors ─────────────────────────────
         case "use_password":
-            // 409 on the email-code path: this address has a password and
-            // the server will not mail it a code. The sign-in screen moves
-            // to the password step on this code, so the sentence explains
-            // the screen that is already appearing rather than a dead end.
+            // 409 on the email-code path: the address has a password; the screen moves to the password step.
             return "This account signs in with a password."
         case "otp_required":
             return "Enter the code from your authenticator."
@@ -107,12 +88,9 @@ enum AuthCopy {
             return "Two-factor sign-in is unavailable for this account. Ask an administrator."
         case "mfa_enrolment_required":
             return "This workspace requires a second factor. Set one up in the web app first."
-        // ── signup (MAC-0 / BE-0) ────────────────────────────────────
+        // ── signup ───────────────────────────────────────────────────
         case "email_not_verified":
-            // 403 on `/auth/login`: the account exists, the password was
-            // right, and the address has not been confirmed. The screen
-            // that shows this also offers "Resend", so the sentence names
-            // the code rather than sending the person hunting for a link.
+            // 403 on `/auth/login`: right password, unconfirmed address. The screen also offers "Resend".
             return "Confirm your email first — we sent you a code."
         // ── the session ──────────────────────────────────────────────
         case "auth_refresh_replay":
@@ -121,7 +99,7 @@ enum AuthCopy {
             return SessionLostReason.expired.message
         case "account_disabled":
             return "This account has been disabled."
-        // ── workspaces (IDX-M2) ─────────────────────────────────────
+        // ── workspaces ──────────────────────────────────────────────
         case "not_a_member":
             return "You are no longer a member of that workspace."
         case "membership_suspended":
@@ -138,10 +116,8 @@ enum AuthCopy {
             return "Confirm it is really you to continue."
         case "challenge_required":
             return "Ask for a new code before entering one."
-        // ── writing a note (Sprint 33/37, L2) ───────────────────────
-        // The same sentences the status line uses for a run that ended
-        // this way, so a refusal at the button and a failure after it
-        // read as one thing.
+        // ── writing a note ──────────────────────────────────────────
+        // The same sentences the status line uses, so a refusal and a failure read as one thing.
         case "processor_unacknowledged":
             return GenerationCopy.processorUnacknowledged
         case "generation_disabled":
@@ -167,9 +143,7 @@ enum AuthCopy {
         }
     }
 
-    /// The one sentence for a failure this app cannot explain, plus a
-    /// short reference the person can quote. Nothing the server wrote
-    /// for its logs is repeated here.
+    /// The one sentence for a failure this app cannot explain, plus a reference the person can quote.
     private static func unknown(status: Int, problem: Problem?) -> String {
         let base: String
         switch status {
@@ -181,8 +155,7 @@ enum AuthCopy {
         return "\(base) Try again, or quote reference \(ref)."
     }
 
-    /// The first eight characters of the request id — enough to find the
-    /// request in the logs, short enough to read out.
+    /// The first eight characters of the request id: enough to find it in the logs.
     static func reference(_ requestId: String?) -> String? {
         guard let requestId = requestId?.trimmingCharacters(in: .whitespaces), !requestId.isEmpty else { return nil }
         return String(requestId.prefix(8))

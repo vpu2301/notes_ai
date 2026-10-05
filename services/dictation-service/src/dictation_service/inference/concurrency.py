@@ -1,15 +1,4 @@
-"""Per-worker inference queue + concurrency cap.
-
-A single asyncio queue serialises calls to ``WhisperEngine.transcribe_window``
-across all live sessions on this process. Sessions submit windows; the
-queue worker pulls them off and runs inference; results are awaited via
-per-call futures. This prevents two windows from contending on the same
-GPU at the same time (which would actually make both slower).
-
-Cap of 4 sessions per worker comes from sprint-04 spec §9. When the
-cap is reached, the WS upgrade handler rejects new sessions with
-``gpu_full`` (recoverable: client retries after another session ends).
-"""
+"""Per-worker inference queue: one asyncio queue serialises window inference so windows never contend on the GPU."""
 
 from __future__ import annotations
 
@@ -41,13 +30,7 @@ class _Job:
 
 
 class InferenceQueue:
-    """Serialise window-inference across sessions on this process.
-
-    Construct once at startup; pass to each session's loop. Sessions call
-    :meth:`submit` per window and ``await`` the returned future. The
-    queue runs one background consumer that calls
-    ``transcribe_window_fn`` per job.
-    """
+    """Serialise window-inference across sessions; one background consumer per process."""
 
     def __init__(
         self,
@@ -115,12 +98,7 @@ class InferenceQueue:
                     prompt=job.prompt,
                     prev_text=job.prev_text,
                 )
-                # Compare the COMPLETION time, not the start time. The
-                # original `t0 > deadline_at` only caught jobs that waited
-                # too long in the queue — a job that started on time and
-                # then ran 6 s never registered a miss, which is precisely
-                # the oversubscription signature conversation mode can
-                # produce (sprint-14 deployment).
+                # Compare completion time, not start time, or a slow run never registers a miss.
                 done_at = time.monotonic()
                 if done_at > job.deadline_at:
                     self._consecutive_deadline_misses += 1
@@ -129,9 +107,7 @@ class InferenceQueue:
                         extra={
                             "worker_id": self._worker_id,
                             "consecutive": self._consecutive_deadline_misses,
-                            # Split the overrun so the cause is readable:
-                            # queue wait = oversubscription, run time = the
-                            # model or the device.
+                            # queue wait = oversubscription, run time = model/device
                             "overrun_ms": round((done_at - job.deadline_at) * 1000, 1),
                             "queue_wait_ms": round((t0 - job.submitted_at) * 1000, 1),
                             "run_ms": round((done_at - t0) * 1000, 1),

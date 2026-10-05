@@ -36,10 +36,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = await build_state()
     app.state.svc = state
     install_state(state)
-    # Maintenance loops run in-process (first iteration fires immediately, so
-    # a fresh deployment self-heals missing telemetry partitions). Both jobs
-    # are idempotent; disable via MDX_BACKGROUND_JOBS when an external
-    # scheduler owns them.
+    # Idempotent in-process maintenance loops; first iteration fires immediately.
     jobs: list[asyncio.Task[None]] = []
     if settings.background_jobs_enabled and not settings.testing:
         interval = settings.background_jobs_interval_s
@@ -77,9 +74,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
-    # CORS for the SPA. allow_credentials=True is required so the browser sends
-    # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
-    # origin, so origins are an explicit allow-list (mirror auth-service A3).
+    # allow_credentials=True (HttpOnly refresh cookie) forbids a wildcard origin.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

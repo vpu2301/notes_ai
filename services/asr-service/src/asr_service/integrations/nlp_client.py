@@ -1,9 +1,4 @@
-"""HTTP client to ``nlp-service`` for batch enrichment.
-
-The batch path is more tolerant of latency than streaming — a 1-minute
-ASR job tolerates a 1-second NLP pass — so we use a longer timeout and
-loop segments via the dedicated batch endpoint.
-"""
+"""HTTP client to ``nlp-service`` for batch enrichment."""
 
 from __future__ import annotations
 
@@ -56,8 +51,7 @@ class NlpBatchClient:
         stages_disabled: list[str] | None = None,
         conversation: bool = False,
     ) -> dict[str, Any] | None:
-        # ``authorization``: forward the end-user's bearer so nlp-service
-        # authorizes + tenant-scopes the call itself (no service creds).
+        # Forward the end-user's bearer: nlp-service tenant-scopes the call itself.
         headers = {"Authorization": authorization} if authorization else None
         body: dict[str, Any] = {
             "segments": segments,
@@ -66,10 +60,9 @@ class NlpBatchClient:
             "reference_date": (reference_date.isoformat() if reference_date else None),
         }
         if stages_disabled:
-            # Sorted, deduplicated — the same shape dictation-service sends.
             body["stages_disabled"] = sorted(set(stages_disabled))
         if conversation:
-            # Sprint I3: fillers and repeats hidden from the displayed text.
+            # Fillers and repeats hidden from the displayed text.
             body["conversation"] = True
         try:
             resp = await self._client.post("/nlp/process/batch", json=body, headers=headers)

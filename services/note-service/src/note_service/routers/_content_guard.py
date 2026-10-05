@@ -1,4 +1,4 @@
-"""Shared write-path guard: sprint-13 field-metadata validation.
+"""Shared write-path guard: field-metadata validation.
 
 Used by every route that accepts a full ``NoteContent`` body
 (create / draft PUT / amend). Raises RFC-9457-style 422s mirroring the

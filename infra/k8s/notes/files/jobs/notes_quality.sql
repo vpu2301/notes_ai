@@ -1,5 +1,4 @@
--- Notes quality — does the engine's document earn trust (Summary Engine v2,
--- Q6 T8)?
+-- Notes quality: does the engine's document earn trust?
 --
 -- One row per (ISO week, dimension, bucket, metric), counts only:
 --   week         the Monday of the week the generation finished (for shares:
@@ -13,12 +12,9 @@
 --   numerator, denominator, value (a percentage; for minutes_to_first_share
 --                the median minutes, with numerator = shares timed)
 --
--- Run as `funnel_reader` (migrations 0040, 0046, 0060) — scripts/jobs/
--- weekly_notes_quality.py does. The role reads metadata columns only; the
--- two numbers that compare written lines with the note's current text come
--- from 0060's SECURITY DEFINER functions, which return ids and integers.
--- No tenant or workspace id leaves the database: every row is aggregated
--- across workspaces.
+-- Run as `funnel_reader` (metadata columns only; line comparisons come from
+-- 0060's SECURITY DEFINER functions, which return ids and integers). Every
+-- row is aggregated across workspaces.
 --
 -- Approximations (docs/runbooks/notes.md, "Weekly notes quality"):
 --   kept line    the written line's text, marker off, is still in the note
@@ -148,8 +144,7 @@ rows AS (
     FROM dismissed x JOIN gens g ON g.id = x.generation_id
     GROUP BY 1, 2, 3
     UNION ALL
-    -- the same dismissals by error-taxonomy code (docs/eval/error-taxonomy.md;
-    -- the table is scripts/eval/taxonomy.py REASON_CODES)
+    -- the same dismissals by error-taxonomy code (scripts/eval/taxonomy.py REASON_CODES)
     SELECT g.week, 'code',
            CASE x.reason
                WHEN 'not_said'       THEN 'F-INV'

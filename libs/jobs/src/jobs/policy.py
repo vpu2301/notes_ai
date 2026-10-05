@@ -1,10 +1,5 @@
-"""Pure retry / warming policy — no I/O, table-tested.
-
-* ``warming`` is a job *state*, not an error: reschedule ``+WARMING_RESCHEDULE_S``
-  without consuming an attempt, up to ``cold_start_seconds × WARMING_BUDGET_FACTOR``
-  measured from when the job first started waiting. Beyond that the job
-  falls back to the normal retry path (attempt consumed, backoff).
-* Normal retries: exponential backoff with a cap; ``max_attempts`` → ``dead``.
+"""Pure retry/warming policy: warming reschedules without consuming an attempt up to
+``cold_start_seconds × WARMING_BUDGET_FACTOR``; normal retries back off exponentially to ``dead``.
 """
 
 from __future__ import annotations

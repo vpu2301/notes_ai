@@ -26,14 +26,7 @@ _meter = metrics.get_meter("mdx.generation")
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
-
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
-    """
+    """Trusted issuers; both the JWKS cache and ``current_user`` must build from this list."""
     return issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -48,26 +41,19 @@ class ServiceState:
     audit_writer_pool: asyncpg.Pool
     audit_writer: AuditWriter
     redis: Any  # redis.asyncio.Redis
-    # None when MDX_LAYER_C_ENABLED=false — the backend is never touched
-    # (MDX_CONVERSATION_ENABLED precedent: off means never construct it).
+    # None when MDX_LAYER_C_ENABLED=false.
     inference: InferenceClient | None
     slot_pool: SlotPool
     rate_limiter: InlineRateLimiter
     shown_audit: ShownAuditBuffer
     inline_latency_metric: Any
     completions_metric: Any
-    # Sprint 16 pre-warm: readiness gates on this when MDX_PREWARM_ENABLED
-    # (set false at startup by the lifespan, flipped true after the
-    # 1-token warm completion lands).
+    # Readiness gates on this when MDX_PREWARM_ENABLED.
     warmed: bool = True
 
 
 async def build_state() -> ServiceState:
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     audit_writer_pool = await create_pool(
@@ -104,10 +90,7 @@ async def build_state() -> ServiceState:
     )
     shown_audit.start()
 
-    # unit deliberately empty — the collector's prometheus exporter appends
-    # unit names, which would break the dashboard-contract metric name
-    # (…_inline_latency_ms_histogram_bucket). Values are ms; the "*latency*"
-    # View in libs/observability supplies the ms bucket boundaries.
+    # Empty unit on purpose: the prometheus exporter would append it to the dashboard metric name.
     inline_latency_metric = _meter.create_histogram(
         "mdx_layer_c_inline_latency_ms_histogram",
         description="End-to-end inline completion latency in ms (served only)",

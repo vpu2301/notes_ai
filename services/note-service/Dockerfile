@@ -16,9 +16,7 @@ RUN apt-get update \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
 RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
-# PyPI fetches share the link with the torch wheels of the ASR images when
-# `docker compose build` runs everything at once; bump uv's 30s default so a
-# slow index response doesn't fail the build.
+# `docker compose build` shares the link with the ASR torch wheels; raise uv's 30s default.
 ENV UV_HTTP_TIMEOUT=600
 
 WORKDIR /build
@@ -45,10 +43,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/crypto \
     /build/libs/storage
 
-# Editable workspace libs install as .pth files, which Python only honors
-# in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
-# /deps is on PYTHONPATH; it re-registers /deps as a site dir so the editable
-# .pth files (asr_models, audit, observability, …) actually activate.
+# Editable libs install as .pth files, honoured only in a site dir (not via PYTHONPATH):
+# sitecustomize re-registers /deps as one so they activate.
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
 ENV PYTHONPATH=/deps \

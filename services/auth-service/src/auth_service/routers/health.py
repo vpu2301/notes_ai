@@ -17,7 +17,6 @@ async def readyz(request: Request) -> dict[str, str]:
     state = getattr(request.app.state, "svc", None)
     if state is None:
         return {"status": "starting"}
-    # Cheap ping: one round trip on the app pool.
     async with state.app_pool.acquire() as conn:
         await conn.execute("SELECT 1")
     return {"status": "ready"}

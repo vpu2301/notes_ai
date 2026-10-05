@@ -1,9 +1,5 @@
-"""`GET /v1/admin/sharing/stats` — the workspace's loop, in counts (Sprint 22).
-
-For whoever runs the workspace (`stats.read` on the tenant): how many
-recipient links were made, sent, opened, acted on, how many recipients
-clicked through or opted out, and who sends the most. Counts and the
-senders' display names — no recipient address ever leaves this route.
+"""`GET /v1/admin/sharing/stats`: the workspace's sharing loop in counts
+(`stats.read`). No recipient address ever leaves this route.
 """
 
 from __future__ import annotations
@@ -73,7 +69,7 @@ async def sharing_stats(
     )
 
 
-# ── Sprint 23: the workspace's sharing policy ────────────────────────
+# ── The workspace's sharing policy ───────────────────────────────────
 
 
 class RevokeAllResult(BaseModel):

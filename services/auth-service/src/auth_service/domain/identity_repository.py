@@ -1,22 +1,8 @@
-"""SQL for `identities`, `auth_challenges`, `auth_sessions` (migration 0024).
+"""SQL for `identities`, `auth_challenges`, `auth_sessions`.
 
-Everything here runs on the ``tenant_writer`` pool. That is not a
-convenience: these three tables have no ``tenant_id`` to scope by (an
-identity exists before it has a workspace), so their isolation is the
-role grant plus the writer-only RLS policy, and ``app_role`` — what the
-rest of the fleet connects as — cannot reach them at all.
-
-The one place a tenant scope *is* set is :meth:`IdentityRepository.
-create_with_personal_workspace`: the ``users`` row it writes lives under
-``users_writer_tenant``, which reads ``app.tenant_id``. That transaction
-sets it with ``set_config(..., true)`` after the tenant row exists, so
-the setting dies with the transaction exactly as ``tenant_connection``
-would leave it.
-
-The pure decision logic — which attempt consumes a challenge, when a
-lock trips, what a personal workspace is called — is in
-:mod:`auth_service.domain.email_code`. This module only reads and writes
-rows, so that logic stays testable without a database.
+Everything runs on ``tenant_writer``: these tables have no ``tenant_id``, so
+isolation is the role grant plus the writer-only RLS policy; ``app_role`` cannot
+reach them. Decision logic lives in :mod:`auth_service.domain.email_code`.
 """
 
 from __future__ import annotations
@@ -59,19 +45,10 @@ _IDENTITY_COLUMNS = """
     deletion_requested_at, locale, timezone, legacy_idp, created_at
 """
 
-# Management role on the membership → the platform roles the JWT carries.
-# Membership roles are the workspace's own vocabulary (who may manage the
-# team); the `roles` claim is the fleet's authorization vocabulary. Kept
-# explicit rather than derived so that adding a membership role is a
-# deliberate decision about what it may do everywhere else.
+# Membership role → the platform roles the JWT carries (explicit on purpose).
 _PLATFORM_ROLES: dict[str, tuple[str, ...]] = {
-    # Whoever runs a workspace also works in it. `tenant_admin` alone
-    # carries no content permission at all (S14), so an owner mapped to
-    # it alone signs in and then 403s on every note, space and recording
-    # — which is every self-serve account on its first use, since the
-    # person who creates a workspace is its owner. `docs/auth/roles.md`
-    # has always said a founder holds BOTH roles; this is that guidance
-    # applied by default instead of left as a manual step nobody does.
+    # `tenant_admin` alone carries no content permission, so owners/admins get
+    # `member` too or they 403 on every note.
     "owner": ("tenant_admin", "member"),
     "admin": ("tenant_admin", "member"),
     "member": ("member",),
@@ -83,39 +60,11 @@ _FALLBACK_ROLES: tuple[str, ...] = ("viewer",)
 
 
 def platform_roles_for(membership_role: str, *, tenant_kind: str = "team") -> list[str]:
-    """The `roles` claim for one membership.
-
-    Membership roles are the workspace's own vocabulary (who may manage
-    the team); the `roles` claim is the fleet's authorization vocabulary.
-    The map above is explicit rather than derived so that adding a
-    membership role is a deliberate decision about what it may do
-    everywhere else.
-
-    **Managing a workspace never removes the ability to work in it.**
-    S14 split administration from content so that `tenant_admin` holds
-    no `note.*`, `asr.*` or `dictation.*` — but that split is a statement
-    about the *role*, not about the person: `docs/auth/roles.md` says a
-    founder who both runs the workspace and takes notes holds both roles,
-    and a permission check passes on any granting role. Handing an owner
-    `tenant_admin` alone does not restrict an administrator, it locks out
-    the only account the workspace has. BE-3's first-use test caught
-    exactly that shape: `403 deny: roles=['tenant_admin'] cannot
-    'asr.write'` on the first recording a new account ever attempts.
-
-    An admin-only account — administration without content — is still
-    expressible; it is a realm-role assignment somebody makes on purpose
-    (`PUT /admin/users/{sub}/roles`), not the default a person lands in
-    by creating the workspace they are the only member of.
-
-    ``tenant_kind`` is accepted for callers that pass it and no longer
-    changes the answer: a personal workspace's owner and a team's owner
-    both work in what they administer.
-    """
+    """The `roles` claim for one membership; ``tenant_kind`` is accepted but no longer changes the answer."""
     return list(_PLATFORM_ROLES.get(membership_role, _FALLBACK_ROLES))
 
 
-# The `users.role` value written for the founding owner of a personal
-# workspace. They are alone in it, so they administer it.
+# `users.role` for the founding owner of a personal workspace.
 _PERSONAL_OWNER_USER_ROLE = "tenant_admin"
 
 
@@ -134,18 +83,13 @@ class Identity:
     locked_until: datetime | None
     lock_notified_at: datetime | None
     deletion_requested_at: datetime | None
-    # Person-level, not workspace-level: the language someone reads mail
-    # in follows them across workspaces. `users` keeps its own copies
-    # until IDX-B2 retires that table.
+    # Person-level: follows them across workspaces (`users` keeps its own copies).
     locale: str = "en"
     timezone: str = "UTC"
-    # BE-1 / migration 0031. True while this person's password and second
-    # factor live in Keycloak. Read with `mfa_enabled` by BE-3: the two
-    # together are what make an emailed code an unacceptable single
-    # factor. NOT inferable from `has_password` — a native signup has no
-    # password hash either (see the migration header).
+    # True while the password and second factor live in Keycloak; NOT inferable
+    # from `has_password` (a native signup has no hash either).
     legacy_idp: bool = False
-    # Sprint 21: when the account came to exist, for first-run hints.
+    # For first-run hints.
     created_at: datetime | None = None
 
     @classmethod
@@ -205,8 +149,7 @@ class LockState:
 
 
 class PgChallengeStore:
-    """The :class:`auth_service.domain.email_code.ChallengeStore` Protocol,
-    backed by ``auth_challenges``."""
+    """:class:`~auth_service.domain.email_code.ChallengeStore` backed by ``auth_challenges``."""
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -265,12 +208,7 @@ class PgChallengeStore:
         return self._row(row)
 
     async def consume_open_for_email(self, *, kind: str, email: str) -> int:
-        """Supersede every open challenge for this address.
-
-        Only the newest code may work. Without this, asking for a second
-        code because the first mail was slow would leave two live codes,
-        doubling an attacker's guessing budget for the same address.
-        """
+        """Supersede every open challenge for this address: only the newest code may work."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -315,12 +253,7 @@ class PgChallengeStore:
             )
 
     async def consume(self, challenge_id: UUID) -> bool:
-        """Spend the challenge. False when someone else spent it first.
-
-        The ``consumed_at IS NULL`` guard is what makes a double-submitted
-        code log in exactly once: both requests read a live challenge and
-        both match the code, but only one UPDATE returns a row.
-        """
+        """Spend the challenge; False when someone else spent it first (``consumed_at IS NULL`` guard)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -361,11 +294,7 @@ class IdentityRepository:
         return Identity.from_row(row) if row is not None else None
 
     async def list_memberships(self, identity_id: UUID) -> list[Membership]:
-        """Every workspace this identity can reach.
-
-        Cross-tenant by definition, which is why it runs on the writer
-        pool — ``tenant_memberships``' app_role policy sees one tenant.
-        """
+        """Every workspace this identity can reach (cross-tenant, hence the writer pool)."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -389,15 +318,7 @@ class IdentityRepository:
         ]
 
     async def membership_in(self, identity_id: UUID, tenant_id: UUID) -> MembershipLookup:
-        """This identity's standing in one workspace, whatever that standing is.
-
-        Unlike :meth:`list_memberships` — which answers "where may I go"
-        and therefore filters to live memberships in live tenants — this
-        answers "why not", and the caller needs the difference between a
-        suspended membership, a dissolved workspace and a workspace this
-        person was never in. Those are three different 403s
-        (``docs/api/error-codes.md``).
-        """
+        """This identity's standing in one workspace, unfiltered: the caller needs to tell the 403s apart."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -412,9 +333,7 @@ class IdentityRepository:
                 tenant_id,
             )
         if row is None or row["role"] is None:
-            # No such tenant, or no membership in it. Deliberately the same
-            # answer: whether a workspace exists is not this caller's
-            # business, and two answers here would enumerate them.
+            # No such tenant or no membership: same answer, no enumeration.
             return MembershipLookup(membership=None, tenant_active=False)
         return MembershipLookup(
             membership=Membership(
@@ -428,12 +347,7 @@ class IdentityRepository:
         )
 
     async def set_last_tenant(self, identity_id: UUID, *, tenant_id: UUID) -> None:
-        """Remember the workspace this person chose.
-
-        It is where the next sign-in — on this Mac or another device —
-        lands, which is the whole point of switching being a decision
-        rather than a per-session accident.
-        """
+        """Remember the workspace this person chose; the next sign-in lands there."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE identities SET last_tenant_id = $2 WHERE id = $1",
@@ -452,37 +366,17 @@ class IdentityRepository:
         password_hash: str | None = None,
         email_verified: bool = True,
     ) -> tuple[Identity, Membership]:
-        """Signup, in one transaction: identity + tenant + membership + user.
+        """Signup in one transaction: identity + tenant + membership + ``users`` row, all or none.
 
-        All four or none. A half-built account is worse than no account:
-        the address is taken, so the person cannot retry, and there is no
-        workspace for them to land in — they are locked out by their own
-        successful signup.
-
-        The ``users`` row is not in the pack's list, and is written anyway.
-        ``users`` is how the rest of the estate resolves a ``sub`` to a
-        person: note-service reads it to offer share recipients,
-        notification-service reads it to find an address to mail. An
-        identity without one holds a perfectly valid token and is
-        invisible to both.
-
-        The last three arguments are BE-0's password signup and default to
-        BE-3's code signup, which is the older caller: a code signup proves
-        the address as part of creating the account (``email_verified``
-        True) and sets no password. A password signup passes a name the
-        person typed, a verifier, and ``email_verified=False`` — the
-        account exists but cannot start a session until the mailed code
-        comes back. Both write the same four rows; only these three columns
-        differ, which is why this stayed one method.
+        The ``users`` row is how the rest of the estate resolves a ``sub``. The last
+        three arguments are the password-signup variant (code signup is the default).
         """
         email = ec.normalise_email(email)
         last_exc: asyncpg.UniqueViolationError | None = None
         for attempt in range(attempts):
             names = ec.personal_workspace_names(email, slug_hex=slug_hex)
-            # Collisions are on the workspace NAME (the email local part:
-            # every `ada@` on every domain wants "ada") and, far less
-            # likely, on the random slug. Suffix the name on retry; the
-            # slug is redrawn by generating fresh names.
+            # Collisions are on the workspace name (email local part) or the slug;
+            # retry with a suffixed name and a fresh slug.
             name = names.name if attempt == 0 else f"{names.name}-{secrets.token_hex(2)}"
             try:
                 async with self._pool.acquire() as conn, conn.transaction():
@@ -494,12 +388,7 @@ class IdentityRepository:
                         RETURNING {_IDENTITY_COLUMNS}
                         """,
                         email,
-                        # BE-3 F4: the email local part until the welcome
-                        # step overrides it. An empty display name renders
-                        # as a blank avatar and an unnamed author on every
-                        # note the person writes before they finish
-                        # onboarding — which some of them never will.
-                        # BE-0 has a better answer: the person typed one.
+                        # Email local part until the welcome step overrides it.
                         (display_name or "").strip() or names.name,
                         email_verified,
                         password_hash,
@@ -532,9 +421,7 @@ class IdentityRepository:
                         identity_id,
                     )
 
-                    # `users` is RLS-scoped even for tenant_writer, so the
-                    # connection needs a tenant before the insert. Local to
-                    # this transaction, cleared at COMMIT.
+                    # `users` is RLS-scoped even for tenant_writer; transaction-local setting.
                     await conn.execute(
                         "SELECT set_config('app.tenant_id', $1, true)", str(tenant_id)
                     )
@@ -547,9 +434,7 @@ class IdentityRepository:
                         tenant_id,
                         email,
                         _PERSONAL_OWNER_USER_ROLE,
-                        # The same name the identity got, or the two rows
-                        # disagree about who this is the moment somebody
-                        # types one at signup.
+                        # Same name as the identity, or the two rows disagree.
                         identity_row["display_name"],
                     )
 
@@ -563,9 +448,7 @@ class IdentityRepository:
                     )
                     assert identity_row is not None
             except asyncpg.UniqueViolationError as exc:
-                # An identity-email collision means someone signed up with
-                # this address between our lookup and here — that is not a
-                # naming problem and retrying will not help.
+                # Email collision: somebody signed up between our lookup and here; no retry.
                 if "identities" in str(getattr(exc, "constraint_name", "") or exc):
                     raise
                 last_exc = exc
@@ -593,28 +476,9 @@ class IdentityRepository:
         slug_hex: str | None = None,
         attempts: int = 3,
     ) -> Membership | None:
-        """Give an EXISTING identity a personal workspace if it has none.
+        """Give an EXISTING identity a personal workspace if it has none; None when it already has one.
 
-        BE-2 F3 (pulled forward from IDX-B1 F5). The account states this
-        heals are all real and none of them is the user's fault:
-
-        * an identity backfilled from a ``users`` row whose only
-          membership was later removed;
-        * a signup whose transaction committed the identity and then lost
-          the connection (the transaction makes this impossible today —
-          this is defence against the day it stops being one method);
-        * a person removed from the last team workspace they were in, who
-          would otherwise get ``409 no_workspace`` on every sign-in with
-          no way to act on it.
-
-        Returns ``None`` when the identity already has an active
-        membership: healing is what this does, not what it insists on. The
-        check and the insert are in one transaction, so two concurrent
-        refreshes cannot each decide the workspace is missing.
-
-        The bridge ``users`` row is written here for the same reason
-        signup writes one — an identity without it cannot author content
-        until IDX-B2 (see migration 0031).
+        Check and insert are one transaction so concurrent refreshes cannot both heal.
         """
         email = ec.normalise_email(email)
         last_exc: asyncpg.UniqueViolationError | None = None
@@ -623,9 +487,7 @@ class IdentityRepository:
             name = names.name if attempt == 0 else f"{names.name}-{secrets.token_hex(2)}"
             try:
                 async with self._pool.acquire() as conn, conn.transaction():
-                    # FOR UPDATE on the identity row, not on memberships:
-                    # it is the one row both racing callers are certain to
-                    # touch, and it is what serialises them.
+                    # FOR UPDATE on the identity row serialises racing callers.
                     locked = await conn.fetchrow(
                         "SELECT id FROM identities WHERE id = $1 FOR UPDATE", identity_id
                     )
@@ -672,9 +534,7 @@ class IdentityRepository:
                     await conn.execute(
                         "SELECT set_config('app.tenant_id', $1, true)", str(tenant_id)
                     )
-                    # ON CONFLICT because a `users` row for this sub may
-                    # survive in another tenant; the PK is (sub, tenant_id)
-                    # so this one is new, but a re-run must not fail.
+                    # ON CONFLICT: a re-run must not fail (PK is (sub, tenant_id)).
                     await conn.execute(
                         """
                         INSERT INTO users (sub, tenant_id, email, display_name, role, status)
@@ -712,14 +572,7 @@ class IdentityRepository:
         raise last_exc
 
     async def password_hash_for(self, identity_id: UUID) -> str | None:
-        """The stored verifier, read on its own and never as part of :class:`Identity`.
-
-        ``Identity`` exposes ``has_password`` and not the hash, deliberately:
-        the dataclass is passed around routers, logged in tests and returned
-        through service layers, and a verifier that rides along in it will
-        eventually be somewhere it should not be. One caller needs the real
-        value — the password login — so it asks for it explicitly.
-        """
+        """The stored verifier, read on its own; :class:`Identity` deliberately never carries it."""
         async with self._pool.acquire() as conn:
             return await conn.fetchval(
                 "SELECT password_hash FROM identities WHERE id = $1", identity_id
@@ -735,12 +588,7 @@ class IdentityRepository:
             )
 
     async def mark_email_verified(self, identity_id: UUID) -> Identity | None:
-        """Stamp ``email_verified_at``, unless it is already stamped.
-
-        Idempotent, and the ``IS NULL`` guard is the reason: two tabs
-        submitting the same code must not move the timestamp, which is the
-        record of when the address was first proved.
-        """
+        """Stamp ``email_verified_at`` unless already stamped (idempotent via the ``IS NULL`` guard)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
@@ -754,18 +602,7 @@ class IdentityRepository:
         return Identity.from_row(row) if row is not None else None
 
     async def reactivate(self, identity_id: UUID) -> list[UUID]:
-        """Cancel a pending deletion because the owner just signed in.
-
-        Symmetric with :meth:`request_deletion`, and it has to be: that
-        method dissolves the workspaces nobody else is in, and a
-        reactivation that restored only the identity would hand the user
-        back an account with nowhere to go — no memberships, so no `tid`,
-        so no token. The mail this flow sends promises the account comes
-        back "exactly as it was", and this is the half that keeps it.
-
-        Only tenants this identity is alone in are revived, so a workspace
-        dissolved for any other reason stays dissolved.
-        """
+        """Cancel a pending deletion; revives only the tenants this identity is alone in (mirror of :meth:`request_deletion`)."""
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 """
@@ -792,12 +629,7 @@ class IdentityRepository:
         return [r["id"] for r in rows]
 
     async def note_successful_login(self, identity_id: UUID, *, tenant_id: UUID) -> None:
-        """Clear the lockout counters and remember where they landed.
-
-        ``lock_count`` is deliberately NOT reset: it is the memory that
-        makes the next lock longer than the last one, and an attacker who
-        can reach a successful login has already won more than that.
-        """
+        """Clear the failure counter and remember where they landed; ``lock_count`` is deliberately kept."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
@@ -815,14 +647,7 @@ class IdentityRepository:
     async def register_failure(
         self, identity_id: UUID, *, policy: ec.LockoutPolicy, now: datetime | None = None
     ) -> LockState:
-        """Record one failed sign-in and apply the lockout policy.
-
-        Read-modify-write under ``FOR UPDATE`` so two concurrent wrong
-        codes cannot both read count 9 and leave the account at 10 with
-        no lock. The arithmetic itself is
-        :class:`~auth_service.domain.email_code.LockoutPolicy`, unit-tested
-        without a database.
-        """
+        """Record one failed sign-in under ``FOR UPDATE``; the arithmetic is :class:`~auth_service.domain.email_code.LockoutPolicy`."""
         now = now or datetime.now(UTC)
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
@@ -835,9 +660,7 @@ class IdentityRepository:
             if row is None:
                 return LockState(locked_until=None, newly_locked=False, failed_login_count=0)
             if ec.is_locked(row["locked_until"], now=now):
-                # Already locked: the count is not the interesting number
-                # any more, and re-locking on every attempt would extend
-                # the lock for as long as an attacker keeps knocking.
+                # Already locked: re-locking per attempt would extend the lock indefinitely.
                 return LockState(
                     locked_until=row["locked_until"],
                     newly_locked=False,
@@ -872,13 +695,7 @@ class IdentityRepository:
         )
 
     async def claim_lock_notice(self, identity_id: UUID) -> bool:
-        """True at most once per lock — the caller may send the locked mail.
-
-        The claim is the UPDATE itself (``lock_notified_at IS NULL`` in the
-        WHERE), so N racing requests against a locked account produce one
-        mail, not N. Without it the lockout is a way to make us mail
-        somebody as fast as an attacker can type.
-        """
+        """True at most once per lock (the UPDATE is the claim), so N racing requests send one mail."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -893,7 +710,7 @@ class IdentityRepository:
             )
         return row is not None
 
-    # ── IDX-A5: MFA state, profile, email change, deletion ───────────
+    # ── MFA state, profile, email change, deletion ───────────────────
 
     async def set_mfa_enabled(self, identity_id: UUID, *, enabled: bool) -> None:
         async with self._pool.acquire() as conn:
@@ -928,13 +745,7 @@ class IdentityRepository:
         return Identity.from_row(row) if row is not None else None
 
     async def email_is_taken(self, email: str, *, excluding: UUID | None = None) -> bool:
-        """Is this address already somebody's login?
-
-        Includes `pending_deletion` identities: their address is still
-        theirs until the purge rewrites it, and signing in reclaims the
-        account. Excludes `deleted`, whose address was rewritten and can
-        never collide.
-        """
+        """Is this address already somebody's login? Includes `pending_deletion`, excludes `deleted`."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -948,14 +759,7 @@ class IdentityRepository:
         return row is not None
 
     async def change_email(self, identity_id: UUID, *, new_email: str) -> Identity | None:
-        """Move the login identifier, and re-stamp verification.
-
-        `email_verified_at` is reset to now rather than cleared: the change
-        only happens after a code delivered to the new address, so it is
-        verified at exactly this moment. Also mirrors the address onto the
-        `users` rows the rest of the estate still reads (IDX-B2 retires
-        that duplication).
-        """
+        """Move the login identifier, re-stamp verification (a code reached the new address) and mirror onto `users`."""
         new_email = ec.normalise_email(new_email)
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
@@ -982,12 +786,7 @@ class IdentityRepository:
         return Identity.from_row(row)
 
     async def sole_owner_tenants_with_members(self, identity_id: UUID) -> list[Membership]:
-        """Workspaces this identity would orphan by leaving.
-
-        The rule is "only owner AND somebody else is still active" — a
-        one-person workspace is dissolved with the account, but a team
-        must never be left with nobody who can administer it.
-        """
+        """Workspaces this identity would orphan: only owner AND somebody else still active."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -1017,12 +816,7 @@ class IdentityRepository:
         ]
 
     async def request_deletion(self, identity_id: UUID) -> list[UUID]:
-        """Mark for deletion and dissolve the workspaces nobody else is in.
-
-        Returns the dissolved tenant ids. The identity row survives the
-        grace period intact — that is what makes signing in able to undo
-        this — so nothing is destroyed here; the purge does that.
-        """
+        """Mark for deletion and dissolve the workspaces nobody else is in; returns their ids. Nothing is destroyed here."""
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 """
@@ -1106,13 +900,7 @@ class SessionRepository:
         return _session_row(row) if row is not None else None
 
     async def list_live(self, identity_id: UUID) -> list[SessionRow]:
-        """Every session the sessions screen should show.
-
-        Revoked and expired rows are filtered out here rather than in the
-        router: "where am I signed in" is a question about live access,
-        and a list padded with dead sessions makes the live ones harder to
-        spot — which is the one thing the screen exists for.
-        """
+        """Live sessions only (revoked and expired filtered here, not in the router)."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -1125,13 +913,7 @@ class SessionRepository:
         return [_session_row(r) for r in rows]
 
     async def revoke(self, session_id: UUID, *, identity_id: UUID, reason: str) -> bool:
-        """End one session. False if it is not this identity's, or already dead.
-
-        ``identity_id`` is in the WHERE clause, not checked beforehand, so
-        there is no window in which a session could be re-owned between
-        the check and the write — and so the route can answer 404 for
-        "someone else's sid" and "no such sid" identically.
-        """
+        """End one session; False if not this identity's or already dead (``identity_id`` is in the WHERE)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1149,13 +931,7 @@ class SessionRepository:
     async def revoke_all(
         self, identity_id: UUID, *, reason: str, except_session_id: UUID | None = None
     ) -> list[UUID]:
-        """End every live session, optionally sparing the caller's own.
-
-        Returns the sids so the caller can push each onto the denylist —
-        the DB row stops the next refresh, the denylist stops the access
-        token already in someone's hands, and only both together close the
-        window.
-        """
+        """End every live session, optionally sparing the caller's own; returns the sids for the denylist."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -1172,13 +948,7 @@ class SessionRepository:
         return [r["id"] for r in rows]
 
     async def find_by_refresh_token(self, token: str) -> RefreshMatch | None:
-        """Which session, if any, this refresh token belongs to.
-
-        Answers for both generations at once — the current token and the
-        one the last rotation retired — because the caller has to tell
-        those apart and a second round trip to do it would open a window
-        between the two reads.
-        """
+        """Which session this refresh token belongs to, matching both the current and the retired generation in one read."""
         digest = hash_refresh_token(token)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -1209,25 +979,11 @@ class SessionRepository:
         ip: str,
         presented_is_current: bool,
     ) -> bool:
-        """Swap the session's refresh token for ``new_token``.
+        """Swap the session's refresh token for ``new_token``; the replaced token is in the WHERE.
 
-        The token being replaced is in the WHERE clause, so two concurrent
-        refreshes carrying the same token cannot both succeed: the second
-        UPDATE matches nothing and its caller is told to look again, which
-        is how the grace and replay paths get their evidence.
-
-        Two invariants, and the reason for each:
-
-        * ``previous_refresh_token_hash`` is always **the token this
-          rotation replaced**. Even on the grace path — where the caller
-          presented the already-retired token — the outgoing current token
-          is the one worth remembering: it is live, somebody is holding it,
-          and orphaning it would sign that somebody out for having won a
-          race they did not know they were in.
-        * ``rotated_at`` moves only when the presented token *was* the
-          current one. The grace window is measured from the rotation that
-          retired a token, so a caller re-presenting one cannot keep
-          extending its own grace.
+        Invariants: ``previous_refresh_token_hash`` is always the token this rotation
+        replaced (even on the grace path); ``rotated_at`` moves only when the
+        presented token was the current one.
         """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -1255,12 +1011,7 @@ class SessionRepository:
         return row is not None
 
     async def set_tenant(self, session_id: UUID, *, tenant_id: UUID) -> bool:
-        """Point a live session at another workspace.
-
-        The session row is what `refresh` re-mints from, so this is what
-        makes a switch outlive the access token that carried it — and what
-        makes "I closed the lid in workspace B" still true tomorrow.
-        """
+        """Point a live session at another workspace (refresh re-mints from the row)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1275,7 +1026,7 @@ class SessionRepository:
         return row is not None
 
     async def touch_authenticated(self, session_id: UUID) -> None:
-        """Stamp a fresh proof of identity on the session (IDX-A5 F3)."""
+        """Stamp a fresh proof of identity on the session."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE auth_sessions SET last_authenticated_at = now(), last_used_at = now()"
@@ -1288,7 +1039,7 @@ def build_repositories(pool: Any) -> tuple[IdentityRepository, PgChallengeStore,
     return IdentityRepository(pool), PgChallengeStore(pool), SessionRepository(pool)
 
 
-# ── second factors (IDX-A5) ──────────────────────────────────────────────
+# ── second factors ───────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -1328,12 +1079,7 @@ class TotpRepository:
     async def put_candidate(
         self, identity_id: UUID, *, secret_enc: str, kek_tenant_id: UUID
     ) -> None:
-        """Store an unconfirmed secret, replacing any earlier attempt.
-
-        Unconfirmed (``confirmed_at IS NULL``) so it gates nothing: a
-        person who scans the QR and then closes the tab has not enabled
-        MFA and must not be locked out by the row that is left behind.
-        """
+        """Store an unconfirmed secret, replacing any earlier attempt; unconfirmed rows gate nothing."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
@@ -1352,12 +1098,7 @@ class TotpRepository:
             )
 
     async def confirm(self, identity_id: UUID, *, step: int) -> bool:
-        """Promote the candidate to a real second factor. False if already confirmed.
-
-        The ``confirmed_at IS NULL`` guard makes a double-submitted
-        confirmation idempotent instead of resetting the step counter,
-        which would reopen the replay window this sprint closes.
-        """
+        """Promote the candidate to a real second factor; False if already confirmed (no step reset)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1372,12 +1113,7 @@ class TotpRepository:
         return row is not None
 
     async def spend_step(self, identity_id: UUID, *, step: int) -> bool:
-        """Claim a TOTP time step. False when it was already spent.
-
-        The comparison is in the WHERE clause, not in Python, so two
-        requests carrying the same code in the same window cannot both
-        read the old value and both succeed.
-        """
+        """Claim a TOTP time step; False when already spent (comparison in the WHERE, not Python)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1405,11 +1141,7 @@ class RecoveryCodeRepository:
         self._pool = pool
 
     async def replace_all(self, identity_id: UUID, *, hashes: list[bytes]) -> None:
-        """Issue a fresh set, invalidating every old code in the same transaction.
-
-        Regeneration must not leave a window where both sets work: a user
-        regenerates precisely because they think the old list leaked.
-        """
+        """Issue a fresh set, invalidating every old code in the same transaction."""
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 "DELETE FROM identity_recovery_codes WHERE identity_id = $1", identity_id
@@ -1420,12 +1152,7 @@ class RecoveryCodeRepository:
             )
 
     async def consume(self, identity_id: UUID, *, code_hash: bytes) -> bool:
-        """Spend one code. False if it is unknown or already used.
-
-        Single-statement claim: the same code submitted twice concurrently
-        marks one row once, and the loser is told the code is invalid —
-        which, by then, it is.
-        """
+        """Spend one code (single-statement claim); False if unknown or already used."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1455,7 +1182,7 @@ class RecoveryCodeRepository:
             )
 
 
-# ── sessions: listing, revocation, step-up (IDX-A5 F4) ───────────────────
+# ── sessions: listing, revocation, step-up ───────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -1472,22 +1199,13 @@ class SessionRow:
     last_authenticated_at: datetime
     expires_at: datetime
     revoked_at: datetime | None
-    # Whether the sign-in that opened this session passed a second factor.
-    # Refresh re-mints the access token from the session row, and dropping
-    # the claim on the way through would quietly demote every MFA session
-    # fifteen minutes after it started.
+    # Whether the sign-in passed a second factor; refresh re-mints the claim from here.
     mfa: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class RefreshMatch:
-    """A refresh token resolved to its session, and to its generation.
-
-    ``is_current`` False means the token is the one the last rotation
-    retired: a retry inside the grace window, or a replay after it. The
-    difference is arithmetic on ``rotated_at``, and it is the caller's to
-    make — the repository does not decide what a session deserves.
-    """
+    """A refresh token resolved to its session; ``is_current`` False = the retired generation (grace or replay is the caller's call)."""
 
     session: SessionRow
     is_current: bool

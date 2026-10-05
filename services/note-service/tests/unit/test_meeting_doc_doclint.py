@@ -1,5 +1,4 @@
-"""Sprint D1 — the document linter (docs/eval/document-standard.md,
-meeting_doc/doclint.py, ADR-0065). Tests follow the work order's tasks."""
+"""The document linter (docs/eval/error-taxonomy.md, meeting_doc/doclint.py, ADR-0065)."""
 
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ def _fact(text: str, start_ms: int, quote: str | None = None, **kw: Any) -> Veri
     return VerifiedFact(
         kind=kw.pop("kind", schema.KEY_POINT),
         text=text,
-        # A quote that is not the text: the text restates it (F2).
+        # A quote that is not the text: the text restates it.
         quote=quote or "so wurde es in dem Gespräch erzählt",
         turn=0,
         start_ms=start_ms,
@@ -66,7 +65,7 @@ def _rules(findings: list[doclint.Finding]) -> dict[str, set[str]]:
     return out
 
 
-# ── Acceptance 1: r03's notes as rendered documents ─────────────────
+# ── Acceptance: eval notes as rendered documents ────────────────────
 
 
 def test_r03_note_1_is_rejected_for_what_it_is() -> None:
@@ -98,7 +97,7 @@ def test_the_comparison_notes_structure_has_no_structural_finding() -> None:
     assert "orient.present" in _rules(findings)
 
 
-# ── T1 structure and volume ─────────────────────────────────────────
+# ── structure and volume ─────────────────────────────────────────
 
 
 def _topic(title: str, facts: list[VerifiedFact], key: str | None = None) -> RenderedSection:
@@ -222,11 +221,11 @@ def test_a_duplicated_bullet_is_one() -> None:
     repaired, done = doclint.repair(sections, _ctx([*facts, twin], minutes=2))
     texts = [ln.text for s in repaired for ln in s.lines]
     assert texts.count(f"- {facts[0].text}") == 1
-    # SQ3: the composed ladder repeats the bullets and goes too (also D-RED).
+    # The composed ladder repeats the bullets and goes too (also D-RED).
     assert done["D-RED"] >= 1
 
 
-# ── T2 headings and title ───────────────────────────────────────────
+# ── headings and title ───────────────────────────────────────────
 
 
 def test_diskussion_fails_generic_and_caps_and_takes_the_fallback() -> None:
@@ -264,7 +263,7 @@ def test_the_six_comparison_headings_pass() -> None:
     assert not [f for f in doclint.check(sections, ctx) if f.rule.startswith("heading.")]
 
 
-# ── T3 lines ────────────────────────────────────────────────────────
+# ── lines ────────────────────────────────────────────────────────
 
 
 def test_a_label_as_subject_is_not_rendered_and_goes_to_d2_once() -> None:
@@ -349,7 +348,7 @@ def test_an_evaluation_of_a_person_is_descriptive_unless_a_claim_follows() -> No
     assert not support.descriptive("Das Boot ist mit 20 Metern ungewöhnlich lang", "de")
 
 
-# ── T4 orientation ──────────────────────────────────────────────────
+# ── orientation ──────────────────────────────────────────────────
 
 
 def test_r03_note_2_first_paragraph_fails_length_label_and_guest() -> None:
@@ -397,7 +396,7 @@ def test_a_missing_second_paragraph_takes_the_composed_rung() -> None:
     assert len(summary) >= 3 and done["D-ORIENT"] >= 1
 
 
-# ── T5 wiring, failure, one module ──────────────────────────────────
+# ── wiring, failure, one module ──────────────────────────────────
 
 
 def test_a_linter_that_raises_leaves_the_document_and_says_so(monkeypatch: Any) -> None:

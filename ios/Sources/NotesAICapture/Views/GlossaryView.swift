@@ -1,18 +1,7 @@
 import SwiftUI
 
-/// The workspace's names and terms (Sprint 35).
-///
-/// The list is the safety mechanism. Terms get here from corrections —
-/// you fix a name once and the workspace offers to remember it — and a
-/// vocabulary that learns without showing you what it learned is one you
-/// cannot trust. So: everything visible, everything removable by whoever
-/// added it, nothing learned silently.
-///
-/// Sprint I2 added the other half of "visible": the exact line the
-/// transcriber is given before the next recording, and a flag on any
-/// entry the server no longer sends because it is a role label, not a
-/// name. The one time this list learned something wrong ("Moderator II"),
-/// nobody could see it being read into every recording.
+/// The workspace's names and terms: everything visible and removable,
+/// nothing learned silently; shows the exact hint sent to the transcriber.
 struct GlossaryView: View {
     @EnvironmentObject private var app: AppState
     @State private var terms: [GlossaryTerm] = []
@@ -84,9 +73,7 @@ struct GlossaryView: View {
         .task { await load() }
     }
 
-    /// Read-only: what the next upload's `vocabulary_hint` will be, word
-    /// for word, straight from the server. Not a rendering of the list
-    /// above — the server decides what is sent, and this shows its answer.
+    /// Read-only: the next upload's `vocabulary_hint`, word for word from the server.
     private var transcriberBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("What the transcriber is told for the next recording")
@@ -167,8 +154,7 @@ struct GlossaryView: View {
         await refreshHint()
     }
 
-    /// The hint is the server's, so it is re-read after every change
-    /// rather than guessed from the list.
+    /// Re-read after every change rather than guessed from the list.
     private func refreshHint() async {
         hint = try? await app.api.glossaryHint()
     }

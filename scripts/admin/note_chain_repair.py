@@ -1,12 +1,6 @@
-"""Read-only admin tool for investigating a note-chain anomaly.
+"""Read-only admin tool for investigating a note-chain anomaly; repair is manual.
 
-Sprint-08 day-8 ships investigation tooling only; actual repair is
-manual + multi-sign-off (DBA + tech lead + security lead). The script
-prints the relevant chain in a way that's easy to paste into the
-incident note.
-
-Usage:
-    uv run python scripts/admin/note_chain_repair.py --note-id <uuid>
+uv run python scripts/admin/note_chain_repair.py --note-id <uuid>
 """
 
 from __future__ import annotations

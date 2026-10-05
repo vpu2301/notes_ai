@@ -1,16 +1,5 @@
-"""Dedicated inline concurrency slots.
-
-A small semaphore pool (default 2) bounds how many inline completions
-can hit the model at once. Combined with the caller's whole-request
-``asyncio.timeout`` (slot wait INCLUDED in the budget), a long-running
-generation can never starve the typing path beyond the deadline — the
-request simply times out into a silent 204.
-
-Deliberately not the dictation-service ``InferenceQueue``: that class
-serialises ALL calls onto one GPU engine and tracks deadline misses per
-job; here the backend server (llama-server ``--parallel N`` / Ollama
-``OLLAMA_NUM_PARALLEL``) already multiplexes, and the only guarantee the
-service needs is "never queue more than N inline calls".
+"""Semaphore pool bounding concurrent inline completions; slot wait is inside the
+caller's ``asyncio.timeout``, so a slow generation times out into a silent 204.
 """
 
 from __future__ import annotations

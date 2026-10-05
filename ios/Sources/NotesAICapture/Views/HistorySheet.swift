@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// The note's versions, newest first (History in the ⋯ menu). Tapping one
-/// shows it read-only in the document, with a banner and "Back to
-/// current". Amendments are history only (ADR-0051), but a note written
-/// before that still names its reason.
+/// The note's versions, newest first; tapping one shows it read-only. Amendments are history only (ADR-0051).
 struct HistorySheet: View {
     @ObservedObject var model: NoteViewModel
     let onClose: () -> Void

@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-I2 I2-01 — local state belongs to one identity in one workspace.
+/// Local state belongs to one identity in one workspace.
 final class ScopedStateTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
@@ -70,7 +70,7 @@ final class ScopedStateTests: XCTestCase {
     }
 
     func testTheOldUnscopedMeetingsMoveToTheFirstIdentityThatSignsIn() throws {
-        // What the app wrote before IDX-I2: one list, no owner.
+        // The legacy shape: one list, no owner.
         let legacy = try JSONEncoder().encode([capture("Before the update")])
         defaults.set(legacy, forKey: "recentCaptures")
         let scope = StateScope(identityId: "id-1", tenantId: "t-1")
@@ -108,7 +108,7 @@ final class ScopedStateTests: XCTestCase {
     }
 }
 
-/// IDX-I2 I2-02 — the workspace a request is scoped to.
+/// The workspace a request is scoped to.
 final class WorkspaceTransportTests: XCTestCase {
 
     func testSwitchingPublishesTheNewTokenAndRemembersTheWorkspace() async throws {
@@ -295,7 +295,7 @@ final class WorkspaceTransportTests: XCTestCase {
     }
 }
 
-/// IDX-I2 I2-04 (cut) — the seam that is left where invitations will go.
+/// The seam left where invitations will go.
 final class AppLinkTests: XCTestCase {
 
     func testAnInvitationLinkIsRecognised() {
@@ -309,8 +309,7 @@ final class AppLinkTests: XCTestCase {
     }
 
     func testTheOAuthCallbacksAreNotAppLinks() {
-        // They are answered by the ASWebAuthenticationSession that started
-        // them; anything that could route them here could replay them.
+        // Answered by the ASWebAuthenticationSession that started them; routing them here could replay them.
         XCTAssertNil(AppState.AppLink(URL(string: "notesai://oauth/callback?code=x")!))
         XCTAssertNil(AppState.AppLink(URL(string: "notesai://calendar/connected")!))
     }

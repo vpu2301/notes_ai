@@ -1,25 +1,7 @@
 #!/usr/bin/env python
-"""BLOCKING CI gate: no email template may render note content or personal data.
-
-Renders every emailing category against a payload deliberately stuffed
-with fake personal data and note content — a surname, a tax id, a
-confidential deal narrative, a date of birth, a phone number — and fails
-if any of those tokens survive into the subject, the text body, or the
-HTML body.
-
-Why this catches real regressions rather than restating the design:
-the allow-list in `domain/render.ALLOWED_PAYLOAD_KEYS` is the control,
-but a future edit that adds `author_name` to a template, or widens an
-allow-list entry "just for debugging", would be invisible in review.
-This gate turns that edit into a red build.
-
-It also fails if a category declares a template that does not exist, or
-renders a template that leaves a Jinja placeholder unfilled.
-
-Emails carry pointers, never content (ADR-0031): assert the negative,
-mechanically, on every push.
-
-Exit 0 = clean. Exit 1 = a leak or a broken template.
+"""BLOCKING CI gate: no email template may render note content or personal data
+(ADR-0031). Renders every category against a poisoned payload and fails if a
+token survives, a template is missing, or a Jinja placeholder is left unfilled.
 """
 
 from __future__ import annotations
@@ -43,9 +25,8 @@ from notification_service.domain.render import (  # noqa: E402
     safe_payload,
 )
 
-# Tokens that must NEVER reach a rendered email. Deliberately realistic:
-# a surname (Latin and Cyrillic), a 10-digit tax id, a confidential
-# note-content fragment, a date of birth, and a phone number.
+# Tokens that must NEVER reach a rendered email (realistic: surname, tax id,
+# note-content fragment, date of birth, phone number).
 PII_TOKENS: tuple[str, ...] = (
     "Іваненко",
     "Ivanenko",
@@ -55,15 +36,10 @@ PII_TOKENS: tuple[str, ...] = (
     "1978-04-12",  # DOB
     "+380671234567",
 )
-# NOT tokens: bare common nouns like "note"/"meeting". They occur in
-# legitimate boilerplate ("contains no note content"), so a substring
-# match on them fails every template and the gate gets muted — the
-# classic way a security check stops being enforced. The leak is the
-# NAME, the tax id and the content fragment; `note_title` below is
-# caught because it embeds "Ivanenko".
+# NOT tokens: bare nouns like "note" occur in legitimate boilerplate; a gate
+# that fails every template gets muted.
 
-# A payload a careless producer might send. Every sensitive key here is
-# expected to be dropped by the allow-list before rendering.
+# A careless producer's payload; every sensitive key must be dropped by the allow-list.
 POISONED_PAYLOAD: dict[str, str | int | float | bool | None] = {
     # Legitimate, allow-listed keys — these SHOULD appear.
     "note_code": "NOTE-2026-0042",
@@ -85,8 +61,7 @@ POISONED_PAYLOAD: dict[str, str | int | float | bool | None] = {
 
 
 def _event(category: Category) -> NotificationEvent:
-    # The envelope itself rejects oversized/nested payloads; build it
-    # through the real model so the gate exercises the real path.
+    # Built through the real model so the gate exercises the real path.
     return NotificationEvent(
         event_id=uuid4(),
         tenant_id=uuid4(),
@@ -140,20 +115,12 @@ def main() -> int:
                         f"{category}: PII/content token {token!r} leaked into the "
                         f"{surface_name} of template {spec.email_template!r}"
                     )
-            # An unrendered placeholder means the template referenced
-            # something the allow-list does not provide.
+            # The template referenced something the allow-list does not provide.
             if "{{" in content or "{%" in content:
                 failures.append(f"{category}: unrendered Jinja placeholder in {surface_name}")
 
-        # Actionability, checked against what this category is ABOUT.
-        #
-        # For a mail about a note, the code is the whole point: a
-        # template that lost it is broken even though it leaks nothing.
-        # For one that carries no resource pointer at all — S21's
-        # `security.mfa_reminder` is about the recipient's own account,
-        # and its allow-list is deliberately two non-identifying keys —
-        # the equivalent is the link: a security ask with nothing to
-        # click is a mail that cannot be acted on.
+        # Actionability: a mail about a note must carry the code; one with no
+        # resource pointer (security.mfa_reminder) must carry the link.
         body = rendered.subject + rendered.text_body
         if "note_code" in ALLOWED_PAYLOAD_KEYS.get(category, frozenset()):
             if "NOTE-2026-0042" not in body:

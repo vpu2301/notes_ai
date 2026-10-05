@@ -1,9 +1,6 @@
-"""Audacity label track(s) → RTTM for in-house gold-set files.
+"""Audacity label track (``start<TAB>end<TAB>label``, seconds) to RTTM.
 
-    uv run python scripts/eval/labels_to_rttm.py FILE_ID labels.txt > eval/speakers/v1/rttm/FILE_ID.rttm
-
-Audacity exports ``start<TAB>end<TAB>label`` per line (seconds). The label
-is the speaker id (``A``, ``B``…); overlapping regions are simply two lines.
+uv run python scripts/eval/labels_to_rttm.py FILE_ID labels.txt > eval/speakers/v1/rttm/FILE_ID.rttm
 """
 
 from __future__ import annotations

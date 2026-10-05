@@ -1,9 +1,4 @@
-"""asr-worker entry point.
-
-Runs as a long-lived process (no FastAPI surface). Health is exposed via
-the GPU compose's `restart: unless-stopped` policy + the metrics it emits
-to OTel — there is no listening HTTP server in the worker.
-"""
+"""asr-worker entry point: a long-lived process with no HTTP server."""
 
 from __future__ import annotations
 
@@ -35,10 +30,7 @@ async def _main() -> None:
     try:
         state = await build_state()
     except MasterKeyError as mk_exc:
-        # Fail closed (spec §6/§4.8): the master key is missing/malformed, so
-        # the crypto subsystem cannot operate. Emit the security signal and let
-        # the process exit non-zero — the orchestrator's restart policy will
-        # keep retrying until an operator restores the key per the runbook.
+        # Fail closed: no master key, no crypto; exit non-zero and let the orchestrator retry.
         logger.critical(
             audit_kinds.KEY_MASTER_MISSING,
             extra={

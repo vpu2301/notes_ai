@@ -1,13 +1,9 @@
-"""B-4 guard-rail grid for the legacy clusterer, with the pre-registered ship rule.
+"""Guard-rail grid for the legacy clusterer with the pre-registered ship rule:
+winner on DEV by ``count_exact`` (ties by DER), then vs defaults on TEST.
 
     uv run --with 'pyannote.metrics>=3.2,<4' python scripts/eval/grid_legacy.py
 
-1. Every config below runs on the DEV split (embeddings cached per file,
-   chunking and VAD setting, so the grid re-clusters without re-embedding).
-2. Winner = best ``count_exact``, ties by DER.
-3. Winner vs defaults on the TEST split. SHIP only if overcount falls
-   ≥ 50 % relative AND DER rises ≤ 2 points AND undercount ≤ 5 % of files.
-Writes docs/eval/grid-<date>-legacy.json; the verdict goes into ADR-0052.
+SHIP only if overcount falls >= 50 % relative AND DER rises <= 2 points AND undercount <= 5 % of files.
 """
 
 from __future__ import annotations

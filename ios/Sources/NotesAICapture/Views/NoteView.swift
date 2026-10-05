@@ -1,10 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The note as a document, the way the web editor shows it: the title, a
-/// meta line, Notes / Transcript tabs, and one seamless text area per
-/// template section; status, save state and ⋯ live in the navigation bar.
-/// Every note autosaves until it is cancelled (history stays in the web app).
+/// The note as a document, as the web editor shows it; autosaves until cancelled.
 struct NoteView: View {
     @EnvironmentObject private var app: AppState
     @StateObject private var model: NoteViewModel
@@ -14,12 +11,11 @@ struct NoteView: View {
     @State private var historyPresented = false
     /// Which speaker label is being renamed, and the name it starts from.
     @State private var renaming: SpeakerRename?
-    /// Sprint 30: the turn whose avatar was tapped ("Move this turn to").
+    /// The turn whose avatar was tapped ("Move this turn to").
     @State private var movingTurn: TranscriptTurn?
     @State private var copied = false
     @State private var reviewingSpellings = false
-    /// Which section is open in its editor. A draft reads as a document
-    /// until you tap into one, and only one is ever open at a time.
+    /// Which section is open in its editor; only one at a time.
     @State private var editingSection: String?
     /// What is typed in the ask bar at the foot of the note.
     @State private var askDraft = ""
@@ -52,7 +48,7 @@ struct NoteView: View {
                     ProgressView().controlSize(.small)
                 }
                 if model.tab == .transcript, model.canMoveTurns, model.online || model.selecting {
-                    // Sprint 30: pick several turns, then move them at once.
+                    // Pick several turns, then move them at once.
                     Button(model.selecting ? "Done" : "Select") {
                         if model.selecting { model.endSelection() } else { model.selecting = true }
                     }
@@ -71,9 +67,7 @@ struct NoteView: View {
         .task(id: model.noteId) { await model.load() }
         .task(id: model.noteId) { await model.loadSharing() }
         .onChange(of: model.note?.title) { old, title in
-            // The server's name for the note — the one a recording gets
-            // once it has been heard — replaces this device's placeholder
-            // in the recents and the notes list.
+            // The server's name for the note replaces this device's placeholder.
             guard let title, !title.isEmpty else { return }
             if let jobId = capture?.jobId { app.updateRecent(jobId: jobId, title: title) }
             if old != nil, old != title { Task { await app.refreshNotes() } }
@@ -202,15 +196,13 @@ struct NoteView: View {
                     }
                 }
             },
-            // One entry, not two: whether a recipient is a colleague or
-            // an outsider is the server's problem, not the sender's.
+            // One entry: colleague vs outsider is the server's problem.
             .item("Send by email…", symbol: "envelope", disabled: model.busy || !canManage) {
                 shareByEmail = true
             },
         ]
         if model.rules.externalLinksEnabled {
-            // The client-facing path (Sprint 19): one link per recipient.
-            // Hidden, not disabled, when the workspace admin switched it off.
+            // One link per recipient; hidden, not disabled, when the admin switched it off.
             items.insert(.item("Share with client…", symbol: "paperplane", disabled: model.busy || !canManage) {
                 shareWithClient = true
             }, at: 3)
@@ -275,11 +267,7 @@ struct NoteView: View {
                 .disabled(!model.editable)
                 .padding(.bottom, 6)
 
-                // The meta line is a row of quiet, unframed items: when
-                // it was taken, what wrote it, where it is filed, what it
-                // is called. Only the space is a control — the rest are the
-                // facts you want at a glance. It scrolls sideways rather
-                // than wrapping into three ragged rows on a narrow phone.
+                // Meta line: unframed facts, only the space is a control; scrolls sideways.
                 if let note = model.note {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 2) {
@@ -353,9 +341,7 @@ struct NoteView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DS.gutter)
             .padding(.top, 12)
-            // The composer is a bottom safe-area inset, so the scroll view
-            // already keeps its height clear; this is just breathing room
-            // under the last line.
+            // Breathing room under the last line (the composer is a safe-area inset).
             .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -365,14 +351,13 @@ struct NoteView: View {
             .onChange(of: model.asking) { _, asking in
                 if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
             }
-            // Sprint 32: a suggestion's quote was tapped — show its turn.
+            // A suggestion's quote was tapped — show its turn.
             .onChange(of: model.revealedTurn) { _, reveal in
                 guard let reveal else { return }
                 withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(reveal.turnId, anchor: .center) }
             }
         }
-        // The composer sits over the document, under a short wash of the
-        // page ground so a line of text never runs into it.
+        // A short wash of the page ground so text never runs into the composer.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.selecting { moveBar } else if model.viewing == nil { askBar }
         }
@@ -380,8 +365,7 @@ struct NoteView: View {
 
     // MARK: - Ask this note
 
-    /// The thread: questions on the right in a quiet bubble, answers as a
-    /// typeset document under a spark — one conversation about this note.
+    /// The thread: questions in a bubble on the right, answers typeset under a spark.
     private var askThread: some View {
         VStack(alignment: .leading, spacing: 16) {
             ForEach(model.chat) { message in
@@ -406,8 +390,7 @@ struct NoteView: View {
                             .font(.dsSymbol(14, .medium))
                             .foregroundStyle(DS.accentText)
                             .frame(width: 20)
-                        // An answer arrives as bullets and headings just as
-                        // the note does, so it is typeset the same way.
+                        // Typeset like the note.
                         RichTextView(text: message.text)
                     }
                 }
@@ -430,9 +413,7 @@ struct NoteView: View {
         }
     }
 
-    /// The composer, floating over the foot of the document — Claude's:
-    /// the field on top, a tool row underneath (what it asks about, and
-    /// send). The send button lights up as soon as there is something to send.
+    /// The composer floating over the foot of the document: field on top, tool row underneath.
     private var askBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Ask about this note…", text: $askDraft, axis: .vertical)
@@ -509,15 +490,14 @@ struct NoteView: View {
     private var sections: some View {
         VStack(alignment: .leading, spacing: 22) {
             if !model.items.isEmpty, model.viewing == nil {
-                // Sprint 20: the action items as objects, with what the
-                // recipients did. The section text below stays the source.
+                // Action items as objects; the section text below stays the source.
                 ActionItemsSection(model: model)
             }
             if model.viewing == nil {
                 generationStatus
             }
             if model.isGenerated {
-                // Q5: how much to show, the names the engine respelled.
+                // How much to show, the names the engine respelled.
                 DetailToggle(model: model)
                 CorrectionsPanel(model: model)
             }
@@ -540,9 +520,7 @@ struct NoteView: View {
         }
     }
 
-    /// Sprint 33: the engine, from the Notes tab. The button lives here
-    /// and nowhere else — a draft of ours, made from a recording, that
-    /// was never written up.
+    /// Generate Summary lives here and nowhere else.
     @ViewBuilder
     private var generationStatus: some View {
         if model.canGenerateSummary {
@@ -604,8 +582,7 @@ struct NoteView: View {
         }
     }
 
-    /// Q5: Short shows only the overview; Standard the note as written;
-    /// Detailed adds the verified facts no line used, under their topic.
+    /// Short = overview only; Standard = as written; Detailed adds unused verified facts.
     private var shownBlocks: [NoteViewModel.NoteBlock] {
         let all = model.blocks
         return model.isGenerated && model.detail == .short ? all.filter { $0.key == "gen:overview" } : all
@@ -620,19 +597,13 @@ struct NoteView: View {
         }
     }
 
-    /// Structure follows content: one block per section the note HAS,
-    /// headed only when it has a title. Nothing is drawn for being in the
-    /// template.
+    /// One block per section the note HAS, headed only when titled.
     private var noteBlocks: some View {
         let alsoSaid = model.alsoSaidBySection
         return ForEach(shownBlocks) { block in
             VStack(alignment: .leading, spacing: 7) {
                 if let title = block.title, !title.isEmpty {
-                    // No hanging "#" here — a phone has no gutter to
-                    // hang it in, which is why the web drops it below
-                    // 820px too.
-                    // The section names are the document's headings — the
-                    // same serif as the title, a size down.
+                    // No hanging "#" on a phone (the web drops it below 820px too).
                     Text(title)
                         .font(.dsSerif(21))
                         .tracking(-0.2)
@@ -653,8 +624,7 @@ struct NoteView: View {
                         ),
                         extra: lineExtra)
                 } else {
-                    // Structured fields (choice, date, number) are edited in
-                    // the web app; show the value read-only here.
+                    // Structured fields are edited in the web app; read-only here.
                     RichTextView(text: model.shownContent?.section(block.key).text ?? "", extra: lineExtra)
                 }
                 if let rows = alsoSaid[block.key], !rows.isEmpty {
@@ -664,8 +634,7 @@ struct NoteView: View {
         }
     }
 
-    /// "Also said" — what Detailed adds under a section: the verified
-    /// facts no line used, each with its evidence.
+    /// "Also said" — the verified facts no line used, with their evidence.
     private func alsoSaidView(_ rows: [GeneratedItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Also said")
@@ -690,9 +659,7 @@ struct NoteView: View {
         .padding(.top, 4)
     }
 
-    /// The "filed in" pill. A note already in a space names it; one that
-    /// isn't offers the list, so filing it is one tap rather than a trip
-    /// through the ⋯ menu. With no spaces yet there is nothing to offer.
+    /// The "filed in" pill: names the space, or offers the list.
     @ViewBuilder
     private var spacePill: some View {
         if !app.spaces.isEmpty {
@@ -723,10 +690,7 @@ struct NoteView: View {
 
     // MARK: - What the engine made of the recording (Q3)
 
-    /// Under the status line, quietly: what the recording was taken to be
-    /// (nothing for a meeting), and the passages left out of the note —
-    /// "Not included: 00:45–00:52 (background speech)". Each range opens
-    /// the transcript at that moment when there is a timed one to open.
+    /// What the recording was taken to be, and the passages left out; each range opens the transcript.
     @ViewBuilder
     private func generationFacts(_ generation: GenerationView) -> some View {
         let label = generation.recordingTypeLabel
@@ -761,9 +725,7 @@ struct NoteView: View {
     /// Links in the "Not included" line are these, handled in place.
     private static let seekScheme = "notesai-seek"
 
-    /// Sprint F1, under the transcript's status line: speech that did not
-    /// make it into the transcript, and why. A range inside the recording
-    /// opens the transcript there; audio lost before the file began cannot.
+    /// Speech that did not make it into the transcript, and why; a range inside the recording opens it there.
     private func notTranscribed(_ line: CoverageGapsFormatter.Line) -> some View {
         var text = AttributedString("Not transcribed: ")
         for (index, item) in line.items.enumerated() {
@@ -971,9 +933,7 @@ struct NoteView: View {
         }
     }
 
-    /// The turn's avatar: a tap offers to move the turn (Sprint 30); in
-    /// Select mode it is the turn's checkbox. A "?" marks a turn where
-    /// people talked over each other.
+    /// The turn's avatar: a tap offers to move the turn; in Select mode it is the checkbox.
     @ViewBuilder
     private func turnAvatar(_ turn: TranscriptTurn) -> some View {
         if model.selecting {
@@ -1094,22 +1054,15 @@ struct NoteView: View {
     }
 }
 
-/// One free-text section.
-///
-/// A note is a document first: what the model wrote is typeset — headings,
-/// nested bullets, checklists — rather than shown as the raw `- ` and
-/// `**…**` a plain string used to carry. On a draft the document is also
-/// the way in: tap it and the same words come back as their markdown
-/// source in the seamless editor, and dismissing the keyboard sets them
-/// again. A section with nothing in it skips straight to the editor —
-/// there is no document to read yet, only a prompt to write one.
+/// One free-text section: typeset to read, tap to edit its markdown source;
+/// an empty section goes straight to the editor.
 private struct SectionField: View {
     @Binding var text: String
     let name: String
     let placeholder: String
     let editable: Bool
     @Binding var editing: Bool
-    /// The evidence behind a line (Q5); nil when the engine did not write it.
+    /// The evidence behind a line; nil when the engine did not write it.
     var extra: ((String) -> RichLineExtra?)? = nil
 
     var body: some View {
@@ -1167,9 +1120,7 @@ private struct SectionEditor: View {
             .padding(.horizontal, -8)
             .onAppear { if focusNow { focused = true } }
             .onChange(of: focused) { _, isFocused in
-                // Dismissing the keyboard closes the editor and the section
-                // goes back to being read; the text was already saved on
-                // every keystroke.
+                // Dismissing the keyboard closes the editor; text was saved per keystroke.
                 if !isFocused, focusNow { onDone() }
             }
             .animation(.easeOut(duration: 0.12), value: focused)
@@ -1177,9 +1128,7 @@ private struct SectionEditor: View {
 }
 
 
-/// Initials in a tinted circle; the tint is a stable function of the
-/// name (same palette and hash as the web), so a person keeps their
-/// colour everywhere.
+/// Initials in a tinted circle; the tint is a stable hash of the name (same as the web).
 struct SpeakerAvatar: View {
     let name: String
 
@@ -1205,8 +1154,7 @@ struct SpeakerAvatar: View {
     }
 }
 
-/// Sprint 30: a small "?" on a turn's avatar — the attribution is a guess
-/// because people talked over each other.
+/// A small "?" on a turn's avatar — the attribution is a guess.
 struct UncertainMarker: View {
     static let explanation = "People talked over each other here."
 
@@ -1229,8 +1177,7 @@ struct SpeakerRename: Identifiable {
 }
 
 
-/// Sprint TQ2: "[Musik 00:12–00:41]" — music, silence or noise the worker
-/// marked instead of transcribing. A quiet line of its own, not a turn.
+/// "[Musik 00:12–00:41]" — a marked no-speech stretch, a line of its own.
 struct NoiseMarkerLine: View {
     let marker: TranscriptNoise
     let language: String?
@@ -1264,8 +1211,7 @@ extension EntityCorrection {
     }
 }
 
-/// Sprint TQ3: one row per unified spelling — Accept, Reject, Edit, Add to
-/// glossary. Offline it is read-only (corrections live on the server).
+/// One row per unified spelling — Accept, Reject, Edit, Add to glossary. Read-only offline.
 struct EntityReviewSheetView: View {
     @ObservedObject var model: NoteViewModel
     @Environment(\.dismiss) private var dismiss

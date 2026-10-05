@@ -146,8 +146,7 @@ describe("the note exists from the first second", () => {
     await act(async () => recorder.onDone?.({ blob: new Blob(["x"]), filename: "m.webm" }));
     await waitFor(() => expect(notes.attachJob).toHaveBeenCalledWith("note-1", "job-9"));
     expect(notes.startMeeting).toHaveBeenCalledTimes(2);
-    // Both attempts carry the SAME capture id, so a note created by the
-    // first one (that only looked like it failed) is not duplicated.
+    // Same capture id on both attempts, so a note from the first is not duplicated.
     const [first, second] = notes.startMeeting.mock.calls.map((c) => c[0].client_capture_id);
     expect(first).toBe(second);
   });

@@ -1,12 +1,6 @@
-"""End-to-end smoke of every note operation against the live dev stack.
-
-Needs the full stack up (`docker compose up`) with the dev seed users.
-Exercises create, read, draft update, optimistic-lock conflict, versions,
-diff, sharing (member / visibility / public link / anonymous read + PDF /
-send by e-mail),
-synthesis, PDF, search scoping, editing, cancel and delete
-as four different callers (author, another member, tenant_admin, a member
-of another tenant, and an anonymous reader). Exit 1 on any failure.
+"""End-to-end smoke of every note operation against the live dev stack (``docker compose up``
+with the dev seed users), as author, another member, tenant_admin, a member of another
+tenant and an anonymous reader. Exit 1 on any failure.
 
     make smoke-notes
 """

@@ -1,14 +1,6 @@
-"""Whisper inference engine wrapper.
+"""faster-whisper engine wrapper: PCM in, segments + metadata out.
 
-``faster-whisper`` is the chosen backend (ADR-0009). The engine is
-stateless across calls; ``transcribe`` is safe to call sequentially.
-This file deliberately knows nothing about queues, DBs, or storage —
-it transforms PCM in, segments + metadata out.
-
-Optional imports: ``faster_whisper`` is a heavy dependency, not
-installable on macOS arm64 hosts without coercing the wheel. The module
-imports it lazily so the asr-service (which only imports the output
-types) doesn't pay the cost.
+``faster_whisper`` is imported lazily (heavy; asr-service only needs the output types).
 """
 
 from __future__ import annotations
@@ -41,8 +33,7 @@ from .vad import SpeechSegment
 
 
 def detect_speech(audio_pcm: np.ndarray) -> list[SpeechSegment]:
-    """The engine's VAD (Sprint F1): the ordinary pass, the leading pad and,
-    when decision 4's condition holds, the floor pass on the mixdown."""
+    """The engine's VAD: ordinary pass, leading pad, floor pass when its condition holds."""
     return _vad.speech_runs(
         audio_pcm,
         pad_ms=settings.asr_vad_pad_ms,
@@ -53,19 +44,12 @@ def detect_speech(audio_pcm: np.ndarray) -> list[SpeechSegment]:
 
 
 class TranscriptionCancelledError(_SeamCancelled):
-    """The job was cancelled while inference was running.
-
-    Not a failure: the user asked for it. The processor turns this
-    into ``status='cancelled'`` rather than ``'failed'``, and no
-    transcript is stored.
-    """
+    """Cancelled mid-inference; the processor files it as ``cancelled``, not ``failed``."""
 
 
 logger = logging.getLogger(__name__)
 
-# Sprint TQ2 T1: language identification and its rule moved to
-# ``chunks.py`` (the worker plans runs for every backend). Re-exported here
-# (``__all__``) for callers and tests that import them from the engine.
+# Language identification lives in ``chunks.py``; re-exported for callers and tests.
 from .chunks import LANGUAGE_ID_FALLBACK as _LANGUAGE_ID_FALLBACK  # noqa: E402
 from .chunks import LANGUAGE_ID_WINDOWS as _LANGUAGE_ID_WINDOWS  # noqa: E402
 from .chunks import OTHER_LANGUAGES, EngineLID, LanguageGuess, other_language  # noqa: E402
@@ -75,11 +59,7 @@ from .chunks import speech_sample as _speech_sample  # noqa: E402
 
 @dataclass(slots=True)
 class WindowResult:
-    """One streaming-window inference outcome (sprint 04).
-
-    Used by dictation-service's windower. Window-relative timestamps;
-    the caller adds the window offset to land in session-absolute time.
-    """
+    """One streaming-window outcome; timestamps are window-relative."""
 
     segments: list[Segment]
     avg_logprob: float
@@ -88,22 +68,14 @@ class WindowResult:
 
 
 class WhisperEngine:
-    """Lazily-loaded faster-whisper model.
-
-    Instantiate once at process startup; reuse across jobs. The first
-    ``transcribe`` after construction runs the warmup pass (5 s of
-    silence) that JITs the CUDA kernels.
-    """
+    """Lazily-loaded faster-whisper model; one per process, reused across jobs."""
 
     def __init__(self) -> None:
         self._model: Any | None = None
         self._loaded = False
         self._warm = False
         self._warmup_seconds: float = 0.0
-        # Sprint TQ1 T5: what the last ``_run_chunk`` decoded, the decoder's
-        # own numbers per segment. Chunks run one at a time (each is awaited
-        # before the next starts), so one slot is enough; a stand-in
-        # ``_run_chunk`` in tests that never sets it records nothing.
+        # Per-segment decoder numbers of the last ``_run_chunk``; chunks run one at a time.
         self._chunk_diagnostics: list[SegmentDiagnostics] = []
 
     def _take_chunk_diagnostics(
@@ -127,18 +99,10 @@ class WhisperEngine:
         return self._loaded
 
     def load(self) -> None:
-        """Eagerly load the model.
-
-        Synchronous because faster-whisper's loader holds the GIL and
-        kicks off CUDA kernel compilation that doesn't yield. Call
-        once from the worker's startup path.
-        """
+        """Eagerly load the model (blocking: the loader holds the GIL)."""
         if self._loaded:
             return
-        # Engine selection (ADR-0021). Only faster_whisper is supported on the
-        # streaming + confidence-span paths; a vLLM spike is gated behind an
-        # ADR (Sprint B1 Day 3). Fail loud rather than silently load the wrong
-        # backend.
+        # Only faster_whisper is supported (ADR-0021); fail loud.
         if settings.asr_engine != "faster_whisper":
             raise RuntimeError(
                 f"unsupported MD_ASR_ENGINE={settings.asr_engine!r}; "
@@ -154,8 +118,7 @@ class WhisperEngine:
                 "model": settings.asr_model,
                 "device": device,
                 "compute_type": compute_type,
-                # Build-time provenance: which pinned repo@revision produced
-                # the baked weights this process is loading (ADR-0021).
+                # Build-time provenance (ADR-0021).
                 "engine": settings.asr_engine,
                 "model_repo": settings.asr_model_repo,
                 "model_revision": settings.asr_model_revision or "(unpinned)",
@@ -169,9 +132,7 @@ class WhisperEngine:
             compute_type=compute_type,
         )
         self._loaded = True
-        # Synthetic warm-up on 5 s of silence: forces CUDA kernel JIT
-        # and caches the audio frontend so the first real job's latency
-        # isn't dominated by setup.
+        # Warm-up on 5 s of silence: CUDA kernel JIT + audio frontend cache.
         silence = np.zeros(int(16_000 * 5), dtype=np.float32)
         try:
             _ = list(self._model.transcribe(silence, language="en", beam_size=1)[0])
@@ -197,21 +158,11 @@ class WhisperEngine:
         should_cancel: Callable[[], Awaitable[bool]] | None = None,
         second_pass: bool = False,
     ) -> TranscriptionOutput:
-        """Run VAD + Whisper on the full audio.
+        """Run VAD + Whisper on the full audio (mono 16 kHz float32 in [-1, 1]).
 
-        ``second_pass`` (Sprint F1, decision 3): ``audio_pcm`` is one speech
-        run the first decode lost. It is decoded whole — no VAD, no language
-        identification (``language`` is the recording's) — with no prompt,
-        no conditioning and a beam of at least 5.
-
-        ``audio_pcm`` is mono 16 kHz float32 in [-1, 1].
-        Offloads the (blocking) Whisper call to a thread so the asyncio
-        loop stays responsive — which is what makes ``should_cancel``
-        possible: it is awaited between chunks, so a user who
-        presses Cancel on a running job stops it rather than waiting for
-        a transcript nobody will read. Raises :class:`TranscriptionCancelledError`
-        when it returns true; without the callback the run is
-        uninterruptible, which is what it used to be.
+        ``second_pass``: decode ``audio_pcm`` whole, no VAD/LID/prompt/conditioning.
+        ``should_cancel`` is awaited between chunks and raises
+        :class:`TranscriptionCancelledError`.
         """
         if not self._loaded:
             raise RuntimeError("WhisperEngine.load() must be called before transcribe()")
@@ -220,10 +171,7 @@ class WhisperEngine:
             return await self._second_pass(audio_pcm, language=language, t_start=t_start)
         speech = detect_speech(audio_pcm)
 
-        # Nothing to decode: say so with an empty transcript (the processor
-        # files it as `no_speech`) instead of asking the language detector
-        # and the decoder about audio VAD heard nothing in — that is the
-        # path that turns a silent recording into a hallucinated one.
+        # No speech: empty transcript (`no_speech`), never a decode that could hallucinate.
         if not speech:
             return TranscriptionOutput(
                 language=language if language != AUTO_LANGUAGE else _LANGUAGE_ID_FALLBACK,
@@ -240,11 +188,8 @@ class WhisperEngine:
                 ),
             )
 
-        # Sprint TQ2 T1: the plan (recording language, per-run language) is
-        # the worker's shared chunker, asked with this engine's detector.
-        # "auto" listens before deciding: the recording is decoded in the
-        # language of its opening minutes, a run in another only when the
-        # detector is sure of it (chunks.other_language).
+        # Shared chunker with this engine's detector; "auto" decodes in the opening
+        # minutes' language, a run in another only when the detector is sure.
         planned = await _plan(
             audio_pcm,
             speech,
@@ -289,14 +234,9 @@ class WhisperEngine:
         should_cancel: Callable[[], Awaitable[bool]] | None = None,
         group_seconds: float = 300.0,
     ) -> TranscriptionOutput:
-        """Sprint TQ2 T1: decode the worker's planned runs, one faster-whisper
-        call per run in the run's language (``group_seconds`` is the HTTP
-        backends' concern). A run in another language comes back labelled —
-        never translated into the recording's (ADR-0061 d6).
+        """Decode planned runs, one call per run in its language, never translated (ADR-0061).
 
-        Offloads each (blocking) call to a thread; ``should_cancel`` is
-        awaited between runs, not inside one — a run is at most 30 s, and
-        stopping mid-run would leave the model half-fed."""
+        ``should_cancel`` is awaited between runs, not inside one."""
         del group_seconds
         if not self._loaded:
             raise RuntimeError("WhisperEngine.load() must be called before transcribe_runs()")
@@ -364,21 +304,13 @@ class WhisperEngine:
         )
 
     def _detect_chunk_language(self, pcm: np.ndarray) -> LanguageGuess:
-        """Language identification on one chunk: one 30 s window, and an
-        undecidable chunk answers with the recording's own language (an
-        empty guess is never "another language")."""
+        """LID on one chunk (one 30 s window); undecidable = the recording's own language."""
         return self.detect_language(pcm, windows=1)
 
     def detect_language(
         self, pcm: np.ndarray, *, windows: int = _LANGUAGE_ID_WINDOWS
     ) -> LanguageGuess:
-        """Identify the spoken language of ``pcm`` (mono 16 kHz float32).
-
-        Blocking; call from an executor. Never raises: a detector that
-        cannot decide — no audio, an exception, a code the output schema
-        would reject — answers with the fallback so the job still produces
-        a transcript rather than failing on the step meant to help it.
-        """
+        """Identify the spoken language of ``pcm``. Blocking; never raises (falls back)."""
         assert self._model is not None
         if pcm.size == 0:
             return LanguageGuess(language=_LANGUAGE_ID_FALLBACK, probability=0.0)
@@ -417,16 +349,7 @@ class WhisperEngine:
         prompt: str | None,
         prev_text: str | None = None,
     ) -> WindowResult:
-        """Run inference on one streaming window (sprint 04 entry point).
-
-        ``pcm`` is mono 16 kHz float32. Timestamps in the returned
-        segments are window-relative (window-start = 0 ms); the caller
-        adds the window's absolute offset.
-
-        Unlike :meth:`transcribe`, this method is stateless: no VAD
-        chunking, no aggregation. The dictation-service's windower owns
-        the sliding-window state.
-        """
+        """Inference on one streaming window; timestamps window-relative, no VAD chunking."""
         if not self._loaded:
             raise RuntimeError("WhisperEngine.load() must be called before transcribe_window()")
         loop = asyncio.get_running_loop()
@@ -455,8 +378,7 @@ class WhisperEngine:
         assert self._model is not None
         vad_kwargs: dict[str, Any] = {}
         if settings.asr_streaming_vad_filter:
-            # Silence-only windows never reach the decoder, so they cannot
-            # be hallucinated into text (see config for the measurements).
+            # Silence-only windows never reach the decoder.
             vad_kwargs = {
                 "vad_filter": True,
                 "vad_parameters": {
@@ -500,8 +422,7 @@ class WhisperEngine:
             logprobs.append(float(getattr(seg, "avg_logprob", -0.5)))
             no_speech_probs.append(float(getattr(seg, "no_speech_prob", 0.0)))
         avg_logprob = sum(logprobs) / len(logprobs) if logprobs else -1.0
-        # Use the worst no_speech_prob across segments so a tail-of-silence
-        # high-prob segment isn't averaged away.
+        # Worst no_speech_prob, so a tail-of-silence segment isn't averaged away.
         worst_no_speech = max(no_speech_probs) if no_speech_probs else 1.0
         return segments, avg_logprob, worst_no_speech
 
@@ -526,14 +447,13 @@ class WhisperEngine:
             language=language,
             word_timestamps=True,
             beam_size=beam,
-            # `task` is never "translate": a passage in another language is
-            # decoded in that language (Sprint I2 T4), not rendered in this one.
+            # Never "translate": another language is decoded in that language.
             task="transcribe",
             **options,
         )
         out: list[Segment] = []
         for seg in result_segs:
-            # Every decoded segment, before any guard looks at it (TQ1 T5).
+            # Every decoded segment, before any guard looks at it.
             self._chunk_diagnostics.append(
                 SegmentDiagnostics(
                     start_ms=int(seg.start * 1000) + offset_ms,
@@ -543,12 +463,8 @@ class WhisperEngine:
                     compression_ratio=_float_or_none(getattr(seg, "compression_ratio", None)),
                 )
             )
-            # Whisper's known failure with a prompt over non-speech (a
-            # breath, a hum, room tone that passed VAD) is to write the
-            # prompt back. A segment made only of the prompt's words that
-            # the model itself rates as probably-not-speech is that, not
-            # something anyone said; the same words with a low
-            # no_speech_prob are speech and stay.
+            # Whisper writes the prompt back over non-speech; only-prompt words rated
+            # probably-not-speech are that, not something anyone said.
             if _is_prompt_echo(seg.text, prompt, float(getattr(seg, "no_speech_prob", 0.0))):
                 logger.info(
                     "whisper.prompt_echo_dropped",
@@ -596,12 +512,7 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def chunk_decode_options(prompt: str | None) -> dict[str, Any]:
-    """The vocabulary and context arguments of one batch-chunk decode
-    (Sprint I2 T5/T7): the vocabulary as `initial_prompt` or as `hotwords`
-    per `MDX_ASR_VOCABULARY_MODE`; `condition_on_previous_text` per
-    `MDX_ASR_CONDITION_PREV` (ON by default since I2 T7 measured the
-    punctuation cost of turning it off; it conditions within one ≤ 30 s run,
-    never across runs — each run is its own faster-whisper call)."""
+    """Vocabulary (`initial_prompt` or `hotwords`) and conditioning options for one chunk decode."""
     options: dict[str, Any] = {"condition_on_previous_text": bool(settings.asr_condition_prev)}
     if settings.asr_vocabulary_mode == "hotwords":
         options["hotwords"] = prompt
@@ -612,8 +523,7 @@ def chunk_decode_options(prompt: str | None) -> dict[str, Any]:
 
 
 def _probability_table(all_probs: object) -> dict[str, float]:
-    """faster-whisper's ``[(code, prob), …]`` → ``{code: prob}``; anything
-    else (an older API, a stub) is an empty table."""
+    """faster-whisper's ``[(code, prob), …]`` → ``{code: prob}``; anything else is empty."""
     out: dict[str, float] = {}
     try:
         for code, prob in all_probs or ():  # type: ignore[union-attr]
@@ -624,11 +534,7 @@ def _probability_table(all_probs: object) -> dict[str, float]:
 
 
 def _peak_gpu_mem_mb() -> int:
-    """Best-effort GPU peak memory in MB.
-
-    Uses ``torch.cuda.max_memory_allocated`` if torch + CUDA are present;
-    returns 0 otherwise (CPU fallback, or no torch in the image).
-    """
+    """Best-effort GPU peak memory in MB; 0 without torch + CUDA."""
     try:
         import torch
 
@@ -641,9 +547,8 @@ def _peak_gpu_mem_mb() -> int:
         return 0
 
 
-# Above this the decoder itself says the window was probably not speech;
-# faster-whisper's own gate (no_speech_threshold=0.6) does not fire when a
-# prompt makes the echoed text high-probability, which is exactly this case.
+# faster-whisper's own no_speech gate (0.6) does not fire when a prompt makes echoed
+# text high-probability.
 _PROMPT_ECHO_NO_SPEECH_PROB = 0.5
 
 
@@ -652,8 +557,7 @@ def _prompt_words(text: str) -> set[str]:
 
 
 def _is_prompt_echo(text: str, prompt: str | None, no_speech_prob: float) -> bool:
-    """True when ``text`` is nothing but words from ``prompt`` and the
-    decoder rated the window as probably-not-speech."""
+    """True when ``text`` is only prompt words and the window rated probably-not-speech."""
     if not prompt or no_speech_prob < _PROMPT_ECHO_NO_SPEECH_PROB:
         return False
     words = _prompt_words(text)
@@ -661,12 +565,7 @@ def _is_prompt_echo(text: str, prompt: str | None, no_speech_prob: float) -> boo
 
 
 def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:
-    """Join the vocabulary-hint prompt with the last-finalized text.
-
-    Strips any Whisper special tokens (``<|...|>``) defensively. The
-    caller is responsible for truncating prev_text to a token budget;
-    here we just concatenate.
-    """
+    """Join the vocabulary prompt with the last-finalized text; strips ``<|...|>`` tokens."""
     parts: list[str] = []
     if base:
         parts.append(re.sub(r"<\|[^|]+\|>", "", base).strip())
@@ -676,7 +575,6 @@ def _combine_prompts(base: str | None, prev_text: str | None) -> str | None:
     return text or None
 
 
-# Re-export so callers don't have to import vad themselves.
 __all__ = [
     "OTHER_LANGUAGES",
     "LanguageGuess",

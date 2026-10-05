@@ -1,10 +1,5 @@
-"""Client IP for rate-limit keys, without trusting ``X-Forwarded-For`` blindly.
-
-Rule (IDX-A3 F4): the peer address is the client — unless it is one of
-``TRUSTED_PROXY_CIDRS``, in which case walk ``X-Forwarded-For`` from the
-right and take the first hop that is *not* a trusted proxy. A header the
-client wrote itself sits to the left of the proxy-appended entries and is
-never reached unless every hop before it is trusted.
+"""Client IP for rate-limit keys: the peer, unless it is a trusted proxy, then the rightmost untrusted
+``X-Forwarded-For`` hop (a client-written header is never reached unless every hop before it is trusted).
 """
 
 from __future__ import annotations

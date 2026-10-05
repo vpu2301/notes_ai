@@ -28,22 +28,17 @@ class TelemetryRequest(BaseModel):
     phrase_id: UUID | None = None
     snippet_id: UUID | None = None
     context: dict = Field(default_factory=dict)
-    # Sprint 15: 'layer_c' = generative ghost-text events (request_id echoes
-    # the inline-completion response's request_id). Default keeps every
-    # pre-sprint-15 client byte-compatible.
+    # 'layer_c' = generative ghost-text events (request_id echoes the completion response's).
     source: Literal["autocomplete", "layer_c"] = "autocomplete"
 
     @model_validator(mode="after")
     def _accept_needs_exactly_one_id(self) -> TelemetryRequest:
-        # accepted: phrase_id XOR snippet_id. Other events may reference at
-        # most one id (shown_only carries the top suggestion's id for the
-        # roll-up's impression counting) — never both.
+        # At most one id per event; accepted needs exactly one.
         if self.phrase_id is not None and self.snippet_id is not None:
             msg = "phrase_id and snippet_id are mutually exclusive"
             raise ValueError(msg)
         if self.source == "layer_c":
-            # Completions are not corpus rows: an id here would corrupt the
-            # phrase counters the roll-up maintains.
+            # Completions are not corpus rows; an id would corrupt roll-up counters.
             if self.phrase_id is not None or self.snippet_id is not None:
                 msg = "layer_c events must not carry phrase_id/snippet_id"
                 raise ValueError(msg)
@@ -60,8 +55,7 @@ async def receive_telemetry(
     claims: Annotated[Claims, Depends(requires("autocomplete.read", "phrase"))],
 ) -> Response:
     state = get_state()
-    # Fire-and-forget doctrine: NOTHING past validation may surface to the
-    # client — losing telemetry is acceptable, slowing a keystroke is not.
+    # Fire-and-forget: nothing past validation may surface to the client.
     try:
         scrubbed = scrub_prefix(body.prefix)
         state.telemetry_redaction_metric.add(

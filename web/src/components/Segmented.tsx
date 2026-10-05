@@ -7,11 +7,7 @@ interface SegmentedProps<T extends string> {
   onChange: (value: T) => void;
 }
 
-/**
- * A small segmented switch: equal-width options on a pill, with a thumb
- * that slides under the chosen one. A radio group to assistive tech;
- * arrow keys move the choice, as they do in a native one.
- */
+/** Segmented switch; a radio group to assistive tech, arrow keys move the choice. */
 export function Segmented<T extends string>({ label, options, value, onChange }: SegmentedProps<T>) {
   const index = Math.max(
     0,

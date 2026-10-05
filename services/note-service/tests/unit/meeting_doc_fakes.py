@@ -1,11 +1,5 @@
-"""A scripted model for whole-pipeline tests (Summary Engine v2, Q1).
-
-``ScriptedProvider`` answers each model step from what it was actually
-given — facts quoted from the window it was shown, summaries and topics
-citing the fact ids it was shown — and records every prompt and system
-string, so a test can assert what the engine sent as well as what it
-wrote. Which step is being asked is read off the schema, the same way a
-constrained-decoding backend would see it.
+"""A scripted model for whole-pipeline tests: ``ScriptedProvider`` answers each
+step from what it was given (read off the schema) and records every prompt.
 """
 
 from __future__ import annotations
@@ -184,7 +178,7 @@ class ScriptedProvider:
         }
 
     def _block(self, _prompt: str, facts: list[tuple[str, str, str]]) -> dict[str, Any]:
-        """Sprint D2 — one block: a heading from its first fact's words and
+        """One block: a heading from its first fact's words and
         its first facts as bullets."""
         if not facts:
             return {"heading": "", "bullets": []}
@@ -217,7 +211,7 @@ class ScriptedProvider:
 
 
 def spoken(text: str) -> str:
-    """A quote a fact's text is drawn from without being a copy of it (F2:
+    """A quote a fact's text is drawn from without being a copy of it (
     a text that IS its quote is evidence only, never a line). Fixtures that
     once used ``quote=text`` as shorthand use this instead."""
     quote = f"so {text}"

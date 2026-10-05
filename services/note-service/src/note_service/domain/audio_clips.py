@@ -1,13 +1,7 @@
 """Audio-replay domain: source resolution, segment listing, clip registry,
-download tokens (sprint 15, ADR-0037).
-
-Clip URLs are NOT S3 presigns — presigned URLs serve envelope ciphertext
-(platform rule 3 / ADR-0011), useless to an ``<audio>`` element. The
-sanctioned shape is the DSAR download-token idiom (ADR-0028): an
-HMAC-signed 5-minute token bound to (tenant, clip), redeemed at an
-authenticated decrypt-and-stream endpoint. The clip registry lives in
-Redis with the same TTL — clips are ephemeral derivatives, never
-a second permanent copy (bucket ILM is the backstop, not the mechanism).
+download tokens (ADR-0037). Clip URLs are HMAC-signed short-lived tokens bound
+to (tenant, clip), never S3 presigns (those serve ciphertext); the clip registry
+lives in Redis with the same TTL.
 """
 
 from __future__ import annotations
@@ -84,9 +78,7 @@ class AudioSource:
     object_key: str
     aad: bytes
     mime_type: str
-    # Session-relative ms of the FIRST retained byte: 0 normally; positive
-    # when the tmpfs ring wrapped (truncated session) and early audio is
-    # permanently gone. Slice offsets subtract this.
+    # Session-relative ms of the FIRST retained byte; positive when the tmpfs ring wrapped.
     retained_from_ms: int
     duration_ms: int | None
 
@@ -147,8 +139,7 @@ async def resolve_audio_source(conn: asyncpg.Connection, *, note_id: UUID) -> Au
             )
         retained_from_ms = 0
         if session["truncated"] and audio["duration_ms"] is not None:
-            # Ring wrapped: only the LAST duration_ms of the session
-            # survived; everything before it is permanently gone.
+            # Ring wrapped: only the LAST duration_ms survived.
             retained_from_ms = max(0, int(session["total_audio_ms"]) - int(audio["duration_ms"]))
         return AudioSource(
             kind="session",
@@ -197,8 +188,7 @@ class SegmentRef:
 
 
 def _decode_transcript(raw: Any) -> list[dict[str, Any]]:
-    """transcript_jsonb reads back as a JSON STRING (no jsonb codec on the
-    pool) — the dictation-service ``_transcript_from_row`` defensive shape."""
+    """transcript_jsonb reads back as a JSON STRING (no jsonb codec on the pool)."""
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -210,16 +200,9 @@ def _decode_transcript(raw: Any) -> list[dict[str, Any]]:
 def segments_from_transcript(
     transcript: list[dict[str, Any]], *, segment_ids: list[UUID]
 ) -> list[SegmentRef]:
-    """Map a session transcript to replay segments.
-
-    When the section carries ``transcript_segment_ids`` (sprint-14
-    conversation drafts), only those segments return. Otherwise — nearly
-    every note today, the field being a sprint-08 placeholder — the
-    WHOLE session transcript returns so replay still works; the FE aligns
-    by timing. Dictation-mode segments have no ``id`` (deliberately not
-    minted here: the finalize path commits to a byte-identical legacy
-    shape) → ``segment_id`` is null and ``index`` addresses them.
-    """
+    """Map a session transcript to replay segments: only ``transcript_segment_ids``
+    when the section carries them, else the WHOLE transcript. Dictation-mode
+    segments have no ``id``: ``segment_id`` is null and ``index`` addresses them."""
     wanted = {str(s) for s in segment_ids}
     refs: list[SegmentRef] = []
     for idx, seg in enumerate(transcript):

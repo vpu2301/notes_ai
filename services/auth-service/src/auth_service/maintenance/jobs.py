@@ -1,23 +1,7 @@
-"""Scheduled maintenance for the identity tables (IDX-B3 D).
+"""Scheduled maintenance for the identity tables (ADR-0041).
 
-Every job here obeys the three rules ADR-0041 sets, and each rule is
-load-bearing rather than ceremonial:
-
-**Idempotent.** There is deliberately no advisory lock, so two replicas
-can run the same job at the same instant. Every statement below is
-therefore a predicate delete or a guarded update — "delete what is past
-its expiry", never "delete the oldest 5000". Two concurrent runs converge
-on the same state; the loser simply reports fewer rows.
-
-**Batched.** A single unbounded `DELETE` on a table with months of
-challenges takes a lock long enough to be an outage. Each job deletes in
-bounded chunks until it runs out, so the longest statement is one chunk.
-
-**Reports its work.** Each returns a row count, which becomes the
-`scheduler.job.completed` audit payload and the `mdx_auth_maint_rows_total`
-metric. A job that silently does nothing is indistinguishable from a job
-that is not running, and that distinction is the entire point of the
-freshness alert.
+Every job is idempotent (predicate deletes, no advisory lock), batched, and
+reports a row count (audit payload + `mdx_auth_maint_rows_total`).
 """
 
 from __future__ import annotations
@@ -53,17 +37,12 @@ _device_active = _meter.create_gauge(
     unit="1",
 )
 
-# Chunk size for predicate deletes. Big enough that a quiet system
-# finishes in one pass, small enough that one statement is never the
-# long pole.
+# Chunk size for predicate deletes.
 BATCH = 5_000
 
-# How long a spent challenge is kept. Not zero: a support question of the
-# form "did a code go out at 09:14" is answerable for a day, and the rows
-# carry no secret — the code is a hash bound to a consumed row.
+# Spent challenges are kept a day for support questions (rows carry no secret).
 CHALLENGE_RETENTION_HOURS = 24
-# A revoked session row is audit context, not state. Ninety days matches
-# the audit retention window.
+# Revoked session rows are audit context; 90 days matches the audit retention.
 SESSION_RETENTION_DAYS = 90
 DELETION_GRACE_DAYS = 30
 
@@ -81,16 +60,11 @@ class JobResult:
 
 
 async def _delete_in_batches(pool: Any, sql: str, *args: Any) -> int:
-    """Run a `DELETE ... WHERE id IN (SELECT ... LIMIT $n)` until it stops.
-
-    The LIMIT lives in the caller's SQL so each job can express its own
-    predicate; this only drives the loop and counts.
-    """
+    """Run a `DELETE ... WHERE id IN (SELECT ... LIMIT $n)` until it stops; counts rows."""
     total = 0
     async with pool.acquire() as conn:
         while True:
             tag = await conn.execute(sql, *args, BATCH)
-            # asyncpg returns "DELETE <n>" / "UPDATE <n>".
             moved = int(tag.rsplit(" ", 1)[-1] or 0)
             total += moved
             if moved < BATCH:
@@ -101,12 +75,7 @@ async def _delete_in_batches(pool: Any, sql: str, *args: Any) -> int:
 
 
 async def purge_challenges(pool: Any) -> JobResult:
-    """Drop `auth_challenges` rows a day past expiry (IDX-A3 J, deferred here).
-
-    Covers every kind — email_login, mfa_login, totp_enroll, email_change,
-    reauth — because the predicate is expiry, not purpose. A row that has
-    expired cannot be used for anything by anyone.
-    """
+    """Drop `auth_challenges` rows a day past expiry, every kind."""
     rows = await _delete_in_batches(
         pool,
         f"""
@@ -122,14 +91,7 @@ async def purge_challenges(pool: Any) -> JobResult:
 
 
 async def expire_sessions(pool: Any) -> JobResult:
-    """Revoke sessions past their absolute expiry, then reap old dead rows.
-
-    Two steps because they mean different things. The first closes
-    sessions the database still considers live — a refresh would be
-    refused anyway, but the row is what `GET /auth/sessions` shows a user,
-    and showing somebody a session that cannot be used is a support
-    ticket. The second is housekeeping.
-    """
+    """Revoke sessions past their absolute expiry (so the sessions list is honest), then reap old dead rows."""
     async with pool.acquire() as conn:
         tag = await conn.execute(
             """
@@ -156,14 +118,7 @@ async def expire_sessions(pool: Any) -> JobResult:
 
 
 async def purge_deleted_identities(pool: Any) -> JobResult:
-    """The IDX-A5 F6 purge, on a schedule.
-
-    Shares its implementation with
-    ``scripts/ops/idx-purge-deleted-identities.py`` rather than
-    reimplementing it: an account deletion that behaves differently
-    depending on whether an operator or a timer ran it is the worst kind
-    of bug to discover from a GDPR request.
-    """
+    """The account purge on a schedule; same implementation as the operator script."""
     from .purge_impl import due_identities, purge_one
 
     purged = 0
@@ -177,13 +132,7 @@ async def purge_deleted_identities(pool: Any) -> JobResult:
 
 
 async def sample_gauges(pool: Any) -> JobResult:
-    """Publish the two "how much is out there" gauges.
-
-    Sampled rather than maintained incrementally: a counter kept in step
-    with every session start and revoke drifts the first time a process
-    restarts mid-operation, and the number is only ever read by a human
-    looking at a dashboard.
-    """
+    """Publish the two size gauges (sampled, not maintained incrementally: counters drift across restarts)."""
     async with pool.acquire() as conn:
         sessions = int(
             await conn.fetchval(
@@ -204,12 +153,7 @@ async def sample_gauges(pool: Any) -> JobResult:
 
 
 async def signing_key_status(pool: Any, *, warn_days: int = 30) -> JobResult:
-    """Report the signing keys, and warn before one strands the fleet.
-
-    A key that expires with no successor is not a degraded issuer, it is
-    no issuer: `KeySet.active()` raises and the service stops minting.
-    The warning window has to be long enough to schedule a deploy.
-    """
+    """Report the signing keys and warn before one expires with no successor (the service would stop minting)."""
     from ..config import settings
     from ..domain.signing_keys import KeySet
 
@@ -235,13 +179,7 @@ async def signing_key_status(pool: Any, *, warn_days: int = 30) -> JobResult:
 
 
 async def rotate_kek(pool: Any) -> JobResult:
-    """Re-wrap TOTP secrets under the current keys.
-
-    Manual by design. Re-keying every second factor in the estate is not
-    something a timer should decide to do, and the operator wants the
-    dry-run output first — see `scripts/ops/idx-rekey-totp-secrets.py`,
-    which is the real implementation.
-    """
+    """Re-wrap TOTP secrets under the current keys; manual by design (see scripts/ops/idx-rekey-totp-secrets.py)."""
     del pool
     return JobResult(
         "rotate-kek",
@@ -254,14 +192,7 @@ async def rotate_kek(pool: Any) -> JobResult:
 
 
 def record_success(job: str, rows: int) -> None:
-    """Stamp the freshness gauge and the row counter.
-
-    The gauge is set **only** on success. That is what makes
-    `AuthMaintenanceStale` meaningful: a job failing every run keeps its
-    timestamp frozen and the alert fires, where a gauge set on every
-    attempt would look healthy while the work never happened.
-    """
-    # ``job_name`` rather than ``job``: the Prometheus exporter reserves
-    # ``job`` for the service and drops a metric that reuses it.
+    """Stamp the freshness gauge (ONLY on success, so `AuthMaintenanceStale` can fire) and the row counter."""
+    # ``job_name``: the Prometheus exporter reserves ``job`` and drops a metric that reuses it.
     _rows_total.add(rows, {"job_name": job})
     _last_success.set(datetime.now(UTC).timestamp(), {"job_name": job})

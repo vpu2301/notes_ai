@@ -1,13 +1,5 @@
-"""Step 5 — probe duration with ffprobe; reject > MD_ASR_MAX_DURATION_SECONDS.
-
-ffprobe is invoked with the strict ``-of json`` output and timeout. The
-subprocess is started with the argument-array form (never a shell
-string) so user-controlled bytes can never inject shell metacharacters.
-
-The probe also returns the codec, sample rate, and channel count, which
-the next validator (codec) consumes — kept in :class:`ProbeOutput` to
-avoid running ffprobe twice.
-"""
+"""Step 5 — ffprobe duration (argument-array form, never a shell); also yields codec,
+sample rate and channels for step 6."""
 
 from __future__ import annotations
 
@@ -35,11 +27,7 @@ async def probe_audio(
     ffprobe_path: str = "ffprobe",
     timeout_seconds: float = 5.0,
 ) -> ProbeOutput | None:
-    """Run ffprobe on the file and return parsed metadata.
-
-    Returns ``None`` if the file is unprobeable (corrupt headers, codec
-    we don't recognise, or ffprobe times out / crashes).
-    """
+    """Run ffprobe; ``None`` when the file is unprobeable."""
     args = [
         ffprobe_path,
         "-v",
@@ -93,12 +81,8 @@ async def probe_audio(
     if sample_rate <= 0 or channels <= 0 or not codec:
         return None
 
-    # A WebM written live — which is every ``MediaRecorder`` capture, and
-    # the shape the web and mobile clients upload — carries no duration
-    # in its header: the muxer never seeks back to fill it in. Neither
-    # the format nor the stream reports one, so the header pass yields 0
-    # and the file would look unprobeable. Walking the packets recovers
-    # the real length (~0.2 s for a 30-minute recording).
+    # A live-written WebM (every MediaRecorder capture) has no duration in its header;
+    # walking the packets recovers it.
     if duration_seconds <= 0:
         duration_seconds = await _duration_from_packets(
             path, ffprobe_path=ffprobe_path, timeout_seconds=timeout_seconds
@@ -120,11 +104,7 @@ async def _duration_from_packets(
     ffprobe_path: str,
     timeout_seconds: float,
 ) -> float:
-    """Duration of the first audio stream, summed from its packets.
-
-    Used only when the container declares none. Returns ``0.0`` if the
-    scan fails, which the caller treats as unprobeable.
-    """
+    """Duration of the first audio stream from its packets; ``0.0`` when the scan fails."""
     args = [
         ffprobe_path,
         "-v",
@@ -154,9 +134,7 @@ async def _duration_from_packets(
     if proc.returncode != 0:
         return 0.0
 
-    # The end of the last packet that carries a timestamp. Trailing
-    # packets can report "N/A" for either field, so scan backwards for
-    # the last usable pair rather than trusting the final line.
+    # Trailing packets can report "N/A"; scan backwards for the last usable pair.
     for line in reversed(stdout.decode("utf-8", "replace").splitlines()):
         parts = line.split(",")
         if len(parts) < 2:
@@ -177,10 +155,7 @@ def validate_duration(
             "ffprobe could not probe the audio (corrupt header, unsupported "
             "container, or process timed out).",
         )
-    # A recording too short to hold a usable utterance is a mis-fire — a
-    # tapped record button, a browser that flushed one buffer. Whisper will
-    # happily "transcribe" it into a hallucinated phrase, which is worse
-    # than a rejection: it lands in the note looking like dictation.
+    # Too short for an utterance: Whisper would hallucinate a phrase.
     if probe.duration_ms < min_ms:
         return reject(
             ValidationCode.DURATION_TOO_SHORT,

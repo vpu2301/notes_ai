@@ -1,10 +1,4 @@
-"""German number normalization corpus.
-
-Mirrors the UK/EN corpora, plus the two German-specific hazards: the
-compound numeral ("zweiundzwanzig" is one token, units-before-tens) and
-"zu" as a BP separator in a language where "zu" is also the most common
-preposition there is.
-"""
+"""German number normalization corpus, plus compound numerals and "zu" as a BP separator."""
 
 from __future__ import annotations
 

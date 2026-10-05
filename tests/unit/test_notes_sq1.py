@@ -1,4 +1,4 @@
-"""Sprint SQ1 — gold v3 and the scorers the summary criteria need."""
+"""Gold v3 and the scorers the summary criteria need."""
 
 from __future__ import annotations
 

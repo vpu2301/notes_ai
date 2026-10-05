@@ -1,5 +1,4 @@
-"""Sprint F1 T1/T4: capture timing on submit, and coverage + capture on
-the result view."""
+"""Capture timing on submit, and coverage + capture on the result view."""
 
 from __future__ import annotations
 
@@ -125,7 +124,7 @@ def test_the_job_view_reads_timing_and_coverage_share_off_the_row() -> None:
         }
     )
     assert view.first_frame_offset_ms == 800 and view.coverage_share == 0.9731
-    # A row from before migration 0063 and before F1's metadata.
+    # A row from before the capture-timing columns and coverage metadata.
     old = _row_to_view({**base, "metadata": json.dumps({"model": "large-v3"})})  # type: ignore[arg-type]
     assert old.record_pressed_at is None and old.coverage_share is None
 

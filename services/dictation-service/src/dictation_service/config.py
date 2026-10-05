@@ -9,11 +9,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from secret import Secret
 
-# ``Secret[str]`` is a generic, so pydantic-settings classes it as a complex
-# type and json.loads() the raw env value — any plain string (including "")
-# blows up with a JSONDecodeError before the field is ever validated. NoDecode
-# hands the raw string straight to Secret's validator. Every Secret field fed
-# from the environment must use this alias.
+# pydantic-settings json.loads() generic types from env; NoDecode hands the raw
+# string to Secret's validator. Every env-fed Secret field must use this alias.
 SecretStrEnv = Annotated[Secret[str], NoDecode]
 
 
@@ -46,11 +43,8 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # ADR-0047: JSON list `[{"issuer", "jwks_url", "audience"}, …]`; the token's
+    # `iss` selects the entry. Unset = one-element list from the values above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
@@ -73,10 +67,8 @@ class Settings(BaseSettings):
     # ── Redis (rate-limit + worker liveness + notification bus) ────────
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
-    # ── Sprint-12 notification event bus (ADR-0029) ────────────────────
-    # Same kill switch note-service carries. Publishing is already
-    # fire-and-forget, so this is not about failure handling — it is the
-    # source-level cut-off for a notification storm (E1).
+    # ── Notification event bus (ADR-0029) ──────────────────────────────
+    # Kill switch shared with note-service; source-level cut-off for a storm.
     notifications_enabled: bool = Field(default=True, alias="MDX_NOTIFICATIONS_ENABLED")
 
     # ── S3 object storage (finalized audio uploads) ────────────────────
@@ -87,21 +79,17 @@ class Settings(BaseSettings):
     s3_audio_bucket: str = Field(default="mdx-audio", alias="S3_AUDIO_BUCKET")
     s3_use_ssl: bool = Field(default=False, alias="S3_USE_SSL")
 
-    # ── Demo privacy envelope (sprint 07, ADR-0018) ─────────────────────
-    # When disabled, no finalized audio is ever written to object storage
-    # (the HF Space sets this true). Purge-on-finalize additionally zeroes
-    # the in-memory PCM buffer at end-of-session as defence in depth.
+    # ── Demo privacy envelope (ADR-0018) ────────────────────────────────
+    # Disabled = no finalized audio reaches object storage; purge also zeroes the PCM buffer.
     object_store_disabled: bool = Field(default=False, alias="MD_OBJECT_STORE_DISABLED")
     demo_audio_purge_on_finalize: bool = Field(default=False, alias="DEMO_AUDIO_PURGE_ON_FINALIZE")
 
     # ── Master key (envelope crypto for finalized uploads) ──────────────
     master_key_path: str = Field(default="/etc/mdx/master.key", alias="MDX_MASTER_KEY_PATH")
 
-    # ── Master-key provider (sprint 16, ADR-0011 KMS swap) ───────────────
-    # 'file' (dev default — behaviour identical to pre-sprint-16) or
-    # 'vault' (Vault Transit; fail-closed startup probe). With 'vault', the
-    # file at master_key_path — if present — stays live as a read-only
-    # fallback for rows not yet re-wrapped (scripts/kms/rewrap-tenant-keks.py).
+    # ── Master-key provider (ADR-0011) ──────────────────────────────────
+    # 'file' (dev) or 'vault' (Transit, fail-closed probe); with 'vault' the
+    # file stays a read-only fallback for rows not yet re-wrapped.
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
     vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
@@ -133,18 +121,11 @@ class Settings(BaseSettings):
     )
 
     # ── Stale-session reaper ────────────────────────────────────────────
-    # The abandon timer lives in the worker process, so a worker that dies
-    # takes its timers with it and leaves every session it held stranded in
-    # a non-terminal status — forever, and counting against
-    # per_tenant_max_active_sessions. The reaper is the out-of-process
-    # backstop: it only touches sessions whose worker's Redis heartbeat has
-    # expired, so a legitimately paused session on a live worker is never
-    # collected.
+    # Out-of-process backstop for sessions stranded by a dead worker; only
+    # touches sessions whose worker heartbeat has expired.
     session_reaper_enabled: bool = Field(default=True, alias="MDX_SESSION_REAPER_ENABLED")
     session_reaper_interval_s: float = Field(default=300.0, alias="MDX_SESSION_REAPER_INTERVAL_S")
-    # Grace after last activity before a session is even considered. Must
-    # comfortably exceed worker_heartbeat_ttl_s so a rolling restart isn't
-    # mistaken for a crash.
+    # Must comfortably exceed worker_heartbeat_ttl_s (rolling restart != crash).
     session_reaper_grace_s: float = Field(default=300.0, alias="MDX_SESSION_REAPER_GRACE_S")
     session_reaper_batch_limit: int = Field(default=200, alias="MDX_SESSION_REAPER_BATCH_LIMIT")
 
@@ -161,51 +142,35 @@ class Settings(BaseSettings):
     no_speech_prob_drop_threshold: float = Field(
         default=0.6, alias="MDX_NO_SPEECH_PROB_DROP_THRESHOLD"
     )
-    # Backstop for the silence-gated commit rule: a word older than this
-    # commits even without a VAD silence boundary, so continuous speech
-    # can never stall the transcript (sprint-14 fix, ADR-0013 amendment).
-    # 4 s = 2× the commit horizon; keeps final latency inside the
-    # sprint-04 p95 ≤ 2500 ms target for the normal (silence-gated) path.
+    # A word older than this commits without a VAD boundary, so continuous
+    # speech never stalls the transcript (2× the commit horizon).
     commit_max_provisional_ms: int = Field(default=4000, alias="MDX_COMMIT_MAX_PROVISIONAL_MS")
     aligner_boundary_uncertainty_threshold: float = Field(
         default=0.30, alias="MDX_ALIGNER_BOUNDARY_UNCERTAINTY_THRESHOLD"
     )
     prompt_max_tokens: int = Field(default=150, alias="MDX_PROMPT_MAX_TOKENS")
-    # Service-wide fallback for the free-text vocabulary hint fed to
-    # Whisper's initial_prompt when start_session carries none.
+    # Fallback initial_prompt when start_session carries no vocabulary hint.
     default_vocabulary_hint: str = Field(default="", alias="MDX_DEFAULT_VOCABULARY_HINT")
 
-    # ── Conversation mode / diarization (sprint 14, ADR-0034) ───────────
+    # ── Conversation mode / diarization (ADR-0034) ──────────────────────
     conversation_enabled: bool = Field(default=True, alias="MDX_CONVERSATION_ENABLED")
-    # Baked model dir produced by scripts/models/prepare_ecapa.py
-    # (Dockerfile bakes /opt/models/ecapa; macOS dev default matches the
-    # prepare script's default target so `make prepare-ecapa` just works).
+    # Baked model dir from scripts/models/prepare_ecapa.py (`make prepare-ecapa`).
     diar_model_dir: str = Field(default="/opt/models/ecapa", alias="MDX_DIAR_MODEL_DIR")
-    # "cpu" is the safe-everywhere default; the GPU compose overlay sets
-    # MDX_DIAR_DEVICE=cuda so ECAPA shares the A10G with Whisper.
+    # The GPU compose overlay sets MDX_DIAR_DEVICE=cuda.
     diar_device: str = Field(default="cpu", alias="MDX_DIAR_DEVICE")
-    # Build-time provenance, stamped into the image ENV by the Dockerfile's
-    # ecapa-fetch stage (docs/models/PINS.md). The digests are re-asserted at
-    # STARTUP, fail-closed — a mismatch refuses to serve rather than diarize
-    # with unaccountable weights. Empty digests = dev path (`make
-    # prepare-ecapa`): presence checked, content only logged.
+    # Digests stamped by the Dockerfile (docs/models/PINS.md), re-asserted at
+    # startup fail-closed. Empty = dev path: presence checked, content only logged.
     diar_model_repo: str = Field(default="", alias="MDX_DIAR_MODEL_REPO")
     diar_model_revision: str = Field(default="", alias="MDX_DIAR_MODEL_REVISION")
     diar_model_sha256: str = Field(default="", alias="MDX_DIAR_MODEL_SHA256")
     diar_meanvar_sha256: str = Field(default="", alias="MDX_DIAR_MEANVAR_SHA256")
-    # Warm both models at startup rather than on the first conversation
-    # session. A worker that advertises conversation capacity with a cold
-    # diarizer pays ~0.7 s of load on the first window and blows the latency
-    # budget; readiness gates on this instead (sprint-14 deployment).
+    # Warm both models at startup; a cold diarizer blows the first-window budget.
     diar_warm_at_startup: bool = Field(default=True, alias="MDX_DIAR_WARM_AT_STARTUP")
-    # A conversation session runs two models; weighted capacity below.
-    # Weight 2 => 4 dictation OR 2 conversation OR 2+1 mix per worker.
-    # CONFIGURED, not yet GPU-measured — see todo.md (S14) + ADR-0034.
+    # Weight 2 => 4 dictation OR 2 conversation OR 2+1 mix per worker; not GPU-measured.
     conversation_session_weight: int = Field(default=2, alias="MDX_CONVERSATION_SESSION_WEIGHT")
 
-    # ── Finalize-time NLP + draft creation (sprint 14) ──────────────────
-    # Finalize is not latency-critical; generous timeouts, graceful
-    # degradation (raw transcript persists if either call fails).
+    # ── Finalize-time NLP + draft creation ──────────────────────────────
+    # Not latency-critical; raw transcript persists if either call fails.
     nlp_base_url: str = Field(default="http://nlp-service:8000", alias="MDX_NLP_BASE_URL")
     finalize_nlp_timeout_seconds: float = Field(
         default=5.0, alias="MDX_FINALIZE_NLP_TIMEOUT_SECONDS"
@@ -240,9 +205,7 @@ class Settings(BaseSettings):
     )
 
     # ── CORS for the SPA (dev origins) ─────────────────────────────────
-    # The HTTP companion surface (/healthz, /dictate/sessions/...) is called
-    # cross-origin by the SPA, so it needs the same allow-list the other
-    # services use. WS upgrades are gated separately by ws_allowed_origins.
+    # WS upgrades are gated separately by ws_allowed_origins.
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
         alias="CORS_ALLOWED_ORIGINS",
@@ -252,18 +215,13 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
-    # ── Startup model warmup (sprint 16 — sprint-03 retro cold-start) ───
-    # false (dev default): pre-sprint-16 blocking load — simplest, and
-    # fine when warmup is fast (tiny on CPU). true (production): Whisper +
-    # diarizer load in a background lifespan task; /healthz serves
-    # immediately (liveness never kills a cold pod), /readyz stays 503
-    # until the models are resident, so the LB sends no traffic early.
+    # ── Startup model warmup ────────────────────────────────────────────
+    # false: blocking load. true: background load; /healthz serves at once,
+    # /readyz stays 503 until the models are resident.
     warm_in_background: bool = Field(default=False, alias="MDX_WARM_IN_BACKGROUND")
 
-    # ── Session revocation check (sprint 16) ────────────────────────────
-    # When on, current_user rejects tokens whose sid/sub is on the Redis
-    # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
-    # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
+    # ── Session revocation check (ADR-0040) ─────────────────────────────
+    # Rejects tokens on the Redis denylist; fail-OPEN on Redis outage.
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 

@@ -1,13 +1,4 @@
-"""Guards on the streaming ASR quality path.
-
-Background: the conversation/meeting surface produced Ukrainian that was
-not merely inaccurate but non-existent as language — invented word-shapes
-like "Добро губня" for "Доброго дня". The cause was the model
-(dictation-service ran whisper-tiny long after batch ASR moved to
-large-v3), which is compose configuration; these tests cover the three
-code-level defects that amplified it and that a model swap alone would
-leave in place.
-"""
+"""Guards on the streaming ASR quality path: tail flush, single base prompt, forced final window."""
 
 from __future__ import annotations
 
@@ -44,12 +35,7 @@ def _pcm_all_speech(duration_ms: int) -> np.ndarray:
 
 
 def test_flush_provisional_recovers_the_tail() -> None:
-    """End-of-session must commit words still inside the revision horizon.
-
-    Nothing will revise them and no further audio will produce the silence
-    boundary they wait on, so without a flush they are dropped and the
-    persisted transcript stops short of what was said.
-    """
+    """End-of-session must commit words still inside the revision horizon."""
     w = StreamingWindower(base_prompt="", language="uk")
     tick = w.integrate(
         # Ends 200 ms before the window end — deep inside the 2 s overlap.
@@ -95,14 +81,7 @@ def test_flush_provisional_on_untouched_windower_is_empty() -> None:
 
 
 def test_composed_prompt_contains_the_base_prompt_once() -> None:
-    """`build_prompt` already prepends the vocabulary hint.
-
-    The window loop also passed it to the engine as `prompt`, and the
-    engine concatenates its two prompt arguments — so every window's
-    initial_prompt opened with the vocabulary hint twice. A repeated
-    initial_prompt is a Whisper repetition/hallucination trigger and the
-    duplicate also consumed the budget meant for decoded context.
-    """
+    """`build_prompt` already prepends the vocabulary hint; a duplicate is a Whisper hallucination trigger."""
     base = "Консультація кардіолога."
     composed = build_prompt(
         base_prompt=base,
@@ -167,12 +146,7 @@ def test_wide_window_config_still_commits_and_flushes() -> None:
 
 
 def test_short_tail_needs_a_forced_window() -> None:
-    """A remainder below the hop is never offered a window on its own.
-
-    This is the loss that scales with the hop: at the 1.5 s default it is a
-    clipped final word, at a 28 s CPU hop it is most of the closing
-    exchange of the consultation.
-    """
+    """A remainder below the hop is never offered a window on its own (loss scales with the hop)."""
     w = StreamingWindower(
         base_prompt="", language="uk", window_s=30.0, overlap_s=2.0, min_partial_s=28.0
     )

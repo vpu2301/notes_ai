@@ -5,10 +5,7 @@ import XCTest
 
 // MARK: - A session store that is not the Keychain
 
-/// The Keychain is the app's storage; a test bundle would leave real items
-/// behind in the simulator's keychain if it used it, and cannot show a Face
-/// ID prompt to anybody. The store's own behaviour (cache, rotate, seal,
-/// clear) is what these tests are about.
+/// In-memory session storage: the real Keychain would leave items behind and cannot prompt.
 final class InMemorySessionStorage: SessionStorage, @unchecked Sendable {
     private let lock = NSLock()
     private var data: Data?
@@ -72,8 +69,7 @@ final class FakeGate: SessionGateKeyring, @unchecked Sendable {
     }
 
     func unlock(reason: String) async throws -> SymmetricKey {
-        // The lock is taken in a synchronous call: `NSLock` must not be
-        // held across a suspension point, and Swift 6 makes that an error.
+        // `NSLock` must not be held across a suspension point (a Swift 6 error).
         try prompt()
     }
 
@@ -99,9 +95,7 @@ final class FakeGate: SessionGateKeyring, @unchecked Sendable {
 
 // MARK: - A server that answers from a script
 
-/// One `URLProtocol` for every test: it records what the app sent (which
-/// is where the transport assertions live — headers, bodies, the absence
-/// of a cookie) and answers from a handler the test installs.
+/// One `URLProtocol` for every test: records what the app sent, answers from the test's handler.
 final class StubServer: URLProtocol {
     struct Recorded: Sendable {
         let url: URL
@@ -260,10 +254,7 @@ enum Fixtures {
         json(["title": "Unauthorized", "status": 401, "detail": detail, "code": code])
     }
 
-    /// A Keycloak refresh token: no `nrt_` prefix, so `SessionKind` reads
-    /// it as the legacy issuer's (ADR-0047). Deliberately not a realistic
-    /// JWT — the discriminator this app uses is the prefix, and a test
-    /// that leant on anything else would be testing a fiction.
+    /// A Keycloak refresh token: no `nrt_` prefix (ADR-0047). Deliberately not a realistic JWT.
     static let keycloakToken = "eyJhbGciOiJSUzI1NiJ9.keycloak-refresh"
 
     /// An ungated session item, as it sits in the Keychain.

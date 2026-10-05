@@ -1,23 +1,10 @@
 #!/usr/bin/env python3
-"""Which glossary terms are role labels, per workspace (Sprint I2 T1).
+"""Count, per workspace, the live glossary terms the vocabulary rule rejects (role labels).
 
-    DATABASE_URL=postgresql://funnel_reader:...@host/notes \\
-        uv run python scripts/admin/glossary_audit.py [--show-terms]
+    DATABASE_URL=postgresql://...@host/notes uv run python scripts/admin/glossary_audit.py [--show-terms]
 
-The vocabulary rule (``note_service.domain.glossary.is_vocabulary``) now
-keeps a stored role label — "Moderator II", "speaker background" — out of
-the transcriber's hint without a data migration. This lists, per
-workspace, how many live terms fail the rule so support can ask the
-workspace to remove them (the glossary page shows the same banner).
-
-Counts by default. ``--show-terms`` prints the failing term text as well —
-to the terminal only, never to a file — for the one workspace whose
-incident is being handled. Workspace ids are shortened.
-
-The reader role has no grant on ``workspace_glossary``; this reads through
-``app_role`` as the migrations job does, under a tenant-less connection
-with row security off, which the funnel_reader role cannot do. Run it as
-an operator on the database host.
+``--show-terms`` prints term text to the terminal only. Reads through ``app_role`` with
+row security off; run as an operator on the database host.
 """
 
 from __future__ import annotations

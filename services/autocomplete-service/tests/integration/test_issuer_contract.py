@@ -1,17 +1,7 @@
-"""FND-1 contract: this service trusts a LIST of issuers, and only that list.
+"""Issuer-list contract (ADR-0047), generated from :mod:`auth.contract`, all in process.
 
-Generated from the template in :mod:`auth.contract`. Four cases, all in
-process — no Keycloak, no auth-service, no database:
-
-    (a) a Keycloak-shaped token   → accepted
-    (b) a native-shaped token     → accepted
-    (c) a third issuer's token    → rejected
-    (d) alg=none / HS256-confusion→ rejected
-
-The list under test is the one THIS service resolves from its own
-settings, so the test fails if the service stops reading
-``AUTH_ISSUERS_JSON`` or builds its JWKS cache from a different list than
-its ``current_user`` dependency.
+Keycloak-shaped and native-shaped tokens are accepted; a third issuer and alg=none/HS256
+confusion are rejected. The list under test is the one this service resolves from its own settings.
 """
 
 from __future__ import annotations
@@ -34,11 +24,7 @@ async def test_trusts_both_configured_issuers_and_nothing_else(
 async def test_without_the_list_the_legacy_single_issuer_still_works(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The pre-FND-1 deployment shape: three env vars, one issuer.
-
-    This is what every service runs with until the fleet rollout, so it
-    has to keep working byte for byte.
-    """
+    """Single-issuer shape: three env vars, one issuer; must keep working byte for byte."""
     contract = IssuerContract(audience=settings.auth_audience)
     monkeypatch.setattr(settings, "auth_issuers_json", "")
     monkeypatch.setattr(settings, "auth_issuer", contract.keycloak_issuer)

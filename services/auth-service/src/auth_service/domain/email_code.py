@@ -1,19 +1,5 @@
-"""Email one-time-code sign-in — the parts that need no database (IDX-A3).
-
-What lives here:
-
-* code generation and the challenge-bound hash (F1);
-* the verify state machine as a pure function over a :class:`Challenge`
-  snapshot — expired / consumed / exhausted / wrong / right — so the
-  branch logic is unit-tested without Postgres;
-* lockout arithmetic (F5): when a failure count trips the lock and for how
-  long, doubling per lock up to a cap;
-* the personal-workspace naming rule (F3).
-
-What does not live here: reading and writing ``auth_challenges`` and
-``identities`` rows. That is :class:`ChallengeStore`, a Protocol the A1
-tables implement; the route handler composes the two.
-"""
+"""Email one-time-code sign-in, database-free: code hashing, the verify state machine,
+lockout arithmetic, personal-workspace naming. Persistence is :class:`ChallengeStore`."""
 
 from __future__ import annotations
 
@@ -30,8 +16,7 @@ from uuid import UUID
 CODE_DIGITS = 6
 KIND_EMAIL_LOGIN = "email_login"
 
-# Local-part characters allowed to survive into a workspace *name* (the
-# unique key). Everything else collapses to "-".
+# Local-part characters allowed in a workspace name; everything else collapses to "-".
 _NAME_UNSAFE = re.compile(r"[^a-z0-9._-]+")
 
 
@@ -60,7 +45,7 @@ def normalise_email(raw: str) -> str:
 
 
 def email_subject_hash(email: str) -> str:
-    """The per-email rate-limit subject: never the address itself (F4)."""
+    """The per-email rate-limit subject: never the address itself."""
     return hashlib.sha256(normalise_email(email).encode("utf-8")).hexdigest()[:32]
 
 
@@ -89,10 +74,7 @@ class Challenge:
     max_attempts: int
     consumed_at: datetime | None
     created_at: datetime
-    # Flow context (IDX-A5): the first factor's client type for an
-    # `mfa_login` row, the address being replaced for `email_change`.
-    # Never a secret — codes live in `code_hash`, TOTP secrets in
-    # `identity_totp.secret_enc`.
+    # Flow context (first factor's client type, address being replaced). Never a secret.
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -108,13 +90,8 @@ class VerifyDecision:
 def evaluate(
     challenge: Challenge, submitted_code: str, *, now: datetime | None = None
 ) -> VerifyDecision:
-    """Decide what one submission does to a challenge. Pure; the caller persists.
-
-    Order matters: a consumed or expired challenge never learns whether the
-    code was right (no oracle on dead challenges), and the attempt that
-    exhausts the budget is refused as ``exhausted`` even when it would have
-    matched — five wrong guesses buy nothing, not a sixth try.
-    """
+    """Decide what one submission does to a challenge (pure). Dead challenges never compare the code;
+    the attempt that exhausts the budget is refused even when it would have matched."""
     now = now or datetime.now(UTC)
     if challenge.consumed_at is not None:
         return VerifyDecision(VerifyOutcome.CONSUMED, challenge.attempts, 0, consume=False)
@@ -139,7 +116,7 @@ def resend_allowed_at(created_at: datetime, *, cooldown_seconds: int) -> datetim
     return created_at + timedelta(seconds=cooldown_seconds)
 
 
-# ── lockout (F5) ─────────────────────────────────────────────────────────
+# ── lockout ──────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +144,7 @@ def is_locked(locked_until: datetime | None, *, now: datetime | None = None) -> 
     return locked_until is not None and (now or datetime.now(UTC)) < locked_until
 
 
-# ── personal workspace (F3) ──────────────────────────────────────────────
+# ── personal workspace ───────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,12 +166,11 @@ def personal_workspace_names(email: str, *, slug_hex: str | None = None) -> Work
     return WorkspaceNames(name=name[:60], display_name=f"{local}'s workspace", slug=f"ws-{hex8}")
 
 
-# ── the store the A1 tables implement ───────────────────────────────────
+# ── the store ───────────────────────────────────────────────────────────
 
 
 class ChallengeStore(Protocol):
-    """Persistence for ``auth_challenges`` (IDX-A1). Every method is one statement
-    or one transaction on the ``tenant_writer`` pool."""
+    """Persistence for ``auth_challenges``; every method is one statement or transaction on ``tenant_writer``."""
 
     async def open(
         self,
@@ -210,14 +186,7 @@ class ChallengeStore(Protocol):
         ip: str,
         metadata: dict[str, Any] | None = None,
     ) -> Challenge:
-        """Insert a challenge under an id the CALLER chose.
-
-        The id is an input rather than an output because ``code_hash`` is
-        bound to it: generating it here would mean inserting a row with a
-        placeholder hash and updating it a moment later, and a row that is
-        briefly live with an unusable code is a row a concurrent start can
-        supersede or a verify can hit.
-        """
+        """Insert a challenge under an id the CALLER chose (``code_hash`` is bound to it)."""
         ...
 
     async def consume_open_for_email(self, *, kind: str, email: str) -> int:
@@ -225,8 +194,7 @@ class ChallengeStore(Protocol):
         ...
 
     async def latest_open_for_email(self, *, kind: str, email: str) -> Challenge | None:
-        """The newest unconsumed challenge for the address — the resend cooldown's
-        authority when Redis is unavailable (F4, ``otp_cooldown``)."""
+        """The newest unconsumed challenge for the address (the resend cooldown's authority without Redis)."""
         ...
 
     async def get(self, challenge_id: UUID) -> Challenge | None: ...

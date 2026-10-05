@@ -1,4 +1,4 @@
-"""Spaces — personal folders for notes, the same on every device (0021).
+"""Spaces — personal folders for notes, the same on every device.
 
     GET    /v1/spaces                   the caller's spaces, each with the notes filed in it
     POST   /v1/spaces                   create → space
@@ -6,10 +6,8 @@
     DELETE /v1/spaces/{id}              delete (its notes become unfiled)
     PUT    /v1/notes/{note_id}/space    file the note in a space ({space_id: null} unfiles)
 
-Spaces are personal: every route filters on the caller's ``sub`` on top
-of tenant RLS. Filing does not touch the note itself — it is the
-caller's own organisation of the notes they can already see, so it
-needs only ``note.read``.
+Spaces are personal: every route filters on the caller's ``sub`` on top of tenant
+RLS. Filing needs only ``note.read``.
 """
 
 from __future__ import annotations

@@ -2,16 +2,8 @@ import { expect, test } from "@playwright/test";
 import { codeFor, enterCode, freshEmail } from "./helpers";
 
 /**
- * WEB-1b §4 — what the emailed code must not have broken.
- *
- * `dual` mode is the whole point of this sprint's risk: a deployment where
- * some accounts are native and some are still Keycloak's, and where the
- * new way in must not become the only way in. These are the two seeded
- * accounts that prove the old ones still work.
- *
- * Both are skipped rather than failed when their fixture is absent —
- * `E2E_PASSWORD_EMAIL` unset means this stack is native-only, which is a
- * legitimate configuration and not a regression.
+ * Password and MFA sign-in still work beside the emailed code (`dual` mode).
+ * Skipped, not failed, when the seeded fixture is absent (native-only stack).
  */
 
 const PASSWORD_EMAIL = process.env.E2E_PASSWORD_EMAIL;
@@ -36,7 +28,7 @@ test.describe("password sign-in still works", () => {
     await page.getByLabel(/email/i).fill(PASSWORD_EMAIL!);
     await page.getByRole("link", { name: /use a password instead/i }).click();
 
-    // Carried across, so switching methods is not a retype.
+    // The address is carried across.
     await expect(page.getByLabel(/^email$/i)).toHaveValue(PASSWORD_EMAIL!);
     await expect(page.getByLabel(/^password$/i)).toBeFocused();
   });
@@ -51,18 +43,14 @@ test.describe("a second factor is still asked for", () => {
     await page.getByRole("button", { name: /email me a code/i }).click();
     await enterCode(page, codeFor(MFA_EMAIL!));
 
-    // The right code does not buy a session on its own — that is the whole
-    // contract of `status: "mfa_required"`, and landing on `/` here would
-    // mean the second factor had quietly stopped mattering.
+    // `status: "mfa_required"` must not yield a session on its own.
     await expect(page).toHaveURL(/\/login\/mfa$/);
     await expect(page.getByLabel(/authenticator code/i)).toBeVisible();
   });
 });
 
 test("an unknown address is indistinguishable from a known one", async ({ page }) => {
-  // The enumeration property, asserted from the outside: the screen after
-  // "email me a code" says the same thing either way. A future edit that
-  // helpfully says "we don't know that address" fails here.
+  // No account enumeration: the screen reads the same either way.
   await page.goto("/login");
   await page.getByLabel(/email/i).fill(freshEmail("never-seen"));
   await page.getByRole("button", { name: /email me a code/i }).click();

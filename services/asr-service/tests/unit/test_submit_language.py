@@ -1,9 +1,4 @@
-"""Sprint TQ1 T1 (TR-11): every language a client offers is accepted.
-
-The route once validated ``language`` with its own literal pattern that
-lacked ``de`` while the web, macOS and iOS pickers offered it. It now uses
-``LANGUAGE_REQUEST_PATTERN`` from ``asr_models``; these tests pin that.
-"""
+"""Every language a client offers is accepted (``LANGUAGE_REQUEST_PATTERN`` from ``asr_models``)."""
 
 from __future__ import annotations
 

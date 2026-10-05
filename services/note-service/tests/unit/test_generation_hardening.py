@@ -1,11 +1,6 @@
-"""Sprint 37 — what the generation path does when nobody is watching.
-
-Shadow runs, snapshot retention and the removal of the synthesis stub:
-three things whose failure mode is silent. A shadow run that stored its
-output would be a second copy of every sampled meeting; a snapshot that
-outlived its generation would be a second copy of every meeting, full
-stop; and a retired route that still answers is an attack surface
-nobody owns.
+"""What the generation path does when nobody is watching: shadow runs store
+nothing, snapshots do not outlive their generation, the retired synthesis
+route does not answer.
 """
 
 from __future__ import annotations

@@ -8,10 +8,8 @@ kind: Job
 metadata:
   name: mdx-migrate-{{ .Release.Revision }}
   annotations:
-    # POST-install: on a virgin cluster postgres itself is a chart
-    # resource, so a pre-install migrate would deadlock waiting for a DB
-    # that will only exist after install. Services tolerate the gap —
-    # readiness holds them out of rotation until migrations land.
+    # post-install: a pre-install migrate would wait for a postgres the chart
+    # itself creates; readiness holds services out until migrations land.
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "-1"
     "helm.sh/hook-delete-policy": before-hook-creation
@@ -24,12 +22,8 @@ spec:
       restartPolicy: OnFailure
       {{- if .Values.stateful.inCluster }}
       initContainers:
-        # Belt-and-braces bootstrap: initdb.d scripts run only on an EMPTY
-        # data dir, so a container restart mid-first-boot leaves init.sql
-        # half-applied (found live in S16D staging: plain-postgres image
-        # aborted at CREATE EXTENSION vector and the audit schema never
-        # materialised). init.sql is idempotent — re-applying here makes
-        # the migrate hook self-healing regardless of first-boot history.
+        # initdb.d runs only on an EMPTY data dir, so a restart mid-first-boot
+        # leaves init.sql half-applied; it is idempotent, so re-apply it here.
         - name: bootstrap-sql
           image: {{ include "notes.image" (dict "root" $ "image" .Values.jobs.migrate.image) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
@@ -80,7 +74,6 @@ spec:
         - name: seed
           image: {{ include "notes.image" (dict "root" $ "image" .Values.jobs.seed.image) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          # Same sequence as the compose seed one-shot (docker-compose.override.yml).
           command:
             - /bin/sh
             - -ec

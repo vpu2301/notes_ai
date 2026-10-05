@@ -10,13 +10,8 @@ _MASK = "Secret(***)"
 
 
 class Secret[T]:
-    """A value wrapper that refuses to leak via the usual channels.
-
-    .value() is the single intentional read path. repr/str/format/f-string all
-    return the constant mask. Pickling and deep-copying raise. Equality is
-    constant-time. Hashing is by type identity, not value, so secrets cannot
-    end up as dict keys whose lookup leaks the value via timing.
-    """
+    """A value wrapper that refuses to leak: .value() is the only read path; equality is constant-time;
+    hashing is by type, not value, so a dict lookup cannot leak via timing."""
 
     __slots__ = ("_value",)
 
@@ -54,9 +49,7 @@ class Secret[T]:
         if isinstance(a, (bytes, bytearray)) and isinstance(b, (bytes, bytearray)):
             return hmac.compare_digest(bytes(a), bytes(b))
         if isinstance(a, str) and isinstance(b, str):
-            # ``a`` is read from this instance's own type parameter ``T``, which
-            # mypy does not narrow through isinstance (it stays widened to
-            # ``object``); the guard proves it is str.
+            # mypy does not narrow ``T`` through isinstance; the guard proves it is str.
             return hmac.compare_digest(cast(str, a), b)
         return bool(a == b)
 

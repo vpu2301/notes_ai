@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-M1 M1-04 — a recording that did not reach the server is kept.
+/// A recording that did not reach the server is kept.
 final class PendingCaptureTests: XCTestCase {
     private var directory: URL!
 

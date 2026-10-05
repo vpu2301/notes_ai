@@ -1,15 +1,6 @@
-"""Day-5 diff engine.
-
-Produces a structured diff between two ``NoteContent`` snapshots:
-
-- Per-section classification (added/removed/modified/unchanged).
-- Char-level segments via ``difflib.SequenceMatcher`` for modified
-  sections.
-- Metadata diff: title.
-
-Deterministic — same inputs → byte-equal output. The diff endpoint
-caches by ``(from_id, to_id)`` and content versions are immutable,
-so cache hits are free of staleness concerns (ADR-0020 corollary).
+"""Structured diff between two ``NoteContent`` snapshots: per-section
+classification, char-level segments via ``difflib.SequenceMatcher``, title.
+Deterministic, so the ``(from_id, to_id)`` cache never goes stale.
 """
 
 from __future__ import annotations

@@ -1,9 +1,4 @@
-"""Session-resume validation.
-
-Every failure path returns the same opaque ``session_not_found`` so an
-attacker can't distinguish "wrong tenant" from "wrong user" from "stale
-session" — a deliberate uniform-failure pattern.
-"""
+"""Session-resume validation; every failure is the same opaque ``session_not_found``."""
 
 from __future__ import annotations
 
@@ -41,12 +36,7 @@ async def evaluate_resume(
     requesting_tenant: UUID,
     live_session_attached: bool,
 ) -> ResumeOutcome:
-    """Run every gate the spec requires; return a single yes/no.
-
-    Reasons are for internal logging only — the WS upgrade handler emits
-    `session_not_found` regardless of which gate failed, so callers
-    can't infer state.
-    """
+    """Run every resume gate; reasons are for internal logging only."""
     if live_session_attached:
         return ResumeOutcome(allowed=False, reason="duplicate_attach")
 
@@ -86,18 +76,13 @@ async def evaluate_resume(
 
 
 async def worker_alive(redis: Redis, worker_id: str) -> bool:
-    """True while ``worker_id``'s heartbeat key is still alive.
-
-    The reaper's only safety interlock, so it is public: a session is
-    stranded iff the process that owned it stopped heart-beating.
-    """
+    """True while ``worker_id``'s heartbeat key is alive (the reaper's safety interlock)."""
     ttl_raw: object = await redis.ttl(f"mdx:dict:worker:{worker_id}:hb")
     ttl = int(ttl_raw) if isinstance(ttl_raw, (int, str)) else -2
     return ttl > 0
 
 
-#: Back-compat alias for the original private name.
-_worker_alive = worker_alive
+_worker_alive = worker_alive  # back-compat alias
 
 
 async def heartbeat_worker(redis: Redis) -> None:
@@ -122,13 +107,7 @@ def evaluate_retransmit(
     to_seq: int,
     hwm: int,
 ) -> RetransmitDecision:
-    """Idempotency for retransmit ranges.
-
-    ``hwm`` is the per-session high-water-mark of received seqs. Any
-    portion of the requested range that's ≤ hwm is silently deduped.
-    Ranges larger than ``MD_RETRANSMIT_MAX_RANGE_FRAMES`` are rejected
-    with ``retransmit_too_large`` (sprint-04 spec §6 E9).
-    """
+    """Dedup a retransmit range against ``hwm``; oversized ranges are ``retransmit_too_large``."""
     if to_seq <= from_seq:
         return RetransmitDecision(accept=False, too_large=False)
     if (to_seq - from_seq) > settings.retransmit_max_range_frames:

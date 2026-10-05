@@ -4,17 +4,13 @@ import CryptoKit
 import Foundation
 import Network
 
-/// The OAuth 2.1 dance remote MCP servers expect from a native client
-/// (the MCP authorization spec): discover the authorization server from
-/// the resource's metadata, register this app as a client on the fly
-/// (RFC 7591), send the user to the browser with PKCE, and swap the code
-/// for tokens. The callback comes back on the app's own URL scheme,
-/// `notesai://oauth/callback`, which ASWebAuthenticationSession intercepts.
+/// The OAuth 2.1 flow remote MCP servers expect: discover the authorization server
+/// from resource metadata, register as a client (RFC 7591), PKCE in the browser,
+/// swap the code for tokens. The callback returns on `notesai://oauth/callback`.
 enum MCPOAuth {
     static let redirectScheme = "notesai"
     static let redirectURI = "notesai://oauth/callback"
-    /// For servers that do not register clients themselves (HubSpot): the
-    /// user creates an app on their side and enters this redirect URL.
+    /// For servers that do not register clients themselves (HubSpot): the user enters this redirect URL on their side.
     static let loopbackPort: UInt16 = 52581
     static let loopbackRedirectURI = "http://localhost:\(loopbackPort)/callback"
 
@@ -30,8 +26,7 @@ enum MCPOAuth {
         }
     }
 
-    /// What the app keeps per server so refreshes and re-logins work
-    /// without rediscovering everything.
+    /// What the app keeps per server so refreshes and re-logins work without rediscovery.
     struct Registration: Codable, Equatable, Sendable {
         var authorizationEndpoint: URL
         var tokenEndpoint: URL
@@ -40,8 +35,7 @@ enum MCPOAuth {
         var scopes: [String]
         /// RFC 8707 resource indicator: the MCP server URL.
         var resource: String
-        /// The custom scheme for self-registered clients, loopback for
-        /// user-supplied ones.
+        /// The custom scheme for self-registered clients, loopback for user-supplied ones.
         var redirectURI: String = MCPOAuth.redirectURI
     }
 
@@ -69,9 +63,7 @@ enum MCPOAuth {
 
     // MARK: - Discovery
 
-    /// RFC 9728 protected-resource metadata → RFC 8414 / OIDC server
-    /// metadata. Falls back to `<origin>/.well-known/…` when the 401 gave
-    /// no hint, which is how older servers behave.
+    /// RFC 9728 protected-resource metadata → RFC 8414 / OIDC server metadata. Falls back to `<origin>/.well-known/…` when the 401 gave no hint.
     static func discover(server: URL, resourceMetadataURL: URL?) async throws -> (authorizationServer: URL, metadata: [String: Any]) {
         var origin = URLComponents()
         origin.scheme = server.scheme
@@ -94,8 +86,7 @@ enum MCPOAuth {
             authorizationServers = servers.compactMap(URL.init(string:))
             if !authorizationServers.isEmpty { break }
         }
-        // No resource metadata: the MCP server's own origin may be the
-        // authorization server.
+        // No resource metadata: the MCP server's own origin may be the authorization server.
         if authorizationServers.isEmpty { authorizationServers = [originURL] }
 
         for authServer in authorizationServers {
@@ -129,8 +120,7 @@ enum MCPOAuth {
 
     // MARK: - Dynamic client registration
 
-    /// Register this app with the server, or — when the user brought their
-    /// own client id (HubSpot) — use that with the loopback redirect.
+    /// Register this app with the server, or use the user's own client id with the loopback redirect.
     static func register(server: URL, metadata: [String: Any],
                          clientId: String? = nil, clientSecret: String? = nil) async throws -> Registration {
         guard let authorizationEndpoint = (metadata["authorization_endpoint"] as? String).flatMap(URL.init(string:)),
@@ -297,9 +287,7 @@ private extension CharacterSet {
     }()
 }
 
-/// One ASWebAuthenticationSession at a time, anchored to the main window.
-/// Shared by the MCP sign-in and the Google Calendar connect flow — both
-/// come back on the `notesai://` scheme.
+/// One ASWebAuthenticationSession at a time, anchored to the main window. Shared by MCP sign-in and Google Calendar connect.
 @MainActor
 final class BrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = BrowserSession()
@@ -333,10 +321,7 @@ final class BrowserSession: NSObject, ASWebAuthenticationPresentationContextProv
     }
 }
 
-/// A one-shot HTTP listener on localhost for the OAuth redirect, for
-/// servers whose app settings only accept https or localhost redirect
-/// URLs. Opens the sign-in page in the default browser, answers the one
-/// GET with a "you can close this tab" page, and hands back the URL.
+/// A one-shot localhost HTTP listener for the OAuth redirect (servers that only accept https/localhost redirects). Answers one GET and hands back the URL.
 private enum LoopbackCallback {
     @MainActor
     static func run(open url: URL) async throws -> URL {

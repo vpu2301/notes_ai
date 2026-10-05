@@ -16,18 +16,9 @@ const VIEWS = [
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /**
- * `/settings/data` — who processes this workspace's meetings.
- *
- * Every member can open it, and that is the point: which companies see
- * your employer's meetings is not admin-only information. The table is
- * built from the same registry object that routes the calls, so it
- * cannot drift from what actually happens to the data — a disclosure
- * page that can be wrong is worse than none, because people believe it.
- *
- * Changing the tier is an admin action, and one with a consequence the
- * admin has to see first: the dialog lists exactly which new companies
- * the change lets in, by name and region, and the API refuses the change
- * unless those exact names come back with it.
+ * `/settings/data` — who processes this workspace's meetings; open to every member.
+ * The table comes from the registry that routes the calls, so it cannot drift. A tier
+ * change (admin) must echo back the exact new processor names or the API refuses it.
  */
 export function DataSettingsPage() {
   const toast = useToast();
@@ -61,22 +52,20 @@ export function DataSettingsPage() {
       toast.success(done);
     } catch (err) {
       toast.error(messageFor(err));
-      // Whatever was refused, the server's own view is the truth.
+      // The server's view is the truth after a refusal.
       await load();
     } finally {
       setBusy(false);
     }
   };
 
-  // Which companies a tier change would newly involve. Computed from the
-  // list the server sent, so the dialog and the check agree.
+  // Companies a tier change newly involves, from the server's list so dialog and check agree.
   const unacknowledged = (tier: string): AiProcessor[] =>
     settings.processors.filter((p) => !p.acknowledged && p.tiers.includes(tier));
 
   const overBudget = settings.month_to_date_cents >= settings.budget_cents;
   const downgraded = settings.effective_tier !== settings.tier;
-  // Sprint L2 — who is writing right now, in one line: the processor when
-  // it is a company, "the local model" when it is this machine.
+  // Who is writing right now: the processor, or "the local model".
   const writerName = (w: AiWriter | null | undefined): string =>
     !w ? "" : w.processor && w.region !== "local" ? `${w.processor} (${w.region})` : "the local model";
   const writer = settings.writer ?? null;

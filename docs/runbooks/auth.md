@@ -11,7 +11,7 @@ The tenant-admin user-management surface these procedures call is:
 and `PUT /admin/users/{sub}/roles`. All are RLS-scoped to the caller's
 tenant (a cross-tenant `sub` returns 404, never an existence leak) and
 emit `sec`-severity audit events. The full role × action matrix lives in
-`docs/auth/permissions.csv`; the prose companion is `docs/auth/roles.md`.
+`docs/auth/permissions.csv`.
 
 ---
 
@@ -64,8 +64,7 @@ authenticator. (Applies when MFA is on: `MDX_MFA_ENROLMENT_ENABLED` +
 **Enrolment support notes:** an enrolled user's login needs the `otp`
 field — the SPA shows the code prompt on the 401 `otp_required` machine
 code; `otp_invalid` is a wrong code; `otp_unavailable` means the secret
-store (master key / Vault) is down — check `docs/runbooks/kms.md`, the
-login fails CLOSED on purpose.
+store (master key / Vault) is down — the login fails CLOSED on purpose.
 
 ---
 

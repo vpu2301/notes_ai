@@ -1,18 +1,8 @@
-"""BE-0 end to end: the real Keycloak, the real pools, the real Redis.
+"""Signup end to end: real Keycloak, pools and Redis; only SMTP is the shipped ``mock`` provider.
 
-Nothing is faked except the SMTP relay, and that is the ``mock`` provider
-the service already ships — so the rendering and the address the mail is
-bound for are the production path too.
-
-What this proves that the unit suite cannot: that a Keycloak user created
-with a password and **no required actions** can actually complete the
-password grant. That single line in ``create_user_with_password`` is the
-difference between a working signup and one where every new account is
-told "Account is not fully set up" on its first sign-in, and it cannot be
-tested against a fake — the fake does not implement Keycloak's rule.
-
-Requires: ``RUN_DB_INTEGRATION=1``, ``RUN_KEYCLOAK_INTEGRATION=1``,
-``make dev-up``, ``make migrate-up``.
+Proves a Keycloak user created with a password and no required actions can complete the
+password grant, which no fake implements. Requires ``RUN_DB_INTEGRATION=1``,
+``RUN_KEYCLOAK_INTEGRATION=1``, ``make dev-up``, ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -53,8 +43,7 @@ async def app(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "idp_mode", "keycloak")
     monkeypatch.setattr(settings, "signup_enabled", True)
     monkeypatch.setattr(settings, "email_provider", "mock")
-    # Each test presents its own client address so the per-IP cap (5/h) is
-    # per test rather than shared with every other run against this Redis.
+    # Own client address per test so the per-IP cap is not shared across runs.
     monkeypatch.setattr(settings, "trusted_proxy_cidrs", "127.0.0.1/32")
 
     a = create_app()
@@ -110,13 +99,7 @@ def _code(app, to: str) -> str:
 
 
 async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) -> None:
-    """The whole point of BE-0, in one test.
-
-    The `roles` assertion is not decoration. `tenant_admin` alone holds no
-    content permission at all (S14), so an account with only that role
-    signs in successfully and then gets 403 on the first note it tries to
-    write — a failure that looks like a note-service bug and is not.
-    """
+    """`tenant_admin` alone holds no content permission, so the `roles` assertion is load-bearing."""
     email = _email()
 
     started = await client.post(
@@ -126,8 +109,7 @@ async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) 
     assert started.status_code == 202, started.text
     assert started.json()["status"] == "verification_sent"
 
-    # Before confirmation the account is disabled in Keycloak, so no grant
-    # of any kind can produce a token.
+    # Before confirmation the account is disabled in Keycloak: no grant can produce a token.
     early = await client.post("/auth/login", json={"username": email, "password": PASSWORD})
     assert early.status_code == 403, early.text
     assert early.json()["code"] == "email_not_verified"
@@ -145,26 +127,19 @@ async def test_signup_verify_then_login_returns_a_usable_token(app, client, su) 
     from jose import jwt
 
     claims = jwt.get_unverified_claims(body["access_token"])
-    # A superset: Keycloak also puts its own realm defaults in the claim
-    # (`default-roles-notes`, `offline_access`, `uma_authorization`), and
-    # those are not ours to assert on.
+    # A superset: Keycloak adds its own realm defaults to the claim.
     assert {"tenant_admin", "member"} <= set(claims["roles"]), (
         "a new account must be able to write in its own workspace; "
         "tenant_admin alone holds no content permission (docs/auth/roles.md)"
     )
-    # `tid` is the claim every service filters rows by. It reaches the
-    # token through the `tenant_id` user attribute, which Keycloak's
-    # declarative user profile drops unless the realm declares it — see
-    # the userProfile component in infra/keycloak/realm-export.json.
+    # `tid` reaches the token via the `tenant_id` user attribute, which Keycloak drops unless the realm user profile declares it.
     assert claims.get("tid"), "no tid claim: is `tenant_id` declared on the realm user profile?"
 
     tenant_id = await su.fetchval("SELECT tenant_id FROM users WHERE email = $1", email)
     assert claims["tid"] == str(tenant_id)
     assert await su.fetchval("SELECT status FROM users WHERE email = $1", email) == "active"
     assert await su.fetchval("SELECT kind FROM tenants WHERE id = $1", tenant_id) == "personal"
-    # The bridge row and the identity go together: without the identity
-    # `/auth/me` cannot describe the person, and BE-3's code login later
-    # cannot find them.
+    # Bridge row and identity go together; without the identity `/auth/me` cannot describe the person.
     assert await su.fetchval("SELECT count(*) FROM identities WHERE email = $1", email) == 1
 
 
@@ -190,14 +165,7 @@ async def test_a_second_signup_with_the_same_address_creates_nothing(app, client
 
 
 async def test_the_created_keycloak_user_has_no_pending_required_actions(app, client, su) -> None:
-    """The single line this whole flow rests on.
-
-    ``create_user`` (the admin-invite path) sets
-    ``requiredActions: ["UPDATE_PASSWORD"]``, and a pending required
-    action makes the password grant refuse with "Account is not fully set
-    up". A signup that inherited it would create accounts nobody could
-    ever sign in to, and the error would point at the password.
-    """
+    """`create_user` sets `requiredActions: ["UPDATE_PASSWORD"]`, which makes the password grant refuse; signup must not inherit it."""
     email = _email()
     await client.post(
         "/auth/signup", json={"email": email, "password": PASSWORD, "display_name": "Ada"}
@@ -255,11 +223,7 @@ async def test_the_api_refuses_what_the_realm_would_refuse(client) -> None:
 
 
 async def test_the_concierge_path_onboards_without_a_code(app, su) -> None:
-    """OPS-0's CLI, exercised through the service the CLI calls.
-
-    The account is active immediately and login works — no confirmation
-    mail is sent, because the operator vouched for the address.
-    """
+    """The concierge CLI path: active immediately, no confirmation mail."""
     from auth_service.domain.onboarding_service import generate_password
 
     email = _email()

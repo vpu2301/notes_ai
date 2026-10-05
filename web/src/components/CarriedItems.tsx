@@ -12,14 +12,8 @@ function formatDate(iso: string | null): string {
     : when.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-/**
- * "Still open from 12 Sep" — the previous meeting's unfinished business,
- * at the top of this one.
- *
- * The items keep the PREVIOUS note's key, so ticking one here does not
- * detach it from the meeting where it was agreed, or from the
- * recipient's confirmation on that meeting's shared page.
- */
+/** Previous meeting's open items. They keep the PREVIOUS note's key, so ticking one here
+ *  stays attached to the meeting where it was agreed. */
 export function CarriedItems({ noteId, readOnly = false }: { noteId: string; readOnly?: boolean }) {
   const toast = useToast();
   const [view, setView] = useState<CarriedView | null>(null);
@@ -29,8 +23,6 @@ export function CarriedItems({ noteId, readOnly = false }: { noteId: string; rea
     try {
       setView(await getCarried(noteId));
     } catch {
-      // No series, or the previous note is no longer readable. Either
-      // way there is simply nothing to show.
       setView(null);
     }
   }, [noteId]);
@@ -42,7 +34,7 @@ export function CarriedItems({ noteId, readOnly = false }: { noteId: string; rea
   const update = async (item: CarriedItem, state: "open" | "done_marked" | "dropped") => {
     setBusy(item.item_key);
     const before = view;
-    // Optimistic: ticking a box should feel like ticking a box.
+    // Optimistic.
     setView((cur) =>
       cur
         ? {
@@ -93,7 +85,6 @@ export function CarriedItems({ noteId, readOnly = false }: { noteId: string; rea
                   {item.due_text && <span className="help"> — {item.due_text}</span>}
                 </span>
               </label>
-              {/* The recording said it was done, and these are the words. */}
               {item.state === "done_mentioned" && item.done_quote && (
                 <p className="help carried-quote">
                   {item.done_speaker ? `${item.done_speaker}: ` : ""}“{item.done_quote}”

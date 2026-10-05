@@ -1,22 +1,11 @@
-"""One registry per process, probed once at startup (Sprint L2).
-
-The API and the worker used to each build a `Registry` lazily and never
-ask it anything until the first job. With a hosted default and a local
-fallback the decision has to be made — and said — when the process starts:
+"""One registry per process, probed once at startup, so the routing decision is
+made and logged when the process starts:
 
     models.route      backend=mistral_eu  primary=mistral_eu  reason=None
     models.override_fallback  backend=dev_mac  primary=mistral_eu  reason=probe_failed
 
-`load_registry()` reads `config/models.yaml` with the workspace settings
-source and the dev switch (`MDX_DEV_CHAT_BACKEND`); `probe_chat()` sends
-one liveness call to the active chat backend with a short timeout and, in
-dev only, moves to the fallback for the rest of the process when the
-primary does not answer. Staging and prod never switch processors on
-their own: a failed probe there is a `ConfigError` and the process refuses
-to boot, exactly as before.
-
-`describe()` is what the AI-settings page shows under "Notes are written
-by": backend, processor, and the fallback and reason when one is active.
+`probe_chat()` moves to the fallback for the rest of the process in dev only;
+staging and prod never switch processors on their own (a failed probe refuses to boot).
 """
 
 from __future__ import annotations

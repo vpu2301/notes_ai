@@ -1,15 +1,7 @@
 """GET /notes/search — the note list surface.
 
-Two standings reach it (S14):
-
-  `note.read`  — member / viewer. The full list: titles, snippets,
-                 authors.
-  `stats.read` — tenant_admin, who holds no content read. Same rows,
-                 stripped to counts and timings: no title, no snippet.
-                 This is what keeps the business dashboard's KPIs
-                 working after the admin was separated from note
-                 content, without giving back a browsable list of the
-                 tenant's notes.
+`note.read` gets the full list; `stats.read` (tenant_admin, no content read)
+gets the same rows stripped to counts and timings.
 """
 
 from __future__ import annotations
@@ -39,11 +31,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
 _meter = metrics.get_meter("mdx.note")
-# Sprint 15: closes the sprint-08 gap — the dashboard panel "Search latency
-# (split by has_q)" and the NoteSearchLatencyHigh alert have queried
-# mdx_notes_search_latency_ms_histogram since sprint 08, but nothing ever
-# created the instrument. unit deliberately empty (exporter appends unit
-# names; values are ms); the "*latency*" View supplies the ms buckets.
+# Read by the "Search latency" panel and NoteSearchLatencyHigh. unit deliberately
+# empty (the exporter appends unit names); the "*latency*" View supplies ms buckets.
 _search_latency = _meter.create_histogram(
     "mdx_notes_search_latency_ms_histogram",
     description="End-to-end note search latency in ms (label has_q)",
@@ -68,7 +57,7 @@ class SearchHitDTO(BaseModel):
     co_author_ids: list[UUID]
     snippet: str
     updated_at: str
-    # 0016 — sharing state for the list badge. None in stats mode.
+    # Sharing state for the list badge. None in stats mode.
     visibility: str | None = None
     shared_with_count: int | None = None
     has_public_link: bool | None = None
@@ -82,9 +71,7 @@ class SearchResponse(BaseModel):
     next_cursor: str | None
     total_estimated: int | None
     total_exact: int | None = None
-    # Sprint 15 (ADR-0038): synonym terms that broadened this query —
-    # transparency for the FE ("also matching: quarterly review, QBR").
-    # Empty when expansion found nothing or expand=false.
+    # Synonym terms that broadened this query (ADR-0038); empty when none or expand=false.
     expanded_terms: list[str] = []
 
 
@@ -147,18 +134,14 @@ async def search_notes(
         if total == "exact":
             total_exact = await searchmod.exact_total(conn, filters)
 
-        # S14 — which of the two standings admitted this caller decides
-        # what the rows may contain. `stats.read` alone (a tenant_admin)
-        # gets counts and timings; `note.read` gets the full list.
+        # `stats.read` alone gets counts and timings; `note.read` gets the full list.
         content_read = can_claims(claims, "note.read", "note")
 
     out: list[SearchHitDTO] = []
     for h in hits:
         if not content_read:
-            # Stats mode. Every content-bearing field is dropped at
-            # construction rather than blanked afterwards, so a field
-            # added to SearchHitDTO later cannot leak by being forgotten
-            # here — it simply takes its model default.
+            # Stats mode: content fields are omitted at construction, so a field added
+            # to SearchHitDTO later cannot leak by being forgotten here.
             out.append(
                 SearchHitDTO(
                     note_id=h.note_id,
@@ -219,8 +202,7 @@ async def search_notes(
         severity=Severity.INFO,
     )
     if expanded_terms:
-        # Aggregated search.expanded (ADR-0038): counted in memory, one
-        # audit row per tenant per flush — never per keystroke.
+        # Aggregated search.expanded (ADR-0038): one audit row per tenant per flush.
         await state.search_audit_buffer.record(
             tenant_id=claims.tid, expanded_terms=len(expanded_terms)
         )

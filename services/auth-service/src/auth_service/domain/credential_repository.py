@@ -1,9 +1,4 @@
-"""SQL for `service_credentials` and `service_credential_secrets` (0026).
-
-Runs on the ``tenant_writer`` pool. The secrets table has no ``app_role``
-grant at all, so this module is the only code in the estate that can read
-a hash — which is the point of putting the lookup in one place.
-"""
+"""SQL for `service_credentials` and `service_credential_secrets` (``tenant_writer`` only; no ``app_role`` grant)."""
 
 from __future__ import annotations
 
@@ -80,13 +75,7 @@ class CredentialRepository:
         secret_hash: str,
         secret_prefix: str,
     ) -> Credential:
-        """Insert the credential and its first secret together.
-
-        One transaction, because a credential with no secret cannot
-        authenticate and cannot be given one afterwards through any route
-        that exists — it would be a dead row that looks like a working
-        device in the management list.
-        """
+        """Insert the credential and its first secret in one transaction."""
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
                 f"""
@@ -146,12 +135,7 @@ class CredentialRepository:
         return [Credential.from_row(r) for r in rows]
 
     async def revoke(self, credential_id: UUID) -> bool:
-        """Revoke the credential and every secret it holds, atomically.
-
-        Both halves matter: the credential row is what the grant checks
-        first, and the secrets are what an attacker holding a copy would
-        present. Leaving either behind leaves a way in.
-        """
+        """Revoke the credential and every secret it holds, atomically."""
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
                 """
@@ -172,14 +156,7 @@ class CredentialRepository:
         return True
 
     async def touch_used(self, credential_id: UUID, *, throttle_seconds: int = 300) -> None:
-        """Stamp ``last_used_at``, at most once per ``throttle_seconds``.
-
-        A busy room fetches a token every 15 minutes, but a chatty service
-        could fetch one per request. The throttle is in the WHERE clause
-        so the write is skipped in the database rather than guessed at in
-        Python — "when did this device last check in" stays useful without
-        turning every grant into a row update.
-        """
+        """Stamp ``last_used_at`` at most once per ``throttle_seconds`` (throttle in the WHERE clause)."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
@@ -196,14 +173,7 @@ class CredentialRepository:
     # ── secrets ──────────────────────────────────────────────────────
 
     async def find_by_secret_hash(self, secret_hash: str) -> tuple[Credential, UUID] | None:
-        """Resolve a presented secret to its credential, or None.
-
-        Deliberately keyed on the hash alone, with no ``client_id`` in the
-        predicate: the caller compares the returned credential's id to the
-        one presented, so a secret belonging to credential A cannot be
-        used by claiming to be credential B — and the lookup itself takes
-        the same work either way.
-        """
+        """Resolve a presented secret to its credential, or None; keyed on the hash alone, the caller checks the id."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
@@ -251,13 +221,7 @@ class CredentialRepository:
         secret_prefix: str,
         old_ttl_seconds: int,
     ) -> datetime:
-        """Rotation: issue a new secret and put a clock on the old ones.
-
-        The old secret is *not* revoked. A room is re-keyed by deploying
-        the new secret whenever somebody is next in the room; revoking on
-        rotation would take the room offline the moment the button was
-        pressed, which is how rotations stop happening.
-        """
+        """Rotation: issue a new secret and put a clock on the old ones (not revoked: the room stays online)."""
         expires_at = datetime.now(UTC) + timedelta(seconds=old_ttl_seconds)
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(

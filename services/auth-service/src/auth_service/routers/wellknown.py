@@ -1,19 +1,7 @@
-"""OIDC discovery + JWKS for the native issuer (IDX-A2, G; FND-1).
+"""OIDC discovery + JWKS for the native issuer, mounted in every mode.
 
-Mounted in every mode. Discovery describes an issuer, so in ``keycloak``
-mode — where there is no native issuer — it answers 503.
-
-The JWKS endpoint does not, and that is deliberate. FND-1 configures the
-whole fleet with this URL *before* auth-service has a signing key, so for
-the length of that rollout the honest answer is an empty key set:
-``{"keys": []}`` is a valid JWKS document, every service's cache accepts
-it, and a token claiming this issuer fails ``kid_not_found`` rather than
-crashing a verifier. A 404 here would make the rollout unverifiable — the
-operator could not tell "not deployed yet" from "misconfigured URL"
-without reading logs on eight services.
-
-The JWKS never carries private members — the key set exposes ``public_jwk``
-alone, and a unit test asserts the served document has no ``d/p/q/dp/dq/qi``.
+Discovery answers 503 in keycloak mode; JWKS answers ``{"keys": []}`` (valid,
+cacheable) so the fleet can be pointed here before there is a key. Never private members.
 """
 
 from __future__ import annotations
@@ -65,8 +53,7 @@ async def jwks(response: Response) -> dict[str, Any]:
     state = get_state()
     keys = getattr(state, "signing_keys", None)
     if keys is None:
-        # Empty but valid: this deployment does not mint yet. See the
-        # module docstring — the fleet is pointed here first, on purpose.
+        # Empty but valid: this deployment does not mint yet.
         _jwks_requests.add(1)
         response.headers["Cache-Control"] = "public, max-age=60"
         return {"keys": []}

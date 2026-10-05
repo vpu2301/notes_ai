@@ -1,13 +1,7 @@
 import SwiftUI
 
-/// "Client version" — what this note looks like to someone outside the
-/// workspace (Sprint 36).
-///
-/// A preview of the real thing, not a mock-up of it: the server builds it
-/// with the same function the shared page and the client PDF use, so what
-/// the author sees here and what the client receives cannot drift apart.
-/// That is the whole point — the author is about to make an irreversible
-/// decision about someone else's inbox.
+/// "Client version" — what this note looks like outside the workspace, built
+/// by the same server function as the shared page and the PDF.
 struct ClientVersionView: View {
     @ObservedObject var model: NoteViewModel
 

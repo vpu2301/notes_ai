@@ -1,7 +1,4 @@
-"""Live-DB tests for migrations 0022/0023 (RUN_DB_INTEGRATION=1; needs
-`make dev-up && make migrate-up`). Covers: claim with SKIP LOCKED, the
-warming re-claim not consuming an attempt, the stale-lease reaper, and
-tenant isolation for jobs and model_usage (A cannot read B)."""
+"""Live-DB tests for the jobs queue (RUN_DB_INTEGRATION=1): SKIP LOCKED claim, warming re-claim, reaper, tenant isolation."""
 
 from __future__ import annotations
 

@@ -1,14 +1,5 @@
-"""SMTP delivery for share mail.
-
-The same provider shape auth-service uses for account mail — an ABC, an
-aiosmtplib implementation, and a mock that REFUSES TO RUN IN PRODUCTION.
-The refusal is the point: a mock that silently accepts mail in production
-looks exactly like a working system while every share goes nowhere, and
-nothing in the metrics distinguishes the two.
-
-``reply_to`` is set per message rather than per provider, because a share
-mail's natural reply address is the colleague who sent it, not a noreply
-mailbox — the recipient's first instinct is to answer the person.
+"""SMTP delivery for share mail: an ABC, an aiosmtplib implementation, and a mock
+that REFUSES TO RUN IN PRODUCTION. ``reply_to`` is per message (the sharer).
 """
 
 from __future__ import annotations
@@ -62,30 +53,18 @@ def build_mime(
     message_id: str | None = None,
     date: str | None = None,
 ) -> EmailMessage:
-    """Assemble the MIME document.
-
-    ``message_id`` and ``date`` are injectable so tests can assert on
-    exact bytes; left alone they are generated. Generating them is not
-    optional: ``Date`` is a REQUIRED header (RFC 5322 §3.6) and mail
-    missing either it or ``Message-ID`` is scored as suspicious by every
-    major provider — the share lands in spam, or nowhere, while the
-    relay reports a clean 250 and the sender is told it went out.
-    """
+    """Assemble the MIME document. ``message_id`` and ``date`` are injectable for
+    tests; generating them is required (RFC 5322 §3.6), or the mail lands in spam."""
     mime = EmailMessage()
     mime["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     mime["To"] = message.to_address
     mime["Subject"] = message.subject
     mime["Message-ID"] = message_id or make_msgid(domain=from_address.rsplit("@", 1)[-1])
     mime["Date"] = date or formatdate(localtime=True)
-    # The sharer's own address, or the configured mailbox when they have
-    # none on file — a share mail with no reply path at all leaves the
-    # recipient answering into the void.
     reply_to = message.reply_to or reply_to_fallback
     if reply_to:
         mime["Reply-To"] = reply_to
-    # A share mail is sent by a person pressing "Send", so it is NOT
-    # Auto-Submitted: marking it auto-generated would suppress the
-    # out-of-office reply the sender genuinely wants to see.
+    # NOT Auto-Submitted: a person pressed Send and wants the out-of-office reply.
     mime.set_content(message.text_body)
     if message.html_body:
         mime.add_alternative(message.html_body, subtype="html")
@@ -93,14 +72,8 @@ def build_mime(
 
 
 def ehlo_hostname(from_address: str) -> str:
-    """The name we announce in EHLO. Never ``socket.getfqdn()``.
-
-    Left to itself aiosmtplib resolves the local FQDN, and
-    ``socket.getfqdn()`` does a reverse DNS lookup that BLOCKS — a flat
-    30 seconds per message on a machine with no PTR record. The sending
-    domain is the right answer anyway: stable, matching the envelope
-    sender, and preferred by any receiving MTA that compares the two.
-    """
+    """The name we announce in EHLO: the sending domain, never ``socket.getfqdn()``
+    (a blocking reverse DNS lookup, 30 s per message without a PTR record)."""
     domain = from_address.rsplit("@", 1)[-1].strip()
     return domain or "localhost"
 
@@ -141,10 +114,7 @@ class SmtpProvider(EmailProvider):
             from_name=self._from_name,
             reply_to_fallback=self._reply_to,
         )
-        # Port 465 is implicit TLS (the socket is wrapped before the
-        # greeting); everything else negotiates STARTTLS. start_tls=True
-        # on 465 tries to upgrade an already-encrypted connection and
-        # fails with a protocol error that reads like bad credentials.
+        # 465 is implicit TLS; start_tls=True there fails with an error that reads like bad credentials.
         implicit_tls = self._port == 465
         try:
             await aiosmtplib.send(
@@ -160,9 +130,7 @@ class SmtpProvider(EmailProvider):
             )
         except Exception as exc:  # noqa: BLE001
             code = getattr(exc, "code", None)
-            # 5xx is a permanent refusal — an unknown mailbox, or an
-            # authentication rejection. The caller reports that one
-            # address back to the sender instead of retrying it.
+            # 5xx is a permanent refusal: reported to the sender, not retried.
             if isinstance(code, int) and 500 <= code < 600:
                 raise EmailPermanentError(f"smtp permanent {code}: {exc}") from exc
             raise EmailDeliveryError(f"smtp failure: {exc}") from exc

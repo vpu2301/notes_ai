@@ -5,8 +5,7 @@ import { messageFor } from "../lib/errorCopy";
 import type { GeneratedItem } from "../api/types";
 import { mmss } from "../lib/generation";
 
-/** What a line's certainty is called on its chip (Summary Engine v2, Q5).
- *  A plain fact has no chip. */
+/** Certainty chip label; a plain fact has no chip. */
 export const CERTAINTY_LABELS: Record<string, string> = {
   prediction: "Forecast",
   estimate: "Estimate",
@@ -26,15 +25,8 @@ export function chipLabel(row: GeneratedItem): string | null {
   return holder ? `${label} · ${holder}` : label;
 }
 
-/**
- * The evidence behind one generated line, opened from the line itself.
- *
- * The quote (verbatim, as the transcriber heard it), when it was said and
- * by whom, and a button that plays the recording around it. Labels are
- * data from the row, drawn here — never words in the note a person would
- * have to edit around. Members only: this is never rendered on the shared
- * page, the client version or the PDF.
- */
+/** Evidence behind a generated line: verbatim quote, time, speaker, play button.
+ *  Members only — never on the shared page, client version or PDF. */
 export function LineEvidence({
   noteId,
   row,
@@ -61,8 +53,7 @@ export function LineEvidence({
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  // The line may sit inside a click-to-edit document: nothing here may
-  // start editing.
+  // May sit inside a click-to-edit document: nothing here may start editing.
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   const play = async () => {
@@ -115,8 +106,7 @@ export function LineEvidence({
           if (e.key === "Escape") setOpen(false);
         }}
       >
-        {/* F2: the mark is drawn by CSS, so it is never part of the note's text —
-            selecting and copying a line never carries it along. */}
+        {/* The mark is CSS-drawn so copying a line never carries it along. */}
       </button>
       {open && (
         <span

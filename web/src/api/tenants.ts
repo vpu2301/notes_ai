@@ -1,4 +1,4 @@
-// The workspace's own profile (auth-service `/tenants/{id}`), for the settings page (Sprint 23).
+// The workspace's own profile (auth-service `/tenants/{id}`), for the settings page.
 import { api } from "./http";
 import type { TenantMember, TenantProfile } from "./types";
 
@@ -28,10 +28,7 @@ export function listMembers(id: string): Promise<TenantMember[]> {
   );
 }
 
-/**
- * The address has to belong to an existing account: the server answers
- * 404 when nobody signed up with it yet, 409 when they are already in.
- */
+/** 404 when no account has the address, 409 when already a member. */
 export function addMember(id: string, email: string, role: string): Promise<TenantMember> {
   return api<TenantMember>("auth", `/tenants/${id}/members`, {
     method: "POST",

@@ -1,17 +1,9 @@
-"""IDX-A5 against a real Postgres and a real envelope.
+"""MFA + account against a real Postgres and envelope.
 
-What only the database and libs/crypto can prove:
-
-  * a TOTP secret in the column is AES-GCM ciphertext, not base32;
-  * the step claim is a conditional UPDATE, so concurrent uses of one code
-    produce exactly one winner;
-  * a recovery code is spent once under concurrency;
-  * the sole-owner rule sees the real membership graph;
-  * deletion dissolves solo workspaces and leaves shared ones alone;
-  * the purge crypto-shreds credentials and frees the address.
-
-Requires: ``RUN_DB_INTEGRATION=1``, ``make migrate-up``, and the dev
-master key at ``infra/dev/master.key``.
+TOTP secrets are AES-GCM ciphertext at rest; step and recovery-code claims have exactly
+one winner under concurrency; the sole-owner rule sees the real membership graph; deletion
+dissolves solo workspaces; the purge crypto-shreds credentials and frees the address.
+Requires ``RUN_DB_INTEGRATION=1``, ``make migrate-up`` and ``infra/dev/master.key``.
 """
 
 from __future__ import annotations
@@ -145,8 +137,7 @@ async def test_the_stored_totp_secret_is_ciphertext_not_base32(pool, su, box) ->
         "SELECT secret_enc FROM identity_totp WHERE identity_id = $1", identity.id
     )
     assert secret not in stored
-    # Not a base32 secret by any reading of it — the acceptance criterion
-    # asks for exactly this check against the column.
+    # Not a base32 secret by any reading of it.
     with pytest.raises(binascii.Error):
         base64.b32decode(stored + "=" * (-len(stored) % 8), casefold=True)
 

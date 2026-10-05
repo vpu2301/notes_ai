@@ -1,11 +1,5 @@
-"""Billing (0068) — the plan, the month's usage, and changing the plan.
-
-What is worth a test:
-
-* a plan never changes without a payment provider that allows it — with
-  none connected the change is refused, not faked;
-* the AI allowance on the page is the one generation enforces;
-* only an admin sees or changes what the workspace pays.
+"""Billing: a plan never changes without a provider that allows it; the AI
+allowance shown is the one enforced; only an admin sees or changes it.
 """
 
 from __future__ import annotations

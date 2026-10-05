@@ -2,12 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getGeneratedItems } from "../api/generation";
 import type { GeneratedItem } from "../api/types";
 
-/**
- * The rows behind a generated note, by line key (Summary Engine v2, Q5).
- * Loaded once per note version — a note has well under 200 lines, so one
- * request is the whole cost. Empty for a note nobody generated, and for
- * rows written before Q5: those lines simply have no evidence to open.
- */
+/** Evidence rows behind a generated note, by line key; one request per note version. */
 export function useGeneratedLines(noteId: string, version: number | null) {
   const [rows, setRows] = useState<GeneratedItem[]>([]);
   useEffect(() => {

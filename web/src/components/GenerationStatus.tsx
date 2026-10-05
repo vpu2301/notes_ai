@@ -22,26 +22,10 @@ const REASONS: Record<string, string> = {
 };
 
 /**
- * What the engine is doing with this note, in one line (Sprint 33/37).
- *
- * The note is editable the whole time: generation only writes into
- * sections nobody has touched. So this is a status line, never a
- * blocking overlay — the worst outcome of a slow or failed run is that
- * the note stays exactly as the author left it.
- *
- * `blocked` is the answer the create call already gave us: no generation
- * row will ever appear, and saying so beats a spinner that never ends.
- *
- * `canGenerate` — the note was made from a recording and the reader may
- * edit it. Then a note that was never written up (older than the
- * engine, or the run never started) shows *Generate Summary* in place
- * of nothing: the one place the button lives. Once a run exists the
- * status line takes over.
- *
- * `onSeek` — a finished run names what it left out ("Not included:
- * 00:45–00:52 (background speech)"); each range opens the transcript at
- * that moment. `onView` hands the latest run to the page (its recording
- * type labels the note).
+ * Engine status line, never a blocking overlay (generation only writes untouched sections).
+ * `blocked`: no generation row will ever appear. `canGenerate`: the one place the
+ * Generate Summary button lives, until a run exists. `onSeek`: opens the transcript
+ * at a left-out range. `onView`: hands the latest run to the page.
  */
 export function GenerationStatus({
   noteId,
@@ -62,8 +46,7 @@ export function GenerationStatus({
 }) {
   const toast = useToast();
   const [view, setView] = useState<GenerationView | null>(null);
-  // Distinguishes "not asked yet" from "asked, and there is none": the
-  // button must not flash before the first answer.
+  // "not asked yet" vs "asked, none": the button must not flash before the first answer.
   const [never, setNever] = useState(false);
   const [busy, setBusy] = useState(false);
   const wasLive = useRef(false);
@@ -73,17 +56,14 @@ export function GenerationStatus({
       const latest = await getGeneration(noteId);
       setView(latest);
       onView?.(latest);
-      // A latest run that is `superseded` was reset by an operator: as
-      // far as the reader is concerned there is none.
+      // `superseded` = reset by an operator: treat as none.
       setNever(latest.status === "superseded");
     } catch (err) {
-      // 404 = this note was never generated (typed by hand, or older
-      // than the engine).
+      // 404 = never generated.
       if (err instanceof ApiError && err.status === 404) setNever(true);
       else setView(null);
     }
-    // onView is a notification, not an input: a new function identity
-    // from the parent must not refetch.
+    // onView is a notification: a new identity must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
@@ -128,8 +108,7 @@ export function GenerationStatus({
       await regenerate(noteId);
       await load();
     } catch (err) {
-      // The closed vocabulary first (the same sentence the banner would
-      // show), the general copy for everything else — never the detail.
+      // Closed vocabulary first, general copy otherwise — never the detail.
       const code = err instanceof ApiError ? err.code : undefined;
       toast.error((code && REASONS[code]) || messageFor(err));
     } finally {
@@ -218,9 +197,7 @@ export function GenerationStatus({
   return view.status === "complete" ? excluded : null;
 }
 
-/** "Not included: 00:45–00:52 (background speech), …" — the passages the
- *  engine left out, confirmed by code (Q2), each a link into the
- *  transcript. Nothing at all when nothing was left out. */
+/** "Not included: 00:45–00:52 (background speech), …", each a link into the transcript. */
 function NotIncluded({
   view,
   onSeek,

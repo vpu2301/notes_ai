@@ -1,24 +1,5 @@
-"""Per-tenant Key-Encryption-Key (KEK) repository.
-
-A tenant KEK is the only key that ever wraps DEKs for that tenant. It is
-stored in the ``tenant_keks`` table, wrapped under the master KEK, with
-exactly one row per tenant.
-
-Lifecycle:
-
-1. First encrypt for a new tenant: ``get_or_create`` allocates a fresh
-   32-byte KEK with :func:`os.urandom`, wraps it under the master, and
-   INSERTs a row via the ``crypto_writer`` Postgres role.
-2. Subsequent calls fetch the wrapped KEK, unwrap it via the master
-   provider, and cache the plaintext for a short TTL.
-3. Rotation (sprint 17): ``rotate(tenant_id)`` evicts the cache and
-   ``wraps`` a new KEK in-place; old DEKs are still decryptable until a
-   re-wrap migration runs (KMS swap path, ADR-0011).
-
-Why a separate ``crypto_writer`` role? The least-privilege model in
-sprint 02 split DB roles by responsibility. ``app_role`` can SELECT
-``tenant_keks`` (filtered by RLS to the caller's tenant), but it
-deliberately can't write — that's the crypto_writer role.
+"""Per-tenant KEK repository: one ``tenant_keks`` row per tenant, wrapped under the master, written only by the
+``crypto_writer`` role (``app_role`` can only SELECT its own tenant's row). Plaintext is cached for a short TTL.
 """
 
 from __future__ import annotations
@@ -36,8 +17,7 @@ from .master import MASTER_KEY_SIZE_BYTES, MasterKeyProvider
 
 logger = logging.getLogger(__name__)
 
-# Plaintext-KEK cache TTL. Short on purpose — the cache exists to absorb
-# burst load, not to be a long-lived key store. 60 s is the spec maximum.
+# Short on purpose: absorbs burst load, not a key store. 60 s is the maximum.
 _CACHE_TTL_SECONDS: float = 60.0
 
 
@@ -49,11 +29,7 @@ class _CachedKek:
 
 
 class TenantKekRepository:
-    """Per-tenant KEK fetch / create with bounded plaintext caching.
-
-    Construct with a ``crypto_writer``-backed asyncpg pool and a master
-    key provider. Reuse the instance across requests.
-    """
+    """Per-tenant KEK fetch / create with bounded plaintext caching (``crypto_writer`` pool)."""
 
     def __init__(
         self,
@@ -69,12 +45,7 @@ class TenantKekRepository:
         self._cache_ttl = cache_ttl_seconds
 
     def master_key_id_for(self, tenant_id: UUID) -> str:
-        """Return the master_key_id under which the tenant's KEK is wrapped.
-
-        Reads the cache only — callers MUST have called ``get_or_create``
-        first, which populates the cache. Used by :class:`Envelope` when
-        building :class:`EnvelopeBlob` metadata.
-        """
+        """The master_key_id the tenant's KEK is wrapped under; cache only, so ``get_or_create`` must run first."""
         entry = self._cache.get(tenant_id)
         if entry is None:
             raise KeyError(
@@ -84,32 +55,20 @@ class TenantKekRepository:
         return entry.master_key_id
 
     def evict(self, tenant_id: UUID) -> None:
-        """Drop the cached plaintext KEK for ``tenant_id``.
-
-        Called on rotation, or by adversarial-leak handlers that want to
-        force a re-fetch on the next request.
-        """
+        """Drop the cached plaintext KEK (rotation, or to force a re-fetch)."""
         cached = self._cache.pop(tenant_id, None)
         if cached is not None:
-            # Best-effort zero: overwriting the dataclass field is the
-            # extent of what CPython allows.
+            # Best-effort zero.
             cached.plaintext = b"\x00" * MASTER_KEY_SIZE_BYTES
 
     async def get_or_create(self, tenant_id: UUID) -> bytes:
-        """Return the plaintext tenant KEK, creating it on first use.
-
-        The plaintext is cached for ``cache_ttl_seconds``. Callers must
-        treat the returned ``bytes`` as ephemeral — do not log, do not
-        persist, and zero local copies promptly.
-        """
+        """The plaintext tenant KEK, created on first use; ephemeral — never log or persist, zero copies promptly."""
         cached = self._cache.get(tenant_id)
         now = time.monotonic()
         if cached is not None and now - cached.cached_at < self._cache_ttl:
             return cached.plaintext
 
-        # Atomic on-miss: only one coroutine may hit the DB for a given
-        # tenant at a time. The lock is process-wide; cross-process
-        # contention is handled by the INSERT ... ON CONFLICT below.
+        # Process-wide lock on miss; cross-process contention is handled by INSERT ... ON CONFLICT.
         async with self._lock:
             cached = self._cache.get(tenant_id)
             if cached is not None and now - cached.cached_at < self._cache_ttl:
@@ -130,15 +89,8 @@ class TenantKekRepository:
             return plaintext
 
     async def _fetch_or_insert(self, tenant_id: UUID) -> asyncpg.Record:
-        """Read the wrapped KEK row, INSERTing one on first use.
-
-        Uses INSERT ... ON CONFLICT DO NOTHING to be safe under concurrent
-        first-encrypts for the same tenant across processes. The follow-up
-        SELECT is guaranteed to find a row.
-        """
-        # Cross-tenant fetch is allowed here ONLY because the
-        # crypto_writer role is granted exactly that surface. The
-        # caller's identity is already authenticated upstream.
+        """Read the wrapped KEK row, INSERTing one on first use (ON CONFLICT DO NOTHING across processes)."""
+        # Cross-tenant fetch is allowed only because crypto_writer is granted exactly that surface.
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
                 "SELECT wrapped_kek, kek_master_id FROM tenant_keks WHERE tenant_id = $1",
@@ -147,9 +99,6 @@ class TenantKekRepository:
             if row is not None:
                 return row
 
-            # Generate a fresh KEK and wrap it under the current
-            # master. The DB INSERT cannot run inside the lock above
-            # because asyncpg pool acquisition can block on it.
             plaintext_kek = os.urandom(MASTER_KEY_SIZE_BYTES)
             try:
                 master_key_id, wrapped = await self._master.wrap(plaintext_kek)
@@ -166,8 +115,6 @@ class TenantKekRepository:
                 wrapped,
                 master_key_id,
             )
-            # Re-fetch — either we just inserted, or another process
-            # got there first; either way the row exists now.
             row = await conn.fetchrow(
                 "SELECT wrapped_kek, kek_master_id FROM tenant_keks WHERE tenant_id = $1",
                 tenant_id,

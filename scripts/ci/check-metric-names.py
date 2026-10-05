@@ -1,39 +1,10 @@
 #!/usr/bin/env python3
-"""CI gate — exported metric names must equal the declared instrument names.
+"""CI gate: exported metric names equal the declared instrument names. The OTel
+Prometheus exporter appends the unit (``_ratio``, ``_milliseconds``) unless
+``add_metric_suffixes: false``; a rule on a mangled name never fires, or fires on ``vector(0)``.
 
-The OpenTelemetry Prometheus exporter mangles names by default: it appends
-the instrument's *unit* to the exported series. A ``unit="1"`` gauge
-becomes ``..._ratio``, a ``unit="ms"`` histogram becomes
-``..._milliseconds``, ``unit="MB"`` becomes ``..._MB``. Every alert rule
-and Grafana dashboard in this repo queries the name as declared in the
-service's ``metrics.py`` ("Names match sprint-04 spec §9 verbatim — the
-Grafana dashboard and alerts reference them. Keep stable."), so the
-mangling silently pointed all of them at names that do not exist.
-
-Mostly that fails quiet — an alert on a nonexistent series never fires,
-which reads as "no problem" on a green dashboard. It also fails LOUD:
-``DictationConversationFleetUnavailable`` is written
-``(sum(mdx_dictation_conversation_ready) or vector(0)) == 0`` so the
-absent name evaluated to 0 and paged "NO worker in the fleet can take a
-conversation session" against a healthy, warm, conversation-ready fleet.
-
-Two checks, one per direction of the drift:
-
-1. Every collector config sets ``add_metric_suffixes: false`` on the
-   prometheus exporter — the exporter must not mangle names.
-2. No rule/dashboard queries a mangled name — i.e. no reference is a
-   declared instrument plus a unit suffix. That catches the "fix" of
-   chasing the exporter by renaming the rule instead of the config,
-   which would break again the moment check 1 is honoured.
-
-This does NOT require every referenced ``mdx_*`` name to be a declared
-instrument: several are legitimately produced outside the services, by
-Prometheus textfile exporters (``scripts/jobs/nightly_verify.py`` and its
-chart copy ``infra/k8s/notes/files/jobs/nightly_verify.py``).
-
-Exit codes:
-    0 — no violations
-    1 — violations printed to stderr
+Checks every collector config sets the flag and no rule/dashboard queries a mangled name.
+Textfile-exporter metrics (nightly_verify.py) need not be declared instruments.
 """
 
 from __future__ import annotations
@@ -52,9 +23,8 @@ COLLECTOR_CONFIGS = (
 RULE_DIRS = ("infra/prometheus/rules",)
 DASHBOARD_DIRS = ("infra/grafana/dashboards",)
 
-# Unit -> suffix the OTel Prometheus exporter appends. "1" maps to
-# "_ratio" for gauges only, but we flag it for any instrument: a rule
-# referencing `<declared>_ratio` is wrong either way.
+# Unit -> suffix the OTel Prometheus exporter appends ("_ratio" is flagged
+# for any instrument, not only gauges).
 _UNIT_SUFFIX = {
     "1": "ratio",
     "s": "seconds",
@@ -74,8 +44,7 @@ _INSTRUMENT_RE = re.compile(
 )
 _UNIT_RE = re.compile(r"unit\s*=\s*\"(?P<unit>[^\"]*)\"")
 _METRIC_REF_RE = re.compile(r"\bmdx_[a-z0-9_]+")
-# Histogram/summary series suffixes Prometheus itself appends — strip
-# before comparing against an instrument name.
+# Histogram/summary suffixes Prometheus itself appends; stripped before comparing.
 _SERIES_SUFFIX_RE = re.compile(r"_(bucket|count|sum)$")
 
 

@@ -1,11 +1,4 @@
-"""Forensic record of items that can never be delivered.
-
-Lives in `domain` rather than beside either writer: BOTH the ingest
-consumer (undecodable envelope) and the delivery worker (retries
-exhausted) need it, and having delivery reach into `ingest` for it
-inverted the layering — dead-lettering is shared infrastructure, not an
-ingest detail.
-"""
+"""Forensic record of items that can never be delivered; shared by ingest and delivery."""
 
 from __future__ import annotations
 
@@ -34,13 +27,8 @@ async def write_dead_letter(
 ) -> None:
     """Record a permanently-failed item.
 
-    Scoping depends on what we know. When the tenant parsed, the write
-    goes through `tenant_connection` like every other write — the RLS
-    predicate demands a matching `app.tenant_id`, so an unscoped
-    connection would be refused. When the envelope was too malformed to
-    yield a tenant, the row is written NULL-tenant on a plain
-    connection, which the policy admits precisely so that the evidence
-    of a broken producer survives.
+    Tenant-scoped write when the tenant parsed (RLS demands it); otherwise a NULL-tenant
+    row on a plain connection, which the policy admits so the evidence survives.
     """
     tenant_id: UUID | None = None
     raw_tenant = envelope.get("tenant_id")

@@ -1,20 +1,8 @@
-"""The ``note.generate`` job: a transcript becomes a document.
+"""The ``note.generate`` job (note-worker): a transcript becomes a document.
 
-Runs in `note-worker`, not in the API. A model call over ten windows of
-an hour-long meeting takes minutes and holds a lot of memory; doing that
-inside a request would tie a user's browser to it and let one slow
-meeting starve every other note operation.
-
-The handler writes **twice**, on purpose:
-
-1. after extract/verify/merge — the tasks and decisions, which are what
-   the user opened the note for;
-2. after reduce — the summary and the topics, which take longer and
-   matter less in the first thirty seconds.
-
-Both writes go through `meeting_doc.writer`, which never overwrites
-anything a person typed. A crash between them re-runs the whole job, and
-the second attempt writes nothing new because the section hashes match.
+Writes twice: items after extract/verify/merge, then summary and topics after
+reduce. Both go through `meeting_doc.writer`, which never overwrites a person's
+text; a re-run after a crash writes nothing new because the section hashes match.
 """
 
 from __future__ import annotations
@@ -61,8 +49,7 @@ ITEM_ROLES = frozenset(
 
 
 class GenerationDeps:
-    """What the handler needs. A plain object so the worker wires it once
-    and the tests hand in fakes without a DI framework."""
+    """What the handler needs; a plain object the tests fill with fakes."""
 
     def __init__(
         self,
@@ -80,25 +67,18 @@ class GenerationDeps:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
         self.provider_for = provider_for
-        # Sprint L2: `(workspace_id, operation) -> provider` for the short
-        # calls (classify, title, entities), routed on their own rows. None
-        # means every call goes to the writing model, as before.
+        # `(workspace_id, operation) -> provider` for the short calls; None: the writing model.
         self.operation_provider_for = operation_provider_for
         self.audit_writer = audit_writer
-        # Sprint 37 B-1: a candidate backend running beside the real one
-        # on a sample of meetings, whose output is thrown away. This is
-        # what a routing flip is rehearsed with.
+        # Candidate backend run beside the real one on a sample; output thrown away.
         self.shadow_provider_for = shadow_provider_for
         self.shadow_percent = shadow_percent
-        # Q4: whether the engine may ask the model to respell unknown names.
         self.entity_model_tier = entity_model_tier
-        # SQ2 T3: the coverage retry's time budget per hour of recording.
         self.coverage_retry_budget_s_per_hour = coverage_retry_budget_s_per_hour
 
 
 def _retry_budget(deps: GenerationDeps, built: list[Any] | None) -> float | None:
-    """SQ2 T3 — seconds the generation may have run before the coverage
-    retry is skipped: the per-hour setting times the recording's length."""
+    """Seconds the generation may run before the coverage retry is skipped."""
     per_hour = getattr(deps, "coverage_retry_budget_s_per_hour", None)
     if per_hour is None or not built:
         return None
@@ -107,8 +87,7 @@ def _retry_budget(deps: GenerationDeps, built: list[Any] | None) -> float | None
 
 
 async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dict) -> dict:
-    """One generation, start to finish. Returns a result dict for the job
-    row — ids and counts only, never content."""
+    """One generation, start to finish. Returns ids and counts only, never content."""
     generation_id = UUID(str(payload["generation_id"]))
     note_id = UUID(str(payload["note_id"]))
 
@@ -127,8 +106,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         previous_hashes = (previous.stats or {}).get("section_hashes", {}) if previous else {}
         template_roles, template_code = await _role_map(conn, note_id=note_id)
         template_family = types.family_for_template(template_code)
-        # Sprint 36: the items still open from the previous meeting, so
-        # the extractor can say which of them this recording finishes.
+        # Still-open items from the previous meeting, so the extractor can tick them off.
         carried = await _carried(conn, note_id=note_id)
         meeting = await meetings.fetch(conn, note_id=note_id)
         counterpart = _counterpart(meeting)
@@ -153,17 +131,14 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     title_provider = await _operation_provider(deps, tenant_id, "title", provider)
     entity_provider = await _operation_provider(deps, tenant_id, "entities", provider)
     language = str(result.get("language") or "en")
-    # Relative dates resolve against the day it was RECORDED (Q3): a note
-    # made from an upload days later is not "today" in its own words.
+    # Relative dates resolve against the day it was RECORDED, not today.
     started = getattr(meeting, "started_at", None) if meeting else None
     meeting_date = (started or note.created_at or datetime.now(UTC)).date()
 
-    # Q3: what the recording IS decides which kinds are extracted — before
-    # extraction, so a podcast is never offered "decision" or "action".
+    # The recording type decides which kinds are extracted; classify what the
+    # pipeline will read (adverts cut), windows sized to the writing model's context.
     turns = windows.turns_from_result(result)
-    # F3 amendment: classify what the pipeline will read — adverts cut.
     turns = windows.prepare_turns(turns).turns
-    # L2 T5: the window size follows the writing model's context.
     built = windows.build_windows(
         turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
     )
@@ -179,7 +154,6 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     await _store_detected_type(
         deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
     )
-    # Q4: every name this recording may mean, and the workspace's glossary.
     known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
 
     document = await pipeline.run(
@@ -200,15 +174,11 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         entity_provider=entity_provider,
         retry_budget_s=_retry_budget(deps, built),
     )
-    # D1 — no note below the document standard is written: lint, repair,
-    # fall back, record (stats.lint). D2's regeneration hook is not merged,
-    # so nothing is regenerated. Never raises.
+    # Lint, repair, fall back, record (stats.lint). Never raises.
     document = await doclint.enforce(
         document, regenerate=document.regenerator, known=frozenset(known_people)
     )
-    # 0057 / SQ3 T4: the note gets its name once the pass has read the whole
-    # recording — excerpts from each third plus the note's themes and its
-    # most specific facts. One short call, never able to stop the note.
+    # The title comes after the whole recording was read; one short call that cannot stop the note.
     themes, title_facts = _title_context(document)
     await _name_note(
         deps,
@@ -283,8 +253,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             family=family,
             facts=document.facts,
         )
-        # Q5: the verified facts no line cites — what the reader's
-        # "Detailed" view lists under each topic, without another model call.
+        # Verified facts no line cites: the "Detailed" view's rows.
         await gen_repo.put_lines(
             conn,
             tenant_id=tenant_id,
@@ -293,8 +262,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             rows=uncited_rows(document, family=family),
         )
 
-        # Sprint 36: what the recording says was finished, and what it
-        # offers for a person to accept. Neither is a line of the note.
+        # Completions and judgements are not lines of the note.
         ticked = await _apply_completions(conn, note_id=note_id, completions=document.completions)
         await _store_judgements(
             conn,
@@ -336,10 +304,8 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         counterpart=counterpart,
     )
 
-    # The snapshot has done its job: the document is written and the
-    # transcript still lives in asr-service. Keeping a second encrypted
-    # copy of every meeting would be a data-retention decision nobody
-    # made. The daily sweep catches the ones whose worker died first.
+    # The transcript still lives in asr-service; a second copy is a retention decision
+    # nobody made. The daily sweep catches snapshots whose worker died first.
     await _discard_snapshot(deps, tenant_id, generation_id)
 
     written = len(first.written_sections) + len(second.written_sections)
@@ -357,7 +323,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "failed": document.windows_failed,
             "sections_written": written,
             "sections_suggested": suggested,
-            # Q2 — counts only; never a line, a fact or a quote.
+            # Counts only; never a line, a fact or a quote.
             "facts_kept": document.stats.get("facts_kept", 0),
             "facts_dropped_paraphrase": document.stats.get("facts_dropped_paraphrase", 0),
             "lines_kept": document.stats.get("lines_kept", 0),
@@ -366,12 +332,10 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "speech_ms": document.stats.get("speech_ms", 0),
             "noise_overridden": document.stats.get("noise_overridden", 0),
             "summary_fallback": document.stats.get("summary_fallback"),
-            # F3 amendment after r03 — outcomes, never content.
             "summary_ladder": document.stats.get("summary_ladder"),
             "topics_fallback": document.stats.get("topics_fallback"),
             "topics_failure": document.stats.get("topics_failure"),
             "adverts_cut": document.stats.get("adverts_cut", 0),
-            # D1 — codes and counts only.
             "lint_unresolved": (document.stats.get("lint") or {}).get("unresolved"),
             "lint_error": bool((document.stats.get("lint") or {}).get("error")),
             "prompt_version": document.stats.get("prompt_version"),
@@ -389,9 +353,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
 async def _operation_provider(
     deps: GenerationDeps, tenant_id: UUID, operation: str, default: Any
 ) -> Any:
-    """The provider routed for one short operation (Sprint L2), else the
-    writing model's. A routing problem for a side call never stops the
-    note: it falls back to `default` and says so."""
+    """The provider routed for one short operation, else `default`; a routing problem never stops the note."""
     if deps.operation_provider_for is None:
         return default
     try:
@@ -402,8 +364,7 @@ async def _operation_provider(
 
 
 def _title_context(document: Any) -> tuple[list[str], list[str]]:
-    """SQ3 T4 — the note's themes, and its five most specific verified
-    statements taken in turn from the first, middle and last third."""
+    """The note's themes and its five most specific statements, taken in turn from each third."""
     from note_service.domain.meeting_doc import support as support_rules
     from note_service.domain.meeting_doc import windows as windows_mod
 
@@ -447,10 +408,8 @@ async def _name_note(
 ) -> None:
     """Replace the placeholder title with one taken from the meeting.
 
-    The source is read before the model is asked, so a note that already
-    has a person's title (or this job's, from an earlier attempt) costs no
-    call — and read again under the row lock inside `note_title.apply`,
-    so a rename made while the model was answering is the one that stays.
+    The title source is read before the call (a person's title costs no call) and
+    again under the row lock in `note_title.apply`, so a concurrent rename wins.
     """
     try:
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
@@ -486,10 +445,8 @@ async def _store_items(
     family: Any = None,
     facts: list[Any] | None = None,
 ) -> None:
-    """Every written LINE is a row (Summary Engine v2, Q5): its text, what
-    it cites, and the evidence of the first fact it cites. A line's
-    placement follows what happened to its section: written when we wrote
-    it, suggested when the author had been in there."""
+    """Every written LINE is a row: text, citations, evidence of the first cited fact.
+    Placement: written when we wrote the section, suggested when the author had been in there."""
     by_id = {f.item_key: f for section in sections for f in section.facts}
     for fact in facts or []:
         by_id.setdefault(fact.item_key, fact)
@@ -514,18 +471,16 @@ async def _store_items(
         logger.info("note_generate.lines_stored", extra={"rows": stored})
 
 
-# Line kinds as rows. A line written from one fact keeps that fact's kind,
-# so the recipient page and the corrections routes read it as before.
+# A line written from one fact keeps that fact's kind (recipient page, corrections routes).
 _ROW_KIND: Final[dict[str, str]] = {
     "summary": "summary_sentence",
     "framing": "framing",
     "bullet": "topic_bullet",
     "date": "date",
-    # Sprint D2 T2 — a quote sub-point is a topic bullet row (no migration).
+    # A quote sub-point is a topic bullet row.
     "quote": "topic_bullet",
 }
-# Least sure last: a line resting on several facts is as sure as its
-# weakest one.
+# A line resting on several facts is as sure as its weakest one.
 _CERTAINTY_RANK: Final[dict[str, int]] = {
     "fact": 0,
     "estimate": 1,
@@ -539,8 +494,7 @@ _CERTAINTY_RANK: Final[dict[str, int]] = {
 def line_row(
     line: Any, section_key: str, placement: str, by_id: dict[str, Any], *, family: Any = None
 ) -> dict[str, Any] | None:
-    """The row for one written line, or None for a line with no evidence
-    (a heading). Pure — the tests build rows without a database."""
+    """The row for one written line, or None for a line with no evidence (a heading). Pure."""
     from ..domain import lines as line_rules
 
     cited = [by_id[i] for i in line.fact_ids if i in by_id]
@@ -581,12 +535,11 @@ def line_row(
         else None,
         "attributed_to": next(iter(holders)) if len(holders) == 1 else None,
         "corrections": [{"surface": s, "canonical": c, "source": src} for s, c, src in corrections],
-        # F3 — a figure row carries its verified fields, so a table cell has
-        # a source and a client can draw the value without parsing the line.
+        # A figure row carries its verified fields, so a client draws the value without parsing.
         "payload": first.figure.payload()
         if getattr(first, "figure", None) is not None and line.kind == "figure"
         else None,
-        # F2 — a sub-point names the bullet it sits under by that row's key.
+        # A sub-point names the bullet it sits under by that row's key.
         "parent_key": line_rules.key_of(line_rules.strip_marker(line.parent)[1])
         if getattr(line, "parent", None)
         else None,
@@ -603,10 +556,8 @@ def line_row(
 
 
 def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
-    """Rows for the verified facts no written line cites, each placed under
-    the topic nearest to it in time (else the overview) as ``suggested`` —
-    and, since F2, a row with placement ``evidence`` for every fact kept only
-    as evidence (a copy, or the speaker's own voice), cited or not. Pure."""
+    """``suggested`` rows for uncited facts (under the nearest topic, else the overview)
+    and ``evidence`` rows for evidence-only facts, cited or not. Pure."""
     from ..domain.meeting_doc import render as render_rules
     from ..domain.meeting_doc import roles as role_rules
 
@@ -616,8 +567,7 @@ def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
     for fact in document.facts:
         if fact.kind in ("completion", "judgement"):
             continue
-        # F2 — evidence-only facts get their row whether or not a line cites
-        # them: the evidence popover resolves a line's citations by row.
+        # Evidence-only facts always get a row: the evidence popover resolves citations by row.
         if fact.item_key in cited and not fact.evidence_only:
             continue
         home = min(
@@ -627,9 +577,7 @@ def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
         )
         line = render_rules.Line(fact.text, fact.kind, (fact.item_key,), fact.mentions)
         section_key = home.section_key if home else role_rules.OVERVIEW_KEY
-        # F2 — a copy is evidence: stored, never offered as a line.
-        # A figure no line writes (a narrative recording has no table) is
-        # stored for search and evidence, never offered as a line.
+        # Copies and unwritten figures are stored for evidence, never offered as a line.
         placement = (
             writer.EVIDENCE
             if fact.evidence_only or getattr(fact, "figure", None) is not None
@@ -650,10 +598,8 @@ async def _recording_type(
     turns: list[Any],
     language: str,
 ) -> tuple[str, str]:
-    """``(recording_type, source)``. The author's choice wins: a meeting
-    type they set, or a specific template they picked (a client-call
-    template is a client call). Only an `auto` note on the generic
-    template is classified."""
+    """``(recording_type, source)``: the author's meeting type or specific template wins;
+    only an `auto` note on the generic template is classified."""
     chosen = getattr(meeting, "meeting_type", None) or "auto"
     if chosen != "auto":
         outcome = (types.recording_type_for_meeting_type(chosen), classify.SOURCE_USER)
@@ -684,13 +630,9 @@ async def _recording_type(
 async def _known_names(
     deps: GenerationDeps, tenant_id: UUID, *, result: dict, meeting: Any
 ) -> tuple[frozenset[str], tuple[Any, ...]]:
-    """``(known people, glossary terms)`` for one generation (Q4).
-
-    People: the ASR's name candidates (calendar invitees sent at capture),
-    the roster's names, the calendar event's attendees, and the glossary's
-    persons. The glossary is read inside THIS tenant's connection — another
-    workspace's spellings are never applied. A glossary that cannot be read
-    costs the glossary tier, not the note."""
+    """``(known people, glossary terms)``: ASR name candidates, roster, calendar
+    attendees, glossary persons. The glossary is read inside THIS tenant's
+    connection; an unreadable glossary costs the glossary tier, not the note."""
     from ..domain import glossary_repository
 
     people = {str(n) for n in result.get("name_candidates") or [] if n}
@@ -714,8 +656,7 @@ async def _known_names(
 async def _store_detected_type(
     deps: GenerationDeps, tenant_id: UUID, *, note_id: UUID, recording_type: str, source: str
 ) -> None:
-    """Record it on the note's meeting row. Never stops a generation: the
-    generation's own stats are what the view reads."""
+    """Record it on the note's meeting row; never stops a generation."""
     detected_by = "user" if source == classify.SOURCE_USER else "model"
     try:
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
@@ -730,16 +671,11 @@ async def _store_detected_type(
 
 
 def _counterpart(meeting: Any) -> str:
-    """The other side's name, for the "Acme does" heading.
-
-    Taken from the calendar event's title when there was one — it is the
-    only place we have a name for the other party without asking.
-    """
+    """The other side's name for the "Acme does" heading, from the calendar event's title."""
     if meeting is None:
         return ""
     title = str((meeting.calendar_context or {}).get("title") or "")
-    # "Acme <> Us — Weekly" → "Acme"; anything without a separator is
-    # not a party name and is left alone.
+    # "Acme <> Us — Weekly" → "Acme"; no separator, no party name.
     for sep in ("<>", "—", "–", "|", "/"):
         if sep in title:
             head = title.split(sep)[0].strip()
@@ -748,13 +684,9 @@ def _counterpart(meeting: Any) -> str:
 
 
 async def _carried(conn: Any, *, note_id: UUID) -> list[tuple[str, str]]:
-    """``[(item_key, text)]`` for the items still open from last time.
-
-    Read from THIS note's own "Still open" block, not from the previous
-    note. The visibility rule (ADR-0057) was applied once, when the items
-    were carried in by the user's own request; the worker has no claims
-    to re-apply it with, so it must not reach into another note at all.
-    """
+    """``[(item_key, text)]`` of still-open items, read from THIS note's "Still open"
+    block: the visibility rule (ADR-0057) was applied at carry-in, and the worker
+    has no claims to re-apply it, so it must not reach into another note."""
     rows = [
         r
         for r in await meetings.carried_items(conn, note_id=note_id)
@@ -773,8 +705,7 @@ async def _carried(conn: Any, *, note_id: UUID) -> list[tuple[str, str]]:
     for section in version.content.sections:
         for line in line_rules.split_section(section.text or ""):
             parts = line_rules.parts(line.content)
-            # The block renders as "- [ ] Owner: task — due"; the key is
-            # over the body, which is what `parts` gives back.
+            # The key is over the body of "- [ ] Owner: task — due".
             by_key.setdefault(line_rules.key_of(parts.body), parts.body)
 
     out: list[tuple[str, str]] = []
@@ -787,12 +718,8 @@ async def _carried(conn: Any, *, note_id: UUID) -> list[tuple[str, str]]:
 
 
 async def _apply_completions(conn: Any, *, note_id: UUID, completions: list[Any]) -> int:
-    """Tick off what the recording says was done — with the words.
-
-    `done_mentioned`, never `done_marked`: the distinction is who is
-    claiming it. A person ticking a box is a person; this is the machine
-    saying it heard so, and the quote is what lets a reader check.
-    """
+    """Tick off what the recording says was done, with the words: `done_mentioned`
+    (the machine heard so), never `done_marked` (a person ticked it)."""
     ticked = 0
     for fact in completions:
         if not fact.refers_to_key:
@@ -820,12 +747,7 @@ async def _store_judgements(
     judgements: list[Any],
     family: Any,
 ) -> None:
-    """Judgement values are stored as SUGGESTIONS and nothing else.
-
-    The engine never writes a `choice` or `date` field's metadata: a deal
-    stage or a hire recommendation is a person's call, and a machine that
-    sets one has made a decision nobody asked it to make.
-    """
+    """Judgement values are stored as SUGGESTIONS only; the engine never writes field metadata."""
     if not judgements:
         return
     await gen_repo.put_items(
@@ -865,14 +787,9 @@ async def mark_dead(
 ) -> None:
     """The job will never run again: settle the generation row.
 
-    The runner's probe runs BEFORE :func:`handle_generate`, so a backend
-    that is down ("connection refused" on a dev Mac with Ollama stopped)
-    exhausts the job's attempts without this module ever marking the row
-    `running`, let alone `failed`. Left alone, the row stays `queued`
-    forever: the client spins, the shared page is empty, and the live-
-    generation index refuses every regenerate as "already being written".
-    Only a live row is touched — a run that already wrote the note keeps
-    its `complete`.
+    The runner's probe runs BEFORE :func:`handle_generate`, so a down backend can
+    exhaust the attempts with the row still `queued` (client spins, regenerate
+    refused). Only a live row is touched; a `complete` run keeps its status.
     """
     generation_id = UUID(str(payload["generation_id"]))
     async with tenant_connection(deps.app_pool, tenant_id) as conn:
@@ -899,12 +816,8 @@ async def _fail(
 
 
 async def _discard_snapshot(deps: GenerationDeps, tenant_id: UUID, generation_id: UUID) -> None:
-    """Drop the transcript snapshot this run was given.
-
-    Row first, then the object: a row pointing at a deleted object is a
-    generation that cannot explain itself, while an object no row points
-    at is swept within the day.
-    """
+    """Drop the run's transcript snapshot: row first, then the object (an orphan
+    object is swept within the day; a dangling row is not)."""
     try:
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
             key = await gen_repo.clear_snapshot(conn, generation_id=generation_id)
@@ -922,19 +835,9 @@ async def _shadow_run(
     live: Any,
     **pipeline_kwargs: Any,
 ) -> None:
-    """Run a candidate backend on this meeting and keep only the numbers.
-
-    Nothing it produces is written: not a version, not an item, not a
-    second snapshot. The output exists inside this function and is
-    counted — how many facts survived verification against the same
-    transcript, how long it took — and then dropped. That is the whole
-    contract, and it is why a flip can be rehearsed on real meetings
-    without processing anyone's words twice into storage.
-
-    Sampled deterministically on the generation id, so a re-run of the
-    same generation makes the same choice and a 5 % sample is 5 % of
-    meetings rather than 5 % of attempts.
-    """
+    """Run a candidate backend on this meeting and keep only the numbers; nothing it
+    produces is written. Sampled deterministically on the generation id, so a
+    re-run makes the same choice."""
     if not deps.shadow_provider_for or deps.shadow_percent <= 0:
         return
     if generation_id.int % 100 >= deps.shadow_percent:
@@ -945,9 +848,7 @@ async def _shadow_run(
     try:
         provider = await deps.shadow_provider_for(str(tenant_id))
         if provider is None:
-            # Not eligible: this workspace has not acknowledged the
-            # candidate's processor. Silence is correct — it is not an
-            # error, and it must not become one per meeting.
+            # Workspace has not acknowledged the candidate's processor: silently skip.
             return
         backend = getattr(provider, "backend_name", None) or backend
         shadow = await pipeline.run(transcript, provider=provider, **pipeline_kwargs)
@@ -960,8 +861,7 @@ async def _shadow_run(
     generation_metrics.shadow_seconds.record(seconds, {"backend": backend})
     generation_metrics.shadow_runs.add(1, {"backend": backend, "outcome": "ok"})
     generation_metrics.shadow_facts.add(len(shadow.facts), {"backend": backend, "verdict": "kept"})
-    # What the live run found is the only yardstick we have here; the
-    # gold-set harness is where quality is actually measured.
+    # The live run is the only yardstick here; quality is measured by the gold-set harness.
     delta = len(live.facts) - len(shadow.facts)
     if delta > 0:
         generation_metrics.shadow_facts.add(delta, {"backend": backend, "verdict": "missed"})

@@ -16,14 +16,8 @@ function Spans({ spans }: { spans: Inline[] }) {
   );
 }
 
-/**
- * Build one level of a list and everything nested under it, walking the
- * flat items the parser produced. Returns where the caller should carry
- * on so a sibling list (a numbered run after a bulleted one, say) starts
- * its own element rather than joining this one.
- */
-/** Something drawn at the end of one line, from its source text — the
- *  evidence of a generated line (Q5). */
+/** One list level plus everything nested under it; returns the index to carry on from. */
+/** Drawn at the end of one line from its source text (the evidence affordance). */
 export type LineExtra = (raw: string) => ReactNode;
 
 function buildList(
@@ -41,8 +35,7 @@ function buildList(
 
   for (let item = items[i]; item !== undefined && item.depth >= depth; item = items[i]) {
     if (item.depth > depth) {
-      // Deeper: it hangs under the item we just placed. A deeper line with
-      // nothing above it can only be a stray indent — treat it as ours.
+      // Deeper: nests under the item just placed; with nothing above, a stray indent is ours.
       const sub = buildList(items, i, item.depth, extra);
       const parent = rows[rows.length - 1];
       if (!parent) return sub;
@@ -50,7 +43,6 @@ function buildList(
       i = sub.next;
       continue;
     }
-    // A different kind at the same level starts a new list.
     if (item.ordered !== ordered || (item.done !== undefined) !== checklist) break;
     rows.push({ item, sub: null });
     i++;
@@ -83,8 +75,7 @@ function Blocks({ blocks, extra }: { blocks: Block[]; extra?: LineExtra }) {
   blocks.forEach((block, b) => {
     switch (block.kind) {
       case "heading": {
-        // The gutter "#" is drawn by CSS, the way the outline reads in
-        // the note document: a quiet marker hanging left of the words.
+        // The gutter "#" is drawn by CSS.
         const H = (`h${block.level}` as unknown) as "h3";
         out.push(
           <H key={b} className="rt-h" data-level={block.level}>
@@ -172,17 +163,13 @@ interface RichTextProps {
   /** Shown in place of an empty body. */
   placeholder?: string;
   className?: string;
-  /** Q5: drawn at the end of each paragraph and list item, from its source. */
+  /** Drawn at the end of each paragraph and list item, from its source. */
   lineExtra?: LineExtra;
-  /** SQ3 T1: false for a section the engine wrote — no paragraph is a speaker turn. */
+  /** False for a section the engine wrote — no paragraph is a speaker turn. */
   allowSpeakerTurns?: boolean;
 }
 
-/**
- * A note section, typeset. Headings, nested bullets, checklists, quotes
- * and small tables come out as real structure instead of the raw `- `
- * and `**…**` a `pre-wrap` box used to show.
- */
+/** A note section, typeset: headings, nested bullets, checklists, quotes, small tables. */
 export function RichText({
   text,
   placeholder = "Nothing entered.",

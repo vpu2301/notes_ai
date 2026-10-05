@@ -1,22 +1,7 @@
-"""Loopback-only internal surface — the scale-in drain hook (sprint 16).
+"""Loopback-only scale-in drain hook, called from the pod's own preStop.
 
-Kubernetes calls this from the pod's OWN preStop hook:
-
-    preStop: curl -sf -XPOST localhost:8000/internal/drain
-             then poll GET /internal/drain until active_sessions == 0
-             (cap: terminationGracePeriodSeconds = 30 min)
-
-Contract:
-
-- ``POST /internal/drain``  — flip the one-way draining flag: the worker
-  admits no new sessions (clients get the gpu_full reconnect semantics
-  and land on another pod), live sessions run to completion, and
-  ``/readyz`` goes 503 so the Service stops routing new connections.
-- ``GET  /internal/drain``  — drain progress for the preStop poll loop.
-
-Never exposed beyond the pod: the edge allowlist doesn't carry it, the
-NetworkPolicy doesn't open it, and — defence in depth — the handler
-refuses any non-loopback client address outright.
+POST flips the one-way draining flag (no new sessions, /readyz 503); GET
+reports progress. Non-loopback clients are refused outright.
 """
 
 from __future__ import annotations

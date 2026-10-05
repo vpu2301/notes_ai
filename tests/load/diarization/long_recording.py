@@ -1,8 +1,5 @@
-"""B-5 scenario 4 (in-process): a 2-hour recording with 8 speakers.
-
-Two AMI meetings from the gold set (4 + 4 people) looped to 120 min, through
-the production legacy path with the roster guard on. Prints speakers found,
-wall time, wall ÷ audio and peak RSS.
+"""A 2-hour, 8-speaker recording (two AMI meetings looped) through the production legacy
+path; prints speakers found, wall time, wall / audio and peak RSS.
 
     uv run --project libs/diarization python tests/load/diarization/long_recording.py
 """

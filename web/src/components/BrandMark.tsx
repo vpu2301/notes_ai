@@ -1,13 +1,5 @@
-/* BrandMark — the product mark, one shape across web, macOS and iOS.
- *
- * DSBrandMark (macos|ios/…/Views/Theme.swift) draws a `.continuous` rounded
- * rectangle with the product initial reversed out of it. CSS `border-radius`
- * draws a circular arc instead — the boxier corner — so the mark is an inline
- * SVG here and the outline is a real superellipse, |x/a|^4.6 + |y/a|^4.6 = 1,
- * walked at 64 points on a 32-unit grid. Every browser then gets the same
- * squircle the app icons have, and it is the same curve index.html cuts the
- * favicon from.
- */
+/* BrandMark: inline SVG superellipse |x/a|^4.6 + |y/a|^4.6 = 1 (64 points, 32-unit grid),
+ * matching DSBrandMark's `.continuous` corner and the favicon in index.html. */
 
 const SQUIRCLE =
   "M31 16 30.97 21.46 30.87 23.37 30.72 24.76 30.49 25.88 30.2 26.82 29.84 27.62 " +

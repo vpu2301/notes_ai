@@ -1,6 +1,5 @@
-"""F3 amendment after r03 — the overview is prose and always written
-(§2.9, A-10), a long recording whose topics fail is chaptered by time
-(§2.6, A-6), and a long recording's topics come in two stages (§5, A-12).
+"""The overview is prose and always written; a long recording whose topics fail
+is chaptered by time; a long recording's topics come in two stages.
 """
 
 from __future__ import annotations
@@ -65,7 +64,7 @@ def _run(meeting: dict, provider: ScriptedProvider, **kw: Any) -> pipeline.Docum
 
 
 FAIL_ALL: dict[str, Any] = {
-    # Sprint D2: every block's call answers nothing usable.
+    # Every block's call answers nothing usable.
     "block": lambda facts: {"heading": "", "bullets": []},
     "summary": lambda facts: {"summary": []},
 }
@@ -200,7 +199,7 @@ def test_every_model_pass_failing_still_writes_prose_and_chapters() -> None:
     document = _run(_recording(40), ScriptedProvider(overrides=FAIL_ALL))  # 13 minutes
     assert document.stats["summary_ladder"] == "composed"
     assert document.stats["topics_fallback"] == "chapters"
-    # SQ2 T4: parts come from the transcript; a part with fewer than two
+    # Parts come from the transcript; a part with fewer than two
     # facts joins its neighbour, so a 13-minute recording may have two.
     assert document.stats["block_chapters"] == document.stats["blocks"] >= 2
     top = document.sections[0]
@@ -215,7 +214,7 @@ def test_every_model_pass_failing_still_writes_prose_and_chapters() -> None:
 
 
 def test_a_failed_block_is_its_chapter_at_any_length() -> None:
-    """Sprint D2 T1 supersedes §2.6's ten-minute rule: a block whose call
+    """A block whose call
     fails twice renders its facts by time under its name and time."""
     document = _run(_recording(20), ScriptedProvider(overrides=FAIL_ALL))  # under 7 minutes
     assert document.stats["block_calls"] == 2 * document.stats["blocks"]
@@ -266,7 +265,7 @@ def test_a_long_recording_asks_block_by_block_and_merges_only_within_the_band() 
     provider = ScriptedProvider(overrides={"block": block, "merge": merge})
     document = _run(_recording(100), provider)  # 33 minutes
     calls = [c for c in provider.calls if c[0] == "block"]
-    # SQ2 T4: the transcript gives 8 parts; parts the facts leave under two
+    # The transcript gives 8 parts; parts the facts leave under two
     # are merged into a neighbour (counted), so at least five remain here.
     assert len(calls) == document.stats["blocks"] >= 5
     assert document.stats["blocks_boundaries"] == 7
@@ -303,7 +302,7 @@ def test_the_line_gate_threshold_is_per_language() -> None:
 
 
 def test_introductions_sit_in_the_first_paragraph_and_never_read_as_turns() -> None:
-    """SQ3 T1/T2: who presented and who was a guest are named once, inside
+    """Who presented and who was a guest are named once, inside
     "Es sprechen …" — no "Gast: X" paragraph, which every client would draw
     as a transcript turn."""
     from note_service.domain.meeting_doc import compose, render, roles_table, verify
@@ -359,7 +358,7 @@ def test_default_speaker_names_are_nobody() -> None:
         Turn(2, "SPEAKER_2", "Speaker 2", "Antwort", 52_000, 60_000),
     ]
     table = roles_table.build(turns, [], "podcast_broadcast")
-    # SQ3 T2: the second voice speaks enough to be listed — unnamed, as a
+    # The second voice speaks enough to be listed — unnamed, as a
     # person, never as its label.
     assert compose.speakers_of(table, "de") == (["Erzähler/in"], [], ["eine weitere Person"])
     named = [

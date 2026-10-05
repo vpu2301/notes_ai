@@ -1,13 +1,5 @@
-"""Best-effort PII redaction for search snippets.
-
-Note content sometimes carries personal identifiers in section bodies
-(full names, national id numbers, birth dates). When a snippet is
-returned to a user who is NOT an author of the note, redact these
-patterns. When the viewer is primary_author / co_author, return
-unredacted.
-
-The redactor is intentionally conservative: it is the second line of
-defence behind the role check.
+"""Best-effort PII redaction for search snippets shown to non-authors; the
+second line of defence behind the role check.
 """
 
 from __future__ import annotations

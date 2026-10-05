@@ -86,8 +86,7 @@ def test_extract_snippet_trigger_lowercases():
 
 
 def test_suggest_from_trie_returns_top_k():
-    # Phrases differ in suffix by > Levenshtein 3 so the diversity
-    # guard does not collapse them.
+    # Suffixes differ by > Levenshtein 3 so the diversity guard keeps them.
     trie = build_trie_from_phrases(
         tenant_id="t",
         language="uk",

@@ -1,18 +1,10 @@
--- Speaker quality — the weekly learn-loop cohort (Sprint 30).
+-- Speaker quality: the weekly learn-loop cohort.
 --
 -- One row per (ISO week of job completion, dimension, bucket), counts only.
 -- Definitions and every approximation: docs/product/speaker-metrics.md.
---
--- Run as `funnel_reader` (migrations 0040 + 0046) — scripts/jobs/weekly_speakers.py
--- does. The role reads a COLUMN-LEVEL subset of transcription_jobs and the
--- label-only transcription_speaker_edits; it cannot read speaker_names or
--- speaker_name_candidates (CONTENT), so no naming metric lives here (see
--- mdx_asr_speaker_named_total instead).
---
--- Cohort: complete, diarized jobs (metadata.diarization is an object) that
--- finished MORE than 7 days ago — the evaluation window people get to
--- correct a transcript before it is scored. A job with no correction is
--- counted as correct, so every accuracy-like number here is an UPPER BOUND.
+-- Run as `funnel_reader` (column-level subset; cannot read speaker names).
+-- Cohort: complete, diarized jobs finished MORE than 7 days ago; a job with
+-- no correction counts as correct, so every accuracy number is an UPPER BOUND.
 --
 -- Dimensions (closed vocabularies; anything else folds into 'other'):
 --   all               one row per week
@@ -21,8 +13,7 @@
 --   client            web | ios | macos | other | unknown   (capture_context.client)
 --   source            calendar_event | manual | upload | other | unknown
 --   count_confidence  high | low | unknown (pre-Sprint-29 results)
---   channel_layout    mic_system | mono_fallback | mono   (Sprint 31: what the
---                     worker actually diarized; mono = every pre-31 job)
+--   channel_layout    mic_system | mono_fallback | mono   (what the worker diarized)
 
 WITH jobs AS (
     SELECT
@@ -83,12 +74,8 @@ per_job AS (
         coalesce(ed.labels_created, 0)  AS labels_created,
         (coalesce(ed.live_merges, 0) + coalesce(ed.live_reassigns, 0) > 0 OR c.runs > 0)
                                         AS corrected,
-        -- speakers_predicted − speakers_final, from the edits alone:
-        -- final = predicted − labels merged away + labels created, so the
-        -- error is (merged away − created). Only for jobs never re-run
-        -- (runs = 0 ⇒ rev = 1): a re-run overwrites metadata.diarization,
-        -- so revision 1's prediction is gone for those. Labels emptied by
-        -- reassigns are NOT seen (needs segment data) — see the doc.
+        -- count error = merged away − created, from the edits alone; only for
+        -- jobs never re-run (a re-run overwrites metadata.diarization).
         CASE WHEN c.runs = 0
              THEN coalesce(ed.rev1_merged_away, 0) - coalesce(ed.rev1_created, 0)
         END                             AS count_error,

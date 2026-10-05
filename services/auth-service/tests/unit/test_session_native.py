@@ -1,18 +1,9 @@
-"""IDX-M1 (carrying IDX-A2's session half) — /auth/refresh and /auth/logout.
+"""/auth/refresh and /auth/logout.
 
-The properties under test are the ones a stored refresh token stands on:
-
-  * rotation actually retires the old token, and the new one works;
-  * a token presented twice minutes apart ends the session and the
-    account's live access tokens — a replay is the one auth event that is
-    anomalous by definition;
-  * a token presented twice *seconds* apart does not, because that is a
-    dropped response, not an attacker, and signing people out for their
-    network's mistakes is how a session store loses its users' trust;
-  * roles come from the membership on every rotation, never from the
-    token being replaced;
-  * the transport split holds: a native client's token is in the body and
-    never in a cookie, a browser's is in the cookie and never in the body.
+Rotation retires the old token; a replay minutes apart ends the session and live
+access tokens; a replay seconds apart is a dropped response and does not; roles come
+from the membership on every rotation; a native client's token is in the body and
+never a cookie, a browser's in the cookie and never the body.
 """
 
 from __future__ import annotations
@@ -121,8 +112,7 @@ class FakeSessions:
         expected = self.current[session_id] if presented_is_current else self.previous[session_id]
         if expected != digest:
             return False
-        # The replaced token is always the one remembered; only a rotation
-        # of the *current* token moves the grace window.
+        # Only a rotation of the *current* token moves the grace window.
         self.previous[session_id] = self.current[session_id]
         if presented_is_current:
             self.rotated_at[session_id] = datetime.now(UTC)
@@ -334,12 +324,8 @@ def test_refresh_rotates_and_the_old_token_stops_working(env: Any) -> None:
     # The new one works.
     assert _refresh(env, new_token).status_code == 200
 
-    # The original is now two generations old. One generation is kept —
-    # the row has one slot for the retired hash — so a token this old is
-    # not *attributable* to the session any more and is answered
-    # `session_expired` rather than `auth_refresh_replay`. The session it
-    # once belonged to is untouched, which is the honest outcome: nothing
-    # here proves the token was stolen rather than simply forgotten.
+    # Two generations old: not attributable to the session any more, so `session_expired`
+    # rather than `auth_refresh_replay`; the session itself is untouched.
     env.sessions.age(env.sid, by=timedelta(minutes=5))
     stale = _refresh(env, env.token)
     assert stale.status_code == 401
@@ -404,11 +390,7 @@ def test_a_grace_retry_does_not_extend_its_own_window(env: Any) -> None:
 
 
 def test_concurrent_refreshes_with_one_token_both_succeed(env: Any) -> None:
-    """Two callers, one token, no ordering between them.
-
-    The loser of the rotation race re-reads and comes out through the
-    grace path rather than being told its perfectly good token is gone.
-    """
+    """Two callers, one token: the loser of the rotation race comes out through the grace path."""
     first = _refresh(env, env.token)
     second = _refresh(env, env.token)
     assert first.status_code == second.status_code == 200
@@ -419,13 +401,7 @@ def test_concurrent_refreshes_with_one_token_both_succeed(env: Any) -> None:
 
 
 def test_the_winner_of_a_race_keeps_a_working_token(env: Any) -> None:
-    """Two callers, one token, and neither is signed out for it.
-
-    The second caller comes through the grace path and is given a token of
-    its own; the first caller's token becomes the retired one, so it still
-    works inside the window rather than being orphaned by a race it never
-    knew about.
-    """
+    """Two callers, one token, neither signed out; the first caller's token becomes the retired one."""
     first = _refresh(env, env.token).json()["refresh_token"]
     second = _refresh(env, env.token).json()["refresh_token"]
 
@@ -561,21 +537,12 @@ def test_logout_denylists_the_session_it_ended(env: Any) -> None:
 # ── a Keycloak-shaped token is refused, never 422'd ──────────────────────
 
 
-# A realistic Keycloak refresh token: a signed JWT carrying a realm's worth
-# of claims, comfortably past the ~50 chars a native `nrt_` handle needs.
+# A realistic Keycloak refresh token, comfortably past the ~50 chars a native `nrt_` handle needs.
 KEYCLOAK_SHAPED = "eyJhbGciOiJIUzI1NiJ9." + "A" * 900 + ".signature"
 
 
 def test_a_keycloak_shaped_token_is_refused_not_rejected_as_malformed(env: Any) -> None:
-    """Length must not be what answers this request.
-
-    In `dual` this router owns `/auth/refresh` for both issuers and hands
-    JWT-shaped tokens to `login.py`; a body cap below a real Keycloak
-    token 422s that client before the delegation can happen. Here in
-    `native` the token is a stale credential and 401 is the right answer —
-    either way the client learns its session is over and signs in again,
-    which a 422 never tells it.
-    """
+    """Length must not answer this request: a stale Keycloak token is 401, never 422 (dual delegates to login.py)."""
     resp = _refresh(env, KEYCLOAK_SHAPED)
     assert resp.status_code == 401, resp.text
     assert resp.json()["code"] == "session_expired"
@@ -601,7 +568,7 @@ def test_a_browser_without_an_allowed_origin_is_refused(env: Any) -> None:
     assert resp.json()["code"] == "origin_not_allowed"
 
 
-# ── POST /auth/token — switching workspace (IDX-A2 F3, carried by M2) ─────
+# ── POST /auth/token — switching workspace ───────────────────────────────
 
 
 def _claims_for(env: Any, *, sid: UUID | None = None, tid: UUID | None = None) -> Any:
@@ -682,8 +649,7 @@ def test_activating_moves_the_session_so_a_refresh_comes_back_to_it(env: Any) ->
 
 
 def test_borrowing_a_token_does_not_move_the_session(env: Any) -> None:
-    """An upload finishing in the workspace it started in must not move
-    somebody's session out from under them."""
+    """An upload finishing in the workspace it started in must not move the session."""
     other = _second_workspace(env)
 
     borrowed = _switch(env, other, activate=False)

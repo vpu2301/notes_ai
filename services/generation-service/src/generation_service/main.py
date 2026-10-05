@@ -35,11 +35,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = await build_state()
     app.state.svc = state
     install_state(state)
-    # Sprint 16 (MDX_PREWARM_ENABLED): force the model resident with a
-    # 1-token completion before advertising readiness — a llama-server
-    # that answers /health can still owe its first-token latency to lazy
-    # weight residency/KV allocation. Retries until it lands; /readyz
-    # reports `warmed: false` (503) meanwhile.
+    # A llama-server answering /health may still be cold; 1-token warm-up before readiness.
     state.warmed = not settings.prewarm_enabled
     warm_task: asyncio.Task[None] | None = None
     if settings.prewarm_enabled and settings.layer_c_enabled and not settings.testing:

@@ -1,23 +1,8 @@
-"""Stale-session reaper.
+"""Stale-session reaper: out-of-process backstop for sessions stranded by a dead worker.
 
-The abandon timer that retires an idle session (``_abandon_after_idle`` in
-``ws/handler.py``) is an ``asyncio`` task inside the worker that owns the
-session. That works for every graceful path and for none of the ungraceful
-ones: kill the worker and its timers die with it, leaving every session it
-held parked in ``active`` / ``paused`` / ``reconnecting`` **forever**. Those
-rows are not cosmetic — ``count_active_for_tenant`` gates
-``per_tenant_max_active_sessions``, so each stranded row permanently burns a
-slot in the tenant's capacity budget, and each one keeps showing up in the
-user's "still recording" list.
-
-The reaper is the out-of-process backstop. Its single safety interlock is
-the worker heartbeat in Redis: a session is collected **only** when the
-worker named on the row has stopped heart-beating. A session paused for an
-hour on a healthy worker is a candidate every sweep and is never collected.
-
-Cross-tenant enumeration goes through the ``dictation_tenants_with_stale_sessions``
-SECURITY DEFINER function (0059) — the sanctioned pattern from 0051/0036 —
-and every row read and write still happens inside ``tenant_connection``.
+A session is collected only when its worker has stopped heart-beating in Redis.
+Cross-tenant enumeration uses the ``dictation_tenants_with_stale_sessions``
+SECURITY DEFINER function; every row read/write stays inside ``tenant_connection``.
 """
 
 from __future__ import annotations
@@ -39,12 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _tenants_with_stale_sessions(state: Any, grace_seconds: float) -> list[UUID]:
-    """Tenants holding at least one stale candidate.
-
-    Runs outside ``tenant_connection`` on purpose: the question is
-    cross-tenant, which is exactly what the SECURITY DEFINER function
-    exists for. Only tenant IDs come back.
-    """
+    """Tenants holding at least one stale candidate (cross-tenant, SECURITY DEFINER)."""
     async with state.app_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT tenant_id FROM dictation_tenants_with_stale_sessions($1)",
@@ -65,16 +45,12 @@ async def reap_tenant(state: Any, tenant_id: UUID, *, grace_seconds: float) -> i
         for row in candidates:
             session_id = row["id"]
 
-            # Held in *this* process: its own timers own it, and reaping it
-            # underneath a live SessionContext would desync ctx.state from
-            # the DB.
+            # Held in this process: its own timers own it.
             if state.session_manager.get(session_id) is not None:
                 continue
 
             owner = row["worker_id"]
-            # A blank worker_id predates the column being populated; there is
-            # no liveness signal to wait on, so the grace window is the only
-            # gate and it has already elapsed.
+            # Blank worker_id = no liveness signal; the grace window is the only gate.
             if owner and await worker_alive(state.redis, owner):
                 continue
 

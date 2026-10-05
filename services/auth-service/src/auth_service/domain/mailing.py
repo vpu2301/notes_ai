@@ -1,15 +1,6 @@
-"""One place that turns a template kind into a sent message.
+"""Inline, time-boxed sending of a rendered template kind (password recovery uses the outbox instead).
 
-Account mail in this service is sent two ways: password recovery goes
-through the durable outbox worker, and everything IDX-A3/A5 sends goes
-inline. Inline, because these mails are all time-boxed — a sign-in code
-lives ten minutes, a second-factor notice is only useful while the user
-is still looking at the screen — and a queue the user waits on turns a
-slow relay into "it's broken" with nothing in the logs.
-
-The timeout is the whole reason this is not three lines at each call
-site: without it a hung relay holds an HTTP worker until the client gives
-up, and a handful of those takes the sign-in endpoint down.
+The timeout is the point: a hung relay must not hold an HTTP worker.
 """
 
 from __future__ import annotations
@@ -51,14 +42,7 @@ async def send_rendered(
     reply_to: str,
     timeout_seconds: float,
 ) -> None:
-    """Render ``kind`` in ``lang`` and send it, or raise.
-
-    Raising is the contract: the caller decides whether a failed send
-    aborts the operation (a sign-in code — no mail, no way in) or is
-    merely noted (a "your second factor was removed" notice — the factor
-    is already gone, and failing the request would leave the account in
-    the state the user asked to leave).
-    """
+    """Render ``kind`` in ``lang`` and send it, or raise; the caller decides whether that aborts."""
     rendered = templates.render(
         kind,
         lang,

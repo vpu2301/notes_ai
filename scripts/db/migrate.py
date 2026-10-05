@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
-"""Minimal forward/rollback SQL migration runner.
+"""Forward/rollback SQL migration runner over ``infra/postgres/migrations/NNNN_*.sql``
+(with ``NNNN_*.down.sql`` siblings). Takes an EXCLUSIVE lock on ``schema_migrations``
+per transaction; a divergent sha256 on an applied file aborts before any change.
 
-Looks at ``infra/postgres/migrations/`` and applies any file named
-``NNNN_*.sql`` whose ``NNNN`` is not already recorded in
-``schema_migrations``. Each ``NNNN_*.sql`` must have a sibling
-``NNNN_*.down.sql`` for rollback.
-
-The runner takes an EXCLUSIVE lock on ``schema_migrations`` for the
-duration of each apply/rollback transaction, so two runners cannot race
-on a shared DB. SQL files are checksummed (sha256) — a divergent
-checksum on a previously-applied version aborts before any change.
-
-Usage::
-
-    python scripts/db/migrate.py up      # apply all pending
-    python scripts/db/migrate.py down    # rollback the most recent
-    python scripts/db/migrate.py status  # show applied + pending
-
-Defaults match the dev Compose stack; override via ``DATABASE_URL``.
+    python scripts/db/migrate.py up | down | status   (DATABASE_URL overrides the dev default)
 """
 
 from __future__ import annotations
@@ -43,18 +29,9 @@ _TXN_COMMIT_RE = re.compile(r"^\s*COMMIT\s*;\s*$", re.IGNORECASE)
 
 
 def _strip_outer_transaction(sql: str) -> str:
-    """Drop a file's own outer ``BEGIN;`` / ``COMMIT;`` wrapper.
-
-    The runner already wraps every file in a transaction that also carries the
-    ``schema_migrations`` row, so a file that commits itself splits the two: the
-    DDL lands, then the tracking INSERT runs in its own implicit transaction. If
-    anything interrupts that window the schema has moved but no row records it,
-    and the next ``up`` replays the file against objects that already exist —
-    a wedged stack that only a hand-written INSERT can unstick.
-
-    Only the first and last *statement* lines are considered, so ``BEGIN`` /
-    ``COMMIT`` inside a dollar-quoted function body are never touched (a valid
-    file cannot end mid-body).
+    """Drop a file's own outer ``BEGIN;`` / ``COMMIT;``: the runner's transaction also carries
+    the ``schema_migrations`` row, and a self-committing file would split the two.
+    Only the first and last statement lines are considered (dollar-quoted bodies untouched).
     """
     lines = sql.splitlines()
 
@@ -203,7 +180,6 @@ async def cmd_status(conn: asyncpg.Connection) -> int:
     for m in migrations:
         status = "applied" if m.version in applied else "pending"
         print(f"{status:<8} {m.version:<6} {m.name}")
-    # Highlight checksum drift if any
     for version, csum in applied.items():
         match = next((x for x in migrations if x.version == version), None)
         if match is not None and _checksum(match.up_path) != csum:

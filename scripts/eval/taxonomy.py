@@ -1,10 +1,6 @@
-"""The error taxonomy in code (docs/eval/error-taxonomy.md).
-
-Every defect in a transcript or a note has a code. This module is the one
-table the eval tools read: which codes a checklist check, a scorer metric
-or a person's dismiss reason stands for. A metric, check or reason with no
-code fails ``tests/unit/test_notes_gates.py``; a defect that fits no code
-gets a new one here and in the document, together.
+"""The error taxonomy in code (docs/eval/error-taxonomy.md): the one table mapping
+checklist checks, scorer metrics and dismiss reasons to codes.
+A metric, check or reason with no code fails ``tests/unit/test_notes_gates.py``.
 """
 
 from __future__ import annotations
@@ -53,9 +49,8 @@ CODES: Final[dict[str, tuple[str, str, str]]] = {
     "P-PROMPT": ("process", "S1", "Content-bearing prompt"),
 }
 
-# notes_assert check family → codes. A checklist may name the codes of
-# one check itself (``"codes": {"must_not_contain[0]": ["T-INJ"]}``) — a
-# forbidden string can be an injection, a trailer or an invented claim.
+# notes_assert check family → codes; a checklist may pin one check's codes
+# itself (``"codes": {"must_not_contain[0]": ["T-INJ"]}``).
 CHECK_CODES: Final[dict[str, tuple[str, ...]]] = {
     "recording_type": ("F-TYPE",),
     "topics_min": ("D-STRUCT",),
@@ -111,13 +106,13 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "copied_lines": ("F-COPY",),
     "no_information_lines": ("F-DESC",),
     "first_person_lines": ("D-LANG",),
-    # Taxonomy detectors (2026-09-27)
+    # Taxonomy detectors
     "label_lines": ("D-LABEL",),
     "unresolved_subject_rate": ("F-SUBJ",),
     "unspecific_bullet_rate": ("D-SPEC",),
     "words_per_minute": ("D-VOL",),
     "headings_per_10_min": ("D-STRUCT",),
-    # D1 document-standard lint (meeting_doc/doclint.py)
+    # Document-standard lint (meeting_doc/doclint.py)
     "lint_findings": (
         "D-ORIENT",
         "D-STRUCT",
@@ -152,7 +147,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
         "F-COPY",
         "F-DESC",
     ),
-    # Sprint D2 composition
+    # Composition
     "sections_in_band": ("D-STRUCT",),
     "headings_pass": ("D-HEAD",),
     "bullets_specific_share": ("D-SPEC",),
@@ -188,7 +183,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
         "F-DIST",
     ),
     "summary_ladder": ("D-ORIENT",),
-    # Sprint D1 gates
+    # Lint gates
     "lint_unresolved": (
         "D-ORIENT",
         "D-STRUCT",
@@ -230,7 +225,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "judge_problems": ("F-INV", "F-DIST", "F-NUM", "F-ATTR"),
     "deterministic_vs_judge_disagreement": ("P-MEAS",),
     "judge_lines": ("P-MEAS",),
-    # Sprint TQ1 — the transcript harness (scripts/eval/asr_scoring.py)
+    # The transcript harness (scripts/eval/asr_scoring.py)
     "wer": ("T-ENT", "T-COV", "T-DISP"),
     "entity_error_rate": ("T-ENT",),
     "entity_consistency": ("T-ENT",),
@@ -245,7 +240,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "nonspeech_marked": ("T-ADV",),
     "nonspeech_content_lines": ("T-ADV",),
     "punctuated_share": ("T-DISP",),
-    # Sprint SQ1 — the summary criteria
+    # The summary criteria
     "participant_precision": ("F-ROLE",),
     "participant_recall": ("F-ROLE",),
     "opinion_attribution": ("F-ATTR",),
@@ -254,15 +249,15 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "by_third_ratio": ("F-COV",),
     "propagated_from_asr": ("T-ENT",),
     "invented_vs_truth": ("F-INV",),
-    # Sprint SQ2 — the whole recording is in the note
+    # The whole recording is in the note
     "sections_count_ok": ("D-STRUCT",),
     "near_empty_rate": ("F-COV",),
     "one_bullet_sections": ("D-STRUCT",),
-    # Sprint SQ3 — reads like a note
+    # Reads like a note
     "speaker_shaped_lines": ("D-FORM",),
     "order_inversions": ("D-STRUCT",),
     "redundancy_ok_rate": ("D-RED",),
-    # Sprint TQ3 — the spelling overlay
+    # The spelling overlay
     "entity_consistency_raw": ("T-ENT",),
     "entity_error_rate_raw": ("T-ENT",),
     "wrong_merges": ("T-ENT",),
@@ -271,9 +266,8 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "clusters_proposed": ("T-ENT",),
 }
 
-# Keys a scorer's aggregate may carry that are not error measurements, each
-# with why it has no code. Anything else without a code fails
-# tests/unit/test_notes_gates.py (quality criteria §6 rule 5).
+# Aggregate keys that are not error measurements, each with why it has no
+# code; anything else without a code fails tests/unit/test_notes_gates.py.
 UNCODED_METRICS: Final[dict[str, str]] = {
     "n": "sample size",
     "directional": "sample-size flag (n < 20)",
@@ -293,10 +287,8 @@ def uncoded_metrics(keys: Iterable[str]) -> list[str]:
     return sorted(k for k in keys if k not in METRIC_CODES and k not in UNCODED_METRICS)
 
 
-# A person's dismiss reason (notes_corrections.DismissReason) → the one
-# code the weekly report counts it under. `not_said` cannot tell an
-# invented line (F-INV) from injected transcript text (T-INJ); it counts as
-# F-INV. The SQL in scripts/ops/notes_quality.sql carries the same table.
+# Dismiss reason → the code the weekly report counts it under (`not_said`
+# counts as F-INV). scripts/ops/notes_quality.sql carries the same table.
 REASON_CODES: Final[dict[str, str]] = {
     "not_said": "F-INV",
     "not_a_decision": "F-DIST",

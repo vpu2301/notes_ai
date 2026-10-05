@@ -1,5 +1,4 @@
-"""The weekly notes-quality report (Summary Engine v2, Q6 T8): counts only,
-never content, with the concept's kill thresholds printed next to them."""
+"""The weekly notes-quality report: counts only, never content, with the kill thresholds printed."""
 
 from __future__ import annotations
 
@@ -177,7 +176,7 @@ def test_main_refuses_without_database_url(monkeypatch: pytest.MonkeyPatch, tmp_
     assert not list(tmp_path.iterdir())
 
 
-# ── Error taxonomy (docs/eval/error-taxonomy.md) ────────────────────
+# ── Error taxonomy ────────────────────
 
 
 def test_dismissals_are_counted_by_the_taxonomy_code_of_their_reason() -> None:

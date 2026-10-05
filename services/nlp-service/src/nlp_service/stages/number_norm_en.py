@@ -1,9 +1,4 @@
-"""English number normalization.
-
-Same strategy as the UK module — tag + pattern-match. The English
-vocabulary is smaller (fewer declensions) but the pattern set is the
-same: BP, HR, doses, frequencies, time, ranges, decimals.
-"""
+"""English number normalization; same tag + pattern-match strategy as the UK module."""
 
 from __future__ import annotations
 
@@ -105,17 +100,10 @@ def _digit_value(token: str) -> int | None:
 
 
 def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int, bool]:
-    """Greedy multi-word cardinal parser.
+    """Greedy multi-word cardinal parser; returns ``(value, words_consumed, colloquial)``.
 
-    Returns ``(value, words_consumed, colloquial)``. ``colloquial`` is True
-    when the value came from the ambiguous "one twenty" → 120 spoken-BP
-    heuristic. That reading is only safe inside an explicit BP/range
-    structure; a caller that isn't one MUST treat a colloquial value as
-    doubtful and pass the words through unchanged (ADR-0015
-    pass-through-on-doubt) — otherwise "two ten" fabricates 210.
-
-    Handles "one hundred twenty" = 120 and "two thousand five hundred" = 2500.
-    Pure-digit tokens are returned as-is.
+    ``colloquial`` marks the "one twenty" → 120 heuristic, safe only inside
+    a BP/range structure; elsewhere the words must pass through (ADR-0015).
     """
     if i >= len(tokens):
         return None, 0, False
@@ -130,11 +118,7 @@ def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int, bool]
     consumed = 1
     cursor = i + 1
 
-    # Colloquial BP-style parse: "one twenty" → 120, "two ten" → 210.
-    # Rule: if the head is a SINGLE DIGIT (1–9) and the next token is
-    # a TEENS or TENS value (10–90, no "hundred"), interpret as
-    # ``head * 100 + next``. Disambiguation: only triggers when no
-    # "hundred"/"thousand" follows (the more explicit form wins).
+    # Colloquial "one twenty" → 120: single digit head + teens/tens, no "hundred"/"thousand" following.
     if (
         1 <= current <= 9
         and cursor < len(tokens)
@@ -143,8 +127,6 @@ def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int, bool]
     ):
         nxt = _digit_value(tokens[cursor])
         if nxt is not None and 10 <= nxt <= 99:
-            # Peek ahead — if "hundred"/"thousand" follows, fall through
-            # to the standard parser.
             two_ahead = tokens[cursor + 1].lower() if cursor + 1 < len(tokens) else ""
             if two_ahead not in {"hundred", "thousand"}:
                 current = current * 100 + nxt
@@ -181,13 +163,7 @@ def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int, bool]
 
 
 def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
-    """Parse a spoken decimal fraction as a literal digit string.
-
-    "zero five" → "05", "five" → "5". A summing cardinal parser collapses
-    "zero five" to 5 and silently corrupts the decimal (5.05 → 5.5) — a
-    dropped digit silently corrupts a dictated figure — so the fractional
-    part is rendered digit-by-digit, preserving leading zeros.
-    """
+    """Spoken decimal fraction as a literal digit string ("zero five" → "05"; summing would drop the zero)."""
     digits: list[str] = []
     cursor = i
     while cursor < len(tokens):
@@ -201,8 +177,7 @@ def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
     return "".join(digits), cursor - i
 
 
-# Plausible BP ranges — used to gate the "NUM over NUM" → slash rewrite so
-# that everyday "five over four" is not mangled into "5/4".
+# Plausible BP ranges gate the "NUM over NUM" → slash rewrite.
 _BP_SYSTOLIC = range(60, 301)
 _BP_DIASTOLIC = range(30, 161)
 _BP_CUES_EN: Final[frozenset[str]] = frozenset({"bp", "blood", "pressure"})
@@ -228,8 +203,7 @@ def normalize_en(text: str, *, decimal_separator: str, bp_separator: str) -> str
             v2, c2, _ = _parse_number_run(raw, i + c1 + 1)
             if v2 is not None:
                 consumed = c1 + 1 + c2
-                # Optional trailing "millimeters of mercury" / "mm hg" — an
-                # explicit unit is the strongest BP signal, so it wins outright.
+                # An explicit unit is the strongest BP signal.
                 if (
                     i + consumed + len(_BP_UNIT_SEQ) <= n
                     and tuple(
@@ -248,10 +222,7 @@ def normalize_en(text: str, *, decimal_separator: str, bp_separator: str) -> str
                     out.append(f"{v1}{bp_separator}{v2} mmHg")
                     i += consumed + 2
                     continue
-                # No unit: only emit the slash form when the context actually
-                # looks like a blood pressure (a BP cue word precedes, or both
-                # values are physiologically plausible). Otherwise "five over
-                # four" must pass through unchanged (ADR-0015).
+                # No unit: slash only with a BP cue or plausible values (ADR-0015).
                 if _has_bp_cue_en(raw, i) or _looks_like_bp(v1, v2):
                     out.append(f"{v1}{bp_separator}{v2}")
                     i += consumed
@@ -296,8 +267,7 @@ def normalize_en(text: str, *, decimal_separator: str, bp_separator: str) -> str
             continue
 
         # ── Generic: NUM UNIT ──────────────────────────────────────
-        # A colloquial "one twenty" reading is too doubtful to attach to a
-        # dose unit ("two ten milligrams" must not become "210 mg").
+        # A colloquial reading never attaches to a unit ("two ten milligrams" stays).
         if v1 is not None and not col1 and i + c1 < n:
             unit_word = raw[i + c1].lower()
             if unit_word in _UNITS:
@@ -306,7 +276,7 @@ def normalize_en(text: str, *, decimal_separator: str, bp_separator: str) -> str
                 continue
 
         # ── Multi-word spelled cardinal → digit ────────────────────
-        # Never fold a standalone colloquial value: "two ten" stays words.
+        # Never fold a standalone colloquial value.
         if v1 is not None and not col1 and c1 > 1:
             out.append(str(v1))
             i += c1

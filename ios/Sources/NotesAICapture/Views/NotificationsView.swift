@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The bell: unread count polled while the app is in front, the last
-/// fifteen notifications in a sheet, read on tap, all read at once.
+/// The bell: unread count polled in front, the last fifteen notifications in a sheet.
 @MainActor
 final class NotificationsModel: ObservableObject {
     @Published private(set) var unread = 0

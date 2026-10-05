@@ -1,27 +1,5 @@
-"""libs/diarization — speaker-diarization primitives shared across services.
-
-Pipeline pieces: Silero VAD segmentation → ECAPA-TDNN speaker embeddings
-→ deterministic cosine clustering (online 2-slot for live sessions,
-agglomerative N-speaker for batch, ADR-0045) → majority-overlap
-attribution. Labels are anonymous S1/S2 proposals with confidence;
-UNKNOWN whenever the evidence is ambiguous — never a guess. Outward
-labels are always neutral SPEAKER_1..N; there is no identity inference.
-
-Consumers:
-- dictation-service builds its per-session streaming timeline on the
-  embedder/segmenter/clusterer (its stream + wire mapping stay there);
-- asr-worker runs :func:`diarize_offline` over a whole recording for
-  diarized batch jobs (Ambient Capture v1).
-
-Model weights are baked at ``/opt/models/ecapa`` in prod images and
-verified against pinned digests at load time (``integrity``); dev boxes
-prepare the same dir via ``make prepare-ecapa``.
-
-Sprint 29: the batch worker talks to a :class:`Diarizer` (``protocol``) —
-:class:`LegacyEcapaDiarizer` (the pipeline above), :class:`PyannoteDiarizer`
-(community-1, ``pyannote_engine``) or :class:`HttpDiarizer` (the same
-community-1 pipeline on a GPU endpoint, ``http_engine`` + ``wire``) —
-all guarded by the engine-agnostic roster floor (``roster``).
+"""Speaker-diarization primitives: VAD → embeddings → clustering → attribution; three :class:`Diarizer` engines
+(legacy ECAPA, pyannote community-1, HTTP) behind one roster guard. Labels are neutral SPEAKER_N, never an identity.
 """
 
 from .attribution import UNKNOWN, AttributionPolicy, SpeakerSegment, attribute_word

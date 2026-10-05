@@ -1,9 +1,4 @@
-"""Option-command resolution + the typed-field Operations.
-
-Voice selection writes structured field data directly, so the FSM
-layer resolves option names **exactly** — no fuzziness. A near-miss
-must never become a selection, and prose must never become a command.
-"""
+"""Option-command resolution + typed-field Operations: exact names only, prose never becomes a command."""
 
 from __future__ import annotations
 

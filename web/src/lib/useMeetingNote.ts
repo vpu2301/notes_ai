@@ -1,13 +1,6 @@
-// The note that exists from the first second (Sprint 34).
-//
-// Owns the whole client half of a live capture: opening the note when
-// Record is pressed, autosaving what the author types into `user_notes`,
-// collecting when each line was first touched, and attaching the job and
-// then the transcript when the recording catches up.
-//
-// One rule runs through all of it: NOTHING here may stop or delay the
-// recording. `start()` is fire-and-forget; when it fails the capture keeps
-// running with no note and the page retries at stop.
+// Client half of a live capture: open the note at Record, autosave `user_notes`,
+// collect line timings, attach job then transcript.
+// Rule: NOTHING here may stop or delay the recording; `start()` is fire-and-forget.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/http";
@@ -66,8 +59,7 @@ export function useMeetingNote(elapsedMs: () => number) {
   const [pendingStart, setPendingStart] = useState<StartArgs | null>(null);
 
   const captureId = useRef<string>(crypto.randomUUID());
-  // The id as of NOW. `attachJob` may open the note and save in one tick,
-  // before React has re-rendered with the new state.
+  // The id as of NOW: `attachJob` may open and save before React re-renders.
   const id = useRef<string | null>(null);
   const content = useRef<NoteContent | null>(null);
   const version = useRef(0);
@@ -84,8 +76,7 @@ export function useMeetingNote(elapsedMs: () => number) {
     if (!remote) return;
     content.current = remote;
     version.current = env.current_version_number;
-    // Another device may already have typed into this note: append under a
-    // divider, never overwrite.
+    // Another device may have typed here: append, never overwrite.
     setMyNotes((local) => mergeScratch(sectionText(remote, USER_NOTES_SECTION), local));
   }, []);
 
@@ -107,7 +98,7 @@ export function useMeetingNote(elapsedMs: () => number) {
         await load(res.id);
         return res.id;
       } catch {
-        // Offline, or the service is down. The meeting matters more.
+        // Offline or service down; the meeting matters more.
         setPendingStart(args);
         return null;
       }
@@ -121,8 +112,7 @@ export function useMeetingNote(elapsedMs: () => number) {
     if (!noteId || !base || !dirty.current) return;
     dirty.current = false;
     const next = withSection(base, USER_NOTES_SECTION, text.current);
-    // Keying is async: a line typed just before the debounce fired must
-    // still go out with this save, not the next one.
+    // Keying is async: a line typed just before the debounce must go with this save.
     await queue.current.settled();
     const lines = queue.current.drain();
     setSaving(true);
@@ -132,15 +122,13 @@ export function useMeetingNote(elapsedMs: () => number) {
       version.current = res.version_number;
     } catch (err) {
       dirty.current = true;
-      // A conflict means another device wrote: re-read and merge rather
-      // than overwrite. Anything else retries on the next keystroke.
+      // Conflict = another device wrote: re-read and merge. Else retry on next keystroke.
       if (err instanceof ApiError && err.isConflict) await load(noteId).catch(() => {});
     } finally {
       setSaving(false);
     }
     if (lines.length > 0) {
-      // Timings are a hint, not the text: a failed flush is requeued, and
-      // if it never lands the line still anchors lexically.
+      // Timings are a hint: requeue on failure; the line still anchors lexically.
       await putLineTimes(noteId, lines).catch(() => queue.current.requeue(lines));
     }
   }, [load]);
@@ -171,10 +159,7 @@ export function useMeetingNote(elapsedMs: () => number) {
     await flushRef.current();
   }, []);
 
-  /**
-   * The recording reached asr-service. Creates the note first if `start`
-   * could not (offline at record time), so a capture never ends noteless.
-   */
+  /** The recording reached asr-service. Creates the note first if `start` could not. */
   const attachJob = useCallback(
     async (jobId: string) => {
       if (!id.current && pendingStart) await start(pendingStart);
@@ -208,8 +193,7 @@ export function useMeetingNote(elapsedMs: () => number) {
     myNotes,
     onType,
     saving,
-    /** Whether anything typed has not reached the server yet. Read at
-     *  the moment it matters (the tab-close guard), not at render. */
+    /** Unsaved typing; read at the tab-close guard, not at render. */
     hasUnsaved: () => dirty.current || queue.current.size > 0,
     start,
     save,

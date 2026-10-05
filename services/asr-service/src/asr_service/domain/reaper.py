@@ -1,45 +1,10 @@
-"""Stranded-job reaper.
+"""Stranded-job reaper: the out-of-process backstop for a worker that died mid-job.
 
-Every other terminal outcome of a batch job is written by the worker that
-owns it: it decodes, it transcribes, it marks the row ``complete`` or
-``failed``. That covers every path the worker survives, and none of the
-ones it doesn't. Kill the worker mid-inference — SIGKILL, an OOM kill, a
-node eviction — and its job stays ``running`` with nobody left to finish
-the sentence. Nothing in the system ever revisits that row.
-
-Two stranded shapes, one sweep:
-
-``running`` past the grace window
-    The worker died after claiming the job. The queue may well redeliver
-    the message and a second worker may produce the transcript — that is
-    exactly why the grace window is long and why the update is conditional.
-
-``queued`` past a longer grace window
-    The row committed and the enqueue returned, but the message never
-    reached a worker: a flushed Redis, a trimmed stream, a consumer group
-    recreated underneath it.
-
-Both are worse than cosmetic. ``count_active_jobs`` gates
-``per_tenant_concurrent_jobs``, so every stranded row permanently burns a
-slot in the tenant's upload budget — enough of them and the tenant cannot
-submit at all — and each one shows the user a job that will never
-resolve.
-
-The reaper lives in asr-service, not in asr-worker, for the obvious
-reason: a backstop that runs inside the process being backstopped is not
-a backstop. Cross-tenant enumeration goes through the
-``asr_tenants_with_stale_jobs`` SECURITY DEFINER function (0077) — the
-sanctioned pattern from 0059/0051/0036 — and every row read and write
-still happens inside ``tenant_connection``.
-
-The grace windows ARE the safety interlock; asr-worker publishes no
-heartbeat to check against. They must stay comfortably above the worst
-case the worker allows itself (``max_duration_seconds`` ×
-``asr_max_inference_seconds_multiplier``, plus a redelivery or two), or
-the reaper will fail jobs that were merely slow. Reaping early is not
-catastrophic — the worker's idempotency check sees the terminal row on
-redelivery and skips — but it does cost the user a transcript that
-was on its way.
+``running`` past its grace window (dead worker) and ``queued`` past a longer one (lost
+message) are failed conditionally. Cross-tenant enumeration goes through the
+``asr_tenants_with_stale_jobs`` SECURITY DEFINER function; every row read and write
+stays inside ``tenant_connection``. The grace windows are the only interlock (no
+heartbeat): keep them above max_duration × inference multiplier plus a redelivery.
 """
 
 from __future__ import annotations
@@ -59,8 +24,7 @@ from . import repository
 
 logger = logging.getLogger(__name__)
 
-# `running` is stranded by a dead worker; `queued` by a lost message. The
-# kinds differ because the operator's next question differs.
+# `running` = dead worker; `queued` = lost message.
 _KIND_BY_STATUS = {
     "running": str(JobErrorKind.WORKER_LOST),
     "queued": str(JobErrorKind.QUEUE_LOST),
@@ -70,12 +34,7 @@ _KIND_BY_STATUS = {
 async def _tenants_with_stale_jobs(
     state: Any, *, running_grace_seconds: float, queued_grace_seconds: float
 ) -> list[UUID]:
-    """Tenants holding at least one stranded candidate.
-
-    Runs outside ``tenant_connection`` on purpose: the question is
-    cross-tenant, which is exactly what the SECURITY DEFINER function
-    exists for. Only tenant IDs come back.
-    """
+    """Tenants with a stranded candidate; cross-tenant via SECURITY DEFINER, IDs only."""
     async with state.app_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT tenant_id FROM asr_tenants_with_stale_jobs($1, $2)",
@@ -105,9 +64,7 @@ async def reap_tenant(
             kind = _KIND_BY_STATUS.get(row.status)
             if kind is None:  # pragma: no cover — the query filters on status
                 continue
-            # Conditional on the status we saw: a job that finished between
-            # the SELECT and here keeps its own outcome. A stored transcript
-            # must never be overwritten by a late "the worker looked dead".
+            # Conditional on the status we saw: a job that finished meanwhile keeps its outcome.
             if not await repository.fail_job(
                 conn,
                 job_id=row.id,
@@ -167,14 +124,7 @@ async def _reap_rediarize(
     running_grace_seconds: float,
     queued_grace_seconds: float,
 ) -> int:
-    """Stranded speaker re-runs (Sprint 29): a worker that died mid re-run,
-    or a lost message, leaves ``diarization_status`` spinning forever.
-
-    Only the RE-RUN fails (``stranded``); the job stays ``complete`` with
-    the labels it had. A re-run is a diarization pass, far shorter than the
-    Whisper pass the grace windows are sized for — reaping one is always
-    late, never early.
-    """
+    """Stranded speaker re-runs: only the re-run fails; the job stays ``complete``."""
     reaped = 0
     for row in await repository.list_stale_rediarize(
         conn,

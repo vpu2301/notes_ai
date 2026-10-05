@@ -1,22 +1,9 @@
-"""Readable conversation transcripts without touching the words (Sprint I3 T3).
+"""Disfluency hiding for conversation transcripts (never dictation).
 
-A conversation transcript is served verbatim (Sprint G0): no punctuation
-model, no number or date rewriting. What a reader still trips over is the
-speech itself — "uh", "um", "this is this is the swim platform" — and the
-chunk-to-chunk casing the decoder leaves behind ("the tender garage takes"
-starting a paragraph in lower case).
-
-This stage hides, never deletes: a filler token or the first copy of an
-immediate repeat is marked ``hidden`` and keeps its timing, the displayed
-``text`` is rebuilt from the visible words, and the first visible word of
-the segment is capitalised. ``raw_text`` on the served segment is the
-decoder's own text; the note engine's ``normalise_quote`` drops the same
-fillers, so a quote taken from either text verifies against the other.
-
-Conversation only (``ctx.conversation``): dictation keeps every word the
-person said, because there a filler may be the person's own word.
-The filler table is ``tests/fixtures/glossary/../nlp/fillers.json``; the
-test asserts this module's copy equals it.
+Hides, never deletes: fillers and the first copy of an immediate repeat are
+marked ``hidden`` with timing kept; ``text`` is rebuilt from visible words.
+The note engine's ``normalise_quote`` drops the same fillers, so quotes from
+either text verify. A test asserts FILLERS equals the fixtures' fillers.json.
 """
 
 from __future__ import annotations
@@ -32,8 +19,7 @@ FILLERS: Final[dict[str, frozenset[str]]] = {
     "de": frozenset({"äh", "ähm", "hm", "hmm", "öh", "öhm", "mh"}),
     "uk": frozenset({"е", "ем", "мм", "ммм", "хм", "е-е", "а-а"}),
 }
-# An immediate repeat of up to this many words ("this is this is") hides
-# the first copy; the later copy usually carries the punctuation.
+# Immediate repeat of up to this many words hides the first copy (the later one carries punctuation).
 MAX_REPEAT_WORDS: Final = 3
 
 _EDGE_PUNCT = re.compile(r"^[^\w'-]+|[^\w'-]+$", re.UNICODE)
@@ -45,8 +31,7 @@ def token_of(text: str) -> str:
 
 
 def hidden_positions(tokens: list[str], language: str) -> set[int]:
-    """Which word positions to hide: fillers, and the first copy of an
-    immediate repeat among the words that remain."""
+    """Word positions to hide: fillers, then the first copy of an immediate repeat."""
     fillers = FILLERS.get(language, frozenset())
     hidden = {i for i, tok in enumerate(tokens) if tok in fillers}
     visible = [i for i in range(len(tokens)) if i not in hidden]

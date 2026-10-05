@@ -1,29 +1,8 @@
-"""Tenant (company workspace) management — the backend for the SPA "Tenant" sidebar.
+"""Tenant (workspace) management.
 
-Endpoints
----------
-* ``GET    /tenants``                       — tenants the caller can reach
-* ``GET    /tenants/current``               — the caller's active tenant
-* ``POST   /tenants``                       — onboard a new company (→ owner)
-* ``GET    /tenants/{id}``                   — tenant profile / branding
-* ``PATCH  /tenants/{id}``                   — update profile / branding
-* ``PUT    /tenants/{id}/logo``              — upload / replace the logo
-* ``GET    /tenants/{id}/logo``              — fetch the logo bytes
-* ``GET    /tenants/{id}/members``           — the member roster
-* ``POST   /tenants/{id}/members``           — link a principal (+role)
-* ``PATCH  /tenants/{id}/members/{sub}``      — change a member's role
-* ``DELETE /tenants/{id}/members/{sub}``      — remove a member
-* ``POST   /tenants/{id}/switch``            — select active tenant
-
-Isolation model
----------------
-Reads of a tenant require the caller to hold a membership in that tenant
-(cross-tenant reads allowed for tenants you belong to). *Writes* (create is
-the exception) additionally require the target to be the caller's **active**
-tenant — the JWT is scoped to one tenant, so you manage the tenant you are
-authenticated into. The perms matrix (``tenant.read`` / ``tenant.update`` /
-``tenant.create`` / ``tenant.manage_members``) is the platform-role gate;
-membership presence + management role is the per-tenant gate on top.
+Reads need a membership in the tenant; writes (except create) additionally need
+it to be the caller's active tenant. Perms matrix = platform-role gate, membership
+role = per-tenant gate on top.
 """
 
 from __future__ import annotations
@@ -58,8 +37,7 @@ from ..deps import current_user, get_state, requires, requires_mfa
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
-# Management roles carried by a membership (distinct from the JWT platform
-# roles). The ones that may administer the tenant.
+# Membership management roles (distinct from JWT platform roles).
 MANAGEMENT_ROLES: frozenset[str] = frozenset({"owner", "admin", "member", "assistant", "viewer"})
 MANAGER_ROLES: frozenset[str] = frozenset({"owner", "admin"})
 
@@ -67,7 +45,7 @@ _MAX_LOGO_BYTES = 2 * 1024 * 1024
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-# ── Wire models (extra="forbid" per platform rule 10) ───────────────────
+# ── Wire models ─────────────────────────────────────────────────────────
 
 
 class _Strict(BaseModel):
@@ -251,8 +229,7 @@ def _member_out(row: asyncpg.Record) -> MemberOut:
 
 
 async def _my_membership_role(tenant_id: UUID, sub: UUID) -> str | None:
-    """The caller's management role in ``tenant_id`` (via unrestricted writer
-    pool so it works for any tenant the caller belongs to), or None."""
+    """The caller's management role in ``tenant_id`` (writer pool: any tenant they belong to), or None."""
     state = get_state()
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         m = await repo.get_membership(conn, tenant_id=tenant_id, user_sub=sub)
@@ -262,14 +239,13 @@ async def _my_membership_role(tenant_id: UUID, sub: UUID) -> str | None:
 async def _require_member(tenant_id: UUID, claims: Claims) -> str:
     role = await _my_membership_role(tenant_id, claims.sub)
     if role is None:
-        # Do not leak existence of a tenant the caller can't see.
+        # Never leak the existence of a tenant the caller cannot see.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
     return role
 
 
 def _require_active_tenant(tenant_id: UUID, claims: Claims) -> None:
-    """Writes may only target the tenant the caller is authenticated into —
-    the JWT is single-tenant, so RLS and Keycloak roles both refer to it."""
+    """Writes may only target the tenant the caller is authenticated into (the JWT is single-tenant)."""
     if tenant_id != claims.tid:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -369,7 +345,6 @@ async def create_tenant(
                 tax_id=body.tax_id.strip(),
                 registration_number=body.registration_number.strip(),
             )
-            # The creator is the founding owner.
             await repo.add_member(
                 conn,
                 tenant_id=row["id"],
@@ -415,9 +390,7 @@ async def update_tenant(
     _validate_slug(body.slug)
 
     fields: dict[str, Any] = body.model_dump(exclude_unset=True)
-    # ``is_active`` is the simple toggle; keep the finer ``status`` in sync so
-    # the two never contradict (active ⇄ suspended). An explicit status is not
-    # part of the update surface — lifecycle beyond active/suspended is admin-CLI.
+    # Keep ``status`` in sync with ``is_active`` (active ⇄ suspended).
     if "is_active" in fields:
         fields["status"] = "active" if fields["is_active"] else "suspended"
     for key in (
@@ -561,7 +534,7 @@ async def list_members(
 ) -> MemberListOut:
     await _require_member(tenant_id, claims)
     state = get_state()
-    # Read on the writer pool so cross-tenant members you belong to also resolve.
+    # Writer pool so cross-tenant members resolve.
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         rows = await repo.list_members(conn, tenant_id=tenant_id)
     return MemberListOut(items=[_member_out(r) for r in rows])
@@ -621,7 +594,6 @@ async def add_member(
         payload={"role": body.role},
         severity=Severity.SEC,
     )
-    # Re-read via list to get the joined profile fields for the response.
     return MemberOut(
         user_sub=member["user_sub"],
         role=member["role"],

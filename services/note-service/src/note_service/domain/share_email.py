@@ -1,17 +1,6 @@
-"""Sending a note to somebody's inbox.
-
-This is the server-side half of "Send" in the share modal. The clients
-used to build a ``mailto:`` URL and hand it to the desktop mail client,
-which is where two bugs lived: the mail was an unstyled draft the sender
-still had to send, and on macOS the hand-off surfaces whatever Mail.app
-already had open — an old draft, with an old attachment. Neither is
-fixable in a ``mailto:``. Sending from here is.
-
-Delivery is inline rather than queued, for the same reason auth-service
-sends its codes inline: the person is watching the modal, and a queue
-they wait on turns a slow relay into "sharing is broken" with no error
-anywhere. The cost is that a relay hiccup is a visible per-recipient
-failure they can retry, which is the honest one.
+"""Sending a note to somebody's inbox: the server side of "Send" in the share
+modal. Delivery is inline, not queued: a relay hiccup is a visible per-recipient
+failure the sender can retry.
 """
 
 from __future__ import annotations
@@ -33,11 +22,7 @@ logger = logging.getLogger(__name__)
 
 WINDOW_S = 3600
 
-# How many mails are in flight at once. Not `len(recipients)`: every send
-# opens its own SMTP connection, and a shared relay (Google Workspace,
-# say) counts simultaneous connections from one account and starts
-# refusing them. Four keeps a ten-recipient send inside a couple of relay
-# round-trips without looking like a burst.
+# Every send opens its own SMTP connection and a shared relay refuses bursts from one account.
 _MAX_IN_FLIGHT = 4
 
 _meter = metrics.get_meter("mdx.note.share_mail")
@@ -54,13 +39,8 @@ _send_histogram = _meter.create_histogram(
 
 
 class ShareEmailRateLimiter:
-    """A rolling hourly cap per sender, counted in RECIPIENTS.
-
-    Counting recipients rather than requests is the point: ten calls of
-    one address and one call of ten addresses cost the same, so batching
-    is not a way around the cap. Fails open on a Redis outage, like the
-    clip limiter — a cache being down must not stop people sharing.
-    """
+    """A rolling hourly cap per sender, counted in RECIPIENTS (batching is no way
+    around it). Fails open on a Redis outage."""
 
     def __init__(self, redis: Redis, *, per_hour: int = 60) -> None:
         self._redis = redis
@@ -87,8 +67,7 @@ class Recipient:
     email: str
     # ``member`` | ``link`` — see adapters/share_mail_copy.
     access: str
-    # Where this particular recipient should land. A member goes to the
-    # note in the app; everyone else to the public link.
+    # A member lands on the note in the app; everyone else on their link.
     link_url: str
 
 
@@ -112,12 +91,7 @@ async def send_one(
     shared_at: datetime,
     timeout_seconds: float,
 ) -> SendOutcome:
-    """Render and deliver one share mail. Never raises.
-
-    One bad address among five must not lose the other four, so a
-    failure becomes a per-recipient status the sender can see and act
-    on, not an exception that abandons the batch.
-    """
+    """Render and deliver one share mail. Never raises: a failure is a per-recipient status."""
     rendered = share_mail.render(
         lang=lang,
         sharer_name=sharer_name,
@@ -137,8 +111,6 @@ async def send_one(
                     subject=rendered.subject,
                     text_body=rendered.text_body,
                     html_body=rendered.html_body,
-                    # The recipient's instinct is to answer the person
-                    # who shared, not a mailbox nobody reads.
                     reply_to=sharer_email,
                 )
             ),
@@ -152,8 +124,7 @@ async def send_one(
         _sent_counter.add(1, {"access": recipient.access, "outcome": "rejected"})
         return SendOutcome(email=recipient.email, access=recipient.access, status="rejected")
     except Exception as exc:  # noqa: BLE001
-        # Deliberately no address in the log line: the sender sees which
-        # one failed in the response; the log sink does not need it.
+        # Deliberately no address in the log line.
         logger.error(
             "note.share_mail.send_failed",
             extra={"access": recipient.access, "error_class": type(exc).__name__},
@@ -179,12 +150,7 @@ async def send_many(
     shared_at: datetime,
     timeout_seconds: float,
 ) -> list[SendOutcome]:
-    """Deliver the batch, a few at a time, in the order asked.
-
-    Concurrent rather than sequential because five recipients should
-    cost one relay round-trip's worth of latency and not five; bounded
-    rather than unbounded for the reason in `_MAX_IN_FLIGHT`.
-    """
+    """Deliver the batch, `_MAX_IN_FLIGHT` at a time, in the order asked."""
     gate = asyncio.Semaphore(_MAX_IN_FLIGHT)
 
     async def one(recipient: Recipient) -> SendOutcome:

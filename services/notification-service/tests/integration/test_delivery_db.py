@@ -1,9 +1,4 @@
-"""Delivery, retry, dead-lettering and the digest, against real Postgres.
-
-Covers the §6 items for the delivery axis: delivery idempotency, the
-retry→sent walk, the retry→dead-letter walk, and digest
-idempotency/empty-suppression.
-"""
+"""Delivery, retry, dead-lettering and the digest, against real Postgres."""
 
 from __future__ import annotations
 
@@ -94,8 +89,6 @@ def test_backoff_is_exponential_and_capped() -> None:
     assert backoff_delay(0, base_s=30) == timedelta(seconds=30)
     assert backoff_delay(1, base_s=30) == timedelta(seconds=60)
     assert backoff_delay(2, base_s=30) == timedelta(seconds=120)
-    # An uncapped doubling reaches days; a very late notification is
-    # worse than a loud failure.
     assert backoff_delay(20, base_s=30) == timedelta(seconds=3600)
 
 
@@ -114,8 +107,7 @@ async def test_email_is_sent_once_and_is_idempotent(pool) -> None:
         row = await _outbox(pool, nid, "email")
         assert row["status"] == "sent"
 
-        # Re-driving must NOT produce a second send: the row is no longer
-        # `pending`, which is the delivery-idempotency anchor (E3).
+        # Re-driving must not send again: the row is no longer `pending`.
         await deliver_once(app_pool=pool, tenant_id=TENANT_A, provider=provider, audit_writer=None)
         assert len(provider.sent) == 1
     finally:
@@ -206,7 +198,7 @@ async def test_exhausted_retries_dead_letter(pool) -> None:
         row = await _outbox(pool, nid, "email")
         assert row["status"] == "dead"
 
-        # The forensic row is what the DLQ alert fires on (E10).
+        # The forensic row is what the DLQ alert fires on.
         admin = await create_pool(ADMIN_DSN, application_name="dl-check")
         try:
             async with admin.acquire() as conn:

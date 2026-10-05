@@ -36,6 +36,12 @@
 			path = Tests/NotesAICaptureTests;
 			sourceTree = "<group>";
 		};
+		A1B2C3D4E5F6000000000030 /* clients/Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = Shared;
+			path = ../clients/Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,6 +66,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6000000000001 /* Sources/NotesAICapture */,
+				A1B2C3D4E5F6000000000030 /* clients/Shared */,
 				A1B2C3D4E5F6000000000021 /* Tests/NotesAICaptureTests */,
 				A1B2C3D4E5F6000000000014 /* Support */,
 				A1B2C3D4E5F6000000000004 /* Products */,
@@ -111,6 +118,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				A1B2C3D4E5F6000000000001 /* Sources/NotesAICapture */,
+				A1B2C3D4E5F6000000000030 /* clients/Shared */,
 			);
 			name = NotesAICapture;
 			packageProductDependencies = (

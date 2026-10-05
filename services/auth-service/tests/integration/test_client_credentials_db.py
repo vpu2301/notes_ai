@@ -1,12 +1,8 @@
-"""IDX-B1b against a real Postgres and Redis.
+"""Client credentials against a real Postgres and Redis.
 
-The properties only the database and the cache can prove: that a secret
-for one credential cannot open another, that the lock is fail-closed,
-that rotation gives two live secrets and then one, that `app_role` cannot
-read a hash, and that one workspace's rooms are invisible from another's.
-
-Requires ``RUN_DB_INTEGRATION=1``, ``make migrate-up``, and the dev
-stack's Postgres and Redis.
+A secret for one credential cannot open another, the lock is fail-closed, rotation gives
+two live secrets then one, `app_role` cannot read a hash, one workspace's rooms are
+invisible from another's. Requires ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -137,11 +133,7 @@ async def test_a_device_token_carries_its_rows_tenant(service, su) -> None:
 
 
 async def test_a_service_token_is_minted_against_the_platform_tenant(service) -> None:
-    """`Claims.tid` is required and a service credential has no workspace.
-
-    The platform tenant owns no customer data, so a leaked service token
-    reaches nothing — the right default for a principal nobody has scoped.
-    """
+    """`Claims.tid` is required; a service credential gets the platform tenant, which owns no customer data."""
     from jose import jwt
 
     created = await service.create(
@@ -384,8 +376,7 @@ async def test_one_workspaces_devices_are_invisible_from_another(service) -> Non
 
 
 async def test_service_rows_are_invisible_to_app_role_entirely(service) -> None:
-    """Their tenant_id is NULL, so the RLS predicate is never true — a
-    machine that serves the platform is not a workspace's business."""
+    """Their tenant_id is NULL, so the RLS predicate is never true."""
     created = await service.create(
         kind="service", tenant_id=None, name=_name("svc"), created_by=None
     )

@@ -1,4 +1,4 @@
-"""Sprint SQ1 T6 — no chat routing without a report (or a recorded waiver)."""
+"""No chat routing without a report (or a recorded waiver)."""
 
 from __future__ import annotations
 

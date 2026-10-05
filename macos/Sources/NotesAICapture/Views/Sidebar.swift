@@ -1,15 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The left column, laid out like Claude's (as the web's sidebar): the
-/// panel toggle and a serif wordmark under the traffic lights, one filled
-/// "New meeting" row (a caret on hover for the other ways to start), plain
-/// rows for All notes and the user's spaces, and the account as a single
-/// row at the foot. Search lives on the home page, as on the web.
-///
-/// It collapses to an icon rail (the toggle beside the wordmark, ⌃⌘S). The
-/// rail is wide enough to keep the window's traffic lights inside it, so
-/// nothing ever floats over the detail pane.
+/// The left column, laid out like Claude's: panel toggle and wordmark, one filled
+/// "New meeting" row, plain rows for All notes and spaces, the account at the foot.
+/// Collapses to an icon rail (⌃⌘S) wide enough to keep the traffic lights inside it.
 struct SidebarView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -253,13 +247,10 @@ struct SidebarView: View {
 
     private func accountItems() -> [DSMenuItem] {
         var items: [DSMenuItem] = [
-            // The workspace, not the host: which company's notes these are
-            // is the thing you can be wrong about (IDX-M2).
+            // The workspace, not the host: which company's notes these are is what you can be wrong about.
             .header(app.email.isEmpty ? "Not signed in" : app.email, hint: workspaceLine),
         ]
-        // The workspace switcher, inline: switching is a thing people do
-        // several times a day, and a settings sheet is the wrong distance
-        // away from it (IDX-M2).
+        // The workspace switcher, inline: switching happens several times a day.
         if app.workspaces.count > 1 {
             items.append(.separator)
             items.append(.header("Workspace"))
@@ -303,8 +294,7 @@ struct SidebarView: View {
 
 // MARK: - Rows
 
-/// A plain sidebar row (`.sb-link`): icon and label on the sidebar ground;
-/// hover and the row you are on take a soft neutral fill, never a frame.
+/// A plain sidebar row (`.sb-link`): icon and label; hover and the active row take a soft neutral fill, never a frame.
 struct SidebarRow: View {
     let title: String
     let symbol: String
@@ -339,9 +329,7 @@ struct SidebarRow: View {
     }
 }
 
-/// "New meeting": the one filled row (`.sb-new`). The row starts recording
-/// at once; a caret that surfaces on hover holds the other ways to start
-/// (blank note, template, upload).
+/// "New meeting": the one filled row (`.sb-new`). Starts recording at once; a caret on hover holds the other ways to start.
 private struct SidebarNewRow: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -385,9 +373,7 @@ private struct SidebarNewRow: View {
     }
 }
 
-/// The "New meeting" button's ground (`.sb-new-main`): raised off the
-/// sidebar — surface, hairline, a soft shadow — so it never reads as the
-/// row you are on, which takes the flat `sidebarActive` fill.
+/// The "New meeting" button's ground (`.sb-new-main`): raised off the sidebar so it never reads as the active row.
 private struct SidebarRaisedFill: View {
     let hover: Bool
 
@@ -419,8 +405,7 @@ private struct CaretLabel: View {
     }
 }
 
-/// One icon on the collapsed rail: 40 pt wide, the same neutral fills as a
-/// row; `filled` is the "New meeting" button.
+/// One icon on the collapsed rail: 40 pt wide, the same neutral fills as a row; `filled` is "New meeting".
 private struct RailButton: View {
     let help: String
     let symbol: String
@@ -501,8 +486,7 @@ private struct AccountRowLabel: View {
     }
 }
 
-/// One space in the sidebar; click filters the home page to it. A row like
-/// any other — the count on the right gives way to a ⋯ on hover.
+/// One space in the sidebar; click filters the home page to it. The count gives way to a ⋯ on hover.
 private struct SpaceRow: View {
     @EnvironmentObject private var app: AppState
     let space: Space

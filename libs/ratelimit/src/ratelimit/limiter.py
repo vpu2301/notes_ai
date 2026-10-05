@@ -1,10 +1,5 @@
-"""Fixed-window counter on Redis: ``INCR`` + ``EXPIRE`` per window bucket.
-
-Key shape ``<prefix>:<scope>:<subject>:<window_start>`` — the same shape
-``nlp_service.deps.rate_limited`` and ``auth_service.rate_limit`` have used
-by hand. The TTL outlives the window by a margin so a bucket cannot be
-reset by racing its own expiry. Subjects that are personal data (an email
-address) must be hashed by the caller before they become a key.
+"""Fixed-window counter on Redis, key ``<prefix>:<scope>:<subject>:<window_start>``; the TTL outlives the window
+so a bucket cannot be reset by racing its expiry. Personal-data subjects must be hashed by the caller.
 """
 
 from __future__ import annotations
@@ -62,12 +57,7 @@ class FixedWindowLimiter:
         fail_open: bool = True,
         cost: int = 1,
     ) -> Decision:
-        """Count one hit in the current window and say whether it fits.
-
-        Every call counts, including refused ones — an attacker who is
-        already over the cap keeps feeding the counter, which is what keeps
-        the cap a cap.
-        """
+        """Count one hit in the current window and say whether it fits; refused calls count too."""
         if limit <= 0 or window_seconds <= 0:
             raise ValueError("limit and window_seconds must be positive")
         now = int(self._clock())

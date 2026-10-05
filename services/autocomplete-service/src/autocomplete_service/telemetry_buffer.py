@@ -1,14 +1,7 @@
-"""In-memory telemetry batch buffer.
+"""In-memory telemetry batch buffer: flushes on interval or batch size.
 
-Receives rows from the telemetry router; flushes every
-``flush_interval_s`` OR when the buffer reaches ``flush_batch``,
-whichever first. Sprint-10 service ships a single instance per worker.
-
-Backpressure doctrine: telemetry can never slow a keystroke. The buffer
-is BOUNDED (``10 × flush_batch``); beyond that, rows are shed (drop-
-oldest) and counted in ``mdx_autocomplete_telemetry_dropped_total`` —
-losing telemetry is acceptable, blocking or growing memory is not. A
-failed flush retries once, then drops the batch with the same counter.
+Bounded (``10 × flush_batch``), drop-oldest on overflow; a failed flush retries once then drops.
+Telemetry must never slow a keystroke or grow memory.
 """
 
 from __future__ import annotations
@@ -59,7 +52,6 @@ class TelemetryBuffer:
         self._rows.append(row)
         overflow = len(self._rows) - self._max_buffer
         if overflow > 0:
-            # Shed oldest — backpressure by shedding, never by latency.
             del self._rows[:overflow]
             self._drop(overflow, "buffer_overflow")
         if len(self._rows) >= self._batch:
@@ -75,8 +67,7 @@ class TelemetryBuffer:
                 async with self._pool.acquire() as conn:
                     await repo.insert_telemetry_batch(conn, batch)
             except Exception as first_exc:  # noqa: BLE001
-                # One retry (fresh connection), then drop with the counter —
-                # never block shutdown or grow memory on a down DB.
+                # One retry on a fresh connection, then drop.
                 try:
                     async with self._pool.acquire() as conn:
                         await repo.insert_telemetry_batch(conn, batch)
@@ -94,8 +85,6 @@ class TelemetryBuffer:
             with contextlib.suppress(asyncio.CancelledError, Exception):  # noqa: BLE001
                 await self._task
             self._task = None
-        # Graceful shutdown: flush the remainder, bounded by the retry-once
-        # rule above (~2 s worst case on a dead DB, then shed).
         await self._flush_locked()
 
     async def _run(self) -> None:

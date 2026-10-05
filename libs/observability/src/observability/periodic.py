@@ -1,29 +1,6 @@
-"""The sprint-16 scheduler pattern — one runner, hosted per service.
-
-A single scheduler *process* would have to import three services (jobs
-live in note- and autocomplete-service), which the import-linter
-contracts forbid — so the "one pattern" is this shared runner, hosted
-in-process by each service behind its ``MDX_BACKGROUND_JOBS`` flag (the
-autocomplete precedent), with every job also exposed as a
-``python -m``/``scripts/jobs`` CLI for external cron (the sprint-08/11
-precedent). ADR-0041 records the choice.
-
-The runner owns the loop mechanics and the Prometheus-side contract:
-
-- ``mdx_scheduler_job_runs_total{job_name, outcome}``
-- ``mdx_scheduler_job_duration_seconds{job_name}``
-
-The label is ``job_name``, not ``job``: the collector's Prometheus
-exporter stamps every series with a constant ``job`` (the service name)
-and refuses a metric whose own label collides with it.
-
-The per-run **audit row** is the job's own concern (jobs hold the audit
-writer and tenant context; this leaf lib must not import libs/audit) —
-pass ``on_complete`` to write ``scheduler.job.completed/failed``.
-
-Every job MUST be idempotent: the first iteration fires immediately at
-startup (self-healing after downtime), and a crashed run is simply
-retried next interval.
+"""In-process periodic job runner (ADR-0041). The metric label is ``job_name``, not ``job``: the collector's
+Prometheus exporter stamps a constant ``job`` and refuses a colliding label. The audit row is the job's own
+concern via ``on_complete`` (this leaf must not import libs/audit). Jobs MUST be idempotent.
 """
 
 from __future__ import annotations
@@ -57,13 +34,7 @@ async def run_job_once(
     fn: Callable[[], Awaitable[Any]],
     on_complete: Callable[[str, Any, float], Awaitable[None]] | None = None,
 ) -> Any:
-    """Run one iteration: metrics + logs + optional audit callback.
-
-    Returns the job result on success; swallows (and logs) job errors —
-    the loop must survive any single failure. ``on_complete`` receives
-    ``(outcome, result_or_error_str, duration_seconds)`` and is itself
-    best-effort.
-    """
+    """Run one iteration; job errors are logged and swallowed. ``on_complete(outcome, detail, duration)`` is best-effort."""
     started = time.monotonic()
     try:
         result = await fn()

@@ -1,19 +1,6 @@
-"""Sprint D2 — composition to the document standard, the parts code owns.
-
-* :class:`VolumeBudget` — from the duration of transcribed speech, before
-  any call: target words ``12·D``, bullets per block 2–6, three sub-points,
-  three to six orientation sentences.
-* :func:`blocks` — facts cut into time-contiguous blocks: ``round(D/4)`` of
-  them within [3, 8], each ≥ 4 facts, cut at the largest gaps in time and
-  where the extractor reported a new topic.
-* :func:`top_per_block` — the most specific fact of each block: the
-  skeleton of orientation paragraph 2.
-* :func:`orientation_p1` — paragraph 1 from the roles table, the reader's
-  type word, the show, the subject and the themes.
-* :func:`fallback_heading` — a block with no usable heading: its name and
-  first time.
-
-Pure: facts and values in, structures out.
+"""Composition to the document standard, the parts code owns: the volume budget
+from speech duration, time-contiguous blocks, the skeleton of paragraph 2,
+paragraph 1, fallback headings. Pure.
 """
 
 from __future__ import annotations
@@ -138,9 +125,8 @@ def fallback_heading(facts: Sequence[VerifiedFact], language: str, known: frozen
 
 
 def quote_child(fact: VerifiedFact, speaker: str | None, language: str) -> str | None:
-    """T2 — a quote sub-point from the fact's own quote, never from model
-    text: „…" — Name (mm:ss), cut to 20 words at a word. None when nobody
-    verified the speaker's name: a label is never written."""
+    """A quote sub-point from the fact's own quote: „…" — Name (mm:ss), cut to 20
+    words. None without a verified speaker name: a label is never written."""
     name = roles_table.real_name(speaker)
     words = fact.quote.split()
     if not name or not words:
@@ -155,7 +141,7 @@ def quote_child(fact: VerifiedFact, speaker: str | None, language: str) -> str |
 _QUOTES: Final[dict[str, tuple[str, str]]] = {"en": ("“", "”"), "de": ("„", "“"), "uk": ("«", "»")}
 
 
-# ── orientation paragraph 1 (T4) ────────────────────────────────────
+# ── orientation paragraph 1 ─────────────────────────────────────────
 
 # The reader's word for each role, per language.
 _ROLE_WORDS: Final[dict[str, dict[str, str]]] = {
@@ -186,7 +172,7 @@ def show_name(turns: Sequence[Turn]) -> str | None:
     return None
 
 
-# SQ3 T2 — the role words of paragraph 1, and the person nobody named.
+# The role words of paragraph 1, and the person nobody named.
 _ROLE_NOUNS: Final[dict[str, dict[str, str]]] = {
     "en": {"expert": "expert", "interviewee": "interviewee"},
     "de": {"expert": "Experte/Expertin", "interviewee": "Interviewpartner/in"},
@@ -202,10 +188,8 @@ _ARTICLE: Final = re.compile(r"^(?:a|an|the|ein|eine|einen|der|die|das)\s+", re.
 
 
 def _described(s: roles_table.Speaker, role_word: str | None, language: str = "en") -> str:
-    """``Name (role with organisation, qualifier)`` from the verified fields
-    of the introduction only — what F3's presenter line said, folded into
-    the speaker list (SQ3 T1). ``role_word`` stands in when the
-    introduction gives no role."""
+    """``Name (role with organisation, qualifier)`` from the verified introduction
+    fields; ``role_word`` stands in when the introduction gives no role."""
     from .render import PRESENTER_LABELS
 
     person = s.introduced_as
@@ -225,12 +209,9 @@ def _described(s: roles_table.Speaker, role_word: str | None, language: str = "e
 def speakers_of(
     table: roles_table.RolesTable, language: str
 ) -> tuple[list[str], list[str], list[str]]:
-    """``(speakers, guests, others)`` for paragraph 1 — every voice with at
-    least 5 % of the speech or a role, by role rank (host/narrator, expert,
-    guest, interviewee, participant) then share. A voice nobody named is
-    "eine weitere Person" (several: "2 weitere Personen"), never a label
-    (D-LABEL). Clips and adverts: nobody. Guests are written after "als
-    Gast"; ``others`` (interviewees, participants) after them."""
+    """``(speakers, guests, others)`` for paragraph 1: every voice with >= 5 % of the
+    speech or a role, by role rank then share. An unnamed voice is "eine weitere
+    Person", never a label; clips and adverts are nobody."""
     words = _ROLE_WORDS.get(language, _ROLE_WORDS["en"])
     nouns = _ROLE_NOUNS.get(language, _ROLE_NOUNS["en"])
     one, many = _UNNAMED.get(language, _UNNAMED["en"])
@@ -248,8 +229,7 @@ def speakers_of(
     for s in listed:
         name = roles_table.real_name(s.name)
         if s.role in (roles_table.NARRATOR, roles_table.HOST):
-            # A presenter who introduced themselves: their own role and
-            # organisation (F3's presenter line, folded in here — SQ3 T1).
+            # A presenter who introduced themselves: their own role and organisation.
             if name:
                 speakers.append(_described(s, words[s.role], language))
             else:
@@ -309,9 +289,7 @@ _THEME_SPLIT: Final = re.compile(r"[,;]|[„“”\"«»]")
 
 
 def clean_themes(themes: Sequence[str]) -> list[str]:
-    """Themes as a reader's list: a model that packs several quoted themes
-    into one string ("Datensammlung”, „Geheimdienste”, …") gets them split
-    and unquoted; a fragment the answer's length limit cut ends the list."""
+    """Themes as a reader's list: packed quoted themes split and unquoted; a cut fragment ends the list."""
     out: list[str] = []
     for theme in themes:
         parts = [p.strip(" .-—") for p in _THEME_SPLIT.split(theme)]
@@ -324,17 +302,10 @@ def clean_themes(themes: Sequence[str]) -> list[str]:
     return out
 
 
-# ── Sprint SQ2 T4 — sections follow the recording ───────────────────
-#
-# Block boundaries come from the TRANSCRIPT, not from where facts happen to
-# lie: (a) a spoken structure cue ("Kapitel 2", "let's move on"); (b)
-# otherwise a lexical shift over two-minute tiles (TextTiling: cosine of
-# content words either side of a gap, depth against the neighbouring peaks
-# — deterministic code, no model call); (c) the count reconciled to the
-# standard's ``round(D/4)`` within [3, 8] by dropping the weakest. A
-# recording with no shift at all (a monologue on one subject) gets equal
-# blocks. Facts are placed by their evidence time; a block with fewer than
-# two facts joins its neighbour (never a one-bullet section — D-STRUCT).
+# ── Sections follow the recording ───────────────────────────────────
+# Block boundaries come from the TRANSCRIPT: spoken cues, else lexical shifts
+# over two-minute tiles (TextTiling, no model call), reconciled to round(D/4)
+# within [3, 8]. No shift at all: equal blocks. A block under two facts joins its neighbour.
 
 TILE_MS: Final = 120_000
 TILING_SIDE: Final = 2  # tiles compared either side of a gap
@@ -371,11 +342,8 @@ def _cosine(a: Counter[str], b: Counter[str]) -> float:
 
 
 def lexical_shifts(turns: Sequence[Turn], language: str) -> list[tuple[int, float]]:
-    """``[(boundary ms, depth)]`` at every tile gap, strongest first.
-
-    Tiles are two minutes of speech each; a gap's score is the cosine of
-    the content words of the ``TILING_SIDE`` tiles before and after it; its
-    depth is how far that dips below the highest score on each side."""
+    """``[(boundary ms, depth)]`` at every tile gap, strongest first: cosine of the
+    content words either side, depth against the neighbouring peaks."""
     if not turns:
         return []
     start = turns[0].start_ms
@@ -425,9 +393,7 @@ def segment(
     for ms, depth in lexical_shifts(turns, language):
         if all(abs(ms - c) >= BOUNDARY_NEAR_MS for c, _d, _s in candidates):
             candidates.append((ms, depth, SOURCE_LEXICAL))
-    # Strongest first, but no part shorter than half an equal share: a
-    # shift a minute from the end makes a part too short to hold two facts
-    # (it is merged away and the note loses a section — r03, SQ2).
+    # Strongest first, but no part shorter than half an equal share (it would be merged away).
     min_part = (end - start) / (wanted + 1) / 2 if wanted > 0 else 0
     chosen: list[tuple[int, float, str]] = []
     for cand in sorted(candidates, key=lambda c: (-c[1], c[0])):
@@ -444,8 +410,7 @@ def segment(
         return Segmentation(
             tuple(round(start + step * k) for k in range(1, wanted + 1)), SOURCE_UNIFORM
         )
-    # Fewer shifts than the standard's parts: the longest part is halved
-    # until the count holds (a monologue on one subject: equal parts).
+    # Fewer shifts than wanted: the longest part is halved until the count holds.
     while len(cuts) < wanted:
         edges = [start, *cuts, end]
         a, b = max(zip(edges, edges[1:], strict=False), key=lambda e: e[1] - e[0])

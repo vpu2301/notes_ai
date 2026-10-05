@@ -1,9 +1,5 @@
-"""Author-side action items and responses (Sprint 20).
-
-Items are a projection: the only thing the author changes here is
-status. What is worth pinning is the aggregation the clients render
-(counts + the comment as text), the 404 for an item of an older
-version, the clear, and that an outsider sees nothing.
+"""Author-side action items and responses: the aggregation the clients render,
+the 404 for an older version's item, the clear, and that an outsider sees nothing.
 """
 
 from __future__ import annotations

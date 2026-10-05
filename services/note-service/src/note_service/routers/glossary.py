@@ -1,19 +1,12 @@
-"""The workspace glossary (Sprint 35, migration 0050).
+"""The workspace glossary.
 
     GET    /v1/glossary        every live term
     POST   /v1/glossary        remember a term (opt-in, one at a time)
     DELETE /v1/glossary/{id}   forget it — the creator or an admin
     GET    /v1/glossary/hint   the terms as a `vocabulary_hint` string
 
-Nothing is learned silently. A client offers "Remember *John Mayer* for
-this workspace?" after the author corrects a name, and only a yes reaches
-``POST``. The list is visible and every entry is deletable, because the
-failure mode of a vocabulary that learns by itself is that it learns
-something wrong and nobody can find it.
-
-Terms are personal and business data: tenant-scoped by RLS, never in a log
-line or an audit payload (only counts and the closed ``kind`` vocabulary),
-and gone with the tenant.
+Nothing is learned silently: only an explicit yes reaches ``POST``. Terms are
+personal and business data: never in a log line or an audit payload.
 """
 
 from __future__ import annotations
@@ -60,8 +53,7 @@ class TermView(BaseModel):
     created_at: datetime
     """Whether the caller may delete this one (its creator, or an admin)."""
     can_delete: bool
-    # Sprint I2: whether the transcriber is told this term (a stored role
-    # label from before the rule is kept but no longer sent).
+    # Whether the transcriber is told this term (a stored role label is kept but no longer sent).
     in_hint: bool = True
     # The note whose speaker rename added it, when it came from one.
     source_note_id: UUID | None = None
@@ -74,7 +66,7 @@ class AddTermRequest(BaseModel):
     kind: Literal["person", "company", "product", "term"] = "person"
     # What it was heard or spelled as before the author fixed it.
     heard_as: list[str] = Field(default_factory=list, max_length=16)
-    # Sprint I2 T6: the note the term was renamed in ("Remember this?").
+    # The note the term was renamed in ("Remember this?").
     note_id: UUID | None = None
 
 
@@ -144,8 +136,7 @@ async def add_glossary_term(
             detail={"code": exc.code, "detail": exc.detail},
         ) from None
     if not rules.is_vocabulary(term, body.kind):
-        # Sprint I2 T1: a role label is not vocabulary. Refused here whatever
-        # the client asked, so the transcriber is never told "Moderator II".
+        # A role label is not vocabulary: refused whatever the client asked.
         _terms_rejected.add(1, {"reason": "role_label"})
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,

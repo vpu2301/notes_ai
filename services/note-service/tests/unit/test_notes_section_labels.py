@@ -1,9 +1,4 @@
-"""GET /v1/notes/{id} returns localized section_labels (spec item 4).
-
-Exercises the real ``notes.get_note`` handler with the auth dependency
-overridden and the DB/audit boundary stubbed — no infra required (mirrors
-``test_notes_versions``).
-"""
+"""GET /v1/notes/{id} returns localized section_labels: real handler, auth overridden, DB/audit stubbed."""
 
 from __future__ import annotations
 

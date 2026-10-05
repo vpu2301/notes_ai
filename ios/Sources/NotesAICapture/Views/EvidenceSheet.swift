@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// The evidence behind one generated line, opened from the line itself
-/// (Summary Engine v2, Q5): the quote (verbatim, as the transcriber heard
-/// it), when it was said and by whom, the other statements it rests on,
-/// and a way to the transcript at that moment. Members only: this is
-/// never part of the shared page, the client version or the PDF.
+/// The evidence behind one generated line: the verbatim quote, when and by
+/// whom, the other statements, a way to the transcript. Members only.
 struct EvidenceSheet: View {
     @ObservedObject var model: NoteViewModel
     let row: GeneratedItem
@@ -78,9 +75,7 @@ struct EvidenceSheet: View {
     }
 }
 
-/// Short: the overview. Standard: the note as written. Detailed: plus the
-/// verified facts no line used, under their topic. A view — never an edit,
-/// never a model call.
+/// Short / Standard / Detailed. A view — never an edit, never a model call.
 struct DetailToggle: View {
     @ObservedObject var model: NoteViewModel
 
@@ -96,12 +91,7 @@ struct DetailToggle: View {
     }
 }
 
-/// Names the engine respelled, for the author to accept or reject (Q5).
-///
-/// Accept: the name becomes a workspace glossary term with the heard
-/// spelling as a mishearing — the next generation spells it that way
-/// without asking anyone. Reject: the line goes back to what the
-/// recording heard. Nothing is learned without a person saying so.
+/// Names the engine respelled, for the author to accept (glossary term) or reject (back to what was heard).
 struct CorrectionsPanel: View {
     @ObservedObject var model: NoteViewModel
 

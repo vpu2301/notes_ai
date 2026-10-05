@@ -1,11 +1,5 @@
-"""Sprint-13 close-out guards: kind registration + metric-label discipline.
-
-Two failure modes these catch:
-- a kind emitted in code but absent from the catalogue (the catalogue
-  stops being the source of truth the moment that happens);
-- an option VALUE reaching a metric label. Option values are
-  template-authored, so a label carrying them is unbounded cardinality
-  AND tenant vocabulary in the metrics store. field_type only.
+"""Close-out guards: every emitted audit kind is in the catalogue, and no option
+VALUE reaches a metric label (field_type only).
 """
 
 from __future__ import annotations

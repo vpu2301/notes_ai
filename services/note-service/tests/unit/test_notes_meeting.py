@@ -1,8 +1,5 @@
-"""The meeting surface: the note exists from the first second (Sprint 34).
-
-Real handlers, auth overridden, the DB and asr-service boundaries stubbed
-— the ``test_notes_from_transcript`` rig, extended with the ``note_meetings``
-sidecar.
+"""The meeting surface: the note exists from the first second. Real handlers,
+auth overridden, DB and asr-service stubbed, plus the ``note_meetings`` sidecar.
 """
 
 from __future__ import annotations
@@ -138,7 +135,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         SimpleNamespace(
             app_pool=object(),
             audit_writer=SimpleNamespace(write_event=_write_event),
-            # The engine (Sprint 33) is patched per test; these are the
+            # The engine is patched per test; these are the
             # handles the router passes it.
             job_queue=object(),
             transcripts_store=object(),
@@ -540,7 +537,7 @@ def test_an_empty_transcript_writes_no_version_but_finishes_the_capture(
 
 
 def test_the_transcript_starts_the_engine_on_the_note(rig: SimpleNamespace) -> None:
-    # Sprint 33 wired in: a meeting note writes itself exactly as a
+    # A meeting note writes itself exactly as a
     # from-transcript note does. Before this the meeting path only ever
     # put the transcript in a section — the Notes tab stayed empty.
     rig.store.meeting = _meeting_row(state="transcribing", asr_job_id=JOB_ID)

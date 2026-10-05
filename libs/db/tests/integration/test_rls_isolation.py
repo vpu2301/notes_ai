@@ -1,24 +1,5 @@
-"""RLS isolation property test against the real `users` table.
-
-Sprint-02 Day 3 contract: with RLS enabled+forced and per-tenant policies,
-no `app_role` connection can ever see another tenant's rows, regardless of
-how the data is laid out.
-
-Hypothesis drives the *shape* of the setup (how many tenants, how many
-users per tenant). For each generated shape we:
-
-1. Pre-populate users for every tenant via `tenant_writer`.
-2. Re-open the pool as `app_role` and SELECT from each tenant's context.
-3. Assert each tenant sees exactly its own user count and no other.
-4. Cross-probe: under tenant A's context, attempt to read user rows that
-   exist for tenant B → must return zero rows.
-
-The total cross-tenant probes across all Hypothesis examples must reach
-the spec's threshold of 1000 iterations. With 20 examples × an N×N
-all-pairs probe (N up to 8) we hit ~1000+ easily.
-
-Skipped unless ``RUN_DB_INTEGRATION=1`` and the dev Compose stack is up
-with migrations applied (``make migrate-up``).
+"""RLS isolation property test on `users`: Hypothesis shapes the tenants, every cross-tenant probe must read zero
+rows (≥ 1000 probes in total). Skipped unless ``RUN_DB_INTEGRATION=1`` with the migrated dev stack up.
 """
 
 from __future__ import annotations
@@ -52,15 +33,7 @@ WRITER_DSN = f"postgresql://tenant_writer:tenant_writer@{POSTGRES_HOST}:{POSTGRE
 
 
 async def _wipe(writer_pool: asyncpg.Pool) -> None:
-    """Delete every row from `users` and `tenants` — used between Hypothesis
-    examples. Runs as `tenant_writer` which has unconstrained access on
-    `tenants`; for `users` we have to set ``app.tenant_id`` per tenant we
-    want to drain. Simpler: use the superuser via a side connection.
-
-    Preserves the dev-seed tenants (00…00a / 00…00b) so the auth-service
-    integration suite — which depends on them — keeps working when both
-    test groups run back-to-back via ``make test-integration-db``.
-    """
+    """Wipe `users` and `tenants` between examples (superuser side connection), preserving the dev-seed tenants."""
     su_dsn = f"postgresql://postgres:postgres@{POSTGRES_HOST}:{POSTGRES_PORT}/{DB_NAME}"
     su = await asyncpg.connect(su_dsn)
     try:
@@ -281,14 +254,7 @@ async def test_cross_tenant_probe_threshold(
     await _wipe(writer_pool)
 
 
-# ── Per-entity isolation sweep (CRUD task, Part C1) ────────────────────────
-#
-# The property tests above cover `users` and `audio_files` exhaustively. This
-# deterministic sweep extends the proof to *every* remaining domain entity
-# table: insert one row per table under tenant A, then assert a tenant-B
-# connection reads zero of them. (`nlp_text` has no table — NLP annotations
-# live in `dictation_sessions.transcript_jsonb` — so there is nothing to probe
-# for that entity.)
+# ── Per-entity isolation sweep: one row per table under A, tenant B reads zero (`nlp_text` has no table) ──
 
 # Tenant-scoped entity tables (have a tenant_id column + RLS + FORCE).
 _ENTITY_TABLES: tuple[str, ...] = (

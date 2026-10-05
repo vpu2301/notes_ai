@@ -2,8 +2,7 @@ import AVFoundation
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint F1 — the capture timing sent with an upload, and the
-/// "Not transcribed" line read from a result.
+/// The capture timing sent with an upload, and the "Not transcribed" line read from a result.
 final class CaptureCoverageTests: XCTestCase {
     private var scratch: URL!
 

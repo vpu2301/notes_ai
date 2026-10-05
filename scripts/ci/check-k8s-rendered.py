@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""CI gate — render the Helm chart and police the RENDERED output.
+"""CI gate on the RENDERED Helm chart: it renders for staging and prod, the prod render
+is secret-clean with no dev escape hatches, and the chart's vendored ops files match
+their source (files/jobs/ <- scripts/jobs/, files/postgres-init.sql <- infra/postgres/init.sql).
 
-Three checks, run for both staging and prod values:
-
-1. `helm template` must succeed (chart always renders).
-2. The PROD render must be secret-clean: no `dev-secret-change-in-prod`,
-   no `dev-password`, and none of the demo/dev escape hatches
-   (`MD_OBJECT_STORE_DISABLED`, `MDX_DEMO_MODE`, `AUTH_BYPASS_DEV`)
-   set truthy — the config gates applied to what the cluster would
-   actually receive.
-3. The chart's vendored ops artefacts must not drift from their source
-   of truth (files/jobs/*.py ← scripts/jobs/, files/postgres-init.sql ←
-   infra/postgres/init.sql).
-
-Requires `helm` on PATH (the k8s CI job installs it; skip locally with
-SKIP_HELM=1, which still runs the drift check).
+Needs ``helm``; SKIP_HELM=1 runs the drift check only.
 """
 
 from __future__ import annotations
@@ -33,7 +22,7 @@ FORBIDDEN_LITERALS = ["dev-secret-change-in-prod", "dev-password"]
 TRUTHY_FLAGS = re.compile(
     r"(MD_OBJECT_STORE_DISABLED|MDX_DEMO_MODE|AUTH_BYPASS_DEV)"
     r"\W+['\"]?(true|1|yes|on)['\"]?"
-    # Sprint L2: the dev-only chat switch, set to anything, is a violation.
+    # The dev-only chat switch, set to anything, is a violation.
     r"|MDX_DEV_[A-Z0-9_]+\W+['\"]?[A-Za-z0-9_]+",
     re.IGNORECASE,
 )

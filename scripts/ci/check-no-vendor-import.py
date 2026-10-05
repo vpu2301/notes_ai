@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate: no model-vendor SDK is imported outside ``libs/models``.
+"""CI gate: no model-vendor SDK (anthropic, openai, huggingface_hub, mistralai, litellm, ...)
+is imported outside ``libs/models`` and ``scripts/models`` (build-time tooling).
 
-Foundation plan decision 11 — *model hosting is configuration*: a worker
-receives a provider from ``models.registry`` and never names a vendor. The
-moment a service imports ``anthropic``/``openai``/``huggingface_hub`` the
-backend switch stops being a config change and becomes a code change, and
-the workspace Data page (decision 12) can no longer be derived from the
-registry alone.
-
-Banned anywhere except the allow-list:
-    anthropic, openai, huggingface_hub, cohere, mistralai, groq, together,
-    replicate, google.generativeai, google.genai, vertexai, boto3 bedrock
-    wrappers (``langchain*``/``litellm`` routers are banned outright —
-    see DEP-S0 §G).
-
-Allow-list (each entry justified):
-  * libs/models/                 — the one place a vendor may be named.
-  * scripts/models/              — build-time pin/fetch tooling (PINS.md);
-                                   runs in Docker build stages, never in a
-                                   service process.
-  * scripts/ci/check-no-vendor-import.py — this file.
-
-Exit codes: 0 clean, 1 violations (listed with file:line).
+Exit 0 clean, 1 violations (file:line).
 """
 
 from __future__ import annotations

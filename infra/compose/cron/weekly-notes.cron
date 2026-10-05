@@ -1,8 +1,3 @@
-# Weekly notes-quality report (Summary Engine v2, Q6 T8)
-#
-# Runs scripts/ops/notes_quality.sql as the read-only funnel_reader role
-# (column-level grants + count-only functions, migration 0060) and writes
-# reports/notes-quality-YYYY-WW.csv — kept-line, dismiss, regenerate and
-# share-without-edit rates with the concept's kill thresholds. Counts only.
+# Weekly notes-quality report: notes_quality.sql as funnel_reader → reports/notes-quality-YYYY-WW.csv (counts only)
 CRON_TZ=UTC
 45 6 * * 1  cd /opt/notes-ai-backend && DATABASE_URL=postgresql://funnel_reader:funnel_reader@localhost:5432/notes /usr/bin/env uv run python scripts/jobs/weekly_notes_quality.py >> /var/log/mdx/weekly-notes.log 2>&1

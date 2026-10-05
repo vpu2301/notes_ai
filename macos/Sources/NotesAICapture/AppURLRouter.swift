@@ -1,13 +1,6 @@
 import Foundation
 
-/// Where a `notesai://` URL goes.
-///
-/// The app already answers this scheme — the MCP OAuth callback and the
-/// calendar return both come back on it — but never through the app
-/// itself: `ASWebAuthenticationSession` and a loopback listener intercept
-/// them before macOS does. A link somebody clicks in a mail client has no
-/// such interceptor, so it arrives at the app, and until IDX-M2 there was
-/// nothing here to receive it.
+/// Where a `notesai://` URL goes. OAuth and calendar callbacks are intercepted before macOS; a link clicked in a mail client arrives here.
 enum AppURL: Equatable {
     /// `notesai://invite/<token>` — an invitation to a workspace.
     case invite(token: String)
@@ -18,11 +11,7 @@ enum AppURL: Equatable {
 
     static let scheme = "notesai"
 
-    /// Parse a URL the system handed us, or nil if it is not ours.
-    ///
-    /// Deliberately strict: an unknown host is nil rather than a guess,
-    /// because the one thing worse than ignoring a link is acting on the
-    /// wrong reading of it.
+    /// Parse a URL the system handed us, or nil if it is not ours. Strict: an unknown host is nil, never a guess.
     static func parse(_ url: URL) -> AppURL? {
         guard url.scheme?.lowercased() == scheme else { return nil }
         let path = url.path.split(separator: "/").map(String.init)

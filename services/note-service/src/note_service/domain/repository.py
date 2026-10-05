@@ -1,4 +1,4 @@
-"""Templates repository (sprint 06).
+"""Templates repository.
 
 Every query is RLS-scoped via :func:`db.tenant_connection`. Reads see
 own-tenant + system rows (tenant_id IS NULL). Writes are restricted to
@@ -146,12 +146,7 @@ async def create_template(
     tenant_id: UUID,
     definition: TemplateDefinition,
 ) -> UUID:
-    """Insert a brand-new tenant template (M1·A4).
-
-    Mirrors the structural-edit INSERT but with no parent link: a
-    plain draft (``parent_template_id=NULL, is_system=FALSE,
-    status='draft', schema_version=1``). Returns the new id.
-    """
+    """Insert a brand-new tenant template (a plain draft, no parent link). Returns the new id."""
     new_id = await conn.fetchval(
         """
         INSERT INTO templates
@@ -255,12 +250,8 @@ async def deprecate_template(conn: asyncpg.Connection, *, template_id: UUID) -> 
     if row["status"] == "deprecated":
         return "deprecated"  # idempotent
 
-    # Sprint-17 semantics: only LIVE DRAFTS block deprecation — they are
-    # the rows an admin can still re-bind to a successor. Finalized,
-    # amended and cancelled notes keep their historical
-    # template binding forever ("existing notes keep it"); the FK is
-    # ON DELETE RESTRICT and deprecation is a soft status flip, so
-    # history is never endangered.
+    # Only LIVE DRAFTS block deprecation (an admin can re-bind them); other notes
+    # keep their binding forever and the FK is ON DELETE RESTRICT.
     try:
         n = await conn.fetchval(
             "SELECT COUNT(*) FROM notes WHERE template_id = $1 AND status = 'draft'",
@@ -269,7 +260,7 @@ async def deprecate_template(conn: asyncpg.Connection, *, template_id: UUID) -> 
         if n and int(n) > 0:
             return "in_use"
     except asyncpg.UndefinedTableError:
-        pass  # sprint-8 hasn't run yet
+        pass  # notes table not present yet
 
     await conn.execute(
         "UPDATE templates SET status = 'deprecated' WHERE id = $1",
@@ -278,7 +269,7 @@ async def deprecate_template(conn: asyncpg.Connection, *, template_id: UUID) -> 
     return "deprecated"
 
 
-# ── Bound notes + re-bind (sprint-17 admin console) ───────────────
+# ── Bound notes + re-bind (admin console) ─────────────────────────
 
 
 async def list_bound_notes(
@@ -287,13 +278,8 @@ async def list_bound_notes(
     template_id: UUID,
     limit: int = 50,
 ) -> list[asyncpg.Record]:
-    """Content-free listing of notes referencing a template.
-
-    Deliberately selects ONLY id/status/timestamps: the caller holds
-    ``template.update``, not ``note.read`` (tenant_admin is excluded
-    from content reads by the admin ⟂ content separation), so no title
-    or author fields may appear here.
-    """
+    """Content-free listing of notes referencing a template: ONLY id/status/timestamps,
+    because the caller holds ``template.update``, not ``note.read``."""
     return list(
         await conn.fetch(
             """
@@ -316,17 +302,11 @@ async def rebind_note(
     note_id: UUID,
     to_template_id: UUID,
 ) -> str:
-    """Move ONE draft note from ``template_id`` to a successor.
+    """Move ONE draft note from ``template_id`` to a successor; only drafts are movable.
 
-    Outcome codes: ``ok``, ``template_not_found``, ``note_not_found``,
-    ``not_bound``, ``not_draft``, ``same_template``,
-    ``target_not_found``, ``target_deprecated``, ``language_mismatch``.
-
-    Only ``status='draft'`` notes are movable: finalized/amended
-    rows are immutable history and keep their template;
-    cancelled rows are soft-deleted. ``template_schema_version`` is
-    refreshed to the target's so the draft renders against the schema
-    it is now bound to.
+    Outcome codes: ``ok``, ``template_not_found``, ``note_not_found``, ``not_bound``,
+    ``not_draft``, ``same_template``, ``target_not_found``, ``target_deprecated``,
+    ``language_mismatch``.
     """
     source = await conn.fetchrow(
         "SELECT id, language FROM templates WHERE id = $1",

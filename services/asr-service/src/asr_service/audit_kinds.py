@@ -17,23 +17,22 @@ TRANSCRIPT_ACCESSED: Final = "asr.transcript_accessed"
 JOB_CANCELLED: Final = "asr.job_cancelled"
 # Someone named (or renamed) the diarized speakers of a job.
 SPEAKERS_NAMED: Final = "asr.speakers_named"
-# Speaker edit overlay (Sprint 28): labels only, never names.
+# Speaker edit overlay: labels only, never names.
 SPEAKERS_MERGED: Final = "asr.speakers_merged"
 SPEAKER_EDIT_REVERTED: Final = "asr.speaker_edit_reverted"
-# Turn-level correction (Sprint 30): counts and target kind only.
+# Turn-level correction: counts and target kind only.
 TURN_REASSIGNED: Final = "asr.turn_reassigned"
 SPEAKER_EDITS_RESET: Final = "asr.speaker_edits_reset"
-# Name suggestions (Sprint 32): the label only, never the name.
+# Name suggestions: the label only, never the name.
 NAME_SUGGESTION_ACCEPTED: Final = "asr.name_suggestion_accepted"
 NAME_SUGGESTION_DISMISSED: Final = "asr.name_suggestion_dismissed"
-# Speaker re-labelling (Sprint 29). The worker emits
-# asr.rediarize_completed / asr.rediarize_failed; the reaper emits the
-# latter for a stranded re-run. Payloads: hint kind, counts, engine.
+# Speaker re-labelling (the worker emits completed/failed, the reaper failed for a
+# stranded re-run). Payloads: hint kind, counts, engine.
 REDIARIZE_REQUESTED: Final = "asr.rediarize_requested"
 REDIARIZE_UNDONE: Final = "asr.rediarize_undone"
 REDIARIZE_FAILED: Final = "asr.rediarize_failed"
 
-# Spelling overlay (Sprint TQ3): counts, source, status — never the text.
+# Spelling overlay: counts, source, status — never the text.
 TRANSCRIPT_CORRECTION_PROPOSED: Final = "asr.transcript_correction_proposed"
 TRANSCRIPT_CORRECTION_ACCEPTED: Final = "asr.transcript_correction_accepted"
 TRANSCRIPT_CORRECTION_REJECTED: Final = "asr.transcript_correction_rejected"

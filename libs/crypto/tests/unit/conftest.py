@@ -1,9 +1,4 @@
-"""Shared fixtures for libs/crypto unit tests.
-
-Uses an in-memory ``TenantKekRepository`` substitute so tests don't need
-a live Postgres instance. The real ``TenantKekRepository`` is exercised
-in integration tests under ``tests/integration/``.
-"""
+"""Shared fixtures for libs/crypto unit tests (in-memory ``TenantKekRepository`` substitute)."""
 
 from __future__ import annotations
 
@@ -69,7 +64,5 @@ async def master_provider(tmp_master_key: Path) -> FileMasterKeyProvider:
 @pytest.fixture
 async def envelope(master_provider: FileMasterKeyProvider) -> Envelope:
     repo = InMemoryKekRepo(master_provider)
-    # Mypy: TenantKekRepository's class is what production uses, but in
-    # tests we substitute. The Envelope's constructor accepts anything
-    # that quacks like ``master_key_id_for`` + ``get_or_create``.
+    # Envelope accepts anything that quacks like ``master_key_id_for`` + ``get_or_create``.
     return Envelope(master_key_provider=master_provider, kek_repository=repo)  # type: ignore[arg-type]

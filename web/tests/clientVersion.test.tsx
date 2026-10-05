@@ -106,8 +106,7 @@ describe("the client version shows what a client gets", () => {
 describe("still open from last time", () => {
   it("lists the previous meeting's open items and links to it", async () => {
     wrap(<CarriedItems noteId="n2" />);
-    // The date is formatted in the viewer's locale, so match the phrase
-    // and the day rather than one locale's ordering.
+    // Locale-formatted date: match the phrase and the day, not an ordering.
     const head = await screen.findByRole("heading", { name: /Still open from/ });
     expect(head).toHaveTextContent("12");
     expect(head).toHaveTextContent("Sep");

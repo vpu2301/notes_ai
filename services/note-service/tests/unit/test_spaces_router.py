@@ -1,4 +1,4 @@
-"""/v1/spaces routes with the DB stubbed (0021).
+"""/v1/spaces routes with the DB stubbed.
 
 Mirrors ``test_calendar_router``: the real handlers run against an
 overridden auth dependency and monkeypatched repository functions.

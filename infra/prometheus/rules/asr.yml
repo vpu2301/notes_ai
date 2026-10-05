@@ -51,9 +51,7 @@ groups:
           summary: "Three or more CUDA OOMs in the last 10m"
 
       - alert: AsrMasterKeyMissing
-        # Either the worker isn't started (model_loaded=0) for > 5m while
-        # the queue has work, or a structured log line indicates a missing
-        # master key. Loki alerts handle the latter; this is the metric one.
+        # Worker not started (model_loaded=0) for > 5m while the queue has work.
         expr: mdx_asr_model_loaded == 0
         for: 5m
         labels:
@@ -75,10 +73,8 @@ groups:
           summary: "GPU peak memory > 90% of 24 GB card for 3 jobs in a row"
           description: "Consider reducing beam size or chunk length."
 
-      # Sprint I2 T3: the transcriber is writing its prompt back again. The
-      # lexical guard removes the echo, and counts it; more than 20 echoed
-      # words per hour of audio over a day means the vocabulary is
-      # poisoning transcripts (a role label got in, a backend regressed).
+      # The guard removes prompt echo and counts it; > 20 echoed words per
+      # audio hour over a day means the vocabulary is poisoning transcripts.
       - alert: AsrPromptEchoRate
         expr: |
           increase(mdx_asr_prompt_echo_words_total[24h])
@@ -96,9 +92,8 @@ groups:
             (`scripts/admin/glossary_audit.py`), the backend and
             `MDX_ASR_CONDITION_PREV`. Runbook: docs/runbooks/asr-worker.md#prompt-echo
 
-      # Sprint F1: speech that reached the file but not the transcript. The
-      # capture latency (`no_audio`) happened before the file and is the
-      # clients' to fix, so it is not part of this share.
+      # Speech that reached the file but not the transcript (`no_audio` is the
+      # clients' capture latency and is excluded).
       - alert: AsrUncoveredSpeech
         expr: |
           sum(increase(mdx_asr_uncovered_speech_ms_total{cause!="no_audio"}[1h]))
@@ -115,8 +110,7 @@ groups:
             hour has no transcript. Look at mdx_asr_uncovered_speech_ms_total by
             cause and mdx_asr_second_pass_total. Runbook: docs/runbooks/asr-worker.md#coverage
 
-      # Sprint TQ3: the spelling unifier failing. The transcript is still
-      # served (as the artefact), but names stop being unified.
+      # Spelling unifier failing: the transcript is still served, names stop being unified.
       - alert: AsrEntityUnifyErrors
         expr: |
           sum(increase(mdx_asr_entity_unify_total{outcome="error"}[1h]))

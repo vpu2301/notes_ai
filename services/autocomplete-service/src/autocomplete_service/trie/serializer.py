@@ -3,7 +3,7 @@
 Format header:
     bytes 0..3   magic   = b"MDXT"
     byte  4      version = 1
-    byte  5      algo    = 0 (msgpack-ish JSON in sprint-10)
+    byte  5      algo    = 0 (gzip JSON)
     bytes 6..    payload (gzip(json))
 
 Mismatch on magic / version raises ``SerializerVersionMismatchError`` and
@@ -86,8 +86,5 @@ def deserialize_trie(blob: bytes) -> TenantTrie:
     except SerializerVersionMismatchError:
         raise
     except Exception as exc:
-        # Truncated/corrupt payload behind a valid header (partial Redis
-        # write, mid-eviction read, schema drift inside the JSON). Same
-        # contract as a version mismatch: the cache treats it as a miss
-        # and rebuilds — format problems are self-healing by construction.
+        # Corrupt payload behind a valid header: same contract as a version mismatch (cache miss).
         raise SerializerVersionMismatchError(f"corrupt payload: {exc}") from exc

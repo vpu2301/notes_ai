@@ -2,38 +2,17 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-// Sprint 31 M-1 — the call audio.
-//
-// In an online call with headphones the other participants never reach the
-// microphone, so a mic-only recording has half the meeting. The recorder
-// therefore also records what this Mac plays, through a Core Audio process
-// tap (macOS 14.2+):
-//
-//   • one *global* stereo tap of every process EXCEPT this one (so nothing
-//     the app itself plays ends up in the notes);
-//   • attached to a private aggregate device that also contains the default
-//     input device, with drift compensation on the tap — so the microphone
-//     and the call audio arrive in ONE IO callback on ONE clock and are
-//     sample-aligned by construction. Two independent engines were rejected:
-//     their clocks drift apart over an hour.
-//
-// ScreenCaptureKit (audio-only SCStream) is the documented fallback if the
-// tap turns out not to work somewhere; it is not built.
-//
-// Nothing here is verified at runtime yet (the app is only built, never
-// launched, by the assistant) — see macos/README.md "Call audio".
+// The call audio: a Core Audio process tap (macOS 14.2+) of every process EXCEPT
+// this one, attached to a private aggregate device that also holds the default
+// input, with drift compensation — so microphone and call audio arrive in ONE
+// IO callback on ONE clock, sample-aligned (two engines drift apart over an hour).
+// ScreenCaptureKit audio-only is the documented fallback; not built.
 
-/// What the recorder needs from a microphone + call-audio source. A protocol
-/// so the recorder's rules (interleaving, loss → silence, fallback) can be
-/// tested with a fake instead of hardware.
+/// What the recorder needs from a microphone + call-audio source; a protocol so the rules can be tested with a fake.
 protocol SystemAudioSource: AnyObject {
-    /// Both streams of one IO cycle, each mono Float32 at the same rate and
-    /// frame count. `system` is nil when the call-audio stream did not
-    /// deliver in this cycle (tap gone) — the recorder writes silence then.
-    /// Called on an audio queue.
+    /// Both streams of one IO cycle, mono Float32, same rate and frame count. `system` nil = tap did not deliver (silence written). Called on an audio queue.
     var onBuffers: ((_ mic: AVAudioPCMBuffer, _ system: AVAudioPCMBuffer?) -> Void)? { get set }
-    /// The default input or output device changed and the source rebuilt
-    /// itself on the new one (e.g. AirPods connected).
+    /// The default input or output device changed and the source rebuilt itself.
     var onDeviceChange: (() -> Void)? { get set }
     /// The source stopped for good (a rebuild failed); no more buffers come.
     var onFailure: ((Error) -> Void)? { get set }
@@ -45,8 +24,7 @@ protocol SystemAudioSource: AnyObject {
 enum SystemAudioError: LocalizedError, Equatable {
     case unsupportedOS
     case noInputDevice
-    /// `AudioHardwareCreateProcessTap` refused — typically the "System Audio
-    /// Recording" permission is off.
+    /// `AudioHardwareCreateProcessTap` refused — typically the "System Audio Recording" permission is off.
     case tapFailed(OSStatus)
     case aggregateFailed(OSStatus)
     case ioFailed(OSStatus)
@@ -66,8 +44,7 @@ enum SystemAudioError: LocalizedError, Equatable {
 /// The Core Audio process tap + private aggregate device.
 @available(macOS 14.2, *)
 final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
-    /// Every aggregate device this app creates has a UID with this prefix,
-    /// so one left behind by a crash can be found and removed.
+    /// Every aggregate device this app creates has this UID prefix, so one left by a crash can be removed.
     static let uidPrefix = "ai.notes.capture.aggregate."
     static let deviceName = "Notes AI Capture (call audio)"
 
@@ -177,8 +154,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
 
     // MARK: - The aggregate device
 
-    /// Build the aggregate (default input + tap), start IO on it and return
-    /// its input format.
+    /// Build the aggregate (default input + tap), start IO and return its input format.
     @discardableResult
     private func buildAggregate() throws -> AudioStreamBasicDescription {
         guard let input = HAL.defaultInputDevice(), let inputUID = HAL.deviceUID(input) else {
@@ -195,8 +171,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
             // The microphone is the clock; the tap is resampled onto it.
             kAudioAggregateDeviceMainSubDeviceKey: inputUID,
             kAudioAggregateDeviceClockDeviceKey: inputUID,
-            // Do NOT wait for a tapped process to play before starting: the
-            // microphone must record from the first second.
+            // Do NOT wait for a tapped process to play: the microphone must record from the first second.
             kAudioAggregateDeviceTapAutoStartKey: false,
             kAudioAggregateDeviceSubDeviceListKey: [
                 [kAudioSubDeviceUIDKey: inputUID, kAudioSubDeviceDriftCompensationKey: false],
@@ -256,9 +231,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
 
     // MARK: - IO
 
-    /// Split one cycle's input into the microphone (channel 0 of the input
-    /// sub-device) and the call audio (the tap's stereo pair, mixed to mono).
-    /// The aggregate lists the sub-device's channels first, then the tap's.
+    /// Split one cycle's input into microphone (channel 0 of the input sub-device) and call audio (the tap's stereo pair, mixed to mono).
     private func deliver(_ inputData: UnsafePointer<AudioBufferList>) {
         guard let handler = callbacks.withLock({ $0.buffers }) else { return }
         let layout = self.layout.withLock { $0 }
@@ -297,9 +270,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
         listeners.removeAll()
     }
 
-    /// A device change arrives as a burst of notifications (input and
-    /// output flip separately when AirPods connect). Wait for the burst to
-    /// settle, then rebuild once — the gap stays well under a second.
+    /// A device change arrives as a burst of notifications; wait for it to settle, then rebuild once.
     private func scheduleRebuild() {
         pendingRebuild?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.rebuild() }
@@ -321,10 +292,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
 
     // MARK: - Orphans
 
-    /// Remove aggregate devices a previous run left behind (a crash between
-    /// create and destroy). Private aggregates die with their process, so
-    /// normally there are none; this is the safety net the name prefix is
-    /// for. Called at launch and before each start.
+    /// Remove aggregate devices a previous run left behind (crash between create and destroy). Called at launch and before each start.
     static func removeOrphanAggregateDevices() {
         for device in HAL.allDevices() {
             guard let uid = HAL.deviceUID(device), uid.hasPrefix(uidPrefix) else { continue }
@@ -333,8 +301,7 @@ final class SystemAudioTap: SystemAudioSource, @unchecked Sendable {
     }
 }
 
-/// The pure part of the IO block: which channels are the microphone and
-/// which the call audio. Testable without hardware.
+/// The pure part of the IO block: which channels are the microphone and which the call audio.
 enum InputSplitter {
     struct Split {
         var mic: [Float]
@@ -342,10 +309,7 @@ enum InputSplitter {
         var system: [Float]?
     }
 
-    /// `buffers` are the aggregate's input streams, each Float32 with its
-    /// channels interleaved. Channel 0 is the microphone; the two channels
-    /// after the input sub-device's `micChannels` are the tap (L, R), mixed
-    /// to mono.
+    /// `buffers` are the aggregate's interleaved Float32 input streams: channel 0 the microphone, the two after `micChannels` the tap (L, R), mixed to mono.
     static func split(buffers: UnsafeMutableAudioBufferListPointer, micChannels: Int) -> Split? {
         var channels: [(data: UnsafePointer<Float>, stride: Int)] = []
         var frames = Int.max
@@ -440,8 +404,7 @@ enum HAL {
         return devices
     }
 
-    /// The HAL's process object for `pid`, or nil if it has none (a process
-    /// that never touched audio yet).
+    /// The HAL's process object for `pid`, or nil if it has none.
     static func processObject(pid: pid_t) -> AudioObjectID? {
         var address = address(kAudioHardwarePropertyTranslatePIDToProcessObject)
         var pid = pid

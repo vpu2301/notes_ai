@@ -2,9 +2,7 @@ rule_files:
   - ../asr.yml
 evaluation_interval: 1m
 tests:
-  # One hour of speech per hour (3 600 000 ms). 1 % uncovered is a noisy
-  # room; 10 % is the Pardo opening happening to every tenth job. Late
-  # capture starts (`no_audio`) are the clients', not the transcriber's.
+  # One hour of speech per hour; 1 % uncovered is a noisy room, 10 % is the incident.
   - interval: 1m
     name: one percent uncovered and many late starts do not fire
     input_series:

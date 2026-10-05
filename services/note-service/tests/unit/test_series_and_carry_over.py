@@ -1,8 +1,5 @@
-"""Series and carry-over (Sprint 36).
-
-Two things are being pinned here: that "still open from last time" is a
-deterministic join and not a guess, and that it can never reach into a
-note the author is not allowed to read.
+"""Series and carry-over: "still open from last time" is a deterministic join,
+and it can never reach into a note the author may not read.
 """
 
 from __future__ import annotations

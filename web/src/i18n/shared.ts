@@ -1,4 +1,4 @@
-/** The shared page's own strings (Sprint 23). The backend sends `lang`. */
+/** The shared page's own strings. The backend sends `lang`. */
 export type SharedLang = "en" | "de" | "uk";
 
 const EN = {

@@ -1,12 +1,7 @@
 import type { TranscriptCoverage } from "../api/types";
 import { notTranscribed } from "../lib/coverageGaps";
 
-/**
- * Sprint F1: the speech the transcript does not hold, named with its cause.
- * Each range opens the transcript at that moment; the time before the audio
- * started is not in the recording, so it is plain text. Nothing at all when
- * the whole recording was transcribed.
- */
+/** Untranscribed ranges with their cause; time before the audio started is not seekable. */
 export function NotTranscribed({
   coverage,
   onSeek,

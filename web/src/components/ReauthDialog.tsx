@@ -5,18 +5,8 @@ import { messageFor } from "../lib/errorCopy";
 import { AlertIcon } from "./icons";
 import type { ReauthOptions } from "../api/types";
 
-/**
- * The single step-up prompt.
- *
- * Mounted once, at the root. `http.ts` opens it on a 403 `reauth_required`
- * and retries the original request when it resolves — so no page handles a
- * step-up itself, and no page can forget to.
- *
- * The **server** decides how the person proves themselves
- * (`POST /auth/reauth/start`): an MFA account is asked for its
- * authenticator, everyone else is mailed a code. Offering a menu here would
- * let a caller pick the weakest option on the account.
- */
+/** The single step-up prompt, mounted at the root; `http.ts` opens it on 403 `reauth_required`
+ *  and retries. The server picks the method — no menu, or a caller could pick the weakest. */
 export function ReauthDialog() {
   const { reauthPending, resolveReauth } = useAuth();
   const [options, setOptions] = useState<ReauthOptions | null>(null);

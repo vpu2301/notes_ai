@@ -1,14 +1,8 @@
-"""IDX-B1b — client secrets, and what a non-human token must look like.
+"""Client secrets and the shape of a non-human token.
 
-The claims-parity test in here is the sprint's load-bearing one, and it
-does **not** assert byte-parity with a live Keycloak token. It cannot:
-a real ``room-device-demo`` token captured from the dev realm is
-*rejected* by ``libs/auth.Claims`` on four counts (no ``sid``, plus
-``client_id``/``clientHost``/``clientAddress`` which the model forbids).
-The captured payload is checked in below so that claim is verifiable
-rather than asserted, and parity is measured against the shape the fleet
-actually accepts — same ``sub``/``tid``/``roles``/``aud``, and a token
-that ``Claims`` will parse.
+Claims parity is measured against the shape the fleet accepts (same sub/tid/roles/aud, a
+token ``Claims`` parses), not byte-parity with Keycloak: a real ``room-device-demo`` token
+is rejected by ``libs/auth.Claims`` (no ``sid``, forbidden client_* claims).
 """
 
 from __future__ import annotations
@@ -27,11 +21,7 @@ from auth_service.domain.token_service import TokenService
 
 DEV_KEYS = Path(__file__).resolve().parents[4] / "infra" / "dev" / "auth-signing-dev.json"
 
-# Captured from the dev realm on 2026-09-05:
-#   curl -d grant_type=client_credentials -d client_id=room-device-demo \
-#        -d client_secret=dev-room-device-secret \
-#        http://localhost:8088/realms/notes/protocol/openid-connect/token
-# Trimmed to the claim set; values that change per issuance are marked.
+# Captured from the dev realm on 2026-09-05 (client_credentials grant for room-device-demo); per-issuance values marked.
 KEYCLOAK_DEVICE_TOKEN = {
     "acr": "1",
     "aud": "mdx-api",
@@ -89,19 +79,12 @@ def test_comparison_is_constant_time_and_correct() -> None:
 
 @pytest.mark.parametrize("bad", ["", "short", "hunter2", "x" * 500, "mdx_sk_" + "y" * 300])
 def test_an_out_of_range_secret_is_rejected_before_the_database(bad: str) -> None:
-    """The shape check exists so an attacker-chosen megabyte never becomes
-    a megabyte-wide index probe."""
+    """The shape check keeps an attacker-chosen megabyte from becoming an index probe."""
     assert not cred.looks_like_secret(bad)
 
 
 def test_the_legacy_dev_secret_still_reaches_the_hash_comparison() -> None:
-    """The check is a length bound, not a format.
-
-    Requiring the `mdx_sk_` tag would mean every dev config had to change
-    on the day the token endpoint moved — and would hand an attacker a
-    free oracle: any string without the tag would skip the comparison
-    entirely and answer faster.
-    """
+    """A length bound, not a format: requiring the `mdx_sk_` tag would be a free timing oracle."""
     assert cred.looks_like_secret("dev-room-device-secret")
     assert cred.looks_like_secret("dev-secret-change-in-prod-mdx-backend")
 
@@ -114,8 +97,7 @@ def test_roles_are_fixed_per_kind() -> None:
 
 
 def test_the_role_map_matches_the_migrations_check_constraint() -> None:
-    """The API refuses a bad combination with a 400 rather than letting
-    Postgres refuse it with a 500 — so the two must agree."""
+    """The API refuses a bad combination with a 400, not a Postgres 500, so the two must agree."""
     sql = (
         Path(__file__).resolve().parents[4]
         / "infra"
@@ -123,8 +105,7 @@ def test_the_role_map_matches_the_migrations_check_constraint() -> None:
         / "migrations"
         / "0026_service_credentials.sql"
     ).read_text()
-    # Whitespace-normalised: the assertion is that the two agree, not that
-    # the SQL is aligned a particular way.
+    # Whitespace-normalised: only agreement is asserted.
     normalised = " ".join(sql.split())
     for kind, roles in cred.ROLES_FOR_KIND.items():
         assert f"kind = '{kind}' AND roles = ARRAY['{roles[0]}']" in normalised
@@ -134,13 +115,7 @@ def test_the_role_map_matches_the_migrations_check_constraint() -> None:
 
 
 def test_the_captured_keycloak_device_token_is_rejected_by_claims() -> None:
-    """The finding this sprint is built around, pinned as a test.
-
-    Ambient capture through a Keycloak room device does not work today —
-    `POST /asr/jobs` runs `requires("asr.write", …)` → `current_user` →
-    `Claims(**payload)`, and this payload fails it. B1b does not merely
-    preserve the device path; it is the first time that path can work.
-    """
+    """A captured Keycloak room-device token fails `Claims(**payload)`, so the device path never worked before."""
     with pytest.raises(Exception) as excinfo:
         Claims(**KEYCLOAK_DEVICE_TOKEN)
     message = str(excinfo.value)
@@ -168,21 +143,18 @@ def test_a_native_device_token_carries_the_same_identity_and_parses() -> None:
     )
     payload = jwt.get_unverified_claims(minted.token)
 
-    # The three claims that decide what a device may do are identical in
-    # kind to Keycloak's, and `aud` matches so the fleet's verifier accepts.
+    # The three deciding claims match Keycloak's in kind, and `aud` matches the fleet verifier.
     assert payload["roles"] == KEYCLOAK_DEVICE_TOKEN["roles"] == ["device"]
     assert payload["tid"] == KEYCLOAK_DEVICE_TOKEN["tid"]
     assert payload["aud"] == KEYCLOAK_DEVICE_TOKEN["aud"] == "mdx-api"
     assert payload["typ"] == KEYCLOAK_DEVICE_TOKEN["typ"] == "Bearer"
     assert payload["sub"] == str(credential_id)
 
-    # ...and unlike the Keycloak token, this one is something the fleet
-    # can actually parse.
+    # Unlike the Keycloak token, this one parses.
     claims = Claims(**payload)
     assert claims.roles == ["device"]
     assert str(claims.tid) == tenant_id
-    # `sid` stands in as the credential id: there is exactly one "session"
-    # per credential, forever, and a denylist push on either key kills it.
+    # `sid` is the credential id: one "session" per credential; a denylist push on either key kills it.
     assert claims.sid == str(credential_id) == str(claims.sub)
     assert claims.mfa is False
 

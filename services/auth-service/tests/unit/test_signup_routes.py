@@ -1,14 +1,7 @@
-"""BE-0 — self-serve signup: the router, the service and their refusals.
+"""Self-serve signup: router, service and refusals, with Keycloak, store, mailer and pool faked.
 
-The load-bearing assertions here are the ones about what the endpoint
-does NOT say. `/auth/signup` is reachable by anyone with a socket, and an
-endpoint that answers differently for a registered address than for an
-unknown one is a membership oracle: point it at a list and read off which
-addresses are customers.
-
-Everything is faked except the decision logic — Keycloak, the challenge
-store, the mailer and the pool are stand-ins, so these run with no
-container in the loop. The wiring is covered by the `_db`/`_e2e` suites.
+The load-bearing assertions are about what `/auth/signup` does NOT say: answering
+differently for a registered address is a membership oracle.
 """
 
 from __future__ import annotations
@@ -345,8 +338,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Env:
 
     deps.install_state(_State())  # type: ignore[arg-type]
     monkeypatch.setattr(settings, "signup_resend_seconds", 60)
-    # The timing floor is a property of the deployment, not of the logic
-    # under test; holding every request for 300 ms would only slow this file.
+    # The timing floor is a deployment property; holding every request would only slow this file.
     monkeypatch.setattr(settings, "signup_min_response_ms", 0)
 
     app = FastAPI()
@@ -380,19 +372,16 @@ def test_a_new_address_gets_an_account_a_workspace_and_a_code(env: Env) -> None:
     assert response.json() == {"status": "verification_sent", "resend_after": 60}
 
     assert UNKNOWN in env.kc.users
-    # Disabled until confirmed: an account nobody has verified must not be
-    # able to obtain a token by ANY grant, not merely through our proxy.
+    # Disabled until confirmed: an unverified account must not obtain a token by ANY grant.
     assert env.kc.users[UNKNOWN]["enabled"] is False
-    # BOTH roles. `tenant_admin` alone holds no content permission at all
-    # (S14), so the account could not write the first note.
+    # BOTH roles: `tenant_admin` alone holds no content permission.
     assert env.kc.created_payloads[0]["roles"] == ["tenant_admin", "member"]
 
     assert len(env.store.tenants) == 1
     assert len(env.store.memberships) == 1
     assert len(env.store.users) == 1
     assert next(iter(env.store.users.values()))["status"] == "invited"
-    # The identity row goes in the same transaction, so a BE-0 account is
-    # shaped exactly like a migrated one and `/auth/me` can see it.
+    # Identity row in the same transaction, so `/auth/me` can see the account.
     assert len(env.store.identities) == 1
 
     assert [m.kind for m in env.mailer.sent] == ["signup_verify"]
@@ -425,9 +414,7 @@ def test_the_existing_branch_sends_no_code(env: Env) -> None:
 
 
 def test_a_weak_password_is_refused_with_a_reason(env: Env) -> None:
-    """Checked here rather than left to Keycloak, so the person gets a
-    field-level message instead of a realm error in a language nobody
-    chose."""
+    """Checked here rather than left to Keycloak, for a field-level message."""
     response = _signup(env, UNKNOWN, password="password123")
     assert response.status_code == 400
     body = response.json()
@@ -444,12 +431,7 @@ def test_a_password_built_from_the_address_is_refused(env: Env) -> None:
 
 
 def test_a_whitespace_display_name_is_refused_with_the_documented_code(env: Env) -> None:
-    """Pydantic's `min_length=1` accepts "   "; the service does not.
-
-    The distinction matters for the client: `400 display_name_required`
-    is a field to fix, while a 422 body is a validation dump nobody
-    renders.
-    """
+    """Pydantic's `min_length=1` accepts "   "; the service does not (400 display_name_required, not 422)."""
     response = _signup(env, UNKNOWN, name="   ")
     assert response.status_code == 400
     assert response.json()["code"] == "display_name_required"
@@ -460,11 +442,7 @@ def test_a_whitespace_display_name_is_refused_with_the_documented_code(env: Env)
 
 
 def test_a_database_failure_deletes_the_keycloak_user(env: Env) -> None:
-    """The whole reason Keycloak is written first.
-
-    A Keycloak user with no rows is invisible to the product AND occupies
-    the address, so the person cannot retry — the worst of both.
-    """
+    """A Keycloak user with no rows would be invisible yet occupy the address."""
     env.store.fail_writes = True
     response = _signup(env, UNKNOWN)
     assert response.status_code == 503
@@ -530,8 +508,7 @@ def test_an_unknown_address_looks_exactly_like_an_expired_code(env: Env) -> None
 
 
 def test_a_keycloak_failure_during_verify_keeps_the_code(env: Env) -> None:
-    """`409 verify_retry`: the person must not lose their code to an
-    outage that was not theirs."""
+    """`409 verify_retry`: the person must not lose their code to an outage."""
     _signup(env, UNKNOWN)
     code = _code_for(env, UNKNOWN)
     env.kc.enable_error = KeycloakError(status=503, body={}, message="down")
@@ -578,8 +555,7 @@ def test_the_per_ip_cap_refuses_with_retry_after(env: Env) -> None:
 
 
 def test_the_per_email_cap_is_keyed_on_a_hash_not_the_address(env: Env) -> None:
-    """The rate-limit subject must not be the address itself: Redis keys
-    end up in logs, dashboards and support screenshots."""
+    """The rate-limit subject must not be the address itself: Redis keys end up in logs."""
     _signup(env, UNKNOWN)
     subjects = {subject for _scope, subject in env.limiter.counts}
     assert UNKNOWN not in subjects
@@ -590,8 +566,7 @@ def test_the_per_email_cap_is_keyed_on_a_hash_not_the_address(env: Env) -> None:
 
 
 def test_the_routes_404_when_signup_is_not_wired() -> None:
-    """A deployment with signup off looks like one that has no such
-    endpoint, so a prober learns nothing about what is switched off."""
+    """Signup off looks like no such endpoint, so a prober learns nothing."""
     from auth_service import deps
     from auth_service.routers import signup as signup_router
 
@@ -631,8 +606,7 @@ async def test_the_concierge_path_creates_an_enabled_account_and_sends_no_code(
 
 
 def test_a_generated_password_satisfies_the_policy_it_will_be_checked_against() -> None:
-    """The concierge password is never typed by the operator, but Keycloak
-    still applies the realm policy to it."""
+    """Keycloak still applies the realm policy to the concierge password."""
     from auth_service.domain.password_policy import check_password
 
     for _ in range(20):
@@ -667,8 +641,7 @@ async def test_the_locale_reaches_the_new_workspace(env: Env) -> None:
 
 
 async def test_a_code_hash_cannot_be_replayed_against_another_challenge(env: Env) -> None:
-    """`code_hash` is sha256("<code>:<challenge id>"), so a hash lifted
-    from a backup fits exactly one row."""
+    """`code_hash` is sha256("<code>:<challenge id>"), so a lifted hash fits exactly one row."""
     _signup(env, UNKNOWN)
     row = next(iter(env.challenges.rows.values()))
     other_id = uuid4()
@@ -686,7 +659,7 @@ def test_an_expired_challenge_is_refused(env: Env) -> None:
     assert response.json()["code"] == "challenge_expired"
 
 
-# ── Sprint 21: the conversion step ───────────────────────────────────
+# ── the conversion step ──────────────────────────────────────────────
 
 
 def test_a_referred_signup_records_plan_source_and_attribution(env: Env) -> None:

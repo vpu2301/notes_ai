@@ -1,17 +1,7 @@
-"""Sprint TQ4 T1 — Parakeet output as the OpenAI-style ``verbose_json`` the
-worker's ``asr_http`` reads (ADR-0037: words with times are a contract).
-
-Pure functions, no model: tokens → words → segments. Both engines feed it:
-
-* NeMo returns word timestamps itself (``timestamp['word']``).
-* The ONNX runtime returns SentencePiece tokens with a start time and a log
-  probability each; a token that begins with a space (``" Hand"``) begins a
-  word, the rest continue it (``"ala"``).
-
-Parakeet has no language identification and no segment-quality numbers:
-``language`` is echoed only when the caller named one, and ``no_speech_prob``
-/ ``avg_logprob`` / ``compression_ratio`` are absent — the worker's gates
-treat absent fields as unavailable (TQ2 T2).
+"""Parakeet output as the OpenAI-style ``verbose_json`` the worker's ``asr_http`` reads
+(ADR-0037: words with times are a contract). Pure functions: tokens -> words -> segments.
+``language`` is echoed only when the caller named one; the segment-quality fields are
+absent and the worker treats them as unavailable.
 """
 
 from __future__ import annotations
@@ -23,8 +13,7 @@ from typing import Any
 
 # A token's duration when nothing follows it (Parakeet's 80 ms frame).
 FRAME_S = 0.08
-# A word never ends later than this after its last token starts: the next
-# word's start is its end only when the two are close (no pause between).
+# A word ends at the next word's start only when the two are close (no pause).
 LAST_TOKEN_MAX_S = 0.4
 SEGMENT_MAX_S = 30.0
 SEGMENT_GAP_S = 1.0
@@ -46,10 +35,7 @@ def words_from_tokens(
     *,
     duration: float | None = None,
 ) -> list[Word]:
-    """Join SentencePiece tokens into words. A word ends where the next one
-    starts (or one frame after its last token); its probability is the
-    lowest of its tokens' (exp of the log probability) — one unsure piece
-    makes the word unsure."""
+    """Join SentencePiece tokens into words; a word's probability is its lowest token's."""
     out: list[Word] = []
     pieces: list[tuple[str, float, float | None]] = []
 
@@ -79,9 +65,7 @@ def words_from_tokens(
 
 
 def segments_from_words(words: Sequence[Word]) -> list[dict[str, Any]]:
-    """Sentences: cut after terminal punctuation, at a pause of a second, or
-    at 30 s — what a transcript line is, and what the worker's per-segment
-    gates look at."""
+    """Sentences: cut after terminal punctuation, at a pause of a second, or at 30 s."""
     segments: list[dict[str, Any]] = []
     current: list[Word] = []
 

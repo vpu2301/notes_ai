@@ -1,11 +1,4 @@
-"""IDX-B2 F4 — the harness that replaces logging in through Keycloak.
-
-The point of these tests is that the harness does not *bypass* anything.
-A fixture that overrode `current_user` with a lambda would make every one
-of these pass while the verifier was broken; these go through the real
-`verify_token`, so a wrong audience, a wrong issuer, an expired token and
-a forbidden claim all still fail.
-"""
+"""The in-process auth harness bypasses nothing: every case goes through the real `verify_token`."""
 
 from __future__ import annotations
 

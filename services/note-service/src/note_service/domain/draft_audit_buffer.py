@@ -1,12 +1,6 @@
-"""Aggregates per-session ``note.draft.updated`` audit events.
-
-Spec §5: emit one aggregated audit per dictation session, not one per
-autosave. We buffer per ``(tenant_id, note_id, session_id)`` and
-flush either when the dictation session signals end (sprint-04 hook)
-or every 10 min.
-
-Implementation: in-memory dict guarded by a single asyncio lock,
-flushed by a background task that the service spawns at startup.
+"""Aggregates ``note.draft.updated`` audit events per ``(tenant_id, note_id,
+session_id)``: one row per dictation session, flushed on session end or every
+10 min by a background task.
 """
 
 from __future__ import annotations

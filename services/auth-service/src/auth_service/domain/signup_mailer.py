@@ -1,17 +1,7 @@
-"""The three mails BE-0 sends, rendered and delivered inline.
+"""The signup mails, rendered and sent inline.
 
-Inline rather than through the outbox worker that carries password mail,
-for the same reason the sign-in code is inline (`CodeMailer`): a
-confirmation code is useful for ten minutes and the person is watching the
-page. A queue they wait on turns a slow relay into "signup is broken" with
-no error anywhere. The cost is that a relay hiccup becomes a visible
-failure they can retry, which is the honest one.
-
-The two public-path mails are a matched pair. `/auth/signup` answers the
-same ``202`` whether or not the address is registered, so the mailbox is
-the only place the difference exists — and that only holds if both mails
-go out on the same code path, under the same timeout, with the same
-failure handling. They do.
+The two public-path mails must share one code path, timeout and failure
+handling: the mailbox is the only place "registered or not" may differ.
 """
 
 from __future__ import annotations
@@ -83,15 +73,7 @@ class SignupMailer:
     async def send_concierge(
         self, *, to: str, display_name: str, temporary_password: str, lang: str
     ) -> None:
-        """The one mail an operator-created account gets.
-
-        It carries a password, which no other mail in this service does,
-        and that is the whole reason the concierge path is a CLI an
-        operator runs rather than an endpoint anyone can call. The
-        password is generated, sent once, and never logged or shown to the
-        operator — so the only copy in existence is in the recipient's
-        mailbox, and the change-password link is right beside it.
-        """
+        """The one mail an operator-created account gets; it carries the password (sent once, never logged)."""
         await self._send(
             copy_mod.KIND_CONCIERGE_WELCOME,
             lang,

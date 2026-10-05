@@ -54,8 +54,7 @@ async def test_first_call_misses_then_subsequent_hit(redis):
     ]
     build_fn, get_count = await _build_once_factory(rows)
     tid, uid = uuid4(), uuid4()
-    # First call must initialise the version tag so the cache check
-    # finds a non-null tag on subsequent reads.
+    # First call initialises the version tag.
     await redis.set(f"autocomplete:tenant_phrase_version:{tid}", "1")
     t1, st1 = await cache.get_or_build(
         tenant_id=tid,
@@ -113,9 +112,7 @@ def _row(id_="a", phrase="hello"):
 
 
 async def test_concurrent_cold_requests_build_exactly_once(redis):
-    """Thundering-herd guard: N concurrent get_or_build on a cold key →
-    ONE build wins the lock; losers poll the cache or degrade — no
-    request runs a redundant cached build."""
+    """Thundering herd: N concurrent cold reads, exactly one build wins the lock."""
     import asyncio
 
     cache = TrieCache(redis, ttl_seconds=60)
@@ -137,9 +134,7 @@ async def test_concurrent_cold_requests_build_exactly_once(redis):
         ]
     )
     assert all(t is not None for t, _ in results)
-    # Exactly one lock-winner build; any lock-losers either read the
-    # populated cache (hit=True) or degraded (their own direct build) —
-    # but NONE of them wrote the cache, so a follow-up call is a hit.
+    # Lock losers hit the cache or degraded; none wrote it, so a follow-up call is a hit.
     _, st = await cache.get_or_build(tenant_id=tid, language="uk", user_id=uid, build_fn=build_fn)
     assert st == "hit"
     winner_builds = sum(1 for _, s_ in results if s_ != "hit")
@@ -226,9 +221,7 @@ async def test_lazy_invalidation_never_deletes_trie_keys(redis):
 
 
 async def test_virgin_tenant_without_vtag_key_still_gets_hits(redis):
-    """Regression (step-08 load run): a tenant whose version_tag key was
-    never INCR'd must hit the cache on the second read — the missing key
-    means implicit version "0", not "never cache"."""
+    """Regression: a never-INCR'd version tag means implicit "0", not "never cache"."""
     cache = TrieCache(redis, ttl_seconds=60)
     build_fn, get_count = await _build_once_factory([_row()])
     tid, uid = uuid4(), uuid4()  # NOTE: no vtag key seeded

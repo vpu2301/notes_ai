@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start / verify / stop the model servers on the founder's Mac (DEP-S0, Sprint L1).
+# Start / verify / stop the model servers on the dev Mac.
 #
 #   make dev-model                 # start what is missing, then verify
 #   make dev-model ARGS=verify     # probes only (context probe, ASR words[], 100 % GPU)
@@ -18,16 +18,11 @@
 #   DEV_MAC_ASR_URL     http://localhost:8080       whisper.cpp server (OpenAI path)
 #   DEV_MAC_ASR_MODEL   whisper-large-v3-turbo      label only (whisper-server serves one model)
 #   WHISPER_MODEL_FILE  ~/.cache/whisper-cpp/ggml-large-v3-turbo.bin
-#   DEV_MAC_ASR_ENGINE  whisper                      `parakeet` also starts deploy/asr-server on :8082 (TQ4)
+#   DEV_MAC_ASR_ENGINE  whisper                      `parakeet` also starts deploy/asr-server on :8082
 #
-# Memory budget (Sprint L1 T1): total unified memory − the Docker VM's limit
-# − 3 GiB for macOS. A base model whose 4-bit weights plus KV cache at the
-# chosen context exceed it is refused, not loaded onto swap. Weights are
-# read from `ollama list` when the tag is local, else from a size table by
-# parameter class. KV at q8_0: ≈ 1.5 GiB at 16K, ≈ 3 GiB at 32K.
-#
-# Inside Docker the workers reach these via host.docker.internal (defaults in
-# config/models.yaml); this script talks to localhost.
+# Memory budget: unified memory − the Docker VM's limit − 3 GiB for macOS; a
+# base model whose 4-bit weights + KV cache exceed it is refused, not swapped.
+# The workers reach these via host.docker.internal; this script talks to localhost.
 set -euo pipefail
 cmd="${1:-start}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -39,7 +34,7 @@ BASE_MODEL="${DEV_MAC_BASE_MODEL:-gemma3:4b}"
 ASR_URL="${DEV_MAC_ASR_URL:-http://localhost:8080}"
 WHISPER_FILE="${WHISPER_MODEL_FILE:-$HOME/.cache/whisper-cpp/ggml-large-v3-turbo.bin}"
 WHISPER_URL_DOWNLOAD="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(basename "$WHISPER_FILE")"
-# docs/models/PINS.md row "libs/models dev_mac_asr" — a mismatch refuses to start the server.
+# docs/models/PINS.md row "libs/models dev_mac_asr"; a mismatch refuses to start.
 WHISPER_SHA256="${WHISPER_MODEL_SHA256:-1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69}"
 asr_port="${ASR_URL##*:}"; asr_port="${asr_port%%/*}"
 pidfile="$state/whisper-server.pid"; logfile="$state/whisper-server.log"
@@ -50,8 +45,7 @@ case "$CHAT_MODEL" in *-long) CONTEXT="${DEV_MAC_CONTEXT:-32768}" ;; *) CONTEXT=
 if [ "$CONTEXT" -ge 32768 ]; then MODELFILE="$repo/infra/models/dev-mac/Modelfile.longctx"; else MODELFILE="$repo/infra/models/dev-mac/Modelfile"; fi
 OS_RESERVE_GIB=3
 
-# The server tuning the budget assumes. Applied to an `ollama serve` this
-# script starts; a server started elsewhere keeps its own settings.
+# Server tuning the budget assumes; a server started elsewhere keeps its own.
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
 export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
@@ -81,8 +75,7 @@ budget_gib() { awk -v t="$(total_gib)" -v d="$(docker_gib)" -v o="$OS_RESERVE_GI
 
 kv_gib() { awk -v c="$1" 'BEGIN{printf "%.1f", 1.5*c/16384}'; }
 
-# Weights in GiB: the local blob when the tag is pulled (`ollama list` prints
-# decimal GB), else the 4-bit table by parameter class.
+# Weights in GiB: the local blob when pulled, else the 4-bit table by parameter class.
 weights_gib() {
   local tag="$1" size
   if is_ollama; then
@@ -129,8 +122,7 @@ mem_class() {
 
 # ── chat server ────────────────────────────────────────────────────────
 ollama_tuned() {
-  # True when the running server was started with the tuning above (read
-  # from its own startup line in our log — only a server we started logs there).
+  # True when the running server was started with the tuning above (our log).
   [ -f "$ollama_pidfile" ] && kill -0 "$(cat "$ollama_pidfile")" 2>/dev/null \
     && grep -q 'OLLAMA_FLASH_ATTENTION:true' "$ollama_log" 2>/dev/null \
     && grep -q 'OLLAMA_KV_CACHE_TYPE:q8_0' "$ollama_log" 2>/dev/null
@@ -202,9 +194,7 @@ start_asr() {
     ok "whisper weights match the PINS.md digest"
   fi
   say_ "  starting whisper-server on :$asr_port (Metal, OpenAI path)…"
-  # `-l auto` (Sprint TQ2): the OpenAI-style client omits `language` for an
-  # "auto" job, and whisper-server's own default is English — without this
-  # every auto job on the dev Mac was decoded as English.
+  # `-l auto`: the client omits `language` for an auto job and whisper-server defaults to English.
   nohup whisper-server -m "$WHISPER_FILE" --host 127.0.0.1 --port "$asr_port" \
         --inference-path /v1/audio/transcriptions --split-on-word -l auto >"$logfile" 2>&1 &
   echo $! > "$pidfile"
@@ -212,10 +202,8 @@ start_asr() {
   asr_up && ok "whisper-server up (pid $(cat "$pidfile"), log $logfile)" || { bad "whisper-server did not come up — see $logfile"; return 1; }
 }
 
-# ── Parakeet candidate (Sprint TQ4, ADR-0067 arm C on the Mac) ──────────
-# DEV_MAC_ASR_ENGINE=parakeet also starts deploy/asr-server with its ONNX
-# runtime on :8082 (backend `dev_mac_parakeet_asr`). whisper-server stays up:
-# `dev_mac_asr` is the baseline the candidate is measured against.
+# ── Parakeet candidate (ADR-0067): DEV_MAC_ASR_ENGINE=parakeet also starts
+# deploy/asr-server (ONNX) on :8082; whisper-server stays up as the baseline.
 parakeet_port="${DEV_MAC_PARAKEET_PORT:-8082}"
 parakeet_pidfile="$state/asr-server.pid"; parakeet_log="$state/asr-server.log"
 parakeet_up() { curl -sf -m 3 "http://localhost:$parakeet_port/health" 2>/dev/null | grep -q parakeet; }

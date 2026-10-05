@@ -1,9 +1,7 @@
 # ruff: noqa: F811 — the imported `rig` fixture is injected by name.
-"""Sprint 29 routes: speaker-count hints on submit, re-run, undo.
+"""Re-labelling routes: speaker-count hints on submit, re-run, undo.
 
-The repository is faked in memory and scoped by tenant the way RLS scopes
-it (``conn`` is the tenant id); its SQL is exercised against the real
-schema in tests/integration/test_rediarize_db.py.
+In-memory repository scoped by tenant (``conn`` is the tenant id).
 """
 
 from __future__ import annotations
@@ -385,7 +383,7 @@ def test_another_tenant_gets_404_and_nothing_is_queued(api: SimpleNamespace) -> 
     assert api.repo.jobs[(_TENANT_A, job)]["previous"] == "minio://b/k"
 
 
-# ── Sprint 30: capture context on submit ──────────────────────────────
+# ── Capture context on submit ─────────────────────────────────────────
 
 
 def _capture_insert(rig: SimpleNamespace) -> list[dict[str, Any]]:
@@ -453,7 +451,7 @@ def test_an_unknown_capture_source_is_422(rig: SimpleNamespace) -> None:
     assert resp.status_code == 422
 
 
-# ── Sprint 31: dual-channel submit ────────────────────────────────────
+# ── Dual-channel submit ───────────────────────────────────────────────
 
 
 def _stereo(rig: SimpleNamespace) -> None:

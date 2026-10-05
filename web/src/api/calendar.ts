@@ -1,6 +1,4 @@
-// Calendar connections (note-service, 0019/0020): connect a Google account
-// or add a calendar link, pick which calendars feed the home page, read the
-// next days' events.
+// Calendar connections (note-service): Google account or iCal link, calendar picks, upcoming events.
 
 import { api } from "./http";
 import type {
@@ -14,11 +12,7 @@ export function listCalendarConnections(): Promise<CalendarConnectionsResponse> 
   return api<CalendarConnectionsResponse>("note", "/v1/calendar/connections");
 }
 
-/**
- * Start the Google sign-in. The server answers with Google's consent URL;
- * the caller navigates the whole window there, and Google sends the
- * browser back to `returnTo` with `?calendar=connected` (or `=error`).
- */
+/** Answers Google's consent URL; the browser comes back to `returnTo` with `?calendar=connected|error`. */
 export function startGoogleConnect(returnTo: string, loginHint?: string): Promise<{ authorize_url: string }> {
   return api<{ authorize_url: string }>("note", "/v1/calendar/google/connect", {
     method: "POST",
@@ -26,12 +20,7 @@ export function startGoogleConnect(returnTo: string, loginHint?: string): Promis
   });
 }
 
-/**
- * Add a calendar by its private iCal address (Google's "Secret address in
- * iCal format", an Outlook or iCloud published calendar). Needs no Google
- * client on the server; the feed is fetched once now, so a bad link fails
- * here with a readable message.
- */
+/** Add a calendar by its private iCal address; the feed is fetched once now, so a bad link fails here. */
 export function connectCalendarLink(url: string, label?: string): Promise<CalendarConnection> {
   return api<CalendarConnection>("note", "/v1/calendar/ics/connect", {
     method: "POST",

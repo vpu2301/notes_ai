@@ -1,25 +1,7 @@
-"""Synonym query expansion (sprint 15, ADR-0038).
-
-Wraps — never forks — the sprint-08 search: when a query lexeme matches
-a synonym-group term, the lexeme's tsquery atom broadens from ``'ім'``
-to ``('кп' | ('комерційна' & 'пропозиція') | 'offer')``. The assembled tsquery
-STRING travels as a bind parameter into ``to_tsquery('simple', $n)`` —
-no SQL injection surface, and no tsquery-syntax surface either because
-every atom is a lexeme that already came out of ``to_tsvector('simple')``
-(the established normalization precedent: apostrophes in «м'яч»
-would otherwise break the syntax; quoting doubles them).
-
-Both sides of the match are normalized by the SAME Postgres config:
-``synonyms.lexemes`` is computed via ``to_tsvector('simple')``
-at write/seed time, the query through the one roundtrip below. A
-multi-word query hitting a multi-word term still works per-lexeme:
-«комерційна пропозиція» → ('комерційна'|'кп') & ('пропозиція'|'кп') —
-a document containing only «КП» satisfies both conjuncts.
-
-Caps: at most ``MAX_EXPANSIONS`` query lexemes get synonym groups (the
-rest stay plain — bounds cost on adversarial queries); lexemes shorter
-than ``MIN_LEXEME_LEN`` never expand (the Ukrainian preposition «з»
-must not drag in the з/п = заробітна плата group).
+"""Synonym query expansion (ADR-0038): a matching query lexeme's tsquery atom
+broadens to its group. The tsquery STRING is a bind parameter and every atom
+already came out of ``to_tsvector('simple')``, so there is no SQL or tsquery
+syntax surface. At most ``MAX_EXPANSIONS`` lexemes expand, none shorter than ``MIN_LEXEME_LEN``.
 """
 
 from __future__ import annotations

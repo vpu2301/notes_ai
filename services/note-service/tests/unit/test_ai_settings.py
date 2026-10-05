@@ -1,12 +1,5 @@
-"""Sprint 37 — who processes this workspace's meetings, and what it may cost.
-
-Two things are worth a test here, and they are the two the feature
-exists for:
-
-* a workspace is never routed to a processor nobody acknowledged, even
-  when a routing change introduces one behind everyone's back;
-* a workspace over its monthly budget stops generating and says so,
-  instead of quietly spending.
+"""Who processes this workspace's meetings, and what it may cost: never a
+processor nobody acknowledged; over budget stops generating and says so.
 """
 
 from __future__ import annotations

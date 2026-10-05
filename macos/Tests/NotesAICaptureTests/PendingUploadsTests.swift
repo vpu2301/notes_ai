@@ -26,8 +26,7 @@ final class FakeUploadHost: PendingUploadsHost {
     }
 }
 
-/// IDX-M2 — the recordings this Mac is holding. One rule runs through all
-/// of it: nothing here deletes a recording the server has not taken.
+/// The recordings this Mac is holding: nothing here deletes a recording the server has not taken.
 @MainActor
 final class PendingUploadsTests: XCTestCase {
     private var directory: URL!
@@ -59,8 +58,7 @@ final class PendingUploadsTests: XCTestCase {
             identityId: "ada", tenantId: tenant), in: directory)!
     }
 
-    /// A queued ASR job, as the service answers one. `nonisolated` so the
-    /// stub server's `@Sendable` handler can build it.
+    /// A queued ASR job. `nonisolated` so the stub's `@Sendable` handler can build it.
     nonisolated static func job() -> Data {
         Fixtures.json(["id": "job-1", "status": "queued", "created_at": "2026-09-05T10:00:00Z"])
     }

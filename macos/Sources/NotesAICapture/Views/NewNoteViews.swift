@@ -1,15 +1,11 @@
 import AppKit
 import SwiftUI
 
-// The other ways a note begins (web parity): blank, from a template, or
-// from a recording made elsewhere. One list, behind the caret on the
-// sidebar's New meeting row and the ⋯ beside New meeting on home — the
-// two places the web offers it.
+// The other ways a note begins: blank, from a template, or from a recording made elsewhere. One list, behind the sidebar's caret and the home ⋯.
 
 @MainActor
 enum NewNoteMenu {
-    /// The other ways to start — the sidebar's caret and the home page's ⋯
-    /// both open this list, as on the web.
+    /// The other ways to start — the sidebar's caret and the home page's ⋯ both open this list.
     static func items(app: AppState, capture: CaptureViewModel) -> [DSMenuItem] {
         [
             .item("Blank note", symbol: "doc", disabled: app.creatingNote) {
@@ -27,8 +23,7 @@ enum NewNoteMenu {
     }
 }
 
-/// Pick a template to start from. Sections come pre-filled with their
-/// defaults.
+/// Pick a template to start from. Sections come pre-filled with their defaults.
 struct TemplatePickerSheet: View {
     @EnvironmentObject private var app: AppState
     let onClose: () -> Void

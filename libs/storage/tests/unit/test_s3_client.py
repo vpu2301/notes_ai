@@ -1,10 +1,4 @@
-"""``S3Client`` with no endpoint configured.
-
-A service may run with ``S3_ENDPOINT`` empty (no object store in the stack).
-Every call must then fail with :class:`ObjectStoreNotConfiguredError` — not
-with aiobotocore's ``ValueError: Invalid endpoint:`` raised lazily inside a
-request, which the services rendered as an opaque 500.
-"""
+"""``S3Client`` with ``S3_ENDPOINT`` empty: every call fails with :class:`ObjectStoreNotConfiguredError`."""
 
 from __future__ import annotations
 

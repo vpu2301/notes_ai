@@ -1,28 +1,8 @@
-"""Sprint TQ2 T2/T3 — segment quality gates, for every backend.
+"""Segment quality gates (G1 silence text, G2 loops, G3 low confidence, T3 artefacts).
 
-Applied by ``processor.decode_recording`` right after the decode and
-before prompt-echo removal, on whatever the backend returned. A field the
-backend did not report skips the part of a gate that needs it and is
-counted in ``diagnostics.gate_unavailable`` (whisper.cpp has no
-``compression_ratio``; its ``no_speech_prob`` is ~0 even on text it wrote
-over silence — measured 2026-09-30, docs/models/PINS.md).
-
-| Gate | Condition | Action | reason |
-|---|---|---|---|
-| G1 | no_speech ≥ 0.6 and (avg_logprob < −1.0 or missing) and VAD speech share < 0.3 | drop | ``no_speech`` |
-| G2 | compression_ratio > 2.4, or a 2–6-gram repeated ≥ 4× in a row, or ≥ 4 identical segments in a row | keep two repetitions, drop the rest, second pass for the range | ``loop`` |
-| G3 | mean word probability < 0.25 and segment < 1.5 s and VAD share < 0.3 | drop | ``low_confidence_nonspeech`` |
-| T3 | whole segment is a known artefact phrase and (VAD share < 0.3 or no_speech ≥ 0.5) | drop | ``artefact`` |
-| T3 | … over speech | keep, ``artefact_kept`` | — |
-
-The VAD condition is what keeps G1/G3/T3 from deleting quiet real speech:
-a segment Silero heard speech in is never dropped by them. When the backend
-reports no ``no_speech_prob`` at all, G1 rests on the VAD condition alone
-(failure table, TQ2).
-
-``MDX_ASR_GATES_ENABLED=false``: nothing changes in the transcript; every
-drop is still recorded with ``dry_run: true``.
-
+Run after the decode for every backend. A segment VAD heard speech in is never
+dropped by G1/G3/T3; a missing backend field skips that part of a gate and is counted
+in ``diagnostics.gate_unavailable``. Gates off = ``dry_run`` records only.
 Numbers and enum strings only reach diagnostics, logs and metrics.
 """
 
@@ -74,8 +54,7 @@ class GateResult:
 
 
 def speech_share(start_ms: int, end_ms: int, speech: Sequence[SpeechSegment]) -> float:
-    """Share of ``[start, end)`` that VAD called speech (1.0 for an empty
-    span: a zero-length segment is not evidence of silence)."""
+    """Share of ``[start, end)`` VAD called speech; 1.0 for an empty span."""
     if end_ms <= start_ms:
         return 1.0
     covered = sum(max(0, min(end_ms, s.end_ms) - max(start_ms, s.start_ms)) for s in speech)
@@ -83,9 +62,7 @@ def speech_share(start_ms: int, end_ms: int, speech: Sequence[SpeechSegment]) ->
 
 
 def _diag_for(seg: Segment, diags: Sequence[SegmentDiagnostics]) -> SegmentDiagnostics | None:
-    """The decoder's numbers for this segment: the diagnostics entry that
-    overlaps it most (both come from the same decode; a mapped HTTP group
-    can shift a boundary by the joining silence)."""
+    """The diagnostics entry overlapping this segment most."""
     if not diags:
         return None
 
@@ -109,8 +86,7 @@ def _norm(text: str) -> str:
 
 
 def loop_cut(tokens: Sequence[str], repeats: int) -> int | None:
-    """Index of the first token to drop when a 2–6-gram repeats ``repeats``
-    times in a row — two repetitions are kept — else ``None``."""
+    """First token to drop when a 2–6-gram repeats ``repeats`` times (two kept), else None."""
     norm = [_norm(t) for t in tokens]
     n_tok = len(norm)
     for n in range(LOOP_MIN_N, LOOP_MAX_N + 1):
@@ -182,7 +158,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
             if value is None:
                 unavailable[name] = unavailable.get(name, 0) + 1
 
-        # T3 — a known artefact phrase.
+        # T3
         phrase = match_artefact(seg.text)
         if phrase is not None:
             ident = _artefact_id(phrase)
@@ -202,8 +178,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
                 )
                 _artefact_total.add(1, {"language": phrase.language, "action": "kept"})
 
-        # G1 — text over silence.
-        # Without the decoder's no_speech figure, G1 rests on VAD alone.
+        # G1; without a no_speech figure it rests on VAD alone.
         if nonspeech and (
             no_speech is None
             or (
@@ -216,8 +191,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
                 out_segments.append(seg)
             continue
 
-        # G3 — a short, unsure segment where VAD heard nothing. Skipped when
-        # the backend gave no word probabilities (they read as 1.0).
+        # G3; skipped when the backend gave no word probabilities (they read as 1.0).
         mean_prob = None if unscored_words else _mean_word_prob(seg)
         if (
             nonspeech
@@ -296,8 +270,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
 
 
 def _repeats_ahead(segments: Sequence[Segment], seg: Segment, repeats: int) -> bool:
-    """True when ``seg`` belongs to a run of at least ``repeats`` identical
-    consecutive segments (counted around it)."""
+    """True when ``seg`` is in a run of at least ``repeats`` identical consecutive segments."""
     idx = next(k for k, s in enumerate(segments) if s is seg)
     norm = _norm(seg.text)
     lo = idx

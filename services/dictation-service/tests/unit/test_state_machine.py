@@ -34,7 +34,7 @@ def test_terminal_states_have_no_transitions() -> None:
 
 
 def test_reconnecting_can_finalize_force() -> None:
-    """sprint-04 day-6: POST /dictate/sessions/{id}/finalize while reconnecting."""
+    """POST /dictate/sessions/{id}/finalize while reconnecting."""
     assert can_transition(SessionState.RECONNECTING, SessionState.FINALIZED)
 
 

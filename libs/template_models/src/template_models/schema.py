@@ -1,21 +1,6 @@
-"""Templates JSONB schema (sprint 06).
+"""Templates JSONB schema: ``extra="forbid"`` everywhere, additive bumps serialize old templates byte-identically.
 
-Public contract:
-- ``extra="forbid"`` on every model. Notes rely on schema stability;
-  an unknown field is either a typo (catch early) or a real new
-  feature (forces a Pydantic model bump + ADR).
-- ``ASR_PROMPT_MAX_TOKENS = 224`` matches Whisper's ``initial_prompt``
-  context window.
-- Sprint-06 shipped the first ``FieldType`` values; sprint 13 (typed
-  fields) added ``CHOICE`` and ``MULTI_CHOICE`` as an additive model
-  bump: old templates validate and serialize byte-identically
-  (``options`` is omitted from dumps when empty — see
-  ``TemplateSection``).
-
-``classify_edit`` is the cosmetic-vs-structural decision rule from
-ADR-0016. Cosmetic edits UPDATE in place + bump ``schema_version``;
-structural edits INSERT a new row with ``parent_template_id`` set
-(``schema_version`` reset to 1).
+``classify_edit`` (ADR-0016): cosmetic edits UPDATE in place + bump ``schema_version``; structural ones INSERT a new row.
 """
 
 from __future__ import annotations
@@ -37,14 +22,8 @@ from pydantic import (
     model_validator,
 )
 
-# Whisper's ``initial_prompt`` accepts up to 224 BPE tokens. We accept a
-# slightly conservative limit because token counting is per-tokenizer
-# and we don't want to embed tiktoken in the validation hot path. The
-# authorship-time validator (scripts/validate-templates.py) uses
-# tiktoken for the exact count; this constant gates runtime length.
+# Whisper's ``initial_prompt`` limit; runtime gates by an approximate character count (no tiktoken on the hot path).
 ASR_PROMPT_MAX_TOKENS: Final = 224
-# Approximate token-to-character ratio: 4 chars/token is a safe upper
-# bound across UK + EN tokenizers.
 _APPROX_CHARS_PER_TOKEN: Final = 4
 _ASR_PROMPT_MAX_CHARS_APPROX: Final = ASR_PROMPT_MAX_TOKENS * _APPROX_CHARS_PER_TOKEN
 
@@ -59,8 +38,8 @@ class FieldType(StrEnum):
     DATE = "date"
     DATE_WITH_NOTE = "date_with_note"
     NUMERIC_WITH_UNIT = "numeric_with_unit"
-    CHOICE = "choice"  # sprint-13
-    MULTI_CHOICE = "multi_choice"  # sprint-13
+    CHOICE = "choice"
+    MULTI_CHOICE = "multi_choice"
 
 
 CHOICE_FIELD_TYPES: Final = frozenset({FieldType.CHOICE, FieldType.MULTI_CHOICE})
@@ -154,23 +133,12 @@ class TemplateSection(_Strict):
     min_chars: int = Field(default=0, ge=0, le=10_000)
     order: int = Field(default=0, ge=0)
     default_content: str = Field(default="", max_length=4_000)
-    # Per-section synthesis guidance read by the synthesis engine to turn
-    # the dictated raw text into the section's final prose. Optional: an empty
-    # value means "no section-specific synthesis guidance". Editing it is a
-    # cosmetic change (see ``classify_edit``).
+    # Per-section synthesis guidance; empty = none. Editing it is cosmetic.
     synthesis_prompt: str = Field(default="", max_length=2_000)
-    # Sprint 33 — what this section is FOR, independent of what this
-    # template calls it. The generation engine, the shared page, the
-    # action-item projection and the PDF all decide by role rather than
-    # by id, so one template can call a section "Beschlüsse" and still
-    # have its decisions written into it.
-    #
-    # Optional and additive: templates written before roles existed
-    # (schema_version 1) have none, and `meeting_doc.roles.role_of`
-    # falls back to an id map for them.
+    # What the section is FOR, independent of its name; consumers decide by role, not id.
+    # Optional: older templates have none and `meeting_doc.roles.role_of` falls back to an id map.
     role: SectionRole | None = None
-    # Sprint-13: required non-empty (2..50) for choice/multi_choice
-    # sections, must be empty for every other field_type.
+    # 2..50 for choice/multi_choice, empty for every other field_type.
     options: tuple[ChoiceOption, ...] = Field(default_factory=tuple)
 
     @field_validator("id")
@@ -186,14 +154,12 @@ class TemplateSection(_Strict):
     @field_validator("voice_aliases")
     @classmethod
     def _normalize_aliases(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        # Lower-case for matching; strip whitespace; reject empties.
         out: list[str] = []
         for alias in v:
             cleaned = alias.strip().lower()
             if not cleaned:
                 raise ValueError("voice_aliases must not contain empty strings")
             out.append(cleaned)
-        # Deduplicate but preserve order.
         seen: set[str] = set()
         deduped: list[str] = []
         for alias in out:
@@ -229,8 +195,7 @@ class TemplateSection(_Strict):
                     f"section {self.id!r}: option label {opt.label!r} duplicated (case-insensitive)"
                 )
             labels_ci.add(label_key)
-            # An alias claimed by two options of the same section would
-            # make extraction ambiguous — the extractor must never guess.
+            # An alias on two options would make extraction ambiguous.
             for alias in opt.voice_aliases:
                 if alias in aliases:
                     raise ValueError(
@@ -242,15 +207,7 @@ class TemplateSection(_Strict):
 
     @model_serializer(mode="wrap")
     def _omit_absent_optionals(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Drop ``options`` and ``role`` from dumps when they are unset.
-
-        The sprint-13 additive proof, extended by Sprint 33: a template
-        written before a field existed must serialize byte-identically
-        to its pre-bump dump, because template dumps flow into JSONB
-        rows and into the sprint-06 snapshot path. Emitting
-        ``"options": []`` — or ``"role": null`` — for every old template
-        would violate that.
-        """
+        """Drop unset ``options`` and ``role`` so older templates serialize byte-identically to their pre-bump dump."""
         data: dict[str, Any] = handler(self)
         if isinstance(data, dict):
             if not data.get("options"):
@@ -278,9 +235,7 @@ class TemplateDefinition(_Strict):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=256)
     language: str = Field(pattern="^(uk|en|de)$")
-    # Coarse browse facet ("meetings", "sales", "hr", …). Accepts the
-    # legacy JSON key ``specialty`` on input (pre-rename dumps and the
-    # seed files still carry it); always serialises as ``category``.
+    # Browse facet; accepts the legacy key ``specialty`` on input, always serialises as ``category``.
     category: str = Field(
         min_length=1,
         max_length=64,
@@ -299,12 +254,7 @@ class TemplateDefinition(_Strict):
 
     @model_validator(mode="after")
     def _validate_aliases_unique(self) -> TemplateDefinition:
-        """Voice aliases must be unique across the template's sections.
-
-        Two sections claiming alias "рішення" would make the section
-        command ambiguous; the matcher would pick the first and users
-        would learn it doesn't work.
-        """
+        """Voice aliases must be unique across sections, or the section command is ambiguous."""
         seen: dict[str, str] = {}
         for section in self.sections:
             for alias in section.voice_aliases:
@@ -326,9 +276,6 @@ class TemplateDefinition(_Strict):
         return self
 
 
-# ── Edit classification (ADR-0016) ───────────────────────────────────
-
-
 class EditKind(StrEnum):
     """Whether the edit can be applied in place or requires a new row."""
 
@@ -344,25 +291,9 @@ class EditClassification:
 
 
 def classify_edit(old: TemplateDefinition, new: TemplateDefinition) -> EditClassification:
-    """Decide whether ``new`` replaces ``old`` in place or as a new version.
-
-    **Structural** triggers (any of):
-    - a section was added or removed,
-    - a section's ``id`` changed,
-    - a section's ``field_type`` changed,
-    - a section's ``required`` flag flipped,
-    - a section's ``min_chars`` increased (loosening is cosmetic),
-    - a choice section's option ``value`` removed (a rename is
-      remove+add of the stable identity — stored selections in note
-      ``field_specific_metadata`` would dangle).
-
-    Everything else is cosmetic
-    (name/aliases/asr_prompt/order/default_content/synthesis_prompt/metadata;
-    for options: adding an option, adding/changing voice aliases, and
-    label-only changes — existing notes' selected values stay valid).
-    A no-change edit is classified as :class:`EditKind.NO_CHANGE` so the
-    caller can short-circuit.
-    """
+    """Structural (new row) when a section is added/removed/renamed, its ``field_type`` or ``required`` changes,
+    ``min_chars`` increases, or an option ``value`` is removed (stored selections would dangle); else cosmetic
+    or :class:`EditKind.NO_CHANGE`."""
     reasons: list[str] = []
 
     if old.code != new.code:
@@ -400,7 +331,6 @@ def classify_edit(old: TemplateDefinition, new: TemplateDefinition) -> EditClass
     if reasons:
         return EditClassification(kind=EditKind.STRUCTURAL, reasons=tuple(reasons))
 
-    # Detect any change at all → cosmetic; else no_change.
     if old.model_dump() == new.model_dump():
         return EditClassification(kind=EditKind.NO_CHANGE, reasons=())
     return EditClassification(kind=EditKind.COSMETIC, reasons=())

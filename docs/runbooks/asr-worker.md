@@ -92,7 +92,7 @@ The worker is the only writer of a job's terminal status, and it cannot
 write one for the crash that killed it. Two backstops close that gap —
 the DLQ path (`retry_exhausted`) and the reaper in **asr-service**
 (`worker_lost` for `running`, `queue_lost` for `queued`). Full vocabulary:
-`docs/api/asr-job-errors.md`.
+`asr_models.errors`.
 
 1. Check the reaper is running at all: `asr.job_reaper_swept` in
    asr-service logs, and `MD_ASR_JOB_REAPER_ENABLED` (default true).
@@ -166,7 +166,7 @@ engine inside the endpoint is the same one shape A would run in-process.
 | `diarization_error='diarization_failed'` on many jobs | The endpoint answered, but the run failed or the reply was unreadable (a `wire_version` this worker does not know, after a one-sided deploy). | Deploy the endpoint and the worker from the same commit. Roll back with `MDX_DIAR_ENGINE=legacy`. |
 | First job of the day is slow | `min_replica: 0` cold start (~4 min, inside the timeout). | Nothing. `keep-warm` if it becomes a complaint. |
 | Diarization latency alert (p95 > 0.25 × audio) | Endpoint on CPU, or saturated at `max_replica`. | Check the endpoint's accelerator and replica count in the spec. |
-| The endpoint refuses to start | `MDX_DIAR_SERVER_TOKEN` is empty, or `MDX_DIAR_DEVICE=cpu`. | Set the token (secret store, `docs/deploy/inventory.md`); anonymous is a laptop-only mode. CPU is refused on purpose (0.64–0.85 × audio — every recording would time out); `MDX_DIAR_ALLOW_CPU=1` overrides it deliberately. |
+| The endpoint refuses to start | `MDX_DIAR_SERVER_TOKEN` is empty, or `MDX_DIAR_DEVICE=cpu`. | Set the token (secret store); anonymous is a laptop-only mode. CPU is refused on purpose (0.64–0.85 × audio — every recording would time out); `MDX_DIAR_ALLOW_CPU=1` overrides it deliberately. |
 | Workers log `diarization.remote_unreachable` with `last_error='auth'` at startup | The worker's token is not the one the endpoint expects. | Compare `MDX_DIAR_SERVER_TOKEN` on both sides. This is the loud version of what used to be a silent week of speakerless transcripts. |
 
 **Rollback** is still `MDX_DIAR_ENGINE=legacy` (in-process, no endpoint).
@@ -308,11 +308,10 @@ for the weekly speaker review.
 3. Break it down with the weekly cohort, which says where:
    `make weekly-speakers` → `speakers-YYYY-WW.csv`, rows by engine / hint /
    client / source / count_confidence (definitions and approximations:
-   `docs/product/speaker-metrics.md`). Record what you find and decide in
-   `docs/product/speaker-decisions.md`.
+   `docs/product/speaker-metrics.md`). Record what you find and decide.
 4. Nothing to do per job — people have already fixed their transcripts.
    Recordings that show a new failure pattern can join the eval set only
-   with consent: `docs/runbooks/speakers-eval.md`.
+   with consent: `scripts/ops/export_job_for_eval.py`.
 
 ### § prompt-echo (Sprint I2)
 

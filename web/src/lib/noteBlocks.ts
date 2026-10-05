@@ -1,8 +1,7 @@
 import type { NoteContent, NoteSection, TemplateSection } from "../api/types";
 import { isTranscript } from "./richText";
 
-/** The author's own pad — the one section that is always there to type
- *  into, and never gets a heading: it is the note. */
+/** The author's own pad: always present, never a heading. */
 export const PAD_KEY = "user_notes";
 
 export interface NoteBlock {
@@ -19,20 +18,9 @@ export function isFreeText(def: TemplateSection): boolean {
 }
 
 /**
- * What the Notes tab draws: the sections the content HAS, in its order —
- * never one per template section. Structure follows content.
- *
- * A block is shown when it has text. While the note is editable, three
- * kinds of empty block are shown too, because there is no other way to
- * put something in them: the author's pad; a typed field (choice, date,
- * number — its picker is the only way to set it); and, on a template
- * without a pad (the older, form-shaped ones), the template's own free
- * text fields. A dialogue-shaped section is the transcript and lives
- * behind its own tab.
- *
- * Headings: a template section is named by the template, an engine-made
- * section by its own `title`, and the pad and the engine's opening block
- * by nothing at all.
+ * The sections the content HAS, in its order (structure follows content).
+ * Empty blocks show only while editable and only where a picker/pad is the
+ * sole way to fill them; a dialogue-shaped section is the transcript tab.
  */
 export function noteBlocks(
   content: NoteContent | null,

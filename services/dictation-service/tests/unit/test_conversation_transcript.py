@@ -1,16 +1,7 @@
-"""Sprint-14 persisted-transcript shape contract (``_transcript_to_jsonb``).
+"""Persisted-transcript shape contract (``_transcript_to_jsonb``).
 
-Two promises live here:
-
-* **Dictation is byte-compatible with pre-sprint-14.** The segment and
-  word key sets are pinned EXACTLY — a new key would silently break every
-  existing consumer of ``dictation_sessions.transcript``.
-* **Conversation is honest.** It adds ids + speaker proposals, and a
-  ``UNKNOWN``/null speaker survives into persistence rather than being
-  papered over into a party.
-
-Pure: no DB, no models — the diarization stream is a stub and the
-speaker naming is the real (pure) state object.
+Dictation key sets are pinned exactly; conversation adds ids + speaker
+proposals and UNKNOWN/null speakers survive into persistence. Pure.
 """
 
 from __future__ import annotations
@@ -109,7 +100,7 @@ def _ctx(
     return ctx
 
 
-# ── Dictation: the frozen pre-sprint-14 shape ────────────────────────
+# ── Dictation: the frozen shape ──────────────────────────────────────
 
 
 def test_dictation_segment_shape_is_unchanged() -> None:

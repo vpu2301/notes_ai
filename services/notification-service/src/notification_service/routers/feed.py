@@ -43,8 +43,7 @@ class FeedPage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[NotificationItem]
-    # Opaque by design: clients must not construct or reason about it,
-    # so the encoding stays free to change.
+    # Opaque; encoding is free to change.
     next_cursor: str | None = None
     unread_count: int
 
@@ -74,9 +73,7 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
         raw = json.loads(base64.urlsafe_b64decode(cursor.encode()))
         return datetime.fromisoformat(raw["c"]), UUID(raw["i"])
     except (ValueError, KeyError, TypeError, binascii.Error) as exc:
-        # A bad cursor is a client error, not a silent reset to page 1 —
-        # silently restarting would make a paging bug look like an
-        # infinite feed.
+        # A bad cursor is a client error, not a silent reset to page 1.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "bad_cursor", "detail": "cursor is not valid"},
@@ -137,9 +134,7 @@ async def mark_read(
 ) -> ReadResult:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # `read_at = coalesce(read_at, now())` — marking an already-read
-        # row again succeeds and does not move the timestamp, so a
-        # double-click is not an error and does not rewrite history.
+        # Idempotent: re-marking a read row keeps its timestamp.
         found = await repo.mark_read(conn, user_id=claims.sub, notification_id=notification_id)
         if not found:
             raise HTTPException(

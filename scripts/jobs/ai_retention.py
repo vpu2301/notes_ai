@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
-"""Nightly AI-path retention (Sprint 37, B-6).
+"""Nightly AI-path retention: terminal ``jobs`` rows and old ``model_usage`` rows.
+Runs as ``tenant_writer`` (app_role cannot delete from either); idempotent, batched.
 
-    DATABASE_URL=postgresql://tenant_writer:...@host/notes \\
-        uv run python scripts/jobs/ai_retention.py [--jobs-days 30] [--usage-days 400]
-
-Two tables the application deliberately cannot delete from:
-
-* ``jobs`` — terminal rows are history nobody reads after a month, and
-  every one of them is scanned by the queue's own indexes forever.
-* ``model_usage`` — the ledger's 400-day retention was written in the
-  migration header (0023) and never enforced. A documented retention
-  that does not happen is worse than none: it is a promise in a policy.
-
-Both are append-only to ``app_role`` (policy ``USING (false)``), so this
-runs as ``tenant_writer``, whose only powers here are SELECT and DELETE
-on these two tables (migration 0054). Neither holds note content: ids,
-counts, costs and a scrubbed error kind.
-
-Idempotent. Deletes in batches so a year of backlog cannot hold one long
-transaction open against a live queue. Prints counts and nothing else.
+    DATABASE_URL=postgresql://tenant_writer:...@host/notes uv run python scripts/jobs/ai_retention.py [--jobs-days 30] [--usage-days 400]
 """
 
 from __future__ import annotations

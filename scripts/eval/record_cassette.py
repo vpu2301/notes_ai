@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Record a chat cassette for the `recorded` (test env) backend.
+"""Record a chat cassette (key = sha256(model, prompt, schema, system)) for the
+``recorded`` test-env backend. Never record real customer content.
 
-    uv run --project libs/models python scripts/eval/record_cassette.py --backend dev_mac \
-        --prompt-file prompt.txt [--schema-file schema.json] [--system-file system.txt] \
-        --out tests/fixtures/eval/cassettes
-
-The cassette key is sha256(model, prompt, schema, system); the test env's
-RecordedChatProvider replays it. Never record real customer content.
+    uv run --project libs/models python scripts/eval/record_cassette.py --backend dev_mac --prompt-file prompt.txt --out tests/fixtures/eval/cassettes
 """
 
 from __future__ import annotations

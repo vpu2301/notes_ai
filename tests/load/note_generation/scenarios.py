@@ -1,13 +1,5 @@
-"""The seven note-generation drills (Sprint 37 B-5), as data.
-
-Each scenario is a name, what it does to the system, and the bar it has
-to clear. They are in code rather than only in a document because the
-runner, the report and the GA checklist must be reading the same numbers:
-a pass bar that lives in prose drifts from the one that was measured.
-
-Running them needs a deployed stack with a real model backend, so
-`runner.py` is skipped unless ``RUN_NOTE_LOAD=1``. Results are written to
-``docs/testing/load/notes-<date>.md`` with one row per scenario.
+"""The seven note-generation drills as data (name, what it does, pass bar), so the
+runner, the report and the GA checklist read the same numbers.
 """
 
 from __future__ import annotations

@@ -1,8 +1,5 @@
-"""Behavioural tests for the version-history endpoints (M1·A1/A2).
-
-Exercises the real handlers with the auth dependency overridden and the
-DB/audit boundary stubbed — no infra required (mirrors the asr-service
-result-endpoint test).
+"""Behavioural tests for the version-history endpoints: real handlers, auth
+overridden, DB/audit stubbed.
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
-"""One domain fact → zero or more per-recipient notification rows.
+"""One domain fact to zero or more per-recipient notification rows.
 
-Everything here is idempotent. The consumer is at-least-once, so this
-function WILL be called twice with the same event, and the second call
-must be a no-op that reports what the first one did.
+Idempotent: the consumer is at-least-once, so a second call with the same event
+must be a no-op that reports what the first did.
 """
 
 from __future__ import annotations
@@ -26,12 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class Created:
-    """A row that this call actually inserted.
-
-    Carries the recipient as well as the id because WebSocket fan-out is
-    keyed by recipient — the pub/sub channel a worker listens on is the
-    user's, so an id alone cannot be delivered.
-    """
+    """A row this call inserted; carries the recipient because fan-out is keyed by it."""
 
     notification_id: UUID
     recipient_user_id: UUID
@@ -39,43 +33,32 @@ class Created:
 
 @dataclass(slots=True)
 class MaterializeResult:
-    """What one event actually did — the unit the metrics and tests read."""
+    """What one event did; read by metrics and tests."""
 
     created: list[Created] = field(default_factory=list)
-    # Recipients whose row already existed: the redelivery path.
+    # Rows that already existed (redelivery).
     duplicates: int = 0
     coalesced: int = 0
-    # Outbox rows written as `suppressed` (auditable proof, E8).
+    # Outbox rows written as `suppressed`.
     suppressed: int = 0
     recipients_considered: int = 0
 
 
 async def resolve_recipients(event: NotificationEvent, conn: asyncpg.Connection) -> list[UUID]:
-    """Who hears about this fact.
-
-    Producer-supplied hints are always filtered through the tenant's own
-    user table, so a hint naming a foreign user resolves to nothing
-    rather than crossing a tenant boundary.
-    """
+    """Who hears about this fact; producer hints are filtered to the tenant's own members."""
     spec = spec_for(event.category)
 
     match spec.recipient_rule:
         case RecipientRule.TENANT_ADMINS:
-            # Resolved HERE, not by the producer: note-service has no
-            # business querying who the tenant's admins are.
             recipients = await repo.tenant_admin_ids(conn)
         case RecipientRule.NOTE_PARTICIPANTS | RecipientRule.EXPLICIT_HINTS:
-            # The producer owns the note row and already knows its
-            # author and co-authors, so it sends them as hints. That
-            # keeps notification-service out of note-service's tables
-            # — a cross-service read would couple their schemas.
+            # Hints keep this service out of note-service's tables.
             recipients = await repo.filter_to_tenant_members(conn, event.recipient_hints)
 
     if spec.exclude_actor and event.actor_user_id is not None:
         recipients = [r for r in recipients if r != event.actor_user_id]
 
-    # Deduplicate while preserving order: a note whose author is also
-    # listed as a co-author must not be notified twice.
+    # Dedupe, order-preserving.
     seen: set[UUID] = set()
     unique: list[UUID] = []
     for r in recipients:
@@ -103,8 +86,7 @@ async def materialize(
     recipients = await resolve_recipients(event, conn)
     result.recipients_considered = len(recipients)
     if not recipients:
-        # Not an error: plenty of facts legitimately interest nobody (a
-        # solo author finalizing their own note).
+        # Not an error: many facts interest nobody.
         logger.debug(
             "materialize.no_recipients",
             extra={"event_id": str(event.event_id), "category": str(event.category)},
@@ -115,8 +97,7 @@ async def materialize(
     body = render.render_body(event)
     link = render.deep_link(event, base_url=app_base_url)
     severity = render.severity_for(event)
-    # Persisted alongside the rendering so the email channel re-renders
-    # from the same allow-listed pointers instead of parsing the title.
+    # Persisted so the email channel re-renders from the same allow-listed pointers.
     fields = render.safe_payload(event)
 
     for recipient in recipients:
@@ -158,10 +139,7 @@ async def materialize(
             render_fields=fields,
         )
         if notification_id is None:
-            # Redelivery. The first call already wrote this row AND its
-            # outbox rows in the same transaction, so there is nothing
-            # left to do — re-deriving the outbox here is what would
-            # cause a duplicate send.
+            # Redelivery: outbox rows were written with the row; re-deriving them would double-send.
             result.duplicates += 1
             continue
 
@@ -179,9 +157,7 @@ async def materialize(
         extra={
             "event_id": str(event.event_id),
             "category": str(event.category),
-            # NOT "created": logging reserves that on LogRecord and
-            # raises KeyError, which threw away the whole materialisation
-            # AFTER the rows were written — the event then retried forever.
+            # Not "created": logging reserves that LogRecord attribute and raises KeyError.
             "created_count": len(result.created),
             "duplicates": result.duplicates,
             "coalesced": result.coalesced,
@@ -233,8 +209,7 @@ async def _write_one(
     at: datetime,
 ) -> int:
     if not decision.dispatch:
-        # Written, not skipped: a suppressed row is the auditable proof
-        # that we deliberately did not deliver, and why (E8).
+        # Written, not skipped: the suppressed row is the auditable proof.
         await repo.insert_outbox(
             conn,
             tenant_id=tenant_id,
@@ -252,8 +227,7 @@ async def _write_one(
         notification_id=notification_id,
         channel=decision.channel,
         status="pending",
-        # A quiet-hours deferral keeps its reason so an operator can see
-        # why a pending row is not due yet.
+        # Quiet-hours deferral keeps its reason for operators.
         suppressed_reason=(
             str(decision.reason) if decision.reason is SuppressReason.QUIET_HOURS else ""
         ),
@@ -271,11 +245,7 @@ async def _coalesce(
     severity: str,
     at: datetime,
 ) -> None:
-    """Fold a storm into one running row per (recipient, category, window).
-
-    The dedupe_key is the WINDOW, not the event, so every event past the
-    cap lands on the same row and simply updates its count.
-    """
+    """Fold a storm into one row per (recipient, category, window); dedupe_key is the window."""
     bucket = int(at.timestamp())
     key = f"coalesce:{event.category}:{recipient}:{bucket // 3600}"
 
@@ -296,8 +266,7 @@ async def _coalesce(
         )
         return
 
-    # Bump the visible count. Re-reading it from the row keeps the
-    # counter correct even across a worker restart.
+    # Count re-read from the table so it survives a worker restart.
     count = await conn.fetchval(
         "SELECT count(*) FROM notifications "
         " WHERE recipient_user_id = $1 AND category = $2 AND created_at >= $3",
@@ -322,12 +291,7 @@ async def _over_rate_cap(
     cap: int,
     window_s: int,
 ) -> bool:
-    """Fixed-window counter per (tenant, recipient, category).
-
-    Redis rather than a COUNT(*): the cap is checked on every single
-    event, and a count over a growing table is exactly the query that
-    gets slower as the storm gets worse.
-    """
+    """Fixed-window Redis counter per (tenant, recipient, category); COUNT(*) would slow as the storm grows."""
     key = f"mdx:notif:cap:{tenant_id}:{recipient}:{category}"
     count = await redis.incr(key)  # type: ignore[attr-defined]
     if int(count) == 1:

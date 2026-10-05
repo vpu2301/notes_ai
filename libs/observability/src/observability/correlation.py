@@ -1,9 +1,4 @@
-"""Inject OTel ``trace_id`` / ``span_id`` into stdlib log records.
-
-Use as a logging filter; placed before the JSON formatter so the trace
-context appears as top-level fields in every log line. Falls back to
-empty strings when no span is active.
-"""
+"""Logging filter injecting OTel ``trace_id`` / ``span_id`` (empty strings when no span is active)."""
 
 from __future__ import annotations
 

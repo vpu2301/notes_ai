@@ -1,12 +1,6 @@
-"""The worker's re-run SQL against the real schema (migration 0044).
+"""The worker's re-run SQL against the real schema (RLS on), fake stores and diarizer.
 
-Unit tests fake the job row; this runs ``_rediarize_one`` with a real
-app_role pool (RLS on), fake object stores and a fake diarizer: the claim,
-the swap, the idempotent redelivery and the failure write are the real
-statements.
-
-Skipped unless RUN_DB_INTEGRATION=1. Creates one throwaway tenant and
-deletes only its rows.
+Skipped unless RUN_DB_INTEGRATION=1. Creates one throwaway tenant and deletes only its rows.
 """
 
 from __future__ import annotations

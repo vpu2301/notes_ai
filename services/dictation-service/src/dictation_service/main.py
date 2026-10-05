@@ -1,10 +1,4 @@
-"""dictation-service entry point.
-
-Sprint 04 surface:
-- ``/healthz`` / ``/readyz``
-- ``/dictate/sessions/...`` HTTP companion endpoints
-- ``/ws/dictate`` WebSocket streaming endpoint (dictation.v1)
-"""
+"""dictation-service entry point: health probes, session HTTP endpoints, ``/ws/dictate``."""
 
 from __future__ import annotations
 
@@ -46,9 +40,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.svc = state
     install_state(state)
 
-    # Sprint 16 (MDX_WARM_IN_BACKGROUND): warm Whisper (+ diarizer) off
-    # the startup path. faster-whisper's loader holds the GIL, so it runs
-    # in a thread; /readyz gates on engine.is_loaded meanwhile.
+    # Background warmup: faster-whisper's loader holds the GIL, so it runs in a thread.
     warm_task: asyncio.Task[None] | None = None
     if settings.warm_in_background:
 
@@ -70,10 +62,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         warm_task = asyncio.create_task(_warm_models(), name="model-warmup")
 
-    # Inference queue runs as a background task.
     await state.inference_queue.__aenter__()
 
-    # Worker liveness heartbeat — used by resume to detect dead workers.
+    # Worker liveness heartbeat; resume + reaper detect dead workers with it.
     hb_stop = asyncio.Event()
 
     async def _hb_loop() -> None:
@@ -93,14 +84,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     hb_task = asyncio.create_task(_hb_loop())
 
-    # Worker-state gauges (capacity weight, per-mode sessions, model
-    # residency, device memory). Sampled on a timer because they describe a
-    # standing condition, not an event — see telemetry.gauge_loop.
+    # Worker-state gauges, sampled on a timer (standing condition, not an event).
     gauge_stop = asyncio.Event()
     gauge_task = asyncio.create_task(telemetry.gauge_loop(state, gauge_stop))
 
-    # Out-of-process backstop for sessions stranded by a dead worker — the
-    # in-process abandon timer cannot survive the process that owns it.
+    # Backstop for sessions stranded by a dead worker.
     reaper_stop = asyncio.Event()
     reaper_task: asyncio.Task[None] | None = None
     if settings.session_reaper_enabled:
@@ -113,8 +101,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "env": settings.environment,
             "worker_id": settings.worker_id,
             "model": state.engine.model_name,
-            # Conversation capacity is a deployment-visible property of this
-            # worker: a cold diarizer means dictation-only.
             "conversation_ready": state.diarization_engine.ready_for_conversation,
             "conversation_session_weight": settings.conversation_session_weight,
             "per_worker_max_sessions": settings.per_worker_max_sessions,

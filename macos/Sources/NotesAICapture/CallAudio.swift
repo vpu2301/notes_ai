@@ -1,30 +1,23 @@
 import AVFoundation
 import Foundation
 
-// Sprint 31 — recording the call audio: the consent posture and the two
-// upload fields that come with it.
+// Recording the call audio: the consent posture and the two upload fields that come with it.
 
-/// The call-audio notice the person accepts before the app records other
-/// participants. Stored on this Mac with the version accepted; raising
-/// `currentVersion` (because the notice changed) asks again.
+/// The call-audio notice accepted before recording other participants. Stored with the version accepted; raising `currentVersion` asks again.
 struct CallAudioConsent {
     static let currentVersion = 1
     static let versionKey = "callAudioConsentVersion"
     static let acceptedAtKey = "callAudioConsentAcceptedAt"
 
-    /// The help page the notice and Settings link to — on the product's
-    /// help site (`Product.helpSite`), which is the one place its address
-    /// lives.
+    /// The help page the notice and Settings link to (`Product.helpSite`).
     static let helpURL = Product.help("recording-call-audio")
 
     /// A sentence the person can say at the start of a call.
     static let suggestedSentence =
         "Before we start: I'm recording this call with Notes AI so I can take notes. Is everyone OK with that?"
 
-    /// Deep link to Privacy & Security → Screen & System Audio Recording,
-    /// where the System Audio Recording permission lives. (`Privacy_ScreenCapture`
-    /// is the anchor that pane has answered to since macOS 13; there is no
-    /// separate public anchor for "System Audio Recording Only".)
+    /// Deep link to Privacy & Security → Screen & System Audio Recording. `Privacy_ScreenCapture`
+    /// is that pane's anchor since macOS 13; there is no separate public anchor for audio-only.
     static let privacySettingsURL =
         URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
 
@@ -49,10 +42,7 @@ struct CallAudioConsent {
     }
 }
 
-/// `channel_layout` for the upload (contract §1): `mic_system` only when
-/// the file really has two channels (ch0 microphone, ch1 call audio);
-/// nothing otherwise — the server's default is mono, and declaring a
-/// layout the file does not have is a 422.
+/// `channel_layout` for the upload: `mic_system` only when the file really has two channels; declaring a layout the file lacks is a 422.
 enum ChannelLayout {
     static let micSystem = "mic_system"
 
@@ -71,9 +61,7 @@ enum ChannelLayout {
     }
 }
 
-/// `local_speaker_name` (contract §1): the account owner's display name,
-/// whitespace collapsed, at most 80 characters; nil when empty so the field
-/// is omitted. It is personal data — never log it.
+/// `local_speaker_name`: the account owner's display name, whitespace collapsed, ≤ 80 chars; nil when empty. Personal data — never log it.
 enum LocalSpeakerName {
     static let maxLength = 80
 
@@ -85,7 +73,7 @@ enum LocalSpeakerName {
     }
 }
 
-/// The capture card's one line about what is being recorded (Sprint 31).
+/// The capture card's one line about what is being recorded.
 enum CaptureStateLine: Equatable {
     case micAndCall
     case callAudioLost

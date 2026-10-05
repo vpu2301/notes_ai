@@ -12,15 +12,7 @@ import { messageFor } from "../../lib/errorCopy";
 import type { Credential } from "../../api/types";
 import { Problem } from "./AccountSettingsPage";
 
-/**
- * `/settings/devices` — the meeting-room capture boxes (IDX-B1b).
- *
- * These are non-human principals: each holds a client id and secret and
- * exchanges them at `POST /auth/oauth/token` for a short-lived token with
- * the `device` role. The secret is returned exactly once, on create and on
- * rotate, and the server keeps only its hash — so there is no "show it
- * again", and this page never offers one.
- */
+/** `/settings/devices` — room capture principals. The secret is returned exactly once (create, rotate); never "show again". */
 export function DevicesSettingsPage() {
   const { activeTenantId, memberships } = useAuth();
   const toast = useToast();

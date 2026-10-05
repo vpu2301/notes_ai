@@ -1,6 +1,4 @@
-// Sprint I2: the transcript as text to copy, and the diagnostics line.
-//
-// Pure so the page does not have to render for these to be tested.
+// The transcript as text to copy, and the diagnostics line. Pure.
 
 import type { TranscriptNoise, TranscriptResult, TranscriptTurn } from "../api/types";
 import { mmss } from "./generation";
@@ -10,20 +8,14 @@ export function isOtherLanguage(turn: Pick<TranscriptTurn, "language">): boolean
   return typeof turn.language === "string" && turn.language.length > 0;
 }
 
-/**
- * The transcript as plain text: `Name: paragraphs` per turn when speakers
- * were told apart, else the paragraphs alone. Turns in another language
- * than the recording are left out unless asked for — they are the passage
- * a listener would not have followed either, and in a copy meant for
- * someone else they read as noise.
- */
+/** `Name: paragraphs` per turn (or paragraphs alone); other-language turns left out unless asked. */
 export function transcriptCopyText(
   turns: TranscriptTurn[],
   nameOf: (turn: TranscriptTurn) => string,
   options: {
     diarized: boolean;
     includeOtherLanguages: boolean;
-    /** Sprint TQ2: `[Music 00:12–00:41]` lines, only when asked for. */
+    /** `[Music 00:12–00:41]` lines, only when asked for. */
     markers?: { noise: TranscriptNoise[]; language: string | null | undefined };
   },
 ): string {
@@ -44,10 +36,7 @@ export function transcriptCopyText(
     .join("\n\n");
 }
 
-/**
- * Sprint TQ2: what a non-speech marker is called, in the language that was
- * spoken. A kind this build does not know is noise (the field is additive).
- */
+/** A non-speech marker's name in the spoken language; an unknown kind is noise. */
 export const MARKER_LABELS: Record<string, Record<"music" | "silence" | "noise", string>> = {
   en: { music: "Music", silence: "Silence", noise: "Noise" },
   de: { music: "Musik", silence: "Stille", noise: "Geräusch" },
@@ -64,12 +53,7 @@ export function markerLine(n: TranscriptNoise, language: string | null | undefin
   return `[${labels[markerKind(n.kind)]} ${mmss(n.start_ms)}–${mmss(n.end_ms)}]`;
 }
 
-/**
- * The markers to show before turn `index` (those starting before it and at
- * or after the previous turn); `index === turns.length` gives the ones
- * after the last turn. Markers never become turns: selection, focus and
- * moves keep addressing turns by position.
- */
+/** Markers before turn `index` (`turns.length` = after the last). Markers never become turns. */
 export function markersBefore(
   noise: TranscriptNoise[] | undefined,
   turns: Pick<TranscriptTurn, "start_ms">[],
@@ -81,12 +65,7 @@ export function markersBefore(
   return noise.filter((n) => n.start_ms >= lo && n.start_ms < hi);
 }
 
-/**
- * "12 words removed as prompt echo at 00:03, 01:40" — or null when nothing
- * was removed. The transcriber repeating its own prompt over silence is
- * taken out by the worker; this says so, once, where the words would have
- * been.
- */
+/** "12 words removed as prompt echo at 00:03, 01:40", or null. */
 export function promptEchoLine(diagnostics: TranscriptResult["diagnostics"] | undefined): string | null {
   const echoes = diagnostics?.prompt_echo ?? [];
   if (echoes.length === 0) return null;

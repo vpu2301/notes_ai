@@ -4,8 +4,7 @@
 #   scripts/eval/make_tts_fixture.sh 60min_de
 #   scripts/eval/make_tts_fixture.sh 10min_en
 # Output: tests/fixtures/eval/audio/<name>.wav (16 kHz mono 16-bit, gitignored).
-# Synthetic TTS is NOT a WER gold set — it exists so turnaround numbers are
-# reproducible on any Mac before the BE-S2 corpus lands.
+# Synthetic TTS is NOT a WER gold set; it makes turnaround numbers reproducible.
 set -euo pipefail
 name="${1:?fixture name, e.g. 10min_de}"
 minutes="${name%%min_*}"; lang="${name##*_}"

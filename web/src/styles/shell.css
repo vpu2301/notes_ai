@@ -12,9 +12,7 @@
   overflow-y: auto; overflow-x: hidden;
   background: var(--bg);
 }
-/* The dot print sits behind the home page and the meeting stage, not the
-   note document (as on the Mac). Fixed so it stays put while the page
-   scrolls under it. */
+/* Dot print behind home and the meeting stage; fixed so the page scrolls under it. */
 .app-main:has(.home)::before,
 .app-main:has(.meeting)::before {
   content: "";
@@ -23,8 +21,7 @@
   background-image: var(--dots);
   background-size: var(--dots-size);
   background-position: 10px 10px;
-  /* The light sweep (mask + animation) is declared once, for both dot
-     prints, in base.css. */
+  /* Light sweep (mask + animation) is in base.css. */
   pointer-events: none;
   z-index: 0;
 }
@@ -32,9 +29,6 @@
 .app-main > * { position: relative; z-index: 1; }
 
 /* ─── Sidebar ───────────────────────────────────────────────────────────── */
-/* Laid out like Claude's: a toggle and a serif wordmark on top, a filled
-   "New" row, then plain text rows — no frames, no pills — sentence-case
-   section labels, and the account as one row at the foot. */
 .sb {
   display: flex; flex-direction: column;
   background: var(--sidebar);
@@ -74,8 +68,7 @@
 }
 .sb.collapsed .sb-head { justify-content: center; padding: 0; }
 
-/* "New meeting": the one filled row, a caret for the other ways to start
-   that surfaces on hover. */
+/* "New meeting" row; the caret surfaces on hover */
 .sb-new { position: relative; display: flex; align-items: center; margin: 0 0 calc(2px * var(--density)); }
 .sb-new-main {
   flex: 1; min-width: 0;
@@ -83,8 +76,7 @@
   height: 36px;
   padding: 0 calc(10px * var(--density));
   border-radius: var(--radius-sm);
-  /* Raised off the sidebar, so it never reads as the row you are on
-     (that one takes the flat --sidebar-active fill). */
+  /* Raised, so it never reads as the active row. */
   background: var(--surface);
   border: var(--hairline) solid var(--line);
   box-shadow: 0 1px 2px rgba(26, 24, 22, .06);
@@ -107,7 +99,7 @@
 .sb-new-caret:hover, .sb-new.open .sb-new-caret { background: var(--sidebar-active); color: var(--text-1); }
 .sb-new.collapsed .sb-new-main { flex: 0 0 auto; width: 40px; padding: 0; justify-content: center; margin: 0 auto; }
 
-/* Anchored dropdown menu (fixed off its trigger; escapes overflow clipping). */
+/* Anchored dropdown menu: fixed off its trigger, escapes overflow clipping */
 .anchored-menu {
   position: fixed;
   background: var(--surface);
@@ -166,8 +158,7 @@
 .sb.collapsed .sb-group-h { display: none; }
 .sb.collapsed .sb-group-body { padding: 0; }
 
-/* Nav row: plain text on the sidebar ground; hover and the active row
-   take a soft neutral fill. Frames stay out of it entirely. */
+/* Nav row */
 .sb-link {
   display: flex; align-items: center; gap: calc(12px * var(--density));
   height: 36px;
@@ -196,7 +187,7 @@
 
 /* ─── Spaces: the user's own folders, under the main nav ─────────────── */
 .sb-spaces { display: flex; flex-direction: column; margin-top: calc(22px * var(--density)); }
-/* Sentence-case label, as Claude's "Pinned" / "Chats and tasks". */
+/* Section label */
 .sb-section-h {
   display: flex; align-items: center; gap: 6px;
   height: 28px;
@@ -216,7 +207,7 @@
 .sb-spaces:hover .sb-section-add, .sb-section-add:focus-visible { opacity: 1; }
 .sb-section-add:hover { background: var(--sidebar-hover); color: var(--text-1); }
 
-/* Row = link + a ⋯ that only shows on hover / focus / when open. */
+/* Row = link + a ⋯ shown on hover / focus / open */
 .sb-space { display: flex; align-items: center; position: relative; }
 .sb-space .sb-link { flex: 1; min-width: 0; padding-right: calc(28px * var(--density)); }
 .sb-space-more {
@@ -235,7 +226,7 @@
 }
 .sb.collapsed .sb-count { display: none; }
 
-/* Inline "new space" / rename field, sized like a nav row. */
+/* Inline "new space" / rename field */
 .sb-space-edit {
   display: flex; align-items: center; gap: calc(9px * var(--density));
   height: 36px; margin: 1px 0;
@@ -257,8 +248,7 @@
   font-size: calc(11.5px * var(--fs)); line-height: 1.45; color: var(--muted);
 }
 
-/* Footer: the account as a single row, pinned under a quiet hairline
-   that the list scrolls beneath. */
+/* Footer: the account row */
 .sb-foot {
   position: sticky; bottom: 0;
   margin: 8px calc(-8px * var(--density)) 0;
@@ -267,8 +257,7 @@
   border-top: var(--hairline) solid var(--line-2);
 }
 
-/* Segmented pill (DSSegmentedPill): warm track, white raised segment on a
-   neutral hairline. */
+/* Segmented pill (DSSegmentedPill) */
 .seg-pill {
   display: inline-flex;
   background: var(--surface-2);
@@ -325,7 +314,7 @@
 .sb-user:hover, .sb-user.open { background: var(--sidebar-hover); }
 .sb-user > svg { color: var(--muted); flex: none; transition: transform var(--t) var(--ease); }
 .sb-user.open > svg { transform: rotate(180deg); }
-/* Initials avatar: a quiet neutral disc with ink initials, as Claude's. */
+/* Initials avatar */
 .avatar {
   width: 28px; height: 28px; flex-shrink: 0;
   border-radius: 50%;
@@ -381,9 +370,7 @@
 .sb-user-menu-row > svg { color: var(--text-3); flex: none; }
 .sb-user-menu-row .grow { flex: 1; }
 .sb-user-menu-hint { margin-left: auto; font-size: calc(11px * var(--fs)); color: var(--muted); }
-/* Workspace switcher inside the account menu: a label, one radio row per
-   workspace, the current one ticked. The mark is the same moss-tinted
-   circle as the avatar, smaller. */
+/* Workspace switcher inside the account menu */
 .sb-user-menu-label {
   padding: calc(6px * var(--density)) calc(10px * var(--density)) calc(2px * var(--density));
   font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
@@ -404,8 +391,7 @@
 .sb.collapsed .sb-foot { margin: 8px calc(-8px * var(--density)) 0; }
 
 /* ─── Topbar ────────────────────────────────────────────────────────────── */
-/* Part of the page, not a strip laid over it — transparent until the page
-   scrolls under it, then the ground colour and a warm hairline. */
+/* Transparent until the page scrolls under it */
 .tb {
   display: flex; align-items: center; gap: calc(14px * var(--density));
   height: var(--topbar-h);
@@ -485,7 +471,7 @@
 .notif-time { color: var(--muted); font-size: calc(11px * var(--fs)); margin-top: 3px; }
 
 /* ─── Page chrome ───────────────────────────────────────────────────────── */
-/* 40px gutters and a 760px column, as on the Mac. */
+/* 40px gutters, 760px column */
 .page {
   padding: calc(12px * var(--density)) calc(40px * var(--density)) calc(60px * var(--density));
   max-width: 1280px;
@@ -517,5 +503,4 @@
   font-size: calc(12px * var(--fs));
 }
 
-/* A "Try again" inside a hint line — see the global .link-btn in
-   components.css, which IDX-W1 promoted this rule into. */
+/* "Try again" inside a hint line; see .link-btn in components.css */

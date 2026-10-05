@@ -1,11 +1,6 @@
-"""0016 list badge — search hits carry who can open each note (RUN_DB_INTEGRATION=1).
-
-The notes list shows Private / Shared with N / Workspace / Public on
-hover; all four states come from one search query, so this pins that
-query's `visibility`, `shared_with_count` and `has_public_link` columns,
-including a revoked or expired link no longer counting as public.
-
-Needs `make dev-up && make migrate-up && make seed` (tenants, templates).
+"""Search hits carry who can open each note (RUN_DB_INTEGRATION=1): pins the
+query's `visibility`, `shared_with_count` and `has_public_link` columns.
+Needs `make dev-up && make migrate-up && make seed`.
 """
 
 from __future__ import annotations

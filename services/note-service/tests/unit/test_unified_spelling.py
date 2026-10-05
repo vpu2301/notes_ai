@@ -1,10 +1,6 @@
-"""Sprint TQ3 T3: the note is built from the unified view.
-
-asr-service applies its spelling overlay in ``/result``; note-service
-snapshots that view, so nothing in the engine changes — these tests pin what
-follows from it: a quote (verbatim turn text) carries the unified spelling,
-and tier (a) of ``meeting_doc.entities`` now finds the name the recording
-spells, so a line that still says a variant is corrected to it.
+"""The note is built from the unified view asr-service's spelling overlay
+produces: quotes carry the unified spelling, and ``meeting_doc.entities`` tier
+(a) finds the name the recording spells.
 """
 
 from __future__ import annotations

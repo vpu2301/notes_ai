@@ -7,14 +7,8 @@ import { NotesPage } from "../src/pages/NotesPage";
 import { SpacesProvider } from "../src/spaces/SpacesContext";
 
 /**
- * WEB-1b §2: "NotesPage with zero notes shows one line and the recorder
- * call-to-action, not an empty list; Coming up hides its calendar prompt
- * until the first note exists."
- *
- * The second half is the one worth a test. It is easy to write, easy to
- * regress (any future edit that mounts `<ComingUp />` unconditionally puts
- * it back), and it is the difference between a first screen that says
- * "press record" and one whose loudest button asks for a Google consent.
+ * Zero notes: one line and the recorder call-to-action, not an empty list;
+ * Coming up hides its calendar prompt until the first note exists.
  */
 
 const EMPTY_SEARCH = { hits: [], next_cursor: null };
@@ -111,8 +105,7 @@ describe("the empty workspace", () => {
   });
 
   it("shows no calendar prompt while the note count is still unknown", async () => {
-    // A search that never resolves: the page is loading, and "we don't
-    // know yet" must not render as "there is nothing, so ask about Google".
+    // Still loading: "unknown" must not render as "empty, so ask about Google".
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: unknown) => {

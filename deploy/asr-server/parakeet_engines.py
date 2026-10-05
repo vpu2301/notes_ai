@@ -1,15 +1,6 @@
-"""Sprint TQ4 T1 — the two ways asr-server runs Parakeet-TDT-0.6B-v3.
-
-* ``nemo`` (default, the HF T4 endpoint): NeMo's own ASRModel restored from the
-  baked ``.nemo`` file, fp16 on CUDA. Above ``LOCAL_ATTENTION_AFTER_S`` the
-  encoder switches to local attention (``rel_pos_local_attn``, 256/256) and
-  chunked subsampling — NVIDIA's documented setting for long audio — so a
-  90-minute file fits a T4.
-* ``onnx`` (the dev Mac, and the documented fallback if the NeMo image is too
-  large for the endpoint build): the ONNX export of the same weights through
-  ``onnx-asr`` (MIT), CoreML / CPU execution providers.
-
-Both return :class:`parakeet_format.Word` lists; the server never sees which.
+"""The two Parakeet-TDT-0.6B-v3 runtimes: ``nemo`` (fp16 CUDA, local attention above
+``LOCAL_ATTENTION_AFTER_S`` so long files fit a T4) and ``onnx`` (``onnx-asr``,
+CoreML/CPU, the dev Mac). Both return :class:`parakeet_format.Word` lists.
 """
 
 from __future__ import annotations

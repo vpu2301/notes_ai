@@ -1,34 +1,11 @@
 #!/usr/bin/env python3
-"""Blind pairwise rating: our engine against the one-prompt baseline
-(Summary Engine v2, Q4 T7).
+"""Blind pairwise rating of our engine against the one-prompt baseline, plus the
+document standard's blind rubric (``rubric-build`` / ``rubric-score``).
 
-    # 1. both arms, notes saved locally (gitignored)
-    make eval-notes BACKEND=dev_mac ARM=pipeline    CORPUS=… SAVE=scripts/eval/local/notes-pipeline
-    make eval-notes BACKEND=dev_mac ARM=single_pass CORPUS=… SAVE=scripts/eval/local/notes-single
-    # 2. the sheets
-    python scripts/eval/notes_pairs.py build --a scripts/eval/local/notes-pipeline \\
-        --b scripts/eval/local/notes-single --corpus … --out scripts/eval/local/pairs-2026-10-01
-    # 3. three raters fill ratings.csv; then
-    python scripts/eval/notes_pairs.py score scripts/eval/local/pairs-…/ratings.csv \\
-        scripts/eval/local/pairs-…/key.csv --corpus …
+    python scripts/eval/notes_pairs.py build --a <notes-pipeline> --b <notes-single> --corpus <dir> --out <pairs-dir>
+    python scripts/eval/notes_pairs.py score <pairs-dir>/ratings.csv <pairs-dir>/key.csv --corpus <dir>
 
-``build`` writes one Markdown file per pair — the transcript, the gold
-facts, and the two notes as "Note L" and "Note R" in a random order — plus
-``sheet.csv`` for the raters and ``key.csv`` (which arm is left) kept apart
-from it. Everything stays under ``scripts/eval/local/``: the notes and the
-transcripts are content.
-
-``rubric-build`` / ``rubric-score`` run the document standard's blind
-rubric (docs/eval/document-standard.md §8): eight questions, 0–2 each, per
-note rather than per pair, with the release gate (mean ≥ 13/16, Q4 = 2 on
-≥ 95 % of notes, no note with Q1 = 0).
-
-``score`` reads the raters' ``ratings.csv`` (``pair_id, rater, preferred
-[L|R|tie], accuracy, completeness, usefulness, readability`` — scores 1–5 —
-and, since the F3 amendment after r03 (§2.10), ``overview_L, overview_R``:
-the overview question answered for each note, yes/partly/no) and prints the pipeline's preference rate with a 95 % Wilson interval,
-per recording type and language, and inter-rater agreement. It writes
-numbers only to ``docs/eval/notes-pairs-<date>.json``.
+Sheets and notes stay under ``scripts/eval/local/``; reports carry numbers only.
 """
 
 from __future__ import annotations
@@ -51,9 +28,8 @@ from _common import DOCS_EVAL, REPO  # noqa: E402
 LOCAL = REPO / "scripts" / "eval" / "local"
 SCORES = ("accuracy", "completeness", "usefulness", "readability")
 PIPELINE = "pipeline"
-# F3 amendment §2.10 — one question on the overview alone, asked of both
-# notes of a pair (the rater does not know which is ours). Gate: "yes" for
-# our notes on ≥ 90 % of answers on v2.
+# One question on the overview alone, asked of both notes of a pair.
+# Gate: "yes" for our notes on >= 90 % of answers on v2.
 OVERVIEW_QUESTION = (
     "From the top two paragraphs only: can you say what this recording is, "
     "who speaks, and what it covers? (yes / partly / no)"
@@ -92,10 +68,9 @@ def _role_headings() -> frozenset[str]:
 
 
 def topic_lines(note: str, arm: str = PIPELINE) -> str:
-    """F2's blind round rates topic bullets only. From our note: every line
-    under a heading that is not a fixed role (sub-points included); with no
-    topic headings, the opening block's bullets. The baseline has no topics:
-    its first paragraph — the points it chose to make — as bullets."""
+    """Topic bullets only: ours under non-role headings (sub-points included), the baseline's
+    first paragraph as bullets.
+    """
     if arm != PIPELINE:
         first = note.strip().split("\n\n", 1)[0]
         return "\n".join(
@@ -263,7 +238,7 @@ def score(ratings_path: Path, key_path: Path, corpus: Path | None = None) -> dic
     }
 
 
-# ── The blind rubric (docs/eval/document-standard.md §8) ────────────
+# ── The blind rubric ────────────
 
 RUBRIC: tuple[tuple[str, str, str], ...] = (
     ("q1", "Orientation", "From the first block alone: what is this, who speaks, what does it "
@@ -279,8 +254,7 @@ RUBRIC: tuple[tuple[str, str, str], ...] = (
     ("q7", "Volume", "Body words within the band shown below: 2 yes · 1 within 25 % · 0 worse"),
     ("q8", "Form", "Copies, description, redundancy, rendering defects: 2 none · 1 one · 0 more"),
 )  # fmt: skip
-# SQ3 T4 — asked beside the rubric, not scored in it: does the title (the
-# note's "# " line) describe the whole recording? yes / no.
+# Asked beside the rubric, not scored in it: does the title describe the whole recording?
 TITLE_QUESTION = ("title_whole", "Does the title describe the whole recording, not only its "
                   "beginning? yes · no")  # fmt: skip
 RUBRIC_MAX = 2 * len(RUBRIC)
@@ -367,7 +341,7 @@ def rubric_score(ratings_path: Path, key_path: Path) -> dict[str, Any]:
     for note_id, ratings in by_note.items():
         scores = {q: float(statistics.median(int(r[q]) for r in ratings)) for q, _n, _t in RUBRIC}
         arms[key[note_id]["arm"]].append(scores)
-        # SQ3 T4: the majority of the raters who answered the title question.
+        # The majority of the raters who answered the title question.
         said = [r.get(TITLE_QUESTION[0], "").strip().casefold() for r in ratings]
         said = [s for s in said if s in ("yes", "no")]
         if said:

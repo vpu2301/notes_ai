@@ -1,15 +1,6 @@
-"""Sprint D2 decision 5 — who each voice is to this recording, computed by
-code.
-
-``build(turns, introductions, recording_type, adverts)`` returns one
-:class:`Speaker` per diarizer label: its share of the speech, its turns, how
-often it speaks in the first person, the introduction that names it, and a
-role — ``narrator``, ``host``, ``guest``, ``interviewee``, ``participant``,
-``clip`` or ``advert``. The orientation paragraph, the presenter and guest
-lines and the attribution of opinions all read this table.
-
-A name mentioned in facts but never a speaker is a subject, never a guest:
-the table only ever holds labels that spoke.
+"""Who each voice is to this recording, computed by code: one :class:`Speaker`
+per diarizer label with its share, turns, introduction and role. The table only
+ever holds labels that spoke; a name mentioned in facts is a subject, never a guest.
 """
 
 from __future__ import annotations
@@ -26,14 +17,13 @@ NARRATOR: Final = "narrator"
 HOST: Final = "host"
 GUEST: Final = "guest"
 INTERVIEWEE: Final = "interviewee"
-# SQ3 T2 — a guest or participant introduced as an expert ("Experte",
-# "Analystin", "researcher"): a guest with a reason to be heard.
+# A guest or participant introduced as an expert.
 EXPERT: Final = "expert"
 PARTICIPANT: Final = "participant"
 CLIP: Final = "clip"
 ADVERT: Final = "advert"
 ROLES: Final = (NARRATOR, HOST, EXPERT, GUEST, INTERVIEWEE, PARTICIPANT, CLIP, ADVERT)
-# The order paragraph 1 lists who speaks (SQ3 T2).
+# The order paragraph 1 lists who speaks.
 ROLE_RANK: Final[dict[str, int]] = {
     HOST: 0,
     NARRATOR: 0,
@@ -245,10 +235,7 @@ def _introductions(
 
 
 def standing(fact: VerifiedFact, table: RolesTable) -> str:
-    """F3's presenter/guest/clip for an introduction fact, read from the
-    table: a host or narrator introducing themselves presents; the person a
-    guest's label was introduced as is a guest; anybody else is nobody the
-    note names as a speaker."""
+    """presenter/guest/clip for an introduction fact, read from the table."""
     person = fact.person
     if person is None:
         return "clip"

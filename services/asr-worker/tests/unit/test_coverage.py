@@ -1,5 +1,5 @@
-"""Sprint F1 T2: coverage diagnostics, gap causes, the second pass, the VAD
-pad and the floor pass. Scripted engine, no Whisper."""
+"""Coverage diagnostics, gap causes, the second pass, the VAD pad and the floor pass.
+Scripted engine, no Whisper."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ async def _run(
 async def test_a_prompt_only_first_decode_is_replaced_by_the_second_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 11–41 s: the first decode wrote the prompt back (the Pardo opening).
+    # 11–41 s: the first decode wrote the prompt back.
     first = [
         _seg("Gysi, Moderator, Narrator, Gysi, Moderator", 11_000),
         _seg("If you have any questions", 42_000),
@@ -114,7 +114,7 @@ async def test_a_prompt_only_first_decode_is_replaced_by_the_second_pass(
     )
     rescued = [_seg(opening, 300, step_ms=900)]
     engine = _ScriptedEngine(rescued)
-    # The pad is off by default since T3; set, it moves the slice start.
+    # The pad is off by default; set, it moves the slice start.
     monkeypatch.setattr(processor.settings, "asr_vad_pad_ms", 300)
 
     out = await _run(monkeypatch, _output(first), runs, engine)
@@ -361,9 +361,8 @@ def _db(x: np.ndarray, dbfs: float) -> np.ndarray:
 
 
 def test_quiet_call_audio_under_a_loud_microphone_is_found_by_the_floor_pass() -> None:
-    """The Pardo layout: speech at −30 dBFS on the call channel, the
-    microphone full of −20 dBFS noise. On the mixdown ordinary VAD hears
-    nothing; the per-channel floor pass finds the speech."""
+    """Speech at −30 dBFS on the call channel under −20 dBFS microphone noise: ordinary
+    VAD hears nothing on the mixdown; the per-channel floor pass finds it."""
     vad._ensure_loaded()
     if vad.is_stub():
         pytest.skip("silero-vad not installed")

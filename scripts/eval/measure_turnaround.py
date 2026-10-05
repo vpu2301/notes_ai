@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""DEP-S0 ASR turnaround: wall-clock ÷ audio length for one fixture on one backend.
+"""ASR turnaround (wall-clock / audio length) for one generated TTS fixture on one backend.
 
     make measure-turnaround FIXTURE=10min_de BACKEND=dev_mac_asr
-    make measure-turnaround FIXTURE=10min_de BACKEND=inproc_cpu_asr   # faster-whisper on this CPU
-    ENV=staging make measure-turnaround FIXTURE=60min_de BACKEND=hf_eu_asr
 
-Fixtures live in tests/fixtures/eval/audio/<name>.wav (16 kHz mono 16-bit).
-They are generated, not committed — `scripts/eval/make_tts_fixture.sh` builds
-synthetic German/English speech with macOS TTS so the number is reproducible
-on any Mac. Output: docs/eval/turnaround-<date>-<backend>-<fixture>.json with
-`turnaround_ratio` (the A2 gate quantity: ≤ 0.08× meeting length), word
-count, words-with-timings share and the backend/model that produced it.
+Writes docs/eval/turnaround-<date>-<backend>-<fixture>.json (``turnaround_ratio`` gate: <= 0.08x).
 """
 
 from __future__ import annotations

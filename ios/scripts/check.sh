@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Compile the iOS app's sources against the iOS SDK without an Xcode build.
-# Needs only the Xcode command-line tools (the iPhoneSimulator SDK); no
-# simulator runtime or device support has to be installed.
+# Compile the iOS app's sources with swiftc alone; needs only the iPhoneSimulator SDK.
 #
 #   ios/scripts/check.sh            # whole-module compile, warnings shown
 #   ios/scripts/check.sh --quick    # type-check only (faster)
@@ -12,7 +10,7 @@ cd "$HERE"
 
 TARGET="arm64-apple-ios17.0-simulator"
 FILES=()
-while IFS= read -r f; do FILES+=("$f"); done < <(find Sources -name '*.swift' | sort)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources ../clients/Shared -name '*.swift' | sort)
 
 if [[ "${1:-}" == "--quick" ]]; then
   xcrun -sdk iphonesimulator swiftc -typecheck -target "$TARGET" -parse-as-library "${FILES[@]}"

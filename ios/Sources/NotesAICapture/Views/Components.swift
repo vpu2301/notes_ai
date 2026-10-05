@@ -204,15 +204,8 @@ struct DSSkeleton: View {
 
 // MARK: - Share sheet
 
-/// The system share sheet (Files, Mail, AirDrop, …) for an exported file.
-///
-/// `UIActivityViewController` takes its items once, at construction, and
-/// there is no way to change them afterwards — which is why
-/// `updateUIViewController` is empty rather than merely unimplemented.
-/// So the items must not change under a live controller: give the view
-/// `.id(...)` on whatever identifies the file at the call site, and
-/// SwiftUI builds a new controller for a new file instead of re-showing
-/// the old one with the old attachment.
+/// The system share sheet for an exported file. `UIActivityViewController`
+/// takes its items once, so give the view `.id(...)` per file at the call site.
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -276,16 +269,8 @@ enum MeetingGroups {
 
 // MARK: - One-time code
 
-/// Six boxes over one real field.
-///
-/// A mailed code arrives from Mail or Messages by paste — or, more often
-/// on a phone, from the keyboard's own "From Messages" suggestion — far
-/// more often than it is typed, and six separate fields turn one paste
-/// into six keystrokes in the wrong boxes. `textContentType(.oneTimeCode)`
-/// only works on a single field, which settles it. Typing still works (the
-/// boxes fill left to right) and the field auto-submits on the sixth
-/// digit, because asking someone to tap Continue after entering a code
-/// they were just told to enter is a step with no content.
+/// Six boxes over one real field: paste and `.oneTimeCode` only work on a
+/// single field. Auto-submits on the sixth digit.
 struct DSCodeField: View {
     @Binding var code: String
     var length = 6

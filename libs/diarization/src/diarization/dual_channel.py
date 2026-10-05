@@ -1,23 +1,7 @@
-"""Channel-aware diarization of a mic/system capture (Sprint 31).
+"""Channel-aware diarization of a mic/system capture: each side is diarized separately, then merged per 20 ms
+frame (``both`` frames go to the side louder relative to its running median and into ``overlap_ms``).
 
-The channel is a prior that PARTITIONS the problem, not a replacement for
-diarization: the local side (microphone) and the remote side (call audio)
-are diarized separately through the ordinary :class:`Diarizer` seam, so an
-engine never has to tell a clean digital voice from a reverberant room
-voice, and a meeting room with three local people still works.
-
-    analyse_channels ─► side per 20 ms frame (local | remote | both | none)
-    remote pass:  diarizer(system)                    (skipped < 3 s of speech)
-    local pass:   diarizer(mic, remote-only frames zeroed)   (skipped < 3 s)
-    merge:        local labels only on local/both frames, remote labels only
-                  on remote/both frames; in `both` frames the side louder
-                  relative to its own running median owns the exclusive
-                  timeline and the interval goes to ``overlap_ms`` (the
-                  turn is shown uncertain)
-
-A remote voice can never carry a local label or the reverse — the merge
-makes it impossible, not unlikely. Labels are ``SPEAKER_N`` by first
-appearance across both sides; ``sides`` says which side each is on.
+A remote voice can never carry a local label or the reverse: the merge makes it impossible.
 """
 
 from __future__ import annotations
@@ -39,10 +23,9 @@ from .offline import (
 from .protocol import DiarizationHints, Diarizer
 from .roster import RosterOutcome
 
-# A side with less speech than this is not diarized at all (an in-room
-# meeting recorded with call audio on; a call where the user only listened).
+# A side with less speech than this is not diarized at all.
 MIN_SIDE_SPEECH_S = 3.0
-# Running-median span for the "who is louder in double-talk" decision.
+# Running-median span for the double-talk loudness decision.
 _MEDIAN_FRAMES = 1500  # 30 s
 
 Analyse = Callable[..., ChannelActivity]
@@ -58,13 +41,11 @@ def diarize_dual(
     config: OfflineDiarizationConfig | None = None,
     analyse: Analyse = analyse_channels,
 ) -> OfflineDiarization:
-    """Diarize both sides and merge them. Raises on any failure — the
-    worker falls back to the mono path (``mono_fallback``)."""
+    """Diarize both sides and merge; raises on any failure (the worker falls back to ``mono_fallback``)."""
     cfg = config or OfflineDiarizationConfig()
     hints = hints.validated()
     n = min(len(mic), len(system))
-    # Private float32 copies (int16 in): the mic copy is masked in place
-    # for the local pass, never the caller's array.
+    # The mic copy is masked in place for the local pass, never the caller's array.
     mic_f = _as_float(mic[:n]).copy() if mic.dtype != np.int16 else _as_float(mic[:n])
     sys_f = _as_float(system[:n])
     activity = analyse(mic_f, sys_f, segmenter=segmenter)
@@ -80,8 +61,7 @@ def diarize_dual(
 
     remote_hints = _side_hints(hints)
     if hints.num_speakers is not None and (activity.leak_gain_db is None or local_count == 1):
-        # Headphones (no leak) or one person at the Mac: the count splits
-        # cleanly as 1 local + the rest remote.
+        # Headphones or one person at the Mac: the count splits as local + the rest remote.
         rest = hints.num_speakers - local_count
         remote_hints = DiarizationHints(num_speakers=rest) if rest >= 1 else DiarizationHints()
     remote_diar: OfflineDiarization | None = None
@@ -142,9 +122,6 @@ class ChannelSummary:
         self.both_share = both_share
 
 
-# ── internals ─────────────────────────────────────────────────────────
-
-
 def _as_float(pcm: np.ndarray) -> np.ndarray:
     if pcm.dtype == np.int16:
         return pcm.astype(np.float32) / 32768.0
@@ -152,20 +129,14 @@ def _as_float(pcm: np.ndarray) -> np.ndarray:
 
 
 def _side_hints(hints: DiarizationHints) -> DiarizationHints:
-    """Per-side hints: a person's count becomes a cap on each side (the
-    split is unknown), a calendar cap caps each side."""
+    """Per-side hints: a person's count becomes a cap on each side (the split is unknown)."""
     if hints.num_speakers is not None:
         return DiarizationHints(max_speakers=hints.num_speakers)
     return DiarizationHints(max_speakers=hints.max_speakers)
 
 
 def _mask_remote_only(mic: np.ndarray, activity: ChannelActivity) -> np.ndarray:
-    """The mic with frames that only hold the call's leak silenced.
-
-    IN PLACE when ``mic`` is already a private float32 copy (it is, from
-    ``_as_float`` of int16): nothing needs the unmasked mic after the
-    analysis, and a second full-length copy is ~460 MB on a 2-hour call.
-    """
+    """The mic with leak-only frames silenced, IN PLACE when writeable (a second copy is ~460 MB on a 2-hour call)."""
     masked = mic if mic.flags.writeable else mic.copy()
     frame = SAMPLE_RATE_HZ * FRAME_MS // 1000
     for t in np.flatnonzero(activity.side == REMOTE):
@@ -246,8 +217,7 @@ def _frames_to_segments(labels: list[str | None]) -> list[SpeakerSegment]:
 
 
 def _trim_to(segments: list[SpeakerSegment], n: int) -> list[SpeakerSegment]:
-    """A person's count as a total: keep the ``n`` labels with the most
-    speech; the rest become unattributed (never re-labelled as someone)."""
+    """Keep the ``n`` labels with the most speech; the rest become unattributed, never re-labelled."""
     speech: dict[str, int] = {}
     for s in segments:
         speech[s.label] = speech.get(s.label, 0) + (s.end_ms - s.start_ms)

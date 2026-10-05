@@ -1,26 +1,7 @@
-"""Native sessions: start, rotate, end.
+"""Native sessions: start, refresh, switch_tenant, revoke.
 
-IDX-A2 specifies a ``SessionService`` with ``start``/``refresh``/
-``switch_tenant``/``revoke``. IDX-A3 carried ``start`` alone, because
-that was all a completed email-code verify called. IDX-M1 adds
-``refresh`` and ``revoke``: a refresh token kept in a Mac's Keychain is
-worth keeping only if the server can rotate it, and without rotation a
-native session died one access-token lifetime after it began.
-
-IDX-M2 adds ``switch_tenant``, the last of the four: a Mac with a
-workspace switcher needs a token scoped to the workspace it switches to,
-and `POST /tenants/{id}/switch` (sprint 16) is only an authorization gate
-— its own docstring says the client must "re-authenticate to obtain a
-token scoped to this tenant".
-
-What ``start`` guarantees:
-
-* a **new** ``sid`` every time (F: no session fixation — a session id
-  that existed before authentication is a session id an attacker could
-  have planted);
-* the refresh token is generated here, returned once, and only its
-  sha256 is stored, exactly like the password-reset token;
-* the ``roles`` claim comes from the membership, never from the request.
+``start`` guarantees a new ``sid`` every time (no fixation), a refresh token
+returned once with only its sha256 stored, and ``roles`` from the membership.
 """
 
 from __future__ import annotations
@@ -41,20 +22,13 @@ from .identity_repository import (
 )
 from .token_service import TokenService
 
-# 32 bytes of CSPRNG. The refresh token is a bearer credential with a
-# month-long life; 256 bits is not where its risk lives.
+# 32 bytes of CSPRNG.
 logger = logging.getLogger(__name__)
 
 _REFRESH_TOKEN_BYTES = 32
 
-# BE-2 / ADR-0047. During the `dual` period one endpoint serves two kinds
-# of refresh token, and it has to tell them apart from the value alone —
-# the cookie name is the same for both (deliberately: changing it would
-# need a release of every client for a period measured in weeks).
-#
-# A prefix rather than a length or a charset test, because the two token
-# families are otherwise indistinguishable by inspection and a heuristic
-# that is wrong once logs somebody out.
+# ADR-0047: in `dual` one endpoint serves two refresh-token families under the
+# same cookie name; the prefix is the only reliable discriminator.
 NATIVE_REFRESH_PREFIX = "nrt_"
 
 
@@ -64,27 +38,13 @@ def new_refresh_token() -> str:
 
 
 def is_native_refresh_token(value: str) -> bool:
-    """Does this refresh token belong to THIS service's session store?
-
-    Three cases, in the order they are decided:
-
-    1. The `nrt_` prefix — native, by construction.
-    2. The JWT shape (three dot-separated segments) — Keycloak's. Its
-       refresh tokens are signed JWTs; ours are opaque and never contain
-       a dot, because `token_urlsafe` emits only `[A-Za-z0-9_-]`.
-    3. Anything else — native. This is the pre-prefix opaque token. No
-       deployment has run in native mode, so in practice there are none;
-       the branch exists so that if one does turn up it is routed to the
-       store that could possibly know about it, rather than proxied to
-       Keycloak, which would answer 400 and end a valid session.
-    """
+    """Native store? `nrt_` prefix → yes; JWT shape (dots) → Keycloak; anything else → native (pre-prefix tokens)."""
     if value.startswith(NATIVE_REFRESH_PREFIX):
         return True
     return value.count(".") != 2
 
 
-# Enough of a user agent to recognise your own laptop in the sessions
-# list. Deliberately crude: this is a display label, never a check.
+# Display label only, never a check.
 _DEVICE_HINTS: tuple[tuple[str, str], ...] = (
     ("iPhone", "iPhone"),
     ("iPad", "iPad"),
@@ -118,8 +78,7 @@ class StartedSession:
 
 @dataclass(frozen=True, slots=True)
 class RefreshedSession:
-    """What a rotation hands back. Same shape ``start`` returns, minus the
-    fields a caller can only learn at sign-in."""
+    """What a rotation hands back: ``start``'s shape minus the sign-in-only fields."""
 
     session_id: UUID
     identity_id: UUID
@@ -133,13 +92,7 @@ class RefreshedSession:
 
 @dataclass(frozen=True, slots=True)
 class SwitchedToken:
-    """An access token for one of the identity's other workspaces.
-
-    No refresh token: switching does not rotate anything. The session is
-    the same session — it is only pointed somewhere else — and handing
-    back a second refresh token would give the client two credentials for
-    one session and a replay the next time it used the older one.
-    """
+    """An access token for another of the identity's workspaces; no refresh token (switching does not rotate)."""
 
     tenant_id: UUID
     roles: list[str]
@@ -158,14 +111,7 @@ class EndedSession:
 
 
 class RefreshReplayError(ApiError):
-    """The same refresh token, twice, outside the grace window.
-
-    Carries the session it belongs to because the router has to revoke
-    more than this one session: a replayed token means the chain may be
-    in hostile hands, so every access token of the identity is denylisted
-    too. Deciding that here would put half the response in the service
-    and half in the route.
-    """
+    """The same refresh token twice, outside the grace window; carries the session so the router can denylist the identity."""
 
     def __init__(self, *, session_id: UUID, identity_id: UUID, tenant_id: UUID) -> None:
         super().__init__(
@@ -179,12 +125,7 @@ class RefreshReplayError(ApiError):
 
 
 def session_expired() -> ApiError:
-    """No usable session behind this token — expired, revoked, or never real.
-
-    One code for all three on purpose: which of them it was is a fact
-    about somebody else's account, and the client does the same thing in
-    every case.
-    """
+    """No usable session behind this token; one code for expired, revoked and never-real on purpose."""
     return ApiError("session_expired", 401, detail="session is no longer valid")
 
 
@@ -205,22 +146,14 @@ class SessionService:
             raise ValueError("absolute_ttl_seconds must not be shorter than refresh_ttl_seconds")
         self._tokens = tokens
         self._sessions = sessions
-        # Only ``refresh`` needs these; ``start`` is handed its identity and
-        # membership by the route that already checked them.
+        # Only ``refresh`` needs these.
         self._identities = identities
         self._refresh_ttl_seconds = refresh_ttl_seconds
         self._absolute_ttl_seconds = absolute_ttl_seconds
         self._grace_seconds = grace_seconds
 
     async def _heal_workspace(self, identity: Identity) -> Membership | None:
-        """Re-create the personal workspace for an identity that has none.
-
-        Delegates to the repository so the transaction — tenant,
-        membership and the bridge ``users`` row together — lives in one
-        place and cannot be half-applied. Returns ``None`` when there is
-        no repository wired (``start``-only deployments) or the identity
-        turned out to have a membership after all.
-        """
+        """Re-create the personal workspace for an identity that has none; None when unwired or not needed."""
         if self._identities is None:
             return None
         try:
@@ -242,13 +175,7 @@ class SessionService:
         user_agent: str,
         mfa: bool = False,
     ) -> StartedSession:
-        """Open a session in ``membership.tenant_id`` and mint its first token.
-
-        The caller is responsible for having checked that the membership
-        belongs to the identity and is active; this signs what it is
-        given. That split keeps the "which workspace may this person
-        enter" decision in one place (the route) rather than half here.
-        """
+        """Open a session in ``membership.tenant_id`` and mint its first token; the route has checked the membership."""
         refresh_token = new_refresh_token()
         session_id, expires_at = await self._sessions.create(
             identity_id=identity.id,
@@ -283,7 +210,7 @@ class SessionService:
             expires_at=expires_at,
         )
 
-    # ── rotation (IDX-A2 F2, carried by IDX-M1) ──────────────────────────
+    # ── rotation ─────────────────────────────────────────────────────────
 
     async def refresh(
         self,
@@ -293,20 +220,9 @@ class SessionService:
     ) -> RefreshedSession:
         """Exchange a refresh token for the next one and a fresh access token.
 
-        The order of the checks is the contract:
-
-        1. resolve the token to a session — and to which *generation* of
-           that session's token it is;
-        2. a retired token past its grace is a replay, and the session
-           dies before anything else happens;
-        3. roles are re-read from the membership, never carried over from
-           the expiring token. A session that outlives someone's admin
-           rights must not keep minting admin tokens for thirty days.
-
-        A rotation that loses its race (two requests, one token) re-reads
-        and tries again once: by then the token it presented is the
-        retired one, so the second caller comes out through the grace
-        path with a token of its own rather than a 401 it did not earn.
+        Order: resolve token + generation; a retired token past grace is a replay
+        (session dies first); roles are re-read from the membership. A lost race
+        re-reads once and comes out through the grace path.
         """
         if self._identities is None:  # pragma: no cover - wiring error
             raise RuntimeError("SessionService.refresh needs an IdentityRepository")
@@ -344,9 +260,7 @@ class SessionService:
             if identity is None:
                 raise session_expired()
             if identity.status != "active":
-                # Disabled and deleted alike: the session outlived the
-                # account it belongs to, and refusing it here is cheaper
-                # than every downstream service discovering it separately.
+                # The session outlived its account.
                 await self._sessions.revoke(
                     row.id, identity_id=row.identity_id, reason="account_inactive"
                 )
@@ -356,32 +270,17 @@ class SessionService:
             memberships = await self._identities.list_memberships(identity.id)
             membership = next((m for m in memberships if m.tenant_id == row.tenant_id), None)
             if membership is None:
-                # Removed from the workspace this session is scoped to.
                 await self._sessions.revoke(
                     row.id, identity_id=row.identity_id, reason="membership_lost"
                 )
                 if not memberships:
-                    # Nowhere left to go at all. BE-2 F3: rather than
-                    # answering `no_workspace` and leaving the person with
-                    # nothing they can act on, give them back the personal
-                    # workspace every identity is entitled to. Their old
-                    # notes are wherever they were — this restores a place
-                    # to stand, not any content.
+                    # Nowhere left to go: heal the personal workspace instead of `no_workspace`.
                     if await self._heal_workspace(identity) is None:
-                        # The healer is unavailable (no repository wired)
-                        # or lost a race it should have won. Answer the
-                        # documented code (docs/api/error-codes.md).
                         raise ApiError(
                             "no_workspace", 409, detail="no active workspace for this account"
                         )
-                    # The session was revoked above (`membership_lost`);
-                    # a healed workspace does not un-revoke it. The client
-                    # signs in again and lands in the new workspace, which
-                    # is the honest sequence: the session it presented was
-                    # scoped to a tenant it is no longer in.
+                    # A healed workspace does not un-revoke the session; the client signs in again.
                     raise session_expired()
-                # Other workspaces are still open to them; signing in
-                # again picks one they are a member of.
                 raise session_expired()
 
             new_token = new_refresh_token()
@@ -395,8 +294,7 @@ class SessionService:
                 presented_is_current=match.is_current,
             )
             if not rotated:
-                # Someone rotated this session between the read and the
-                # write. Look again: the token is now the retired one.
+                # Lost the race: look again, the token is now the retired one.
                 continue
 
             roles = platform_roles_for(membership.role, tenant_kind=membership.kind)
@@ -424,18 +322,13 @@ class SessionService:
         raise session_expired()
 
     def _next_expiry(self, *, created_at: datetime, now: datetime) -> datetime:
-        """The idle window, slid forward — but never past the absolute cap.
-
-        Sliding is what makes "signed in on my Mac" true for someone who
-        uses the app every week. The cap is what stops it being true
-        forever: a session nobody can name is one nobody revokes.
-        """
+        """The idle window slid forward, never past the absolute cap."""
         idle = now + timedelta(seconds=self._refresh_ttl_seconds)
         if self._absolute_ttl_seconds is None:
             return idle
         return min(idle, created_at + timedelta(seconds=self._absolute_ttl_seconds))
 
-    # ── switching workspace (IDX-A2 F3, carried by IDX-M2) ───────────────
+    # ── switching workspace ──────────────────────────────────────────────
 
     async def switch_tenant(
         self,
@@ -445,20 +338,11 @@ class SessionService:
         tenant_id: UUID,
         activate: bool = True,
     ) -> SwitchedToken:
-        """Mint an access token scoped to another of this identity's workspaces.
+        """Mint an access token for another of this identity's workspaces.
 
-        Two callers, one endpoint. A person choosing a workspace in the
-        switcher wants the session to move with them (``activate``), so the
-        next refresh — and the next launch — comes back to the same place.
-        A background upload that belongs to the workspace it started in
-        wants a token for that workspace and nothing else: `activate=False`
-        leaves the session where the person put it.
-
-        Every refusal here is a fact about the *caller's* standing, so
-        each has its own code (``docs/api/error-codes.md``): a suspended
-        membership and a dissolved workspace are things they can act on; a
-        workspace they were never in is answered exactly like one that
-        does not exist.
+        ``activate`` moves the session there too; ``activate=False`` is for
+        background work scoped to its own workspace. Refusals have their own
+        codes, except "never a member", which answers like "does not exist".
         """
         if self._identities is None:  # pragma: no cover - wiring error
             raise RuntimeError("SessionService.switch_tenant needs an IdentityRepository")
@@ -467,8 +351,7 @@ class SessionService:
         if row is None or row.revoked_at is not None or row.expires_at <= datetime.now(UTC):
             raise ApiError("session_revoked", 401, detail="this session is no longer live")
         if row.identity_id != identity_id:
-            # The token's `sid` and `sub` disagree: not a situation any
-            # honest client produces.
+            # `sid` and `sub` disagree: no honest client produces this.
             raise ApiError("session_revoked", 401, detail="this session is no longer live")
 
         identity = await self._identities.get(identity_id)
@@ -486,8 +369,7 @@ class SessionService:
 
         activated = False
         if activate and row.tenant_id != tenant_id:
-            # The session row is what a refresh re-mints from; moving it is
-            # what makes the switch survive the access token.
+            # Refresh re-mints from the session row, so the switch survives the token.
             activated = await self._sessions.set_tenant(session_id, tenant_id=tenant_id)
             if not activated:
                 raise ApiError("session_revoked", 401, detail="this session is no longer live")
@@ -513,13 +395,7 @@ class SessionService:
         )
 
     async def revoke(self, *, refresh_token: str) -> EndedSession | None:
-        """End the session this token belongs to. Idempotent.
-
-        Accepts the retired token as well as the current one, with no
-        grace check: a client whose rotation response was lost is still
-        entitled to sign itself out, and a replayed *logout* costs the
-        attacker the session rather than winning them anything.
-        """
+        """End the session this token belongs to; idempotent, accepts the retired token with no grace check."""
         match = await self._sessions.find_by_refresh_token(refresh_token)
         if match is None:
             return None

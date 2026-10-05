@@ -65,9 +65,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = await build_state()
     app.state.svc = state
     install_state(state)
-    # Sprint 16: idle-draft cleanup hosted in-process (ADR-0041). Off by
-    # default in dev; production flips MDX_BACKGROUND_JOBS. The job is
-    # idempotent and also runs as a CLI for external cron.
+    # In-process scheduler (ADR-0041); the jobs are idempotent and also run as CLIs.
     jobs: list[asyncio.Task[None]] = []
     if settings.background_jobs_enabled and not settings.testing:
         from datetime import timedelta
@@ -94,8 +92,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
         )
 
-        # Sprint 34: captures whose client never came back (a crashed tab,
-        # a killed app) stop claiming to be recording. Nothing is deleted.
+        # Captures whose client never came back stop claiming to be recording.
         from .jobs import meeting_state_sweeper
 
         async def _meeting_sweep_iteration() -> dict[str, int]:
@@ -115,8 +112,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 name="meeting-state-sweeper",
             )
         )
-        # Sprint 37: transcript snapshots whose worker was killed before
-        # it could delete its own. Nothing older than a day survives.
+        # Transcript snapshots whose worker died before deleting its own.
         from .jobs import snapshot_sweeper
 
         async def _snapshot_sweep_iteration() -> dict[str, int]:
@@ -164,9 +160,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
-    # CORS for the SPA. allow_credentials=True is required so the browser sends
-    # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
-    # origin, so origins are an explicit allow-list (mirror auth-service A3).
+    # allow_credentials=True (HttpOnly cookie) forbids a wildcard origin: explicit allow-list.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -176,26 +170,17 @@ def create_app() -> FastAPI:
         expose_headers=["WWW-Authenticate"],
         max_age=600,
     )
-    # Sprint 23: the anonymous shared surface is world-readable by design.
-    # Added last, so it is the outermost layer and sees preflights first.
+    # The anonymous shared surface is world-readable; added last so it sees preflights first.
     app.add_middleware(AnonymousCorsMiddleware)
     app.include_router(health.router)
     app.include_router(templates.router)
-    # Search route must be registered BEFORE the parameterised ``{note_id}``
-    # routes so ``/v1/notes/search`` matches the search handler rather than
-    # ``GET /v1/notes/{note_id}``.
+    # Literal paths (/search, /from-transcript, /meeting, …) must be registered
+    # BEFORE notes.router's /{note_id} catch-all.
     app.include_router(notes_search.router)
-    # BEFORE notes.router: their literal paths (/from-transcript,
-    # /by-source-job, /meeting) must win over notes' /{note_id} catch-all.
     app.include_router(notes_from_transcript.router)
-    # Sprint 34: the note is created at record start (ADR-0055).
     app.include_router(notes_meeting.router)
-    # Sprint 35: dismiss / restore / fix a line's owner or date. Before
-    # notes.router for the same reason — literal segments first.
     app.include_router(notes_corrections.router)
-    # Sprint 36: what is still open from last time, and the client version.
     app.include_router(notes_series.router)
-    # Sprint 33: how the writing is going, and the facts behind it.
     app.include_router(notes_generation.router)
     app.include_router(notes_dates.router)
     app.include_router(notes.router)
@@ -205,30 +190,19 @@ def create_app() -> FastAPI:
     app.include_router(notes_versions.router)
     app.include_router(notes_pdf.router)
     app.include_router(notes_sharing.router)
-    # Sprint 20: action items + recipient responses, author side.
     app.include_router(notes_items.router)
-    # "Ask this note" — a question over the note and its transcript.
     app.include_router(notes_ask.router)
-    # Anonymous, token-addressed reads — no auth dependency at all.
+    # Anonymous, token-addressed reads: no auth dependency at all.
     app.include_router(shared_public.router)
-    # Sprint 22: workspace-level sharing stats for admins (counts only).
     app.include_router(sharing_stats.router)
-    # Sprint 15: audio replay (ADR-0037). No ordering hazard: the
-    # multi-segment sections path can't be swallowed by /{note_id}.
     app.include_router(notes_audio.router)
     app.include_router(audio_clips.router)
-    # Sprint 15: query expansion surfaces (ADR-0038).
     app.include_router(search_tips.router)
     app.include_router(synonyms.router)
-    # 0019: calendar connections + the "Coming up" events read.
     app.include_router(calendar.router)
-    # 0021: spaces — personal note folders shared across devices.
     app.include_router(spaces.router)
-    # Sprint 35: the workspace glossary that feeds the vocabulary hint.
     app.include_router(glossary.router)
-    # Sprint 37: who processes this workspace's meetings (ADR-0046 d.12).
     app.include_router(ai_settings.router)
-    # Billing (0068): plan, usage, plan changes.
     app.include_router(billing.router)
     FastAPIInstrumentor.instrument_app(app)
     return app

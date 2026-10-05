@@ -52,16 +52,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 
 ::placeholder { color: var(--muted); opacity: 1; }
 
-/* Scrollbars: a hairline-thin thumb held off the edge by its own padding,
-   so it reads as part of the page rather than a chrome gutter. */
+/* Scrollbars */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--line-hover); border-radius: var(--radius-pill); border: 4px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--line-active); background-clip: content-box; }
 * { scrollbar-width: thin; scrollbar-color: var(--line-hover) transparent; }
 
-/* The dot print. Paint it on a positioned ancestor with `.dotted`; the
-   ::before covers the box and fades from the top like DSDots. */
+/* Dot print: paint on a positioned ancestor with `.dotted`. */
 .dotted { position: relative; isolation: isolate; }
 .dotted::before {
   content: "";
@@ -72,10 +70,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   pointer-events: none;
   z-index: -1;
 }
-/* The light that sweeps the dot print, declared once for every print
-   (the sign-in / empty-state `.dotted` and the app's `.app-main`, shell.css).
-   The gradient has to live on the pseudo-element itself, not on :root,
-   because the angle is animated here and var() resolves where declared. */
+/* Light sweep over the dot print (also `.app-main` in shell.css). The gradient must live
+   on the pseudo-element, not :root: the angle is animated here and var() resolves where declared. */
 .dotted::before, .app-main::before {
   --dots-light: linear-gradient(var(--dots-light-angle), rgba(0, 0, 0, 0.28) 0%, #000 38%, #000 62%, rgba(0, 0, 0, 0.28) 100%);
   -webkit-mask-image: var(--dots-fade), var(--dots-light);
@@ -85,17 +81,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   animation: dots-light var(--dots-light-duration) linear infinite;
 }
 
-/* The light angle is a registered property so the browser can tween it;
-   without registration the angle simply stays put and the print is static. */
+/* Registered so the browser can tween the angle; unregistered it stays put. */
 @property --dots-light-angle {
   syntax: "<angle>";
   inherits: false;
   initial-value: 160deg;
 }
 
-/* The dots stay where they are. Only the light turns: a full revolution per
-   cycle, so the bright band walks around the page and each region of the print
-   surfaces and recedes in turn. */
+/* Only the light turns, one revolution per cycle. */
 @keyframes dots-light {
   from { --dots-light-angle: 160deg; }
   to   { --dots-light-angle: 520deg; }
@@ -113,12 +106,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 }
 
 /* ─── Continuous corners ────────────────────────────────────────────────
-   AppKit and UIKit draw every rounded rectangle `.continuous`: a squircle,
-   where the curvature eases into the straight edge instead of meeting it at
-   a hard tangent. That single difference is most of why the Mac and iPhone
-   apps read soft and the web read boxed. Browsers that ship `corner-shape`
-   get the real thing; the rest keep the circular arc, which is why the radii
-   in tokens.css are already a touch generous. */
+   Squircles where `corner-shape` is supported; the rest keep the circular arc. */
 @supports (corner-shape: squircle) {
   .card,
   .panel,
@@ -168,9 +156,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   }
 }
 
-/* The ground is paper, and paper catches a little light at the top — the
-   Mac's DSWash, which is what keeps the warm white from reading as flat
-   grey. Behind everything, including the dot print. */
+/* Page wash (DSWash): behind everything, including the dot print. */
 body::before {
   content: "";
   position: fixed; inset: 0;

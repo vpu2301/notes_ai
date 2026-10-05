@@ -1,10 +1,4 @@
-"""Wire-level validation for ``stages_disabled`` (sprint 14).
-
-The field is additive on ``ProcessRequest``/``BatchProcessRequest``
-(``extra='forbid'``): conversation mode passes ``["voice_commands"]``
-so other participants' speech can never trigger editing operations. Unknown stage
-names must be rejected at the model boundary.
-"""
+"""Wire-level validation for ``stages_disabled``; unknown stage names are rejected at the model boundary."""
 
 from __future__ import annotations
 

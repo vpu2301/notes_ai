@@ -52,10 +52,8 @@ async def insert_audio_row(
     )
 
 
-# Sprint I2 T2: whether `transcription_jobs.vocabulary_hint` (migration
-# 0061) exists on this database. Probed once at startup; a service running
-# ahead of the migration keeps accepting jobs and stores no hint (with a
-# warning), never fails one.
+# Whether `transcription_jobs.vocabulary_hint` exists; probed at startup. A service
+# ahead of its migration stores no hint and never fails a job over it.
 HINT_COLUMN_PRESENT: bool = True
 
 
@@ -75,9 +73,7 @@ async def probe_hint_column(pool: asyncpg.Pool) -> bool:
     return HINT_COLUMN_PRESENT
 
 
-# Sprint F1: whether the capture-timing columns (migration 0063) exist.
-# Same rule as the hint: a service ahead of its migration stores no timing
-# and never fails a job over it.
+# Whether the capture-timing columns exist; same rule as the hint.
 CAPTURE_TIMING_PRESENT: bool = True
 
 
@@ -187,9 +183,7 @@ async def list_jobs(
 
 
 async def request_cancel(conn: asyncpg.Connection, *, job_id: UUID) -> str | None:
-    """Mark the job for cancellation; return the new status or ``None``
-    if it cannot be cancelled (already terminal).
-    """
+    """Mark the job for cancellation; ``None`` when already terminal."""
     row = await conn.fetchrow(
         "SELECT status FROM transcription_jobs WHERE id = $1 FOR UPDATE",
         job_id,
@@ -224,13 +218,10 @@ async def fail_job(
     error_detail: str,
     only_if_status: tuple[str, ...] = ("queued", "running"),
 ) -> bool:
-    """Move a job to ``failed``; return whether this call is what moved it.
+    """Move a job to ``failed``; return whether this call moved it.
 
-    ``only_if_status`` is the interlock. The reaper and the enqueue path
-    both write terminal failures from outside the worker that owns the
-    job, and a job that came back to life between the read and the write
-    must keep its own outcome — a transcript already stored must never be
-    overwritten by a late "the worker looked dead".
+    ``only_if_status`` is the interlock: a stored transcript must never be
+    overwritten by a late reap.
     """
     row = await conn.fetchrow(
         """
@@ -267,20 +258,8 @@ async def list_stale_jobs(
     queued_grace_seconds: float,
     limit: int,
 ) -> list[StaleJobRow]:
-    """Jobs stranded mid-flight, oldest first.
-
-    Two shapes, one query:
-
-    - ``running`` past ``running_grace_seconds`` — the worker that claimed
-      it died between marking it running and writing an outcome. Nothing
-      else in the system ever revisits that row.
-    - ``queued`` past ``queued_grace_seconds`` — the enqueue landed but the
-      message did not survive (a flushed Redis, a stream trimmed under
-      load), so no worker will ever claim it.
-
-    Both windows are wall-clock only; the reaper applies its own
-    liveness interlock before it collects anything.
-    """
+    """Jobs stranded mid-flight, oldest first: ``running`` (dead worker) or ``queued``
+    (lost message) past their grace windows. Wall-clock only; the reaper interlocks."""
     rows = await conn.fetch(
         """
         SELECT id, status, requester_sub, started_at
@@ -327,7 +306,7 @@ async def set_speaker_names(
     return parse_speaker_names(row["speaker_names"])
 
 
-# ── Speaker edits (Sprint 28) ──────────────────────────────────────────
+# ── Speaker edits ──────────────────────────────────────────────────────
 
 
 _EDIT_COLUMNS = (
@@ -439,7 +418,7 @@ def _row_to_edit(row: asyncpg.Record) -> SpeakerEdit:
     )
 
 
-# ── Speaker re-labelling (Sprint 29) ─────────────────────────────────
+# ── Speaker re-labelling ─────────────────────────────────────────────
 
 
 async def get_job_and_result_uri(
@@ -486,11 +465,7 @@ class RediarizeClaim:
 async def claim_rediarize(
     conn: asyncpg.Connection, *, job_id: UUID, max_runs: int
 ) -> RediarizeClaim | None:
-    """Check and mark a re-run as queued, in one transaction.
-
-    ``None`` = no such job in this tenant. The checks and the write share a
-    row lock, so two concurrent requests cannot both get through.
-    """
+    """Check and mark a re-run as queued under one row lock; ``None`` = no such job."""
     async with conn.transaction():
         row = await conn.fetchrow(
             """
@@ -513,9 +488,7 @@ async def claim_rediarize(
         if int(row["diarization_runs"] or 0) >= max_runs:
             return RediarizeClaim(refused="rediarize_limit", current_rev=rev)
         if row["audio_status"] in (None, "deleted"):
-            # Retention or erasure took the recording: there is nothing to
-            # listen to again. (An object lost under a live row surfaces as
-            # the worker's `audio_missing` on the re-run instead.)
+            # Retention or erasure took the recording.
             return RediarizeClaim(refused="audio_unavailable", current_rev=rev)
         request_id = await conn.fetchval(
             """
@@ -571,12 +544,8 @@ class UndoOutcome:
 
 
 async def undo_rediarize(conn: asyncpg.Connection, *, job_id: UUID) -> UndoOutcome | None:
-    """Swap back to the labelling the last re-run replaced — one step only.
-
-    The names go back with it (the re-run saved them), and the revision
-    moves FORWARD: edits made on the undone labelling must not come back
-    to life on the restored one either.
-    """
+    """Swap back to the labelling the last re-run replaced (one step); the revision moves
+    FORWARD so edits made on the undone labelling stay dead."""
     async with conn.transaction():
         row = await conn.fetchrow(
             """
@@ -679,7 +648,7 @@ async def fail_rediarize(
     return row is not None
 
 
-# ── Sprint 30: reset, capture context, learn loop ─────────────────────
+# ── Reset, capture context, learn loop ────────────────────────────────
 
 
 async def revert_live_edits(conn: asyncpg.Connection, *, job_id: UUID, result_rev: int) -> int:
@@ -717,13 +686,8 @@ async def name_sources(conn: asyncpg.Connection, *, job_id: UUID) -> dict[str, s
 def merge_name_sources(
     current: dict[str, str], *, names: dict[str, str], sources: dict[str, str]
 ) -> dict[str, str]:
-    """The stored provenance after a rename (pure; the rules live here).
-
-    A label whose name the platform set from the channel and that is no
-    longer named becomes ``cleared`` — the one fact that must outlive the
-    name, so the channel name is never re-applied. A label named by a
-    person takes the source the client reported (``typed`` by default).
-    """
+    """Provenance after a rename (pure): a removed channel name becomes ``cleared`` so it
+    is never re-applied; a person's name takes the client's source (``typed`` default)."""
     updated = dict(current)
     for label, source in current.items():
         if source == "channel" and label not in names:
@@ -765,10 +729,8 @@ MAX_DISMISSED_SUGGESTIONS = 32
 async def dismissed_suggestions(
     conn: asyncpg.Connection, *, job_id: UUID, result_rev: int | None = None
 ) -> list[tuple[str, str]]:
-    """Dismissed (label, name) pairs — of one labelling revision when
-    ``result_rev`` is given. A re-run or undo re-numbers speakers, so a
-    "no" said about SPEAKER_2 of revision 1 says nothing about revision 3's
-    SPEAKER_2 (pre-scoping entries count as revision 1)."""
+    """Dismissed (label, name) pairs, scoped to ``result_rev`` when given (re-runs renumber
+    speakers; pre-scoping entries count as revision 1)."""
     raw = await conn.fetchval(
         "SELECT dismissed_name_suggestions FROM transcription_jobs WHERE id = $1", job_id
     )
@@ -896,10 +858,7 @@ async def has_corrections(conn: asyncpg.Connection, *, job_id: UUID) -> bool:
 
 
 async def count_active_jobs(conn: asyncpg.Connection, *, tenant_id: UUID) -> int:
-    """Return the number of queued + running jobs for the tenant.
-
-    Used by the rate-limit check (per-tenant concurrent cap).
-    """
+    """Queued + running jobs for the tenant (per-tenant concurrent cap)."""
     row = await conn.fetchrow(
         """
         SELECT COUNT(*) AS n
@@ -941,9 +900,7 @@ def _row_to_view(row: asyncpg.Record) -> TranscriptionJobView:
 
 
 def _coverage_share(raw: object) -> float | None:
-    """``metadata.coverage_share`` off the job row (Sprint F1): the worker
-    writes the transcript metadata there on completion. Text without a
-    jsonb codec; None before F1 or while the job runs."""
+    """``metadata.coverage_share`` off the job row; None for older rows or while the job runs."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)

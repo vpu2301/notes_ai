@@ -1,14 +1,10 @@
-"""Billing (0068): the workspace's plan, this month's usage, and changing
-the plan.
+"""Billing: the workspace's plan, this month's usage, and changing the plan.
 
     GET  /v1/billing         the plan, the catalogue, usage against limits
     POST /v1/billing/plan    move to another plan (through the provider)
-    POST /v1/billing/redeem  spend a redeem code (0069) — no provider needed
+    POST /v1/billing/redeem  spend a redeem code, no provider needed
 
-Both are an admin's (``billing.read`` / ``billing.write``). A change
-answers with what happened: ``applied`` (the plan is already the new one)
-or ``redirect`` (pay at ``redirect_url`` first — Stripe Checkout, later).
-With no provider connected the change is refused, not faked.
+A change answers ``applied`` or ``redirect``; without a provider it is refused, not faked.
 """
 
 from __future__ import annotations
@@ -113,8 +109,7 @@ async def _view(conn: object, claims: Claims) -> BillingView:
     plan = rules.plan_of(code)
     limits = rules.effective_limits(plan, recorded)
     used = await rules.usage(conn, tenant_id=claims.tid)  # type: ignore[arg-type]
-    # The AI allowance shown is the one enforced: the workspace's own cap
-    # if an admin set one, else the plan's, else the platform default.
+    # The AI allowance shown is the one enforced.
     settings_row = await ai_settings.fetch(conn, tenant_id=claims.tid)  # type: ignore[arg-type]
     ai_limit = ai_settings.budget_cents(settings_row, recorded or plan.limits)
     sub = await rules.subscription(conn, tenant_id=claims.tid)  # type: ignore[arg-type]

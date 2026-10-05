@@ -1,27 +1,4 @@
-"""FastAPI dependencies that turn libs/auth into a one-liner for services.
-
-Usage in a service::
-
-    from auth.dependencies import build_current_user
-    from auth.jwks import JwksCache
-
-    issuers = issuers_from_env(
-        settings.auth_issuers_json,
-        issuer=settings.auth_issuer,
-        jwks_url=settings.auth_jwks_url,
-        audience=settings.auth_audience,
-    )
-    jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
-    current_user = build_current_user(jwks_cache=jwks_cache, issuers=issuers)
-
-    @router.get("/me")
-    async def me(claims: Annotated[Claims, Depends(current_user)]) -> ...:
-        ...
-
-The dependency raises ``HTTPException(401)`` with a ``WWW-Authenticate:
-Bearer`` challenge on any verification failure. The observability lib's
-problem-details handler renders it as RFC 9457 ``application/problem+json``.
-"""
+"""FastAPI dependencies for libs/auth; failures are ``HTTPException(401)`` with a ``WWW-Authenticate: Bearer`` challenge."""
 
 from __future__ import annotations
 
@@ -71,22 +48,9 @@ def build_current_user(
 ) -> Callable[..., Coroutine[None, None, Claims]]:
     """Return a FastAPI dependency that yields verified :class:`Claims`.
 
-    The returned coroutine reads the ``Authorization: Bearer …`` header,
-    verifies the token, sets the per-request claims ContextVar, stashes
-    the claims on ``request.state.claims`` for non-Depends consumers, and
-    returns the :class:`Claims` instance.
-
-    ``issuers`` (FND-1) is the list this service trusts; the token's own
-    ``iss`` selects which entry verifies it. ``expected_audience`` +
-    ``expected_issuer`` remain accepted as the one-element shorthand, so
-    a caller written before FND-1 keeps its exact behaviour.
-
-    ``denylist`` (sprint 16): when provided, a signature-valid token whose
-    ``sid`` or ``sub`` is on the revocation denylist is rejected 401 — this
-    closes the "access tokens stay valid 15 min after logout" window. A
-    ``None`` denylist (feature off) is the pre-sprint-16 behaviour; a
-    denylist whose backend is down fails OPEN inside ``is_revoked``
-    (availability over the residual window — see :mod:`auth.revocation`).
+    Also sets the claims ContextVar and ``request.state.claims``. ``expected_audience`` +
+    ``expected_issuer`` are the one-element shorthand for ``issuers``. ``denylist`` rejects
+    revoked ``sid``/``sub`` with 401; ``None`` = no check; a down backend fails OPEN.
     """
 
     async def _current_user(
@@ -123,7 +87,6 @@ def build_current_user(
         except InvalidTokenError as exc:
             raise _unauthorized(f"Invalid token: {exc}") from exc
         except AuthError as exc:
-            # Catch-all for any future AuthError subclass we add later.
             raise _unauthorized(str(exc)) from exc
 
         if denylist is not None and await denylist.is_revoked(sid=claims.sid, sub=str(claims.sub)):
@@ -137,14 +100,7 @@ def build_current_user(
 
 
 def requires_mfa(claims: Claims) -> Claims:
-    """Helper used by routes that must reject non-MFA tokens.
-
-    Sprint 02 ships with MFA disabled by feature flag; the actual flag
-    check lives in :mod:`auth.feature_flags` (Day 8). This raw helper is
-    safe to call regardless — it just enforces the rule whenever it is
-    used. Callers that want feature-flag awareness should use
-    ``build_requires_mfa`` from Day 8 instead.
-    """
+    """Reject non-MFA tokens with 401 (no feature-flag awareness)."""
     if not claims.mfa:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

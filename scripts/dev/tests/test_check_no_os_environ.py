@@ -1,8 +1,5 @@
-"""Unit tests for the ``check-no-os-environ`` gate.
-
-Proves both directions: the gate REJECTS an ``os.environ`` read in an ordinary
-service module (exit 1, file named) and PERMITS it in the sanctioned surfaces
-(``config.py``, ``tests/``, ``libs/secret/``, explicit ``# noqa: ENV001``).
+"""The ``check-no-os-environ`` gate rejects ``os.environ`` in a service module and permits
+it in the sanctioned surfaces (``config.py``, ``tests/``, ``libs/secret/``, ``# noqa: ENV001``).
 """
 
 from __future__ import annotations

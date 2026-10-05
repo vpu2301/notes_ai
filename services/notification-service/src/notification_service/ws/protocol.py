@@ -1,12 +1,5 @@
-"""The `notifications.v1` wire protocol.
-
-Text frames only, JSON, a discriminated union on `type`, every model
-`extra="forbid"`. The subprotocol string IS the version: a client that
-does not offer it is refused at upgrade rather than served frames it may
-not understand (ADR-0012 lineage, dictation-service precedent).
-
-`docs/api/notifications-ws-v1.md` is generated from these models and is
-the byte-for-byte frontend contract.
+"""The `notifications.v1` wire protocol: JSON text frames, discriminated on `type`,
+`extra="forbid"`. The subprotocol string is the version; clients that do not offer it are refused.
 """
 
 from __future__ import annotations
@@ -107,10 +100,5 @@ _CLIENT_ADAPTER: Final[TypeAdapter[ClientCommand]] = TypeAdapter(ClientCommand)
 
 
 def parse_client_frame(raw: str | bytes) -> ClientCommand:
-    """Validate one inbound frame.
-
-    Raises ``pydantic.ValidationError``; the handler maps that to an
-    `error` frame rather than dropping the connection, so a client bug
-    is visible to the client instead of looking like a network fault.
-    """
+    """Validate one inbound frame; raises ``pydantic.ValidationError`` (handler answers with an `error` frame)."""
     return _CLIENT_ADAPTER.validate_json(raw)

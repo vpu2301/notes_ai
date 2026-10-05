@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "Batch ASR orchestrator. Accepts uploads, validates, enqueues to Redis Streams, returns results."
 requires-python = ">=3.12"
 dependencies = [
-    # Sprint TQ3: Double Metaphone for entity unification (BSD, pure Python).
+    # Double Metaphone for entity unification.
     "Metaphone>=0.6,<0.7",
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.29.0",

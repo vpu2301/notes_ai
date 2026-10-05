@@ -1,21 +1,5 @@
-"""Producer-side publish helper.
-
-Lives here, beside the envelope, so all six producers share one
-implementation instead of each hand-rolling an XADD with slightly
-different field names.
-
-Two deliberate constraints:
-
-* **No redis import.** This is a leaf package; the client is duck-typed
-  on ``.xadd()``. Depending on redis here would drag a broker client
-  into every service that merely wants the type definitions.
-
-* **Never raises.** A notification is strictly less important than the
-  domain action that triggered it. A note finalize must not fail, or
-  roll back, because the notification bus was unreachable — the whole
-  reason this is a stream and not an HTTP call (ADR-0029). Failures are
-  logged and swallowed; the event is lost, which is the correct
-  trade-off against losing the note.
+"""Producer-side publish helper: no redis import (duck-typed ``.xadd()``) and never raises, since a notification
+is less important than the domain action that triggered it (ADR-0029).
 """
 
 from __future__ import annotations
@@ -29,8 +13,7 @@ from .streams import NOTIFICATIONS_STREAM
 
 logger = logging.getLogger(__name__)
 
-# Cap the stream so a stuck consumer cannot exhaust Redis memory. Matches
-# the sprint-03 asr:jobs bound.
+# Caps the stream so a stuck consumer cannot exhaust Redis memory.
 DEFAULT_MAXLEN = 100_000
 
 
@@ -45,12 +28,8 @@ async def publish_event(
     stream: str = NOTIFICATIONS_STREAM,
     maxlen: int | None = DEFAULT_MAXLEN,
 ) -> str | None:
-    """Fire one envelope onto the bus. Returns the stream id, or None on failure.
-
-    The field layout matches what ``libs/messaging.RedisStreamsConsumer``
-    expects — ``value`` plus ``h-``-prefixed headers — so the consumer can
-    read it with no producer-specific special-casing.
-    """
+    """Fire one envelope onto the bus (``value`` + ``h-`` headers, as ``RedisStreamsConsumer`` reads them);
+    returns the stream id, or None on failure."""
     fields: dict[bytes, bytes] = {
         b"value": event.model_dump_json().encode("utf-8"),
         b"key": str(event.resource_id).encode("utf-8"),

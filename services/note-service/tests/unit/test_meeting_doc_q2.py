@@ -1,4 +1,4 @@
-"""Nothing real is dropped, nothing unsupported is written (Summary Engine v2, Q2).
+"""Nothing real is dropped, nothing unsupported is written.
 
 Lines instead of turns, noise confirmed by code, a fact budget that
 follows density, a meaning check on extraction, and a support gate on
@@ -44,7 +44,7 @@ def _run(meeting: dict, provider: ScriptedProvider, **kw: object) -> pipeline.Do
     )
 
 
-# ── T1: lines, not turns ────────────────────────────────────────────
+# ── lines, not turns ────────────────────────────────────────────
 
 MONOLOGUE = " ".join(f"Satz Nummer {i} erzählt etwas Neues über den Hafen." for i in range(180))
 
@@ -114,7 +114,7 @@ def test_a_quote_on_the_wrong_line_takes_the_timestamps_of_the_piece_that_has_it
     assert (kept.line, kept.start_ms, kept.end_ms) == (5, 20_000, 40_000)
 
 
-# ── T2: noise policy in code ────────────────────────────────────────
+# ── noise policy in code ────────────────────────────────────────
 
 GERMAN = (
     "Die Gewerkschaft hat für heute zu einem Warnstreik aufgerufen und die Arbeitgeber haben "
@@ -199,7 +199,7 @@ def test_a_run_whose_model_flags_everything_keeps_the_recording() -> None:
     assert "Hafenbund" in text and "Frühverrentung" in text
 
 
-# ── T3: fact budget follows density ─────────────────────────────────
+# ── fact budget follows density ─────────────────────────────────
 
 
 def test_a_dense_window_may_carry_twenty_four_facts() -> None:
@@ -226,7 +226,7 @@ def test_twenty_four_distinct_facts_are_all_kept() -> None:
     assert len(merge.merge_facts(kept)) == 24
 
 
-# ── T4: meaning check on extraction ─────────────────────────────────
+# ── meaning check on extraction ─────────────────────────────────
 
 
 def test_a_real_paraphrase_passes_and_its_ratio_is_pinned() -> None:
@@ -300,7 +300,7 @@ def test_merge_tokens_are_unchanged() -> None:
     )
 
 
-# ── T5: the support gate on every composed line ─────────────────────
+# ── the support gate on every composed line ─────────────────────
 
 
 def _meeting_with(
@@ -343,7 +343,7 @@ def test_three_failures_in_five_retry_strictly_then_fall_back_to_key_facts() -> 
     assert prompts.strict_suffix("de") not in systems[0]
     assert prompts.strict_suffix("de") in systems[1]
     assert document.stats["summary_retries"] == 1
-    # F3 amendment §2.9: the third rung is composed prose, never a list.
+    # The third rung is composed prose, never a list.
     assert document.stats["summary_ladder"] == "composed"
     overview = document.sections[0]
     assert overview.section_key == roles.OVERVIEW_KEY
@@ -353,7 +353,7 @@ def test_three_failures_in_five_retry_strictly_then_fall_back_to_key_facts() -> 
 
 
 def test_a_topic_left_with_one_bullet_is_not_a_topic() -> None:
-    """Sprint D2: a block whose answer keeps one supported bullet (the other
+    """A block whose answer keeps one supported bullet (the other
     invented) is asked again, then written as its chapter — the model's
     heading for it never appears."""
 
@@ -400,7 +400,7 @@ def test_a_framing_its_key_facts_do_not_carry_is_not_written() -> None:
 
     document, _ = _meeting_with(context=context)
     # The model's sentence is not written; the code-composed first
-    # paragraph (F3 amendment §2.9) stands in its place.
+    # paragraph stands in its place.
     framings = [line.text for _key, line in document.lines if line.kind == "framing"]
     assert all("Scholz" not in text for text in framings)
     assert document.stats["lines_unsupported"]["name"] >= 1

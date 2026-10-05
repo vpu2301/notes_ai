@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""Sprint L1 T3 — the local bake-off report, from the day's manifest entries.
+"""The local bake-off report (numbers only) from the day's manifest entries under
+``scripts/eval/local/bakeoff-<date>/``.
 
     uv run --project services/note-service python scripts/eval/local_bakeoff_report.py --date 2026-09-27
-
-`scripts/dev/local-bakeoff.sh` leaves one JSON entry per (candidate, corpus)
-under ``scripts/eval/local/bakeoff-<date>/`` (gitignored) pointing at the
-``notes-pipeline-<date>-dev_mac-<label>.json`` report the harness wrote.
-This script folds them into ``docs/eval/notes-local-bakeoff-<date>.md``:
-one row per model and corpus, numbers only — no transcript, no line of a
-note, no name.
-
-Columns: unsupported rate, invented claims, key-fact recall, the funnel
-(facts the model proposed → facts verification kept → lines rendered; M1's
-funnel counters are not merged, so this is ``facts_kept`` + the drop
-counters and the harness's line count), linter first-pass rate (D1),
-the r01–r03 rubric (pending human raters), seconds per meeting-hour, peak
-resident size and GPU share from ``ollama ps``, and the regression
-checklists' pass count. The API row is appended by L2 T5.
 """
 
 from __future__ import annotations

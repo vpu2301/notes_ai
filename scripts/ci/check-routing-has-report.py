@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-"""CI gate (Sprint SQ1 T6, SM-15) — a model is routed only with a number.
-
-For every backend that ``config/models.yaml`` routes a chat operation to
-(``routing``, standard and premium, plus the staging/prod
-``env_overrides``), ``docs/eval/`` must hold a notes report for that backend
-id, at the current ``PROMPT_VERSION``, on the real corpus
-(``eval/notes/v2``) — or ``docs/eval/routing-waivers.yaml`` must carry an
-unexpired waiver for that exact (backend, prompt_version), with a reason
-and an owner. A routing change or a prompt bump without either fails here,
-naming the missing pair.
+"""CI gate: every chat backend ``config/models.yaml`` routes to has a notes report in
+``docs/eval/`` at the current ``PROMPT_VERSION`` on the real corpus, or an unexpired
+waiver in ``docs/eval/routing-waivers.yaml``.
 
     python scripts/ci/check-routing-has-report.py [--config config/models.yaml]
 """

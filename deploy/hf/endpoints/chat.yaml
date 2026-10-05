@@ -1,5 +1,4 @@
-# hf_eu — chat/extraction backend for the `standard` tier (beta default).
-# Applied by scripts/models/hf_endpoints.py; diffed in CI (hf-endpoints-plan).
+# hf_eu: chat/extraction backend for the `standard` tier (beta default).
 name: notes-chat-{env}
 task: text-generation
 type: protected            # token-authenticated, no public URL (decision 12)
@@ -7,9 +6,7 @@ model:
   repository: google/gemma-3-4b-it   # gated (manual): the HF namespace must accept Google's Gemma terms once before apply
   revision: 093f9f388b31de276ce2de164bdc2081324b9767   # docs/models/PINS.md (fetched 2026-09-05)
   framework: pytorch
-  # Text Generation Inference (HF's server) speaks the OpenAI-compatible
-  # /v1/chat/completions route the libs/models provider uses; json_schema
-  # structured output is probed at startup (`structured_output: probe`).
+  # TGI speaks the OpenAI-compatible /v1/chat/completions route; json_schema is probed at startup.
   image:
     tgi:
       max_input_tokens: 24576

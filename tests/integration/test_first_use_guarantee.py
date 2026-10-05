@@ -1,34 +1,8 @@
-"""BE-3 F5 — "start using the product", kept in CI.
-
-The batch's promise is not "a stranger can create an account". It is that
-a stranger can create an account **and then use the thing they came for**.
-Those are different claims, and only the second one is worth shipping.
-
-Everything between them crosses a service boundary, and every one of
-those boundaries is a place where a brand-new identity is a shape nobody
-tested: a `tid` that did not exist a second ago, a tenant with no rows in
-any table, a `sub` with a bridge `users` row and nothing else, an audit
-chain with a genesis entry and no second link. This test signs up through
-the real API and then, with that token and nothing else, walks the path:
-
-    system templates are visible in the new workspace
-    an ASR job is accepted
-    a note is created from a transcript
-    the note is readable back
-    the notification feed answers
-    the new tenant's audit chain verifies
-
-**Any failure here is a batch blocker, not a "known issue".** A signup
-that lands somebody in a workspace where the first thing they try fails is
-worse than no signup: they have given us an address, been told they have
-an account, and got nothing.
-
-Runs the four services in process against the dev stack's Postgres and
-Redis, each with the FND-1 issuer list pointed at auth-service's dev
-signing key — which is the wiring `dual` deployments have, so a mistake in
-it fails here rather than in staging.
-
-Requires: ``RUN_DB_INTEGRATION=1``, ``make dev-up``, ``make migrate-up``.
+"""A stranger can sign up through the real API and then, with that token only, see
+templates, submit an ASR job, create and read a note, read the feed and verify the
+new tenant's audit chain. Any failure here is a batch blocker.
+Runs the four services in process with the ``dual`` issuer wiring.
+Requires ``RUN_DB_INTEGRATION=1``, ``make dev-up``, ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -60,9 +34,7 @@ ISSUER = "http://localhost:8000"
 KEYCLOAK_ISSUER = "http://localhost:8088/realms/notes"
 AUDIENCE = "mdx-api"
 
-# What the fleet is deployed with during `dual`: both issuers, the native
-# one served by auth-service itself. Building the services from THIS value
-# is the point — it is the config the sprint ships, not a test-only one.
+# The `dual` fleet config: both issuers, the native one served by auth-service.
 ISSUERS_JSON = json.dumps(
     [
         {
@@ -84,12 +56,7 @@ def _email() -> str:
 
 
 def _one_second_wav() -> bytes:
-    """16 kHz mono PCM silence, one second — the `asr-smoke.sh` fixture.
-
-    Silence rather than speech on purpose: this asserts the job is
-    accepted and queued, which is the part a new tenant can break. What
-    the model hears is the worker's business and is covered elsewhere.
-    """
+    """16 kHz mono PCM silence, one second: this asserts acceptance, not what the model hears."""
     rate, seconds = 16_000, 1
     data = b"\x00\x00" * rate * seconds
     header = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE"
@@ -101,8 +68,7 @@ def _one_second_wav() -> bytes:
 # ── the four apps, wired the way `dual` wires them ───────────────────────
 
 
-# The dev master key, mounted at /etc/mdx/master.key in compose. In
-# process it is read from the repo.
+# The dev master key (compose mounts it at /etc/mdx/master.key).
 MASTER_KEY = "infra/dev/master.key"
 
 
@@ -113,14 +79,8 @@ def _point_at_native_issuer(monkeypatch: pytest.MonkeyPatch, settings_module) ->
 
 
 class _JwksVia:
-    """Route the native issuer's JWKS URL to an in-process auth-service.
-
-    The `http://localhost:8000` in ISSUERS_JSON is a real address in
-    compose, and pointing the test at the container would test whatever
-    image happens to be running rather than this working tree. So the one
-    URL that matters is answered by the auth app under test; everything
-    else still goes to the network, which is what makes a Keycloak token
-    verifiable here too.
+    """Route the native issuer's JWKS URL to the in-process auth-service under test;
+    everything else still goes to the network.
     """
 
     def __init__(self, auth_app, url: str) -> None:
@@ -145,8 +105,7 @@ def _serve_jwks_from(app, auth_app) -> None:
             transport=_JwksVia(auth_app, f"{ISSUER}/.well-known/jwks.json")
         ),
     )
-    # Every service caches the built dependency; a swapped cache alone
-    # would be silently ignored (see auth.testing.install_test_issuer).
+    # Every service caches the built dependency; a swapped cache alone is ignored.
     if hasattr(state, "_current_user_dep"):
         delattr(state, "_current_user_dep")
     if hasattr(state, "current_user_dep"):
@@ -160,8 +119,7 @@ async def auth_app(monkeypatch: pytest.MonkeyPatch):
     from auth_service.config import settings
     from auth_service.main import create_app
 
-    # `dual`, not `native`: this is the mode the batch actually ships, and
-    # the mounting differs (see main.create_app).
+    # `dual`, not `native`: the mounting differs (see main.create_app).
     monkeypatch.setattr(settings, "idp_mode", "dual")
     monkeypatch.setattr(settings, "auth_signing_keys_file", "infra/dev/auth-signing-dev.json")
     monkeypatch.setattr(settings, "email_provider", "mock")
@@ -217,16 +175,12 @@ async def su():
         yield conn
     finally:
         like = f"%@{DOMAIN}"
-        # Order matters, and the order is the FK graph: since migration
-        # 0028 the authorship columns reference `identities`, so a note
-        # this test created pins the identity that wrote it.
+        # FK order: authorship columns reference `identities` (0028).
         for statement in (
             "DELETE FROM auth_challenges WHERE email LIKE $1",
             "DELETE FROM auth_sessions WHERE identity_id IN"
             " (SELECT id FROM identities WHERE email LIKE $1)",
-            # `notes.current_version_id` points back at `note_versions`,
-            # so the note goes first — with the pointer dropped, because
-            # the note itself cannot be deleted while it holds one.
+            # Drop `notes.current_version_id` first: it points at `note_versions`.
             "UPDATE notes SET current_version_id = NULL WHERE primary_author_id IN"
             " (SELECT id FROM identities WHERE email LIKE $1)",
             "DELETE FROM note_versions WHERE created_by IN"
@@ -262,16 +216,9 @@ def _captured_code(app, to_address: str) -> str:
 
 
 def _disable_resend_cooldown(auth_app) -> None:
-    """Say "assume a minute passed" to the built service.
-
-    The cooldown is read from `EmailCodeConfig`, copied out of settings
-    when the app was built, so patching settings afterwards does nothing.
-    It is enforced twice — a Redis counter and the newest challenge's
-    `created_at` — and this turns off the half a test cannot age.
-    """
+    """Turn off the Redis half of the resend cooldown (copied out of settings at build time)."""
     service = auth_app.state.svc.email_code_service
-    # 1, not 0: the window feeds a rate limiter that rejects a
-    # non-positive window. The DB half is aged separately by the caller.
+    # 1, not 0: the rate limiter rejects a non-positive window.
     object.__setattr__(service._cfg, "resend_seconds", 1)
 
 
@@ -306,8 +253,7 @@ async def test_a_brand_new_account_can_actually_use_the_product(
     tenant_id = result["tenant_id"]
     bearer = {"Authorization": f"Bearer {access_token}"}
 
-    # The signup contract itself: one personal workspace, and the bridge
-    # `users` row without which nothing below can save anything.
+    # One personal workspace and the bridge `users` row.
     assert [m["kind"] for m in result["memberships"]] == ["personal"]
     tenants = await su.fetchval(
         "SELECT count(*) FROM tenant_memberships m JOIN tenants t ON t.id = m.tenant_id"
@@ -323,9 +269,7 @@ async def test_a_brand_new_account_can_actually_use_the_product(
         "author a note (migration 0031)"
     )
 
-    # 1. Templates. The system `meeting_notes` rows are tenant-less, so a
-    #    workspace one second old must already see them — otherwise the
-    #    first screen after signup is empty.
+    # 1. Templates: tenant-less system rows must be visible at once.
     async with _client(note_app, **bearer) as notes:
         templates = await notes.get("/templates")
         assert templates.status_code == 200, templates.text
@@ -338,9 +282,7 @@ async def test_a_brand_new_account_can_actually_use_the_product(
         )
         template_id = meeting[0]["id"]
 
-    # 2. An ASR job is accepted. Acceptance is the part a new tenant can
-    #    break (tenant KEK, bucket prefix, queue row); what the model
-    #    hears afterwards is the worker's, and is covered by asr-smoke.
+    # 2. An ASR job is accepted (tenant KEK, bucket prefix, queue row).
     async with _client(asr_app, **bearer) as asr:
         submitted = await asr.post(
             "/asr/jobs",
@@ -351,13 +293,8 @@ async def test_a_brand_new_account_can_actually_use_the_product(
         job_id = submitted.json()["id"]
     assert job_id
 
-    # 3. A note, and 4. reading it back. The note is built on the system
-    #    template the new workspace just proved it can see, which is the
-    #    real first-run path: a template a tenant cannot see is a note it
-    #    cannot create. (`/v1/notes/from-transcript` needs a COMPLETED ASR
-    #    job, which needs the worker; the boundary under test here is
-    #    "can this brand-new tenant write and read a note", not "is a
-    #    worker up" — `scripts/smoke/notes_e2e.py` covers that link.)
+    # 3. A note on the system template, and 4. reading it back
+    #    (`from-transcript` needs a worker; notes_e2e.py covers that link).
     async with _client(note_app, **bearer) as notes:
         detail = await notes.get(f"/templates/{template_id}")
         assert detail.status_code == 200, detail.text
@@ -380,15 +317,12 @@ async def test_a_brand_new_account_can_actually_use_the_product(
         fetched = await notes.get(f"/v1/notes/{note_id}")
         assert fetched.status_code == 200, fetched.text
 
-    # 5. The notification feed answers. A new tenant has no notifications;
-    #    200 with an empty page is the correct answer and a 500 here would
-    #    break the app shell on first load.
+    # 5. The notification feed answers 200 with an empty page.
     async with _client(notification_app, **bearer) as feed:
         page = await feed.get("/v1/notifications")
         assert page.status_code == 200, page.text
 
-    # 6. The new tenant's audit chain verifies. Signup writes the genesis
-    #    entry; a chain that does not verify at length one never will.
+    # 6. The new tenant's audit chain verifies at length one.
     async with _client(auth_app, **bearer, **ORIGIN) as auth:
         verified = await auth.get("/audit/verify")
         assert verified.status_code == 200, verified.text
@@ -400,20 +334,12 @@ async def test_a_brand_new_account_can_actually_use_the_product(
 async def test_signing_up_twice_with_one_address_does_not_make_two_accounts(
     auth_app, su, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other half of the guarantee: the second visit is a login.
-
-    A signup path that quietly creates a second identity for an address
-    that already has one splits a person's notes across two workspaces
-    with no way back.
-    """
+    """The second visit is a login, never a second identity."""
     email = _email()
     first = await _sign_up(auth_app, email)
 
-    # Step past the 60 s resend cooldown. It is enforced twice — a Redis
-    # counter and the newest challenge's `created_at` — and both halves
-    # are per ADDRESS, so a fresh caller IP does not dodge it. Turning the
-    # cooldown off is the honest way to say "assume a minute passed";
-    # ageing only the row would leave the Redis half to flake on.
+    # Step past the 60 s resend cooldown (Redis counter + newest challenge's
+    # `created_at`, both per address).
     _disable_resend_cooldown(auth_app)
     await su.execute(
         "UPDATE auth_challenges SET created_at = created_at - interval '2 minutes'"
@@ -442,14 +368,7 @@ async def test_signing_up_twice_with_one_address_does_not_make_two_accounts(
 
 
 async def test_a_native_token_opens_note_service(note_app, auth_app) -> None:
-    """FND-1's fleet rollout, end to end.
-
-    note-service was configured with the two-issuer list and auth-service
-    minted the token. If the issuer list, the JWKS URL or the audience is
-    wrong anywhere in that chain, this is a 401 — and it is the failure
-    the `dual` period cannot ship with, because every new account's every
-    request depends on it.
-    """
+    """The two-issuer rollout end to end: a wrong issuer list, JWKS URL or audience is a 401 here."""
     result = await _sign_up(auth_app, _email())
     async with _client(note_app, Authorization=f"Bearer {result['access_token']}") as notes:
         response = await notes.get("/templates")

@@ -417,8 +417,7 @@ export function FolderPlusIcon({ size = 16 }: IconProps) {
   );
 }
 
-/** "Written by the model" — the spark that marks an enhanced note and
-    every answer in the ask thread. */
+/** The spark: marks an enhanced note and every ask answer. */
 export function SparkleIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>

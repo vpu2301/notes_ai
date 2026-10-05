@@ -1,4 +1,4 @@
-"""The weekly speaker-quality report (Sprint 30): counts only, never content."""
+"""The weekly speaker-quality report: counts only, never content."""
 
 from __future__ import annotations
 
@@ -48,8 +48,7 @@ CONTENT_COLUMNS = (
     "actor_sub",
     "segment_indices",
 )
-# Every output column is a count, a rate, a mean, the week, or one of the
-# two closed-vocabulary grouping columns.
+# Every output column is a count, rate, mean, the week, or a closed-vocabulary group.
 EXPECTED_COLUMNS = [
     "week",
     "dimension",

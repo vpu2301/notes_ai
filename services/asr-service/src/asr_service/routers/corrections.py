@@ -1,14 +1,7 @@
-"""Sprint TQ3 T2 — the spelling overlay's routes.
+"""Spelling overlay routes (``/asr/jobs/{id}/corrections``).
 
-    GET  /asr/jobs/{id}/corrections              what was unified / is proposed
-    PUT  /asr/jobs/{id}/corrections/{cid}        accept | reject (to_text editable on accept)
-    POST /asr/jobs/{id}/corrections:recompute    run the unifier again (people's decisions kept)
-
-Tenant from the token's membership, never from the body; another
-workspace's job is a 404. A PUT names the ``corrections_rev`` it saw: a
-stale one is a 409, so a decision made on an outdated view is refused
-rather than applied to the wrong spelling. Audit payloads carry counts,
-source and status — never a spelling.
+Tenant from the token, never the body; a stale ``corrections_rev`` is a 409.
+Audit payloads carry counts, source and status, never a spelling.
 """
 
 from __future__ import annotations

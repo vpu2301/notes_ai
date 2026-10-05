@@ -1,16 +1,7 @@
-"""The workspace's say over how notes leave it (Sprint 23, migration 0041).
-
-Stored as JSON on the tenant row and validated here; `{}` is every
-default, so a workspace that never opened the settings page behaves
-exactly as before this sprint. Read on a tenant-scoped connection
-(`tenants_self_select`) and cached in-process for a minute — the
-acceptance bar is "visible within a minute", and a cross-instance
-pub/sub for a value that changes a few times a year is not worth a
-channel. Written through the SECURITY DEFINER helper, since app_role may
-only SELECT `tenants`.
-
-The one rule with a plan attached (G-1): only a paid workspace may turn
-the page's product line off. The header is the price of the free tier.
+"""The workspace's say over how notes leave it: JSON on the tenant row (`{}` is
+every default), cached in-process for a minute, written through the SECURITY
+DEFINER helper (app_role may only SELECT `tenants`). Only a paid workspace may
+turn the page's product line off.
 """
 
 from __future__ import annotations
@@ -28,8 +19,7 @@ _TTL_SECONDS = 60.0
 
 
 class SharingPolicy(BaseModel):
-    # `ignore`, not `forbid`: rows written before a key was retired
-    # (`require_finalized`, 0042) must still load.
+    # `ignore`, not `forbid`: rows with a retired key (`require_finalized`) must still load.
     model_config = ConfigDict(extra="ignore")
 
     external_links_enabled: bool = True

@@ -12,8 +12,7 @@ export function LoginShell({
   title: string;
   subtitle?: ReactNode;
   children: ReactNode;
-  /** When given, the card is a real `<form>` so Enter submits and password
-   *  managers recognise it. */
+  /** When given, the card is a real `<form>` (Enter submits, password managers recognise it). */
   onSubmit?: (e: FormEvent) => void;
 }) {
   const brand = (
@@ -56,12 +55,7 @@ export function Banner({ children, tone = "danger" }: { children: ReactNode; ton
   );
 }
 
-/**
- * Ticks a seconds counter down to zero.
- *
- * The setter is held in a ref so that passing an inline `setState` does not
- * tear down and rebuild the interval on every tick.
- */
+/** Ticks a seconds counter down to zero; the setter lives in a ref so the interval survives re-renders. */
 export function useCountdown(seconds: number, set: (n: number) => void) {
   const setRef = useRef(set);
   setRef.current = set;

@@ -1,14 +1,4 @@
-"""Mint RS256 access tokens in the exact ``libs/auth`` :class:`Claims` shape (IDX-A2, F2).
-
-The contract is the verifier's, not ours: every claim here is a field
-``Claims`` declares, and a unit test round-trips the payload through
-``Claims(**payload)`` so a claim the verifier forbids can never ship.
-
-``mint`` takes plain values rather than identity/session rows on purpose —
-the A1 data model (``identities``, ``auth_sessions``, membership → role
-mapping) is not in the repo yet, and the token format must not depend on
-how those rows are shaped.
-"""
+"""Mint RS256 access tokens in the exact ``libs/auth`` :class:`Claims` shape (a test round-trips the payload)."""
 
 from __future__ import annotations
 
@@ -73,11 +63,7 @@ class TokenService:
         email: str | None = None,
         name: str | None = None,
     ) -> MintedToken:
-        """Sign an access token for ``identity_id`` in ``tenant_id``.
-
-        Membership checks are the caller's job (``SessionService`` in the
-        A1-dependent half of this sprint); this only encodes and signs.
-        """
+        """Sign an access token for ``identity_id`` in ``tenant_id``; membership checks are the caller's job."""
         if not roles:
             raise ValueError("a token needs at least one role")
         if not session_id:

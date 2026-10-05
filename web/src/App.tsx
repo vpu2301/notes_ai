@@ -30,17 +30,8 @@ import { AppShell } from "./shell/AppShell";
 import { SpacesProvider } from "./spaces/SpacesContext";
 
 /**
- * The signed-in half of the app, remounted whenever the active workspace
- * changes.
- *
- * Every page here fetches through `api()` into local state — there is no
- * query cache to invalidate — so the only honest way to re-scope the UI is
- * to throw the old tree away. The key covers `SpacesProvider`'s cache and
- * `NotificationBell`'s poll along with every page.
- *
- * The switcher in the account menu (`AppShell`) changes `activeTenantId`
- * through `AuthContext.switchWorkspace` (`POST /auth/token`), and this key
- * is what makes that one call enough.
+ * The signed-in half, remounted on every workspace switch: pages hold fetched
+ * state locally (no query cache), so the old tree must be thrown away.
  */
 function WorkspaceScope({ children }: { children: ReactNode }) {
   const { activeTenantId } = useAuth();
@@ -52,8 +43,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (status === "restoring") {
-    // A quiet splash: the silent-refresh either restores the session in a
-    // few hundred ms or lands the user on /login — no flash of either UI.
+    // Quiet splash while the silent refresh decides; no flash of either UI.
     return (
       <div className="splash dotted" aria-busy="true">
         <span className="save-status" data-state="saving">
@@ -74,13 +64,11 @@ export function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            {/* Signed-out flows. `/welcome` is the exception — it needs the
-                session the code step just created, and guards itself. */}
+            {/* Signed-out flows; `/welcome` needs the fresh session and guards itself. */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/login/password" element={<PasswordLoginPage />} />
             <Route path="/login/mfa" element={<MfaPage />} />
-            {/* Self-serve account creation (BE-0). Also the route macOS and
-                iOS open in a browser from "Create one". */}
+            {/* Self-serve signup; also what macOS/iOS open from "Create one". */}
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/reset" element={<ResetPasswordPage />} />
             <Route path="/account-recovery" element={<AccountRecoveryPage />} />
@@ -88,7 +76,7 @@ export function App() {
             {/* Public link: anyone with the token, no sign-in. */}
             <Route path="/s/privacy" element={<SharedPrivacyPage />} />
             <Route path="/s/:token" element={<SharedNotePage />} />
-            {/* Where the shared page's CTA lands (Sprint 19 fake door). */}
+            {/* Where the shared page's CTA lands. */}
             <Route path="/join" element={<JoinPage />} />
             <Route
               element={
@@ -106,7 +94,7 @@ export function App() {
               <Route path="/meeting/new" element={<MeetingPage />} />
               <Route path="/new" element={<NewNotePage />} />
               <Route path="/notes/:noteId" element={<NoteEditorPage />} />
-              {/* Sprint 22: workspace admins only; the API enforces it. */}
+              {/* Workspace admins only; the API enforces it. */}
               <Route path="/admin/sharing" element={<SharingStatsPage />} />
               <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />
               <Route path="/settings" element={<SettingsLayout />}>
@@ -117,19 +105,17 @@ export function App() {
                 <Route path="members" element={<MembersSettingsPage />} />
                 {/* Server-checked as well — see DevicesSettingsPage. */}
                 <Route path="devices" element={<DevicesSettingsPage />} />
-                {/* Sprint 23: branding + external sharing policy (admins). */}
+                {/* Branding + external sharing policy (admins). */}
                 <Route path="workspace" element={<WorkspaceSettingsPage />} />
-                {/* Sprint 37: who processes this workspace's meetings.
-                    Every member may read it (ADR-0046 decision 12). */}
+                {/* Who processes this workspace's meetings; every member may read it. */}
                 <Route path="data" element={<DataSettingsPage />} />
-                {/* Billing (0068): plan, usage, plan changes — admins. */}
+                {/* Plan, usage, plan changes (admins). */}
                 <Route path="billing" element={<BillingSettingsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          {/* The one step-up prompt, mounted above every route so that a
-              403 raised anywhere resolves in the same place. */}
+          {/* The one step-up prompt: a 403 raised anywhere resolves here. */}
           <ReauthDialog />
         </BrowserRouter>
       </AuthProvider>

@@ -1,9 +1,5 @@
-"""Sprint L2 — Mistral (EU API) is the dev default, the local model the fallback.
-
-The registry decides at load (missing key, forced switch); `probe_chat`
-decides once more at startup (the API does not answer). Dev falls back and
-says why; staging refuses to boot. The AI-settings page reads the same
-object, so what it says is what the worker does.
+"""Mistral (EU API) is the dev default, the local model the fallback: the registry
+decides at load, `probe_chat` once more at startup; dev falls back, staging refuses to boot.
 """
 
 from __future__ import annotations
@@ -210,7 +206,7 @@ def test_side_calls_use_their_routed_provider_and_fall_back_to_the_writer() -> N
     assert calls == [(str(tenant), "classify"), (str(tenant), "entities")]
 
 
-# ── T5: the engine's sizes follow the context ───────────────────────
+# ── the engine's sizes follow the context ───────────────────────
 
 
 def test_sizes_keep_todays_values_up_to_32k_and_grow_on_128k() -> None:
@@ -226,7 +222,7 @@ def test_sizes_keep_todays_values_up_to_32k_and_grow_on_128k() -> None:
         assert s.extract_max_tokens == pipeline.EXTRACT_MAX_TOKENS
         assert s.reduce_max_tokens == pipeline.REDUCE_MAX_TOKENS
         assert s.max_facts_budget == pipeline.MAX_FACTS_BUDGET
-    # SQ2 T2: extraction windows stop at 8 000 characters on a long context;
+    # Extraction windows stop at 8 000 characters on a long context;
     # the budgets scale with them (facts per character stay constant).
     assert large.window_chars == windows.EXTRACT_WINDOW_CHARS == 8_000
     assert large.max_facts_budget == 32 and large.extract_max_tokens == 4_000
@@ -297,7 +293,7 @@ def test_the_settings_view_says_who_writes_and_why(monkeypatch) -> None:  # noqa
     assert "k" not in (writer.model_id or "").split("-") and "http" not in str(writer)
 
 
-# ── T3: a processor nobody agreed to blocks the run before a byte leaves ──
+# ── a processor nobody agreed to blocks the run before a byte leaves ──
 
 
 def test_an_unacknowledged_processor_blocks_generation_with_the_code(monkeypatch) -> None:  # noqa: ANN001

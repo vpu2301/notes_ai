@@ -1,14 +1,7 @@
-"""``JobRunner`` — claim → run handler → outcome, with lease heartbeat.
+"""``JobRunner``: claim → probe → run handler → outcome, with lease heartbeat.
 
-Warming policy (DEP-S1-03): before a handler runs, the runner calls the
-handler's ``probe`` (if it has one) on the routed backend; a
-``ProviderError(kind=warming)`` from the probe *or* the handler parks the
-job as ``waiting_on_model`` without consuming an attempt. Other
-``ProviderError`` kinds map through ``retryable``; ``auth`` is never
-retried (no retry storm on a revoked token).
-
-Usage records emitted while the handler runs are flushed into the
-``model_usage`` table inside the job's completion transaction.
+A ``warming`` ProviderError parks the job without consuming an attempt; ``auth`` is never retried.
+Usage records are flushed inside the job's completion transaction.
 """
 
 from __future__ import annotations
@@ -46,10 +39,7 @@ class Handler(Protocol):
 
 ProbeFn = Callable[[JobContext], Awaitable[None]]
 BackendFn = Callable[[JobContext], tuple[str, int]]  # → (backend name, cold_start_seconds)
-# (ctx, error_kind) — called once the job will never run again (`dead` after
-# its last attempt, or `failed` on a non-retryable error), so the handler
-# can settle whatever row it owns. Without it a probe that never passes
-# leaves the caller's own state "queued" forever while the job is dead.
+# (ctx, error_kind), called once the job will never run again so the handler can settle its own row.
 DeadFn = Callable[[JobContext, str], Awaitable[None]]
 
 
@@ -82,8 +72,7 @@ class JobRunner:
         self._ledger = ledger
         self._lease = lease_seconds
         self._poll = poll_interval_s
-        # None = plain FIFO. A number makes every claim fair between
-        # workspaces and caps how many one of them may run at once.
+        # None = plain FIFO; a number = fair claims and a per-workspace running cap.
         self._per_tenant = per_tenant
         self._batch = batch
         self._stop = asyncio.Event()
@@ -95,7 +84,6 @@ class JobRunner:
     def stop(self) -> None:
         self._stop.set()
 
-    # ── loop ────────────────────────────────────────────────────────────
     async def run_forever(self) -> None:
         while not self._stop.is_set():
             jobs = await self._claim()
@@ -107,8 +95,7 @@ class JobRunner:
                 await self.run_one(job)
 
     async def _claim(self) -> list[Job]:
-        # `per_tenant` is passed only when asked for, so a queue that has
-        # no fairness question (and every test double) keeps its signature.
+        # `per_tenant` is passed only when set, so test doubles keep their signature.
         extra = {"per_tenant": self._per_tenant} if self._per_tenant is not None else {}
         return await self._queue.claim(
             self.kinds,
@@ -125,7 +112,6 @@ class JobRunner:
             await self.run_one(job)
         return len(jobs)
 
-    # ── one job ─────────────────────────────────────────────────────────
     async def run_one(self, job: Job) -> JobStatus:
         spec = self._handlers[job.kind]
         ctx = JobContext(job=job, worker_id=self._worker_id)
@@ -159,8 +145,7 @@ class JobRunner:
             if self._ledger:
                 leftover = self._ledger.drain()
                 if leftover:
-                    # The completion path flushes inside its transaction; anything
-                    # left here belongs to a failed/parked job and is still a cost.
+                    # Left over from a failed/parked job; still a cost.
                     await self._flush_standalone(job, leftover)
         metrics.jobs_processing_seconds.record(
             time.monotonic() - started, {"kind": job.kind, "outcome": str(status)}
@@ -212,8 +197,7 @@ class JobRunner:
     async def _if_dead(
         self, spec: HandlerSpec, ctx: JobContext, status: JobStatus, error_kind: str
     ) -> None:
-        """Tell the handler its job is over, once, and never let that call
-        turn a settled job into an unhandled one."""
+        """Tell the handler its job is over; never let that call turn a settled job into an unhandled one."""
         if status not in (JobStatus.DEAD, JobStatus.FAILED) or spec.on_dead is None:
             return
         try:

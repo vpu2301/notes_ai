@@ -1,49 +1,9 @@
-"""Main job processor — Whisper inference loop.
+"""Job processor: queue message → decode → ASR → diarize → encrypted result → row.
 
-Lifecycle of a job:
-
-1. Pull message from Redis Streams via ``RedisStreamsConsumer``.
-2. Parse :class:`JobEnqueuePayload` from the message value.
-3. Idempotency check: SELECT status from transcription_jobs.
-4. Mark running, audit ``asr.transcription_started``.
-5. Fetch encrypted audio bytes from S3 via ``EncryptedObjectStore``.
-6. Decode via ffmpeg into mono 16 kHz float32 PCM.
-7. Run ``WhisperEngine.transcribe`` (the payload's optional free-text
-   vocabulary hint feeds Whisper's initial_prompt).
-8. Serialize :class:`TranscriptionOutput` JSON; encrypt + upload.
-9. Mark complete, audit ``asr.transcription_complete``.
-10. ACK the Redis message.
-
-Failure modes are the closed vocabulary in :mod:`asr_models.errors`, and
-the vocabulary decides the retry: a kind whose spec says ``retryable`` goes
-back to ``consumer.fail()`` for redelivery, everything else is recorded on
-the row and acked. Re-delivering a corrupt file three more times only
-delays the failure the user is already waiting on.
-
-  - ``AudioDecodeError``      → ``corrupt_audio``        (terminal)
-  - decoded PCM has no speech → ``no_speech``            (terminal)
-  - audio object gone         → ``audio_missing``        (terminal)
-  - envelope/AAD failure      → ``decrypt_failed``       (terminal)
-  - object store unreachable  → ``storage_unavailable``  (retried)
-  - model not loaded          → ``model_unavailable``    (retried)
-  - CUDA OOM                  → ``gpu_oom``              (terminal; frees cache)
-  - inference over budget     → ``timeout``              (terminal)
-  - transcript upload failed  → ``result_store_failed``  (retried)
-  - anything else             → ``unhandled``            (retried → DLQ)
-
-Whatever the kind, the row reaches a terminal status before the message is
-acked. A failure the worker knows about and the ``transcription_jobs`` row
-does not is the one outcome this module must never produce: the job would
-sit in ``running`` forever, holding a slot in the tenant's concurrency
-budget and showing a spinner nobody will ever resolve. The retry-exhausted
-path (DLQ) and the reaper in asr-service exist for the two cases where the
-worker cannot write that row itself.
-
-Cancellation is checked at four points, because ``DELETE /asr/jobs/{id}``
-on a RUNNING job can only ask: it sets ``cancel_requested`` and leaves the
-status alone, so nothing stops unless the worker looks. It looks before
-claiming the job, after decoding the audio, between inference chunks, and
-once more before the transcript is stored.
+Failure kinds come from :mod:`asr_models.errors`; the spec's ``retryable`` decides
+redelivery vs. recording on the row. Invariant: the row reaches a terminal status
+before the message is acked. Cancellation is a request flag on the row, polled at
+four points (before claim, after decode, between chunks, before store).
 """
 
 from __future__ import annotations
@@ -152,8 +112,7 @@ _diarization_clusters_dropped = _meter.create_counter(
     description="Clusters dissolved by the speaker floor or the roster cap",
     unit="1",
 )
-# Acceptance metric for the diarizer (Sprint 29): p95 must stay ≤ 0.25.
-# Per job, so the quantile is of the ratio itself, not a ratio of quantiles.
+# Per-job ratio so the p95 (budget 0.25) is of the ratio itself.
 _diarization_audio_ratio = _meter.create_histogram(
     "mdx_asr_diarization_audio_ratio",
     description="Diarization wall time divided by audio duration, per diarized job or re-run",
@@ -186,7 +145,6 @@ _prompt_echo_segments_dropped = _meter.create_counter(
     description="Segments left empty by the prompt-echo guard and dropped (Sprint I2 T3)",
     unit="1",
 )
-# Sprint F1: coverage of speech by the transcript.
 _uncovered_speech_ms = _meter.create_counter(
     "mdx_asr_uncovered_speech_ms_total",
     description="Speech with no transcript, by gap cause (Sprint F1)",
@@ -241,17 +199,14 @@ async def run_forever(state: WorkerState) -> None:
                 await _process_one(state, msg)
                 await consumer.ack(msg)
             except _NonRetryableError as exc:
-                # Already recorded a failure on the job row; ack so the
-                # message doesn't keep getting redelivered.
+                # Row already says failed; ack so it is not redelivered.
                 logger.info(
                     "processor.non_retryable",
                     extra={"reason": exc.kind, "detail": str(exc)},
                 )
                 await consumer.ack(msg)
             except _RetryableError as exc:
-                # Transient by classification — hand it back for redelivery.
-                # The job row is left in `running` on purpose: it IS still
-                # running, on the next attempt. Only exhaustion is terminal.
+                # Row stays `running` on purpose; only exhaustion is terminal.
                 logger.warning(
                     "processor.retryable",
                     extra={"reason": exc.kind, "detail": str(exc)},
@@ -273,28 +228,17 @@ async def _fail_or_retry(
     msg: Message,
     exc: _JobError,
 ) -> None:
-    """Hand a retryable failure back to the queue; land it if that was the last try.
-
-    ``consumer.fail`` reports whether this attempt exhausted the retry
-    budget and moved the message to the DLQ. That was previously the end of
-    the story from the queue's side and the beginning of a silence on the
-    database's: the message left the stream, and the job row stayed in
-    ``running`` with no worker, no retry, and no explanation — indefinitely.
-    A DLQ'd message is a dead job, and the row has to say so.
-    """
+    """Hand a retryable failure back to the queue; a DLQ'd message must also fail the row."""
     dead_lettered = await consumer.fail(msg, error_kind=exc.kind)
     if not dead_lettered:
         return
     ids = _identify(msg)
     if ids is None:
-        # Unparseable payload — there is no row to fail. The DLQ entry is
-        # the whole record, which is why bad_payload is never retried.
         return
     tenant_id, job_id, requester_sub = ids
     request_id = _rediarize_request(msg)
     if request_id is not None:
-        # A re-labelling run that ran out of retries fails the RE-RUN, not
-        # the job: the transcript and its previous labels are untouched.
+        # Fails the re-run only; the job and its labels are untouched.
         with contextlib.suppress(Exception):
             await _mark_rediarize_failed(
                 state,
@@ -308,8 +252,7 @@ async def _fail_or_retry(
         "processor.retry_exhausted",
         extra={"job_id": str(job_id), "last_error_kind": exc.kind},
     )
-    # Suppressed: if the database is what's failing, this write fails too.
-    # The reaper in asr-service is the backstop for exactly that case.
+    # If the DB is what's failing this write fails too; the reaper is the backstop.
     with contextlib.suppress(Exception):
         await _mark_failed(
             state,
@@ -342,9 +285,7 @@ def _rediarize_request(msg: Message) -> UUID | None:
     return request_id
 
 
-# How often the engine may ask the database whether the user has
-# cancelled. Between VAD chunks, so the real granularity is whichever is
-# coarser — one chunk, or one second.
+# Cancel poll interval; checked between VAD chunks, so granularity is the coarser of the two.
 _CANCEL_POLL_SECONDS = 1.0
 
 
@@ -366,12 +307,7 @@ class _RetryableError(_JobError):
 
 
 def _classified(kind: JobErrorKind, detail: str) -> _JobError:
-    """Build the right exception for ``kind`` straight from its spec.
-
-    Retry policy lives in the vocabulary, not at the raise site — so
-    ``storage_unavailable`` cannot be spelled retryable in one branch and
-    terminal in the next.
-    """
+    """Exception for ``kind``; retry policy comes from the spec, never the raise site."""
     spec = spec_for(str(kind))
     cls = _RetryableError if spec is not None and spec.retryable else _NonRetryableError
     return cls(str(kind), detail)
@@ -381,9 +317,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
     try:
         payload = JobEnqueuePayload.model_validate_json(msg.value.decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 — decode or schema, same dead end
-        # Version skew: asr-service enqueued a shape this worker cannot
-        # read. Retrying re-reads the same bytes to the same conclusion, so
-        # this goes straight to the DLQ where an operator can see it.
+        # Version skew: deterministic, so straight to the DLQ.
         logger.error("processor.bad_payload", extra={"error": str(exc)})
         raise _NonRetryableError(
             str(JobErrorKind.BAD_PAYLOAD), f"{type(exc).__name__}: {exc}"
@@ -391,13 +325,11 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
     tenant_id = payload.tenant_id
     job_id = payload.job_id
 
-    # Before the "row is complete → skip" guard below: a re-labelling run
-    # targets a job that is complete by definition.
+    # Before the complete→skip guard: a re-run targets a complete job.
     if payload.task == "rediarize":
         await _rediarize_one(state, payload)
         return
 
-    # Idempotency: check the row before doing work.
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT status, cancel_requested FROM transcription_jobs WHERE id = $1",
@@ -420,7 +352,6 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         if row["cancel_requested"]:
             await _mark_cancelled(state, tenant_id, job_id)
             return
-        # Move the row to running.
         await conn.execute(
             """
             UPDATE transcription_jobs
@@ -440,9 +371,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
     )
 
     t0 = time.monotonic()
-    # Every classified failure below leaves through `die`, which records the
-    # terminal ones on the row before raising. Retryable kinds deliberately
-    # leave the row in `running`: the job has not failed, this attempt has.
+    # `die` records terminal kinds on the row before raising; retryable kinds leave it `running`.
     die = _dier(state, tenant_id, job_id, requester_sub=payload.requester_sub)
     try:
         ciphertext_key = f"{tenant_id}/{payload.audio_id}.enc"
@@ -453,14 +382,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 aad=payload.audio_id.bytes,
             )
         except ObjectNotFoundError as exc:
-            # Retention, the S11 erasure engine, or an upload whose row was
-            # written but whose object never landed. The bytes are not
-            # coming back — no amount of redelivery finds them.
             raise await die(JobErrorKind.AUDIO_MISSING, str(exc)) from exc
         except CryptoError as exc:
-            # Wrong AAD, a tenant KEK that will not unwrap, a truncated
-            # envelope. Deterministic, and an operator's problem — the
-            # user re-uploading the same file changes nothing.
             raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — S3 transport
             raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
@@ -473,31 +396,22 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         audio_seconds = pcm.shape[0] / 16_000.0
         _audio_duration_seconds.record(audio_seconds)
 
-        # ffmpeg is happy to decode a file into nothing — a container whose
-        # audio stream is empty, or a recording that is pure silence. Whisper
-        # given no samples answers with a hallucinated phrase, and a
-        # hallucination stored as a `complete` transcript is worse than any
-        # failure: it reaches the note looking like something the speaker
-        # said.
+        # Whisper hallucinates on empty input; never store that as `complete`.
         if audio_seconds <= 0:
             raise await die(JobErrorKind.NO_SPEECH, "decoded audio contains no samples")
 
-        # Check cancel between fetch and inference.
         if await _is_cancelled(state, tenant_id, job_id):
             await _mark_cancelled(state, tenant_id, job_id)
             return
 
         if not state.engine.is_loaded:
-            # The readiness probe should have caught this; if it did not,
-            # say so rather than letting the engine's bare RuntimeError get
-            # filed as `unhandled`.
             raise await die(JobErrorKind.MODEL_UNAVAILABLE, "whisper model is not loaded")
 
         max_infer = max(
             60.0,
             audio_seconds * settings.asr_max_inference_seconds_multiplier,
         )
-        # One budget for both passes (Sprint F1 raised the multiplier 1.3×).
+        # One budget for both decode passes.
         deadline = time.monotonic() + max_infer
         should_cancel = _cancel_poller(state, tenant_id, job_id)
         try:
@@ -506,17 +420,10 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 pcm,
                 stereo=stereo,
                 language=payload.language,
-                # Optional free-text vocabulary hint → initial_prompt.
                 prompt=payload.vocabulary_hint,
                 first_frame_offset_ms=payload.first_frame_offset_ms,
                 timeout=max_infer,
                 deadline=deadline,
-                # Cancel is a request, not a status: DELETE /asr/jobs/{id}
-                # on a RUNNING job only sets `cancel_requested`, and it is
-                # the worker that has to act on it. Before this it never
-                # looked again after inference started, so pressing Cancel
-                # on a job that was already transcribing did nothing at
-                # all — the job ran to completion and came back `complete`.
                 should_cancel=should_cancel,
                 job_id=job_id,
             )
@@ -526,10 +433,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         except TimeoutError:
             raise await die(JobErrorKind.TIMEOUT, f"inference exceeded {max_infer:.1f}s") from None
         except ProviderError as exc:
-            # HTTP ASR backend (dev_mac_asr / hf_eu_asr) failed. Retryable
-            # kinds (warming, unavailable, timeout, rate_limited) become
-            # MODEL_UNAVAILABLE so the job is re-queued; anything else is
-            # a hard failure with the kind in the message (no content).
+            # Retryable backend kinds re-queue as MODEL_UNAVAILABLE; the rest fail hard,
+            # kind only (no content).
             if exc.retryable:
                 raise await die(
                     JobErrorKind.MODEL_UNAVAILABLE, f"asr backend {exc.backend}: {exc.kind}"
@@ -544,8 +449,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             _release_cuda_cache()
             raise err from exc
 
-        # Sprint TQ4 T4: the candidate engine decodes the same audio while
-        # the primary goes on (diarization); bounded, numbers only.
+        # Shadow ASR runs alongside diarization; bounded, numbers only.
         shadow_task: asyncio.Task[Any] | None = None
         if getattr(state, "shadow_asr", None) is not None and output.segments and shadow.sampled():
             shadow_task = asyncio.create_task(
@@ -569,10 +473,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 )
             )
 
-        # Inference ran and produced nothing. Same reasoning as the empty-PCM
-        # gate above, one stage later: a zero-segment transcript stored as
-        # `complete` reads to the user as "we transcribed your recording
-        # and it was blank", which is indistinguishable from a lost dictation.
+        # A zero-segment `complete` transcript is indistinguishable from a lost dictation.
         if not output.segments:
             raise await die(
                 JobErrorKind.NO_SPEECH,
@@ -586,15 +487,10 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         _gpu_memory_peak.record(output.metadata.peak_gpu_mem_mb)
 
         diar: OfflineDiarization | None = None
-        # Set when a REMOTE diarizer (shape B) could not label this
-        # recording: the transcript still completes, and the row carries
-        # why, so the UI can offer "try telling speakers apart again".
+        # Remote diarizer failure: transcript still completes, row carries why.
         diarization_error: str | None = None
         if payload.diarize:
-            # Ambient Capture v1: speaker-attribute the finished transcript.
-            # Runs after the transcript exists so a diarizer failure can be
-            # classified precisely (diarization_*) instead of burning the
-            # Whisper pass into an `unhandled`.
+            # After the transcript exists, so a diarizer failure classifies as diarization_*.
             try:
                 await state.diarizer.ensure_loaded()
             except DiarizationUnavailableError as exc:
@@ -617,9 +513,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                     JobErrorKind.DIARIZATION_FAILED, state, job_id=job_id, exc=exc
                 )
         if diar is not None:
-            # Stop the clock before word attribution: this number is
-            # judged against the 0.25 x audio budget, and attribution is
-            # not the diarizer's work.
+            # Clock stops before word attribution (budget is the diarizer's alone).
             diar_seconds = time.monotonic() - diar_t0
             output = _apply_diarization(output, diar)
             stats = _diarization_stats(output, diar, diar_seconds, channel_layout=layout)
@@ -628,10 +522,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             )
             _record_diarization_metrics(stats, audio_seconds=audio_seconds)
 
-        # Last look before the transcript becomes a fact. A cancel that
-        # landed during the final chunk, or while the audio was being
-        # decoded, must not be overwritten by a `complete` — the user
-        # asked for this job to stop, and a stored transcript is not stopping.
+        # A cancel that landed during the last chunk must not become `complete`.
         if await _is_cancelled(state, tenant_id, job_id):
             await _mark_cancelled(state, tenant_id, job_id)
             return
@@ -655,10 +546,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 aad=job_id.bytes,
             )
         except Exception as exc:  # noqa: BLE001 — encrypt or transport
-            # Retryable, and the retry redoes the inference. That is the
-            # cheaper mistake: the alternative is a job marked complete
-            # pointing at an object that was never written, which fails much
-            # later, on read, as a 410 the user cannot act on.
+            # Retryable: redoing inference beats a `complete` row pointing at a missing object.
             raise await die(JobErrorKind.RESULT_STORE_FAILED, str(exc)) from exc
 
         try:
@@ -684,10 +572,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                     job_id,
                     f"minio://{state.transcript_store.bucket}/{result_key}",
                     json.dumps(output.metadata.model_dump(mode="json")),
-                    # For an `auto` job this is what language identification
-                    # heard; for a pinned job it echoes the pin. Clients pick
-                    # the note template from it, so it lives on the row, not
-                    # only inside the encrypted result.
+                    # Language lives on the row: clients pick the template from it.
                     output.language,
                     diarization_error,
                     json.dumps(quality.summarize(output, audio_seconds=audio_seconds)),
@@ -698,10 +583,8 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 )
                 named = _channel_name(output, payload.local_speaker_name)
                 if named is not None:
-                    # The one name the platform sets without a click (ADR-0053):
-                    # the only speaker on this Mac's microphone is the account
-                    # owner. Visible provenance, one click clears it — and a
-                    # label a person already named or cleared is left alone.
+                    # ADR-0053: sole local speaker is the owner; a label a person set
+                    # or cleared is left alone.
                     await conn.execute(
                         """
                         UPDATE transcription_jobs
@@ -717,10 +600,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                         named[0],
                     )
         except Exception as exc:  # noqa: BLE001 — asyncpg transport / pool
-            # The transcript is stored; only the bookkeeping failed. The
-            # redelivery re-runs inference and overwrites the same key, so
-            # this is safe to retry — and unlike the alternative it does not
-            # strand a finished transcript behind a `running` row.
+            # Transcript stored, bookkeeping failed; a retry overwrites the same key.
             raise await die(JobErrorKind.DB_UNAVAILABLE, str(exc)) from exc
 
         await state.audit_writer.write_event(
@@ -754,10 +634,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             severity=Severity.INFO,
         )
 
-        # After the status UPDATE and the audit write, outside the
-        # tenant_connection block — the same shape note-service uses.
-        # A job the user submitted and stopped watching is the strongest
-        # case in the system for a notification.
+        # After the status UPDATE and audit write, outside tenant_connection.
         await emit_transcription_completed(
             state.redis,
             tenant_id=tenant_id,
@@ -768,15 +645,13 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             language=output.language,
             model=output.metadata.model,
         )
-        # After the job is complete and announced: the shadow engine can
-        # neither change what the user sees nor make them wait for it.
+        # After completion: the shadow engine can neither change nor delay the result.
         if diar is not None and state.shadow_diarizer is not None:
             await _run_shadow(state.shadow_diarizer, pcm, payload, diar, job_id=job_id)
     except _JobError:
         raise
     except Exception as exc:
-        # Last-chance translation: anything we recognise as CUDA OOM
-        # becomes a non-retryable error to avoid hammering the GPU.
+        # CUDA OOM is terminal, to avoid hammering the GPU.
         if _looks_like_oom(exc):
             _oom_counter.add(1)
             err = await die(JobErrorKind.GPU_OOM, str(exc))
@@ -798,25 +673,11 @@ async def decode_recording(
     should_cancel: Any,
     job_id: UUID,
 ) -> TranscriptionOutput:
-    """The transcript of one recording exactly as a job makes it. ``state``
-    needs only ``engine`` (the ASR provider).
+    """The one audio→transcript path, shared by the job and the eval harness.
 
-    The one path from audio to transcript. The job calls it; so does the
-    gold-set harness (``scripts/eval/asr_eval.py``), so a number the eval
-    reports is a number production would have produced. Every guard runs
-    here and nowhere else, whatever the backend (Sprint TQ2 T1):
-
-    1. VAD once (``vad.speech_runs``, floor pass per settings).
-    2. ``chunks.plan``: the recording's language and each run's.
-    3. The backend decodes the planned runs (``transcribe_runs``).
-    4. ``guards.apply``: G1–G3 and the artefact list (TQ2 T2/T3).
-    5. The prompt-echo guard (Sprint I2).
-    6. Coverage and the prompt-free second pass, loops included (F1, TQ2).
-    7. Non-speech markers (TQ2 T4).
-
-    Raises what the engine raises (``TimeoutError`` after ``timeout``,
-    ``ProviderError``, ``TranscriptionCancelledError``); the caller
-    classifies. ``deadline`` bounds both decodes together.
+    VAD → chunk plan → backend decode → guards → prompt-echo guard → coverage
+    second pass → non-speech markers. Raises what the engine raises; ``deadline``
+    bounds both decodes together.
     """
     provider = state.engine
     heard = await asyncio.to_thread(
@@ -831,7 +692,6 @@ async def decode_recording(
 
     async def decode() -> TranscriptionOutput:
         if not hasattr(provider, "transcribe_runs"):
-            # A provider that cannot take planned runs decodes the file.
             out: TranscriptionOutput = await provider.transcribe(
                 pcm, language=language, prompt=prompt, should_cancel=should_cancel
             )
@@ -877,15 +737,11 @@ async def decode_recording(
         )
 
     output = await asyncio.wait_for(decode(), timeout=timeout)
-    # Sprint TQ2 T2/T3: text nobody said, before anything else reads it.
     gated = guards.apply(output, heard.runs)
     output = gated.output
-    # Sprint I2 T3: words the decoder copied from its prompt come out,
-    # whatever backend decoded them. A transcript that was nothing but
-    # the prompt is then an empty one and files as `no_speech`.
+    # Prompt echo removed for every backend; an all-echo transcript files as `no_speech`.
     output = _guarded(output, prompt, job_id=job_id)
-    # Sprint F1: what the transcript covers of the speech; runs the first
-    # decode lost (and TQ2 loops) are decoded again without the prompt.
+    # Runs the first decode lost (and loops) are decoded again without the prompt.
     output = await _covered(
         state,
         output,
@@ -901,15 +757,13 @@ async def decode_recording(
     )
     if heard.stub:
         return output
-    # Sprint TQ2 T4: music, silence and noise are marked, not transcribed.
     return output.model_copy(update={"noise": chunks.nonspeech_regions(pcm, heard.runs)})
 
 
 def _guarded(
     output: TranscriptionOutput, prompt: str | None, *, job_id: UUID
 ) -> TranscriptionOutput:
-    """The transcript with prompt echo removed and the removal recorded in
-    its diagnostics. Counts and timestamps in the log, never words."""
+    """Prompt echo removed and recorded in diagnostics; the log gets counts, never words."""
     segments, spans, dropped = guard_segments(output.segments, prompt)
     if not spans:
         return output
@@ -951,12 +805,9 @@ async def _covered(
     heard: vad.SpeechRuns | None = None,
     loop_ranges: list[tuple[int, int]] | None = None,
 ) -> TranscriptionOutput:
-    """Sprint F1 decisions 1, 3 and 4: measure how much of the speech the
-    transcript covers, decode the runs the first pass lost once more without
-    the prompt, and name the cause of every gap that remains.
+    """Measure speech coverage, re-decode lost runs without the prompt, name remaining gaps.
 
-    Never fails the job: a VAD error leaves the transcript as it was, with
-    no coverage recorded. Cancellation propagates."""
+    Never fails the job (a VAD error leaves the transcript as is); cancellation propagates."""
     try:
         if heard is None:
             heard = await asyncio.to_thread(
@@ -1059,7 +910,6 @@ async def _covered(
             loop_outcome("second_pass_failed")
             continue
         except ProviderError as exc:
-            # The first attempt stands; the gap's cause stays unknown.
             logger.warning(
                 "asr.second_pass_failed",
                 extra={"job_id": str(job_id), "start_ms": run.start_ms, "kind": str(exc.kind)},
@@ -1070,8 +920,7 @@ async def _covered(
         chunks += 1
         by_cause[cause] = by_cause.get(cause, 0) + 1
         fresh = cov.shift(second.segments, slice_start)
-        # TQ2: the second decode goes through the same gates (a prompt-free
-        # decode over noise writes stock phrases too).
+        # Second decode goes through the same gates.
         fresh_diags = [
             d.model_copy(
                 update={"start_ms": d.start_ms + slice_start, "end_ms": d.end_ms + slice_start}
@@ -1089,8 +938,7 @@ async def _covered(
         )
         fresh = list(regated.output.segments)
         second_drops.extend(regated.output.diagnostics.dropped_segments)
-        # The second attempt had no prompt, but the guard still applies:
-        # the rule is about what reaches a transcript, not how it was asked.
+        # Echo guard applies even to the prompt-free decode.
         fresh, fresh_spans, _ = guard_segments(fresh, prompt)
         first_words = cov.words_in(run, segments)
         second_words = cov.words_in(run, fresh)
@@ -1098,7 +946,7 @@ async def _covered(
         if second_words > first_words and cov.confident(fresh):
             segments = cov.splice(segments, slice_start, run.end_ms, fresh)
             spans.extend(fresh_spans)
-            # TQ1 T5: the spliced decode's own numbers, on the recording's clock.
+            # Spliced decode's diagnostics, on the recording's clock.
             seg_diagnostics.extend(
                 d.model_copy(
                     update={
@@ -1149,8 +997,7 @@ async def _covered(
             "segments": sorted(seg_diagnostics, key=lambda d: (d.start_ms, d.second_pass)),
             "loops": [
                 *loop_events,
-                # A loop whose run the second pass never reached (no speech
-                # run overlaps it): kept as truncated.
+                # Loops no second pass reached: kept as truncated.
                 *(LoopEvent(start_ms=a, end_ms=b, outcome="kept_truncated") for a, b in loops),
             ],
             "dropped_segments": [*output.diagnostics.dropped_segments, *second_drops],
@@ -1165,27 +1012,10 @@ async def _covered(
 def _apply_diarization(
     output: TranscriptionOutput, diar: OfflineDiarization
 ) -> TranscriptionOutput:
-    """Speaker-attribute the transcript from the diarized timeline.
+    """Speaker-attribute per word (segments span turns), splitting segments at speaker changes.
 
-    Whisper segments follow its own pause heuristics, not speaker turns:
-    a single segment routinely spans "…so that's the plan. — Sounds
-    good." from two people. Attributing whole segments would label the
-    reply with whoever talked longer. So attribution happens per WORD
-    (the worker asks Whisper for word timings), and a segment is split
-    wherever the speaker changes; each piece keeps its own words, timing
-    and mean word probability.
-
-    A word the diarizer cannot attribute inherits its neighbours' label
-    when they agree (mid-sentence dropouts), and a one-word island
-    between two runs of the same speaker is folded back — a diarizer
-    hiccup, not a real interjection. What stays unattributed keeps
-    ``speaker=None``: an uncertain label on a meeting transcript is worse
-    than no label. Segments without word timings fall back to majority
-    attribution of the whole span.
-
-    ``speakers`` is the first-appearance roster of labels that actually
-    ended up on a segment — a client counting "3 speakers" should be able
-    to find all three in the text.
+    Unattributable words stay ``speaker=None``; ``speakers`` is the first-appearance
+    roster of labels that reached a segment.
     """
     segments: list[Segment] = []
     for seg in output.segments:
@@ -1198,10 +1028,7 @@ def _apply_diarization(
         update={
             "segments": segments,
             "speakers": roster,
-            # Sprint 30: kept so the read path can mark turns where people
-            # talked over each other. Intervals only.
             "overlap_ms": list(getattr(diar, "overlap_ms", []) or []),
-            # Sprint 31: sides of the labels that reached the text.
             "speaker_sides": {
                 label: side
                 for label, side in (getattr(diar, "sides", None) or {}).items()
@@ -1218,8 +1045,7 @@ def _diarization_stats(
     *,
     channel_layout: str | None = None,
 ) -> DiarizationStats:
-    """Numbers that explain the roster: clusterer counts, speech per
-    speaker that reached the text, and how much speech stayed unlabelled."""
+    """Roster stats: clusterer counts, speech per speaker, unlabelled speech."""
     evidence = diar.segments
     speech_ms = sum(s.end_ms - s.start_ms for s in evidence)
     unknown_ms = sum(s.end_ms - s.start_ms for s in evidence if s.label == UNKNOWN)
@@ -1266,8 +1092,7 @@ def _diarization_stats(
     )
 
 
-# The local side must hold at least this much speech before the platform
-# names its only speaker after the account owner (Sprint 31 B-5).
+# Minimum local-side speech before the sole local speaker is named after the owner.
 CHANNEL_NAME_MIN_SPEECH_MS = 10_000
 
 
@@ -1282,7 +1107,6 @@ async def _decode_capture(
             timeout_seconds=settings.ffmpeg_timeout_seconds,
             channels=2,
         )
-        # ASR stays one pass, on the mixdown.
         return stereo, mixdown(stereo)
     pcm = await decode_to_pcm(
         audio_bytes,
@@ -1300,12 +1124,7 @@ async def _diarize_capture(
     *,
     job_id: UUID,
 ) -> tuple[OfflineDiarization, str]:
-    """Diarize a capture: channel-aware for a mic/system file, else mono.
-
-    A failure anywhere in the channel path falls back to the mono path on
-    the mixdown — a channel-analysis bug must never cost the user their
-    speakers. A failure of the mono path itself propagates.
-    """
+    """Diarize: channel-aware for mic/system, else mono; channel-path bugs fall back to mono."""
     if stereo is not None:
         try:
             diar = await asyncio.to_thread(
@@ -1319,10 +1138,7 @@ async def _diarize_capture(
             _dual_jobs.add(1, {"outcome": "dual"})
             return diar, "mic_system"
         except DiarizationUnavailableError:
-            # The engine itself is down (shape B: the endpoint). The mono
-            # path would upload the whole recording again to the same
-            # dead endpoint, and this fallback is for channel-analysis
-            # bugs, not for the diarizer being unreachable.
+            # Engine down: the mono fallback would hit the same dead endpoint.
             raise
         except Exception as exc:  # noqa: BLE001 — any channel-path failure
             _dual_jobs.add(1, {"outcome": "mono_fallback"})
@@ -1384,11 +1200,7 @@ async def _run_shadow(
     *,
     job_id: UUID,
 ) -> None:
-    """Run the shadow engine on the same audio and hints; keep only counts.
-
-    Its labels are discarded here, never stored or returned. Any failure is
-    logged and swallowed: a shadow must not be able to fail a job.
-    """
+    """Shadow diarizer on the same audio; counts only, failures swallowed."""
     t0 = time.monotonic()
     try:
         await shadow.ensure_loaded()
@@ -1436,17 +1248,12 @@ def _split_segment_by_speaker(seg: Segment, diar: OfflineDiarization) -> list[Se
 
     raw: list[str | None] = [diar.attribute(int(w.start_ms), int(w.end_ms)) for w in seg.words]
     labels = _smooth_labels(raw)
-    # A word whose label smoothing supplied or changed: the piece holding
-    # it is marked uncertain (Sprint 30) — likeliest place for a correction.
+    # A piece holding a smoothed label is marked uncertain.
     smoothed = [r != lab and lab is not None for r, lab in zip(raw, labels, strict=True)]
     if all(label == labels[0] for label in labels):
         return [seg.model_copy(update={"speaker": labels[0], "speaker_uncertain": any(smoothed)})]
 
-    # The segment text is Whisper's own rendering (punctuation, spacing);
-    # once split, each piece is rebuilt from its words. Whisper's word
-    # texts carry their punctuation, so joining with spaces reproduces
-    # the original for space-delimited languages; languages written
-    # without spaces are joined the way the original text was.
+    # Word texts carry their punctuation; join the way the original text was.
     joiner = " " if " " in seg.text.strip() else ""
     pieces: list[Segment] = []
     start = 0
@@ -1475,8 +1282,7 @@ def _smooth_labels(labels: list[str | None]) -> list[str | None]:
     islands between two runs of the same speaker."""
     out = list(labels)
     n = len(out)
-    # Pass 1: None runs whose neighbours agree (or with one known
-    # neighbour at either edge of the segment) take that label.
+    # Pass 1: None runs take the label of agreeing (or sole) neighbours.
     i = 0
     while i < n:
         if out[i] is not None:
@@ -1499,12 +1305,11 @@ def _smooth_labels(labels: list[str | None]) -> list[str | None]:
     return out
 
 
-# ── Re-labelling (Sprint 29, ``task="rediarize"``) ─────────────────────
+# ── Re-labelling (``task="rediarize"``) ─────────────────────────────────
 
 
 def revision_key(tenant_id: UUID, job_id: UUID, rev: int) -> str:
-    """Object key of the artifact a re-run writes. Deterministic per
-    ``target_rev``: a redelivery overwrites the same object."""
+    """Object key a re-run writes; deterministic per ``rev`` so a redelivery overwrites it."""
     return f"{tenant_id}/{job_id}.r{rev}.json.enc"
 
 
@@ -1513,28 +1318,20 @@ def key_from_uri(uri: str) -> str:
     return uri.split("://", 1)[-1].split("/", 1)[1]
 
 
-# A name follows its speaker into the new labelling only when the new
-# speaker holds at least this much of the old one's speech.
+# A name follows its speaker only when the new label holds this share of the old one's speech.
 NAME_CARRY_MIN_SHARE = 0.6
 
 
 async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None:
-    """New speaker labels for a complete job, from the stored audio and the
-    stored words. No ASR pass: the words and their timings are already in
-    the transcript; only who said them is recomputed.
+    """Re-label a complete job's stored words (no ASR pass); ``status`` stays ``complete``.
 
-    The job's ``status`` stays ``complete`` throughout. Idempotent under
-    redelivery: the claim is conditional on the revision this run moves
-    FROM, the artifact key is deterministic per ``target_rev``, and the
-    final swap re-checks the revision under a row lock — so a duplicate
-    delivery that arrives after completion does nothing, and one that
-    arrives after a crash finishes the job the first delivery started.
+    Idempotent under redelivery: claim conditional on the FROM revision, key
+    deterministic per ``target_rev``, final swap re-checks under a row lock.
     """
     tenant_id, job_id = payload.tenant_id, payload.job_id
     target_rev = payload.target_rev
     request_id = payload.rediarize_id
     if request_id is None:
-        # No request to answer for: nothing on the row can be claimed.
         raise _NonRetryableError(str(JobErrorKind.BAD_PAYLOAD), "rediarize without rediarize_id")
     if target_rev is None or target_rev < 2:
         await _mark_rediarize_failed(
@@ -1543,9 +1340,7 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
         raise _NonRetryableError(str(JobErrorKind.BAD_PAYLOAD), "rediarize without a target_rev")
     t0 = time.monotonic()
 
-    # Claimed only for THIS request (a stale message for an earlier one
-    # finds another id and skips). `running` is claimable too: that is a
-    # redelivery of this same request after its worker died.
+    # Claim is per request id; `running` is claimable (redelivery after a dead worker).
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         claimed = await conn.fetchrow(
             """
@@ -1562,7 +1357,6 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
             request_id,
         )
     if claimed is None:
-        # Already done (duplicate delivery), superseded, or the row moved on.
         logger.info("processor.rediarize_skip", extra={"job_id": str(job_id)})
         return
 
@@ -1604,8 +1398,7 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
         raise await fail(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise await fail(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
-    # A dual-channel capture re-runs dual-channel (the layout travels on
-    # the job's capture context, Sprint 31).
+    # Layout travels on the job's capture context.
     layout = _parse_names(claimed["capture_context"]).get("channel_layout", "mono")
     try:
         stereo, pcm = await _decode_capture(audio_bytes, layout)
@@ -1669,13 +1462,11 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
                 or int(row["diarization_rev"]) != target_rev - 1
                 or row["diarization_request_id"] != request_id
             ):
-                # Another delivery finished first; its revision stands.
                 return
-            # Names as they are NOW (a rename during the run counts).
+            # Names as of now (a rename during the run counts).
             names = _parse_names(row["speaker_names"])
             carried = {mapping[old]: name for old, name in names.items() if old in mapping}
-            # Provenance follows its name — and "cleared" follows the
-            # speaker, so a channel name a person removed never returns.
+            # Provenance follows its name; "cleared" follows the speaker.
             sources = _parse_names(row.get("speaker_name_sources"))
             carried_sources = {
                 mapping[old]: source for old, source in sources.items() if old in mapping
@@ -1710,8 +1501,7 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
     except Exception as exc:  # noqa: BLE001
         raise await fail(JobErrorKind.DB_UNAVAILABLE, str(exc)) from exc
 
-    # Keep exactly one previous revision. Best effort: an orphan is a
-    # storage cost, not a correctness problem, and erasure lists by prefix.
+    # Keep one previous revision; best effort (erasure lists by prefix).
     if superseded and key_from_uri(str(superseded)) not in {new_key, current_key}:
         with contextlib.suppress(Exception):
             await state.transcript_store.delete(key=key_from_uri(str(superseded)))
@@ -1734,14 +1524,9 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
 
 
 def carry_over_mapping(before: list[Segment], after: list[Segment]) -> dict[str, str]:
-    """Old label → new label, for the labels whose names may follow.
+    """Old label → new label where a name may follow (both lists hold the same words).
 
-    Both lists hold the SAME words (a re-run re-attributes, it never
-    re-transcribes), so speech time is matched word by word. A label maps
-    to the new label that took the most of its speech, and only when that
-    is at least :data:`NAME_CARRY_MIN_SHARE` of it — and of the new label's
-    speech too; two old labels landing on one new label (a merge) both lose
-    the right to name it — a name is never guessed between two people.
+    Needs :data:`NAME_CARRY_MIN_SHARE` in both directions; a merge names nobody.
     """
     before_words = _word_labels(before)
     after_words = _word_labels(after)
@@ -1760,9 +1545,6 @@ def carry_over_mapping(before: list[Segment], after: list[Segment]) -> dict[str,
     best: dict[str, str] = {}
     for old, targets in overlap.items():
         new, ms = max(targets.items(), key=lambda kv: (kv[1], kv[0]))
-        # Both ways: the old speaker mostly became `new`, AND `new` is mostly
-        # the old speaker — otherwise the name would land on someone else's
-        # voice as much as on theirs.
         if (
             spoken[old]
             and ms / spoken[old] >= NAME_CARRY_MIN_SHARE
@@ -1776,8 +1558,7 @@ def carry_over_mapping(before: list[Segment], after: list[Segment]) -> dict[str,
 
 
 def _word_labels(segments: list[Segment]) -> list[tuple[int, str | None]]:
-    """(duration_ms, speaker) per word, in order; a wordless segment counts
-    as one "word" so the two sides still line up."""
+    """(duration_ms, speaker) per word; a wordless segment counts as one word."""
     out: list[tuple[int, str | None]] = []
     for seg in segments:
         if seg.words:
@@ -1806,20 +1587,10 @@ def _remote(diarizer: Any) -> bool:
 def _remote_diarization_skipped(
     kind: JobErrorKind, state: WorkerState, *, job_id: UUID, exc: Exception
 ) -> str:
-    """A remote diarizer failed: log it and let the transcript through.
-
-    With the engine in-process, a diarizer that cannot run means a broken
-    deployment and the job fails loudly. On a remote engine the same
-    outage is somebody else's bad afternoon, and failing the job would
-    throw away a transcript we already have. The row remembers the
-    failure (``diarization_status='failed'``) and the clients turn that
-    into a re-run offer.
-    """
+    """Remote diarizer failed: log, mark ``diarization_status='failed'``, keep the transcript."""
     if kind is JobErrorKind.DIARIZATION_FAILED:
-        # The load path already counted itself; count the call failures
-        # too, so DiarizationEngineUnavailable fires for an endpoint that
-        # answers but cannot diarize — otherwise a broken endpoint is
-        # visible only as transcripts quietly missing their speakers.
+        # Count call failures too: the alert must fire for an endpoint that
+        # answers but cannot diarize.
         _diarizer_unavailable.add(1, {"engine": state.diarizer.engine})
     logger.warning(
         "asr.diarization_skipped_remote",
@@ -1836,10 +1607,7 @@ def _remote_diarization_skipped(
 async def _mark_rediarize_failed(
     state: WorkerState, tenant_id: UUID, job_id: UUID, *, request_id: UUID, kind: str
 ) -> None:
-    """The re-run failed; the job, its transcript and its labels did not.
-
-    Only THIS request's run: a stale delivery must not fail a newer one, and
-    a write that matched nothing is neither counted nor audited."""
+    """Fail this request's re-run only; a no-match write is neither counted nor audited."""
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         failed = await conn.fetchrow(
             """
@@ -1869,16 +1637,9 @@ async def _mark_rediarize_failed(
 def _dier(
     state: WorkerState, tenant_id: UUID, job_id: UUID, *, requester_sub: UUID
 ) -> Callable[[JobErrorKind, str], Awaitable[_JobError]]:
-    """Build the ``die(kind, detail)`` used by every classified failure.
+    """Build ``die(kind, detail)``: returns the exception (so ``raise ... from exc`` chains).
 
-    Returns (rather than raises) the exception so call sites read
-    ``raise await die(...) from exc`` and keep the original traceback
-    chained — the detail column is the only place the underlying ffmpeg or
-    CUDA text survives, and losing the ``__cause__`` would cost the log its
-    stack.
-
-    Terminal kinds are written to the row here, once, before the raise;
-    retryable kinds are not, because the job has not finished failing.
+    Terminal kinds are written to the row here; retryable kinds are not.
     """
 
     async def die(kind: JobErrorKind, detail: str) -> _JobError:
@@ -1900,12 +1661,7 @@ def _dier(
 def _cancel_poller(
     state: WorkerState, tenant_id: UUID, job_id: UUID
 ) -> Callable[[], Awaitable[bool]]:
-    """`should_cancel` for the engine, rate-limited to one query a second.
-
-    VAD can cut a long consultation into hundreds of speech runs, and a
-    round trip per run would spend more time asking whether to stop than
-    stopping saves. A second of extra inference is not worth a query storm.
-    """
+    """`should_cancel` for the engine, rate-limited to one query a second."""
     last = 0.0
     answer = False
 
@@ -1959,12 +1715,7 @@ async def _mark_failed(
     detail: str,
     requester_sub: UUID,
 ) -> None:
-    """Terminal-failure path. Every failure funnels through here.
-
-    `requester_sub` is threaded in rather than re-SELECTed: the row is
-    about to be UPDATEd anyway, and a second query for a value the caller
-    already holds in `payload` is a round trip for nothing.
-    """
+    """Terminal-failure path; every failure funnels through here."""
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         await conn.execute(
             """

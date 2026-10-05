@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-"""Sprint I2 T7 — measure the prompt-echo guard and other-language decoding
-before shipping.
+"""Measure the prompt-echo guard and other-language decoding on the in-process engine
+(``today``, ``guard``, ``guard_nocond``, ``guard_nocond_hotwords``), one model load.
 
-    MD_ASR_DEVICE=cpu MD_ASR_COMPUTE_TYPE=int8 uv run --project services/asr-worker \\
-        python scripts/eval/echo_eval.py --audio a.wav --audio b.flac \\
-        --mixed mixed_en_uk.wav --incident-job <uuid> --out docs/eval/asr-echo-<date>.json
+    MD_ASR_DEVICE=cpu MD_ASR_COMPUTE_TYPE=int8 uv run --project services/asr-worker \
+        python scripts/eval/echo_eval.py --audio a.wav --mixed mixed_en_uk.wav --incident-job <uuid> --out <report.json>
 
-Four configurations of the in-process engine on the same files, one model
-load: ``today`` (conditioning on, guard measured but not applied), ``guard``
-(the lexical guard applied), ``guard_nocond`` (+ `condition_on_previous_text`
-off, the proposed default) and ``guard_nocond_hotwords`` (vocabulary as
-faster-whisper `hotwords` instead of `initial_prompt`).
-
-Reports, per file and configuration: audio seconds, words, words the guard
-removes (per audio hour), segments it drops, other-language chunks, and for
-the mixed-language fixture precision/recall of the `uk` label against the
-known spans; for the incident recording whether any of the seven glossary
-names survive. WER is **not** computed — no reference transcripts are in
-the repo; the report says so. Transcript text goes only to
-``scripts/eval/local/echo-<config>/`` (gitignored) for the PR diff; the JSON
-report carries counts.
+No WER (no references). Transcript text goes only to ``scripts/eval/local/echo-<config>/`` (gitignored).
 """
 
 from __future__ import annotations
@@ -55,8 +41,7 @@ CONFIGS: dict[str, dict[str, Any]] = {
     "guard_nocond_hotwords": {"guard": True, "condition_prev": False, "mode": "hotwords"},
 }
 
-# A 40-term vocabulary of the kind a busy workspace carries: names, products,
-# a few role labels from before the I2 rule. Nothing here is in any recording.
+# A 40-term vocabulary of the kind a busy workspace carries; none of it is in any recording.
 FORTY_TERMS = (
     "Gregor Gysi, Moderator, Moderator II, moderatorin, narrator, speaker, speaker background, "
     "Springbrook Marine, Williams Jet Tender, Pardo, IPS 1350, Volvo Penta, Mitchell, "
@@ -106,9 +91,8 @@ async def _incident_audio(job_id: UUID) -> bytes:
     main_deps.build_asr = lambda _name: _NullEngine()  # type: ignore[assignment]
     state = await main_deps.build_state()
     try:
-        # The job row is behind RLS; the dev superuser reads it (this script
-        # runs on the dev stack only). The audio is still decrypted through
-        # the worker's own store, tenant-bound.
+        # Dev stack only: the superuser reads the RLS-guarded row; audio is still
+        # decrypted through the worker's tenant-bound store.
         import asyncpg
 
         su = await asyncpg.connect("postgresql://postgres:postgres@localhost:5432/notes")

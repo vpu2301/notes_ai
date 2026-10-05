@@ -1,22 +1,12 @@
-// Machine code → something a person can act on.
-//
-// The server's `detail` is written for a developer reading a log
-// ("confirm it is you before making this change"); these are written for
-// somebody who is locked out and getting cross. Every code listed in
-// `docs/api/error-codes.md` that any IDX-W1 flow can raise has an entry —
-// `tests/errorCopy.test.ts` reads that file and fails if one is missing,
-// so a new server code cannot ship as a raw string in the UI.
-//
-// Codes that belong to flows this sprint does not build (`/auth/oauth/*`
-// device grants, note-service model errors, MFA enrolment, account
-// deletion) are listed in the test's exempt set with the reason, not
-// silently ignored.
+// Machine code → something a person can act on. The server's `detail` is never shown.
+// Every code in `docs/api/error-codes.md` needs an entry (or an exemption in
+// `tests/errorCopy.test.ts`, which reads that file).
 
 import { ApiError } from "../api/http";
 
 /** Written in the second person, no jargon, and never a code number. */
 const COPY: Record<string, string> = {
-  // ── billing (0068) ────────────────────────────────────────────────
+  // ── billing ───────────────────────────────────────────────────────
   billing_not_connected: "Payments aren't connected yet, so the plan can't change here.",
   redeem_unknown: "That code isn't valid. Check it and try again.",
   redeem_expired: "That code has expired.",
@@ -34,8 +24,7 @@ const COPY: Record<string, string> = {
   no_workspace: "This account is not in a workspace yet. Ask for an invitation, or contact support.",
   not_a_member: "You are not a member of that workspace.",
   membership_suspended: "Your access to that workspace is suspended.",
-  // Distinct from not_a_member on purpose (IDX-M2): the caller WAS one,
-  // so "you are not a member" would read as an error on their side.
+  // Distinct from not_a_member: the caller WAS one.
   tenant_dissolved: "That workspace has been closed.",
   origin_not_allowed: "This page is not allowed to sign in. Open the app from its usual address.",
 
@@ -48,27 +37,20 @@ const COPY: Record<string, string> = {
   challenge_expired: "That code has expired. Ask for a new one.",
   challenge_consumed: "That code has already been used. Ask for a new one.",
   too_many_attempts: "Too many wrong codes. Start again to get a new one.",
-  // Not a failure — the code was right. The sentence has to explain a
-  // redirect, not apologise for one, or people assume they typed it wrong.
+  // Not a failure: the code was right; explains a redirect.
   use_password: "This account signs in with a password. Enter it below to continue.",
-  // `dual` mode: a Keycloak-issued session cannot be re-minted for another
-  // workspace, so the switcher is off rather than broken. The sentence
-  // names the way out, because "not available" alone is a dead end.
+  // A Keycloak-issued session cannot be re-minted for another workspace.
   legacy_session: "Switching workspaces needs a newer sign-in. Sign out and sign in with an emailed code.",
 
-  // ── self-serve signup (BE-0) ──────────────────────────────────────
-  // `signup_rate_limited` fails closed on purpose, so this can also mean
-  // "the limiter is down" — the sentence has to hold for both.
+  // ── self-serve signup ─────────────────────────────────────────────
+  // Fails closed: also covers "the limiter is down".
   signup_rate_limited: "Too many sign-up attempts. Wait a few minutes and try again.",
-  // The specifics live in `reasons[]`; the form lists them under the field
-  // rather than stuffing them into one sentence.
+  // Specifics live in `reasons[]` (see passwordReasons).
   password_policy: "Please choose a stronger password.",
   display_name_required: "Please tell us your name.",
-  // The endpoint compensates, so "nothing was created" is a promise the
-  // server keeps, not reassurance we invented.
+  // The endpoint compensates, so "nothing was saved" is true.
   signup_unavailable: "We could not create your account just now. Nothing was saved — try again in a moment.",
-  // The code was right and the challenge was NOT spent, which is the only
-  // reason it is safe to say "try again" instead of "ask for a new one".
+  // The challenge was NOT spent, so "try again" is safe.
   verify_retry: "Almost there — something on our side is briefly down. Your code still works; try again in a moment.",
   email_not_verified: "Confirm your email address first — we sent you a 6-digit code.",
 
@@ -86,7 +68,7 @@ const COPY: Record<string, string> = {
   reauth_required: "Confirm it is you before making this change.",
   challenge_required: "Start the check again — we need a fresh code.",
 
-  // ── room devices (IDX-B1b, surfaced by W2's devices screen) ───────
+  // ── room devices ──────────────────────────────────────────────────
   rotation_in_progress:
     "This device already has two live secrets. Deploy or expire one before rotating again.",
   personal_workspace:
@@ -102,9 +84,8 @@ const COPY: Record<string, string> = {
     "You are the only owner of a workspace other people are still using. Hand it over first.",
   confirm_required: "Type DELETE to confirm.",
 
-  // ── speaker count / re-labelling (Sprint 29) ──────────────────────
-  // The roster maps these with sharper, in-place wording (RELABEL_COPY in
-  // SpeakerRoster.tsx); these are the fallbacks any other surface gets.
+  // ── speaker count / re-labelling ──────────────────────────────────
+  // Fallbacks; SpeakerRoster's RELABEL_COPY has sharper in-place wording.
   speakers_hint_invalid: "The number of people cannot be larger than the maximum.",
   job_not_complete: "The transcript is not finished yet. Try again when it is.",
   rediarize_in_progress: "Speakers are already being re-labelled.",
@@ -112,13 +93,12 @@ const COPY: Record<string, string> = {
   rediarize_limit: "This transcript has been re-labelled as often as it can be.",
   enqueue_failed: "We could not start that just now. Nothing changed — try again in a moment.",
   nothing_to_undo: "There is nothing to undo any more.",
-  // Sprint 31 dual-channel capture (sent by the macOS app only).
+  // Dual-channel capture (macOS app only).
   channel_layout_mismatch: "This recording could not be read as a call recording. Try uploading it again.",
   local_speaker_name_invalid: "Your display name is too long to label your voice. Shorten it in your profile.",
 
-  // ── moving turns / capture context (Sprint 30) ────────────────────
-  // `stale_result_rev` is the one the transcript acts on: it reloads and
-  // says this, so the sentence has to hold after the reload too.
+  // ── moving turns / capture context ────────────────────────────────
+  // `stale_result_rev`: the transcript reloads, then says this.
   stale_result_rev: "Speakers were updated elsewhere.",
   bad_segment_index: "That part of the transcript has changed. Reload and try again.",
   too_many_segments: "That is too much to move at once. Move fewer turns at a time.",
@@ -126,9 +106,8 @@ const COPY: Record<string, string> = {
   unknown_label: "That speaker is no longer in this transcript. Reload and try again.",
   name_candidates_invalid: "The invited people's names could not be used. Record without them, or try again.",
 
-  // ── note writing (Sprint 37 / L2) ─────────────────────────────────
-  // The same three sentences GenerationStatus shows in its banner, so a
-  // refused "Generate summary" reads the same as a run that never started.
+  // ── note writing ──────────────────────────────────────────────────
+  // Same sentences as the GenerationStatus banner.
   processor_unacknowledged:
     "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI.",
   generation_disabled: "Automatic note writing is off for this workspace.",
@@ -138,7 +117,6 @@ const COPY: Record<string, string> = {
   too_many_generations: "This note has been rewritten as often as it can be today.",
   no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
   note_cancelled: "This note was cancelled and cannot be written again.",
-  // Sprint 36: a 1:1 or an interview debrief has no version for a client.
   not_available_for_type: "A one-to-one and an interview debrief have no client version.",
 };
 
@@ -164,23 +142,12 @@ export function hasCopy(code: string): boolean {
   return code in COPY;
 }
 
-/**
- * The message to show for any thrown value.
- *
- * A code with copy gets its sentence; a role denial gets the one about
- * access; anything else gets a sentence for its status. The server's
- * `detail` is never shown: it is written for a developer reading a log,
- * and a raw "a workspace admin has to agree to who processes your
- * meetings [processor_unacknowledged]" is exactly what this file exists
- * to prevent. Somebody who has to quote the failure gets the ref from
- * `messageWithRef`.
- */
+/** The message for any thrown value: code copy, else role-denial copy, else by status. Never `detail`. */
 export function messageFor(err: unknown): string {
   if (!(err instanceof ApiError)) {
     if (err instanceof TypeError) return OFFLINE_COPY;
     if (err instanceof DOMException && err.name === "AbortError") return "That was cancelled.";
-    // A plain Error is one of ours (a guard in a hook, a validation
-    // sentence), written to be read.
+    // A plain Error is one of ours, written to be read.
     return err instanceof Error && err.message ? err.message : "Something went wrong. Try again in a moment.";
   }
   const written = err.code ? COPY[err.code] : undefined;
@@ -191,11 +158,7 @@ export function messageFor(err: unknown): string {
   return fallbackFor(err.status);
 }
 
-/**
- * The same message with the correlation id appended, for the cases where
- * somebody may have to quote it. Deliberately not used everywhere: a
- * wrong verification code is not a support ticket.
- */
+/** Same message with the correlation id, where someone may need to quote it. */
 export function messageWithRef(err: unknown): string {
   const base = messageFor(err);
   const ref = err instanceof ApiError ? err.requestId : undefined;
@@ -207,15 +170,7 @@ export function retryAfterSeconds(err: unknown): number | null {
   return err instanceof ApiError ? (err.retryAfter ?? null) : null;
 }
 
-/**
- * The `reasons[]` a `password_policy` refusal carries, in sentences.
- *
- * Mirrors `domain/password_policy.py`, which returns codes rather than
- * prose precisely so the wording lives here. A code with no entry falls
- * through silently — the banner above the list already says the password
- * was refused, and inventing a sentence for a rule we do not know would
- * be worse than saying nothing.
- */
+/** The `reasons[]` of a `password_policy` refusal, in sentences; unknown codes are dropped. */
 export function passwordReasons(err: unknown): string[] {
   if (!(err instanceof ApiError)) return [];
   const codes = err.extra<unknown>("reasons");

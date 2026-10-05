@@ -5,7 +5,7 @@ import type { TranscriptCoverage } from "../src/api/types";
 import { NotTranscribed } from "../src/components/NotTranscribed";
 import { clock, gapReason, notTranscribedLine } from "../src/lib/coverageGaps";
 
-/** Sprint F1 T4: the "Not transcribed" line on the Transcript tab. */
+/** The "Not transcribed" line on the Transcript tab. */
 
 const full: TranscriptCoverage = {
   speech_ms: 120_000,

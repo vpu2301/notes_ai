@@ -1,12 +1,7 @@
-# Pre-commit hooks: local-fast feedback before CI.
-# Install: pip install pre-commit && pre-commit install
-# Run on all files: pre-commit run -a
+# Install: pip install pre-commit && pre-commit install; run all: pre-commit run -a
 
 repos:
-  # Pin MUST track the ruff the project/CI run (uv resolves 0.15.x). A stale
-  # pin enforces a different (older) rule set than `make lint` — e.g. v0.4.x
-  # still flagged UP038/E402 that current ruff dropped — so the hook and CI
-  # disagree. Bump this in lockstep with the project ruff.
+  # Pin MUST track the project's ruff, or the hook and `make lint` disagree.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.5
     hooks:
@@ -39,13 +34,8 @@ repos:
 
   - repo: local
     hooks:
-      # mypy as a LOCAL hook (not the mirror): it must run in the project venv
-      # so the real third-party deps (opentelemetry, …) are importable. The
-      # isolated mirror env sees those imports as Any under ignore_missing_imports
-      # and then flags every real `type: ignore` as unused. This mirrors the
-      # `make typecheck` subset exactly. pass_filenames: false → mypy checks the
-      # packages, not isolated files (isolated files spuriously report unused
-      # ignores under --strict).
+      # LOCAL hook in the project venv (the mirror's isolated env flags real
+      # `type: ignore`s as unused); pass_filenames: false for the same reason.
       - id: mypy-foundation
         name: mypy --strict (secret + observability)
         entry: bash -c 'uv run --with "mypy>=1.10" mypy --strict libs/secret/src libs/observability/src'
@@ -56,12 +46,8 @@ repos:
       - id: no-os-environ-in-services
         name: Reject os.environ outside config.py
         description: All envvar reads go through pydantic-settings in config.py.
-        # language: system + `python3 <path>` — the scripts are stdlib-only and
-        # NOT installed as console entry points, so `language: python` looked
-        # for a non-existent executable. Hooks run from the git toplevel (the
-        # repo root), so the script self-excludes the
-        # sanctioned surfaces, and the un-anchored exclude regex (re.search)
-        # just trims the file list for speed regardless of the prefix.
+        # language: system, as the scripts are not console entry points; the
+        # exclude regex only trims the file list for speed.
         entry: python3 scripts/dev/check-no-os-environ.py
         language: system
         types: [python]

@@ -1,11 +1,5 @@
-"""GET /notes/{id}/pdf — server-rendered PDF (M1·A3 + draft export).
-
-Renders the current version of a note as a PDF. A note is a living
-document (0042/ADR-0051), so there is no watermark-by-status rule: the
-export is clean unless the author explicitly asks for the DRAFT
-treatment (watermark + banner) via ``?variant=draft``. Only a
-*cancelled* note is refused (409). The weasyprint import lives
-behind ``domain.pdf`` so it never loads on the router import path.
+"""GET /notes/{id}/pdf — server-rendered PDF. The DRAFT treatment is opt-in via
+``?variant=draft`` (ADR-0051); only a cancelled note is refused (409).
 """
 
 from __future__ import annotations
@@ -80,22 +74,13 @@ async def get_note_pdf(
         if version is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
 
-        # Human section headings (and their template order) for the
-        # document — the raw section keys are storage identifiers.
         section_names = await _resolve_section_names(conn, content=version.content)
 
-        # Tenant branding for the document header (issuer name). Read under the
-        # same RLS-scoped connection; falls back to the configured default when
-        # the tenant carries no branding.
         branding = await load_tenant_branding(conn, tenant_id=str(claims.tid))
 
-    # A note is a living document (0042): the watermark is opt-in via
-    # ``variant=draft`` for a copy the author wants marked as provisional.
     is_draft = variant == "draft"
     language = lang or "en"
 
-    # Prefer the tenant's registered/legal name as the document issuer; fall
-    # back to the service-level default when the tenant has no branding set.
     issuer_name = branding.issuer_name if branding.issuer_name != "—" else settings.pdf_issuer_name
     pdf_bytes = render_note_pdf(
         note=note,

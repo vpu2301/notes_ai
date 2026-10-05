@@ -1,11 +1,4 @@
-"""Build a per-tenant trie from the phrase corpus.
-
-The trie is the hot-path data structure: a prefix walk yields up to
-the first K candidates for ranking. Sprint-10 uses Python dicts
-keyed by prefix→list (1–6 char prefixes) for very small per-call
-cost; production at larger scale will swap in marisa-trie's
-``Trie.iter_prefix(prefix)`` if memory pressure rises.
-"""
+"""Per-tenant prefix→top-K map built from the phrase corpus (dict-based; marisa-trie if it outgrows memory)."""
 
 from __future__ import annotations
 
@@ -19,8 +12,7 @@ TOP_K_PER_PREFIX = 20
 
 
 def normalize(text: str) -> str:
-    """NFC + lowercase — applied IDENTICALLY at build and lookup time so
-    decomposed uk Cyrillic (й = и + ◌̆) still matches composed corpus text."""
+    """NFC + lowercase, applied identically at build and lookup (decomposed Cyrillic must match)."""
     return unicodedata.normalize("NFC", text).lower()
 
 
@@ -36,8 +28,7 @@ class PhraseTrieEntry:
 
 @dataclass(slots=True)
 class TenantTrie:
-    """Compact prefix→top-K-candidates map. Built once per
-    (tenant, language, user) tuple and cached in Redis."""
+    """Prefix→top-K-candidates map, cached in Redis per (tenant, language, user)."""
 
     tenant_id: str
     language: str
@@ -54,8 +45,7 @@ class TenantTrie:
         key = norm[:MAX_PREFIX_LEN]
         ids = self.prefix_to_ids.get(key)
         if not ids:
-            # Fall back to scanning entries whose phrase starts with the
-            # prefix when no exact prefix-bucket hit (e.g. prefix > 6 chars).
+            # No bucket (e.g. prefix > MAX_PREFIX_LEN): scan entries.
             out: list[PhraseTrieEntry] = []
             for e in self.entries.values():
                 if normalize(e.phrase).startswith(norm):
@@ -78,9 +68,7 @@ def build_trie_from_phrases(
 
     for e in rows:
         entries[e.id] = e
-        # Score for the per-prefix top-K bucket — uses a coarse
-        # acceptance-rate-style heuristic that the full ranker
-        # refines later. This keeps the trie itself language-agnostic.
+        # Coarse bucket score; the full ranker refines later.
         coarse = (
             {"user": 1.0, "tenant": 0.6, "system": 0.3}.get(e.source, 0.3)
             * (e.acceptance_count + 1)

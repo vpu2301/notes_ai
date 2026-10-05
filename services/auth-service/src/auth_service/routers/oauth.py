@@ -1,16 +1,7 @@
-"""`POST /auth/oauth/token` — RFC 6749 §4.4 client credentials (IDX-B1b F2).
+"""`POST /auth/oauth/token` — RFC 6749 §4.4 client credentials.
 
-The one endpoint in this service written to somebody else's spec. Room
-devices and S2S callers already speak OAuth because Keycloak spoke it, so
-the wire format is form-encoded, the errors use RFC 6749's `error` field
-alongside our `code`, and HTTP Basic is accepted because that is what a
-client configured against Keycloak sends today. Getting this shape right
-is what lets a device be re-pointed by changing a URL.
-
-No refresh token is issued, ever. A refresh token is for a principal that
-cannot re-authenticate unattended; a machine holding its own secret can
-ask again whenever it likes, so a second long-lived credential would be
-all risk and no benefit.
+Form-encoded, HTTP Basic accepted, errors carry RFC 6749 `error` beside our
+`code` (clients configured against Keycloak must keep working). Never a refresh token.
 """
 
 from __future__ import annotations
@@ -45,13 +36,7 @@ class TokenGrantResponse(BaseModel):
 
 
 def _basic_credentials(header: str | None) -> tuple[str, str] | None:
-    """`Authorization: Basic base64(client_id:client_secret)`, or None.
-
-    RFC 6749 §2.3.1 prefers this over form fields, and a client set up
-    against Keycloak sends it, so it has to work — but a malformed header
-    is treated as "no credentials here" rather than an error, so the form
-    fields still get their chance.
-    """
+    """`Authorization: Basic base64(client_id:client_secret)`, or None (malformed = no credentials, not an error)."""
     if not header or not header.lower().startswith("basic "):
         return None
     try:
@@ -109,9 +94,7 @@ async def token(
             client_id=client_id, client_secret=client_secret, ip=ip
         )
     except CredentialError as exc:
-        # Every failed grant is an audit row on the platform tenant — the
-        # credential may not exist, so there is no customer chain to write
-        # to, and a burst of these is the shape of somebody guessing.
+        # Every failed grant is audited on the platform tenant (the credential may not exist).
         await audit(
             tenant_id=platform_tenant(),
             kind=audit_kinds.AUTH_CLIENT_CREDENTIALS_FAILED,
@@ -142,13 +125,7 @@ async def token(
 def _oauth_problem(
     code: str, status_code: int, *, detail: str, retry_after: int | None = None
 ) -> HTTPException:
-    """An RFC 9457 problem that also carries RFC 6749's `error` field.
-
-    Two vocabularies in one body on purpose: an OAuth client library
-    branches on `error`, and everything else in this API branches on
-    `code`. Emitting only ours would make a stock client report "unknown
-    error" for a wrong secret.
-    """
+    """An RFC 9457 problem that also carries RFC 6749's `error` field (stock OAuth clients branch on it)."""
     exc = as_problem(ApiError(code, status_code, detail=detail, retry_after=retry_after))
     extras = getattr(exc, "problem_extras", {})
     extras["error"] = _OAUTH_ERROR.get(code, "invalid_request")
@@ -161,9 +138,7 @@ def _oauth_problem(
     return exc
 
 
-# Our machine codes → the RFC 6749 §5.2 vocabulary. `client_locked`,
-# `client_rate_limited` and `try_again` have no OAuth equivalent, so they
-# map to the nearest truthful one and rely on `code` for the detail.
+# Our machine codes → the RFC 6749 §5.2 vocabulary (nearest truthful one where none exists).
 _OAUTH_ERROR = {
     "invalid_client": "invalid_client",
     "invalid_request": "invalid_request",

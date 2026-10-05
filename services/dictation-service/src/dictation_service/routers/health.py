@@ -1,15 +1,7 @@
 """Liveness + readiness probes.
 
-Readiness checks DB / Redis / GPU / Whisper-loaded — sprint 04 §1 — plus,
-since sprint 14, whether this worker can actually take a CONVERSATION
-session: that needs a second model (ECAPA + Silero) resident and warm.
-
-The split matters for the fleet. A worker whose diarizer failed to load is
-still a perfectly good dictation worker, so ``/readyz`` stays 200 and the
-worker keeps serving — but ``conversation_ready`` goes false and the
-scheduler/LB must not send conversation traffic to it. A worker that
-advertised conversation capacity with a cold diarizer would pay weight
-loading inside its first window and blow the latency budget.
+A worker without a warm diarizer stays ready for dictation but advertises
+``conversation_ready=false``.
 """
 
 from __future__ import annotations
@@ -36,13 +28,12 @@ class ReadyResponse(BaseModel):
     redis: str
     model_loaded: bool
     gpu_available: bool
-    # ── sprint 14: conversation capacity ─────────────────────────────
+    # ── conversation capacity ────────────────────────────────────────
     conversation_enabled: bool
     diarizer_loaded: bool
     conversation_ready: bool
     diarizer_error: str | None = None
-    # Live capacity, so an operator (and sprint-16's HPA) can see WHY a
-    # worker is refusing sessions without reading logs.
+    # Live capacity, so an operator can see why a worker refuses sessions.
     capacity_used: int
     capacity_max: int
     conversation_session_weight: int
@@ -87,10 +78,7 @@ async def readyz(response: Response) -> ReadyResponse:
     used = state.session_manager.total_weight
     free = max(0, settings.per_worker_max_sessions - used)
 
-    # Whisper is the hard requirement: without it this worker serves
-    # nothing. The diarizer is NOT — a dictation-only worker is healthy.
-    # Draining (sprint-16 scale-in) also flips readiness: the Service
-    # must stop routing NEW connections while live sessions finish.
+    # Whisper is required, the diarizer is not; draining also flips readiness.
     ok = db_ok == "ok" and redis_ok == "ok" and model_loaded and not state.session_manager.draining
     response.status_code = status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadyResponse(
@@ -106,7 +94,7 @@ async def readyz(response: Response) -> ReadyResponse:
         capacity_used=used,
         capacity_max=settings.per_worker_max_sessions,
         conversation_session_weight=weight,
-        # Zero unless the diarizer is warm — the whole point of the gate.
+        # Zero unless the diarizer is warm.
         conversation_slots_free=(free // weight) if (conversation_ready and weight > 0) else 0,
     )
 

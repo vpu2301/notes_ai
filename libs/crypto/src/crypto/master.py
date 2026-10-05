@@ -1,15 +1,4 @@
-"""Master-key providers.
-
-A master-key provider knows how to ``wrap`` (encrypt) a plaintext tenant KEK
-into ciphertext suitable for at-rest storage, and ``unwrap`` it back. The
-sprint-03 production stack ships ``FileMasterKeyProvider``; sprint 16 swaps
-in ``KmsMasterKeyProvider`` for AWS KMS / Hashicorp Vault.
-
-Why the indirection? The wrapping mechanism changes across environments,
-but the envelope contract (per-object DEK, per-tenant KEK, master KEK)
-must not change. Pinning the Protocol now means sprint 16's KMS migration
-is a 1-line swap in the service composition, plus the re-wrap procedure.
-"""
+"""Master-key providers: ``wrap``/``unwrap`` a tenant KEK under the environment's master (file or Vault Transit)."""
 
 from __future__ import annotations
 
@@ -26,19 +15,14 @@ from .exceptions import DecryptError, MasterKeyError, MasterKeyPermissionError
 
 logger = logging.getLogger(__name__)
 
-# 32 bytes = AES-256-GCM key.
 MASTER_KEY_SIZE_BYTES: int = 32
 GCM_IV_SIZE_BYTES: int = 12
 GCM_TAG_SIZE_BYTES: int = 16
 
-# Deterministic associated data for KEK-wrapping. Pinning this to a
-# version-tagged byte string means future format changes don't silently
-# decrypt against the old format — they fail closed.
+# Version-tagged AAD for KEK-wrapping: a format change fails closed instead of decrypting against the old one.
 MASTER_WRAP_AAD: bytes = b"mdx-master-kek-v1"
 
-# Marker the FileMasterKeyProvider returns. The KMS provider returns
-# ``vault:{mount}:{key_name}``. Stored in EnvelopeBlob so re-wrap
-# migrations know which master a tenant KEK was wrapped under.
+# master_key_id markers, stored in EnvelopeBlob so re-wrap migrations know the master.
 FILE_MASTER_KEY_ID: str = "file-v1"
 VAULT_MASTER_KEY_ID_PREFIX: str = "vault:"
 
@@ -51,39 +35,19 @@ def _reveal(token: object) -> str:
 
 
 class MasterKeyProvider(Protocol):
-    """Wrap / unwrap a tenant KEK under the environment's master key.
-
-    Implementations MUST be safe to call from multiple coroutines
-    concurrently. They MUST NOT expose plaintext master-key bytes via
-    their public API.
-    """
+    """Wrap / unwrap a tenant KEK under the master key; coroutine-safe, never exposes master-key bytes."""
 
     async def wrap(self, kek_plaintext: bytes) -> tuple[str, bytes]:
-        """Wrap a 32-byte tenant KEK.
-
-        Returns ``(master_key_id, wrapped_kek)``. ``wrapped_kek`` is
-        ``iv || ciphertext || tag`` (12 + N + 16 bytes for AES-GCM).
-        """
+        """Wrap a 32-byte tenant KEK → ``(master_key_id, iv || ciphertext || tag)``."""
         ...
 
     async def unwrap(self, master_key_id: str, wrapped_kek: bytes) -> bytes:
-        """Unwrap to plaintext tenant KEK. Caller must zero the result
-        when finished. Raises :class:`DecryptError` on tag mismatch."""
+        """Unwrap to the plaintext tenant KEK (caller zeroes it); :class:`DecryptError` on tag mismatch."""
         ...
 
 
 class FileMasterKeyProvider:
-    """Read the master key from a 0400-mode file on disk.
-
-    Production swaps this for :class:`KmsMasterKeyProvider`. The file path
-    is configurable via ``MDX_MASTER_KEY_PATH``; in dev compose it's
-    bind-mounted from ``infra/dev/master.key``.
-
-    Startup self-check: refuses to operate if the file mode is more
-    permissive than 0400, if the file is missing, or if it's the wrong
-    length. The check happens in :meth:`startup_self_check`, which the
-    service lifespan calls before any traffic is accepted.
-    """
+    """Master key from a 0400-mode file (``MDX_MASTER_KEY_PATH``); :meth:`startup_self_check` refuses a bad mode or length."""
 
     def __init__(self, *, path: str | os.PathLike[str]) -> None:
         self._path = Path(path)
@@ -97,12 +61,7 @@ class FileMasterKeyProvider:
         return master_key_id == FILE_MASTER_KEY_ID
 
     async def startup_self_check(self) -> None:
-        """Verify the master key file's existence, mode, and length.
-
-        Called from each service's lifespan ``startup``. Raises a precise
-        :class:`MasterKeyError` subclass that points to the runbook so an
-        operator can act without paging the on-call engineer.
-        """
+        """Verify the master key file's existence, mode and length; raises a :class:`MasterKeyError` subclass."""
         if not self._path.exists():
             raise MasterKeyError(
                 f"master key file not found at {self._path!s}. "
@@ -115,8 +74,7 @@ class FileMasterKeyProvider:
                 f"master key file at {self._path!s} cannot be stat()'d: {type(exc).__name__}"
             ) from exc
 
-        # Accept any mode whose permission bits are a SUBSET of 0400.
-        # That is: no group/other access, and no write-by-owner.
+        # Permission bits must be a subset of 0400.
         mode_bits = stat.S_IMODE(st.st_mode)
         if mode_bits & ~0o400:
             raise MasterKeyPermissionError(
@@ -131,16 +89,13 @@ class FileMasterKeyProvider:
                 f"expected exactly {MASTER_KEY_SIZE_BYTES} bytes for AES-256."
             )
 
-        # Load once and keep AESGCM around for the process lifetime.
-        # We deliberately do NOT hold the raw 32-byte key in a Python str;
-        # the AESGCM instance owns the bytes internally.
+        # The AESGCM instance owns the key bytes; the raw key is not kept.
         with self._path.open("rb") as f:
             raw = f.read(MASTER_KEY_SIZE_BYTES)
         try:
             self._aead = AESGCM(raw)
         finally:
-            # Best-effort zero — Python doesn't guarantee no copies, but
-            # we at least overwrite our local reference.
+            # Best-effort zero.
             raw = b"\x00" * MASTER_KEY_SIZE_BYTES
 
         logger.info(
@@ -162,8 +117,7 @@ class FileMasterKeyProvider:
             raise MasterKeyError(f"tenant KEK must be 32 bytes, got {len(kek_plaintext)}")
         iv = os.urandom(GCM_IV_SIZE_BYTES)
         ct = self._aead_or_raise().encrypt(iv, kek_plaintext, MASTER_WRAP_AAD)
-        # cryptography's AESGCM returns ciphertext || tag concatenated;
-        # we prepend the IV so the on-disk format is iv || ct || tag.
+        # AESGCM returns ciphertext || tag; on-disk format is iv || ct || tag.
         return FILE_MASTER_KEY_ID, iv + ct
 
     async def unwrap(self, master_key_id: str, wrapped_kek: bytes) -> bytes:
@@ -186,26 +140,10 @@ class FileMasterKeyProvider:
 
 
 class KmsMasterKeyProvider:
-    """Vault-Transit-backed master key (sprint 16, ADR-0011's promised swap).
+    """Vault-Transit-backed master key (ADR-0011): the master KEK never leaves the KMS.
 
-    The master KEK never leaves the KMS: ``wrap``/``unwrap`` are remote
-    calls to Vault's Transit engine (``encrypt``/``decrypt``). The ≤60 s
-    plaintext tenant-KEK cache in :class:`~crypto.tenant_kek.TenantKekRepository`
-    keeps KMS load at one call per tenant per TTL — envelope semantics
-    unchanged.
-
-    ``master_key_id`` format: ``vault:{mount}:{key_name}``. The Vault
-    ciphertext string itself carries the key *version* (``vault:vN:…``),
-    so key rotation inside Transit needs no id change — Vault decrypts
-    old versions transparently (per its ``min_decryption_version``).
-
-    Vault Transit was chosen as the reference implementation because it is
-    self-hostable in-jurisdiction (UA/on-prem posture, ADR-0006); the
-    Protocol seam means a cloud KMS is another implementation, not a
-    redesign. Fail-closed: :meth:`startup_self_check` performs a live
-    encrypt/decrypt round-trip and raises :class:`MasterKeyError` if the
-    KMS is unreachable or the key is absent — the service refuses to start,
-    same posture as master-key-missing (sprint-03 chaos).
+    ``master_key_id`` is ``vault:{mount}:{key_name}``; the ciphertext carries the key version, so Transit
+    rotation needs no id change. Fail-closed: :meth:`startup_self_check` does a live round-trip.
     """
 
     def __init__(
@@ -221,8 +159,7 @@ class KmsMasterKeyProvider:
         import httpx
 
         self._addr = addr.rstrip("/")
-        # Accept Secret[str] (house style) or a plain str; hold only the
-        # revealed value privately — never expose it via public API/repr.
+        # Secret[str] or str; held privately, never exposed.
         self._token: str = _reveal(token)
         if not self._token:
             raise MasterKeyError("Vault token is empty; refusing to construct provider")
@@ -271,8 +208,7 @@ class KmsMasterKeyProvider:
         return data
 
     async def startup_self_check(self) -> None:
-        """Live encrypt/decrypt round-trip. Raises MasterKeyError on any
-        failure so the service lifespan refuses to start (fail-closed)."""
+        """Live encrypt/decrypt round-trip; raises MasterKeyError so the service refuses to start."""
         import base64
 
         probe = os.urandom(16)
@@ -308,7 +244,7 @@ class KmsMasterKeyProvider:
         ct = data.get("ciphertext")
         if not isinstance(ct, str) or not ct.startswith("vault:"):
             raise MasterKeyError("Vault Transit encrypt returned malformed ciphertext")
-        # Stored as the UTF-8 bytes of Vault's versioned ciphertext string.
+        # UTF-8 bytes of Vault's versioned ciphertext string.
         return self.master_key_id, ct.encode("utf-8")
 
     async def unwrap(self, master_key_id: str, wrapped_kek: bytes) -> bytes:
@@ -338,14 +274,7 @@ class KmsMasterKeyProvider:
 
 
 class CompositeMasterKeyProvider:
-    """Route ``unwrap`` by ``master_key_id``; ``wrap`` under the primary.
-
-    Exists for the KMS migration window (ADR-0011 re-wrap procedure):
-    while ``scripts/kms/rewrap-tenant-keks.py`` is moving rows from
-    ``file-v1`` to ``vault:…``, both masters are live and every row must
-    keep decrypting. After the re-wrap completes the file member can be
-    dropped from configuration.
-    """
+    """Route ``unwrap`` by ``master_key_id``, ``wrap`` under the primary: the KMS migration window (ADR-0011)."""
 
     def __init__(self, *, primary: Any, fallbacks: tuple[Any, ...] = ()) -> None:
         self._primary = primary
@@ -367,10 +296,7 @@ class CompositeMasterKeyProvider:
         return bool(getattr(member, "master_key_id", None) == master_key_id)
 
     async def startup_self_check(self) -> None:
-        """Fail-closed on the PRIMARY; fallback members that fail their
-        check are logged loudly but tolerated — a fallback exists only to
-        read not-yet-re-wrapped rows, and those reads will fail precisely
-        and audibly at unwrap time if the member is genuinely broken."""
+        """Fail-closed on the PRIMARY; a failing fallback is logged and tolerated (its reads fail audibly at unwrap)."""
         check = getattr(self._primary, "startup_self_check", None)
         if callable(check):
             await check()
@@ -421,18 +347,8 @@ def build_master_key_provider(
     vault_transit_key: str = "mdx-master",
     vault_transit_mount: str = "transit",
 ) -> Any:
-    """The single composition helper every service calls (the '1-line swap').
-
-    ``provider='file'``  → :class:`FileMasterKeyProvider` (dev default,
-    behaviour identical to pre-sprint-16).
-    ``provider='vault'`` → :class:`KmsMasterKeyProvider` as primary, with
-    the file provider included as a read-only fallback **iff** the file
-    exists on disk — so the migration window keeps every old row
-    decryptable, and a finished migration (key file removed) runs pure-KMS.
-
-    The returned object satisfies :class:`MasterKeyProvider` and exposes
-    ``startup_self_check`` — call it in the lifespan, exactly as before.
-    """
+    """``file`` → :class:`FileMasterKeyProvider`; ``vault`` → KMS primary with the file provider as read-only
+    fallback iff the key file exists. The result exposes ``startup_self_check``."""
     provider = provider.strip().lower()
     if provider == "file":
         if not file_path:

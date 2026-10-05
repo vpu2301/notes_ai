@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// 0057 — the app's "Meeting <date>" placeholder is sent to the server as
-/// no title at all, so the note can be named from what was said. A title a
-/// person typed is sent as typed.
+/// The app's "Meeting <date>" placeholder is sent as no title, so the note can be named from what was said; a typed title is sent as typed.
 final class PlaceholderTitleTests: XCTestCase {
     func testThePlaceholderIsRecognised() {
         let formatter = DateFormatter()

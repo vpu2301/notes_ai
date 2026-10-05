@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
-"""Pre-commit / CI gate: reject direct ``asyncpg.connect`` / ``create_pool``
-outside ``libs/db/``.
-
-Why: the only sanctioned way to obtain a tenant-scoped DB connection is
-``libs/db.tenant_connection``. Direct ``asyncpg`` use bypasses the RLS
-contract — see ADR-0004.
-
-The gate is self-contained and scopes to APPLICATION SOURCE. It skips:
-``libs/db/`` (the sanctioned home of the raw driver), ``tests/`` (integration
-tests stand up real connections), and ``scripts/`` (the migration runner, seed
-and admin tooling legitimately open non-tenant connections). It therefore
-behaves identically whether pre-commit feeds it a staged file list or ``make``
-feeds it ``git ls-files``.
-
-Override (rare, for non-tenant infra code): inline ``# noqa: DB001``.
+"""Gate: no direct ``asyncpg.connect`` / ``create_pool`` outside ``libs/db/`` (the RLS
+contract, ADR-0004). Skips libs/db/, tests/ and scripts/; override with ``# noqa: DB001``.
 """
 
 from __future__ import annotations

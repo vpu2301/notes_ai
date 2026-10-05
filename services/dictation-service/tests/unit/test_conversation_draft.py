@@ -1,16 +1,7 @@
-"""Sprint-14 conversation finalize → note draft (pure, fakes only).
+"""Conversation finalize → note draft (pure, fakes only).
 
-Two contracts:
-
-* ``dialogue_text`` renders reviewable speaker turns — client-supplied
-  names or the neutral SPEAKER_N defaults, consecutive same-speaker
-  turns merged, and an unresolved speaker gets the honesty label
-  instead of being folded into a participant.
-* ``create_conversation_draft`` posts through the EXISTING
-  ``POST /v1/notes`` surface with the caller's bearer, links back
-  via ``source_session_id`` + ``transcript_segment_ids``, and NEVER
-  raises: every failure degrades to a ``conversation.draft.create_failed``
-  audit row (the transcript is already persisted when this runs).
+``dialogue_text`` renders speaker turns (UNKNOWN never folded into a
+participant); ``create_conversation_draft`` never raises, failures audit.
 """
 
 from __future__ import annotations

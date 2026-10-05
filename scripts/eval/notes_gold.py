@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
-"""Gold format v2 for the notes eval, and a validator (Summary Engine v2, Q1 T2).
+"""Gold format v2/v3 for the notes eval, and a validator that refuses a gold file
+contradicting its own transcript.
 
-    python scripts/eval/notes_gold.py tests/fixtures/eval/notes     # prints problems, exit 1 if any
-    make eval-notes-validate CORPUS=eval/notes/v2
+    python scripts/eval/notes_gold.py tests/fixtures/eval/notes
 
-Every v2 field is optional, so a v1 file is a valid v2 file. What the
-validator refuses is a gold file that contradicts itself or its own
-transcript: an ASR spelling that the ASR never produced, a date phrase
-nobody said, a speaker label nobody spoke under, a forbidden string that
-the gold facts themselves contain. A metric computed from such a file
-would measure the annotator, not the engine.
-
-Problems name the file and the index of the offending entry — never its
-text, so the output is safe to paste into a ticket about a real corpus.
+Problems name the file and the entry index, never its text.
 """
 
 from __future__ import annotations
@@ -156,7 +148,7 @@ def fact_third(fact: str | dict | KeyFact) -> int | None:
 
 
 class Gold(_Model):
-    # v1/v2: strings; v3 (Sprint SQ1): KeyFact objects. One file uses one.
+    # v1/v2: strings; v3: KeyFact objects. One file uses one.
     key_facts: list[str | KeyFact] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
@@ -170,16 +162,15 @@ class Gold(_Model):
     topics: list[TopicRef] = Field(default_factory=list)
     must_contain: list[str] = Field(default_factory=list)
     must_not_contain: list[str] = Field(default_factory=list)
-    # F3 — what a walkthrough's note must carry.
+    # What a walkthrough's note must carry.
     figures: list[GoldFigure] = Field(default_factory=list)
     presenter: GoldPresenter | None = None
     contact: list[str] = Field(default_factory=list)
-    # Sprint D2 — who each voice is (label → narrator | host | guest |
-    # interviewee | participant | clip | advert).
+    # Who each voice is (label → narrator | host | guest | interviewee | participant | clip | advert).
     roles: dict[str, Literal[
         "narrator", "host", "guest", "interviewee", "participant", "clip", "advert"
     ]] = Field(default_factory=dict)  # fmt: skip
-    # Gold v3 (Sprint SQ1, 01-quality-criteria §3).
+    # Gold v3.
     participants: list[Participant] = Field(default_factory=list)
     opinions: list[Opinion] = Field(default_factory=list)
     topic_segments: list[TopicSegment] = Field(default_factory=list)
@@ -195,8 +186,7 @@ class Meeting(_Model):
     recorded_on: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     recording_type: RecordingType | None = None
     transcript: list[Turn]
-    # Gold v3: the human-corrected transcript (TQ1 reference.json in the
-    # snapshot shape). Faithfulness is scored against both (SM-02b).
+    # Gold v3: the human-corrected transcript; faithfulness is scored against both.
     reference_transcript: list[Turn] | None = None
     gold: Gold
 

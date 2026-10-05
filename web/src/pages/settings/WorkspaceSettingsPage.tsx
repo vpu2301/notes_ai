@@ -18,11 +18,7 @@ const VIEWS = [
   { value: "terms", label: "Names and terms" },
 ] as const;
 
-/**
- * `/settings/workspace` — the first admin surface (Sprint 23): how the
- * shared page looks (branding) and how notes may leave the workspace
- * (policy). The API refuses non-admins; the tab is only shown to them.
- */
+/** `/settings/workspace` — branding and sharing policy; admin-only. */
 export function WorkspaceSettingsPage() {
   const { activeTenantId } = useAuth();
   return activeTenantId ? <WorkspaceSettingsForm tenantId={activeTenantId} /> : <p className="help">No workspace selected.</p>;
@@ -33,7 +29,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [policy, setPolicy] = useState<SharingPolicy | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Branding's own load failure: shown on Branding, not over the other views.
+  // Branding's own load failure, shown on Branding only.
   const [brandingError, setBrandingError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -42,8 +38,7 @@ export function WorkspaceSettingsForm({ tenantId }: { tenantId: string }) {
   const [contactEmail, setContactEmail] = useState("");
   const [view, setView] = useSettingsView(VIEWS);
 
-  // Each half loads on its own: a branding read that fails must not take
-  // the sharing policy down with it.
+  // Each half loads on its own.
   useEffect(() => {
     let live = true;
     getTenant(tenantId)

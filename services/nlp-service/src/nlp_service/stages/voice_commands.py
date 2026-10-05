@@ -1,16 +1,4 @@
-"""Stage 1 — voice command detection.
-
-The stage delegates to :class:`VoiceCommandMatcher`. Detected matches
-are converted to :class:`CommandSlot` (for inspectability) + the
-matching words are flagged ``is_voice_command_token=True`` so later
-stages (punctuation, numbers, abbreviations) skip them.
-
-Mixed-content splitting: a command in the middle of a segment doesn't
-split the segment into multiple records — instead, the words remain a
-single list with the command tokens flagged. Downstream renderers can
-split if they want, but the pipeline's text/words invariant stays
-clean.
-"""
+"""Stage 1: voice command detection. Matched words are flagged, never split out of the segment."""
 
 from __future__ import annotations
 
@@ -34,9 +22,7 @@ from .voice_command_matcher import CommandSpec, MatchResult, VoiceCommandMatcher
 
 logger = logging.getLogger(__name__)
 
-# Observability for the typed-field commands. LABEL DISCIPLINE:
-# ``op`` and ``reason`` are closed enums from operations.py — never an
-# option value, never a section key with free-text provenance.
+# Label discipline: ``op`` and ``reason`` are closed enums, never free-text values.
 _meter = metrics.get_meter("mdx.nlp.commands")
 _operations = _meter.create_counter(
     "mdx_nlp_operations_total",
@@ -46,20 +32,7 @@ _operations = _meter.create_counter(
 
 
 class VoiceCommandStage:
-    """Sprint-05 Stage 1.
-
-    Inputs:
-      - ``ctx.template_sections`` (optional): used for section-command argument
-        resolution.
-      - ``input.words``: Whisper-style words with timing + probability.
-
-    Outputs:
-      - ``words``: same order, with ``is_voice_command_token`` set on consumed words.
-      - ``voice_commands``: ordered list of detected :class:`CommandSlot`.
-      - ``operations``: one :class:`Operation` per command.
-      - ``text``: with command tokens stripped (so punctuation, numbers,
-        and abbreviations don't see them).
-    """
+    """Stage 1: flags consumed words, emits voice_commands + operations, strips command tokens from text."""
 
     name = "voice_commands"
     runs_on_partials: bool = True
@@ -78,13 +51,8 @@ class VoiceCommandStage:
 
         words = list(input.words)
         if not words and input.text:
-            # If words aren't supplied (batch path with text-only input),
-            # synthesise placeholder words so the matcher has something to
-            # walk. Pause-before becomes 0 for synthesised words; the
-            # confidence gate also drops to 0 because we have no real
-            # probability. So this path effectively disables voice
-            # commands on text-only inputs — which is the desired
-            # sprint-5 behaviour (commands need timing + probability).
+            # Text-only input: synthesised words have no pause/probability, so
+            # the gates effectively disable commands (by design).
             words = []
 
         results = matcher.detect(words)
@@ -119,9 +87,7 @@ class VoiceCommandStage:
                 attrs["reason"] = reason
             _operations.add(1, attrs)
 
-        # Rebuild text from non-command words so later stages don't see commands.
-        # Batch mode additionally applies text-shaped ops in place — a spoken
-        # «крапка» becomes "." attached at the command's position.
+        # Rebuild text without command words; batch mode applies text-shaped ops in place.
         if ctx.apply_operations_inline:
             non_command_text = _apply_ops_inline(new_words, results)
         else:
@@ -129,9 +95,7 @@ class VoiceCommandStage:
                 w.text for i, w in enumerate(new_words) if i not in consumed
             ).strip()
 
-        # Surface ambiguous matches (a different command intent fit the same
-        # span) so the FE/user can confirm rather than trust the
-        # arbitrary longest-first winner.
+        # Surface ambiguous matches so the user confirms rather than trusting the longest-first winner.
         ambiguity_warnings = tuple(
             PipelineWarning(
                 code="ambiguous_command",
@@ -158,13 +122,10 @@ class VoiceCommandStage:
 
 
 def _apply_ops_inline(words: tuple[Word, ...], results: list[MatchResult]) -> str:
-    """Rebuild segment text with text-shaped operations applied in place.
+    """Rebuild text with text-shaped ops applied in place.
 
-    Punctuation attaches to the preceding word (no space); a command with
-    nothing before it in the segment renders as the bare mark — the caller
-    (asr-service batch enrichment) merges such leading marks into the
-    previous segment. Editor-only ops (save_draft, navigate_section, …)
-    have no textual form and are dropped from text.
+    Punctuation attaches to the preceding word; a leading mark renders bare
+    (the caller merges it into the previous segment). Editor-only ops are dropped.
     """
     op_at_first_index: dict[int, Operation] = {}
     consumed: set[int] = set()

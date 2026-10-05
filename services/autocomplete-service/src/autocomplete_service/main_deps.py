@@ -22,13 +22,9 @@ _meter = metrics.get_meter("mdx.autocomplete")
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
+    """Trusted issuers (ADR-0047): AUTH_ISSUERS_JSON, else the single AUTH_ISSUER trio.
 
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
+    Both the JWKS cache and ``build_current_user`` derive from this list so they cannot drift.
     """
     return issuers_from_env(
         settings.auth_issuers_json,
@@ -44,7 +40,7 @@ class ServiceState:
     app_pool: asyncpg.Pool
     audit_writer_pool: asyncpg.Pool
     audit_writer: AuditWriter
-    redis: object  # redis.asyncio.Redis — held for the readiness probe
+    redis: object  # redis.asyncio.Redis
     phrase_rate_limiter: object  # PhraseWriteRateLimiter
     pii_rejections_metric: object
     trie_cache: TrieCache
@@ -57,10 +53,6 @@ class ServiceState:
 
 async def build_state() -> ServiceState:
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     app_pool = await create_pool(
@@ -68,8 +60,6 @@ async def build_state() -> ServiceState:
         application_name=f"{settings.service_name}/app",
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
-        # libs/db.create_pool always sets statement_cache_size=0 (transaction-
-        # pooler safe), so we don't pass it explicitly — it isn't a kwarg.
     )
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,
@@ -82,9 +72,6 @@ async def build_state() -> ServiceState:
     from redis.asyncio import Redis
 
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
-    # Cache health instruments (step-03 §4.3): the degraded counter feeds
-    # the Redis-down / lock-storm visibility; the size histogram feeds the
-    # 50k-phrase marisa-trie upgrade watch (ADR-0025).
     degraded_metric = _meter.create_counter(
         "mdx_autocomplete_degraded_total",
         description="Suggest requests served by the degraded direct-DB path (label=reason)",
@@ -126,8 +113,7 @@ async def build_state() -> ServiceState:
     )
     telemetry_buffer.start()
 
-    # Roll-up freshness gauge — the RollupStale alert fires on its age.
-    # unit "" so the exporter does not suffix the contract name.
+    # unit "" so the exporter does not suffix the contract metric names.
     from opentelemetry.metrics import CallbackOptions, Observation
 
     from .jobs import rollup as rollup_job
@@ -148,8 +134,6 @@ async def build_state() -> ServiceState:
             for source, n in rollup_job.corpus_size_by_source().items()
         ]
 
-    # Sprint 15: Layer C acceptance rate (ADR-0036) — the ghost-text quality
-    # metric and kill-switch input. Global; refreshed by the nightly roll-up.
     def _layer_c_acceptance_callback(_options: CallbackOptions) -> list[Observation]:
         return [Observation(rollup_job.layer_c_acceptance_rate())]
 
@@ -189,11 +173,7 @@ async def build_state() -> ServiceState:
         description="Suggest cache lookups (label=hit)",
         unit="1",
     )
-    # Name matches the as-built Grafana/k6 contract
-    # (…_suggest_latency_ms_histogram_bucket after the exporter's suffixes).
-    # unit deliberately empty: the collector's prometheus exporter appends
-    # the unit name as a suffix, which would break the dashboard-contract
-    # metric name (…_suggest_latency_ms_histogram_bucket). Values are ms.
+    # Name is a Grafana/k6 contract; unit empty so the exporter adds no suffix. Values are ms.
     suggest_latency_metric = _meter.create_histogram(
         "mdx_autocomplete_suggest_latency_ms_histogram",
         description="End-to-end suggest latency in ms (label path=hit|miss|degraded|snippet)",

@@ -1,4 +1,4 @@
-"""The nightly DER gate (Sprint 29 B-10): regressions fail, gaps are not passes."""
+"""The nightly DER gate: regressions fail, gaps are not passes."""
 
 from __future__ import annotations
 

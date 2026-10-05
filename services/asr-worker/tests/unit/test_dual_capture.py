@@ -1,10 +1,5 @@
-"""Sprint 31: dual-channel captures in the worker.
-
-The channel path is exercised through `_diarize_capture` with a fake
-engine; the failure isolation (any channel-path exception → mono on the
-mixdown, `mono_fallback`) and the naming rule are held here. The channel
-analysis itself is tested in libs/diarization.
-"""
+"""Dual-channel captures in the worker: `_diarize_capture` failure isolation and the
+naming rule. The channel analysis itself is tested in libs/diarization."""
 
 from __future__ import annotations
 
@@ -184,8 +179,7 @@ def test_channel_stats_are_numbers_only() -> None:
 async def test_a_cleared_channel_name_stays_cleared_after_a_rerun(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Acceptance 6: the person removed the channel name; a re-run must
-    not put it back — "cleared" follows the speaker."""
+    """A removed channel name never returns on a re-run: "cleared" follows the speaker."""
     world = _World(_THREE, monkeypatch)
     world.row["speaker_names"] = json.dumps({})
     world.row["speaker_name_sources"] = json.dumps({"SPEAKER_1": "cleared"})

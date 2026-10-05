@@ -1,14 +1,4 @@
-"""Per-process session registry + in-memory contexts.
-
-Every live session has one :class:`SessionContext` here. The context
-owns the audio buffer reference, the Whisper context, the WS connection
-(or None during reconnect), and the sequence-cursor bookkeeping. DB
-state mirrors the in-memory state — the manager is responsible for
-keeping them aligned.
-
-Manager is process-local. Multi-process workers (sprint 16) keep
-sessions affine to a single process via Redis routing.
-"""
+"""Per-process session registry + in-memory contexts; DB status mirrors ctx.state."""
 
 from __future__ import annotations
 
@@ -28,29 +18,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SessionContext:
-    """Everything the session loop needs in one place.
-
-    ``ws`` is the current WebSocket connection (or None while
-    reconnecting). ``buffer`` is the :class:`SessionAudioBuffer` (sprint
-    04 day 4). ``finalized_text`` is the running last-N-tokens used as
-    Whisper's ``initial_prompt`` for the next window.
-    """
+    """Everything the session loop needs in one place."""
 
     session_id: UUID
     tenant_id: UUID
     user_id: UUID
     language: str
-    # Free-text vocabulary hint fed to Whisper's initial_prompt (from
-    # start_session or the service-wide config default). Empty = none.
-    vocabulary_hint: str
+    vocabulary_hint: str  # Whisper initial_prompt; empty = none
     target_kind: str
     template_id: UUID | None
     template_text: str | None = None
 
-    # Ambient-capture v1: which surface produced the audio ('browser' |
-    # 'mobile' | 'room_device') and an optional stable device/room label.
-    # They describe the ORIGINAL capture — a resume from a different
-    # surface does not overwrite them.
+    # Original capture surface ('browser' | 'mobile' | 'room_device'); a resume never overwrites.
     capture_source: str = "browser"
     device_name: str | None = None
 
@@ -71,14 +50,8 @@ class SessionContext:
     last_partial_emit_ms: int = 0
     last_window_cursor_ms: int = 0
     finalized_segments: list[Any] = field(default_factory=list)  # list[Segment]
-    # The session's StreamingWindower. Held here so every teardown path
-    # (normal, cap, failure, abandon) can flush the words still provisional
-    # at end-of-session instead of dropping them — see
-    # `StreamingWindower.flush_provisional`.
-    windower: Any | None = None  # StreamingWindower
-    # Serialises windower mutation. The tick loop is still live when
-    # EndSession triggers finalize, so the end-of-session drain would
-    # otherwise race a normal tick and corrupt the windower's cursor.
+    windower: Any | None = None  # StreamingWindower; teardown paths flush provisional words
+    # Serialises windower mutation: the end-of-session drain races the live tick loop.
     window_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     # Timing
@@ -96,24 +69,20 @@ class SessionContext:
     partial_latencies_ms: list[int] = field(default_factory=list)
     final_latencies_ms: list[int] = field(default_factory=list)
 
-    # Sprint-06: section-aware dictation
+    # Section-aware dictation
     template_doc: Any | None = None  # TemplateDoc (avoiding import cycle)
     active_section_id: str | None = None
     active_section_prompt: str | None = None
 
-    # Sprint-14: conversation (meeting) mode + protocol v2. The
-    # diarization stream and speaker naming live on the context so an
-    # in-process resume keeps the speaker timeline exactly like
-    # `finalized_segments`.
+    # Conversation mode + protocol v2; diarization state survives an in-process resume.
     mode: str = "dictation"  # 'dictation' | 'conversation'
     protocol_version: int = 1
-    bearer: str | None = None  # raw token — draft creation forwards the caller's identity
+    bearer: str | None = None  # raw token; draft creation forwards the caller's identity
     capacity_weight: int = 1
     diarization: Any | None = None  # DiarizationStream (Any: torch-free import path)
     speaker_naming: Any | None = None  # SpeakerNaming (conversation only)
     mapping_manual: bool = False  # a SetSpeakerMapping arrived
-    # Honesty metrics (Grafana DER proxy). Counted on COMMITTED words
-    # only — partials are re-emitted every tick until they commit.
+    # Honesty metrics, counted on committed words only.
     unknown_speaker_words: int = 0
     labeled_speaker_words: int = 0
     pending_speaker_words: int = 0
@@ -133,12 +102,7 @@ class SessionManager:
         self._sessions: dict[UUID, SessionContext] = {}
         self._lock = asyncio.Lock()
         self._max_sessions = max_sessions
-        # Sprint 16 deployment: scale-in drain. When True the worker
-        # admits NOTHING new; live sessions run to completion. Set by
-        # the preStop hook (POST /internal/drain) — Kubernetes then
-        # waits (terminationGracePeriodSeconds) until active sessions
-        # hit zero before the pod dies. One-way by design: a draining
-        # pod is already condemned by the autoscaler.
+        # Scale-in drain (POST /internal/drain): admit nothing new; one-way by design.
         self._draining = False
 
     @property
@@ -162,9 +126,7 @@ class SessionManager:
 
     @property
     def total_weight(self) -> int:
-        """Mode-aware load: dictation = 1, conversation = its configured
-        weight (2 by default — two resident models). The cap compares
-        weight, not headcount: 4 dictation OR 2 conversation OR a mix."""
+        """Mode-aware load; the cap compares weight, not headcount."""
         return sum(s.capacity_weight for s in self._sessions.values())
 
     def fits(self, weight: int) -> bool:
@@ -175,8 +137,7 @@ class SessionManager:
     async def register(self, ctx: SessionContext) -> None:
         async with self._lock:
             if self._draining:
-                # Same client semantics as gpu_full: this worker has no
-                # room — reconnect and land on another pod.
+                # Same client semantics as gpu_full: reconnect lands on another pod.
                 raise CapacityError("worker is draining for scale-in; no new sessions")
             if self.total_weight + ctx.capacity_weight > self._max_sessions:
                 raise CapacityError(

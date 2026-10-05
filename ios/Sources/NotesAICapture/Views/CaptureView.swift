@@ -1,11 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The live card: title, timer and Stop while recording; the three pipeline
-/// steps while working; "Note ready" when done. Nothing to fill in before
-/// pressing record — the title can be typed while the meeting runs. It sits
-/// at the bottom of every screen (`CaptureBar`) so the meeting is one tap
-/// away wherever you are.
+/// The live card: recording, the pipeline steps, "Note ready". Pinned at the bottom of every screen (`CaptureBar`).
 struct ActiveCaptureCard: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -42,9 +38,7 @@ struct ActiveCaptureCard: View {
                 } else {
                     PulsingDot()
                 }
-                // Sprint F1: "Starting…" until audio actually reaches the
-                // file; then the counter, with one quiet line when the
-                // audio began noticeably after the press.
+                // "Starting…" until audio reaches the file; then the counter.
                 VStack(alignment: .leading, spacing: 1) {
                     if let offset = capture.recorder.firstFrameOffsetMs {
                         Text(formatElapsed(capture.recorder.elapsed))
@@ -78,8 +72,7 @@ struct ActiveCaptureCard: View {
                 .foregroundStyle(DS.text1)
                 .submitLabel(.done)
             if let invited = capture.context.inviteLine {
-                // Sprint 30: a capture from a calendar event says what the
-                // invitation will be used for — quietly.
+                // A capture from a calendar event says what the invitation is used for.
                 Text(invited)
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
@@ -120,8 +113,7 @@ struct ActiveCaptureCard: View {
                 DSNotice(tone: .warn, symbol: "clock.badge.exclamationmark",
                          text: "Stopped at the \(formatLimit(capture.recorder.limitSeconds)) limit. The note is being drafted — start a new meeting to keep recording.")
             }
-            // The typing does not disappear the moment the meeting ends:
-            // the most useful minute to add a line is often the one after.
+            // The pad stays after the meeting ends.
             MyNotesEditor()
             Text("Keep the app open until the upload finishes; the rest happens on the server.")
                 .font(.dsMeta)
@@ -183,11 +175,7 @@ struct ActiveCaptureCard: View {
     }
 }
 
-/// "People": how many speakers the meeting has, sent with the upload so
-/// the speaker separation looks for that many. Auto and 6+ leave the count
-/// to it. Can be set while recording — it is read when the upload goes (or
-/// kept with the recording if that has to wait). Off with "Separate
-/// speakers", which it only refines.
+/// "People": the speaker count sent with the upload; read when the upload goes. Off without "Separate speakers".
 struct PeoplePicker: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var height: CGFloat = 34
@@ -199,20 +187,14 @@ struct PeoplePicker: View {
             height: height)
             .disabled(!capture.diarize)
             .opacity(capture.diarize ? 1 : 0.45)
-            // A container with its own name: a label on the bare stack
-            // would replace every segment's name with this one.
+            // A named container: a label on the bare stack would replace every segment's name.
             .accessibilityElement(children: .contain)
             .accessibilityLabel("People in the meeting")
             .accessibilityHint(capture.diarize ? "" : "Turn on Separate speakers to use this")
     }
 }
 
-/// "My notes": what the author types while the meeting runs (Sprint 34).
-///
-/// It is the note's `user_notes` section, not a scratch buffer — autosaved
-/// as it is typed, on disk within half a second, and on every other device
-/// of the same person. Nothing downstream ever rewrites a character of it:
-/// the document is built AROUND these lines.
+/// "My notes": the note's `user_notes` section, typed while the meeting runs; autosaved, never rewritten downstream.
 struct MyNotesEditor: View {
     @EnvironmentObject private var capture: CaptureViewModel
     @FocusState private var focused: Bool
@@ -233,8 +215,7 @@ struct MyNotesEditor: View {
                     .foregroundStyle(DS.text1)
                     .scrollContentBackground(.hidden)
                     .focused($focused)
-                    // Tall enough to feel like a page, short enough to leave
-                    // the timer and Stop in reach of a thumb.
+                    // Tall enough for a page, short enough to keep Stop in reach.
                     .frame(minHeight: 120, maxHeight: 220)
             }
             .padding(.horizontal, 5)
@@ -252,9 +233,7 @@ struct MyNotesEditor: View {
     }
 }
 
-/// What kind of meeting the next one is: picks the template family the note
-/// is written into. "Auto" is the default and is always right enough, so
-/// this is a thing to notice rather than a step to complete.
+/// What kind of meeting the next one is: picks the template family. "Auto" is the default.
 struct MeetingTypePicker: View {
     @EnvironmentObject private var capture: CaptureViewModel
 
@@ -294,14 +273,10 @@ struct NewMeetingButton: View {
     }
 }
 
-/// The strip pinned to the bottom of every screen: the one button when
-/// nothing is happening, otherwise the live card — full size, or folded
-/// to one line. Swipe up (or tap the chevron) for the whole card, swipe
-/// down to fold it away; a new recording or a result unfolds it.
+/// The strip pinned to the bottom of every screen: the one button, or the live card (full or folded).
 struct CaptureBar: View {
     @EnvironmentObject private var capture: CaptureViewModel
-    /// The keyboard is up (a note is being typed): the idle button steps
-    /// aside; the live card stays, its title field needs the keyboard too.
+    /// The keyboard is up: the idle button steps aside; the live card stays.
     @State private var keyboardShown = false
     @State private var expanded = true
 
@@ -400,8 +375,7 @@ struct CaptureBar: View {
     }
 }
 
-/// The folded card: one line with what matters — the timer and Stop while
-/// recording, the step in progress, or the result and its button.
+/// The folded card: one line with the timer and Stop, the step in progress, or the result.
 private struct CompactCaptureRow: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel

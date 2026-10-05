@@ -9,13 +9,8 @@ import { messageFor } from "../../lib/errorCopy";
 import { Banner, LoginShell } from "./LoginShell";
 
 /**
- * `/login/password` — the alternative to an emailed code.
- *
- * Still Keycloak-backed (`routers/login.py` runs in both `MDX_IDP_MODE`s),
- * so the second factor arrives as the sprint-16 `otp_required` /
- * `otp_invalid` pair on a 401 rather than as an `mfa_required` AuthResult.
- * Both shapes are handled: the code path here, the AuthResult path at
- * `/login/mfa`.
+ * `/login/password` — Keycloak-backed: the second factor arrives as `otp_required` /
+ * `otp_invalid` on a 401 (handled here), not as an `mfa_required` AuthResult (`/login/mfa`).
  */
 export function PasswordLoginPage() {
   useDocumentTitle("Sign in");
@@ -23,13 +18,7 @@ export function PasswordLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /**
-   * `/login` hands over the address it already has — either because the
-   * person chose "Use a password instead", or because the code step was
-   * refused with `use_password` and sent them here. `notice` is the
-   * explanation that goes with the second case; there is none for the
-   * first, because choosing a different way in needs no apology.
-   */
+  /** Address handed over by `/login`; `notice` explains a `use_password` refusal. */
   const handover = (location.state ?? null) as {
     from?: string;
     email?: string;
@@ -59,17 +48,13 @@ export function PasswordLoginPage() {
     setBusy(true);
     try {
       await login(email.trim(), password, otpRequired && otp ? otp.trim() : undefined);
-      // Not awaited: Chromium's save bubble outlives this client-side route
-      // change, and the button should not sit on "Signing in…" while the
-      // user decides.
+      // Not awaited: Chromium's save bubble outlives the route change.
       void offerToSavePassword(email.trim(), password);
       navigate(from, { replace: true });
     } catch (err) {
       const code = err instanceof ApiError ? err.code : undefined;
       if (code === "email_not_verified") {
-        // The password was right — this is the one 403 on this screen that
-        // is not about credentials, so it gets a way forward rather than a
-        // red line telling somebody to re-check something that was fine.
+        // The password was right: the one 403 here that is not about credentials.
         setUnverified(true);
         setError(messageFor(err));
       } else if (code === "otp_required") {
@@ -79,9 +64,7 @@ export function PasswordLoginPage() {
         setOtpRequired(true);
         setError(messageFor(err));
       } else if (authApi.isUnavailableHere(err)) {
-        // `/auth/login` is mounted only under `MDX_IDP_MODE=keycloak`. A
-        // native deployment answers 404, and "Not Found" under a password
-        // box reads as a wrong address rather than an absent flow.
+        // `/auth/login` exists only in keycloak mode; a native 404 is an absent flow, not a wrong address.
         setError("Password sign-in is not enabled here. Use an emailed code instead.");
       } else {
         setError(messageFor(err));
@@ -91,13 +74,7 @@ export function PasswordLoginPage() {
     }
   };
 
-  /**
-   * Another confirmation code, from the screen where the person learned
-   * they needed one. Unauthenticated by necessity — not being able to sign
-   * in is the problem being solved — and answered with a 202 either way,
-   * so the button reports on success as well as failure: nothing else here
-   * changes, and silence reads as broken.
-   */
+  /** Resend the confirmation code; unauthenticated, 202 either way, so the button reports success too. */
   const onResend = async () => {
     setBusy(true);
     try {
@@ -142,7 +119,6 @@ export function PasswordLoginPage() {
           type="password"
           autoComplete="current-password"
           required
-          // Prefilled address ⇒ the only thing left to type is here.
           autoFocus={!otpRequired && !!handover?.email}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -206,8 +182,7 @@ export function PasswordLoginPage() {
         </Link>
       </p>
 
-      {/* The seeded dev account. Stripped from production bundles — a
-          working credential in shipped HTML is not a convenience. */}
+      {/* Seeded dev account; stripped from production bundles. */}
       {import.meta.env.DEV && (
         <p className="login-foot">
           <span>

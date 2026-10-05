@@ -1,12 +1,4 @@
-"""Per-session Opus decoder.
-
-Opus is a stateful codec; the decoder accumulates inter-frame state. One
-:class:`OpusDecoder` instance per session — never shared across sessions.
-
-The implementation imports ``opuslib`` lazily so the module can be
-imported on macOS (where the library wheel isn't published) for unit
-tests that exercise the surrounding framing.
-"""
+"""Per-session Opus decoder (stateful codec: never share across sessions). ``opuslib`` is imported lazily."""
 
 from __future__ import annotations
 
@@ -17,14 +9,12 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Wire constants for the dictation client (sprint 04 frontend):
+# Wire constants for the dictation client.
 SAMPLE_RATE_HZ: int = 16_000
 CHANNELS: int = 1
 FRAME_MS: int = 20
 SAMPLES_PER_FRAME: int = SAMPLE_RATE_HZ * FRAME_MS // 1000  # 320
-# A 20-ms Opus frame at 16-kHz mono VOIP profile is typically 60-90
-# bytes; 1500 bytes is the absolute upper bound. Frames above that are
-# rejected at the codec layer (the wire DoS check is 8 KB).
+# A 20-ms Opus frame is typically 60-90 bytes; 1500 is the absolute upper bound.
 
 
 class OpusDecodeError(Exception):
@@ -41,14 +31,7 @@ class _DecodeStats:
 
 
 class OpusDecoder:
-    """Stateful per-session Opus → PCM (float32 mono 16 kHz).
-
-    ``decode(bytes) -> np.ndarray`` returns 320 float32 samples per
-    20-ms frame, normalised to ``[-1, 1]``.
-
-    Five consecutive decode failures raises :class:`OpusDecodeError(fatal=True)`;
-    the session loop translates that to a `worker_failed` close.
-    """
+    """Stateful Opus → float32 PCM; five consecutive failures raise ``OpusDecodeError(fatal=True)``."""
 
     _MAX_CONSECUTIVE_FAILURES: int = 5
 
@@ -63,9 +46,7 @@ class OpusDecoder:
 
             self._decoder = opuslib.Decoder(SAMPLE_RATE_HZ, CHANNELS)
         except Exception as exc:  # noqa: BLE001
-            # On macOS / dev hosts without libopus we fall back to a
-            # stub decoder that returns silence; tests for upstream
-            # logic still run. Production images ship libopus0.
+            # No libopus (dev hosts): stub decoder returns silence.
             logger.warning(
                 "opus.unavailable_fallback",
                 extra={"error": str(exc), "error_class": type(exc).__name__},

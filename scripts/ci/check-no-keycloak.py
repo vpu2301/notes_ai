@@ -1,30 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — no Keycloak anywhere (IDX-B2 F3/L).
+"""Gate for the Keycloak removal: no Keycloak term may survive. NOT wired into CI yet
+and fails today; its ``--count`` is the removal's progress bar.
 
-**This gate is NOT wired into CI yet, and will fail if you run it.** That
-is correct: Keycloak is still the issuer in every environment. It is
-committed now so that the sprint which actually performs the removal has
-a finish line it can run against, rather than deciding what "removed"
-means while half-way through deleting things.
-
-Wire it up — add `make check-no-keycloak` to the architectural-gates step
-in `.github/workflows/ci.yml` — on the commit that deletes the last
-Keycloak artefact. Until then:
-
-    uv run python scripts/ci/check-no-keycloak.py        # see what is left
-    uv run python scripts/ci/check-no-keycloak.py --count  # just the number
-
-The count is the removal's progress bar.
-
-What is deliberately exempt, and why:
-
-* `docs/adr/`   — an ADR is a record of a decision that WAS made. ADR-0006
-                  chose Keycloak; superseding it does not un-make it, and
-                  editing the history would leave the supersession
-                  pointing at nothing.
-* `docs/sprints/` — sprint logs are the same kind of record.
-* `CHANGELOG`   — likewise.
-* this file     — it necessarily contains every term it bans.
+    uv run python scripts/ci/check-no-keycloak.py [--count]
 """
 
 from __future__ import annotations
@@ -37,9 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# The names that must not survive. Client ids are included because they
-# outlive the word "keycloak": a leftover `mdx-asr-worker` in a config is
-# a credential nobody rotates and nobody owns.
+# Names that must not survive; client ids included because they outlive the word "keycloak".
 BANNED = re.compile(
     r"keycloak|KEYCLOAK_|mdx-backend|mdx-admin|mdx-dev-cli|"
     r"mdx-asr-worker|mdx-dictation|room-device-demo",

@@ -43,8 +43,7 @@ describe("parseRichText", () => {
   });
 
   it("does not let a stray indent open a level of its own", () => {
-    // A one-space jog is the same level as far as the reader is concerned;
-    // what matters is that it comes back out again on the next line.
+    // A one-space jog is the same level; it must round-trip.
     const list = parseRichText("- one\n   - two\n- three").at(0) as { items: { depth: number }[] };
     expect(list.items.map((i) => i.depth)).toEqual([0, 1, 0]);
   });

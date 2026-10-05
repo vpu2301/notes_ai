@@ -1,17 +1,4 @@
-"""Silero VAD segmentation tuned for diarization (sprint 14).
-
-Distinct from ``asr_worker.vad`` on purpose: that wrapper merges segments
-< 500 ms apart and caps them at 30 s for Whisper's context window — both
-transformations destroy speaker-turn boundaries. Here we keep turns as
-Silero reports them (250 ms min silence splits a speaker hand-off
-into two segments) and never merge across a potential turn change.
-
-Fail-loud policy: diarization with a stubbed VAD would silently produce
-garbage speaker labels on real meetings, so unlike the asr-worker
-wrapper there is NO stub fallback — a missing silero-vad install raises
-at load time and diarization is refused (non-diarized work is
-unaffected; it never loads this module).
-"""
+"""Silero VAD for diarization: unlike ``asr_worker.vad`` it never merges across a turn change and has NO stub fallback."""
 
 from __future__ import annotations
 
@@ -23,10 +10,7 @@ SAMPLE_RATE_HZ = 16_000
 
 
 class SileroSegmenter:
-    """Speech-region detection over a PCM window. Thread-safe for the
-    single-consumer pattern used by the diarization stream (one call at
-    a time per process; the model itself is stateless between calls
-    because we reset internal state per invocation)."""
+    """Speech-region detection over a PCM window; one call at a time per process (state reset per invocation)."""
 
     def __init__(
         self,
@@ -53,8 +37,7 @@ class SileroSegmenter:
         self._get_speech_timestamps = get_speech_timestamps
 
     def speech_regions(self, pcm: np.ndarray) -> list[tuple[int, int]]:
-        """Return [(start_ms, end_ms), ...] of speech inside ``pcm``
-        (float32 mono 16 kHz), relative to the start of the buffer."""
+        """[(start_ms, end_ms), ...] of speech inside ``pcm`` (float32 mono 16 kHz), relative to the buffer start."""
         self._ensure_loaded()
         import torch
 

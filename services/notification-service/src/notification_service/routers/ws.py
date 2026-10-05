@@ -1,9 +1,4 @@
-"""The `/ws/notifications` route.
-
-Thin on purpose: authorize, then hand off. All the policy lives in
-ws/upgrade.py and all the behaviour in ws/handler.py, so this file
-stays a wiring detail.
-"""
+"""The `/ws/notifications` route: authorize (ws/upgrade.py), then hand off (ws/handler.py)."""
 
 from __future__ import annotations
 
@@ -23,9 +18,7 @@ async def notifications_ws(websocket: WebSocket) -> None:
     try:
         upgrade = await authorize_upgrade(websocket, jwks_cache=state.jwks_cache)
     except UpgradeRejected as rejection:
-        # Closing with a mapped 4xxx code gives the client the reason.
-        # We must accept() first to be able to send a close code at all
-        # once the handshake has begun.
+        # Mapped 4xxx close code tells the client why; accept() is needed first to send one.
         await websocket.close(code=ws_code_for_http(rejection.status_code))
         return
 

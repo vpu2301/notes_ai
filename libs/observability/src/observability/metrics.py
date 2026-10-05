@@ -1,14 +1,4 @@
-"""OTel metrics setup.
-
-Exports metrics two ways:
-
-* OTLP gRPC to the collector (network metrics, downstream Prometheus).
-* Prometheus pull endpoint exposed at ``/metrics`` on a sidecar port for
-  services that prefer scrape over push.
-
-Default histogram buckets follow request-latency expectations stated in the
-sprint spec: ``5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000`` ms.
-"""
+"""OTel metrics setup: OTLP gRPC push plus an optional Prometheus pull endpoint."""
 
 from __future__ import annotations
 

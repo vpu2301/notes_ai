@@ -1,15 +1,7 @@
-"""The ``rediarize`` task (Sprint 29 B-5): new speaker labels, no ASR pass.
+"""The ``rediarize`` task: new speaker labels, no ASR pass. In-memory job row, dict stores.
 
-The database is a single in-memory job row behind a fake connection that
-understands the handful of statements the task issues; stores are dicts.
-What is held here:
-
-* the transcript is re-labelled from the stored words — the ASR engine is
-  never touched — and lands under a new ``.r{rev}`` key;
-* duplicate delivery is a no-op, a redelivery after a crash finishes with
-  one revision bump;
-* a failure fails the RE-RUN, never the job or its current labels;
-* names follow a speaker only on a clear, one-to-one majority.
+Idempotent under redelivery; a failure fails the re-run, never the job; names follow
+a speaker only on a clear one-to-one majority.
 """
 
 from __future__ import annotations

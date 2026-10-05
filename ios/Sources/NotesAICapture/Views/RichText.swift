@@ -2,19 +2,9 @@ import SwiftUI
 
 // MARK: - Markdown-lite → blocks
 //
-// A generated note is not flat prose: it arrives as headings, nested
-// bullets, numbered decisions, checkbox action items and bold run-in
-// leads. The PDF has always typeset that (note-service's
-// `domain/pdf_richtext.py`); on screen it was shown as one plain string,
-// so the reader saw the raw `- ` and `**…**` instead of a document.
-//
-// This is the same grammar the PDF and the web app read, plus nesting:
-// indentation puts a bullet at a depth, and the renderer draws a
-// different glyph per level. The web twin is `web/src/lib/richText.ts`
-// and `web/src/components/RichText.tsx` — the three are meant to agree,
-// so a change to one belongs in all of them.
-//
-// Parsing is a pure function of the input string: no time, no locale.
+// The same grammar the PDF (`domain/pdf_richtext.py`) and the web
+// (`web/src/lib/richText.ts`, `RichText.tsx`) read; keep the three in step.
+// Parsing is a pure function of the input string.
 
 /// One run of inline text with at most one emphasis on it.
 struct RichSpan: Equatable {
@@ -24,8 +14,7 @@ struct RichSpan: Equatable {
     var code = false
 }
 
-/// One item of a list, flattened: `depth` carries the indent the author
-/// typed, so the renderer can lay the whole list out in one column.
+/// One item of a list, flattened; `depth` carries the indent.
 struct RichListItem: Equatable {
     var spans: [RichSpan]
     var depth: Int
@@ -33,15 +22,13 @@ struct RichListItem: Equatable {
     var number: Int?
     /// Set only on checklist items.
     var done: Bool?
-    /// The source line, marker included — what a generated line's
-    /// evidence row is keyed by (Summary Engine v2, Q5).
+    /// The source line, marker included — what a generated line's evidence row is keyed by.
     var raw: String? = nil
 }
 
 enum RichBlockKind: Equatable {
     case heading(level: Int, spans: [RichSpan])
-    /// `raw` is the source line when the paragraph was one line — the
-    /// only kind of paragraph a generated row can stand behind.
+    /// `raw` is the source line when the paragraph was one line.
     case paragraph(spans: [RichSpan], raw: String? = nil)
     case item(RichListItem)
     case quote(spans: [RichSpan])
@@ -57,8 +44,7 @@ struct RichBlock: Identifiable, Equatable {
 // MARK: - Parser
 
 enum RichText {
-    /// The most levels of nesting the renderer draws; deeper indents all
-    /// land on the last one rather than marching off the page.
+    /// The most levels of nesting the renderer draws; deeper indents land on the last one.
     static let maxDepth = 4
 
     private static let heading = regex(#"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$"#)
@@ -79,9 +65,7 @@ enum RichText {
         do {
             return try NSRegularExpression(pattern: pattern)
         } catch {
-            // The patterns are literals in this file, compiled once; one
-            // that does not compile is a bug to fix here, not a condition
-            // to handle at run time.
+            // Literal patterns, compiled once; a non-compiling one is a bug here.
             preconditionFailure("invalid pattern in RichText: \(pattern)")
         }
     }
@@ -143,9 +127,7 @@ enum RichText {
         return first.contains("|") && matches(tableSep, second) != nil
     }
 
-    /// Parse one section body into blocks. Single newlines are soft wraps
-    /// inside a paragraph; a blank line starts a new block — which is how
-    /// the note editor's plain-text fields behave.
+    /// Parse one section body into blocks: single newlines are soft wraps, a blank line starts a block.
     static func parse(_ text: String) -> [RichBlock] {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
 
@@ -178,8 +160,7 @@ enum RichText {
             flushList()
         }
 
-        /// Where an indent sits in the open list — capped, so one stray
-        /// space cannot push a bullet three levels deep.
+        /// Where an indent sits in the open list — capped against stray spaces.
         func depth(for column: Int) -> Int {
             while let top = columns.last, column < top { columns.removeLast() }
             if columns.last.map({ column > $0 }) ?? true { columns.append(column) }
@@ -286,8 +267,7 @@ enum RichText {
         return kinds.enumerated().map { RichBlock(id: $0.offset, kind: $0.element) }
     }
 
-    /// A one-line preview of a body — the first line with words in it,
-    /// with the markup stripped.
+    /// A one-line preview of a body: the first line with words, markup stripped.
     static func preview(_ text: String, limit: Int = 160) -> String {
         for block in parse(text) {
             let runs: [RichSpan]
@@ -307,12 +287,8 @@ enum RichText {
 
 // MARK: - Rendering
 
-/// A note section, typeset. Headings, nested bullets, checklists, quotes
-/// and small tables come out as real structure instead of the raw `- `
-/// and `**…**` a plain string used to show.
-/// Something drawn at the end of one line, from its source text — the
-/// evidence of a generated line (Q5): a certainty chip, the names the
-/// engine respelled, and a way to open the words behind it.
+/// What is drawn at the end of one line: the evidence of a generated line
+/// (certainty chip, respelled names, a way to the words behind it).
 struct RichLineExtra {
     var chip: String?
     var names: [String] = []
@@ -351,8 +327,7 @@ struct RichTextView: View {
             .padding(.top, gap(before: block.kind, after: previous))
     }
 
-    /// The rhythm of the document: tight between the items of one list,
-    /// open around a heading, ordinary between paragraphs.
+    /// Spacing: tight within a list, open around a heading, ordinary between paragraphs.
     private func gap(before kind: RichBlockKind, after previous: RichBlockKind?) -> CGFloat {
         guard let previous else { return 0 }
         switch (previous, kind) {
@@ -425,10 +400,7 @@ struct RichTextView: View {
         }
     }
 
-    /// A line of the note, and — when the engine wrote it and can prove
-    /// it — the chips and the way to its evidence under it. The chips are
-    /// data from the row, drawn here: never words in the note a person
-    /// would have to edit around.
+    /// A line of the note, with its evidence chips under it when the engine wrote it. Chips are never note text.
     @ViewBuilder
     private func line(_ spans: [RichSpan], raw: String?) -> some View {
         if let raw, let extra = extra?(raw) {
@@ -451,9 +423,7 @@ struct RichTextView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Three bullet glyphs, one per level, the way an outline is drawn on
-    /// paper: filled, then hollow, then a dash — and a real box for a
-    /// checklist, ticked or not.
+    /// Bullet glyphs per level (filled, hollow, dash) and a box for a checklist.
     @ViewBuilder
     private func marker(_ item: RichListItem) -> some View {
         if let done = item.done {
@@ -485,8 +455,7 @@ struct RichTextView: View {
         }
     }
 
-    /// Build the run-level attributes. The size is passed in rather than
-    /// read off the view so a heading's bold is a heading-sized bold.
+    /// Run-level attributes; the size is passed in so a heading's bold is heading-sized.
     private func attributed(_ spans: [RichSpan], size: CGFloat, weight: Font.Weight) -> AttributedString {
         var out = AttributedString()
         for span in spans {

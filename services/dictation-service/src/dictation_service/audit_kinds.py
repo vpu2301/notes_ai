@@ -18,15 +18,13 @@ AUDIO_TRUNCATED: Final = "dictation.audio.truncated"  # severity=warn
 # Upgrade rejections
 UPGRADE_FAILED: Final = "dictation.upgrade.failed"  # warn/sec by cause
 
-# Section-aware dictation (sprint 06)
+# Section-aware dictation
 SECTION_SWITCHED: Final = "dictation.section_switched"
 
-# NLP degradation (documented since sprint 05; constant added when the
-# finalize-time NLP pass was actually wired — sprint 14).
+# NLP degradation
 NLP_TIMEOUT: Final = "dictation.nlp_timeout"  # severity=warn
 
-# Conversation (meeting) mode (sprint 14). SESSION_STARTED gains `mode`
-# in its payload; this one is conversation-specific.
+# Conversation mode (SESSION_STARTED carries `mode` in its payload)
 SPEAKER_MAPPING_MANUAL_SET: Final = "conversation.speaker_mapping.manual_set"
 
 # Draft creation on conversation finalize (via note-service POST /v1/notes)

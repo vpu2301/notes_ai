@@ -1,12 +1,4 @@
-"""Silero VAD wrapper.
-
-The model is loaded once at import time. ``detect_speech`` returns the
-list of speech regions; chunks shorter than ``min_speech_duration_ms``
-and gaps shorter than ``min_silence_duration_ms`` are smoothed out.
-
-The output is consumed by the Whisper engine to produce per-chunk
-transcriptions; chunks are individually ≤ 30 s (Whisper's audio context).
-"""
+"""Silero VAD wrapper; speech runs capped at 30 s (Whisper's audio context)."""
 
 from __future__ import annotations
 
@@ -22,17 +14,16 @@ logger = logging.getLogger(__name__)
 class SpeechSegment:
     start_ms: int
     end_ms: int
-    # Sprint F1: heard only by the floor pass (lower threshold / one
-    # channel), not by the ordinary one.
+    # Heard only by the floor pass.
     floor_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class SpeechRuns:
-    """What VAD heard in a recording (Sprint F1)."""
+    """What VAD heard in a recording."""
 
     runs: list[SpeechSegment]
-    # The floor pass ran (quiet speech under a loud channel suspected).
+    # The floor pass ran.
     floor_used: bool = False
     # Silero is not installed: the whole file is one run.
     stub: bool = False
@@ -40,14 +31,12 @@ class SpeechRuns:
 
 # Silero's own default; the floor pass lowers it.
 DEFAULT_THRESHOLD = 0.5
-# Below this, the part of a file VAD called non-speech is silence, not a
-# quiet voice under a louder one (decision 4).
+# Below this, non-speech is silence, not a quiet voice under a louder one.
 FLOOR_MIN_NON_SPEECH_DBFS = -45.0
 _MERGE_GAP_MS = 500
 _MAX_RUN_MS = 30_000
 
 
-# Module-level cache for the loaded model + utils (silero is heavy).
 _model: object | None = None
 _get_speech_timestamps: object | None = None
 
@@ -107,8 +96,7 @@ def _silero_runs(
 
 
 def pad_runs(runs: list[SpeechSegment], pad_ms: int) -> list[SpeechSegment]:
-    """Decision 5: start every run ``pad_ms`` earlier, never before 0 and
-    never inside the previous run."""
+    """Start every run ``pad_ms`` earlier, never before 0 or inside the previous run."""
     if pad_ms <= 0:
         return list(runs)
     out: list[SpeechSegment] = []
@@ -133,8 +121,7 @@ def cap_runs(runs: list[SpeechSegment]) -> list[SpeechSegment]:
 
 
 def union_runs(ordinary: list[SpeechSegment], floor: list[SpeechSegment]) -> list[SpeechSegment]:
-    """Both passes' runs merged (overlapping or < 500 ms apart); a merged
-    run is ``floor_only`` when no ordinary run is part of it."""
+    """Both passes' runs merged; ``floor_only`` when no ordinary run is part of it."""
     tagged = sorted(
         [(r.start_ms, r.end_ms, False) for r in ordinary]
         + [(r.start_ms, r.end_ms, True) for r in floor]
@@ -152,8 +139,7 @@ def union_runs(ordinary: list[SpeechSegment], floor: list[SpeechSegment]) -> lis
 
 
 def non_speech_dbfs(audio_pcm: np.ndarray, runs: list[SpeechSegment], sr: int) -> float | None:
-    """RMS level of everything VAD did not call speech, in dBFS (None when
-    the whole file is speech)."""
+    """RMS dBFS of everything VAD did not call speech; None when all is speech."""
     mask = np.ones(audio_pcm.shape[0], dtype=bool)
     per_ms = sr / 1000
     for r in runs:
@@ -168,8 +154,7 @@ def non_speech_dbfs(audio_pcm: np.ndarray, runs: list[SpeechSegment], sr: int) -
 def floor_applies(
     audio_pcm: np.ndarray, runs: list[SpeechSegment], sr: int, *, max_speech_share: float
 ) -> bool:
-    """Decision 4: little speech was heard, but what was not called speech
-    is not silence either."""
+    """Little speech heard, but the rest is not silence either."""
     duration_ms = len(audio_pcm) / sr * 1000
     if duration_ms <= 0:
         return False
@@ -197,10 +182,7 @@ def speech_runs(
     floor_threshold: float = 0.35,
     floor_max_speech_share: float = 0.2,
 ) -> SpeechRuns:
-    """VAD for a whole recording (Sprint F1): the ordinary pass, the floor
-    pass when decision 4's condition holds (per channel for a stereo
-    capture, else on the mixdown), the union, the leading pad, the 30 s cap.
-    """
+    """VAD for a whole recording: ordinary pass, floor pass (per channel), union, pad, cap."""
     _ensure_loaded()
     if _model == "stub":
         duration_ms = int(len(audio_pcm) / sr * 1000)
@@ -232,27 +214,13 @@ def speech_runs(
 def detect_speech(
     audio_pcm: np.ndarray, sr: int = 16_000, *, pad_ms: int = 0
 ) -> list[SpeechSegment]:
-    """Return speech regions as a list of ``SpeechSegment``.
-
-    On hosts where Silero isn't installed (the CPU dev fallback), this
-    returns a single segment covering the entire audio so the downstream
-    pipeline still runs and Whisper gets the whole signal. With Silero
-    loaded, audio in which it hears nothing yields an empty list — never
-    the whole file (see the note at the end).
-    """
+    """Speech regions; without Silero (dev fallback) one segment covers the whole audio."""
     _ensure_loaded()
     if _model == "stub":
         duration_ms = int(len(audio_pcm) / sr * 1000)
         return [SpeechSegment(0, max(1, duration_ms))]
-    # Runs capped to 30 s of audio so Whisper's 30 s context isn't exceeded.
     capped = cap_runs(pad_runs(_silero_runs(audio_pcm, sr), pad_ms))
-    # No speech found is an answer, not a reason to guess. Handing Whisper
-    # the whole file instead (as this used to) meant a silent recording —
-    # a microphone that delivered zeros for half an hour — was decoded end
-    # to end, and Whisper given silence plus an initial_prompt writes the
-    # prompt: the workspace's glossary names, repeated for 28 minutes,
-    # stored as a `complete` transcript. An empty list makes the engine
-    # produce no segments and the processor file the job as `no_speech`.
+    # No speech is an answer: Whisper given silence plus a prompt writes the prompt.
     if not capped:
         logger.info(
             "vad.no_speech",

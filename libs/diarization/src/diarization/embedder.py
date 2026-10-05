@@ -1,11 +1,4 @@
-"""ECAPA-TDNN speaker-embedding wrapper (sprint 14, ADR-0034).
-
-Loads the pinned model dir produced by ``scripts/models/prepare_ecapa.py``
-(baked at ``/opt/models/ecapa`` in prod images — docs/models/PINS.md) fully
-offline and exposes a single ``embed()`` call returning an L2-normalised
-192-dim vector. One instance per process, shared by every conversation
-session (the model is stateless; ~90 MB resident once).
-"""
+"""ECAPA-TDNN speaker-embedding wrapper (ADR-0034): offline load from the baked dir, L2-normalised 192-dim ``embed()``."""
 
 from __future__ import annotations
 
@@ -33,8 +26,7 @@ class EcapaEmbedder:
         from speechbrain.inference.speaker import EncoderClassifier
 
         torch.set_grad_enabled(False)
-        # source == savedir: everything is already in the baked dir; no
-        # fetch, no symlink farm, no network (HF_HUB_OFFLINE-safe).
+        # source == savedir: no fetch, no symlink farm, no network.
         self._clf = EncoderClassifier.from_hparams(
             source=self._model_dir,
             savedir=self._model_dir,
@@ -42,8 +34,7 @@ class EcapaEmbedder:
         )
 
     def warm_up(self) -> None:
-        """Load weights and run one dummy forward so the first real
-        window doesn't pay the initialisation cost."""
+        """Load weights and run one dummy forward."""
         self._ensure_loaded()
         self.embed(np.zeros(SAMPLE_RATE_HZ // 2, dtype=np.float32))
 

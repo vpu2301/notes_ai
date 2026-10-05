@@ -1,11 +1,5 @@
-"""Sprint L1 T2 — the small-model profile.
-
-A backend that says ``small_model: true`` (the founder's Mac) gets simpler
-work: twelve facts per window, one extraction example, no ``noise`` field,
-reduce calls over at most fifteen facts with the heading asked separately
-and no sub-points, the strict summary rung first, and a schema-echo retry
-after a malformed answer. A capable backend sees exactly what it saw
-before: the profile is a switch, never a default.
+"""The small-model profile: a ``small_model: true`` backend gets simpler work; a
+capable backend sees exactly what it saw before. The profile is a switch, never a default.
 """
 
 from __future__ import annotations
@@ -77,7 +71,7 @@ def test_small_model_extraction_asks_for_twelve_facts_one_example_and_no_noise()
     extract_schemas = [s for s in provider.schemas if step_of(s) == "extract"]
     assert extract_schemas
     for built in extract_schemas:
-        # SQ2 T2: 8–12 by the window's length, one per 500 characters.
+        # 8–12 by the window's length, one per 500 characters.
         cap = built["properties"]["facts"]["maxItems"]
         assert pipeline.SMALL_MODEL_MIN_FACTS == 8 <= cap <= pipeline.SMALL_MODEL_MAX_FACTS == 12
         assert "noise" not in built["properties"]
@@ -157,7 +151,7 @@ def test_after_a_malformed_answer_the_small_model_is_shown_the_schema() -> None:
     assert second.startswith(first)
     echoed = second[len(first) :]
     assert prompts.SCHEMA_ECHO["de"] in echoed
-    # SQ2 T2: a short window's budget is the floor, eight.
+    # A short window's budget is the floor, eight.
     assert '"maxItems": 8' in echoed and '"noise"' not in echoed
 
 

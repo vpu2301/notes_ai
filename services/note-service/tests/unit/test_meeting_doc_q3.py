@@ -1,4 +1,4 @@
-"""The document fits the recording (Summary Engine v2, Q3).
+"""The document fits the recording.
 
 A podcast is extracted as a broadcast — no decisions, no tasks — each
 fact is written once, nothing the engine writes can be mistaken for a
@@ -34,7 +34,7 @@ from .meeting_doc_fakes import ScriptedProvider, as_result, load_fixture, spoken
 TUESDAY = date(2026, 9, 22)
 
 
-# ── T2: recording type → family ─────────────────────────────────────
+# ── recording type → family ─────────────────────────────────────
 
 
 class _Classifier:
@@ -196,7 +196,7 @@ def test_m06_as_a_broadcast_has_no_decisions_or_tasks() -> None:
         assert "decision" not in kinds and "action" not in kinds
 
 
-# ── T4: one fact, once ──────────────────────────────────────────────
+# ── one fact, once ──────────────────────────────────────────────
 
 
 def _fact(text: str, start_ms: int, kind: str = schema.KEY_POINT) -> VerifiedFact:
@@ -264,7 +264,7 @@ def test_a_bullet_the_summary_already_says_is_dropped() -> None:
     )
     assert "- the union calls a strike" not in _bullets(sections)
     # The topic then has one bullet: it joins the one before it. The one
-    # topic left keeps its heading (F3 amendment §2.9: no list above it).
+    # topic left keeps its heading (no list above it).
     titles = [s.title for s in sections if s.role == roles.TOPICS]
     assert titles == ["Pension"]
 
@@ -312,7 +312,7 @@ def test_m06_is_not_redundant() -> None:
     assert document.stats["lines_total"] == len(document.lines)
 
 
-# ── T5: nothing the web could mistake for a speaker ─────────────────
+# ── nothing the web could mistake for a speaker ─────────────────
 
 # `web/src/lib/richText.ts` SPEAKER, ported: a paragraph that opens with
 # up to four words and ": " is drawn as a speaker turn with initials.
@@ -324,7 +324,7 @@ def test_no_line_the_engine_writes_reads_as_a_speaker_turn() -> None:
     assert document.lines
     for _key, line in document.lines:
         # The web reads a speaker turn from a PARAGRAPH only; a "- …" list
-        # item is never one, so a "- Voraussichtlich: …" record (Q4) is safe.
+        # item is never one, so a "- Voraussichtlich: …" record is safe.
         if not line.text.startswith(("- ", "### ")):
             assert not SPEAKER.match(line.text), line.text
     assert all(line.kind != "note" for _key, line in document.lines)
@@ -340,7 +340,7 @@ def test_an_action_line_only_opens_with_its_owner() -> None:
     assert match and match.group(1) == owned.owner_label
 
 
-# ── T6: dates with a direction ──────────────────────────────────────
+# ── dates with a direction ──────────────────────────────────────
 
 
 @pytest.mark.parametrize(

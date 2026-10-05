@@ -1,11 +1,6 @@
 import { Fragment, createElement, type ReactNode } from "react";
 
-/**
- * Speaker-correction strings added in Sprint 32 (name suggestions, the
- * re-label offer, screen-reader announcements). English only for now, but
- * kept here as whole sentences with `{placeholders}` so a translation can
- * reorder them: never build one of these by concatenating a name or number.
- */
+/** Speaker-correction strings as whole sentences with `{placeholders}`: never concatenate a name or number. */
 export const SPEAKER_COPY = {
   suggestionGroup: "Name suggestion for {speaker}",
   suggestionLead: "Probably {name}",
@@ -44,10 +39,7 @@ export function copyText(key: SpeakerCopyKey, vars: Record<string, string | numb
   return SPEAKER_COPY[key].replace(PLACEHOLDER, (m, k: string) => (k in vars ? String(vars[k]) : m));
 }
 
-/**
- * A copy string with its placeholders filled in by React nodes — for when a
- * part of the sentence is emphasised or interactive ("Probably **Anna**").
- */
+/** A copy string with its placeholders filled in by React nodes. */
 export function copyNodes(key: SpeakerCopyKey, vars: Record<string, ReactNode>): ReactNode {
   const parts = SPEAKER_COPY[key].split(PLACEHOLDER);
   // split() with a capture group alternates text, name, text, name, …

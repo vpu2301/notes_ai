@@ -1,12 +1,6 @@
 """Prompts carry no content, and a run carries only its own recording
-(Summary Engine v2, Q1 T4 — the closure of audit finding P0-1).
-
-On 2026-09-22 a news podcast's note said "Der Start im November bleibt
-das Ziel". It was the German summary prompt's own example sentence, not
-another workspace's recording (docs/security/2026-09-22-november-sentence.md).
-These tests keep both halves of that conclusion true: the examples are
-invented and caught when copied, and every prompt a run sends is built
-from that run's transcript alone.
+(docs/security/2026-09-22-november-sentence.md): the examples are invented and
+caught when copied, and every prompt is built from that run's transcript alone.
 """
 
 from __future__ import annotations
@@ -178,7 +172,7 @@ def test_an_echoed_example_never_reaches_the_note() -> None:
     echoed = prompts.EXAMPLES["de"]["summary_right"]
 
     def summary(facts: list[tuple[str, str, str]]) -> dict:
-        # One echo among four: under the Q2 retry threshold (30 %), so
+        # One echo among four: under the retry threshold (30 %), so
         # the echo is dropped and the rest is written.
         real = facts[0][0]
         return {
@@ -218,7 +212,7 @@ def test_prompts_carry_only_this_recording() -> None:
     a_lines = {t["text"] for t in a["transcript"]}
     for step, prompt, system in provider_a.calls:
         if step in ("figures", "people", "steps"):
-            # F3 details: this window's own lines, nothing else.
+            # Figure details: this window's own lines, nothing else.
             for body in data_blocks(prompt):
                 for line in body.splitlines():
                     listed = re.match(r"^\s*\d+\.\s*(?:line:\s*)?(?P<said>.+)$", line)

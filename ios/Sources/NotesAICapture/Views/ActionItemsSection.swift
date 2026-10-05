@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// "Action items" above the sections (Sprint 20): one row per item with
-/// owner / due chips and the response badges; tap for the responses.
+/// "Action items" above the sections: one row per item with chips and badges; tap for the responses.
 struct ActionItemsSection: View {
     @ObservedObject var model: NoteViewModel
     @State private var expanded = true
@@ -86,8 +85,7 @@ struct ActionItemRow: View {
     }
 }
 
-/// The responses on one item, each with the sender's label for the link
-/// and the recipient's comment as plain text. "Mark done" and "Clear".
+/// The responses on one item (the recipient's comment as plain text). "Mark done" and "Clear".
 struct ItemDetailSheet: View {
     @ObservedObject var model: NoteViewModel
     let itemId: String

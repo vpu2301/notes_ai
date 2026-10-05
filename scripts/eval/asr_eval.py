@@ -1,24 +1,11 @@
 #!/usr/bin/env python3
-"""Sprint TQ1 T3 — the ASR gold-set harness.
+"""The ASR gold-set harness: every recording goes through
+``asr_worker.processor.decode_recording``, the production path.
 
-    make eval-asr BACKEND=inproc_cpu_asr SPLIT=test        # → docs/eval/asr-<date>-<backend>-<split>.{json,md}
-    make eval-asr-assert BACKEND=inproc_cpu_asr            # r03 / r04 regression checklists
+    make eval-asr BACKEND=inproc_cpu_asr SPLIT=test
+    make eval-asr-assert BACKEND=inproc_cpu_asr
 
-    uv run --project services/asr-worker python scripts/eval/asr_eval.py run \\
-        --backend dev_mac_asr --split dev [--ids r04,de-003] [--hint-file hint.txt] [--draft]
-
-Every recording goes through ``asr_worker.processor.decode_recording`` — the
-function a production job calls: the backend named in ``config/models.yaml``,
-then the prompt-echo guard, the coverage pass and the second decode. Nothing
-here decodes around it, so a guard TQ2 adds to the worker is measured here
-without touching this file.
-
-Language is ``auto`` (what the clients send) unless ``--pin-language``.
-No vocabulary hint unless ``--hint-file`` (TQ1 T4 runs with and without).
-
-Output rule (repo rules): the report carries ids, counts and rates. The
-transcripts, heard spellings and per-word timing errors go to
-``scripts/eval/local/asr-<backend>/`` (gitignored).
+Reports carry ids, counts and rates; transcripts go to ``scripts/eval/local/`` (gitignored).
 """
 
 from __future__ import annotations
@@ -43,8 +30,7 @@ os.environ.setdefault("TESTING", "true")
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "services" / "asr-worker" / "src"))
-# Sprint TQ3: the spelling overlay is asr-service's; the eval scores the
-# view a reader gets, so it applies the same pure functions.
+# The spelling overlay is asr-service's; the eval applies the same pure functions.
 sys.path.insert(0, str(REPO / "services" / "asr-service" / "src"))
 sys.path.insert(0, str(REPO / "scripts" / "eval"))
 
@@ -363,8 +349,7 @@ async def run(args: argparse.Namespace) -> int:
             print(f"  {rec.id:<12} skipped: no reference.json", flush=True)
             continue
         spans = asr_gold.load_spans(corpus, rec.id)
-        # Sprint TQ3: entities are scored on the applied view (what every
-        # reader sees); the raw artefact's numbers are kept beside them.
+        # Entities are scored on the applied view; raw numbers are kept beside them.
         view, plan = unified_view(output, rec.language)
         row = asr_scoring.score_recording(
             reference=reference,

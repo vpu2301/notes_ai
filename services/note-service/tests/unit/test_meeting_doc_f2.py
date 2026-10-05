@@ -1,7 +1,5 @@
-"""Sprint F2 — statements, not quotes.
-
-T1 copies are evidence, T2 restate once per window, T3 no_information and
-first_person in code, T4 sub-points, T5 nothing but text in section text.
+"""Statements, not quotes: copies are evidence, restate once per window,
+no_information and first_person in code, sub-points, nothing but text in section text.
 """
 
 from __future__ import annotations
@@ -92,7 +90,7 @@ SHOW_TALK = [
 ]
 
 
-# ── T1: copies are evidence ─────────────────────────────────────────
+# ── copies are evidence ─────────────────────────────────────────
 
 
 def test_quote_bullets_are_all_copied_and_none_is_rendered() -> None:
@@ -155,12 +153,12 @@ def test_a_copy_is_stored_as_evidence_cited_or_not() -> None:
     )
     placements = {row["text"]: row["placement"] for row in uncited_rows(document)}
     assert placements[copied.text] == "evidence"
-    # No key-point list in the overview any more (F3 amendment §2.9): a
+    # No key-point list in the overview: a
     # plain fact no line cites is a suggested row.
     assert placements[plain.text] == "suggested"
 
 
-# ── T3: information and voice, in code ──────────────────────────────
+# ── information and voice, in code ──────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -220,7 +218,7 @@ def test_the_small_talk_shot_is_in_every_extract_prompt() -> None:
         assert "Quillhaven" in prompts.EXAMPLES[language]["shot_small_talk"]
 
 
-# ── T2: restate once per window ─────────────────────────────────────
+# ── restate once per window ─────────────────────────────────────
 
 
 @dataclass
@@ -362,7 +360,7 @@ def test_restate_and_copy_counts_reach_the_metrics(monkeypatch: pytest.MonkeyPat
     assert ("lines", 4, {"outcome": "copied"}) in seen
 
 
-# ── T4: sub-points ──────────────────────────────────────────────────
+# ── sub-points ──────────────────────────────────────────────────
 
 
 def _platform_facts() -> list[VerifiedFact]:
@@ -459,7 +457,7 @@ def test_the_topics_schema_allows_three_children_one_level() -> None:
     assert len(parsed.children) == 3
 
 
-# ── T5: nothing but text in section text ────────────────────────────
+# ── nothing but text in section text ────────────────────────────
 
 _MARKS = re.compile(r"❝|\[↗\]|\b[0-9a-f]{16}\b")
 

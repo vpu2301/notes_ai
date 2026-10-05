@@ -1,33 +1,9 @@
-"""Sprint TQ2 T1 — the worker plans the decode, for every backend.
+"""Decode planning for every backend: VAD runs (≤ 30 s) with a language each.
 
-Before TQ2 only the in-process engine ran VAD and per-run language
-identification; the HTTP backends (``dev_mac_asr``, ``hf_eu_asr``) were
-posted the whole file, silence and jingles included, in one language. Now
-the worker runs VAD once, cuts speech runs (≤ 30 s, merged < 500 ms — the
-engine's logic, moved here), identifies the recording's language and each
-run's, and hands the backend a list of ``SpeechRun``s with an explicit
-language each. The backend only decodes.
-
-Language identification (Sprint I2 decision 4, ADR-0061 d4, moved here from
-``inference.py``): a run of at least 2 s is decoded in another language
-only when the identifier is sure of it (p ≥ 0.6), it is one we transcribe
-(en/de/uk), and the recording's language is nearly excluded (≤ 0.2).
-
-Who identifies:
-
-- ``EngineLID`` — the in-process engine's own model (large-v3): unchanged
-  behaviour for ``inproc_cpu_asr``.
-- ``BackendLID`` — HTTP backends: the recording's language from the backend
-  itself (one request on a 30 s speech sample, the production model
-  decides, as it did when it was sent the whole file), each run's from a
-  small local model (``MDX_ASR_LID_MODEL``, faster-whisper tiny baked in
-  the CPU image; 0.2 s per run on CPU, measured 2026-09-30). Tiny is weak
-  on Ukrainian (0.63 on clean uk speech), which the rule tolerates: a run
-  switches only when the recording's language is ≤ 0.2, so a weak uk score
-  keeps it in uk. When no local model loads, runs stay in the recording's
-  language and ``diagnostics.language_id`` says ``unavailable``.
-
-Also here: the non-speech regions the transcript marks (TQ2 T4).
+A run switches language only when the identifier is sure (p ≥ 0.6), it is one we
+transcribe, and the recording's language is nearly excluded (≤ 0.2) (ADR-0061).
+``EngineLID`` uses the in-process model; ``BackendLID`` asks the backend for the
+recording's language and a small local model for each run's. Also: non-speech regions.
 """
 
 from __future__ import annotations
@@ -55,19 +31,12 @@ LANGUAGE_ID_SECONDS = 90
 LANGUAGE_ID_WINDOWS = 3
 LANGUAGE_ID_FALLBACK = "en"
 BACKEND_LID_SECONDS = 30
-# Sprint I2 T4: a VAD chunk at least this long gets its own language check;
-# it is decoded in another language only when the detector is sure of the
-# other one AND nearly excludes the recording's — a stray English word in a
-# Ukrainian meeting must not flip the decoder chunk by chunk.
+# A VAD chunk at least this long gets its own language check.
 CHUNK_LID_MIN_MS = 2_000
-# "Sure which": 0.6, not 0.8 — Ukrainian shares probability with Russian
-# (measured 0.75 / 0.18 on clean Ukrainian speech, T7), and the second bar
-# is what keeps a stray word from flipping. "Not the recording's": ≤ 0.2.
+# 0.6 not 0.8: Ukrainian shares probability with Russian; the second bar stops stray words.
 OTHER_LANGUAGE_MIN_PROB = 0.6
 RECORDING_LANGUAGE_MAX_PROB = 0.2
-# Only a language the product transcribes is decoded as "another language".
-# Whisper's detector calls accented English "Welsh" now and then (T7,
-# VoxConverse); decoding that as Welsh would replace speech with noise.
+# Only these count as "another language" (Whisper calls accented English "Welsh" at times).
 OTHER_LANGUAGES = frozenset({"en", "de", "uk"})
 
 _meter = metrics.get_meter("mdx.asr.worker.lid")
@@ -89,8 +58,7 @@ class LanguageGuess:
 
 
 def other_language(guess: LanguageGuess, *, recording: str) -> str | None:
-    """The language a chunk should be decoded in when it clearly is not the
-    recording's — else None (decision 4 of Sprint I2)."""
+    """The language to decode a chunk in when it clearly is not the recording's, else None."""
     if guess.language == recording or guess.language not in OTHER_LANGUAGES:
         return None
     if guess.probability < OTHER_LANGUAGE_MIN_PROB:
@@ -103,9 +71,7 @@ def other_language(guess: LanguageGuess, *, recording: str) -> str | None:
 def speech_sample(
     audio_pcm: np.ndarray, speech: Sequence[SpeechSegment], *, seconds: int
 ) -> np.ndarray:
-    """The first ``seconds`` of *speech* (VAD runs concatenated, silence
-    dropped) — what language identification listens to. Silence between
-    turns would otherwise eat the detector's fixed 30 s windows."""
+    """The first ``seconds`` of speech (VAD runs concatenated) for language identification."""
     budget = seconds * SAMPLE_RATE
     parts: list[np.ndarray] = []
     for s in speech:
@@ -134,8 +100,7 @@ class LanguageIdentifier(Protocol):
 
 
 class EngineLID:
-    """The in-process engine's own detector (looked up at call time, so a
-    test's stand-in on the engine is what answers)."""
+    """The in-process engine's own detector, looked up at call time."""
 
     source: Literal["engine", "local", "unavailable"] = "engine"
 
@@ -156,9 +121,7 @@ _local_model_failed = False
 
 
 def _load_local_model() -> Any:
-    """The small faster-whisper model that identifies run languages for
-    HTTP backends. Loaded once; a failure is remembered (the worker then
-    decodes every run in the recording's language)."""
+    """Small local LID model for HTTP backends; loaded once, a failure is remembered."""
     global _local_model, _local_model_failed
     if _local_model is not None or _local_model_failed:
         return _local_model
@@ -186,8 +149,7 @@ def _probabilities(all_probs: object) -> dict[str, float]:
 
 
 class BackendLID:
-    """HTTP backends: the recording's language from the backend (the model
-    that transcribes decides it), each run's from the local model."""
+    """HTTP backends: recording language from the backend, each run's from the local model."""
 
     def __init__(self, provider: Any) -> None:
         self._provider = provider
@@ -200,18 +162,14 @@ class BackendLID:
             self.source = "unavailable"
 
     async def recording_language(self, sample: np.ndarray) -> LanguageGuess:
-        # The server decides from its first 30 s window; sending more only
-        # costs decode time.
+        # The server decides from its first 30 s window.
         out = await self._provider.transcribe(
             sample[: BACKEND_LID_SECONDS * SAMPLE_RATE], language=AUTO_LANGUAGE, prompt=None
         )
         if out.language_detected:
             prob = out.language_probability if out.language_probability is not None else 1.0
             return LanguageGuess(language=out.language, probability=prob)
-        # Sprint TQ4: a backend with no language identification (Parakeet)
-        # names none; the local model decides, among the languages we
-        # transcribe when it is unsure (tiny reads clean Ukrainian at 0.63,
-        # with Russian close behind).
+        # Backend without LID: the local model decides, among the languages we transcribe.
         guess = await self.run_language(sample[: BACKEND_LID_SECONDS * SAMPLE_RATE])
         if guess is None:
             return LanguageGuess(language=LANGUAGE_ID_FALLBACK, probability=0.0)
@@ -274,12 +232,7 @@ async def plan(
     should_cancel: Callable[[], Awaitable[bool]] | None = None,
     cancelled: type[Exception] | None = None,
 ) -> Plan:
-    """Speech runs (already capped at 30 s) → runs with a language each.
-
-    ``language`` is the job's: ``auto`` asks the identifier about the first
-    90 s of speech; a pinned language skips that step but every run is
-    still checked for another language (a pinned German meeting can quote
-    English)."""
+    """Speech runs → runs with a language each; a pinned language still checks every run."""
     detected = False
     probability: float | None = None
     if language == AUTO_LANGUAGE:
@@ -302,8 +255,7 @@ async def plan(
             and lid.source != "unavailable"
             and chunk.size >= CHUNK_LID_MIN_MS * 16
         ):
-            # Identification is the slow step (seconds per run on CPU with
-            # the engine's own model): look at the cancel flag before it.
+            # Identification is the slow step; check cancel before it.
             if should_cancel is not None and await should_cancel():
                 from models import TranscriptionCancelledError
 
@@ -344,12 +296,11 @@ async def plan(
     )
 
 
-# ── Non-speech markers (TQ2 T4) ──────────────────────────────────────
+# ── Non-speech markers ───────────────────────────────────────────────
 
 NONSPEECH_MIN_MS = 5_000
 SILENCE_MAX_DBFS = _vad.FLOOR_MIN_NON_SPEECH_DBFS  # −45 dBFS, the floor pass's measure
-# Median spectral flatness below this reads as tonal (music); above, as
-# broadband (noise). Speech-free by construction — VAD heard none here.
+# Median spectral flatness: below = tonal (music), above = broadband (noise).
 MUSIC_MAX_FLATNESS = 0.3
 _FRAME = 1024  # 64 ms at 16 kHz
 
@@ -372,9 +323,7 @@ def _median_flatness(x: np.ndarray) -> float:
 
 
 def classify_region(x: np.ndarray) -> Literal["music", "silence", "noise"]:
-    """Silence by level (≤ −45 dBFS, the floor pass's measure); above that,
-    music when the spectrum is tonal (median flatness < 0.3), else noise.
-    Deliberately simple and recorded as such (TQ2 T4)."""
+    """Silence by level (≤ −45 dBFS); above that, music when tonal, else noise."""
     if _dbfs(x) <= SILENCE_MAX_DBFS:
         return "silence"
     return "music" if _median_flatness(x) < MUSIC_MAX_FLATNESS else "noise"
@@ -384,8 +333,7 @@ _LEVEL_FRAME_MS = 1000
 
 
 def _split_by_level(x: np.ndarray, start_ms: int) -> list[tuple[int, int, bool]]:
-    """``(start, end, silent)`` pieces of one non-speech stretch, per 1 s
-    level: music followed by a silent tail is two regions, not one."""
+    """``(start, end, silent)`` pieces of one non-speech stretch, split by 1 s level."""
     step = _LEVEL_FRAME_MS * 16
     labels = [
         _dbfs(x[i : i + step]) <= SILENCE_MAX_DBFS for i in range(0, max(1, x.shape[0]), step)
@@ -412,9 +360,7 @@ def _split_by_level(x: np.ndarray, start_ms: int) -> list[tuple[int, int, bool]]
 
 
 def nonspeech_regions(pcm: np.ndarray, speech: Sequence[SpeechSegment]) -> list[NoiseRegion]:
-    """Stretches of at least 5 s with no VAD speech — before the first run,
-    between runs, after the last — split where the level changes between
-    silence and sound, each with a kind."""
+    """Stretches of at least 5 s with no VAD speech, split by level, each with a kind."""
     total_ms = int(pcm.shape[0] / SAMPLE_RATE * 1000)
     edges = [0]
     for s in sorted(speech, key=lambda r: r.start_ms):

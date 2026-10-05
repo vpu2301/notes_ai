@@ -1,8 +1,5 @@
-"""Sprint 35: the line splitter, the glossary rules, and the boundary the
-shared page must never cross.
-
-The router-level correction tests live in ``test_notes_corrections.py``;
-everything here is pure or is a schema assertion.
+"""The line splitter, the glossary rules, and the boundary the shared page must
+never cross; everything here is pure or a schema assertion.
 """
 
 from __future__ import annotations
@@ -148,9 +145,8 @@ def test_the_hint_is_truncated_at_a_term_boundary() -> None:
     assert not hint.endswith(",")
 
 
-# Owner and name correction moved to `meeting_doc.entities` (Summary Engine
-# v2 Q4), which applies the glossary to every name in a line, not only to
-# owners — `canonical_owner` was never called by the engine.
+# Owner and name correction lives in `meeting_doc.entities`, which applies the
+# glossary to every name in a line, not only to owners.
 
 
 def test_an_owner_that_is_a_known_mishearing_is_canonicalised() -> None:

@@ -1,11 +1,6 @@
-"""Sprint-15 audio replay — end-to-end pipeline against live infra.
-
-Needs ``RUN_DB_INTEGRATION=1`` + ``make dev-up && make migrate-up && make seed``
-(Postgres, an S3 endpoint, the dev master key). Proves the whole chain the POST
-endpoint drives: session row + encrypted WAV → resolve → full GCM decrypt
-(the ONLY read path — no range mode exists) → ms slice (+pad) → opus →
-encrypted clip object → token stream-back, with the slice verified by
-checksum against an independently computed reference.
+"""Audio replay end to end against live infra (``RUN_DB_INTEGRATION=1`` +
+``make dev-up && make migrate-up && make seed``): the whole chain the POST
+endpoint drives, with the slice verified by checksum.
 """
 
 from __future__ import annotations
@@ -89,7 +84,7 @@ async def test_full_replay_pipeline_with_checksum_and_diarized_segments():
     wav, pcm = _make_wav(10_000)
     object_key = f"dictations/{TENANT_A}/{session_id}.wav.enc"
 
-    # Sprint-14 conversation transcript shape: two diarized speaker turns.
+    # Conversation transcript shape: two diarized speaker turns.
     seg_host, seg_guest = uuid4(), uuid4()
     transcript = [
         {

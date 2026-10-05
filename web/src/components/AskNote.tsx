@@ -5,16 +5,17 @@ import type { AskTurn } from "../api/types";
 import { AlertIcon, ArrowUpIcon, SparkleIcon } from "./icons";
 import { RichText } from "./RichText";
 
-/**
- * "Ask this note" — the thread at the foot of the document and the
- * composer that floats over it, the same conversation the Mac app has.
- *
- * The thread lives here, not on the server: the client sends it back as
- * context with every question, so a follow-up has something to refer to.
- * It is dropped when the page is left — a question about a note is not a
- * record of anything, and nothing about it belongs in the note's history.
- */
-export function AskNote({ noteId }: { noteId: string }) {
+/** "Ask this note": the thread is client-only and sent back as context with each question. */
+export function AskNote({
+  noteId,
+  resetKey = 0,
+  onThreadChange,
+}: {
+  noteId: string;
+  /** Bump to clear the thread (the ⋯ menu's "Clear chat"). */
+  resetKey?: number;
+  onThreadChange?: (count: number) => void;
+}) {
   const [thread, setThread] = useState<AskTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [asking, setAsking] = useState(false);
@@ -22,14 +23,23 @@ export function AskNote({ noteId }: { noteId: string }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // A different note is a different conversation.
   useEffect(() => {
     setThread([]);
     setDraft("");
     setError(null);
   }, [noteId]);
 
-  // Grow the composer with what is typed, up to the CSS max-height.
+  useEffect(() => {
+    if (resetKey > 0) {
+      setThread([]);
+      setError(null);
+    }
+  }, [resetKey]);
+
+  useEffect(() => {
+    onThreadChange?.(thread.length);
+  }, [thread.length, onThreadChange]);
+
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -103,7 +113,6 @@ export function AskNote({ noteId }: { noteId: string }) {
       )}
 
       <div className="ask-dock">
-        {/* Claude's composer: the field on top, a tool row underneath. */}
         <div className="ask-bar" onClick={() => inputRef.current?.focus()}>
           <textarea
             ref={inputRef}
@@ -114,7 +123,6 @@ export function AskNote({ noteId }: { noteId: string }) {
             aria-label="Ask about this note"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              // Return sends; Shift+Return is a new line, as everywhere else.
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void send();

@@ -1,11 +1,4 @@
-"""nlp-service entry point.
-
-Sprint 05 surface:
-- ``/healthz`` / ``/readyz``
-- ``POST /nlp/process``
-- ``POST /nlp/process/batch``
-- ``GET/PUT/DELETE /nlp/abbreviations``
-"""
+"""nlp-service entry point: health probes, ``/nlp/process[/batch]``, ``/nlp/abbreviations``."""
 
 from __future__ import annotations
 
@@ -70,9 +63,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestIDMiddleware)
     register_exception_handlers(app)
-    # CORS for the SPA. allow_credentials=True is required so the browser sends
-    # the HttpOnly `mdx_rt` cookie on cross-origin XHR; that forbids a wildcard
-    # origin, so origins are an explicit allow-list (mirror auth-service A3).
+    # allow_credentials=True (HttpOnly cookie) forbids a wildcard origin.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

@@ -1,25 +1,8 @@
-"""Managing credentials for non-human principals (IDX-B1b F3).
+"""Credentials for non-human principals.
 
-Two audiences, two gates:
-
-* ``/admin/credentials`` — platform operators. There is no "platform
-  owner" role in the matrix; the closest true thing is a ``tenant_admin``
-  whose ``tid`` **is the platform tenant**, which is exactly what a
-  platform operator is in this data model. Both conditions are checked.
-* ``/tenants/{id}/devices`` — a workspace's own owners and admins,
-  checked against their membership row.
-
-IDX-B1 is meant to supply a `device.manage` policy for the second gate.
-It has not been run, so the check here is the same explicit owner/admin
-membership lookup IDX-A5 uses for admin MFA reset, and
-``docs/auth/permissions.csv`` carries the `device.manage` row ready for
-B1 to wire onto the policy engine. The behaviour is the pack's; only the
-mechanism is interim.
-
-Every mutating route requires recent auth. Creating a room credential
-mints a secret that can upload recordings into a workspace, and rotating
-or revoking one can take a room offline — an unlocked laptop must not be
-enough for any of them.
+``/admin/credentials`` needs a ``tenant_admin`` whose ``tid`` IS the platform
+tenant; ``/tenants/{id}/devices`` needs an owner/admin membership (interim
+`device.manage` gate). Every mutation requires recent auth.
 """
 
 from __future__ import annotations
@@ -96,8 +79,7 @@ class RotatedOut(_Strict):
 class CreateServiceIn(_Strict):
     kind: Literal["service", "device"] = "service"
     name: str = Field(min_length=1, max_length=120)
-    # Only meaningful for kind="device": the pack's cut-down path, so an
-    # operator can provision a room before the workspace routes exist.
+    # Only meaningful for kind="device".
     tenant_id: UUID | None = None
 
 
@@ -134,12 +116,7 @@ async def _svc() -> CredentialService:
 async def platform_operator(
     claims: Annotated[Claims, Depends(current_user)],
 ) -> Claims:
-    """A `tenant_admin` acting inside the platform tenant.
-
-    Both halves are load-bearing. The role alone would let any workspace's
-    admin mint platform-wide service credentials; the tenant alone would
-    let any member of the platform tenant do it.
-    """
+    """A `tenant_admin` acting inside the platform tenant; both halves are load-bearing."""
     if str(claims.tid) != platform_tenant() or "tenant_admin" not in claims.roles:
         raise as_problem(ApiError("not_a_member", 403, detail="platform operators only"))
     return claims
@@ -153,8 +130,7 @@ async def _require_workspace_admin(identity: Identity, tenant_id: UUID) -> str:
             if membership.role in {"owner", "admin"}:
                 return str(membership.role)
             break
-    # 404, not 403: a workspace this person does not administer should not
-    # be confirmed to exist by the error they get for asking.
+    # 404, not 403: never confirm a workspace this person does not administer.
     raise as_problem(ApiError("not_found", 404, detail="no such workspace"))
 
 
@@ -281,9 +257,7 @@ async def create_device(
         None,
     )
     if workspace is not None and workspace.kind == "personal":
-        # A personal workspace has exactly one member and no meeting room.
-        # Allowing it would create a credential nobody would ever deploy,
-        # and a secret nobody would ever rotate.
+        # A personal workspace has no meeting room.
         raise as_problem(
             ApiError(
                 "personal_workspace",
@@ -382,12 +356,7 @@ async def revoke_device(
 async def _device_of_tenant(
     svc: CredentialService, credential_id: UUID, tenant_id: UUID
 ) -> Credential:
-    """404 for a credential that is not this workspace's device.
-
-    The tenant is checked here rather than trusted from the path, so a
-    workspace admin cannot rotate or revoke another workspace's room by
-    guessing its id.
-    """
+    """404 for a credential that is not this workspace's device (tenant checked, not trusted from the path)."""
     credential: Credential | None = await svc.get(credential_id)
     if credential is None or credential.kind != "device" or credential.tenant_id != tenant_id:
         raise as_problem(ApiError("not_found", 404, detail="no such device"))
@@ -395,12 +364,7 @@ async def _device_of_tenant(
 
 
 async def _audit_lifecycle(*, credential: Credential, action: str, actor: UUID) -> None:
-    """`credential.created|rotated|revoked`, on the right chain.
-
-    A device's lifecycle belongs to its workspace's audit trail — that is
-    where somebody investigating a recording will look. A service
-    credential has no workspace, so it goes to the platform tenant.
-    """
+    """`credential.created|rotated|revoked` on the workspace's chain, or the platform tenant's for a service credential."""
     kind_map = {
         "created": audit_kinds.CREDENTIAL_CREATED,
         "rotated": audit_kinds.CREDENTIAL_ROTATED,

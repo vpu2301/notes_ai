@@ -11,10 +11,8 @@ let package = Package(
             name: "NotesAICapture",
             path: "Sources/NotesAICapture"
         ),
-        // IDX-M1. Tests link the executable target directly (supported since
-        // Swift 5.5): the session, the transport and the capture-safety
-        // rules are worth exercising, and splitting the app into a library
-        // to test them would move every file for no other reason.
+        // Tests link the executable target directly (Swift 5.5+) rather than
+        // splitting the app into a library.
         .testTarget(
             name: "NotesAICaptureTests",
             dependencies: ["NotesAICapture"],

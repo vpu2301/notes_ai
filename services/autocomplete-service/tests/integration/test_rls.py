@@ -1,25 +1,8 @@
-"""Sprint-10 step-01 §6 behavioral contract — three-scope RLS.
+"""Three-scope RLS contract (system / tenant / user), enforced by Postgres, not service code.
 
-The three-scope corpus (system / tenant / user) is enforced by Postgres
-RLS, not service code. These tests are the authoritative guard for that
-contract (spec: "the §6 tests are the guard, not code review"):
-
-1. Any authenticated tenant connection SELECTs system rows.
-2. Tenant A never SELECTs tenant B rows (phrases, snippets).
-3. User A cannot INSERT/UPDATE a ``source='user'`` row owned by user B,
-   even inside the same tenant.
-4. A member-role connection cannot write ``source='tenant'`` rows;
-   a tenant_admin connection can, only in its own tenant.
-5. app_role cannot write ``source='system'`` rows; tenant_writer can.
-6. GUCs are transaction-local: a reused pooled connection carries no
-   ``app.user_id`` after the transaction ends.
-
-Plus the step-01 schema guards: scope-coherence CHECKs, the per-scope
-unique index (regression: 0023 shipped it non-UNIQUE; fixed in 0039),
-and telemetry landing in the correct monthly partition.
-
-Skipped unless ``RUN_DB_INTEGRATION=1``; needs ``make dev-up`` +
-``make migrate-up`` (through 0039).
+Covers cross-tenant isolation, owner-only user rows, role-gated tenant rows,
+tenant_writer-only system rows, transaction-local GUCs and the schema guards.
+Skipped unless ``RUN_DB_INTEGRATION=1``.
 """
 
 from __future__ import annotations
@@ -190,8 +173,7 @@ async def test_user_b_cannot_write_user_a_rows(app_pool, tenant_a_users):
                 _phrase("forged-owner"),
             )
 
-    # Owner CAN update their own row (proves the zero-match above was RLS,
-    # not a wrong id).
+    # Owner CAN update their own row (proves the zero-match above was RLS).
     async with tenant_connection(app_pool, TENANT_A) as conn:
         await _set_user(conn, user_a, "member")
         tag = await conn.execute(

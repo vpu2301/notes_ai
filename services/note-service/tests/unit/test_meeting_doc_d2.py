@@ -1,5 +1,4 @@
-"""Sprint D2 — composition to the standard: blocks, phase headings,
-subjects, roles, orientation. Tests follow the work order's tasks."""
+"""Composition to the standard: blocks, phase headings, subjects, roles, orientation."""
 
 from __future__ import annotations
 
@@ -73,7 +72,7 @@ def _run(meeting: dict, provider: ScriptedProvider, **kw: Any) -> pipeline.Docum
     )
 
 
-# ── T1 blocks, budget, per-block reduce ─────────────────────────────
+# ── blocks, budget, per-block reduce ─────────────────────────────
 
 
 def test_84_facts_over_28_minutes_are_7_blocks_in_time_order() -> None:
@@ -139,7 +138,7 @@ def test_bullets_stay_within_the_budget() -> None:
             assert len(points) <= max(budget.bullets_per_block, doclint.POINTS_PER_SECTION[1])
 
 
-# ── T2 phase headings and sub-points ────────────────────────────────
+# ── phase headings and sub-points ────────────────────────────────
 
 
 def test_a_generic_heading_is_asked_again_then_takes_the_entity_fallback() -> None:
@@ -226,7 +225,7 @@ def test_a_quote_child_is_written_from_its_facts_quote_with_speaker_and_time() -
     assert unnamed == []
 
 
-# ── T3 subjects and narrator attribution ────────────────────────────
+# ── subjects and narrator attribution ────────────────────────────
 
 
 def _window(*lines: tuple[str, str, str | None]) -> Window:
@@ -304,7 +303,7 @@ def test_a_guests_own_opinion_stays_the_guests() -> None:
     assert same.attributed_to == "Felix Holtermann" and changed == 0
 
 
-# ── T4 roles table, type cues, paragraph 1 ──────────────────────────
+# ── roles table, type cues, paragraph 1 ──────────────────────────
 
 
 def _r03_like() -> tuple[list[Turn], list[VerifiedFact], list[tuple[int, int]]]:
@@ -450,11 +449,11 @@ def test_r02s_host_presents_and_a_meeting_has_participants() -> None:
     ]
     table = roles_table.build(meeting, [], "meeting")
     assert {s.role for s in table.speakers.values()} == {roles_table.PARTICIPANT}
-    # SQ3 T2: participants come after hosts, experts and guests.
+    # Participants come after hosts, experts and guests.
     assert compose.speakers_of(table, "de") == ([], [], ["Ada", "Ben"])
 
 
-# ── T5 orientation paragraph 2 ──────────────────────────────────────
+# ── orientation paragraph 2 ──────────────────────────────────────
 
 
 def test_rung_1_follows_the_blocks_rung_2_names_their_top_facts_rung_3_is_code() -> None:
@@ -480,7 +479,7 @@ def test_rung_1_follows_the_blocks_rung_2_names_their_top_facts_rung_3_is_code()
 
 
 def test_the_d1_hook_names_a_subject_and_the_linter_rereads_the_document() -> None:
-    """D1's line.subject goes to the pipeline's hook, which re-extracts the
+    """line.subject goes to the pipeline's hook, which re-extracts the
     window told to name every subject."""
     quote = "Er ist genervt, dass er plötzlich seine Schuhe am Flughafen ausziehen muss"
     meeting = {
@@ -535,7 +534,7 @@ def render_section_with(document: pipeline.DocumentResult, bullet: str) -> Any:
     )
 
 
-# ── From r03 on the stack model (2026-09-27) ────────────────────────
+# ── From the stack model ────────────────────────────────────────────
 
 
 def test_themes_packed_into_one_quoted_string_are_split() -> None:

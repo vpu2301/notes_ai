@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     testing: bool = Field(default=False, alias="TESTING")
 
-    # OpenTelemetry — also honoured by the OTel SDK itself via env vars
+    # OpenTelemetry
     otel_exporter_otlp_endpoint: str = Field(
         default="http://localhost:4317",
         alias="OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -35,11 +35,7 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # JSON list of trusted issuers `[{"issuer", "jwks_url", "audience"}]`; unset = the three above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 

@@ -1,10 +1,4 @@
-"""IDX-A5 — the second-factor logic that needs no database.
-
-Recovery-code shape and single-use hashing, the TOTP replay rule, IP
-masking, and the revert-token round trip. Each of these is a security
-property stated as arithmetic, which is exactly the kind of thing that
-should be provable without a Postgres.
-"""
+"""Second-factor logic without a database: recovery codes, TOTP replay rule, IP masking, revert token."""
 
 from __future__ import annotations
 
@@ -31,8 +25,7 @@ def test_a_recovery_code_avoids_the_characters_people_misread() -> None:
     assert code.count("-") == 2
     body = code.replace("-", "")
     assert set(body) <= set(mfa.RECOVERY_ALPHABET)
-    # The whole point of the alphabet: no O/0 or I/1 confusion when the
-    # code is read off paper or dictated over a phone.
+    # No O/0 or I/1 confusion when read off paper or dictated.
     assert not (set(body) & set("OI01"))
 
 
@@ -49,8 +42,7 @@ def test_codes_are_unguessable_between_sets() -> None:
 
 
 def test_the_alphabet_is_base32_minus_the_confusable_letters() -> None:
-    """Base32 has no 0, 1, 8 or 9 to begin with; O and I are what get
-    dropped. Pinned because the set is what makes a dictated code work."""
+    """Base32 has no 0, 1, 8 or 9; O and I are dropped. The set is what makes a dictated code work."""
     assert set(mfa.RECOVERY_ALPHABET) == set("ABCDEFGHJKLMNPQRSTUVWXYZ") | set("234567")
     assert not (set(mfa.RECOVERY_ALPHABET) & set("OI0189"))
 
@@ -60,22 +52,13 @@ def test_the_alphabet_is_base32_minus_the_confusable_letters() -> None:
     ["K7NM-2QXF-4RTB", "k7nm2qxf4rtb", "K7NM 2QXF 4RTB", "  k7nm-2qxf-4rtb  "],
 )
 def test_a_code_is_accepted_however_a_person_types_it(typed: str) -> None:
-    """It was printed for a human and comes back from a human — often on
-    the worst day of their week, having just lost their phone."""
+    """Printed for a human and comes back from a human."""
     assert mfa.normalise_recovery_code(typed) == "K7NM-2QXF-4RTB"
     assert mfa.recovery_code_hash(typed) == mfa.recovery_code_hash("K7NM-2QXF-4RTB")
 
 
 def test_a_character_outside_the_alphabet_is_dropped_so_the_code_cannot_match() -> None:
-    """Anything not in the alphabet is discarded, separators included.
-
-    A real code is always twelve alphabet characters, so a submission
-    containing a stray one comes out short and matches nothing that was
-    ever issued. That also means the two characters the alphabet exists to
-    avoid — O/0 — normalise identically: neither can appear in a genuine
-    code, so collapsing them costs nothing and spares the user a failed
-    attempt for reading a letter as a digit.
-    """
+    """Non-alphabet characters are discarded; O/0 normalise identically since neither appears in a genuine code."""
     issued = mfa.generate_recovery_code()
     assert len(mfa.normalise_recovery_code(issued).replace("-", "")) == 12
     assert len(mfa.normalise_recovery_code("K7NM-2QXF-4RT0").replace("-", "")) == 11
@@ -103,8 +86,7 @@ def test_a_code_matches_the_step_it_was_generated_for() -> None:
 
 
 def test_the_drift_window_still_matches_but_reports_the_older_step() -> None:
-    """A code from the previous window is accepted, and charged to ITS step —
-    which is what stops it being re-spent once the clock moves on."""
+    """A previous-window code is accepted and charged to ITS step, so it cannot be re-spent."""
     secret = totp.generate_secret()
     at = 1_800_000_000.0
     previous = totp.totp_at(secret, at_unix=at - totp.TOTP_PERIOD_SECONDS)
@@ -120,8 +102,7 @@ def test_a_wrong_or_malformed_code_matches_nothing() -> None:
 
 
 def test_the_same_step_cannot_be_spent_twice() -> None:
-    """The drift window keeps one code valid for up to 90 seconds. Without
-    step accounting the same six digits authenticate three times."""
+    """The drift window keeps a code valid up to 90 s; without step accounting it authenticates three times."""
     first = mfa.decide_step(matched_step=100, last_used_step=None)
     assert first.accepted and first.step == 100
 

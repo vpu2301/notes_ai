@@ -1,11 +1,4 @@
-"""asyncpg connection pool factory with safe defaults.
-
-Defaults chosen so that this pool can be placed behind pgbouncer/pgcat in
-production (Sprint 16) without further changes:
-
-- ``statement_cache_size=0`` — required when using a transaction-mode pooler.
-- ``application_name`` — set so DB observability can attribute traffic.
-"""
+"""asyncpg pool factory; ``statement_cache_size=0`` so it works behind a transaction-mode pooler."""
 
 from __future__ import annotations
 

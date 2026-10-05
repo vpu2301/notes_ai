@@ -1,10 +1,4 @@
-"""``model_usage`` hook — every provider call emits one record.
-
-DEP-S0 ships the hook and a log sink; DEP-S1 persists records (cost meter,
-per-tier fairness in DEP-S4). A record carries counts and identifiers only,
-never prompt, transcript or output text — a unit test scans a captured log
-to keep that true.
-"""
+"""``model_usage`` hook: every provider call emits one record of counts and identifiers only, never text."""
 
 from __future__ import annotations
 

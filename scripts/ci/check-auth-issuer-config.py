@@ -1,29 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — every service verifies against its configured issuer LIST.
+"""CI gate: every service verifies against its configured issuer LIST (ADR-0047),
+never a literal ``expected_issuer`` and never only the legacy env trio.
 
-FND-1 (ADR-0047) replaced the single ``expected_issuer`` string with a
-list resolved from ``AUTH_ISSUERS_JSON``. Two regressions would undo it
-silently, and neither shows up as a failing test in the service that
-causes it:
-
-1. **A literal issuer at a call site.** ``verify_token(...,
-   expected_issuer="https://...")`` or ``build_current_user(...,
-   expected_issuer=settings.auth_issuer)`` pins one service to one issuer
-   while the rest of the fleet has moved on. During the `dual` period
-   that service rejects every native token — an outage confined to one
-   endpoint, which is the hardest kind to find.
-
-2. **A service that never reads the list.** A new service copied from an
-   older one keeps the three legacy env vars, and the fleet-wide
-   ``AUTH_ISSUERS_JSON`` rollout skips it without a word.
-
-The legacy keyword pair is still supported by ``libs/auth`` — the
-one-element fallback is how a not-yet-migrated deployment keeps working —
-so this gate is what stops the fleet drifting back onto it.
-
-Exit codes:
-    0 — no violations
-    1 — violations printed to stderr
+Exit 0 clean, 1 violations on stderr.
 """
 
 from __future__ import annotations
@@ -35,8 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SERVICES_DIR = ROOT / "services"
 
-# libs/auth itself defines the legacy path and documents it; its tests
-# exercise it deliberately.
+# libs/auth defines the legacy path; its tests exercise it deliberately.
 EXEMPT_PACKAGES: frozenset[str] = frozenset({"auth"})
 
 VERIFY_CALLS: frozenset[str] = frozenset({"verify_token", "build_current_user"})
@@ -81,8 +59,7 @@ def check_reads_the_list(service_src: Path) -> list[str]:
         return problems
 
     declares = any("AUTH_ISSUERS_JSON" in p.read_text(encoding="utf-8") for p in sources)
-    # A service that never verifies a token (a pure worker) has no config
-    # to check; recognise it by the absence of any verification wiring.
+    # A pure worker never verifies a token and has no config to check.
     verifies = any(
         any(name in p.read_text(encoding="utf-8") for name in VERIFY_CALLS) for p in sources
     )

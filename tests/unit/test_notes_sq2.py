@@ -1,4 +1,4 @@
-"""Sprint SQ2 — the coverage scoring, gates and diagnosis verdicts."""
+"""The coverage scoring, gates and diagnosis verdicts."""
 
 from __future__ import annotations
 

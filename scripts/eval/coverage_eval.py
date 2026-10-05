@@ -1,35 +1,12 @@
 #!/usr/bin/env python3
-"""Sprint F1 T3 — measure the VAD pad, the floor pass and the second pass
-before shipping.
+"""Measure the VAD pad, the floor pass and the second pass on the in-process engine
+(``today``, ``pad``, ``pad_floor``, ``pad_floor_second``), one model load.
 
-    MD_ASR_DEVICE=cpu MD_ASR_COMPUTE_TYPE=int8 uv run --project services/asr-worker \\
-        python scripts/eval/coverage_eval.py --speakers vc-afjiv --speakers vc-ampme \\
-        --incident-job <uuid> --out docs/eval/asr-coverage-<date>.json
+    MD_ASR_DEVICE=cpu MD_ASR_COMPUTE_TYPE=int8 uv run --project services/asr-worker \
+        python scripts/eval/coverage_eval.py --speakers vc-afjiv --incident-job <uuid> --out <report.json>
 
-Four configurations of the in-process engine, one model load, the same files:
-``today`` (no pad, no floor, no second pass), ``pad`` (+ 300 ms leading pad),
-``pad_floor`` (+ the floor pass) and ``pad_floor_second`` (+ the second pass).
-A configuration that cannot change a file's first decode reuses the previous
-one's (the floor pass on a file where its condition does not hold), so the
-seconds reported are the ones each configuration really costs.
-
-Per file and configuration: audio and inference seconds, words, coverage
-share (VAD speech the transcript covers), gaps by cause, second-pass chunks
-and recovered words; for speakers-corpus files the share of the RTTM
-reference speech within reach of a word (independent of our VAD) and the
-word change against ``today``. For the incident recording: the r02
-checklist (``tests/fixtures/eval/asr/assertions/``) and the coverage of the
-transcript stored before the fix.
-
-**WER is not computable** — the speakers corpus carries RTTM only. The word
-change against ``today`` (word edit distance / ``today``'s words) is an upper
-bound on how far any configuration's WER can have moved: by the triangle
-inequality, |WER(x) − WER(today)| ≤ d(x, today) / |reference|, and the
-reference is about as long as ``today``. **DER is not re-measured**: none of
-the three changes touches the diarizer's input or labels.
-
-Transcript text goes only to ``scripts/eval/local/coverage-<config>/``
-(gitignored); the JSON report carries numbers and check names.
+WER is not computable (RTTM-only corpus): the word change against ``today`` bounds it.
+Transcript text goes only to ``scripts/eval/local/coverage-<config>/`` (gitignored).
 """
 
 from __future__ import annotations
@@ -67,13 +44,10 @@ CONFIGS: dict[str, dict[str, Any]] = {
     "pad": {"pad_ms": 300, "floor": False, "second_pass": False},
     "pad_floor": {"pad_ms": 300, "floor": True, "second_pass": False},
     "pad_floor_second": {"pad_ms": 300, "floor": True, "second_pass": True},
-    # Added after the first run: the pad changed words broadly (3.3 % deleted,
-    # 5.2 % substituted), the second pass only inserted recovered speech —
-    # so the candidate to ship is the floor and the second pass without it.
+    # The pad changed words broadly; the candidate to ship is floor + second pass without it.
     "floor_second": {"pad_ms": 0, "floor": True, "second_pass": True},
 }
-# The incident workspace's vocabulary at the time: role labels, no names
-# anyone said (a hint with "Mitchell" in it would make the check pointless).
+# The incident workspace's vocabulary: role labels, no names anyone said.
 ROLE_LABELS = "Gysi, Moderator, Moderator II, moderatorin, narrator, speaker, speaker background"
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)

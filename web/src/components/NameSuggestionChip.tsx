@@ -4,12 +4,7 @@ import { copyNodes, copyText } from "../i18n/speakers";
 import { formatElapsed } from "../lib/time";
 import { CloseIcon } from "./icons";
 
-/**
- * `Probably **Anna Keller** — "Hi, this is Anna from Acme" · 00:14`, then
- * Accept / ✕. The quote is the evidence and is always shown before anyone
- * accepts; where the chip sits away from the turn (the roster), the quote is
- * a link that scrolls to it.
- */
+/** Name suggestion chip; the quote is always shown before anyone accepts. */
 export function NameSuggestionChip({
   suggestion,
   speakerName,

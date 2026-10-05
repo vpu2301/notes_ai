@@ -1,10 +1,5 @@
-"""Note-generation counters (Sprint 37).
-
-Counts only, and no label that can carry content: `outcome` and
-`error_kind` are closed vocabularies, `backend` is a name from
-`config/models.yaml`. A quote, an item's text, a speaker or a tenant id
-never becomes a label — the first three are content, the fourth is
-unbounded cardinality.
+"""Note-generation counters. Counts only; labels are closed vocabularies or backend
+names, never content or a tenant id.
 """
 
 from __future__ import annotations
@@ -36,10 +31,7 @@ budget_blocked = _meter.create_counter(
     unit="1",
 )
 
-# ── Shadow runs (B-1, before a routing flip) ────────────────────────
-# A candidate backend runs on a sample of real meetings and its output is
-# thrown away. Only these numbers survive it: never a second copy of the
-# document, never a fact's text.
+# ── Shadow runs: a candidate backend on a sample; only these numbers survive ──
 shadow_runs = _meter.create_counter(
     "mdx_note_generation_shadow_runs_total",
     description="Shadow generations (labels: backend, outcome)",
@@ -56,9 +48,7 @@ shadow_seconds = _meter.create_histogram(
     unit="s",
 )
 
-# ── What the engine wrote and left out (Summary Engine v2, Q2) ──────
-# Closed vocabularies only. A line's text, a fact, a quote never becomes
-# a label; these say how many, and why.
+# ── What the engine wrote and left out (closed vocabularies only) ──
 lines = _meter.create_counter(
     "mdx_note_generation_lines_total",
     description=(
@@ -81,14 +71,13 @@ facts = _meter.create_counter(
     ),
     unit="1",
 )
-# F2 — windows re-extracted because most of their facts copied the
-# transcript, by whether the second answer replaced any copy.
+# Windows re-extracted because their facts copied the transcript.
 restate = _meter.create_counter(
     "mdx_note_generation_restate_total",
     description="Windows asked once more to restate copied facts (labels: outcome = improved|unchanged)",
     unit="1",
 )
-# D1 — what the document linter did (docs/eval/document-standard.md).
+# What the document linter did.
 lint_findings = _meter.create_counter(
     "mdx_note_generation_lint_total",
     description=(
@@ -188,7 +177,7 @@ def record_document(stats: dict, *, backend: str) -> None:
         excluded_share.record(int(stats.get("excluded_ms", 0)) / speech, {"backend": backend})
 
 
-# ── Q3: what the recording is, and what the render removed ─────────
+# ── What the recording is, and what the render removed ─────────────
 classify = _meter.create_counter(
     "mdx_note_generation_classify_total",
     description="How a generation's recording type was decided (labels: outcome = user|classifier|rule|failed)",
@@ -200,7 +189,7 @@ redundant_lines = _meter.create_counter(
     unit="1",
 )
 
-# ── Q4: names respelled, doubted, and opinions without a holder ─────
+# ── Names respelled, doubted, and opinions without a holder ─────────
 entities_counter = _meter.create_counter(
     "mdx_note_generation_entities_total",
     description=(
@@ -210,7 +199,7 @@ entities_counter = _meter.create_counter(
     unit="1",
 )
 
-# ── Q5: every written line is a row ─────────────────────────────────
+# ── Every written line is a row ─────────────────────────────────────
 lines_stored = _meter.create_counter(
     "mdx_note_generation_lines_stored_total",
     description="Written lines stored with their evidence (labels: kind)",

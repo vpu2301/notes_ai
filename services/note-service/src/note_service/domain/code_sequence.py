@@ -1,14 +1,6 @@
-"""Per-tenant, per-year note-code generator.
-
-Format: ``NOTE-{year}-{counter:05d}`` (e.g. NOTE-2026-00042).
-
-Uses a per-tenant advisory lock to serialise concurrent counter
-increments. The lock is held only for the duration of the single
-INSERT/UPDATE statement; the heaviest writers see <100ms contention
-even under 100-parallel inserts (verified by day-9 load test).
-
-Counter resets implicitly on first insert of a new year — a new
-``(tenant_id, year)`` row is created with counter=1.
+"""Per-tenant, per-year note-code generator: ``NOTE-{year}-{counter:05d}``.
+A per-tenant advisory lock serialises increments; the counter resets on the
+first insert of a new year.
 """
 
 from __future__ import annotations

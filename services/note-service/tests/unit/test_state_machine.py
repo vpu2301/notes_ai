@@ -1,8 +1,5 @@
-"""Unit tests for NoteStateMachine.
-
-These tests use a stub asyncpg.Connection so we can drive the SQL paths
-without a live DB. Cancel is the one transition left (0042): the happy
-path, the illegal sources and the concurrent race are exercised here.
+"""Unit tests for NoteStateMachine over a stub asyncpg.Connection: cancel is the
+one transition left; happy path, illegal sources, the concurrent race.
 """
 
 from __future__ import annotations

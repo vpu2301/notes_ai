@@ -1,13 +1,6 @@
-"""``POST /asr/jobs`` rejections: every one names a code, and none 500s.
+"""``POST /asr/jobs`` rejections the router owns: every one names a code, none 500s.
 
-The file-shape validators were always well covered; the rejections the
-*router* owns were not, and one of them was not a rejection at all:
-a queue that refused the publish left the row sitting in ``queued``
-with nothing on the other end, and answered 202.
-
-``run_all`` is stubbed here: ffprobe's verdict is tested in
-``test_validators.py``, and what is under test is what the handler does
-with an upload that already passed.
+``run_all`` is stubbed (ffprobe's verdict is tested in ``test_validators.py``).
 """
 
 from __future__ import annotations
@@ -110,8 +103,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         yield None
 
     monkeypatch.setattr(jobs, "tenant_connection", _fake_tenant_conn)
-    # The role→permission matrix lives in libs/auth and is not under test
-    # here; grant everything so the rig is independent of role names.
+    # Grant everything: the role→permission matrix is not under test here.
     monkeypatch.setattr(deps, "check", lambda *a, **k: None)
     monkeypatch.setattr(deps, "check_any", lambda *a, **k: None)
 
@@ -197,8 +189,7 @@ def test_enqueue_failure_fails_the_job_instead_of_reporting_202(
     # 503, not 202: nothing is going to transcribe this recording.
     assert resp.status_code == 503
     assert resp.json()["code"] == str(JobErrorKind.ENQUEUE_FAILED)
-    # And the row says so, rather than sitting in `queued` forever holding
-    # a slot in the tenant's concurrency budget.
+    # And the row says so.
     assert len(rig.failed) == 1
     assert rig.failed[0]["kind"] == str(JobErrorKind.ENQUEUE_FAILED)
 
@@ -223,7 +214,7 @@ def test_unknown_language_pin_is_rejected(rig: SimpleNamespace) -> None:
     assert resp.status_code == 422
 
 
-# ── Sprint I2 T2: what the transcriber was told is stored with the job ──
+# ── What the transcriber was told is stored with the job ──────────────
 
 
 def test_the_hint_is_stored_on_the_job_and_counted_in_the_audit(rig: SimpleNamespace) -> None:

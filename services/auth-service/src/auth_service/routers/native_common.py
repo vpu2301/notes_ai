@@ -1,13 +1,6 @@
-"""Shared plumbing for the native account routers (IDX-A5).
+"""Shared plumbing for the native account routers: problem mapping, identity resolution, the step-up gate.
 
-Three things every one of them needs, in one place so they cannot drift:
-turning a domain refusal into an RFC 9457 problem, resolving the bearer's
-``sub`` to an :class:`Identity`, and the step-up gate.
-
-The step-up gate is a dependency rather than a line at the top of each
-handler on purpose. "Which endpoints require recent auth" is a security
-decision that should be readable from the route declaration, not from
-whether somebody remembered to call a helper inside the body.
+The gate is a dependency so "requires recent auth" is readable from the route declaration.
 """
 
 from __future__ import annotations
@@ -39,12 +32,7 @@ def as_problem(exc: ApiError) -> HTTPException:
 
 
 def native_services() -> Any:
-    """The A5 service bundle, or 404 when this deployment has none.
-
-    404 rather than 503, for the same reason ``/auth/password/*`` does it:
-    a deployment running under Keycloak should look like one that has no
-    such endpoint, so a prober learns nothing about what is switched off.
-    """
+    """The native service bundle, or 404 (not 503) when this deployment has none."""
     state = get_state()
     services = getattr(state, "account_services", None)
     if services is None:
@@ -55,13 +43,7 @@ def native_services() -> Any:
 async def current_identity(
     claims: Annotated[Claims, Depends(current_user)],
 ) -> Identity:
-    """The identity behind the bearer token.
-
-    Read fresh on every request rather than trusted from the token: MFA
-    state, the email address and the account status all change during a
-    session's life, and a fifteen-minute-old claim about any of them is
-    exactly the wrong thing to make a security decision on.
-    """
+    """The identity behind the bearer token, read fresh on every request (never trusted from claims)."""
     services = native_services()
     identity: Identity | None = await services.identities.get(claims.sub)
     if identity is None:
@@ -76,19 +58,14 @@ async def current_identity(
 async def recent_auth(
     claims: Annotated[Claims, Depends(current_user)],
 ) -> Claims:
-    """Refuse unless this session proved itself inside the step-up window.
-
-    Attach with ``dependencies=[Depends(recent_auth)]`` on anything that
-    can take the account away from its owner.
-    """
+    """Refuse unless this session proved itself inside the step-up window (``dependencies=[Depends(recent_auth)]``)."""
     services = native_services()
     try:
         await services.account.require_recent_auth(session_id=UUID(claims.sid))
     except ApiError as exc:
         raise as_problem(exc) from exc
     except ValueError as exc:
-        # A native `sid` is always a UUID; anything else is a token from
-        # the Keycloak era and cannot be checked against a session row.
+        # A native `sid` is always a UUID; anything else is Keycloak-era.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="this session cannot be verified"
         ) from exc

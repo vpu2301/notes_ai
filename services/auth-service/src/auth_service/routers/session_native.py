@@ -1,44 +1,9 @@
 """POST /auth/refresh, /auth/logout and /auth/token against `auth_sessions`.
 
-The native half of IDX-A2's session surface, carried by IDX-M1 because
-the Mac app's Keychain session is exactly a refresh token the server can
-rotate — and until this router existed, nothing could. In native mode
-these two paths replace the Keycloak-backed ones in `login.py`.
-
-In `dual` mode (BE-2, ADR-0047) BOTH kinds of session are live at once
-and this router is mounted FIRST, so `/auth/refresh` and `/auth/logout`
-arrive here whoever they belong to. The routing rule is the token's own
-shape: `nrt_`-prefixed (or otherwise opaque) → this service's store;
-JWT-shaped → `login.py`'s Keycloak proxy, called directly.
-
-The cookie name does not change for the dual period, and neither does
-anything else a client can see. That is the point: a migration state that
-needed a release of the web app, the Mac app and the iPhone app before it
-could begin is not a migration state, it is a cut-over with extra steps.
-
-Where the token travels is `X-Client-Type`'s decision, and it is the same
-decision `/auth/email/verify` made when the session started
-(`domain/transport.py`): a browser's refresh token is in the HttpOnly
-`mdx_rt` cookie and is never in a body; a native client's is in the body
-and never in a cookie. A request that carries both is served the body's
-— it is the one the caller could only have got by being the client.
-
-What this router owns, beyond calling the service:
-
-* the cookie, in both directions (rotate it, clear it on the way out);
-* the denylist. The session row stops the *next* refresh; the access
-  token already minted stays signature-valid until `exp`, and only
-  denylisting its `sid` closes that window. On a replay the whole
-  identity is denylisted, because a replayed refresh token means the
-  chain may be in hostile hands and the tokens it already bought are not
-  worth guessing about;
-* the audit trail, on the tenant the session belongs to.
-
-`POST /auth/token` (IDX-M2) is the third: an access token for another of
-the identity's workspaces. It is bearer-authenticated rather than
-refresh-authenticated — the caller is a live client with a live session,
-not one recovering from an expiry — and it returns no refresh token,
-because switching rotates nothing.
+In `dual` (ADR-0047) this router is mounted FIRST; JWT-shaped refresh tokens are
+handed to `login.py`'s Keycloak handler. Owns the cookie, the denylist (replay
+denylists the whole identity) and the audit trail. `/auth/token` is
+bearer-authenticated and returns no refresh token.
 """
 
 from __future__ import annotations
@@ -110,13 +75,7 @@ class TokenRequest(_Strict):
 
 
 def _service() -> Any:
-    """The wired :class:`SessionService`, or 404 when this deployment has none.
-
-    404 rather than 503, the posture the other native routers take: a
-    deployment running under Keycloak should look like one that has no
-    such endpoint. (It does have one — `login.py`'s — but that router is
-    mounted in the other mode, so this branch is unreachable there.)
-    """
+    """The wired :class:`SessionService`, or 404 (not 503) when this deployment has none."""
     service = getattr(get_state(), "session_service", None)
     if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
@@ -130,14 +89,7 @@ def _presented_token(request: Request, body: RefreshRequest | LogoutRequest | No
 
 
 def _belongs_to_keycloak(presented: str | None) -> bool:
-    """Should this request be served by `login.py` instead?
-
-    Only ever true in `dual`. In `keycloak` mode this router is not
-    mounted; in `native` mode Keycloak no longer holds sessions, and a
-    JWT-shaped refresh token arriving after the cut-over is a stale
-    credential that must be refused, not proxied to an issuer that is out
-    of the token path.
-    """
+    """Should `login.py` serve this request? Only ever true in `dual`; after cut-over a JWT-shaped token is refused."""
     if settings.idp_mode != "dual" or not presented:
         return False
     return not is_native_refresh_token(presented)
@@ -185,20 +137,14 @@ async def _audit(
 
 
 async def _bearer_claims(authorization: str | None) -> Claims | None:
-    """Verified claims of an accompanying access token, or None.
-
-    Logout takes one so it can denylist the `sid` it is ending. It is
-    never *required*: a client whose access token has already expired is
-    exactly the client that most needs its refresh token revoked.
-    """
+    """Verified claims of an accompanying access token, or None; never required."""
     if not authorization or not authorization.startswith("Bearer "):
         return None
     state = get_state()
     try:
         return await verify_token(
             authorization[len("Bearer ") :],
-            # FND-1: both issuers during `dual`, so a logout can denylist
-            # the `sid` of whichever kind of session is ending.
+            # Both issuers during `dual`.
             issuers=auth_issuers(),
             jwks_cache=state.jwks_cache,
         )
@@ -218,9 +164,7 @@ async def refresh(
 ) -> TokenResponse:
     presented = _presented_token(request, body)
     if _belongs_to_keycloak(presented):
-        # Called, not redirected: the caller's cookie, headers and body
-        # are already here, and a 307 would make every client re-send a
-        # credential across a hop for no gain.
+        # Called, not redirected: a 307 would re-send a credential across a hop.
         from .login import refresh as keycloak_refresh
 
         return await keycloak_refresh(response, request, body)  # type: ignore[arg-type]
@@ -228,9 +172,7 @@ async def refresh(
     service = _service()
     client_type = client_type_of(request)
     if not presented:
-        # A distinct code (docs/api/error-codes.md): "you sent nothing" is
-        # a client bug, "your session is over" is a user event, and a
-        # client that cannot tell them apart retries the wrong one.
+        # Distinct code: "you sent nothing" is a client bug, not an expiry.
         _clear_refresh_cookie(response)
         raise as_problem(ApiError("no_refresh_token", 401, detail="no refresh token was presented"))
 
@@ -269,14 +211,7 @@ async def refresh(
 
 
 async def _on_replay(exc: RefreshReplayError) -> None:
-    """A retired token, presented late: revoke everything it could buy.
-
-    The session is already revoked by the service (that is the half that
-    must happen inside the same read the detection came from). What is
-    left is the blast radius: every access token of this identity, on the
-    denylist, and a `sec`-severity line in the audit trail — this is the
-    one auth event that is anomalous by definition.
-    """
+    """Replay: the service already revoked the session; denylist every access token of the identity and audit `sec`."""
     state = get_state()
     auth_metrics.refresh_replay_counter.add(1, {"tenant_id": str(exc.tenant_id)})
     await _audit(
@@ -353,8 +288,7 @@ async def token(
             severity=Severity.INFO,
             actor_sub=claims.sub,
         )
-    # No refresh token and no cookie: nothing rotated, and the session's
-    # one credential is still the one the client already holds.
+    # No refresh token and no cookie: nothing rotated.
     return TokenResponse(
         access_token=switched.access_token,
         expires_in=switched.expires_in,
@@ -364,19 +298,7 @@ async def token(
 
 
 def _refuse_legacy_session(claims: Claims) -> None:
-    """`409 legacy_session` when the caller's token came from Keycloak.
-
-    Recorded up front in ADR-0047 as the one capability the `dual` period
-    splits by token origin. Switching workspace means minting an access
-    token for a different `tid`, and auth-service cannot sign a Keycloak
-    token — it does not have Keycloak's key, and asking Keycloak for one
-    would mean teaching it about our tenant model on the way out the door.
-
-    A distinct code rather than a 401 because nothing is wrong with the
-    session: it is valid, it just cannot do this one thing. Clients hide
-    the workspace switcher for these sessions instead of letting the tap
-    earn a 409 (docs/api/error-codes.md).
-    """
+    """`409 legacy_session` for a Keycloak-issued token: auth-service cannot re-sign it for another `tid` (ADR-0047)."""
     if settings.idp_mode != "dual":
         return
     if claims.iss == native_issuer_config().issuer:
@@ -394,11 +316,7 @@ def _refuse_legacy_session(claims: Claims) -> None:
 
 
 def _session_id(claims: Claims) -> UUID:
-    """The `sid` as a session row id.
-
-    A Keycloak-era token carries a `sid` that is not a UUID and cannot
-    name a row here; it is not a session this service can re-scope.
-    """
+    """The `sid` as a session row id (a Keycloak-era `sid` is not a UUID)."""
     try:
         return UUID(claims.sid)
     except (ValueError, AttributeError) as exc:
@@ -436,9 +354,7 @@ async def logout(
 
     ended = await service.revoke(refresh_token=presented) if presented else None
 
-    # Close the access token's remaining life. Preferring the bearer's own
-    # `sid` matters when the two disagree: the caller is signing *this*
-    # client out, and that is the token in this client's memory.
+    # Denylist the access token; prefer the bearer's own `sid` when the two disagree.
     sid = claims.sid if claims is not None else (str(ended.session_id) if ended else None)
     if sid is not None and state.denylist is not None:
         ttl = (

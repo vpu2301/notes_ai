@@ -1,10 +1,4 @@
-"""Telemetry intake — scrub-before-buffer, 422 matrix, DB-down 204.
-
-The handler is exercised directly (deps installed with fakes): what
-matters is that (a) PII is redacted BEFORE the row enters the buffer —
-unscrubbed text never exists beyond the request scope — and (b) shape
-violations 422 while infra failures never surface to the client.
-"""
+"""Telemetry intake: PII is redacted before the row enters the buffer; shape errors 422, infra failures never surface."""
 
 from __future__ import annotations
 
@@ -129,7 +123,7 @@ async def test_buffer_failure_never_surfaces():
     assert resp.status_code == 204
 
 
-# ── Sprint 15: Layer C source discriminator ──────────────────────────────
+# ── Layer C source discriminator ─────────────────────────────────────────
 
 
 def test_layer_c_accepted_without_ids_is_valid():

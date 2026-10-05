@@ -1,10 +1,4 @@
-"""Repository helpers for nlp-service.
-
-Loads the voice command catalogue + abbreviation snapshot. All
-abbreviation reads are RLS-scoped via :func:`db.tenant_connection` —
-tenant rows see their own + global rows; cross-tenant access is
-impossible at the DB layer.
-"""
+"""Repository helpers: voice command catalogue + abbreviation snapshot (RLS-scoped reads)."""
 
 from __future__ import annotations
 
@@ -25,14 +19,8 @@ logger = logging.getLogger(__name__)
 async def load_voice_commands(
     pool: asyncpg.Pool,
 ) -> dict[str, list[CommandSpec]]:
-    """Read voice_commands table → indexed by language.
-
-    Falls back to an empty catalogue if the table is absent (dev hosts
-    without migrations). The matcher tolerates an empty catalogue.
-    """
-    # Pre-seeded so a language with no catalogue rows still resolves to an
-    # empty list (the matcher tolerates it) instead of a KeyError-shaped
-    # surprise for callers that index the map directly.
+    """Read voice_commands indexed by language; empty catalogue if the table is absent."""
+    # Pre-seeded so a language with no rows resolves to an empty list, not a KeyError.
     out: dict[str, list[CommandSpec]] = {"uk": [], "en": [], "de": []}
     try:
         async with pool.acquire() as conn:
@@ -72,12 +60,7 @@ async def load_voice_commands(
 async def fetch_abbreviation_snapshot(
     pool: asyncpg.Pool, *, tenant_id: UUID, language: str
 ) -> AbbreviationSnapshot:
-    """Read tenant + global rows for ``language`` and freeze them.
-
-    Result is hashed into a stable ``fingerprint`` that participates in
-    the idempotence cache key — pipeline_version + this hash invalidate
-    the cache when an admin edits the dictionary.
-    """
+    """Freeze tenant + global rows for ``language``; the ``fingerprint`` is part of the cache key."""
     from db import tenant_connection
 
     entries: list[AbbreviationEntry] = []
@@ -184,8 +167,7 @@ async def delete_tenant_abbreviation(
     from db import tenant_connection
 
     async with tenant_connection(pool, tenant_id) as conn:
-        # The RLS policy already restricts to own tenant; the explicit
-        # ``tenant_id`` predicate is defence-in-depth.
+        # RLS already restricts to own tenant; the predicate is defence in depth.
         result = await conn.execute(
             "DELETE FROM abbreviation_dictionary WHERE id = $1 AND tenant_id = $2",
             abbreviation_id,

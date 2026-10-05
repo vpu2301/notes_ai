@@ -1,29 +1,8 @@
-"""The account surface: sessions, step-up, email change, deletion (IDX-A5).
+"""The account surface: sessions, step-up, email change, deletion.
 
-What ties these four together is that each of them can take an account
-away from its owner. So each is gated on a recent proof of identity, and
-each tells somebody about it afterwards — the person who can still act if
-it was not them.
-
-**Step-up ("recent auth").** A live access token proves that somebody was
-this person at some point. Changing the login address or deleting the
-account needs more than that: an unlocked laptop must not be enough. The
-proof is ``auth_sessions.last_authenticated_at``, stamped by any first
-factor and by ``/auth/reauth``, and the gate is a window measured from
-it. IDX-A4 adds a password to the list of things that can re-stamp it.
-
-**Email change is two-sided.** The new address must prove it can receive
-mail before it becomes the login; the old address then gets a one-shot
-link that restores it and ends every session. That link is the entire
-defence against an attacker who has a session and quietly moves the
-account to their own mailbox — so it is long-lived (24 h) and destructive
-on purpose.
-
-**Deletion is reversible until it isn't.** Requesting it dissolves the
-workspaces nobody else is in and signs the person out everywhere, but
-destroys nothing: signing in during the grace window puts everything
-back (IDX-A3 F3). The purge, thirty days later, is the irreversible half
-and lives in a script an operator runs.
+Each can take an account from its owner, so each is gated on a recent proof of
+identity (``auth_sessions.last_authenticated_at``) and notifies afterwards. The
+old address gets a 24 h revert link; deletion destroys nothing until the purge.
 """
 
 from __future__ import annotations
@@ -67,10 +46,7 @@ _sessions_revoked_counter = _meter.create_counter(
     description="Sessions ended, by reason",
     unit="1",
 )
-# The other half of revocation. The database row stops the next refresh;
-# this counts the times the access token already in someone's hands could
-# NOT be stopped, which is the window revocation exists to close — hence
-# a critical alert rather than a log line nobody reads.
+# Counts access tokens that could NOT be denylisted (the window revocation exists to close).
 _denylist_failed_counter = _meter.create_counter(
     "mdx_auth_denylist_push_failed_total",
     description="Revocations that failed to reach the session denylist",
@@ -81,7 +57,7 @@ KIND_EMAIL_CHANGE = "email_change"
 KIND_REAUTH = "reauth"
 
 EMAIL_CHANGE_TTL_SECONDS = 900
-REVERT_TTL_SECONDS = 86_400  # 24 h — see the module docstring.
+REVERT_TTL_SECONDS = 86_400
 REAUTH_TTL_SECONDS = 600
 DELETION_GRACE_DAYS = 30
 
@@ -105,7 +81,7 @@ class Denylist(Protocol):
 
 
 class CodeSender(Protocol):
-    """Sends a six-digit code to an address (the IDX-A3 mailer)."""
+    """Sends a six-digit code to an address."""
 
     async def send_code(
         self, *, to: str, lang: str, code: str, ttl_seconds: int, user_agent: str
@@ -133,14 +109,7 @@ class ReauthOptions:
 
 
 def mask_ip(raw: str) -> str:
-    """``203.0.113.7`` → ``203.0.113.0/24``; IPv6 → ``/48``.
-
-    The sessions list exists so somebody can spot a login they do not
-    recognise, and a network is enough for that — "somewhere else in the
-    world" reads the same as a full address. Storing precision we then
-    show back turns a security screen into a location history, which is
-    worth something to whoever gets into the account.
-    """
+    """``203.0.113.7`` → ``203.0.113.0/24``; IPv6 → ``/48`` (a network is enough to spot a strange login)."""
     try:
         addr = ipaddress.ip_address(raw)
     except ValueError:
@@ -151,12 +120,7 @@ def mask_ip(raw: str) -> str:
 
 
 def revert_token(challenge_id: UUID, secret: str) -> str:
-    """``<challenge id>.<secret>`` — the whole credential in one URL segment.
-
-    The id alone is not enough to use the link (the secret is checked
-    against the stored hash) and the secret alone cannot be looked up.
-    An attacker needs both, and neither is ever logged.
-    """
+    """``<challenge id>.<secret>`` — the whole credential in one URL segment; neither part is logged."""
     return f"{challenge_id.hex}.{secret}"
 
 
@@ -213,12 +177,7 @@ class AccountService:
             )
 
     async def start_reauth(self, identity: Identity, *, lang: str) -> ReauthOptions:
-        """Offer the ways this person can prove themselves right now.
-
-        An MFA user answers with their authenticator; everyone else gets a
-        code mailed to the address on the account. Until IDX-A4 there is
-        no password, so that is the complete list.
-        """
+        """Offer the ways this person can prove themselves: authenticator if enrolled, else a mailed code."""
         if identity.mfa_enabled:
             return ReauthOptions(
                 methods=[mfa.MfaMethod.TOTP, mfa.MfaMethod.RECOVERY_CODE],
@@ -305,7 +264,7 @@ class AccountService:
             extras={"attempts_left": decision.attempts_left},
         )
 
-    # ── sessions (F4) ────────────────────────────────────────────────
+    # ── sessions ─────────────────────────────────────────────────────
 
     async def list_sessions(self, identity: Identity, *, current_sid: UUID) -> list[SessionView]:
         rows = await self._sessions.list_live(identity.id)
@@ -327,12 +286,7 @@ class AccountService:
     async def revoke_session(
         self, identity: Identity, *, session_id: UUID, reason: str = "user_revoked"
     ) -> None:
-        """End one session. 404 for a sid that is not this identity's.
-
-        404 rather than 403: answering "forbidden" would confirm that the
-        sid exists and belongs to somebody, which is a probe worth nothing
-        to the owner and something to an attacker.
-        """
+        """End one session; 404 (not 403) for a sid that is not this identity's, so nothing is confirmed."""
         if not await self._sessions.revoke(session_id, identity_id=identity.id, reason=reason):
             raise AccountError("not_found", 404, detail="no such session")
         await self._push_denylist([session_id])
@@ -349,13 +303,7 @@ class AccountService:
         return len(revoked)
 
     async def _push_denylist(self, sids: list[UUID]) -> None:
-        """Stop the access tokens already issued for these sessions.
-
-        Best-effort by design (ADR-0040): the database row is the durable
-        half and already stops the next refresh. A Redis outage shortens
-        the guarantee to "within the access-token lifetime", which is the
-        documented degraded mode, not a failure of the request.
-        """
+        """Denylist the access tokens already issued; best-effort (ADR-0040), the DB row is the durable half."""
         if self._denylist is None:
             return
         for sid in sids:
@@ -368,7 +316,7 @@ class AccountService:
                     extra={"sid": str(sid), "error_class": type(exc).__name__},
                 )
 
-    # ── email change (F5) ────────────────────────────────────────────
+    # ── email change ─────────────────────────────────────────────────
 
     async def start_email_change(
         self, identity: Identity, *, new_email: str, lang: str, user_agent: str
@@ -380,10 +328,7 @@ class AccountService:
             raise AccountError(
                 "invalid_email", 400, detail="that does not look like an email address"
             )
-        # Revealing that an address is taken is acceptable here and nowhere
-        # else: the caller is already authenticated, so this is not an
-        # enumeration oracle — and without it the flow would silently fail
-        # at confirm time with nothing the user could act on.
+        # Revealing a taken address is acceptable here only: the caller is authenticated.
         if await self._identities.email_is_taken(address, excluding=identity.id):
             raise AccountError("email_in_use", 409, detail="that address is already in use")
 
@@ -402,8 +347,7 @@ class AccountService:
             ip="",
             metadata={"old_email": identity.email, "stage": "confirm"},
         )
-        # To the NEW address: the point of the code is to prove that
-        # mailbox is reachable before it becomes the way in.
+        # To the NEW address: it must prove reachable before it becomes the login.
         await self._code_sender.send_code(
             to=address,
             lang=lang,
@@ -425,16 +369,13 @@ class AccountService:
         new_email = challenge.email
 
         if await self._identities.email_is_taken(new_email, excluding=identity.id):
-            # Someone claimed it between start and confirm.
             raise AccountError("email_in_use", 409, detail="that address is already in use")
 
         updated = await self._identities.change_email(identity.id, new_email=new_email)
         if updated is None:
             raise AccountError("not_found", 404, detail="no such account")
 
-        # Sessions deliberately survive: the person is standing at their
-        # own screen and has just proved the new mailbox. What they get
-        # instead is the undo below, aimed at the address that lost access.
+        # Sessions deliberately survive; the undo goes to the address that lost access.
         token_secret = secrets.token_urlsafe(32)
         revert_id = uuid4()
         await self._challenges.open(
@@ -481,11 +422,7 @@ class AccountService:
             or challenge.identity_id is None
         ):
             raise AccountError("not_found", 404, detail="that link is not valid")
-        # Checked by hand rather than through `ec.evaluate`, which
-        # normalises a submission to digits — right for a six-digit code,
-        # wrong for a urlsafe token. Same comparison, same binding to the
-        # challenge id; every failure answers 404 so the link reveals
-        # nothing about which part of it was wrong.
+        # Not `ec.evaluate` (it normalises to digits); every failure is a 404.
         if challenge.consumed_at is not None or self._now() >= challenge.expires_at:
             raise AccountError("not_found", 404, detail="that link has expired")
         if not ec.hashes_match(challenge.code_hash, ec.code_hash(secret, challenge_id)):
@@ -502,15 +439,14 @@ class AccountService:
             raise AccountError("email_in_use", 409, detail="that address has since been taken")
 
         updated = await self._identities.change_email(identity.id, new_email=restore_to)
-        # Everything, including whoever made the change: they are the
-        # suspected attacker, and this is the one flow that assumes so.
+        # Everything, including whoever made the change: the suspected attacker.
         await self.revoke_other_sessions(identity, current_sid=None, reason="email_reverted")
         _email_change_counter.add(1, {"stage": "reverted"})
         logger.warning("auth.email_change.reverted", extra={"identity_id": str(identity.id)})
         assert updated is not None
         return updated
 
-    # ── deletion (F6) ────────────────────────────────────────────────
+    # ── deletion ─────────────────────────────────────────────────────
 
     async def request_deletion(
         self, identity: Identity, *, lang: str
@@ -529,8 +465,7 @@ class AccountService:
             )
         dissolved = await self._identities.request_deletion(identity.id)
         purge_after = self._now() + timedelta(days=DELETION_GRACE_DAYS)
-        # Every session, the caller's included: the account is on its way
-        # out and leaving a live token behind would let it keep acting.
+        # Every session, the caller's included.
         await self.revoke_other_sessions(identity, current_sid=None, reason="account_deleted")
         notified = True
         try:

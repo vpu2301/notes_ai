@@ -30,8 +30,7 @@ const LANGUAGES: ReadonlyArray<readonly [AsrLanguage, string]> = [
   ["de", "Deutsch"],
 ];
 
-// How many people spoke. Only an exact small number is a hint worth
-// sending; "Auto" and "6+" leave the count to the diarizer.
+// Only an exact small number is a hint worth sending; "Auto" and "6+" leave it to the diarizer.
 type People = "auto" | 1 | 2 | 3 | 4 | 5 | "6+";
 const PEOPLE: ReadonlyArray<readonly [People, string]> = [
   ["auto", "Auto"],
@@ -43,8 +42,7 @@ const PEOPLE: ReadonlyArray<readonly [People, string]> = [
   ["6+", "6+"],
 ];
 
-// What kind of meeting this is — picks the template family the note is
-// written into. "Auto" is the default and is always right enough.
+// Picks the template family the note is written into.
 const MEETING_TYPES: ReadonlyArray<readonly [MeetingType, string]> = [
   ["auto", "Auto"],
   ["client", "Client"],
@@ -54,35 +52,23 @@ const MEETING_TYPES: ReadonlyArray<readonly [MeetingType, string]> = [
   ["interview", "Interview"],
 ];
 
-/**
- * One screen, one button. Type a title (optional), press Record, press Stop.
- *
- * Sprint 34: pressing Record also OPENS THE NOTE. What the author types
- * while the meeting runs is the highest-value signal there is about what
- * matters, so there is now somewhere to type it — and it is the note
- * itself, autosaved, on every device, kept verbatim.
- */
-/** Sprint I3: "also record this tab's audio" — a per-browser preference. */
+/** One screen, one button; Record also opens the note (autosaved scratchpad). */
+/** "also record this tab's audio" — a per-browser preference. */
 const SYSTEM_AUDIO_KEY = "notesai.capture.systemAudio";
 
 export function MeetingPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [params] = useSearchParams();
-  // The author's own name labels their microphone's speaker ("Me").
+  // The author's name labels their microphone's speaker ("Me").
   const displayName = useAuthOptional()?.displayName;
 
-  // A calendar event's title arrives as ?title= from the home page's
-  // "Start" button; otherwise the field starts empty.
+  // A calendar event's title arrives as ?title= from the home page.
   const [title, setTitle] = useState(() => params.get("title")?.slice(0, 200) ?? "");
   useDocumentTitle(title.trim() || "New meeting");
-  // Sprint 30: its invitees wait in sessionStorage under ?event= (names
-  // never ride the URL). They bound the speaker count and are offered as
-  // names when renaming speakers. Sprint 34: they also go on the note,
-  // together with the invite's agenda.
+  // Invitees wait in sessionStorage under ?event= (names never ride the URL).
   const [eventCtx] = useState(() => readCaptureContext(params.get("event")));
-  // Sprint 21: `/meeting/new?first_run=1` is where a new workspace lands.
-  // Shown once per browser; a per-viewer convenience, so localStorage.
+  // `?first_run=1`: where a new workspace lands; shown once per browser.
   const [firstRun, setFirstRun] = useState(() => {
     if (params.get("first_run") !== "1") return false;
     try {
@@ -99,13 +85,11 @@ export function MeetingPage() {
       /* private mode */
     }
   };
-  // Auto by default: the transcript and the note come out in whatever
-  // language the meeting was held in. Pinning is an option, not a step.
+  // Auto by default: output follows the spoken language.
   const [language, setLanguage] = useState<AsrLanguage>("auto");
   const [meetingType, setMeetingType] = useState<MeetingType>("auto");
   const [diarize, setDiarize] = useState(true);
-  // Me / Them: the tab audio as a second channel. Off until asked for,
-  // then remembered in this browser.
+  // Me / Them: tab audio as a second channel; remembered per browser.
   const [systemAudio, setSystemAudioState] = useState(() => {
     try {
       return window.localStorage.getItem(SYSTEM_AUDIO_KEY) === "1";
@@ -123,8 +107,7 @@ export function MeetingPage() {
   };
   const [people, setPeople] = useState<People>("auto");
   const [hint, setHint] = useState("");
-  /** The author edited the vocabulary: stop overwriting it with the
-   *  workspace's. The hint is a suggestion about THIS meeting. */
+  /** The author edited the vocabulary: stop overwriting it with the workspace's. */
   const hintTouched = useRef(false);
   const [showOptions, setShowOptions] = useState(false);
   const [showContext, setShowContext] = useState(false);
@@ -134,8 +117,7 @@ export function MeetingPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const scratch = useRef<HTMLTextAreaElement>(null);
 
-  // The workspace's own names and terms, so the transcriber has the
-  // spellings before it guesses (Sprint 35). Pre-filled, never forced.
+  // Workspace names and terms, pre-filled for the transcriber, never forced.
   useEffect(() => {
     let cancelled = false;
     void glossaryHint()
@@ -175,8 +157,7 @@ export function MeetingPage() {
       const twoChannel = audio.channelLayout === "mic_system";
       setPhase("uploading");
       try {
-        // A 2-channel capture the server cannot read as one is re-posted
-        // once as mono — the recording matters more than the split.
+        // A 2-channel capture the server rejects is re-posted once as mono.
         const { job, fellBackToMono } = await submitWithLayoutFallback(submitJob, {
           audio: audio.blob,
           filename: audio.filename,
@@ -184,10 +165,10 @@ export function MeetingPage() {
           diarize: s.diarize,
           vocabularyHint: s.hint,
           speakersExpected: s.diarize && typeof s.people === "number" ? s.people : undefined,
-          // Both go when set; a "People" number wins on the server.
+          // A "People" number wins on the server.
           ...(s.diarize ? contextFields(s.eventCtx) : {}),
           captureSource,
-          // Sprint F1: absent for an uploaded file — nobody pressed Record.
+          // Absent for an uploaded file — nobody pressed Record.
           ...(audio.recordPressedAt ? { recordPressedAt: audio.recordPressedAt } : {}),
           ...(audio.firstFrameOffsetMs != null ? { firstFrameOffsetMs: audio.firstFrameOffsetMs } : {}),
           ...(twoChannel
@@ -201,8 +182,7 @@ export function MeetingPage() {
         markMine(job.id);
         setJobId(job.id);
         setPhase("processing");
-        // Bind the recording to the note the author has been typing in.
-        // Also creates the note when `start` could not (offline at Record).
+        // Bind to the scratchpad note; creates it when `start` could not (offline at Record).
         await note.attachJob(job.id);
         void refresh();
       } catch (err) {
@@ -228,11 +208,7 @@ export function MeetingPage() {
     onSystemAudioUnavailable,
   });
 
-  /**
-   * Record. The recorder starts FIRST and the note is opened beside it:
-   * a note we failed to create is recoverable at Stop, a meeting we failed
-   * to record is not.
-   */
+  /** Recorder starts FIRST: a note we failed to create is recoverable at Stop, a recording is not. */
   const onRecord = async () => {
     startedAt.current = Date.now();
     await rec.start();
@@ -242,7 +218,6 @@ export function MeetingPage() {
       meetingType,
       calendar: meetingCalendar(eventCtx),
     });
-    // The scratchpad is where the value is: put the caret there.
     window.setTimeout(() => scratch.current?.focus(), 0);
   };
 
@@ -251,7 +226,7 @@ export function MeetingPage() {
     rec.stop();
   };
 
-  // Don't let a tab close eat a recording — or unsaved scratch text.
+  // A tab close must not eat a recording or unsaved scratch text.
   useEffect(() => {
     if (!rec.recording && phase !== "uploading" && !note.hasUnsaved()) return;
     const onUnload = (e: BeforeUnloadEvent) => {
@@ -263,7 +238,7 @@ export function MeetingPage() {
 
   const onFile = (file: File | undefined | null) => {
     if (!file) return;
-    // An uploaded file is always sent as it is: no channel layout is declared.
+    // An uploaded file declares no channel layout.
     void submit({ blob: file, filename: file.name, channelLayout: "mono" }, "upload");
   };
 
@@ -363,8 +338,7 @@ export function MeetingPage() {
                 <span aria-live="off">
                   {rec.firstFrameOffsetMs == null ? "Starting…" : formatElapsed(rec.elapsedMs)}
                 </span>
-                {/* Sprint F1: what the recording will not hold, said while it
-                    still matters. Under a second is ordinary; not shown. */}
+                {/* Under a second is ordinary; not shown. */}
                 {rec.firstFrameOffsetMs != null && rec.firstFrameOffsetMs >= 1000 && (
                   <span className="help rec-latency">
                     Recording from {formatOffset(rec.firstFrameOffsetMs)}

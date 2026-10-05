@@ -1,22 +1,6 @@
--- Dev seed data — aligns the DB with the Keycloak realm-export.
--- Run via: make seed  (scripts/seed/seed.py executes this file first,
--- then layers templates, voice commands, and the autocomplete starter
--- corpus on top).
---
--- Authoritative schema lives in infra/postgres/migrations/0001.
---   tenants(id, name, display_name, locale, timezone, status, …)
---   users(sub PK, tenant_id, email, display_name, role, status, …)
--- Roles are the five platform roles: tenant_admin, member, viewer,
--- auditor, service.
---
--- Tenants `tenant-a` (…00a) and `tenant-b` (…00b) are created by
--- migration 0013_seed_dev_tenants; we only (idempotently) ensure they
--- exist here so this script is self-contained, then seed the users.
---
--- IMPORTANT: each user's `sub` MUST equal the Keycloak user id pinned in
--- infra/keycloak/realm-export.json — that 1:1 mapping is what lets token
--- `sub` claims join to DB rows (and lets auth-service resolve a tenant
--- from a sub). Keep the two files in lockstep.
+-- Dev seed data (make seed; scripts/seed/seed.py runs this first).
+-- Each user's `sub` MUST equal the Keycloak user id in
+-- infra/keycloak/realm-export.json; keep the two files in lockstep.
 
 BEGIN;
 
@@ -29,26 +13,16 @@ ON CONFLICT (id) DO NOTHING;
 -- ── Users (sub = Keycloak user id from realm-export.json) ───────────────────
 INSERT INTO users (sub, tenant_id, email, display_name, role, status) VALUES
     ('0a000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'admin@tenant-a.example',   'Dev Admin A',   'tenant_admin', 'active'),
-    -- The ONLY seeded account with tenant_admin and NOTHING else. Dev
-    -- Admin A above deliberately also holds `member` in Keycloak (an
-    -- admin who also writes notes), so it does not exercise the pure
-    -- admin view. Log in as this one to see it: no notes, no dictations
-    -- — only the workspace roster and settings.
+    -- The only seeded account with tenant_admin and nothing else (the pure admin view).
     ('0b000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000a', 'owner@tenant-a.example',   'Dev Owner A',   'tenant_admin', 'active'),
     ('0c000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'member@tenant-a.example',  'Dev Member A',  'member',       'active'),
     ('0d000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'viewer@tenant-a.example',  'Dev Viewer A',  'viewer',       'active'),
     ('0e000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'auditor@tenant-a.example', 'Dev Auditor A', 'auditor',      'active'),
     ('0c000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000b', 'member@tenant-b.example',  'Dev Member B',  'member',       'active'),
     ('0a000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000b', 'admin@tenant-b.example',   'Dev Admin B',   'tenant_admin', 'active')
--- Conflict on (tenant_id, email), NOT on sub. The subs above are only correct
--- on a stack whose Keycloak was built from realm-export.json: Keycloak honours
--- a caller-supplied user id during realm import but NOT via its admin REST API,
--- which silently mints its own (verified on KC 24). So any account created by
--- hand on a running stack carries a different sub for the same email, and
--- conflicting on sub made this INSERT try to add a second row for that email —
--- violating users_tenant_id_email_key and aborting the whole seed. Keying on
--- the email keeps whichever sub the live Keycloak issued (the authoritative
--- one, since it is what the token carries) and refreshes the mutable columns.
+-- Conflict on (tenant_id, email), NOT on sub: Keycloak's admin REST API mints
+-- its own user id (KC 24), so a hand-created account carries a different sub
+-- for the same email and conflicting on sub would abort the seed.
 ON CONFLICT (tenant_id, email) DO UPDATE
     SET display_name = EXCLUDED.display_name,
         role         = EXCLUDED.role,
@@ -79,10 +53,7 @@ UPDATE tenants SET
     is_active       = true
 WHERE id = '00000000-0000-0000-0000-00000000000b';
 
--- ── Tenant memberships ──────────────────────────────────────────────────────
--- Fresh dev DBs seed users here (after migrations); create the memberships
--- explicitly, mapping the platform role to the management role. Idempotent
--- on (tenant_id, user_sub).
+-- ── Tenant memberships (platform role → management role) ───────────────────
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 SELECT
     u.tenant_id,
@@ -97,17 +68,12 @@ SELECT
 FROM users u
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
--- Cross-tenant demo: let Dev Admin A also administer tenant-B as an admin, so
--- the workspace switcher / members UI has multi-tenant data to exercise.
+-- Dev Admin A also administers tenant-B (multi-tenant data for the switcher).
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 VALUES ('00000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-00000000000a', 'admin', 'active')
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
--- ── Example workspace "Sunrise Studio" owned by the current login account ───
--- A fully-branded example workspace, with Dev Admin A
--- (admin@tenant-a.example — the account used to log in now) linked as its
--- owner. It shows up in that account's workspace switcher (GET /tenants)
--- and workspace-settings page.
+-- ── Example workspace "Sunrise Studio", owned by Dev Admin A ───────────────
 INSERT INTO tenants (
     id, name, display_name, legal_name, slug, locale, timezone, status, is_active,
     contact_email, phone_number, website,
@@ -130,23 +96,13 @@ ON CONFLICT (id) DO UPDATE SET
     country       = EXCLUDED.country,
     is_active     = EXCLUDED.is_active;
 
--- Link the current login account (Dev Admin A) to the example workspace.
+-- Dev Admin A owns the example workspace.
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 VALUES ('0000c111-0000-0000-0000-000000000001', '0a000000-0000-0000-0000-00000000000a', 'owner', 'active')
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
--- ── Notes AI's own account — the vendor, not a customer ────────────────────
--- Backs the platform-owner console at #/company (src/company/ in the SPA),
--- whose access gate is an email allowlist because there is no platform role
--- in KNOWN_ROLES yet. In Keycloak it carries tenant_admin + auditor:
--- tenant_admin covers /admin/users and /tenants/*, auditor covers /audit/*,
--- and the Usage tab's notes/sessions/ASR reads resolve through
--- tenant_admin's `stats.read` in the content-stripped mode. Anchored in
--- tenant-a so the token's tid points at the tenant that has seeded
--- activity.
---
--- Reconciled on email, not on a pinned sub, for the same Keycloak reason
--- documented on the users INSERT above.
+-- ── Notes AI's own account (the vendor): backs the #/company console ───────
+-- tenant_admin + auditor in Keycloak; anchored in tenant-a. Reconciled on email.
 INSERT INTO users (sub, tenant_id, email, display_name, role, status)
 VALUES (
     '0f000000-0000-0000-0000-00000000000f',   -- used only on a fresh realm import
@@ -159,17 +115,8 @@ ON CONFLICT (tenant_id, email) DO UPDATE
         status       = EXCLUDED.status;
 
 -- ── Notes AI owner: member of tenant-a only ───────────────────────────────
--- The platform-owner console reads its portfolio from GET /tenants, which
--- returns exactly the tenants the caller is a member of — so the owner
--- joins tenant-a (where its notes are) and nothing else. It used to be a
--- cross join over every tenant, and every `make seed` after an integration
--- run (test_email_code_e2e, test_signup_e2e, test_first_use_guarantee each
--- sign up a throwaway `e<hex>@…` account with its own workspace) made the
--- owner the owner of all those leftovers: 263 junk workspaces in the
--- switcher by 2026-10-03. A workspace the owner creates or accepts an
--- invitation to gets its membership from the API, not from here.
--- Keyed off the email because the sub is whatever the live Keycloak issued.
--- Idempotent on (tenant_id, user_sub).
+-- Never a cross join over every tenant (integration runs leave throwaway
+-- workspaces behind). Keyed off the email.
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 SELECT t.id, u.sub, 'owner', 'active'
 FROM tenants t
@@ -179,18 +126,9 @@ WHERE u.email = 'vpu2301@gmail.com'
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
 -- ── Identities for every seeded user ──────────────────────────────────────
--- Migration 0028 repointed notes.primary_author_id, note_versions.created_by
--- and autocomplete_*.owner_user_id from users(sub) to identities(id). The
--- 0027 backfill only sees the users that existed WHEN IT RAN, and on a fresh
--- stack that is none — migrations run against an empty database and the seed
--- lands afterwards. So a seeded account signed in fine and then 500'd on
--- every POST /v1/notes with notes_primary_author_id_fkey: "Key is not present
--- in table identities".
---
--- Same shape as 0027's backfill, keyed off users so it stays correct when
--- Keycloak issued a sub of its own (see the users INSERT above). legacy_idp
--- is true: these accounts authenticate through Keycloak, their password and
--- MFA live there, and ADR-0047's dual mode has to know that.
+-- Authorship FKs point at identities (0028); the 0027 backfill ran on an empty
+-- DB, so without this every POST /v1/notes 500s. legacy_idp = true: these
+-- accounts authenticate through Keycloak.
 INSERT INTO identities (id, email, email_verified_at, display_name,
                         status, locale, timezone, legacy_idp)
 SELECT u.sub, lower(u.email), u.created_at, u.display_name,
@@ -205,20 +143,14 @@ SET last_tenant_id = u.tenant_id
 FROM users u
 WHERE u.sub = i.id AND i.last_tenant_id IS NULL;
 
--- Keep the profile in step on re-seed. The INSERT above only fires for an
--- identity that does not exist yet, so without this a display name edited
--- in the users INSERT lands on `users` and never reaches `identities` —
--- the seed then reports one name and every native token carries the other.
---
--- Scoped to legacy_idp: for a Keycloak-backed identity the profile is
--- owned upstream and `users` is the local mirror of it, so copying down is
--- correct. A native identity (IDX-BE-3) owns its own name and must never
--- have it overwritten by a seed run.
+-- Fill a missing name from the users row on re-seed. Never overwrite one that
+-- is set: a person who renamed themselves (PATCH /auth/me writes identities
+-- only) must keep that name across `make seed`, legacy_idp or not.
 UPDATE identities i
 SET display_name = u.display_name
 FROM users u
 WHERE u.sub = i.id
   AND i.legacy_idp
-  AND i.display_name IS DISTINCT FROM u.display_name;
+  AND (i.display_name IS NULL OR btrim(i.display_name) = '');
 
 COMMIT;

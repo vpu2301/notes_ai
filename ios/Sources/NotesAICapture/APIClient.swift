@@ -1,45 +1,18 @@
 import Foundation
 
-/// Async URLSession client for the Notes AI backends.
+/// Async URLSession client for the Notes AI backends. Native session: refresh
+/// token in the Keychain (optionally behind Face ID), sent in the body of
+/// `POST /auth/refresh`, rotated on every call; no cookie store.
 ///
-/// Since IDX-I1 this phone holds a **native session**: the refresh token
-/// lives in the Keychain (`SessionStore`), optionally behind Face ID,
-/// travels in the body of `POST /auth/refresh`, and comes back rotated.
-/// The app keeps no cookie store at all — `URLSession` is built without
-/// one — so nothing this client sends can carry an ambient credential it
-/// did not choose to.
-///
-/// - Every request declares itself: `X-Client-Type: ios` (which is how the
-///   server knows to put the refresh token in the body rather than a
-///   cookie, and how the origin check knows this is not a browser) and a
-///   fresh `X-Request-Id`, which comes back on failures worth quoting.
-/// - The access token is kept in memory only, and refreshed once (via
-///   `POST /auth/refresh`) whenever a request answers 401 or the token is
-///   about to expire.
-/// - Refreshes are SINGLE-FLIGHT. The server rotates the token on every
-///   call and treats a re-used one as a replay after a 30-second grace
-///   — it revokes the session and denylists the account's access tokens
-///   — so two concurrent 401s (the capture pipeline polling a job while
-///   the home page polls notes) must share one refresh rather than each
-///   sending the same token.
-/// - The rotated token is written to the Keychain BEFORE it is published
-///   in memory. A crash in between then costs nothing: the newest token
-///   is on disk. The other order would leave the retired token there, and
-///   the next launch would present it — which is the definition of a
-///   replay.
-/// - The KEEPALIVE is armed for Keycloak sessions and only those. During
-///   the dual-issuer period (ADR-0047) this phone may hold either kind of
-///   refresh token, told apart by the `nrt_` prefix. A Keycloak token
-///   dies after the realm's thirty idle minutes, so without a background
-///   refresh a long meeting ends with a recording and no session to
-///   upload it with — which is exactly the failure this app had before
-///   IDX-I1, and it did not stop being real because a second issuer
-///   arrived. A native token idles for thirty days
-///   (`AUTH_REFRESH_TTL_SECONDS`); arming a timer for it would wake the
-///   phone every quarter of an hour to prove something that was never in
-///   doubt. Either way a 45-minute meeting also refreshes once just
-///   before the upload (`ensureFreshToken`), which is the belt to the
-///   keepalive's braces and the only protection a native session needs.
+/// - Every request sends `X-Client-Type: ios` and a fresh `X-Request-Id`.
+/// - Access token in memory only; refreshed once on a 401 or near expiry.
+/// - Refreshes are SINGLE-FLIGHT: a re-used refresh token is a replay and
+///   revokes the session.
+/// - The rotated token is written to the Keychain BEFORE it is published in
+///   memory, so a crash in between cannot leave a retired token on disk.
+/// - The KEEPALIVE is armed for Keycloak sessions only (30-minute idle);
+///   native tokens (`nrt_` prefix, ADR-0047) idle for 30 days. Both refresh
+///   once before a long upload (`ensureFreshToken`).
 actor APIClient {
     private var settings: BackendSettings
     private var accessToken: String?
@@ -49,20 +22,17 @@ actor APIClient {
     private(set) var roles: [String] = []
     private let session: URLSession
     private let store: SessionStore
-    /// Which issuer minted the session this phone is holding, once it is
-    /// known. Nil while signed out.
+    /// Which issuer minted the session; nil while signed out.
     private(set) var sessionKind: SessionKind?
     /// The refresh currently in flight, if any; joiners await it.
     private var refreshInFlight: Task<Void, Error>?
-    /// The background refresh that keeps a Keycloak session from idling
-    /// out. Nil for a native session, and for no session at all.
+    /// The background refresh for a Keycloak session; nil otherwise.
     private var keepAlive: Task<Void, Never>?
     /// Called once when the session is gone for good.
     private var sessionLostHandler: (@Sendable (SessionLostReason) -> Void)?
     /// Called when the gate is shut and something needs the token.
     private var lockedHandler: (@Sendable () -> Void)?
-    /// Presents the step-up sheet and answers whether it succeeded, so a
-    /// `403 reauth_required` can be retried once (IDX-I2 uses it).
+    /// Presents the step-up sheet, so a `403 reauth_required` can be retried once.
     private var reauthHandler: (@Sendable () async -> Bool)?
 
     init(settings: BackendSettings,
@@ -71,9 +41,7 @@ actor APIClient {
         self.settings = settings
         self.store = store
         let config = configuration ?? URLSessionConfiguration.ephemeral
-        // No cookie jar, in either direction: the refresh token is the
-        // app's to hold, and an HttpOnly cookie in a native app is a
-        // credential on disk that nothing in the app can see or rotate.
+        // No cookie jar: the refresh token is the app's to hold and rotate.
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.httpCookieAcceptPolicy = .never
@@ -101,12 +69,8 @@ actor APIClient {
 
     // MARK: - Signing in
 
-    /// `POST /auth/email/start` — mail a one-time code.
-    ///
-    /// Answers 202 for an address nobody has registered exactly as it does
-    /// for one that exists: the endpoint is an enumeration dead end by
-    /// construction, and this app must not undo that by treating the two
-    /// differently.
+    /// `POST /auth/email/start` — mail a one-time code. 202 whether or not
+    /// the address exists (no enumeration); the app must not tell them apart.
     func startEmailCode(email: String, language: String? = nil) async throws -> EmailChallenge {
         var body: [String: Any] = ["email": email]
         if let language { body["lang"] = language }
@@ -125,11 +89,8 @@ actor APIClient {
         return try await authenticate(path: "/auth/email/verify", body: body)
     }
 
-    /// `POST /auth/login` — email and password.
-    ///
-    /// Native mode does not serve this yet (IDX-A4 owns the native
-    /// password grant), so a 404 here is a fact about the server, not a
-    /// failure of the sign-in: the caller offers the emailed code instead.
+    /// `POST /auth/login` — email and password. A 404 means the server has
+    /// no password grant; the caller offers the emailed code instead.
     func login(email: String, password: String, otp: String? = nil) async throws -> AuthResult {
         var body: [String: String] = ["email": email, "password": password]
         if let otp, !otp.isEmpty { body["otp"] = otp }
@@ -138,16 +99,8 @@ actor APIClient {
             body: try JSONSerialization.data(withJSONObject: body))
     }
 
-    /// `POST /auth/signup/resend` — mail the confirmation link again.
-    ///
-    /// For accounts made through the web signup (BE-0), which land
-    /// unconfirmed: `/auth/login` refuses them with `403
-    /// email_not_verified` until the link in the mail is followed. The
-    /// only thing this app can usefully do about that is send it again.
-    ///
-    /// Unauthorised by definition — the caller cannot sign in, which is
-    /// the whole problem — and, like `/auth/email/start`, its answer must
-    /// not depend on whether the address is known.
+    /// `POST /auth/signup/resend` — mail the confirmation link again (after a
+    /// `403 email_not_verified`). Unauthorised; answer independent of whether the address is known.
     func resendVerification(email: String) async throws {
         _ = try await send(
             base: \.authBaseURL, path: "/auth/signup/resend", method: "POST",
@@ -176,17 +129,11 @@ actor APIClient {
     /// Take a freshly minted session: Keychain first, memory second.
     private func adopt(_ session: AuthSession) async throws {
         guard let refreshToken = session.refreshToken else {
-            // The server put the refresh token in a cookie, which means it
-            // took this app for a browser — `X-Client-Type` did not reach
-            // it, or the deployment still runs the Keycloak login. Either
-            // way there is nothing to keep, and claiming to be signed in
-            // would end fifteen minutes later with no explanation.
+            // Refresh token went into a cookie (server took us for a browser): nothing to keep.
             throw APIError.noNativeSession
         }
         let kind = SessionKind(refreshToken: refreshToken)
-        // Keycloak's refresh token is worth ~30 idle minutes, not 30 days,
-        // and `refresh_expires_in` says so — so the fallback below is only
-        // ever reached for a native token, where 30 days is the right one.
+        // Keycloak sends `refresh_expires_in` (~30 min); the 30-day fallback is for native tokens.
         let ttl = session.refreshExpiresIn ?? 30 * 24 * 60 * 60
         try await store.save(StoredSession(
             refreshToken: refreshToken,
@@ -203,9 +150,7 @@ actor APIClient {
 
     private func publish(accessToken: String, expiresIn: Int, tenantId: String, roles: [String]) {
         self.accessToken = accessToken
-        // Expiry is computed from the server's `expires_in` at the moment
-        // of receipt, so a phone whose clock is wrong is still right about
-        // how long it has.
+        // Expiry from `expires_in` at receipt, so a wrong phone clock does not matter.
         self.tokenExpiry = Date().addingTimeInterval(TimeInterval(expiresIn))
         if !tenantId.isEmpty { self.tenantId = tenantId }
         if !roles.isEmpty { self.roles = roles }
@@ -214,17 +159,10 @@ actor APIClient {
 
     // MARK: - The keepalive (Keycloak sessions only)
 
-    /// Refresh a minute before the access token expires, for as long as
-    /// the app holds a Keycloak session.
-    ///
-    /// The point is the refresh token, not the access token: Keycloak's
-    /// idle timeout is what runs out during a long recording, and each
-    /// refresh rotates the token and pushes that timeout out again. A
-    /// native session is left alone — see the note at the top of the file.
+    /// Refresh a minute before expiry while holding a Keycloak session: each
+    /// refresh pushes Keycloak's idle timeout out. Native sessions are left alone.
     private func scheduleKeepAlive(expiresIn: Int) {
-        // A minute before the access token expires, and never in the past:
-        // a phone that wakes to an already-spent token refreshes at once
-        // rather than an hour on.
+        // A minute before expiry, never in the past (a spent token refreshes at once).
         scheduleKeepAlive(in: max(1, TimeInterval(expiresIn) - 60))
     }
 
@@ -247,15 +185,10 @@ actor APIClient {
         } catch APIError.sessionRevoked {
             sessionLost(.securityRevoked)
         } catch APIError.notAuthenticated {
-            // The Keycloak session idled out past its timeout while the
-            // app was suspended. Say so rather than letting the next thing
-            // the person taps fail with no explanation.
+            // Idled out while suspended: say so now.
             sessionLost(.expired)
         } catch {
-            // Transient — offline, a 503, a captive portal. A fixed minute
-            // rather than the token's own cadence, which by now is in the
-            // past and would spin. The next real request refreshes too, so
-            // nothing is lost meanwhile.
+            // Transient: retry in a fixed minute (the token's own cadence is in the past and would spin).
             scheduleKeepAlive(in: 60)
         }
     }
@@ -266,20 +199,15 @@ actor APIClient {
     enum Restore: Equatable {
         case signedOut
         case signedIn(SessionSummary)
-        /// There is a session, and it is behind the biometric gate. No
-        /// request carrying a token has been sent, and none will be until
-        /// the gate is opened.
+        /// A session behind the biometric gate; nothing carrying a token is sent until it opens.
         case locked(SessionSummary)
-        /// There is a session, but the server could not be reached to
-        /// prove it. Stay signed in and say so — wiping a session because
-        /// a café's Wi-Fi is down would be the app's own doing.
+        /// A session the server could not be reached to prove: stay signed in and say so.
         case offline(SessionSummary)
     }
 
     func restoreSession() async -> Restore {
         guard let summary = await store.summary() else { return .signedOut }
-        // Before the first request, so `publish` can arm the keepalive for
-        // a Keycloak session on the very refresh that restores it.
+        // Before the first request, so `publish` can arm the keepalive on the restoring refresh.
         sessionKind = summary.kind
         if summary.isExpired {
             await wipe()
@@ -318,8 +246,7 @@ actor APIClient {
         await store.isGateOn
     }
 
-    /// Whether this phone's session can carry the gate at all. False for a
-    /// Keycloak session, which has no native refresh token to seal.
+    /// Whether the session can carry the gate; false for a Keycloak session.
     func canGate() async -> Bool {
         (await store.kind ?? .native).canGate
     }
@@ -328,9 +255,7 @@ actor APIClient {
         await store.isUnlocked
     }
 
-    /// Show the biometric prompt. `false` means the person cancelled;
-    /// `SessionStoreError.gateLost` means the enrolled biometry changed
-    /// and the session has been wiped.
+    /// Show the biometric prompt. `false` = cancelled; `gateLost` = biometry changed, session wiped.
     func unlock(reason: String = "Unlock Notes AI") async throws -> Bool {
         do {
             try await store.unlock(reason: reason)
@@ -343,8 +268,7 @@ actor APIClient {
         }
     }
 
-    /// Turn the gate on or off. Only possible while unlocked, which is
-    /// exactly when the Settings screen offering it can be reached.
+    /// Turn the gate on or off; only while unlocked.
     func setGate(enabled: Bool) async throws {
         try await store.setGate(enabled: enabled)
     }
@@ -360,10 +284,8 @@ actor APIClient {
         await wipe()
     }
 
-    /// Rotate the refresh token and mint a new access token. Concurrent
-    /// callers join the refresh already in flight instead of racing it —
-    /// two requests carrying the same token is exactly what the server's
-    /// replay detection is looking for.
+    /// Rotate the refresh token and mint a new access token. Concurrent callers
+    /// join the refresh in flight: two requests with the same token look like a replay.
     private func refresh() async throws {
         if let inFlight = refreshInFlight {
             return try await inFlight.value
@@ -407,10 +329,8 @@ actor APIClient {
                 await wipe()
                 throw APIError.notAuthenticated
             default:
-                // A 401 with no code we know, from a server that answered:
-                // the session is over. Anything else — a timeout, a 503, a
-                // DNS failure — leaves the session alone and is retried by
-                // whatever the person does next.
+                // A 401 from a server that answered: the session is over.
+                // Transient failures leave the session alone.
                 if error.status == 401 {
                     await wipe()
                     throw APIError.notAuthenticated
@@ -421,8 +341,7 @@ actor APIClient {
 
         let response = try decode(AuthResultDTO.self, from: data)
         guard let rotated = response.refreshToken, !response.accessToken.isEmpty else {
-            // A body with no refresh token means the server answered as if
-            // to a browser. Nothing to store; do not pretend otherwise.
+            // No refresh token in the body: the server answered as if to a browser.
             throw APIError.noNativeSession
         }
         // Persist BEFORE publishing: see the note at the top of the file.
@@ -430,9 +349,7 @@ actor APIClient {
         try await store.rotate(refreshToken: rotated,
                                expiresAt: Date().addingTimeInterval(TimeInterval(ttl)),
                                tenantId: response.tenantId.isEmpty ? nil : response.tenantId)
-        // After the write, and before `publish` arms the keepalive off it:
-        // a rotation should never change the issuer, but the phone follows
-        // the token it is actually holding rather than the one it expected.
+        // After the write, before `publish` arms the keepalive: follow the token actually held.
         sessionKind = SessionKind(refreshToken: rotated)
         publish(accessToken: response.accessToken,
                 expiresIn: response.expiresIn,
@@ -440,10 +357,7 @@ actor APIClient {
                 roles: response.roles)
     }
 
-    /// Refresh now if the access token has less than `minimum` seconds of
-    /// life left. Called before a long upload: a token that expires while
-    /// a 45-minute recording is on the wire costs the whole upload, and on
-    /// a phone the retry may be minutes later on a worse connection.
+    /// Refresh now if the access token has less than `minimum` seconds left (before a long upload).
     func ensureFreshToken(minimum: TimeInterval = 300) async throws {
         guard let expiry = tokenExpiry else {
             if accessToken == nil { try await refresh() }
@@ -469,8 +383,7 @@ actor APIClient {
         forgetToken()
     }
 
-    /// A request answered 401 and refreshing did not help: sign the app out
-    /// instead of surfacing the server's wording in a capture banner.
+    /// 401 that a refresh did not fix: sign out rather than show the server's wording.
     private func sessionLost(_ reason: SessionLostReason) {
         forgetToken()
         sessionLostHandler?(reason)
@@ -484,9 +397,7 @@ actor APIClient {
         return try decode(MeResponse.self, from: data)
     }
 
-    /// Name a brand-new identity (the welcome step). The server has
-    /// already defaulted the display name to the address's local part, so
-    /// this is an edit, not a requirement.
+    /// Name a brand-new identity (the welcome step); the server already defaulted it.
     @discardableResult
     func setDisplayName(_ name: String) async throws -> IdentitySummary {
         let body = try JSONSerialization.data(withJSONObject: ["display_name": name])
@@ -495,9 +406,7 @@ actor APIClient {
         return try decode(IdentitySummary.self, from: data)
     }
 
-    /// `POST /auth/reauth/start` — the server decides which methods it
-    /// will accept (an authenticator if the account has one, a mailed
-    /// code otherwise) and sends the code if that is the answer.
+    /// `POST /auth/reauth/start` — the server picks the methods and mails a code if needed.
     func startReauth() async throws -> ReauthOptions {
         let data = try await send(base: \.authBaseURL, path: "/auth/reauth/start", method: "POST",
                                   authorized: true, allowRefresh: true)
@@ -514,25 +423,16 @@ actor APIClient {
 
     // MARK: - Workspaces (auth-service /tenants, POST /auth/token)
 
-    /// Every workspace this identity belongs to.
-    ///
-    /// `GET /tenants`, not `GET /auth/me`: `routers/me.py` still answers
-    /// the pre-IDX `{claims, db_user}` shape and carries no memberships
-    /// (IDX-B2 debt, recorded in IDX-M1 and unchanged since). The tenant
-    /// list is the membership list, re-read from the database on every
-    /// call, which is what the switcher needs it to be.
+    /// Every workspace this identity belongs to (`GET /tenants`, re-read from
+    /// the database on every call; `/auth/me` carries no memberships).
     func workspaces() async throws -> [Workspace] {
         let data = try await send(base: \.authBaseURL, path: "/tenants", method: "GET",
                                   authorized: true)
         return try decode(WorkspaceList.self, from: data).items
     }
 
-    /// Move this session to another workspace.
-    ///
-    /// The new access token is published here, so every request after it
-    /// is scoped to the new `tid`. Nothing rotates: the refresh token is
-    /// untouched. The stored session's `lastTenantId` follows, so the next
-    /// launch comes back to the same place.
+    /// Move this session to another workspace: new access token published, refresh
+    /// token untouched, stored `lastTenantId` follows.
     @discardableResult
     func switchWorkspace(to tenantId: String) async throws -> SwitchedToken {
         let switched = try await mintToken(tenantId: tenantId, activate: true)
@@ -544,9 +444,7 @@ actor APIClient {
         return switched
     }
 
-    /// A token for one request against another workspace, without moving
-    /// the session. This is how a recording made for workspace A is
-    /// uploaded while workspace B is open.
+    /// A token for one request against another workspace, without moving the session.
     func borrowToken(for tenantId: String) async throws -> String {
         try await mintToken(tenantId: tenantId, activate: false).accessToken
     }
@@ -562,8 +460,7 @@ actor APIClient {
 
     // MARK: - Sessions (auth-service /auth/sessions)
 
-    /// Where this account is signed in. The row with `current` is this
-    /// phone.
+    /// Where this account is signed in; the row with `current` is this phone.
     func sessions() async throws -> [DeviceSession] {
         let data = try await send(base: \.authBaseURL, path: "/auth/sessions", method: "GET",
                                   authorized: true)
@@ -576,9 +473,7 @@ actor APIClient {
     }
 
     /// End every session but this one. The server asks for recent proof
-    /// (`403 reauth_required`), which `send` answers with the step-up
-    /// sheet and one retry — this is the first endpoint in the app to use
-    /// the plumbing IDX-I1 laid down.
+    /// (`403 reauth_required`); `send` answers with the step-up sheet and one retry.
     @discardableResult
     func revokeOtherSessions() async throws -> Int {
         let data = try await send(base: \.authBaseURL, path: "/auth/sessions/revoke-others",
@@ -601,9 +496,7 @@ actor APIClient {
         return try decode(TenantMembersResponse.self, from: data).items
     }
 
-    /// Add someone to the workspace. The server resolves the address to an
-    /// existing account: 404 when nobody signed up with it yet (invite them
-    /// by e-mail instead), 403 when the caller is not an owner/admin.
+    /// Add someone to the workspace: 404 when nobody signed up with the address, 403 when not owner/admin.
     @discardableResult
     func addTenantMember(tenantId: String, email: String, role: String) async throws -> TenantMember {
         let body = try JSONSerialization.data(withJSONObject: ["email": email, "role": role])
@@ -646,8 +539,7 @@ actor APIClient {
         return try decode(CalendarConnectionsResponse.self, from: data)
     }
 
-    /// Google's consent page for a new connection. After the sign-in Google
-    /// sends the browser to `returnTo` (the app's own URL scheme here).
+    /// Google's consent page for a new connection; Google returns to `returnTo` (the app's URL scheme).
     func startGoogleCalendarConnect(returnTo: String, loginHint: String?) async throws -> URL {
         var body: [String: Any] = ["return_to": returnTo]
         if let loginHint, !loginHint.isEmpty { body["login_hint"] = loginHint }
@@ -658,8 +550,7 @@ actor APIClient {
         return url
     }
 
-    /// 0020: add a calendar by its private iCal address. No Google client
-    /// involved; the server fetches the feed once before answering.
+    /// Add a calendar by its private iCal address; the server fetches the feed once before answering.
     func connectCalendarLink(url: String, label: String?) async throws -> CalendarConnection {
         var body: [String: Any] = ["url": url]
         if let label, !label.isEmpty { body["label"] = label }
@@ -733,8 +624,7 @@ actor APIClient {
     }
 
     func createNoteFromTranscript(asrJobId: String, templateId: String?, title: String) async throws -> FromTranscriptResponse {
-        // The app's own "Meeting <date>" placeholder is not a title anyone
-        // chose: sent empty, the server names the note from what was said.
+        // The "Meeting <date>" placeholder is sent empty so the server names the note.
         let request = FromTranscriptRequest(asrJobId: asrJobId, templateId: templateId,
                                             title: CaptureViewModel.isPlaceholderTitle(title) ? "" : title)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/from-transcript", method: "POST",
@@ -743,8 +633,7 @@ actor APIClient {
     }
 
 
-    /// `POST /v1/notes` — a note typed from scratch (Blank note, New from
-    /// template), its sections pre-filled with the template's defaults.
+    /// `POST /v1/notes` — a note typed from scratch, sections pre-filled from the template.
     func createNote(content: NoteContent) async throws -> NoteCreatedResponse {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes", method: "POST",
                                   jsonBody: try JSONEncoder().encode(CreateNoteRequest(content: content)),
@@ -769,8 +658,7 @@ actor APIClient {
 
     // MARK: - Series, carry-over and the client version (Sprint 36)
 
-    /// What is still open from the previous meeting in this series. 404
-    /// (no series) is the caller's to treat as "nothing to show".
+    /// What is still open from the previous meeting in this series; 404 = no series.
     func carried(noteId: String) async throws -> CarriedView {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/carried", method: "GET",
                                   authorized: true)
@@ -802,8 +690,7 @@ actor APIClient {
 
     // MARK: - Evidence (Summary Engine v2, Q5)
 
-    /// Every line the engine wrote, with the words that prove it — only
-    /// the run the reader is looking at.
+    /// Every line the engine wrote, with its evidence, for the run being read.
     func generatedItems(noteId: String) async throws -> [GeneratedItem] {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generated-items",
                                   method: "GET", query: [("generation", "current")], authorized: true)
@@ -821,13 +708,8 @@ actor APIClient {
 
     // MARK: - The live meeting note (Sprint 34, ADR-0055)
 
-    /// Open the note as Record is pressed. Idempotent on
-    /// `clientCaptureId`: a retry, a double tap and a second device that
-    /// resumed the same capture all get the same note.
-    ///
-    /// The caller must never let this block or stop a recording — a note
-    /// we failed to create is recoverable, a meeting we failed to record
-    /// is not.
+    /// Open the note as Record is pressed. Idempotent on `clientCaptureId`.
+    /// Must never block or stop a recording.
     func startMeeting(clientCaptureId: String, title: String, startedAt: Date,
                       language: String?, meetingType: MeetingType,
                       calendar: MeetingCalendarContext?) async throws -> StartMeetingResponse {
@@ -843,8 +725,7 @@ actor APIClient {
         return try decode(StartMeetingResponse.self, from: data)
     }
 
-    /// When each typed line was first touched. First report per key wins,
-    /// so re-sending a queue that may already have landed is safe.
+    /// When each typed line was first touched. First report per key wins, so re-sending is safe.
     func putLineTimes(noteId: String, lines: [UserLineTime]) async throws {
         guard !lines.isEmpty else { return }
         let body = try JSONEncoder().encode(["lines": lines])
@@ -861,9 +742,7 @@ actor APIClient {
         return try decode(MeetingInfo.self, from: data)
     }
 
-    /// The transcription finished: put it in the note. Safe from any
-    /// device of the author, and idempotent — which is what makes a
-    /// capture survive the app being killed mid-transcription.
+    /// The transcription finished: put it in the note. Idempotent, from any device of the author.
     @discardableResult
     func attachTranscript(noteId: String) async throws -> AttachTranscriptResponse {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/transcript",
@@ -871,8 +750,7 @@ actor APIClient {
         return try decode(AttachTranscriptResponse.self, from: data)
     }
 
-    /// The recording was discarded or never happened. The note stays — it
-    /// holds what was typed, which is the part that cannot be redone.
+    /// The recording was discarded or never happened; the note (and what was typed) stays.
     @discardableResult
     func markMeetingNoAudio(noteId: String) async throws -> MeetingInfo {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/meeting/no-audio",
@@ -896,11 +774,8 @@ actor APIClient {
         return try decode([GlossaryTerm].self, from: data)
     }
 
-    /// Remember one term. Sending one the workspace already has merges the
-    /// new mishearing into it rather than failing as a duplicate. `noteId`
-    /// is the note the correction was made in (Sprint I2), so the glossary
-    /// page can say where a term came from. 422 `term_not_vocabulary`: a
-    /// role label, refused.
+    /// Remember one term; a duplicate merges the new mishearing. `noteId` is
+    /// where the correction was made. 422 `term_not_vocabulary`: a role label, refused.
     @discardableResult
     func rememberTerm(_ term: String, kind: GlossaryKind = .person,
                       heardAs: [String] = [], noteId: String? = nil) async throws -> GlossaryTerm {
@@ -917,8 +792,7 @@ actor APIClient {
                            authorized: true)
     }
 
-    /// The workspace's terms as a `vocabulary_hint`, so the transcriber
-    /// has the spellings before it guesses.
+    /// The workspace's terms as a `vocabulary_hint`.
     func glossaryHint() async throws -> GlossaryHint {
         let data = try await send(base: \.noteBaseURL, path: "/v1/glossary/hint", method: "GET",
                                   authorized: true)
@@ -945,9 +819,7 @@ actor APIClient {
         return try decode(GenerationView.self, from: data)
     }
 
-    /// Write the note from its recording — *Generate Summary*. 409 with
-    /// a code when the workspace has it off, is over budget, or the note
-    /// is already being written; 429 after ten runs in a day.
+    /// *Generate Summary*. 409 with a code (off, over budget, already running); 429 after ten runs a day.
     @discardableResult
     func regenerate(noteId: String) async throws -> GenerationStarted {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
@@ -955,8 +827,7 @@ actor APIClient {
         return try decode(GenerationStarted.self, from: data)
     }
 
-    /// `purpose` is required when the note is not ours and was not shared
-    /// with us; the server says so with `APIError.needsReadPurpose`.
+    /// `purpose` is required for an oversight read (`APIError.needsReadPurpose`).
     func fetchNote(id: String, purpose: ReadPurpose? = nil) async throws -> NoteEnvelope {
         var query = [("include_content", "true")]
         if let purpose { query.append(("purpose", purpose.rawValue)) }
@@ -978,8 +849,7 @@ actor APIClient {
         return try decode(UpdateDraftResponse.self, from: data)
     }
 
-    /// The tenant's notes, newest first; `q` runs the server's full-text
-    /// search (with synonym expansion).
+    /// The tenant's notes, newest first; `q` runs the server's full-text search.
     func searchNotes(query: String?, limit: Int = 100) async throws -> SearchResponse {
         var params: [(String, String)] = [("limit", String(limit))]
         if let query, !query.isEmpty { params.append(("q", query)) }
@@ -1056,15 +926,14 @@ actor APIClient {
 
     // MARK: - Per-recipient links (Sprint 19)
 
-    /// 201 with the new link, or 200 with the one already minted for that
-    /// address.
+    /// 201 with the new link, or 200 with the one already minted for that address.
     func createLink(id: String, label: String, recipientEmail: String?, expiresInDays: Int,
                     mail: Bool = false, personalMessage: String = "",
                     source: String = "native") async throws -> LinkView {
         var payload: [String: Any] = ["label": label, "expires_in_days": expiresInDays, "source": source]
         if let recipientEmail, !recipientEmail.isEmpty { payload["recipient_email"] = recipientEmail }
         if mail {
-            // Sprint 22: create and mail in one call, in the app's language.
+            // Create and mail in one call, in the app's language.
             payload["send"] = true
             if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
             payload["lang"] = Locale.preferredLanguageCode ?? "en"
@@ -1075,8 +944,7 @@ actor APIClient {
         return try decode(LinkView.self, from: data)
     }
 
-    /// Sprint 22: mail (or re-mail) a recipient link from the product.
-    /// 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap.
+    /// Mail (or re-mail) a recipient link. 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap.
     func sendLink(id: String, linkId: String, personalMessage: String) async throws -> LinkView {
         var payload: [String: Any] = ["lang": Locale.preferredLanguageCode ?? "en"]
         if !personalMessage.isEmpty { payload["personal_message"] = personalMessage }
@@ -1086,7 +954,7 @@ actor APIClient {
         return try decode(LinkView.self, from: data)
     }
 
-    /// Sprint 23: the workspace's sharing rules, for any member.
+    /// The workspace's sharing rules, for any member.
     func sharingConstraints() async throws -> SharingConstraints {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/sharing/constraints", method: "GET",
                                   authorized: true)
@@ -1112,13 +980,8 @@ actor APIClient {
         return try decode(SharingView.self, from: data)
     }
 
-    /// Mail the note to people, from the server.
-    ///
-    /// Replaces the old `mailto:` hand-off, which opened Mail.app with an
-    /// unstyled draft the sender still had to send — and, often enough,
-    /// with whatever message Mail already had open in front of it.
-    /// Members are granted access and pointed at the note; everyone else
-    /// gets the public link, minted server-side if the note has none.
+    /// Mail the note from the server: members get access and an app link,
+    /// everyone else the public link (minted if needed).
     func shareByEmail(
         id: String, recipients: [String], message: String, lang: String
     ) async throws -> ShareEmailResponse {
@@ -1134,9 +997,7 @@ actor APIClient {
 
     // MARK: - Transcription jobs (asr-service)
 
-    /// Plaintext transcript of a COMPLETE job (409 while it is still running).
-    /// Sprint TQ3: accept or reject one unified spelling; a stale
-    /// `correctionsRev` is refused (409) and the caller reloads.
+    /// Accept or reject one unified spelling; a stale `correctionsRev` is refused (409).
     func decideCorrection(jobId: String, correctionId: String, status: String,
                           toText: String?, correctionsRev: Int) async throws -> CorrectionsView {
         let body = try JSONEncoder().encode(CorrectionDecisionRequest(status: status, toText: toText,
@@ -1152,9 +1013,7 @@ actor APIClient {
         return try decode(TranscriptResult.self, from: data)
     }
 
-    /// Ask a question about a note. The answer comes from the model the
-    /// server routes this environment to, grounded in the note and its
-    /// transcript; `history` is the thread so far (the server stores nothing).
+    /// Ask a question about a note; `history` is the thread so far (the server stores nothing).
     func askNote(id: String, question: String, history: [AskTurn]) async throws -> AskNoteResponse {
         let body = try JSONEncoder().encode(AskNoteRequest(question: question, history: history))
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/ask", method: "POST",
@@ -1162,11 +1021,8 @@ actor APIClient {
         return try decode(AskNoteResponse.self, from: data)
     }
 
-    /// Name the diarized speakers of a job (the complete label → name map;
-    /// a label left out goes back to its "Speaker N" default). Stored on the
-    /// job, so the web app and the note built from it show the same names.
-    /// `sources` (Sprint 30, a metric only) says per label whether the name
-    /// was picked from `name_candidates` or typed.
+    /// Name the diarized speakers (complete label → name map; a label left
+    /// out reverts to its default). `sources` is a metric only.
     func setSpeakerNames(jobId: String, names: [String: String],
                          sources: [String: SpeakerNameSource]? = nil) async throws -> [String: String] {
         let body = try JSONEncoder().encode(SpeakerNamesRequest(names: names, sources: sources))
@@ -1175,8 +1031,7 @@ actor APIClient {
         return try decode(SpeakerNamesResponse.self, from: data).speakerNames
     }
 
-    /// Sprint 32: "✕" on a name suggestion. 204, idempotent; that
-    /// label/name pair never comes back for this job.
+    /// "✕" on a name suggestion. 204, idempotent; the pair never comes back.
     func dismissNameSuggestion(jobId: String, label: String, name: String) async throws {
         let body = try JSONEncoder().encode(NameSuggestionDismissRequest(label: label, name: name))
         do {
@@ -1199,10 +1054,8 @@ actor APIClient {
         }
     }
 
-    /// Move turns to another speaker (Sprint 30). `segmentIndices` are the
-    /// selected turns' `segment_indices`, concatenated as they came — one
-    /// call however many turns. `resultRev` is the result they were read
-    /// from; a newer one on the server is `SpeakerEditError.staleResultRev`.
+    /// Move turns to another speaker. `segmentIndices` = the turns' `segment_indices`
+    /// concatenated; a newer `resultRev` on the server is `staleResultRev`.
     func reassignTurns(jobId: String, resultRev: Int, segmentIndices: [Int],
                        to target: ReassignTarget) async throws -> SpeakerReassignResult {
         let body = try JSONEncoder().encode(SpeakerReassignRequest(resultRev: resultRev,
@@ -1238,23 +1091,15 @@ actor APIClient {
         }
     }
 
-    /// Upload a recording.
-    ///
-    /// `tenantId` is the workspace the recording was **made for**, which
-    /// since IDX-I2 need not be the one that is open: a meeting recorded
-    /// for the agency and retried a day later, after the person switched
-    /// to a client workspace, still belongs to the agency. When it differs
-    /// the upload borrows a token for that workspace rather than moving
-    /// the session under the person's feet.
+    /// Upload a recording. `tenantId` is the workspace it was made for; when
+    /// that is not the open one, a token is borrowed rather than moving the session.
     func submitJob(fileURL: URL, contentType: String, language: String, diarize: Bool,
                    speakersExpected: Int? = nil,
                    context: CaptureContext? = nil,
                    vocabularyHint: String? = nil,
                    captureTiming: CaptureTiming? = nil,
                    tenantId: String? = nil) async throws -> TranscriptionJob {
-        // The upload is the one request in this app that can be tens of
-        // megabytes over a phone connection. Start it with a token that
-        // will still be valid when it lands (IDX-I1 F).
+        // The upload can take minutes: start it with a token that will still be valid when it lands.
         try await ensureFreshToken()
         var borrowed: String?
         if let tenantId, !tenantId.isEmpty, tenantId != self.tenantId {
@@ -1287,11 +1132,8 @@ actor APIClient {
         }
     }
 
-    /// The form fields of `POST /asr/jobs`. `speakers_expected` goes only
-    /// when the person picked an exact number: "Auto" and "6+" send nothing
-    /// and leave the count to the diarizer.
-    /// Sprint 30: the capture context adds `speakers_max`, `name_candidates`
-    /// and `capture_source` (see `CaptureContext.formFields`).
+    /// The form fields of `POST /asr/jobs`. `speakers_expected` only for an
+    /// exact number; the context adds its own fields (`CaptureContext.formFields`).
     static func jobFields(language: String, diarize: Bool,
                           speakersExpected: Int?,
                           context: CaptureContext? = nil,
@@ -1300,13 +1142,11 @@ actor APIClient {
         var fields = [("language", language), ("diarize", diarize ? "true" : "false")]
         if let speakersExpected { fields.append(("speakers_expected", String(speakersExpected))) }
         if let context { fields += context.formFields(diarize: diarize) }
-        // Sprint 35: the workspace's own names and terms, so the
-        // transcriber has the spellings before it guesses.
+        // The workspace's own names and terms.
         if let vocabularyHint, !vocabularyHint.isEmpty {
             fields.append(("vocabulary_hint", String(vocabularyHint.prefix(2000))))
         }
-        // Sprint F1: when Record was pressed and how late the audio began;
-        // both or neither.
+        // When Record was pressed and how late the audio began; both or neither.
         if let captureTiming { fields += captureTiming.formFields }
         return fields
     }
@@ -1317,8 +1157,7 @@ actor APIClient {
         return problem?.code == "name_candidates_invalid"
     }
 
-    /// Re-label the job's speakers ("Wrong number of speakers?"). Returns
-    /// once the run is queued; poll `jobStatus` for `diarization_status`.
+    /// Re-label the job's speakers. Returns once queued; poll `jobStatus` for `diarization_status`.
     func rediarize(jobId: String, speakersExpected: Int?) async throws -> RediarizeResponse {
         let body = try JSONEncoder().encode(RediarizeRequest(speakersExpected: speakersExpected))
         do {
@@ -1346,8 +1185,7 @@ actor APIClient {
         return try decode(AsrLimits.self, from: data)
     }
 
-    /// `DELETE /asr/jobs/{id}` — stop a transcription that is queued or
-    /// running. The job ends `cancelled`; the recording is not deleted.
+    /// `DELETE /asr/jobs/{id}` — stop a queued or running job; the recording is kept.
     func cancelJob(id: String) async throws {
         _ = try await send(base: \.asrBaseURL, path: "/asr/jobs/\(id)", method: "DELETE", authorized: true)
     }
@@ -1370,45 +1208,33 @@ actor APIClient {
         contentType: String? = nil,
         accept: String = "application/json",
         authorized: Bool,
-        /// A token minted for another workspace (`POST /auth/token`).
-        /// It is used as-is: it is not this session's access token, so
-        /// refreshing would replace it with one scoped to the wrong
-        /// tenant, and a 401 on it means the membership is gone rather
-        /// than that the session is.
+        /// A token minted for another workspace, used as-is: never refreshed,
+        /// and a 401 on it means the membership is gone, not the session.
         bearer: String? = nil,
         allowRefresh: Bool = true,
         allowReauth: Bool = true,
-        /// False for the one request that is *already* the person signing
-        /// out: a 401 there means the session was over, which is not news
-        /// worth putting on the sign-in screen as "your session ended".
+        /// False for the sign-out request itself: a 401 there is not news.
         signalsSessionLoss: Bool = true
     ) async throws -> Data {
         guard let root = URL(string: settings[keyPath: base].trimmingCharacters(in: .whitespaces)) else {
             throw APIError.badURL
         }
         if authorized, bearer == nil, allowRefresh, needsFreshToken {
-            // Expired, about to expire, or never minted in this launch (the
-            // app came up offline and is now being used).
+            // Expired, about to expire, or never minted in this launch (offline boot).
             do {
                 try await refresh()
             } catch APIError.sessionRevoked {
-                // Report it here, where the reason is known. Sending the
-                // request anyway would earn a 401 whose only honest
-                // reading is "expired", and the person would never be told
-                // that their session was revoked for security.
+                // Report here, where the reason (revoked) is known; a 401 would only say "expired".
                 sessionLost(.securityRevoked)
                 throw APIError.sessionRevoked
             } catch APIError.notAuthenticated {
                 sessionLost(.expired)
                 throw APIError.notAuthenticated
             } catch APIError.sessionLocked {
-                // The gate is shut. Nothing carrying a token leaves this
-                // phone until it is opened — that is what the gate is.
+                // The gate is shut: nothing carrying a token leaves until it opens.
                 throw APIError.sessionLocked
             } catch {
-                // Transient (offline, 503): send the request anyway. It
-                // will 401 and take the retry path below, or succeed if
-                // the token still had life in it.
+                // Transient: send anyway; it will 401 into the retry path, or succeed.
             }
         }
 
@@ -1419,12 +1245,8 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        // Two headers on every request, to every service. `X-Client-Type`
-        // is what makes this a native client rather than a browser — the
-        // refresh token comes back in the body because of it, and the
-        // origin check lets a request through without an `Origin` because
-        // of it. `X-Request-Id` is the correlation id the fleet already
-        // propagates; it comes back on failures the app cannot explain.
+        // `X-Client-Type` makes this a native client (refresh token in the body,
+        // no `Origin` needed); `X-Request-Id` is the fleet's correlation id.
         request.setValue("ios", forHTTPHeaderField: "X-Client-Type")
         let requestId = UUID().uuidString
         request.setValue(requestId, forHTTPHeaderField: "X-Request-Id")
@@ -1455,17 +1277,13 @@ actor APIClient {
         }
 
         if http.statusCode == 401, authorized {
-            // An MFA-gated endpoint answers 401 to ask for a one-time code,
-            // not because the session is gone — refreshing would only earn
-            // a second 401 and sign the user out.
+            // An MFA-gated 401 asks for a code; refreshing would only sign the user out.
             let error = failure()
             if error.isMFARequired { throw error }
         }
 
         if http.statusCode == 401, authorized, bearer != nil {
-            // A borrowed token was refused: the membership behind it is
-            // gone. Refreshing this session would not help and would hide
-            // what happened, so it is reported as it is.
+            // A borrowed token was refused: the membership is gone; report as is.
             throw failure()
         }
 
@@ -1492,17 +1310,13 @@ actor APIClient {
                                   signalsSessionLoss: signalsSessionLoss)
         }
         if http.statusCode == 401, authorized {
-            // Still unauthorised with a freshly minted token: the server has
-            // revoked the user (denylist), so the session is gone too.
+            // Still 401 with a fresh token: the user is denylisted, session gone.
             if signalsSessionLoss { sessionLost(.expired) }
             throw APIError.notAuthenticated
         }
 
         if http.statusCode == 403, authorized, allowReauth, failure().code == "reauth_required" {
-            // The session is fine; it just has not proved itself recently
-            // enough for whatever this endpoint does. Ask, then try once
-            // more — a step-up the person completes should not cost them
-            // the action they were taking.
+            // Step-up wanted: ask, then try once more.
             guard let reauthHandler, await reauthHandler() else {
                 throw APIError.reauthRequired
             }
@@ -1515,17 +1329,9 @@ actor APIClient {
 
         if http.statusCode == 403, authorized, allowRefresh, bearer == nil,
            failure().isRoleDenial {
-            // A role denial, not a session problem. The `roles` claim is
-            // re-read from the workspace membership every time a token is
-            // minted, so a token taken out before the person was granted
-            // what they now hold keeps being refused until it rotates —
-            // which, for an account that was just created or just given a
-            // role, is the whole of the "you are not allowed to work with
-            // notes here" wall. Rotate once and try again; if the denial
-            // is genuine the retry earns the same 403 and it reaches the
-            // caller with `allowRefresh: false`, so this costs one request.
-            // A borrowed `bearer` is excluded: it is not this session's
-            // token, and rotating the session would not change it.
+            // Role denial: `roles` is re-read from the membership on every mint, so
+            // rotate once and retry (a genuine denial costs one request). A
+            // borrowed `bearer` is excluded: rotating the session would not change it.
             try? await refresh()
             return try await send(base: base, path: path, method: method, query: query,
                                   jsonBody: jsonBody, body: body, contentType: contentType,
@@ -1540,12 +1346,8 @@ actor APIClient {
         return data
     }
 
-    /// Whether an authorised request should refresh before it is sent.
-    ///
-    /// "About to expire" is 30 seconds: long enough to cover the request's
-    /// own flight, short enough that a token is not thrown away while it
-    /// still works. A nil expiry with a session on disk is the offline-boot
-    /// case — there is a session, it has simply never been proved here.
+    /// Whether an authorised request should refresh first: expiry within 30 s,
+    /// or a nil expiry with a session on disk (offline boot).
     private var needsFreshToken: Bool {
         guard let expiry = tokenExpiry else { return accessToken == nil }
         return expiry.timeIntervalSinceNow < 30

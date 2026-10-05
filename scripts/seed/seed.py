@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""Seed the dev database with sample + system content (``make seed``).
+"""Seed the dev database (``make seed``): seed.sql (tenants, users, memberships), system
+templates from infra/seeds/templates/, voice commands, the autocomplete starter corpus.
+Idempotent; connects as the superuser because system-scope rows are what app_role can never write.
 
-Four idempotent passes, in order:
-
-1. ``seed.sql`` — dev tenants, users, memberships, branding (must match
-   infra/keycloak/realm-export.json; see the comments in the SQL file).
-2. System note templates — every JSON file in ``infra/seeds/templates/``
-   is upserted via the ``upsert_system_template()`` SQL function
-   (migration 0008). The JSON is the authoritative, PR-reviewable copy.
-3. Voice commands — ``infra/postgres/seed/voice_commands_<lang>.json``
-   fixtures. The seeder DELETEs a language before re-inserting it, so
-   removed commands disappear on re-seed.
-4. Autocomplete starter corpus — a small English business phrase +
-   snippet set (system scope) so /autocomplete/suggest has something to
-   serve on a fresh stack. ON CONFLICT DO NOTHING.
-
-Connects as the DB superuser (dev stack), which bypasses RLS — the
-system-scope rows (tenant_id IS NULL) are exactly the rows app_role can
-never write.
-
-Usage::
-
-    python scripts/seed/seed.py
     DATABASE_URL=postgresql://... python scripts/seed/seed.py
 """
 
@@ -50,9 +31,8 @@ DSN = os.getenv(
     f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
 )
 
-# ── Autocomplete starter corpus (system scope, English) ──────────────
-# Shape mirrors autocomplete_phrases: (phrase, specialty, section_hint).
-# Phrases are ≤ 80 chars (DB CHECK) and carry no personal data.
+# Autocomplete starter corpus: (phrase, specialty, section_hint), <= 80 chars
+# (DB CHECK), no personal data.
 STARTER_PHRASES: list[tuple[str, str, str]] = [
     # meetings / general
     ("Action items:", "meetings", "action_items"),
@@ -113,8 +93,7 @@ async def _seed_templates(conn: asyncpg.Connection) -> None:
         return
     for path in files:
         doc = json.loads(path.read_text("utf-8"))
-        # The JSONB schema (libs/template_models) calls the browse facet
-        # `specialty`; the DB column is the generic `category`.
+        # The JSONB schema calls the facet `specialty`; the DB column is `category`.
         category = doc.get("category") or doc["specialty"]
         row_id = await conn.fetchval(
             """
@@ -137,7 +116,7 @@ async def _seed_voice_commands(conn: asyncpg.Connection) -> None:
     for path in sorted(VOICE_COMMANDS_DIR.glob("voice_commands_*.json")):
         language = path.stem.split("_")[-1]
         commands = json.loads(path.read_text("utf-8"))
-        # Clean slate for this language so re-seeds drop removed commands.
+        # Re-seeds drop removed commands.
         await conn.execute("DELETE FROM voice_commands WHERE language = $1", language)
         for cmd in commands:
             await conn.execute(
@@ -198,24 +177,9 @@ async def _seed_autocomplete(conn: asyncpg.Connection) -> None:
     print(f"-- autocomplete snippets: {inserted} inserted ({len(STARTER_SNIPPETS)} in set)")
 
 
-# ── IDX-B1b: the dev room device ─────────────────────────────────────
-#
-# Seeded here rather than in seed.sql because the row stores a HASH, and a
-# hard-coded hash in SQL is a value nobody can check and everybody has to
-# trust. Computing it from the known dev secret keeps the SQL honest and
-# means changing the dev secret is a one-line edit.
-#
-# The secret is the same string the Keycloak realm uses for
-# `room-device-demo`, so a dev device config keeps working across the
-# cut-over without being touched.
-#
-# NOTE what is deliberately NOT seeded: service credentials. The B1b
-# inspect step found that `mdx-backend`, `mdx-asr-worker` and
-# `mdx-dictation` have `serviceAccountsEnabled` in the realm but no
-# service-account user, no roles, and no runtime consumer anywhere in
-# `services/` — a captured token for them carries Keycloak's default
-# roles and no `tid`. They are declared-but-unused and are deleted in
-# IDX-B2; giving them credentials here would carry dead clients forward.
+# The dev room device: seeded here, not in seed.sql, because the row stores a
+# hash computed from the known dev secret (the realm's `room-device-demo`).
+# Service credentials are deliberately NOT seeded (declared-but-unused clients).
 DEV_DEVICE_TENANT = "00000000-0000-0000-0000-00000000000a"
 DEV_DEVICE_ID = "0000000d-0000-0000-0000-00000000d0e1"
 DEV_DEVICE_SECRET = "dev-room-device-secret"  # noqa: S105 — dev realm parity
@@ -249,12 +213,9 @@ async def _seed_dev_device(conn: asyncpg.Connection) -> None:
     print(f"-- dev room device: {DEV_DEVICE_ID} (tenant A, secret in the runbook)")
 
 
-# ── Sprint L2: the dev workspaces acknowledge the dev processors ──────
-# A workspace is only ever routed to a processor its admin acknowledged by
-# (name, region). The dev routing (config/models.yaml, ENV=dev) reaches
-# Mistral AI (EU) with a key and this machine without one; both are
-# acknowledged for the seeded tenants so `make dev-up && make seed` writes
-# notes either way. Real workspaces always see the dialog.
+# A workspace is only routed to a processor its admin acknowledged by (name,
+# region); both dev processors are acknowledged for the seeded tenants so
+# `make seed` writes notes either way. Real workspaces always see the dialog.
 DEV_TENANTS = (
     "00000000-0000-0000-0000-00000000000a",
     "00000000-0000-0000-0000-00000000000b",
@@ -263,10 +224,9 @@ SEED_ACTOR = "0a000000-0000-0000-0000-00000000000a"  # admin@tenant-a
 
 
 def _dev_processors() -> list[dict[str, str]]:
-    """Every processor the dev routing can reach, from the registry itself —
-    with a placeholder key so the primary resolves even on a machine that
-    has none yet. Never typed: a processor list that can drift from the
-    routing is the failure the Data page exists to prevent."""
+    """Every processor the dev routing can reach, from the registry itself (placeholder key),
+    never typed: a list that can drift from the routing is the failure the Data page prevents.
+    """
     sys.path.insert(0, str(REPO_ROOT / "libs" / "models" / "src"))
     from models import Registry
 

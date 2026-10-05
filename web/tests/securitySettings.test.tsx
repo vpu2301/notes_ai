@@ -9,12 +9,8 @@ import { SecuritySettingsPage } from "../src/pages/settings/SecuritySettingsPage
 import type { MeResponse } from "../src/api/types";
 
 /**
- * §H, as far as a jsdom test can reach: enrolment shows the key and the
- * recovery codes exactly once, and the codes screen will not let go until
- * the person says they have saved them.
- *
- * `qrcode` renders asynchronously and is not what these assert, so the
- * component is stubbed — the manual key beside it is the thing under test.
+ * Enrolment shows the key and recovery codes exactly once, and the codes screen
+ * holds until the person confirms saving them. `qrcode` is stubbed (async, not asserted).
  */
 vi.mock("../src/components/QrCode", () => ({
   QrCode: ({ label }: { label: string }) => <div data-testid="qr">{label}</div>,

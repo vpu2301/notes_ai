@@ -1,17 +1,9 @@
 """GET /v1/notes/{id}/sections/{section_key}/audio-clips — replay segments.
 
-Lists the audio moments behind one note section so the author can
-tap a sentence and hear the ground truth (sprint 15, ADR-0037).
-
-Sections populated by the sprint-14 conversation draft carry
-``transcript_segment_ids`` and map 1:1; everything older predates the
-field (a sprint-08 placeholder) and falls back to the WHOLE session
-transcript — replay still works, the FE aligns by timing. Timings +
-speakers only, no transcript text: the text is already in the note the
-caller just read.
-
-Access: ``note.read`` plus the sprint-08 ``?purpose=`` rule for
-non-authors.
+Lists the audio moments behind one note section (ADR-0037). Sections with
+``transcript_segment_ids`` map 1:1; older ones fall back to the WHOLE session
+transcript. Timings + speakers only, no text. Access: ``note.read`` plus the
+``?purpose=`` rule for non-authors.
 """
 
 from __future__ import annotations
@@ -63,14 +55,12 @@ async def list_section_audio_segments(
 ) -> list[AudioSegmentOut]:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404 (0016).
+        # A private note the caller was not given is a 404.
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
 
         if note.source_session_id is None:
-            # Batch notes have no session transcript to list; clip
-            # creation by explicit ms range still works (the FE holds the
-            # batch transcript's timings).
+            # Batch notes have no session transcript; clips by explicit ms range still work.
             return []
 
         version = await repo.fetch_version(conn, version_id=note.current_version_id)

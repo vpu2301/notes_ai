@@ -1,13 +1,5 @@
-"""``model_usage`` ledger — the DB sink for the libs/models usage hook (DEP-S1-06).
-
-Records emitted during a job are buffered per task (a ContextVar) and
-flushed **inside the job's completion transaction** by the runner, so a
-usage row and the job outcome commit or roll back together — that is the
-"outbox in the job transaction" of the spec. Records emitted outside any
-job (eval scripts, probes) are flushed by whoever owns the connection or
-dropped with a log line — never lost silently.
-
-Rows carry counts, identifiers and an estimated cost; never content.
+"""``model_usage`` ledger: records are buffered per task and flushed inside the job's completion transaction;
+records outside a job are logged, never lost silently. Rows carry counts, identifiers and cost, never content.
 """
 
 from __future__ import annotations
@@ -44,7 +36,6 @@ class UsageLedger:
             tier_of  # Callable[[str], str] | None — workspace → tier for the cost metric
         )
 
-    # ── sink side (called from libs/models on every call) ───────────────
     def install(self) -> None:
         set_usage_sink(self.record)
 
@@ -75,7 +66,6 @@ class UsageLedger:
             return
         buf.append(rec)
 
-    # ── job side ────────────────────────────────────────────────────────
     @staticmethod
     def begin() -> None:
         """Start buffering for the current task (the runner calls this per job)."""

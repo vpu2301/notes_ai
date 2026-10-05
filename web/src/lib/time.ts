@@ -33,16 +33,7 @@ export function formatElapsed(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/**
- * The browser's IANA time zone, or null when it cannot be read.
- *
- * `resolvedOptions().timeZone` is universally supported and yet not
- * guaranteed: a locked-down or very old engine can return `undefined`, and
- * `Intl` itself can be absent from a stripped runtime. Callers send this
- * to the server, so "I don't know" has to be expressible — a wrong guess
- * (`"UTC"`) would silently file somebody's notes on the wrong day, which
- * is worse than leaving the stored value alone.
- */
+/** The browser's IANA time zone, or null: never guess "UTC" (it would file notes on the wrong day). */
 export function browserTimezone(): string | null {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || null;

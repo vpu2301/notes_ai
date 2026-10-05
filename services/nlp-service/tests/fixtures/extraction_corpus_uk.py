@@ -1,16 +1,6 @@
-"""Labeled uk utterance corpus for choice/multi_choice extraction.
+"""Labeled uk corpus for choice/multi_choice extraction: ``(utterance, expected_value_or_None, why)``.
 
-The extraction-safety contract in data form. Each case is
-``(utterance, expected_value_or_None, why)`` — ``None`` means the
-extractor MUST leave the field empty (prose preserved). Every negation
-case is a case where filling the field would invert the meaning of the
-note.
-
-The options model a CRM-style intake template (subscription status +
-preferred contact channels) — the same linguistic shapes the extractor
-must survive in any business template: negated aliases that are their
-own option, gendered verb forms, multi-token agent nouns, and
-one-character inflection drift.
+``None`` means the extractor must leave the field empty.
 """
 
 from __future__ import annotations

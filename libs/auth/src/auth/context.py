@@ -1,18 +1,4 @@
-"""Per-request ContextVar carrying the verified :class:`Claims`.
-
-A FastAPI dependency that calls :func:`set_current_claims` makes the claims
-available to any code further down the call chain in the same async Task
-— without threading them explicitly through every function argument.
-
-The intended consumer is ``libs/db.tenant_connection``: services can write
-``async with tenant_connection(pool, current_tenant_id()): ...`` and let the
-ContextVar handle the wiring. The explicit-argument form remains available
-for service code that prefers it.
-
-ContextVar.set creates a per-Task binding; FastAPI runs each request in a
-fresh asyncio Task, so the binding is naturally request-scoped. Tests can
-override via :func:`reset_current_claims`.
-"""
+"""Per-request ContextVar carrying the verified :class:`Claims` (FastAPI runs each request in its own Task)."""
 
 from __future__ import annotations
 
@@ -46,12 +32,7 @@ def current_tenant_id() -> UUID | None:
 
 
 def require_current_claims() -> Claims:
-    """Return claims or raise ``RuntimeError`` — for code that must have them.
-
-    Distinct from FastAPI's dependency injection: this is for non-handler
-    code paths (background tasks, library internals) that should never have
-    been reached without an authenticated context.
-    """
+    """Return claims or raise ``RuntimeError`` (for non-handler code paths)."""
     claims = _current_claims.get()
     if claims is None:
         raise RuntimeError(

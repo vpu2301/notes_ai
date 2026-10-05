@@ -1,4 +1,4 @@
-"""Sprint SQ3 — the scorers and gates read by code (D-FORM, order, filler)."""
+"""The form scorers and gates read by code (D-FORM, order, filler)."""
 
 from __future__ import annotations
 

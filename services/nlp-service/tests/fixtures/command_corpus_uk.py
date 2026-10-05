@@ -1,23 +1,6 @@
-"""Labeled TP/FP corpus for the voice-command matcher.
+"""Labeled TP/FP corpus for the voice-command matcher, measured twice in `test_command_corpus.py`.
 
-**As-built note.** The original gate suite
-(`tests/unit/test_voice_command_matcher.py`) exercises pause,
-confidence, edit-distance and ambiguity individually — valuable, but it
-reports no precision number, so "targets still hold" had nothing to
-measure against.
-
-This file is that corpus, built so the seeding of the typed-field
-command specs can be shown not to degrade matching. It is measured
-twice in `test_command_corpus.py`: once with the base catalogue alone
-(the BASELINE) and once with the typed-field commands added (the
-AFTER). Both must hit 100% on these cases; the point is that the two
-runs are compared, so any future spec that starts eating ordinary
-prose fails loudly.
-
-`POSITIVES` — an utterance that MUST produce the given intent.
-`NEGATIVES` — ordinary prose that must produce NO command at all. The
-negatives are the ones that matter: a false positive silently deletes
-words from a note.
+`POSITIVES` must produce the given intent; `NEGATIVES` (ordinary prose) must produce no command.
 """
 
 from __future__ import annotations

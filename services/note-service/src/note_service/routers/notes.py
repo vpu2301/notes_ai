@@ -1,4 +1,4 @@
-"""POST /notes + GET /notes/{id} — sprint-08 day-1/day-6."""
+"""POST /notes + GET /notes/{id}."""
 
 from __future__ import annotations
 
@@ -85,15 +85,11 @@ class NoteEnvelope(BaseModel):
     updated_at: str
     finalized_at: str | None
     cancelled_at: str | None
-    # The transcription job the note was made from, so a client can open
-    # the recording's transcript (and rename its speakers) from any device.
+    # The transcription job the note was made from.
     source_job_id: UUID | None = None
-    # 0016 — who may read it beyond the author team.
     visibility: str = "workspace"
     shared_with_ids: list[UUID] = Field(default_factory=list)
-    # Only filled for an oversight read (the caller is not on the author
-    # team and was not shared the note), so the client can name whose note
-    # it is showing. None on the author's own reads and on list envelopes.
+    # Only filled for an oversight read, so the client can name whose note it shows.
     primary_author_name: str | None = None
     content: NoteContent | None = None
     section_labels: list[SectionLabel] | None = None
@@ -134,20 +130,9 @@ def _envelope(
 async def _resolve_section_labels(
     conn: object, *, content: NoteContent
 ) -> list[SectionLabel] | None:
-    """Localized section labels for what the note's content has.
-
-    One label per content section that has a name: the template's name
-    for a template section, the section's own ``title`` for one the
-    engine made from the conversation. A section with neither (the
-    unheaded opening block, an unknown key) gets no label — the clients
-    draw it without a heading. Order is the content's. Returns ``None``
-    — never raises — when the template is gone and no section carries a
-    title, so a missing template degrades gracefully.
-
-    Note: only the current template row is persisted per ``template_id``
-    (cosmetic edits update in place), so we resolve against it; section
-    names are cosmetic and never participate in ``body_hash``.
-    """
+    """Localized section labels in content order: the template's name or the
+    section's own ``title``; none for an unheaded block. ``None`` (never raises)
+    when the template is gone and no section carries a title."""
     import json
 
     from template_models import TemplateDefinition
@@ -175,8 +160,7 @@ async def _resolve_section_labels(
         name = template_names.get(section.section_key) or section.title
         if not name:
             continue
-        # Templates are per-language; mirror the single name into both
-        # locales (matches the frontend's toStudioTemplate behaviour).
+        # Mirror the single name into both locales (matches toStudioTemplate).
         labels.append(
             SectionLabel(section_key=section.section_key, name=LocalizedText(uk=name, en=name))
         )
@@ -186,10 +170,7 @@ async def _resolve_section_labels(
 
 
 async def _resolve_section_names(conn: object, *, content: NoteContent) -> dict[str, str]:
-    """``{section_key: heading}`` in content order, for the PDF renderer.
-
-    A section without a name is absent — the renderer prints it without
-    a heading; an unknown key is humanized rather than printed raw."""
+    """``{section_key: heading}`` in content order, for the PDF renderer; unnamed sections absent."""
     labels = await _resolve_section_labels(conn, content=content) or []
     return {
         label.section_key: name for label in labels if (name := (label.name.en or label.name.uk))
@@ -217,7 +198,6 @@ async def create_note(
 ) -> NoteCreatedResponse:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # Sprint-13: typed field metadata must be valid at every write.
         await ensure_valid_field_metadata(conn, content=body.content)
 
         code = await code_sequence.next_code(conn, tenant_id=claims.tid)
@@ -268,14 +248,10 @@ async def get_note(
         # A private note the caller was not given is a 404, not a 403.
         row = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
 
-        # Read-purpose enforcement: an oversight reader (a workspace member
-        # on a workspace-visible note, a tenant_admin or auditor on anything)
-        # must say why they are reading; the author team and people the
-        # note was shared with never do.
+        # An oversight reader must say why they are reading; author team and sharees never do.
         is_author = access.require_read_purpose(row, claims, purpose)
 
-        # An oversight reader is told whose note it is, so a client can say
-        # "Ada's note" rather than "someone else's". Authors already know.
+        # An oversight reader is told whose note it is.
         primary_author_name: str | None = None
         if not is_author:
             members = await repo.fetch_members(conn, subs=[row.primary_author_id])

@@ -208,8 +208,8 @@ TTL (3600 s) after the cause clears.
 Redaction rate 4× day-over-day AND > 0.05/s: the SPA is very likely
 sending field contents (not the typed token) in telemetry prefixes.
 Check the FE prefix extraction (src/autocomplete/prefix.js) and recent
-SPA deploys. DPO owns the pattern set — see
-docs/security/autocomplete-pii-scrubber.md.
+SPA deploys. DPO owns the pattern set
+(`autocomplete_service/scrubber.py`).
 
 ### alert-pii-rejections
 

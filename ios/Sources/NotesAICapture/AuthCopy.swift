@@ -1,16 +1,8 @@
 import Foundation
 
-/// What a failed auth request says to the person holding the phone.
-///
-/// One map, keyed on the machine-readable `code` the server sends
-/// (`docs/api/error-codes.md`), because the alternative — each screen
-/// inventing its own wording from `detail` — produces a different
-/// sentence for the same failure on every screen, and `detail` is
-/// explicitly allowed to change.
-///
-/// Anything unrecognised falls through to a generic line **with the
-/// request id**, which is the whole point of sending `X-Request-Id`: an
-/// unknown failure the person can quote is one somebody can look up.
+/// What a failed auth request says to the person. One map keyed on the
+/// server's `code` (docs/api/error-codes.md); `detail` may change. Unknown
+/// codes get a generic line with the request id.
 enum AuthCopy {
     static func message(for error: Error) -> String {
         guard let apiError = error as? APIError else { return error.localizedDescription }
@@ -31,12 +23,7 @@ enum AuthCopy {
         case 401:
             return "Wrong sign-in details."
         case 403:
-            // `libs/auth`'s role gate answers `deny: roles=[…] cannot
-            // 'note.read' on 'note'` — a sentence about the permission
-            // matrix, not about the person reading it. `APIClient` has
-            // already refreshed once by the time this is reached (roles
-            // are re-read from the membership on every rotation), so what
-            // is left is a real refusal worth naming plainly.
+            // The role gate's `deny: roles=[…] …`; `APIClient` already refreshed once, so this is a real refusal.
             if let detail = problem?.detail, detail.hasPrefix("deny:") {
                 return "This account is not allowed to do that in this workspace. Ask whoever runs it to give you access."
             }
@@ -59,8 +46,7 @@ enum AuthCopy {
         }
     }
 
-    /// Every code these flows can raise, and nothing else — an entry here
-    /// is a promise that this app knows what the failure means.
+    /// Every code these flows can raise, and nothing else.
     private static func copy(for code: String, problem: Problem?) -> String? {
         switch code {
         // ── the emailed code ────────────────────────────────────────
@@ -88,14 +74,10 @@ enum AuthCopy {
             return "The code could not be sent. Try again in a moment."
         // ── passwords and second factors ─────────────────────────────
         case "email_not_verified":
-            // The sign-in screen puts a "Resend" beside this, so the
-            // sentence says what is owed rather than what to do next.
+            // A "Resend" sits beside this, so the sentence says what is owed.
             return "Confirm your email first — check your inbox for the link we sent."
         case "use_password":
-            // Reached only during the dual-issuer period, and only for an
-            // account that predates it. The sign-in screen moves to the
-            // password form on this code, so the sentence explains the
-            // move rather than reporting a failure.
+            // The sign-in screen moves to the password form on this code.
             return "This account signs in with a password. Enter it below."
         case "legacy_session":
             return "Switching workspace needs the new sign-in. Sign out and sign in with an emailed code, or switch in the web app."
@@ -124,9 +106,8 @@ enum AuthCopy {
             return "Confirm it is really you to continue."
         case "challenge_required":
             return "Ask for a new code before entering one."
-        // ── writing the note (Sprint 33/37, L2) ──────────────────────
-        // The same sentences `GenerationView.failureText` uses for a run
-        // that ended, so a refused start and a failed run read alike.
+        // ── writing the note ─────────────────────────────────────────
+        // Same sentences as `GenerationView.failureText`.
         case "processor_unacknowledged":
             return GenerationCopy.processorUnacknowledged
         case "generation_disabled":
@@ -152,10 +133,7 @@ enum AuthCopy {
         }
     }
 
-    /// A failure this app has no sentence for. One generic line and a
-    /// short reference — never the server's own wording, its code, or a
-    /// whole request id. The reference is the first eight characters of
-    /// the request id, which is what support looks a request up by.
+    /// A failure with no sentence: a generic line plus the first eight characters of the request id.
     private static func unknown(status: Int, problem: Problem?) -> String {
         let base: String
         switch status {
@@ -166,8 +144,7 @@ enum AuthCopy {
         return withRef(base, problem: problem)
     }
 
-    /// `message` with the correlation reference appended, for the cases
-    /// where somebody may have to quote it.
+    /// `message` with the correlation reference appended.
     static func withRef(_ message: String, problem: Problem?) -> String {
         guard let requestId = problem?.requestId, !requestId.isEmpty else { return message }
         return "\(message) (ref \(requestId.prefix(8)))"
@@ -188,9 +165,7 @@ enum AuthCopy {
     }
 }
 
-/// The sentences for a note that was not written, shared by the refused
-/// start (`POST /generation` → 409) and the finished-but-failed run
-/// (`GenerationView.failureText`), so the two cannot drift.
+/// The sentences for a note that was not written (refused start and failed run alike).
 enum GenerationCopy {
     static let processorUnacknowledged =
         "A workspace admin has to agree to who processes your meetings before notes are written. Settings › Data & AI."

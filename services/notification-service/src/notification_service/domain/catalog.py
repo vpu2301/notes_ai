@@ -1,13 +1,6 @@
-"""The category catalogue — who hears about what, and how, by default.
+"""The category catalogue: who hears about what, and how, by default.
 
-ONE declarative table. Every routing decision the service makes is a
-lookup here; nothing about recipients or default channels is scattered
-across handlers.
-
-`test_catalog.py` asserts this maps 1:1 onto `Category`, so adding an
-enum member without an entry is a build failure rather than a category
-that silently notifies nobody — the same "unknown intent is a bug"
-contract as nlp-service's operations map.
+`test_catalog.py` asserts a 1:1 mapping onto `Category`.
 """
 
 from __future__ import annotations
@@ -20,19 +13,11 @@ from notification_events import Category, EmailMode, Severity
 
 
 class RecipientRule(StrEnum):
-    """How to resolve a fact's audience.
+    """How to resolve a fact's audience; role-derived audiences are resolved here, not by the producer."""
 
-    The producer supplies `recipient_hints` for the rules it can answer
-    (it knows a note's author). Role-derived audiences are resolved
-    here against the membership table — a producer has no business
-    querying who the tenant's admins are.
-    """
-
-    # The acting user's note: primary author + co-authors, minus the
-    # actor (you don't need telling about your own action).
+    # Author + co-authors, minus the actor.
     NOTE_PARTICIPANTS = "note_participants"
-    # Everyone with tenant_admin on the tenant. Used for integrity
-    # failures, which are an operational concern, not an authoring one.
+    # Everyone with tenant_admin on the tenant.
     TENANT_ADMINS = "tenant_admins"
     # Exactly the users the producer named, verbatim.
     EXPLICIT_HINTS = "explicit_hints"
@@ -43,25 +28,19 @@ class CategorySpec:
     category: Category
     recipient_rule: RecipientRule
 
-    # Defaults, overridable per user (domain/preferences.py). A user who
-    # has never expressed an opinion follows whatever these say today.
+    # Defaults, overridable per user (domain/preferences.py).
     default_in_app: bool
     default_email_mode: EmailMode
 
     severity: Severity
 
-    # May a user route this to the daily digest instead of an immediate
-    # email? Time-critical and failure categories say no — batching an
-    # integrity alert into tomorrow morning's summary is not a
-    # preference, it is a defect.
+    # May a user route this to the daily digest? Time-critical/failure categories say no.
     digest_eligible: bool
 
     # Whether the actor is excluded from their own fan-out.
     exclude_actor: bool = True
 
-    # Template stem under `templates/email/`. Empty means this category
-    # never emails, so it needs no template — asserted by the PII gate,
-    # which would otherwise report a missing file.
+    # Template stem under `templates/email/`; empty = never emails (PII gate asserts this).
     email_template: str = ""
 
 
@@ -73,12 +52,7 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         default_email_mode=EmailMode.OFF,
         severity=Severity.INFO,
         digest_eligible=True,
-        # The author DOES get told their own note finalized. The default
-        # (exclude the actor) assumed finalize was something you do TO
-        # someone else's note; in practice the overwhelmingly common
-        # case is a solo author finalizing their own, and excluding
-        # them meant that session produced no notification at all — the
-        # feed stayed empty for exactly the user who was watching it.
+        # A solo author must be told about their own note.
         exclude_actor=False,
     ),
     CategorySpec(
@@ -111,8 +85,7 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
     ),
     CategorySpec(
         category=Category.NOTE_RECIPIENT_RESPONDED,
-        # The author team, by hint — note-service names them. No actor:
-        # the recipient has no account.
+        # Author team by hint; the recipient has no account.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
         default_email_mode=EmailMode.DIGEST,
@@ -130,108 +103,72 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
     ),
     CategorySpec(
         category=Category.AI_BUDGET_REACHED,
-        # Only an admin can raise a budget, so only an admin is told.
         recipient_rule=RecipientRule.TENANT_ADMINS,
         default_in_app=True,
-        # No mail: the numbers are on the Data page, and one budget is
-        # reached once a month at most — a banner is the right weight.
         default_email_mode=EmailMode.OFF,
         severity=Severity.WARNING,
         digest_eligible=False,
-        # System-raised at enqueue time; the "actor" is whoever happened
-        # to record the meeting that crossed the line, and they need
-        # telling as much as anyone.
+        # The "actor" is whoever crossed the line; they need telling too.
         exclude_actor=False,
     ),
     CategorySpec(
         category=Category.NOTE_LINK_STATUS_CHANGED,
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
-        # Never mail: a chip on a screen, not a message worth an inbox.
         default_email_mode=EmailMode.OFF,
         severity=Severity.INFO,
         digest_eligible=False,
     ),
     CategorySpec(
         category=Category.DICTATION_COMPLETED,
-        # The dictating user, named by dictation-service, which owns
-        # the session row. Nobody else has any interest in the fact that
-        # a colleague stopped recording.
+        # The dictating user, named by dictation-service.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
-        # Never emails. Finishing a dictation is a receipt you read in the
-        # app you are already looking at; a mail per session would be the
-        # single noisiest thing this service could do.
         default_email_mode=EmailMode.OFF,
         severity=Severity.INFO,
         digest_eligible=True,
-        # The dictating user IS the audience. Excluding the actor here
-        # would leave the category with no recipients at all.
+        # The actor is the audience.
         exclude_actor=False,
     ),
     CategorySpec(
         category=Category.TRANSCRIPTION_COMPLETED,
-        # The user who submitted the job, named by asr-worker.
+        # The submitter, named by asr-worker.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
         default_email_mode=EmailMode.OFF,
         severity=Severity.INFO,
         digest_eligible=True,
-        # The submitter IS the audience — this is the receipt for a job
-        # that ran for minutes while they looked away.
+        # The actor is the audience.
         exclude_actor=False,
     ),
     CategorySpec(
         category=Category.TRANSCRIPTION_FAILED,
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
-        # WARNING, not INFO: severity drives how long the SPA's toast
-        # lingers, and a job that died needs to outlast a glance.
-        # Silence here is worse than silence on success — the user waits
-        # for a result that is never coming.
+        # WARNING: severity drives how long the SPA toast lingers.
         severity=Severity.WARNING,
-        # A failure the user must act on does not belong in tomorrow's
-        # summary, matching note.chain_failure.
         digest_eligible=False,
-        # No email, and therefore no template. The failure is only
-        # actionable inside the app (resubmit the job), and every other
-        # emailing category needed a PII-gated template to say something
-        # an in-app row already says.
+        # Only actionable in the app, so no email and no template.
         default_email_mode=EmailMode.OFF,
         exclude_actor=False,
     ),
     CategorySpec(
         category=Category.SECURITY_MFA_REMINDER,
-        # Exactly the user who was asked, named by auth-service. This is
-        # never a broadcast: telling a company that a colleague has no
-        # second factor is publishing a weakness, not fixing one.
+        # Exactly the user asked, never a broadcast: a missing second factor is a weakness.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         default_in_app=True,
-        # WARNING: an account without a second factor is one stolen
-        # password away from being someone else's, and the feed should
-        # not present that with the same weight as "your note saved".
         severity=Severity.WARNING,
-        # The one category that emails BECAUSE the recipient may not be
-        # in the app — a user who has not enrolled is often a user who
-        # signs in rarely, which is exactly who the in-app banner never
-        # reaches.
+        # Emails because the un-enrolled user is often one the in-app banner never reaches.
         default_email_mode=EmailMode.IMMEDIATE,
-        # A security ask does not wait for tomorrow's summary, and the
-        # standing banner already covers the "later" case.
         digest_eligible=False,
-        # The actor is the reviewer, the audience is the subject. They
-        # cannot be the same person (the endpoint refuses self-reminders),
-        # so the default exclusion would never fire — spelled out rather
-        # than left to be re-derived.
+        # Actor (reviewer) and audience (subject) can never coincide.
         exclude_actor=False,
         email_template="security_mfa_reminder",
     ),
     CategorySpec(
         category=Category.SYSTEM_DIGEST,
-        # The digest job addresses one user directly; it never fans out.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
-        # The digest IS an email. An in-app copy of "here is a summary of
-        # your in-app notifications" is noise.
+        # The digest is an email; an in-app copy is noise.
         default_in_app=False,
         default_email_mode=EmailMode.IMMEDIATE,
         severity=Severity.INFO,
@@ -245,13 +182,7 @@ CATALOG: Final[dict[Category, CategorySpec]] = {spec.category: spec for spec in 
 
 
 def spec_for(category: Category) -> CategorySpec:
-    """Look up a category. Raises rather than guessing a default.
-
-    An unknown category means producer and consumer disagree about the
-    contract; inventing a routing decision would deliver the fact to the
-    wrong audience, which is worse than failing the message into the DLQ
-    where an operator can see it.
-    """
+    """Look up a category; raises rather than guessing (unknown = contract mismatch, goes to DLQ)."""
     try:
         return CATALOG[category]
     except KeyError as exc:  # pragma: no cover — guarded by test_catalog
@@ -263,5 +194,5 @@ def digest_eligible_categories() -> frozenset[Category]:
 
 
 def emailing_categories() -> frozenset[Category]:
-    """Categories that can ever produce an email — the PII gate's input."""
+    """Categories that can ever produce an email (PII gate input)."""
     return frozenset(s.category for s in _SPECS if s.email_template)

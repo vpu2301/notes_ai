@@ -1,10 +1,4 @@
-"""FND-1: a service trusts a LIST of issuers, and nothing beyond it.
-
-The table in the sprint brief, one test per row. The negative cases carry
-the weight here: a multi-issuer verifier that got selection wrong would
-accept a token signed by anyone who can name a trusted `iss`, which is
-worse than the single-issuer verifier it replaces.
-"""
+"""A service trusts a LIST of issuers and nothing beyond it; the negative cases carry the weight."""
 
 from __future__ import annotations
 
@@ -166,10 +160,7 @@ async def test_jwks_is_fetched_only_from_the_matching_url(
     )
 
     await verify_token(native_key.mint(), issuers=configs, jwks_cache=cache)
-    # The Keycloak document is never fetched to verify a native token —
-    # a verifier that fetched both would leak the fact that a native
-    # token exists to the issuer it does not belong to, and would make
-    # every verify wait on the slower of two IdPs.
+    # The Keycloak document is never fetched to verify a native token.
     assert requested == [configs[1].jwks_url]
 
 

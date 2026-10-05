@@ -56,9 +56,7 @@ def test_recency_boost_old_neutral():
 
 
 def test_recency_boost_naive_datetime_degrades_to_no_boost():
-    """asyncpg decodes '±infinity'::timestamptz as a naive datetime
-    (datetime.min/max); ranking must return neutral 1.0, not raise
-    TypeError against the aware now() (S10 /suggest 500 fix)."""
+    """asyncpg decodes '±infinity'::timestamptz as a naive datetime; ranking must return 1.0, not raise."""
     assert recency_boost(datetime.min) == 1.0
     assert recency_boost(datetime.max) == 1.0
     assert recency_boost(datetime(2026, 7, 12, 12, 0)) == 1.0  # any naive value
@@ -100,9 +98,7 @@ def test_confidence_in_unit_interval():
 
 
 def test_determinism_shuffled_input_identical_output():
-    """Response stability for identical corpus+counters is an API property:
-    equal-score candidates are tie-broken by text, so any input order
-    yields the same ranked output."""
+    """Equal-score candidates are tie-broken by text, so any input order yields the same output."""
     import random
 
     from autocomplete_service.suggest import suggest_from_trie

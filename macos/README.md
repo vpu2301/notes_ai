@@ -401,6 +401,7 @@ macos/
 │   ├── Info.plist                   # LSUIElement, NSMicrophoneUsageDescription
 │   └── NotesAICapture.entitlements
 └── Sources/NotesAICapture/
+    ├── Shared -> ../../../clients/Shared   # sources compiled unchanged into both apps
     ├── App.swift                    # @main MenuBarExtra scene + dynamic icon
     ├── Models.swift                 # API DTOs, settings, problem parsing
     ├── APIClient.swift              # async URLSession, multipart, single-flight refresh

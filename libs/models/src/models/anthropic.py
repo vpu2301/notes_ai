@@ -1,10 +1,4 @@
-"""The only vendor-specific provider — opt-in, lands in BE-S3.
-
-Kept as a named backend now so the registry, the Data page (decision 12)
-and the ``no-vendor-import`` lint all know where the SDK will live. Until
-BE-S3 the constructor raises ``ConfigError(provider_not_configured)``; the
-``anthropic`` package is not imported anywhere in this repo.
-"""
+"""Placeholder for the opt-in vendor provider: the constructor raises ``provider_not_configured``; no SDK is imported."""
 
 from __future__ import annotations
 

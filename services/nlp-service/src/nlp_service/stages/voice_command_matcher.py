@@ -1,22 +1,8 @@
 """Voice command detector.
 
-The matcher walks a word stream and emits :class:`CommandSlot` for
-intentional voice commands. Three gates defend against false positives:
-
-1. **Pause-before**: the silence between the previous content word and
-   the first command word must exceed ``requires_pause_before_ms``.
-2. **Confidence**: the average Whisper word-probability across the
-   matched span must be ≥ ``min_avg_probability``.
-3. **Edit-distance tolerance**: at most one substitution per phrase;
-   substituted word's Levenshtein distance from expected ≤ 2.
-
-False positives are the primary user-trust risk here; the defaults err
-on the side of "didn't fire" rather than "fired wrong."
-
-Section commands (``intent`` starts with ``section.``) additionally
-resolve their argument by matching the words AFTER the command head
-against the active template's section names/aliases. If no match, the
-command is rejected and the words are returned as content.
+Gates against false positives: pause before, average word probability,
+and at most one substitution (Levenshtein ≤ 2). Section/option commands
+resolve their argument from the following words or are rejected as content.
 """
 
 from __future__ import annotations
@@ -32,9 +18,7 @@ logger = logging.getLogger(__name__)
 _MAX_SUBSTITUTION_DISTANCE: Final = 2
 _MAX_SUBSTITUTIONS_PER_PHRASE: Final = 1
 
-# Whisper attaches sentence punctuation to word tokens («Крапка.», "period,").
-# Strip token EDGES only before comparing against catalogue phrases, so the
-# attached mark neither consumes the edit-distance budget nor blocks a match.
+# Whisper attaches punctuation to word tokens («Крапка.»); strip token edges before matching.
 _EDGE_PUNCT: Final = ".,!?;:…«»„“”\"'()[]"
 
 
@@ -63,39 +47,25 @@ class CommandSpec:
     requires_pause_before_ms: int = 200
     min_avg_probability: float = 0.85
     is_section_command: bool = False
-    # Sprint 13: the phrase is followed by an OPTION name, resolved
-    # against the template's choice sections (see _resolve_option).
+    # The phrase is followed by an option name (see _resolve_option).
     is_option_command: bool = False
-    # Sprint 13: disable the 1-substitution edit-distance tolerance for
-    # THIS spec. Required wherever a near-miss would trigger the OPPOSITE
-    # action — "прибрати" (remove) is Levenshtein-2 from "обрати" (set),
-    # so fuzzy heads would let "remove penicillin" select it instead.
+    # No fuzzy tolerance: "прибрати" (remove) is Levenshtein-2 from "обрати" (set).
     exact_match_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class MatchResult:
-    """One detected match. ``after_index`` is the next word the caller
-    should resume from."""
+    """One detected match; ``after_index`` is the next word to resume from."""
 
     slot: CommandSlot
     consumed_word_indices: tuple[int, ...]
     after_index: int
-    # Other distinct intents that also matched this exact span — when
-    # non-empty the match is ambiguous and the caller should warn rather
-    # than silently committing to the (arbitrary longest-first) winner.
+    # Other intents that matched this exact span; non-empty = ambiguous, caller warns.
     ambiguous_with: tuple[str, ...] = ()
 
 
 class VoiceCommandMatcher:
-    """Build a flat list of phrase-specs sorted longest-first.
-
-    For sprint-05 volumes (15+ commands × ~3 phrases each × ≤ 4 words)
-    a naive scan is O(N · |catalogue|) and lands well under the 5 ms
-    p95 budget on a 50-word segment. The trie optimisation lives in
-    the spec but isn't worth the complexity yet — revisit if the
-    catalogue grows past ~100 phrases.
-    """
+    """Flat list of phrase-specs sorted longest-first; a naive scan is fast enough at this catalogue size."""
 
     def __init__(
         self,
@@ -147,9 +117,7 @@ class VoiceCommandMatcher:
             window = words[i : i + n]
             avg_p = sum(w.probability for w in window) / n if n else 0.0
 
-            # Ambiguity: a different intent of the SAME length that also
-            # clears every gate at this position. The longest-first winner
-            # is otherwise arbitrary, so surface the collision.
+            # Another intent of the same length clearing every gate here: surface the collision.
             ambiguous_with = tuple(
                 sorted(
                     {
@@ -169,9 +137,7 @@ class VoiceCommandMatcher:
             if phrase.is_option_command:
                 resolved, option_consumed = self._resolve_option(words, i + n, intent=phrase.intent)
                 if resolved is None:
-                    # The head matched but no option followed at all —
-                    # reject so the words stay content ("обрати" alone is
-                    # ordinary Ukrainian, not a command).
+                    # No option followed: the words stay content.
                     continue
                 arg = dict(resolved)
                 consumed = consumed + tuple(range(i + n, i + n + option_consumed))
@@ -180,8 +146,7 @@ class VoiceCommandMatcher:
             elif phrase.is_section_command:
                 section_id, section_consumed = self._resolve_section(words, i + n)
                 if section_id is None:
-                    # Section command needs an argument; without one we
-                    # reject so the words become content.
+                    # No section argument: the words stay content.
                     continue
                 arg = {"section_id": str(section_id)}
                 consumed = consumed + tuple(range(i + n, i + n + section_consumed))
@@ -224,8 +189,7 @@ class VoiceCommandMatcher:
         return avg_p >= phrase.min_avg_probability
 
     def _matches_exactly(self, words: list[Word], i: int, expected: tuple[str, ...]) -> bool:
-        """Zero tolerance. Used by specs where a near-miss would fire the
-        wrong — sometimes opposite — action."""
+        """Zero tolerance, for specs where a near-miss would fire the wrong action."""
         return all(_norm_token(words[i + j].text) == target for j, target in enumerate(expected))
 
     def _matches_with_edit_distance(
@@ -246,7 +210,7 @@ class VoiceCommandMatcher:
 
     def _pause_ok(self, words: list[Word], i: int, required_ms: int) -> bool:
         if i == 0:
-            return True  # nothing before — no pause requirement
+            return True  # nothing before, no pause requirement
         prev = words[i - 1]
         curr = words[i]
         observed_ms = max(0.0, curr.start_s - prev.end_s) * 1000.0
@@ -255,11 +219,7 @@ class VoiceCommandMatcher:
     # ── Section argument resolution ────────────────────────────────
 
     def _resolve_section(self, words: list[Word], start: int) -> tuple[str | None, int]:
-        """Look at the next 1–3 words; return (section_id, words_consumed).
-
-        Sections are matched by name OR alias, case-insensitively. If
-        no match found in the first 3 tokens, return (None, 0).
-        """
+        """Match the next 1–3 words against section names/aliases; (None, 0) if none."""
         if start >= len(words):
             return None, 0
         if not self._sections:
@@ -274,34 +234,23 @@ class VoiceCommandMatcher:
                     return str(section.id), span
         return None, 0
 
-    # ── Option argument resolution (sprint 13) ─────────────────────
+    # ── Option argument resolution ─────────────────────────────────
 
     def _resolve_option(
         self, words: list[Word], start: int, *, intent: str
     ) -> tuple[dict[str, str] | None, int]:
         """Resolve the option name after a choice command.
 
-        Returns ``({section_key, value} | {reason}, words_consumed)``.
-
-        The FSM layer matches EXACTLY (normalized), never fuzzily:
-        fuzziness belongs to the extractor, where a wrong guess only
-        produces a proposal the user can reject. A voice command
-        writes directly, so an unresolvable option must become a
-        precise no-op — never a guess.
-
-        As-built note: ``ProcessingContext`` has no "active section"
-        (section-aware streaming was never wired). So the option
-        resolves across ALL choice sections
-        in the template snapshot, and an alias claimed by two sections
-        is reported ambiguous rather than arbitrarily assigned.
+        Returns ``({section_key, value} | {reason}, words_consumed)``. Exact
+        match only (a command writes directly, so never guess); resolves
+        across all choice sections, an alias in two sections is ambiguous.
         """
         if start >= len(words) or not self._sections:
             return None, 0
 
         choice_sections = [s for s in self._sections if s.field_type in ("choice", "multi_choice")]
         if not choice_sections:
-            # No typed sections at all — "обрати" here is ordinary
-            # Ukrainian. Reject so the word stays in the note.
+            # No typed sections: the word stays in the note.
             return None, 0
 
         for span in (4, 3, 2, 1):
@@ -321,10 +270,7 @@ class VoiceCommandMatcher:
             if len(unique) == 1:
                 section_key, value = unique[0]
                 field_type = next(ft for k, v, ft in hits if (k, v) == unique[0])
-                # Commands mirror field semantics STRICTLY — predictability
-                # over cleverness. add/remove are meaningless on a
-                # single-select field, so they no-op with a precise reason
-                # instead of being silently reinterpreted as "set".
+                # add/remove on a single-select field no-op with a reason, never become "set".
                 if intent in ("choice.add", "choice.remove") and field_type == "choice":
                     return {
                         "reason": "not_a_multi_choice_section",
@@ -332,16 +278,10 @@ class VoiceCommandMatcher:
                     }, span
                 return {"section_key": section_key, "value": value}, span
             if len(unique) > 1:
-                # The same words name options in two sections — the
-                # user must disambiguate; we never pick.
+                # Same words name options in two sections; never pick.
                 return {"reason": "option_ambiguous"}, span
-        # Words followed the head but named no option we know. REJECT
-        # rather than emitting an "option_not_found" no-op: a no-op would
-        # still CONSUME the head, deleting a word from ordinary prose
-        # ("обрати варіант поки неможливо"). A missing toast is
-        # recoverable; a silently eaten word is not. A reason is
-        # only reported when an option name was positively recognised
-        # (ambiguous, or right name / wrong field type).
+        # Unknown option: reject rather than no-op, since a no-op would still
+        # consume the head and eat a word of ordinary prose.
         return None, 0
 
 

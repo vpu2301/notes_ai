@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Create a self-signed code-signing identity for local builds, once.
-#
-# Why: macOS ties privacy permissions (microphone) to an app's code-signing
-# "designated requirement". An ad-hoc signature (`codesign -s -`) has none
-# beyond the binary's own hash, so every rebuild looks like a different app
-# and the microphone grant you gave last time is silently dropped. Signing
-# with one persistent certificate keeps the identity — and the permission —
-# stable across builds.
+# Create a self-signed code-signing identity for local builds, once: macOS keys
+# the microphone grant to the designated requirement, and an ad-hoc signature
+# changes on every rebuild (grant silently dropped).
 #
 #   scripts/make-signing-identity.sh              # creates "Notes AI Capture Dev"
 #   NOTES_AI_SIGN_IDENTITY="My Cert" scripts/…    # a different common name

@@ -16,18 +16,10 @@ dependencies = [
     "opentelemetry-sdk>=1.24.0",
     "opentelemetry-instrumentation-fastapi>=0.45b0",
     "python-json-logger>=2.0.7",
-    # opuslib needs libopus on the host; the GPU worker image ships libopus0.
-    # Optional at install time so the unit tests can run on macOS / dev hosts
-    # without it installed — codec is imported lazily.
+    # opuslib needs libopus; excluded on macOS so unit tests run (codec is imported lazily).
     "opuslib>=3.0.1 ; platform_system != 'Darwin'",
     # Internal libs
-    # Sprint 14 conversation mode: speaker diarization core (Silero VAD
-    # segmentation + speechbrain ECAPA embeddings, ADR-0034), hoisted to
-    # libs/diarization for Ambient Capture v1 so the batch worker shares
-    # it. The lib carries the silero-vad/speechbrain deps (same
-    # macOS-exclusion pattern as opuslib/faster-whisper: dev laptops get
-    # them via the root [dependency-groups] dev group instead, prod
-    # images pin the ECAPA weights via the Dockerfile model-fetch stage).
+    # diarization carries the silero-vad/speechbrain deps (macOS-excluded; dev group supplies them).
     "diarization",
     "observability",
     "auth",

@@ -1,51 +1,12 @@
-# ══════════════════════════════════════════════════════════════════
-# Full-stack overlay — auto-merged with docker-compose.yml on a plain
-# `docker compose up`, so `docker compose build && docker compose up`
-# brings up the ENTIRE backend: infra (from docker-compose.yml) + DB
-# migrate/seed one-shots + all application services.
-#
-#   docker compose build      # builds every service image
-#   docker compose up         # infra → migrate → seed → services
-#
-# `make dev-up` uses `-f docker-compose.yml` explicitly, which disables
-# auto-loading of this override, so it stays infra-only (unchanged).
-#
-# Services (host → container :8000):
-#   auth-service          :8000   (the SPA expects this origin)
-#   asr-service           :8001
-#   dictation-service     :8002   (WebSocket streaming ASR)
-#   notification-service  :8004   (feed + WebSocket push + email)
-#   nlp-service           :8005
-#   note-service          :8006   (notes, templates, versions, search)
-#   autocomplete-service  :8007
-#   generation-service    :8009   (Layer C inline completion)
-#   llama-server          :8089   (inference backend — mounts the
-#                                  host's `ollama pull gemma3:1b` blob)
-#   asr-worker            (no port — Redis-stream consumer)
-#   note-worker           (no port — drains the note.generate queue)
-#
-# NOTE: building asr-worker + dictation-service downloads the pinned
-# faster-whisper-tiny weights from Hugging Face at BUILD time (offline
-# at runtime). The first `docker compose build` therefore needs network.
-#
-# MEMORY FLOOR — 12 GiB of Docker engine memory, and this is a hard
-# requirement, not a recommendation. Measured resident on this stack:
-#   asr-worker          2.7 GiB  (whisper large-v3, int8, CPU)
-#   dictation-service   3.0 GiB  (whisper large-v3 + ECAPA diarizer)
-#   everything else     ~2.0 GiB (keycloak, nlp, postgres, kafka, obs)
-# On Docker Desktop's 8 GiB default the loser is dictation-service,
-# which OOMs while loading the diarizer and is restarted by
-# `restart: unless-stopped` — a silent crash-loop whose only symptom at
-# the SPA is a WebSocket that will not open (meeting mode reports
-# `connect_failed`). Diagnose with
-#   docker events --filter container=notes-ai-dictation-service-1
-# and look for `oom` / `die exit=137`, then raise Docker Desktop →
-# Settings → Resources → Memory. `docker info --format '{{.MemTotal}}'`
-# reports what the engine actually has.
-# ══════════════════════════════════════════════════════════════════
+# Full-stack overlay, auto-merged on a plain `docker compose up`
+# (`make dev-up` passes -f docker-compose.yml and stays infra-only).
+# Host ports: auth 8000, asr 8001, dictation 8002, notification 8004,
+# nlp 8005, note 8006, autocomplete 8007, generation 8009, llama 8089.
+# Building asr-worker/dictation-service needs network (whisper-tiny weights).
+# Docker engine needs >= 12 GiB: on 8 GiB dictation-service OOMs loading the
+# diarizer and crash-loops silently (`docker events` shows `die exit=137`).
 name: notes-ai
 
-# ── Shared snippets ────────────────────────────────────────────────
 x-postgres-dsns: &postgres-dsns
   DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
   DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
@@ -53,22 +14,9 @@ x-postgres-dsns: &postgres-dsns
 x-auth-env: &auth-env
   AUTH_ISSUER: http://keycloak:8080/realms/notes
   AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
-  # FND-1 / ADR-0047: the fleet trusts a LIST of issuers. Both are named
-  # here from day one — Keycloak, which mints today, and auth-service,
-  # which mints from BE-2 (`MDX_IDP_MODE=dual`). Until then its JWKS is an
-  # empty-but-valid document, which every service tolerates: an issuer
-  # with no keys rejects tokens, it does not break the ones beside it.
-  #
-  # Naming the second issuer BEFORE it can sign is the whole point of the
-  # rollout order. The alternative — flip auth-service first, then chase
-  # eight services with a config change — is the mass-logout window
-  # ADR-0047 exists to avoid.
-  # `issuer` is the browser-facing origin, because that is what lands in
-  # the token's `iss`. `jwks_url` is NOT: every consumer fetches it from
-  # inside the compose network, where `localhost:8000` is the consuming
-  # container itself (note-service fetching its own 404 page, not a key
-  # set). They are two different addresses for the same issuer and must
-  # be configured as such — AUTH_ISSUER_JWKS_URL is the in-cluster one.
+  # Both issuers are trusted (ADR-0047); an issuer with no keys only rejects
+  # its own tokens. `issuer` is the browser-facing origin (token `iss`);
+  # `jwks_url` must be the in-cluster address (localhost = the consumer itself).
   AUTH_ISSUERS_JSON: >-
     [{"issuer":"http://keycloak:8080/realms/notes",
       "jwks_url":"http://keycloak:8080/realms/notes/protocol/openid-connect/certs",
@@ -77,9 +25,7 @@ x-auth-env: &auth-env
       "jwks_url":"${AUTH_ISSUER_JWKS_URL:-http://auth-service:8000/.well-known/jwks.json}",
       "audience":"mdx-api"}]
 
-# Browser origins allowed to call the SPA-facing services WITH credentials
-# (the HttpOnly mdx_rt cookie). Single source of truth — every HTTP service that
-# the SPA calls merges this so the CORS allow-list can't drift between services.
+# Credentialed browser origins; every SPA-facing service merges this.
 x-cors-env: &cors-env
   CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,https://vpu2301.github.io
 
@@ -88,11 +34,7 @@ x-common-env: &common-env
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
 
-# Object storage (S3-compatible). Defaults to the stack's own MinIO
-# (docker-compose.yml), which holds every recording and transcript written
-# so far. Point these at another S3-compatible endpoint in `.env` only
-# after moving those objects across; an empty S3_ENDPOINT makes every
-# transcript and audio read answer 503 `object_store_not_configured`.
+# Defaults to the stack's MinIO; an empty S3_ENDPOINT = 503 object_store_not_configured.
 x-s3-env: &s3-env
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
   S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-minioadmin}}
@@ -106,7 +48,7 @@ x-svc-healthcheck: &svc-healthcheck
   start_period: 30s
 
 services:
-  # ── MinIO bucket bootstrap (root compose only ships MinIO itself) ──
+  # MinIO bucket bootstrap
   minio-init:
     image: minio/mc:RELEASE.2024-04-18T16-45-29Z
     depends_on:
@@ -129,8 +71,7 @@ services:
         echo "minio-init: buckets ready"
     restart: "no"
 
-  # ── DB schema migrations (one-shot, runs as the postgres superuser
-  #    because migrations CREATE ROLE / extensions) ──────────────────
+  # Migrations run as superuser (CREATE ROLE / extensions).
   migrate:
     build:
       context: .
@@ -143,7 +84,6 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # ── Dev data seed (one-shot, after migrate) ───────────────────────
   seed:
     build:
       context: .
@@ -169,7 +109,6 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # ── auth-service — identity, tenant CRUD, audit read (SPA :8000) ───
   auth-service:
     build:
       context: .
@@ -183,30 +122,17 @@ services:
       DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/notes
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: notes
-      # IDX-A2 native issuer. Off by default; flip MDX_IDP_MODE=native to
-      # mint tokens locally with the dev-only key mounted below.
       MDX_IDP_MODE: "${MDX_IDP_MODE:-keycloak}"
       AUTH_ISSUER_URL: "${AUTH_ISSUER_URL:-http://localhost:8000}"
       AUTH_ACCESS_TTL_SECONDS: "${AUTH_ACCESS_TTL_SECONDS:-900}"
-      # IDX-M1 rotation: the idle window slides on every refresh, the
-      # absolute cap does not move, and the grace window is how long the
-      # token a rotation retired still answers (a dropped response, not a
-      # replay).
+      # Refresh TTL slides on every rotation; the absolute cap does not.
       AUTH_REFRESH_TTL_SECONDS: "${AUTH_REFRESH_TTL_SECONDS:-2592000}"
       AUTH_SESSION_ABSOLUTE_TTL_SECONDS: "${AUTH_SESSION_ABSOLUTE_TTL_SECONDS:-7776000}"
       AUTH_REFRESH_GRACE_SECONDS: "${AUTH_REFRESH_GRACE_SECONDS:-30}"
       AUTH_SIGNING_KEYS_FILE: /etc/mdx/auth-signing.json
-      # ── Password recovery ────────────────────────────────────────
-      # ON in the dev stack so the flow is exercised locally, with mail
-      # captured by Mailpit (http://localhost:8025) rather than sent.
-      # Every value below is `${VAR:-<mailpit default>}`, so with no
-      # `.env` present nothing can escape to a real mailbox.
+      # Mail defaults to Mailpit (http://localhost:8025) so nothing escapes without a .env.
       MDX_PASSWORD_RESET_ENABLED: "${MDX_PASSWORD_RESET_ENABLED:-true}"
       MDX_EMAIL_PROVIDER: "${MDX_EMAIL_PROVIDER:-smtp}"
-      # BE-0 self-serve signup. On in the dev stack so the flow is
-      # exercised locally, with mail captured by Mailpit
-      # (http://localhost:8025) rather than sent. Off by default
-      # everywhere else — see .env.example.
       MDX_SIGNUP_ENABLED: "${MDX_SIGNUP_ENABLED:-true}"
       MDX_AUTH_SMTP_HOST: "${MDX_AUTH_SMTP_HOST:-mailpit}"
       MDX_AUTH_SMTP_PORT: "${MDX_AUTH_SMTP_PORT:-1025}"
@@ -216,33 +142,20 @@ services:
       MDX_AUTH_EMAIL_FROM: "${MDX_AUTH_EMAIL_FROM:-sales@notes-ai.local}"
       MDX_AUTH_EMAIL_FROM_NAME: "${MDX_AUTH_EMAIL_FROM_NAME:-Notes AI}"
       MDX_AUTH_EMAIL_REPLY_TO: "${MDX_AUTH_EMAIL_REPLY_TO:-sales@notes-ai.local}"
-      # Where the mailed links point. Must be the origin the SPA is
-      # actually served from, or every reset link 404s.
+      # Must be the origin the SPA is served from, or mailed links 404.
       MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
       MDX_SUPPORT_URL: "${MDX_SUPPORT_URL:-https://notes-ai.local/contact}"
-      # Per-deployment salt for the stored IP hashes. The dev default is
-      # a known string on purpose — it is not a secret here, and it MUST
-      # be overridden in staging/prod.
+      # Known dev salt; MUST be overridden in staging/prod.
       MDX_PASSWORD_RESET_IP_HASH_SALT: "${MDX_PASSWORD_RESET_IP_HASH_SALT:-dev-ip-hash-salt-change-in-prod}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
-      # ── Notification producer (the MFA reminder) ─────────────────
-      # auth-service publishes `security.mfa_reminder` onto the same
-      # Redis stream every other producer uses. Off means the reminder
-      # is still recorded and still banners in the SPA; only the bell
-      # and the mail go quiet. Same env name across the estate.
+      # Off: the MFA reminder still banners in the SPA; only bell + mail go quiet.
       MDX_NOTIFICATIONS_ENABLED: "${MDX_NOTIFICATIONS_ENABLED:-true}"
-      # ── MFA (ADR-0039) ───────────────────────────────────────────
-      # The enrolment SURFACE is on in the dev stack so `#/mfa` works.
-      # ENFORCEMENT stays off — enrolment is per-user opt-in here, and
-      # a user who enrols is asked for their TOTP code at login
-      # regardless (login.py enforces on enrolment, not on the flag).
+      # MFA (ADR-0039): enrolment on, enforcement off; an enrolled user is
+      # still asked for the code at login.
       MDX_MFA_ENROLMENT_ENABLED: "${MDX_MFA_ENROLMENT_ENABLED:-true}"
       MDX_REQUIRE_MFA: "${MDX_REQUIRE_MFA:-false}"
       MDX_MFA_TOTP_ISSUER: "${MDX_MFA_TOTP_ISSUER:-Notes AI (dev)}"
-      # Enrolment stores the TOTP secret envelope-encrypted (AAD =
-      # tenant‖sub‖purpose), so auth-service needs the master key and
-      # the crypto_writer pool — lazily built on the first MFA call,
-      # 503 "MFA secret store unavailable" without them.
+      # TOTP secrets are envelope-encrypted: master key + crypto_writer needed.
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
     volumes:
@@ -258,16 +171,12 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
-      # Both Redis users here are fail-open (the reset limiter and the
-      # notification publisher), so this is about a clean start rather
-      # than correctness — without it the first requests after a cold
-      # `up` log a connection failure and quietly degrade.
+      # Redis users here are fail-open; this only avoids a noisy cold start.
       redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
 
-  # ── asr-service — batch ASR submission/status API ─────────────────
   asr-service:
     build:
       context: .
@@ -298,14 +207,8 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # ── asr-worker — batch Whisper inference (Redis-stream consumer) ──
-  # Runs large-v3 (the production model) on CPU/int8 for real transcript
-  # quality — tiny is unusable for Ukrainian speech. The weights come
-  # from the host's HF cache (same pinned revision as PINS.md, the
-  # model.bin blob name IS the pinned sha256) mounted read-only, so the
-  # baked tiny image stays untouched and nothing downloads at runtime.
-  # CPU large-v3 runs slower than the default 5× realtime inference
-  # budget — the multiplier is raised accordingly (dev only).
+  # asr-worker runs large-v3 int8 from the host's HF cache (tiny is unusable
+  # for Ukrainian); the inference-budget multiplier is raised for CPU (dev only).
   asr-worker:
     build:
       context: .
@@ -320,14 +223,11 @@ services:
       MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
       MD_ASR_MAX_INFERENCE_SECONDS_MULTIPLIER: "52.0"  # F1: 40 × 1.3 for the second pass
-      # Model-provider registry (libs/models, DEP-S0/S1). ENV=dev routes
-      # ASR_BACKEND=dev_mac_asr to whisper-server on this Mac (make dev-model);
-      # the default keeps the baked CPU whisper. HF_* only matter with ENV=staging.
+      # libs/models registry: dev_mac_asr = whisper-server on this Mac (make dev-model).
       ENV: ${ENV:-dev}
       MODELS_CONFIG: /app/config/models.yaml
       ASR_BACKEND: ${ASR_BACKEND:-inproc_cpu_asr}
-      # Sprint TQ4: Parakeet on this Mac (make dev-model with DEV_MAC_ASR_ENGINE=parakeet)
-      # as the primary (ASR_BACKEND=dev_mac_parakeet_asr) or in the shadow.
+      # Parakeet on this Mac (DEV_MAC_ASR_ENGINE=parakeet), primary or shadow.
       DEV_MAC_PARAKEET_URL: ${DEV_MAC_PARAKEET_URL:-http://host.docker.internal:8082}
       MDX_ASR_SHADOW_BACKEND: ${MDX_ASR_SHADOW_BACKEND:-}
       MDX_ASR_SHADOW_RATE: ${MDX_ASR_SHADOW_RATE:-0.2}
@@ -354,13 +254,7 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # ── dictation-service — real-time streaming ASR over WebSocket ────
-  # Runs large-v3, for the same reason asr-worker does: tiny does not
-  # merely transcribe Ukrainian badly, it invents words that do not
-  # exist in the language. Weights come from the host's HF cache (the
-  # same pinned revision as PINS.md and asr-worker) mounted read-only,
-  # so the baked tiny image stays untouched and nothing downloads at
-  # runtime.
+  # dictation-service: same large-v3 weights from the host's HF cache.
   dictation-service:
     build:
       context: .
@@ -374,55 +268,32 @@ services:
       MD_ASR_MODEL_REPO: Systran/faster-whisper-large-v3
       MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
       MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
-      # Whisper's encoder always pads its input to 30 s, so a window costs
-      # roughly the same whether it holds 3.5 s of audio or 30 s. Measured
-      # (large-v3/int8, this CPU): 3.5 s window = 14.2 s compute = 0.25x
-      # realtime, i.e. hopelessly behind; 30 s window = ~23.5 s compute.
-      # With a 28 s hop that sustains 1.18x realtime over a 193 s
-      # meeting, so the transcript keeps up and stays complete.
-      #
-      # The trade is partial latency: a word can take up to the hop to
-      # appear. That is the honest cost of accurate Ukrainian on CPU and
-      # it is acceptable for meeting capture (the note is written after
-      # the meeting). The GPU overlay (infra/compose/gpu.yml) keeps the
-      # low-latency defaults — do NOT copy these values onto a GPU worker.
+      # Whisper pads every window to 30 s, so on CPU only a 30 s window / 28 s
+      # hop keeps up (1.18x realtime); partials lag up to one hop. Do NOT copy
+      # these onto a GPU worker (infra/compose/gpu.yml keeps low-latency defaults).
       MDX_WINDOW_SECONDS: "30.0"
       MDX_WINDOW_MIN_FOR_PARTIAL_SECONDS: "28.0"
-      # Greedy decoding, and this one decides whether the worker keeps up.
-      # Measured on a 28 s window: beam 5 = 39.4 s (0.71x realtime —
-      # permanently falling behind), beam 1 = 26.2 s (1.07x) for
-      # BYTE-IDENTICAL text. The beam buys nothing on this audio and
-      # costs 50% more compute. asr-worker keeps beam 5: batch has no
-      # realtime constraint.
+      # Greedy: beam 5 falls behind realtime on CPU for identical text.
       MD_ASR_BEAM_SIZE: "1"
-      # Overlap stays at the 2 s default: it is the commit horizon, so
-      # widening it would delay every commit and enlarge the tail that
-      # finalize has to flush.
+      # Overlap is the commit horizon; widening it delays every commit.
       MDX_WINDOW_OVERLAP_SECONDS: "2.0"
       MDX_WORKER_ID: dictation-dev-1
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       REDIS_URL: redis://redis:6379/0
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       MDX_TMPFS_ROOT: /run/dictation
-      # Keep in sync with x-cors-env above — the SPA opens the WS from the
-      # same origins it makes HTTP calls from.
+      # Keep in sync with x-cors-env.
       MDX_WS_ALLOWED_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173","http://localhost:4173","http://127.0.0.1:4173","http://localhost:3000","https://vpu2301.github.io"]'
     volumes:
       - ./infra/dev/master.key:/etc/mdx/master.key:ro
       - ${HOME}/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3:/opt/models/whisper-large-v3:ro
     tmpfs:
-      # Owned by the nonroot service user (uid/gid 65532) so it can create
-      # per-session 0700 dirs; RAM-backed so decrypted PCM never hits disk.
+      # RAM-backed so decrypted PCM never hits disk; owned by the nonroot uid.
       - /run/dictation:size=2g,mode=0700,uid=65532,gid=65532
     ports:
       - "127.0.0.1:8002:8000"
-    # NOT *svc-healthcheck: the shared 30 s start_period is sized for a
-    # stateless FastAPI app. This container loads whisper large-v3 (int8,
-    # CPU) AND warms ECAPA before it binds — measured 137–176 s on this
-    # box. With start_period=30s the container reports UNHEALTHY for the
-    # whole of a perfectly normal start, so `depends_on: service_healthy`
-    # times out and a genuine crash-loop is indistinguishable from a
-    # cold start. Warmup timings: docs/models/PINS.md.
+    # Loads large-v3 + warms ECAPA before binding (137-176 s measured), so the
+    # shared 30 s start_period would report a normal start as unhealthy.
     healthcheck:
       <<: *svc-healthcheck
       start_period: 300s
@@ -440,7 +311,6 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # ── nlp-service — post-processing pipeline ────────────────────────
   nlp-service:
     build:
       context: .
@@ -463,7 +333,6 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ── note-service — templates + versioned notes + diff/FTS ─────────
   note-service:
     build:
       context: .
@@ -471,33 +340,21 @@ services:
     restart: unless-stopped
     environment: &note-env
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
-      # "Attach transcription to a note" fetches the transcript here.
       ASR_SERVICE_BASE_URL: http://asr-service:8000
-      # Billing (0068): a plan change applies at once, no payment, until
-      # Stripe is connected. The service default is `none` (no changes).
+      # manual = plan changes apply at once without payment (service default: none).
       MDX_BILLING_PROVIDER: "${MDX_BILLING_PROVIDER:-manual}"
-      # Notification producer — lifecycle transitions publish onto the
-      # Redis Streams bus (ADR-0029). Without this the config default
-      # (redis://localhost:6379/0) resolves to the container itself and
-      # every publish silently no-ops, since publish_event never raises.
+      # Without this the default redis://localhost resolves to the container
+      # itself and every notification publish silently no-ops.
       REDIS_URL: redis://redis:6379/0
-      # Audio replay (ADR-0037): decrypt-slice-encode needs the same
-      # S3 + envelope-crypto wiring dictation-service has.
+      # Audio replay (ADR-0037) needs envelope crypto.
       DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
-      # Google Calendar (0019). Calendar links (0020, iCal addresses)
-      # need none of this. Leave the client id empty and the
-      # "Coming up" list simply hides its connect button. When set, the
-      # redirect URI must be registered on the OAuth client at Google and
-      # point at THIS service as the browser reaches it.
+      # Google Calendar OAuth; empty client id hides the connect button.
+      # The redirect URI must be registered at Google and reach THIS service.
       GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
       GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:8006/v1/calendar/google/callback}
-      # ── Sharing a note by e-mail ─────────────────────────────────
-      # "Send" in the share sheet delivers a branded HTML mail from
-      # here. Captured by Mailpit (http://localhost:8025) in the dev
-      # stack: every value is `${VAR:-<mailpit default>}`, so with no
-      # `.env` present nothing can escape to a real mailbox.
+      # Share mail; defaults to Mailpit so nothing escapes without a .env.
       MDX_EMAIL_PROVIDER: "${MDX_EMAIL_PROVIDER:-smtp}"
       MDX_NOTE_SMTP_HOST: "${MDX_NOTE_SMTP_HOST:-mailpit}"
       MDX_NOTE_SMTP_PORT: "${MDX_NOTE_SMTP_PORT:-1025}"
@@ -506,19 +363,13 @@ services:
       MDX_NOTE_SMTP_PASSWORD: "${MDX_NOTE_SMTP_PASSWORD:-}"
       MDX_NOTE_EMAIL_FROM: "${MDX_NOTE_EMAIL_FROM:-notes@notes-ai.local}"
       MDX_NOTE_EMAIL_FROM_NAME: "${MDX_NOTE_EMAIL_FROM_NAME:-Notes AI}"
-      # Replies normally go to the colleague who pressed Send; this is
-      # the fallback for a sharer with no address on file.
+      # Fallback Reply-To for a sharer with no address on file.
       MDX_NOTE_EMAIL_REPLY_TO: "${MDX_NOTE_EMAIL_REPLY_TO:-notes@notes-ai.local}"
       MDX_SHARE_EMAIL_TIMEOUT_S: "${MDX_SHARE_EMAIL_TIMEOUT_S:-15}"
-      # Where the mailed links point. Must be the origin the SPA is
-      # actually served from, or every shared note 404s.
+      # Must be the origin the SPA is served from, or shared links 404.
       MDX_APP_BASE_URL: "${MDX_APP_BASE_URL:-http://localhost:5173}"
-      # ── Who writes the notes (Sprint L2, config/models.yaml) ────────
-      # With the key: Mistral's EU API (large model writes, small model
-      # classifies/names). Without it, or with MDX_DEV_CHAT_BACKEND=dev_mac,
-      # this Mac's Ollama — the startup log says which and why
-      # (`models.route` / `models.override_fallback`). The key is read from
-      # .env.local only; never write a value here.
+      # Chat backend (config/models.yaml): Mistral EU with the key, else this
+      # Mac's Ollama (`models.route` in the startup log). Key from .env.local only.
       MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
       MISTRAL_API_URL: "${MISTRAL_API_URL:-https://api.mistral.ai/v1}"
       MDX_DEV_CHAT_BACKEND: "${MDX_DEV_CHAT_BACKEND:-}"
@@ -544,25 +395,9 @@ services:
       mailpit:
         condition: service_healthy
 
-  # ── note-worker — the process that writes notes (ADR-0058) ────────
-  # Same image and same code as note-service, different container: a
-  # generation is minutes of model calls, and running it on the request
-  # loop would tie a browser to it and let one slow meeting starve every
-  # other note operation. It is the first consumer of the `libs/jobs`
-  # queue, so without it `POST /v1/notes/{id}/generate` enqueues a job
-  # that nothing ever drains and the note stays `queued` forever.
-  #
-  # `environment: *note-env` is deliberate — the worker calls the API's
-  # own `build_state()`, so it needs exactly the API's wiring (pool,
-  # envelope crypto, object store). Drift between the two blocks is a
-  # generation that fails only in the worker.
-  #
-  # No port and no healthcheck: it serves no HTTP. In dev the chat
-  # backend it resolves is Mistral's EU API when MISTRAL_API_KEY is set
-  # and `dev_mac` — the Mac's Ollama on :11434 — otherwise (Sprint L2;
-  # see config/models.yaml). With nothing listening there either, a
-  # generation fails with a model error and the note keeps the transcript
-  # it had.
+  # note-worker drains the note.generate queue (ADR-0058); without it notes
+  # stay `queued`. `*note-env` is deliberate: the worker calls the API's own
+  # build_state() and must have identical wiring. No HTTP, so no healthcheck.
   note-worker:
     build:
       context: .
@@ -584,7 +419,6 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  # ── autocomplete-service — phrase suggestions ─────────────────────
   autocomplete-service:
     build:
       context: .
@@ -606,12 +440,8 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # ── llama-server — Layer C inference backend (ADR-0036) ───────────
-  # Serves the pinned gemma3:1b GGUF (docs/models/PINS.md). The blob is
-  # mounted from the host's Ollama store — run `ollama pull gemma3:1b`
-  # ONCE on the host if it's missing. Containerized inference is
-  # CPU-only (no Metal inside the Docker VM), hence the raised dev
-  # timeout on generation-service below.
+  # Layer C backend (ADR-0036): pinned gemma3:1b blob from the host's Ollama
+  # store (`ollama pull gemma3:1b` once). CPU-only inside the Docker VM.
   llama-server:
     image: ghcr.io/ggml-org/llama.cpp:server
     restart: unless-stopped
@@ -631,7 +461,6 @@ services:
     ports:
       - "127.0.0.1:8089:8080"
 
-  # ── generation-service — Layer C inline completion ────────────────
   generation-service:
     build:
       context: .
@@ -643,9 +472,7 @@ services:
       MDX_GEN_BACKEND: llamacpp
       MDX_GEN_BASE_URL: http://llama-server:8080
       MDX_GEN_MODEL: gemma3:1b
-      # CPU-container inference (no Metal in the Docker VM) runs well
-      # over the 600 ms production budget — dev keeps the feature usable
-      # instead of answering 204 to everything (ADR-0036 dev posture).
+      # CPU inference exceeds the 600 ms prod budget; dev keeps it usable.
       MDX_GEN_TIMEOUT_MS: "6000"
     ports:
       - "127.0.0.1:8009:8000"
@@ -658,14 +485,10 @@ services:
       migrate:
         condition: service_completed_successfully
       llama-server:
-        # service_started, not healthy: the image ships no probe tool;
-        # generation-service's own /readyz reflects backend readiness.
+        # The image ships no probe tool; /readyz reflects backend readiness.
         condition: service_started
 
-  # ── Mailpit — dev SMTP sink ───────────────────────────────────────
-  # Catches every outbound mail so nothing can escape a dev box, and
-  # exposes an HTTP API the PII gate asserts against. :8025 is the web
-  # inbox; :1025 is the SMTP port the services dial.
+  # Dev SMTP sink: :8025 web inbox, :1025 SMTP; the PII gate reads its API.
   mailpit:
     image: axllent/mailpit:v1.20
     restart: unless-stopped
@@ -682,7 +505,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── notification-service — feed, WebSocket push, email ────────────
   notification-service:
     build:
       context: .
@@ -696,8 +518,7 @@ services:
       MDX_SMTP_HOST: mailpit
       MDX_SMTP_PORT: "1025"
       MDX_EMAIL_FROM: noreply@notes-ai.local
-      # Unique per replica — two replicas sharing a consumer name share
-      # a pending-entries list.
+      # Unique per replica (shared consumer name = shared pending list).
       MDX_NOTIFICATION_CONSUMER_NAME: notification-1
     ports:
       - "127.0.0.1:8004:8000"

@@ -1,17 +1,13 @@
-"""Author-side action items and recipient responses (Sprint 20, 0037).
+"""Author-side action items and recipient responses.
 
     GET   /v1/notes/{id}/items                       items of the current version + responses
     PATCH /v1/notes/{id}/items/{item_id}             {status} — the one thing an author edits here
     GET   /v1/notes/{id}/responses                   every live response and flag, newest first
     POST  /v1/notes/{id}/responses/{response_id}/clear
 
-Items are a projection of the section text (G-1), derived the first
-time a version is read (`action_items.ensure_items`): their wording,
-owner and date change by editing the note, never through this router. Status is the exception — "done" is a fact about the world, not
-about the text — so it is the only writable field.
-
-A recipient's comment is returned here verbatim. It is the author's to
-read; the clients render it as text and nothing else.
+Items are a projection of the section text (`action_items.ensure_items`);
+status is the only writable field. A recipient's comment is returned verbatim
+and rendered as text only.
 """
 
 from __future__ import annotations
