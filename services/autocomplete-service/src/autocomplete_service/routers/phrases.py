@@ -96,9 +96,7 @@ async def list_phrases(
 
 
 async def _reject_pii(state, claims: Claims, *, field: str, text: str, target_kind: str) -> None:
-    """PII in a phrase/snippet write: 422 naming the pattern class ONLY
-    (never the match), a security audit event (text length, not text), a
-    metric the spike alert reads."""
+    """422 naming the pattern class only (never the match); audit carries text length, not text."""
     pii_hits = contains_pii(text)
     if not pii_hits:
         return
@@ -172,8 +170,7 @@ async def create_phrase(
             detail={"error": "phrase_already_exists"},
         ) from None
     except asyncpg.InsufficientPrivilegeError:
-        # RLS WITH CHECK rejection (e.g. a member posting source='tenant').
-        # Authority lives in the DB; map to a stable code, never SQLSTATE.
+        # RLS WITH CHECK rejection; stable code, never SQLSTATE.
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={"error": "forbidden_scope"},
@@ -252,8 +249,7 @@ class CreateSnippetRequest(BaseModel):
 
     @model_validator(mode="after")
     def _cursor_within_expansion(self) -> CreateSnippetRequest:
-        # (A leading "/" is already excluded by the trigger pattern —
-        # triggers are stored WITHOUT the slash typed at request time.)
+        # Triggers are stored without the leading "/".
         if self.cursor_position > len(self.expansion):
             msg = "cursor_position must be within the expansion"
             raise ValueError(msg)

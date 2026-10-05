@@ -1,29 +1,10 @@
-"""Action items as a derived projection of the ``action_items`` section
-(Sprint 20, migration 0037).
+"""Action items as a derived projection of the ``action_items`` section, parsed
+deterministically on first read; recipient responses attach by ``item_key``.
 
-The section text stays canonical. The first time a version is read
-(author items view, shared page) the lines of the section are parsed — deterministically, no model — into items with an
-owner label, a due date and a stable ``item_key``. Recipient responses
-attach by that key, so an unchanged line keeps its responses across an
-edit and an edited line starts clean: the recipient confirmed the
-wording they saw, not the line number.
-
-Line grammar, matching the seed templates' synthesis prompt
-(``'Owner: task — due date'``)::
-
-    [bullet] [Owner:] task [— [by|due] date]
-
-Owner is explicit (confidence 1.0) when a short ``Name:`` prefix is
-there, and *inferred* (0.5) when the line opens with two capitalised
-words — surfaced to the author as "check owner", never asserted. Dates
-go through :func:`parse_due`, a small pure port of the rules in
-``docs/nlp/date-normalization.md`` (ISO, numeric, month names in
-en/uk/de, weekdays, today/tomorrow/next week) anchored to the day the
-items were derived, in the tenant's time zone. Anything unparseable keeps
-its text and has no date.
-
-The extractor is a seam (:class:`ActionItemExtractor`); the rules
-parser is the only implementation this sprint.
+Line grammar: ``[bullet] [Owner:] task [— [by|due] date]``. An explicit
+``Name:`` owner is confidence 1.0, two leading capitalised words 0.5. Dates go
+through :func:`parse_due`, anchored in the tenant's time zone; unparseable text
+keeps its text and has no date.
 """
 
 from __future__ import annotations
@@ -41,7 +22,7 @@ from . import notes_repository as repo
 
 logger = logging.getLogger(__name__)
 
-# Section ids whose lines are action items (the Sprint 19 role map).
+# Section ids whose lines are action items.
 ACTION_SECTION_KEYS = ("action_items", "next_steps")
 
 MAX_TEXT = 500
@@ -211,16 +192,13 @@ def _with_default_year(month: int, day: int, year: str | None, anchor: date) -> 
 
 
 def parse_due(text: str | None, *, anchor: date) -> date | None:
-    """A due date from free text, or None. Never raises.
-
-    Forward-looking, as a deadline is: weekdays resolve to the next one,
-    an undated day long past means next year. Unchanged since Sprint 33;
-    the engine's direction-aware reading is :func:`parse_when`."""
+    """A due date from free text, or None. Never raises. Forward-looking: weekdays
+    resolve to the next one; the direction-aware reading is :func:`parse_when`."""
     when = _resolve(text, anchor=anchor, direction="future", extended=False)
     return when.date if when else None
 
 
-# ── dates with a direction (Summary Engine v2, Q3) ───────────────────
+# ── dates with a direction ───────────────────────────────────────────
 
 Direction = Literal["future", "past", "auto"]
 
@@ -235,8 +213,7 @@ class ResolvedWhen:
     direction: str
 
 
-# Words only the direction-aware reading knows. Kept out of parse_due so
-# its behaviour does not move under the items projection.
+# Kept out of parse_due so the items projection does not move.
 _PAST_RELATIVE: dict[str, int] = {
     "yesterday": -1, "gestern": -1, "вчора": -1, "учора": -1,
     "the day before yesterday": -2, "vorgestern": -2, "позавчора": -2,
@@ -270,12 +247,9 @@ def _clock(s: str) -> time | None:
 def parse_when(
     text: str | None, *, anchor: date, direction: Direction = "future"
 ) -> ResolvedWhen | None:
-    """A date expression — and the time, when one was said — resolved
-    against ``anchor`` in ``direction``. ``past``: a weekday is the most
-    recent one BEFORE the anchor ("am Montag … gewesen" on a Tuesday is
-    the day before), "last week" is −7, and an undated day is this year's.
-    ``future`` is parse_due's reading; ``auto`` is ``future``. None when
-    nothing resolves ("Ende des Jahres"). Never raises."""
+    """A date expression (and time, when said) resolved against ``anchor`` in
+    ``direction``: ``past`` takes the most recent weekday BEFORE the anchor,
+    ``future`` is parse_due's reading, ``auto`` is ``future``. None when nothing resolves."""
     return _resolve(text, anchor=anchor, direction=direction, extended=True)
 
 
@@ -348,8 +322,7 @@ def build_extractor(kind: str) -> ActionItemExtractor:
 
 
 async def anchor_date(conn: object, *, tenant_id: object) -> date:
-    """Today in the tenant's time zone — what "Friday" and "tomorrow" are
-    relative to. Falls back to UTC when the zone is unknown."""
+    """Today in the tenant's time zone; UTC when the zone is unknown."""
     from datetime import UTC, datetime
     from zoneinfo import ZoneInfo
 
@@ -369,18 +342,14 @@ async def materialise_items(
     anchor: date,
     extractor: ActionItemExtractor | None = None,
 ) -> int:
-    """Insert the item set for ``version`` — idempotent through the
-    (version, item_key) unique constraint; nothing is ever deleted.
-    An item whose key already existed on an earlier version carries its
-    status forward, so marking something done survives an edit that
-    did not touch that line."""
+    """Insert the item set for ``version``, idempotent via the (version, item_key)
+    constraint; a key seen on an earlier version carries its status forward."""
     extractor = extractor or RulesExtractor()
     parsed: list[ParsedItem] = []
     for section in version.content.sections or []:
         if section.section_key in ACTION_SECTION_KEYS and (section.text or "").strip():
             parsed.extend(extractor.extract(section.text, anchor=anchor))
-    # Duplicate lines within one version collapse to the first: the key is
-    # the identity, and a response cannot point at "the second copy".
+    # Duplicate lines within one version collapse to the first.
     seen: set[str] = set()
     unique = [p for p in parsed if not (p.item_key in seen or seen.add(p.item_key))]  # type: ignore[func-returns-value]
     if not unique:
@@ -412,13 +381,8 @@ async def ensure_items(
     note: repo.NoteRow,
     version: repo.VersionRow,
 ) -> list[items_repo.ItemRow]:
-    """The items of ``version``, deriving them on first read.
-
-    A note is a living document (0042): there is no moment at which it
-    is "done", so the projection is built lazily for whichever version is
-    current when someone looks. Once a version has items it is never
-    re-parsed — a version's content is immutable, so the result would be
-    the same."""
+    """The items of ``version``, derived lazily on first read and never re-parsed
+    (a version's content is immutable)."""
     items = await items_repo.fetch_items(conn, version_id=version.id)  # type: ignore[arg-type]
     if items:
         return items

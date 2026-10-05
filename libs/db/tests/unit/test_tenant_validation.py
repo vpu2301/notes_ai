@@ -1,9 +1,4 @@
-"""Unit-level validation of tenant_connection input handling.
-
-Integration tests that exercise the actual RLS round-trip against Postgres
-live in tests/integration/test_tenant_isolation.py and require the dev
-Compose stack to be up.
-"""
+"""Unit-level validation of tenant_connection input handling (the RLS round-trip lives in tests/integration/)."""
 
 from __future__ import annotations
 

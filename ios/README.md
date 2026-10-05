@@ -70,7 +70,7 @@ one, a second factor and a welcome step appear only when the server asks
 for them, and *Forgot?* opens the web app.
 
 **Two kinds of session, side by side.** For the duration of the
-dual-issuer period ([ADR-0047](../docs/adr/0047-dual-issuer-period.md)) an
+dual-issuer period (ADR-0047) an
 email code gets you a **native** session minted by auth-service, and a
 password gets you a **Keycloak** one. Both are refresh tokens this phone
 holds in the same Keychain item and presents in a request body — even the
@@ -291,8 +291,9 @@ open ios/NotesAICapture.xcodeproj      # then ⌘R on a simulator or your phone
 ```
 
 The project is committed (no XcodeGen needed) in Xcode 16's
-synchronized-folder format: everything under `Sources/NotesAICapture` is
-part of the target automatically. It needs Xcode with the **iOS platform
+synchronized-folder format: everything under `Sources/NotesAICapture` and
+`../clients/Shared` (sources identical to the macOS app) is part of the target
+automatically. It needs Xcode with the **iOS platform
 installed** (Xcode › Settings › Components, or
 `xcodebuild -downloadPlatform iOS`). To run on a phone, set your team under
 Signing & Capabilities once. Bundle id `ai.notes.capture.ios`, iOS 17+.

@@ -1,5 +1,4 @@
-"""The notes eval's gates: regression checklists, the nightly comparison
-and the judge column (Summary Engine v2, Q1 T6–T8)."""
+"""The notes eval's gates: regression checklists, the nightly comparison and the judge column."""
 
 from __future__ import annotations
 
@@ -52,24 +51,21 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "dates",
         "every_line_cited",
         "sprint",
-        # F2
         "no_copied_lines",
         "no_information_lines_max",
         "no_marks",
         "topics",
-        # F3
         "figures",
         "figures_min",
         "presenter_line",
         "contact_line",
-        # F3 amendment after r03
         "excluded_reasons",
         "guest_line",
         "chapters_min",
         "overview",
-        # docs/eval/error-taxonomy.md — codes pinned per check
+        # Codes pinned per check
         "codes",
-        # D1 lint: findings allowed per code
+        # Lint findings allowed per code
         "lint",
     }
     files = sorted(notes_assert.ASSERTIONS.glob("*.assertions.json"))
@@ -227,7 +223,7 @@ def test_the_judge_sees_the_line_and_its_facts_and_never_the_transcript() -> Non
     assert usage.input_tokens == 20
 
 
-# ── Blind pairwise rating (Q4 T7) ───────────────────────────────────
+# ── Blind pairwise rating ───────────────────────────────────
 
 notes_pairs = _load("notes_pairs")
 
@@ -318,7 +314,7 @@ def test_the_scripted_run_gates_only_what_the_engine_guarantees() -> None:
     } == notes_assert.ENGINE_CHECKS
 
 
-# ── F2: statements, not quotes ──────────────────────────────────────
+# ── Statements, not quotes ──────────────────────────────────────
 
 
 _PARDO_LIKE = {
@@ -401,7 +397,7 @@ def test_the_topics_round_rates_topic_bullets_only() -> None:
     assert notes_pairs.topic_lines(base, "single_pass") == "- Summary one.\n- Summary two."
 
 
-# ── F3: figures, presenter, contact ─────────────────────────────────
+# ── Figures, presenter, contact ─────────────────────────────────
 
 
 def test_the_f3_scorers() -> None:
@@ -473,7 +469,7 @@ def test_the_r02_checklist_checks_figures_presenter_and_contact() -> None:
     assert results["presenter_line"] and results["contact_line"]
 
 
-# ── Support-gate calibration (F3 amendment after r03, §2.10) ────────
+# ── Support-gate calibration ────────
 
 support_calibration = _load("support_calibration")
 
@@ -543,7 +539,7 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
                 for n in range(4)
             ),
         ],
-        # SQ3 T2: the guest is named in paragraph 1, never on a "Gast:" line.
+        # The guest is named in paragraph 1, never on a "Gast:" line.
         "lines": [{"kind": "framing", "text": framing, "fact_ids": ["a"]}],
     }
     results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced)}
@@ -572,7 +568,7 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
     assert not results["guest_line"]
 
 
-# ── Error taxonomy (docs/eval/error-taxonomy.md) ────────────────────
+# ── Error taxonomy ────────────────────
 
 taxonomy = _load("taxonomy")
 
@@ -662,7 +658,7 @@ def test_the_lint_check_reads_the_engine_lint_per_code() -> None:
     assert taxonomy.check_codes("lint[D-ORIENT]") == ("D-ORIENT",)
 
 
-# ── The document standard's blind rubric (§8) ───────────────────────
+# ── The blind rubric ───────────────────────
 
 
 def test_rubric_round_trip_and_release_gate(tmp_path: Path, monkeypatch: Any) -> None:
@@ -701,7 +697,7 @@ def test_rubric_round_trip_and_release_gate(tmp_path: Path, monkeypatch: Any) ->
     }
 
 
-# ── Sprint D2: composition scorers and gates ────────────────────────
+# ── Composition scorers and gates ────────────────────────
 
 
 def test_the_d2_scorers_read_an_enforced_note_end_to_end() -> None:

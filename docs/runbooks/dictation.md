@@ -14,7 +14,7 @@ Operational guide for the sprint-04 streaming surface.
 | Worker liveness key   | Redis: `mdx:dict:worker:<worker_id>:hb` (TTL ≈ 30 s)            |
 | Dashboard             | Grafana → "Sprint 04 — Streaming Dictation"                     |
 | Alerts                | `infra/prometheus/rules/sprint-04-streaming-dictation.yml`      |
-| Protocol spec         | `docs/api/dictation-ws-v1.md`                                   |
+| Protocol spec         | `dictation_service.protocol.messages`                           |
 
 ## Failure modes
 

@@ -7,24 +7,8 @@ import { browserTimezone } from "../../lib/time";
 import { Banner, LoginShell } from "./LoginShell";
 
 /**
- * `/welcome` — the one question a brand-new identity is asked.
- *
- * Reached only when `AuthResult.is_new_identity` was true. Skipping is a
- * first-class option: an unnamed account works perfectly well, and the
- * alternative is a wall between somebody and the product they just signed
- * up for.
- *
- * Two things happen here that the person is not asked about:
- *
- *  * The name box starts on the address's local part. It is a guess, and
- *    frequently the right one — somebody signing up as `alex.kim@…` is
- *    usually Alex Kim. It is pre-selected rather than merely filled, so
- *    the first keystroke replaces it instead of appending to it.
- *  * The browser's time zone is sent with the same `PATCH`. It decides
- *    which day a note is filed under, and it is the one setting a person
- *    cannot supply a better answer for than the machine can. Asking would
- *    be a second question for no gain; the value is visible and editable
- *    afterwards in Settings › Account.
+ * `/welcome` — asks a new identity (`is_new_identity`) for its name; skipping is fine.
+ * The browser's time zone rides the same PATCH (editable later in Settings › Account).
  */
 export function WelcomePage() {
   useDocumentTitle("Welcome");
@@ -42,15 +26,10 @@ export function WelcomePage() {
   const from = (location.state as { from?: string } | null)?.from ?? "/";
   if (status === "anonymous") return <Navigate to="/login" replace />;
 
-  // The name arrives with `identity`, which lands a tick after the first
-  // paint on a hard reload. Adopt it until the person types.
+  // `identity` lands a tick after first paint on a hard reload; adopt it until the person types.
   const value = touched ? name : name || suggestion;
 
-  /**
-   * On to the app. `focusNewMeeting` asks `NotesPage` to put the caret on
-   * the recorder: this is the last screen before the thing they came for,
-   * and it should not need a hunt with the mouse.
-   */
+  /** On to the app; `focusNewMeeting` asks `NotesPage` to focus the recorder. */
   const finish = () => navigate(from, { replace: true, state: { focusNewMeeting: true } });
 
   const onSubmit = async (e: FormEvent) => {
@@ -58,8 +37,7 @@ export function WelcomePage() {
     setError(null);
     setBusy(true);
     try {
-      // Even with no name, the time zone is worth the call — and a failed
-      // `PATCH` must not strand somebody on a screen they may skip.
+      // Time zone is worth the call even with no name; a failed PATCH must not strand anyone.
       await saveProfile({
         display_name: value.trim() || undefined,
         timezone: browserTimezone() ?? undefined,
@@ -92,8 +70,7 @@ export function WelcomePage() {
           autoFocus
           placeholder="Olena Kovalenko"
           value={value}
-          // The guess is selected, not just typed in: somebody whose
-          // address does not match their name replaces it with one key.
+          // Selected, not just filled: one key replaces the guess.
           onFocus={(e) => !touched && e.currentTarget.select()}
           onChange={(e) => {
             setTouched(true);
@@ -117,25 +94,17 @@ export function WelcomePage() {
   );
 }
 
-/**
- * `alex.kim+notes@example.com` → `Alex Kim`.
- *
- * A guess, and deliberately a conservative one: a local part that is
- * mostly digits or a single opaque token (`k1n2m3`, `info`) is left alone
- * rather than Title-Cased into something that looks like a name and is
- * not. An empty return means the box starts empty, which is fine.
- */
+/** `alex.kim+notes@example.com` → `Alex Kim`; conservative — opaque tokens return "". */
 export function suggestName(email: string | undefined): string {
   const local = (email ?? "").split("@")[0] ?? "";
   const words = local
     .replace(/\+.*$/, "") // strip the +tag
     .split(/[._-]+/)
     .filter(Boolean)
-    // A part with a digit in it is an account number, not a first name.
+    // A digit means an account number, not a name.
     .filter((w) => !/\d/.test(w));
   if (words.length === 0) return "";
-  // One word tells us nothing a person did not already know, so it is only
-  // worth offering when it reads like a name rather than a mailbox alias.
+  // A single word is offered only when it reads like a name, not a mailbox alias.
   if (words.length === 1 && (words[0]!.length < 3 || GENERIC.has(words[0]!.toLowerCase()))) return "";
   return words.map((w) => w[0]!.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }

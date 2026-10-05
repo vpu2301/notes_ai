@@ -1,5 +1,4 @@
-"""Name suggestions (Sprint 32 B-1): patterns per language + the rules
-that keep them precise. Table-driven; no service, no network."""
+"""Name suggestions: patterns per language + the precision rules. Table-driven."""
 
 from __future__ import annotations
 
@@ -187,7 +186,7 @@ def test_german_and_ukrainian_suggestions() -> None:
     )
 
 
-# ── Review findings (Sprint 32) ───────────────────────────────────────
+# ── Review findings ───────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -248,7 +247,7 @@ def test_a_label_matching_two_invitees_still_claims_both() -> None:
     )
 
 
-# ── Sprint F3: what the person said they do ─────────────────────────
+# ── Role clause: what the person said they do ───────────────────────
 
 
 @pytest.mark.parametrize(

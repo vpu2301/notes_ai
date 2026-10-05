@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 28 — speaker merge/undo: wire decoding and refusal copy.
+/// Speaker merge/undo: wire decoding and refusal copy.
 final class SpeakerEditTests: XCTestCase {
     func testResultDecodesTalkTimeAndEdits() throws {
         let json = """

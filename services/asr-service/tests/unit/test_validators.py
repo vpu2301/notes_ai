@@ -37,12 +37,7 @@ def test_mime_allow_list_rejects_application_zip() -> None:
     ],
 )
 def test_mime_allow_list_ignores_parameters(declared: str) -> None:
-    """A browser recording declares its codec; that is still audio/webm.
-
-    ``MediaRecorder`` sets the blob type to what it actually picked, so
-    the multipart part arrives as ``audio/webm;codecs=opus``. Matching
-    the raw header against the allow-list rejected every web capture.
-    """
+    """``audio/webm;codecs=opus`` (every MediaRecorder capture) is still audio/webm."""
     assert validate_mime(declared).ok
     assert normalize_mime(declared) == "audio/webm"
 
@@ -100,9 +95,7 @@ def test_size_over_cap_rejected() -> None:
 
 
 def test_empty_upload_named_as_such() -> None:
-    # Not `mime_mismatch`: a zero-byte body is a recording that never
-    # arrived, and telling the user their file is the wrong format
-    # sends them looking for a codec problem that does not exist.
+    # Not `mime_mismatch`: a zero-byte body is a recording that never arrived.
     r = validate_size(0, max_mb=100)
     assert not r.ok
     assert r.code == "empty_upload"
@@ -131,9 +124,7 @@ def test_duration_accepted() -> None:
 
 
 def test_duration_under_floor_rejected() -> None:
-    # A tapped record button. Whisper answers a fraction of a second of
-    # noise with a confident hallucination, and a hallucination in a chart
-    # is worse than a rejected upload.
+    # A tapped record button: Whisper would hallucinate on it.
     probe = ProbeOutput(duration_ms=120, sample_rate_hz=16000, channels=1, codec="pcm_s16le")
     r = validate_duration(probe, max_seconds=1800, min_ms=400)
     assert not r.ok
@@ -184,15 +175,8 @@ def _ffmpeg_missing() -> bool:
 
 @pytest.mark.skipif(_ffmpeg_missing(), reason="ffmpeg/ffprobe not installed")
 def test_probe_recovers_duration_of_live_muxed_webm(tmp_path: Path) -> None:
-    """A WebM with no duration in its header is still probeable.
-
-    Piping the muxer's output (``-f webm -``) reproduces exactly what a
-    browser's ``MediaRecorder`` writes: the muxer cannot seek back to
-    fill in the Segment duration, so ffprobe reports none for either the
-    format or the stream. Every web recording has this shape, and
-    without the packet-scan fallback all of them were rejected as
-    ``unprobeable``.
-    """
+    """A WebM with no duration in its header (``-f webm -``, what MediaRecorder writes)
+    is still probeable via the packet scan."""
     path = tmp_path / "live.webm"
     with path.open("wb") as out:
         subprocess.run(  # noqa: S603

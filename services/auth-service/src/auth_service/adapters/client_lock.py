@@ -1,21 +1,8 @@
-"""The fail-closed lock on client-credential guessing (IDX-B1b F2/H).
+"""The fail-closed lock on client-credential guessing.
 
-Two keys, because the pack's rule has two different clocks in it — "ten
-wrong secrets within ten minutes, then locked for fifteen":
-
-    mdx:auth:fail:client:<id>   counter, 10-minute TTL
-    mdx:auth:lock:client:<id>   the lock itself, 15-minute TTL
-
-A fixed-window limiter cannot express that on its own: its window is both
-the counting period and the penalty, so a 10-minute window gives a
-10-minute lock. Separating them means the penalty outlives the evidence,
-which is the point of a lockout.
-
-``is_locked`` **raises** rather than guessing when Redis is unreachable.
-That is the deliberate exception to the house fail-open posture: the
-alternative is unlimited secret guessing against a principal that never
-notices and never gets tired, and the client on the other end is a
-machine that already retries with backoff.
+Two keys with two clocks: `mdx:auth:fail:client:<id>` (counter, 10 min) and
+`mdx:auth:lock:client:<id>` (the lock, 15 min). ``is_locked`` RAISES when Redis
+is unreachable — the deliberate exception to the fail-open house posture.
 """
 
 from __future__ import annotations
@@ -55,12 +42,7 @@ class RedisClientLock:
             raise LockUnavailableError("client lock backend unavailable") from exc
 
     async def record_failure(self, subject: str) -> bool:
-        """Count one wrong secret. True when this failure tripped the lock.
-
-        Best-effort: a failure we could not count is a failure the client
-        was still refused for. Losing the count degrades the lock, it does
-        not open the door — unlike losing ``is_locked``, which would.
-        """
+        """Count one wrong secret; True when it tripped the lock. Best-effort (losing the count degrades, not opens)."""
         key = FAIL_KEY.format(subject=subject)
         try:
             count = int(await self._redis.incr(key))
@@ -78,7 +60,7 @@ class RedisClientLock:
             return False
 
     async def clear(self, subject: str) -> None:
-        """Drop both keys. Used by the operator runbook after a re-provision."""
+        """Drop both keys (operator runbook, after a re-provision)."""
         try:
             await self._redis.delete(
                 FAIL_KEY.format(subject=subject), LOCK_KEY.format(subject=subject)

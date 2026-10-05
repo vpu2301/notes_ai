@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 32 — name suggestions (accept, undo, dismiss, the quote's turn),
-/// the re-label banner, the roster's spoken labels, and what a sign-out
-/// removes from the device.
+/// Name suggestions, the re-label banner, the roster's spoken labels, and sign-out cleanup.
 final class NameSuggestionTests: XCTestCase {
     private var directory: URL!
 
@@ -26,7 +24,7 @@ final class NameSuggestionTests: XCTestCase {
         "segment_indices": [3],
     ]
 
-    /// A two-speaker result; `extra` adds the Sprint 32 fields.
+    /// A two-speaker result; `extra` adds the suggestion fields.
     private static func result(_ jobId: String, extra: [String: Any] = [:]) -> Data {
         var object: [String: Any] = [
             "job_id": jobId, "segments": [], "result_rev": 1,

@@ -1,13 +1,6 @@
-// The author's scratchpad, client side (Sprint 34).
-//
-// While the meeting runs, the first keystroke of every new line is worth
-// remembering: it is what later tells the engine WHERE in the recording to
-// look for what the line is about. The line's identity is the same hash the
-// server and the action-item projection use —
-// `sha256(normalise(text)).hex[:16]` — so a line keeps its timing across a
-// whitespace edit, and the same line typed on two devices is one line.
-//
-// Nothing here ever changes the author's text. It only observes it.
+// The author's scratchpad: records when each new line first appeared in the
+// recording. Line identity is the server's `sha256(normalise(text)).hex[:16]`.
+// Never changes the author's text.
 
 import type { LineTime } from "../api/types";
 
@@ -26,13 +19,7 @@ function stripBullet(text: string): string {
   return text.replace(/^[\s\-•*·▪◦]*(?:\d{1,2}[.)]\s*)?[\s\-•*·]*/, "");
 }
 
-/**
- * `sha256(normalise(stripBullet(text))).hex[:16]`, or "" for a blank line.
- *
- * Async because WebCrypto is: the queue below awaits it off the typing
- * path, so hashing never sits between a keystroke and the character
- * appearing.
- */
+/** `sha256(normalise(stripBullet(text))).hex[:16]`, or "" for a blank line. */
 export async function lineKey(text: string): Promise<string> {
   const normalised = normalise(stripBullet(text));
   if (!normalised) return "";
@@ -48,30 +35,20 @@ export function splitLines(text: string): string[] {
 }
 
 /**
- * Watches the scratchpad and collects `{line_key, offset_ms}` for lines it
- * has not seen before.
- *
- * The clock is the recording's, not the wall's: `elapsedMs()` is asked at
- * the moment the line first appears, so a line typed at 2:10 into the
- * meeting is stamped 130000 whatever the device's clock says.
- *
- * Only NEW keys are emitted. Editing a line gives it a new key and a new
- * (later) time, which is correct — the author was thinking about it then
- * too — and the server keeps whichever arrived first.
+ * Collects `{line_key, offset_ms}` for lines not seen before, stamped with
+ * the recording clock. An edited line is a new key; the server keeps the first.
  */
 export class LineTimeQueue {
   private readonly seen = new Set<string>();
   private pending: LineTime[] = [];
-  /** Hashing is async; observations are chained so they cannot interleave
-   *  and a flush can wait for the ones already in flight. */
+  /** Observations are chained so they cannot interleave. */
   private tail: Promise<void> = Promise.resolve();
 
   constructor(private readonly elapsedMs: () => number) {}
 
   /** Call on every change of the scratchpad text. */
   observe(text: string): Promise<void> {
-    // The clock is read NOW, not when the hash comes back: the line
-    // appeared at this moment in the recording.
+    // Clock read now, not when the hash comes back.
     const at = Math.max(0, Math.round(this.elapsedMs()));
     this.tail = this.tail.then(async () => {
       for (const line of splitLines(text)) {
@@ -106,16 +83,9 @@ export class LineTimeQueue {
   }
 }
 
-/**
- * Merge scratch text typed on this device into what the server already has.
- *
- * Append under a divider, never overwrite: two devices typing the same
- * meeting is two people's worth of attention on it, and silently dropping
- * one of them is the one failure this feature cannot have. Lines the server
- * already holds are skipped, so a reconnect does not duplicate.
- */
 export const MERGE_DIVIDER = "---";
 
+/** Append local lines under a divider, never overwrite; lines the server has are skipped. */
 export function mergeScratch(remote: string, local: string): string {
   if (!local.trim()) return remote;
   if (!remote.trim()) return local;

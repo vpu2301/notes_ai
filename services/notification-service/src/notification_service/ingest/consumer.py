@@ -1,16 +1,7 @@
-"""Redis Streams consumer: envelopes in, notification rows out.
+"""Redis Streams consumer: envelopes in, notification rows out. At-least-once.
 
-At-least-once. The DLQ path splits by cause, because the two failures
-need different responses:
-
-  * A malformed envelope will NEVER succeed. Retrying it three times
-    just delays the inevitable and keeps a poison entry circulating, so
-    it is dead-lettered on first sight and acked.
-  * A transient failure (database unavailable) WILL succeed later, so it
-    goes back to the pending-entries list to be reclaimed and retried.
-
-Getting that distinction backwards is how a queue wedges itself behind
-one bad message.
+A malformed envelope is dead-lettered on first sight and acked; a transient failure
+stays pending for reclaim + retry. Mixing the two wedges the queue behind one bad message.
 """
 
 from __future__ import annotations
@@ -83,7 +74,6 @@ async def run_forever(
                 )
                 await consumer.ack(message)
             except _PermanentEventError as exc:
-                # Never going to work. Record it and stop retrying.
                 metrics.events_rejected.add(1)
                 await write_dead_letter(
                     app_pool,
@@ -93,8 +83,7 @@ async def run_forever(
                 )
                 await consumer.ack(message)
             except Exception as exc:  # noqa: BLE001
-                # Transient. Leave it pending for reclaim + retry; the
-                # consumer promotes it to the DLQ once it hits the cap.
+                # Transient: stays pending; the consumer promotes to DLQ at the cap.
                 logger.exception("ingest.transient_failure", exc_info=exc)
                 await consumer.fail(message, error_kind="unhandled")
 
@@ -119,8 +108,7 @@ async def handle_message(
             now=datetime.now(UTC),
         )
 
-    # Fan out only what was actually created. Publishing on the
-    # redelivery path is what would make a badge tick twice for one fact.
+    # Fan out only what was created: publishing on redelivery would double-tick the badge.
     metrics.events_consumed.add(1, {"category": str(event.category)})
     if result.created:
         metrics.notifications_created.add(len(result.created), {"category": str(event.category)})

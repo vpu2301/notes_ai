@@ -1,10 +1,6 @@
-"""Sprint 19 loop counters, in one place (the ``auth_metrics`` pattern).
-
-Declared at module level rather than on ``ServiceState`` so the routers
-that count — sharing and the anonymous page — need nothing new wired
-into the state object, in production or in the router tests' fakes.
-Names are what ``infra/grafana/dashboards/viral-loop.json`` and
-``infra/prometheus/rules/viral-loop.yml`` query; keep them stable.
+"""Sharing loop counters, at module level so routers need nothing wired into state.
+Names are queried by infra/grafana/dashboards/viral-loop.json and
+infra/prometheus/rules/viral-loop.yml; keep them stable.
 """
 
 from __future__ import annotations
@@ -34,7 +30,7 @@ rate_limited = _meter.create_counter(
     unit="1",
 )
 
-# Sprint 20: the interactive page.
+# The interactive page.
 action_items_materialised = _meter.create_counter(
     "mdx_action_items_materialised_total",
     description="Action items derived from the note text (labels: parsed_owner, parsed_due)",
@@ -51,14 +47,14 @@ shared_flags = _meter.create_counter(
     unit="1",
 )
 
-# Sprint 22: recipient links sent from the product.
+# Recipient links sent from the product.
 recipient_mail_sent = _meter.create_counter(
     "mdx_recipient_mail_sent_total",
     description="Recipient-link mails by outcome (sent, rejected, failed)",
     unit="1",
 )
 
-# Sprint 23: verification, abuse, retention.
+# Verification, abuse, retention.
 share_otp_requests = _meter.create_counter(
     "mdx_share_otp_requests_total",
     description="Recipient verification codes requested",

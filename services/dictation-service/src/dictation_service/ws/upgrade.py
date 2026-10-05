@@ -1,16 +1,7 @@
-"""WebSocket upgrade — auth, subprotocol negotiation, rate-limit.
+"""WebSocket upgrade: auth, subprotocol negotiation, rate-limit.
 
-The WS upgrade is, at the HTTP layer, an ordinary GET request with
-``Upgrade: websocket``. We validate the bearer token and the requested
-subprotocol BEFORE calling ``websocket.accept()``. A rejected upgrade
-returns a normal HTTP response (400 / 401 / 429) — never a WS handshake
-that immediately closes.
-
-Per-IP and per-user rate limits use Redis counters with TTLs.
-
-Audit:
-- Every rejection writes ``dictation.upgrade.failed`` (warn or sec).
-- Successful upgrades audit on session start in the session handler.
+Validated before ``accept()``; a rejection is a plain HTTP 400/401/429 and
+writes ``dictation.upgrade.failed``.
 """
 
 from __future__ import annotations
@@ -59,11 +50,7 @@ class UpgradeContext:
     subprotocol: str
     client_ip: str
     origin: str | None
-    # Sprint 14: negotiated wire version (1 = dictation.v1, 2 = .v2)
-    # and the raw bearer. The bearer is retained because conversation
-    # finalize creates the note draft over HTTP with the CALLER's
-    # identity (note-service enforces note.write on the caller),
-    # matching the repo's forward-the-caller's-bearer pattern.
+    # The bearer is kept because conversation finalize drafts the note as the caller.
     protocol_version: int = VERSION_BY_SUBPROTOCOL[SUBPROTOCOL]
     bearer: str | None = None
 
@@ -74,11 +61,7 @@ class UpgradeRejected(HTTPException):
     def __init__(self, status_code: int, code: str, detail: str = "") -> None:
         super().__init__(status_code=status_code, detail={"code": code, "detail": detail})
         self.code = code
-        # Counted here rather than at each of the ~9 raise sites: this is the
-        # one choke point every rejection passes through, so the metric cannot
-        # drift as rejection reasons are added. Sprint 04 declared this
-        # instrument but never emitted it, leaving DictationUpgradeRejectionRate
-        # unable to fire (found in the sprint-14 deployment pass).
+        # Single choke point for every rejection, so the metric cannot drift.
         metrics.ws_upgrade_rejections.add(1, {"reason": code})
 
 
@@ -91,16 +74,12 @@ async def authorize_upgrade(
 ) -> UpgradeContext:
     """Validate the upgrade or raise :class:`UpgradeRejected`.
 
-    Order matters: we check the subprotocol header BEFORE the JWT, so a
-    misconfigured client doesn't burn a JWKS verification on us. The
-    rate-limit check happens before subprotocol — DoS protection wins.
+    Order: rate limit, then subprotocol, then JWT (cheapest rejection first).
     """
     client_ip = _client_ip(websocket)
     origin = websocket.headers.get("origin")
 
-    # Origin allow-list. Browsers send `Origin` for cross-site WS too;
-    # we mirror the frontend CORS allow-list. CLI tools (no Origin)
-    # are allowed through in dev only.
+    # Origin allow-list mirrors the frontend CORS list; no Origin passes in dev only.
     if (
         origin is not None
         and origin not in settings.ws_allowed_origins
@@ -121,7 +100,7 @@ async def authorize_upgrade(
             detail=f"origin {origin!r} is not in the allow-list",
         )
 
-    # Per-IP rate limit: 10 upgrade attempts per minute.
+    # Per-IP rate limit.
     if not await _allow_ip(redis, client_ip):
         await _audit_upgrade_fail(
             audit_writer,
@@ -137,9 +116,7 @@ async def authorize_upgrade(
             detail="too many upgrade attempts from this IP",
         )
 
-    # Subprotocol negotiation (sprint 14): the client offers a list; the
-    # server selects by preference (v2 over v1). A v1-only client is
-    # untouched; a v2-capable client that offers both gets v2.
+    # Subprotocol negotiation: server prefers v2 over v1 among what the client offers.
     offered = _parse_subprotocols(websocket.headers.get("sec-websocket-protocol"))
     negotiated = negotiate_subprotocol(offered)
     if negotiated is None:
@@ -160,9 +137,7 @@ async def authorize_upgrade(
             ),
         )
 
-    # Bearer token. We accept Authorization header *or* (some browsers
-    # can't set Authorization on WS) a ?token= query param. Both are
-    # validated identically.
+    # Authorization header or ?token= (browsers cannot set headers on WS).
     bearer = _extract_bearer(websocket)
     if bearer is None:
         await _audit_upgrade_fail(
@@ -183,9 +158,7 @@ async def authorize_upgrade(
         claims = await verify_token(
             bearer,
             jwks_cache=jwks_cache,
-            # FND-1: the same list the HTTP dependency uses. A socket
-            # that trusted a different set of issuers than the REST surface
-            # would be an outage confined to one endpoint.
+            # Same issuer list as the HTTP dependency.
             issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
         )
@@ -226,7 +199,7 @@ async def authorize_upgrade(
             detail=type(exc).__name__,
         ) from exc
 
-    # Per-user rate limit: 30 upgrades per hour.
+    # Per-user rate limit.
     if not await _allow_user(redis, claims.sub):
         await _audit_upgrade_fail(
             audit_writer,
@@ -256,12 +229,7 @@ async def authorize_upgrade(
 
 
 def _client_ip(websocket: WebSocket) -> str:
-    """Best-effort client-IP extraction.
-
-    Honours `X-Forwarded-For` only in dev. In prod the load balancer
-    sets a trusted header that the SRE configures; for sprint 4 dev we
-    accept the leftmost XFF value.
-    """
+    """Best-effort client IP; honours leftmost X-Forwarded-For in dev only."""
     xff = websocket.headers.get("x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()
@@ -280,8 +248,7 @@ def _extract_bearer(websocket: WebSocket) -> str | None:
     auth = websocket.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
         return auth[7:].strip()
-    # Browsers can't set Authorization on the WS upgrade. As a fallback
-    # the frontend may pass ?token= (over TLS only — documented).
+    # ?token= fallback for browsers (TLS only).
     token = websocket.query_params.get("token")
     return token if token else None
 
@@ -319,13 +286,7 @@ async def _audit_upgrade_fail(
     severity: Severity,
     **extra: object,
 ) -> None:
-    """Write a `dictation.upgrade.failed` event.
-
-    ``tenant_id`` may be None for pre-auth failures (the chain requires
-    a tenant scope — we have to skip the audit row in that case and rely
-    on the structured log line. Real prod adds a "system" tenant for
-    this, but sprint 4 keeps it simple).
-    """
+    """Write a `dictation.upgrade.failed` event; pre-auth failures (no tenant) only log."""
     payload: dict[str, object] = {
         "reason": reason,
         "client_ip": client_ip,

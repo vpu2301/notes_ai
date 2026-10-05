@@ -1,16 +1,7 @@
-"""FND-1 contract for auth-service — the one service whose list depends on its mode.
+"""Issuer contract for auth-service, whose list is mode-derived (``main_deps.auth_issuers``).
 
-Every other service trusts whatever ``AUTH_ISSUERS_JSON`` names. This one
-also decides which issuers exist, so its list is mode-derived
-(``main_deps.auth_issuers``):
-
-    keycloak → the configured list
-    dual     → the configured list + its own native issuer  (ADR-0047)
-    native   → its own issuer ONLY — a Keycloak token left in a browser
-               must not outlive the cut-over
-
-The four contract cases run against the `dual` list, which is the only
-one with two live issuers in it.
+keycloak → the configured list; dual → the configured list + its own native issuer (ADR-0047);
+native → its own issuer only. The four contract cases run against the `dual` list.
 """
 
 from __future__ import annotations
@@ -60,8 +51,7 @@ def test_native_mode_drops_keycloak(
 def test_dual_does_not_duplicate_an_already_configured_native_issuer(
     monkeypatch: pytest.MonkeyPatch, contract: IssuerContract
 ) -> None:
-    """A fleet-wide AUTH_ISSUERS_JSON already names both; adding a third copy
-    of ourselves would build a JwksCache with a lost entry."""
+    """AUTH_ISSUERS_JSON already names both; a third copy of ourselves would lose a JwksCache entry."""
     _configure(monkeypatch, contract, "dual")
     monkeypatch.setattr(settings, "auth_issuers_json", contract.issuers_json)
     names = [c.issuer for c in auth_issuers()]
@@ -71,9 +61,7 @@ def test_dual_does_not_duplicate_an_already_configured_native_issuer(
 def test_native_issuer_config_matches_the_published_jwks_path(
     monkeypatch: pytest.MonkeyPatch, contract: IssuerContract
 ) -> None:
-    """FND-1 configures the fleet with this URL before BE-2 serves anything
-    at it; a mismatch here is a fleet that trusts an issuer it can never
-    fetch a key for."""
+    """The fleet trusts this URL before anything is served at it; a mismatch is an issuer with no fetchable key."""
     _configure(monkeypatch, contract, "dual")
     config = native_issuer_config()
     assert config.issuer == contract.native_issuer

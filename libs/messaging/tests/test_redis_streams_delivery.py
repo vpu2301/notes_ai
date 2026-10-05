@@ -1,18 +1,5 @@
-"""Delivery-semantics regression tests for RedisStreamsConsumer.
-
-These run against fakeredis on every `make test` — deliberately NOT
-behind RUN_REDIS_INTEGRATION. The three defects covered here all
-survived because the only coverage was an env-gated integration suite
-that never ran in CI:
-
-  * ``ack()`` guarded on ``Message.offset``, which ``_to_message`` always
-    sets to None, so XACK never fired and the PEL grew without bound.
-  * the retry counter was read from the message headers, but a failed
-    entry is re-delivered with its original fields, so the count always
-    read back as 0 and the DLQ cap was never reached.
-  * ``_reclaim_loop`` logged the entries XAUTOCLAIM returned but never
-    yielded them, and XREADGROUP '>' cannot return them either — so a
-    crashed consumer's in-flight messages were stranded.
+"""Delivery-semantics regressions for RedisStreamsConsumer on fakeredis (deliberately not env-gated):
+ack must XACK, the retry counter must survive re-delivery, reclaimed entries must reach the iterator.
 """
 
 from __future__ import annotations
@@ -95,14 +82,8 @@ async def test_dlq_after_max_retries_without_header_help(
             break
         assert first is not None
 
-        # Re-delivery hands back a Message rebuilt from the SAME stream
-        # fields, so failing the same object three times is exactly the
-        # retry sequence. Under the old header-borne counter this read
-        # back as attempts=1 every time and never reached the cap.
-        # The return value is the "this work is now permanently off the
-        # stream" signal: a caller that keeps its own record of the job
-        # (asr-worker keeps a transcription_jobs row) has no other way to
-        # learn the queue gave up, and the record would wait forever.
+        # Re-delivery rebuilds the Message from the SAME fields, so failing one object three times is the retry
+        # sequence; the return value tells a caller with its own job record that the queue gave up.
         assert await consumer.fail(first, error_kind="boom-1") is False
         assert await redis_client.xlen(dlq) == 0
 
@@ -152,9 +133,7 @@ async def test_reclaimed_entries_are_redelivered(redis_client: FakeRedis) -> Non
     ) as b:
         assert await b.reclaim_once() == 1
 
-        # The claimed entry must come back out of the iterator. Drive one
-        # step of the generator rather than an `async for` + `break`, which
-        # would leave the generator suspended for the GC to finalise.
+        # One generator step rather than `async for` + `break`, which would leave it suspended for the GC.
         it = b.__aiter__()
         try:
             rescued = await asyncio.wait_for(anext(it), timeout=5.0)

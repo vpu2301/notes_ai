@@ -1,14 +1,6 @@
-"""The drills that can be measured without a model (Sprint 37 B-5).
-
-Two of the seven scenarios are properties of the QUEUE, not of the model:
-fairness between workspaces and the budget stop. Those are measurable on
-a dev database in seconds, so they run here and their numbers go in the
-report with the rest.
-
-The other five need a deployed stack with a real backend (and, for two of
-them, a way to break it on purpose); `docs/testing/load/notes-README.md`
-has the commands. A drill that cannot run on this machine is recorded as
-not run — never as a pass.
+"""The note-generation drills measurable without a model: queue fairness between
+workspaces and the budget stop. The others need a deployed stack and are recorded as
+not run, never as a pass.
 
     RUN_NOTE_LOAD=1 uv run pytest tests/load/note_generation/runner.py -v
 """
@@ -70,9 +62,7 @@ async def pool() -> asyncpg.Pool:  # noqa: ANN201
 
 
 async def test_noisy_neighbour(pool: asyncpg.Pool, workspaces: tuple[UUID, UUID]) -> None:
-    """One workspace enqueues 50, another enqueues 1. The single job must
-    start within two minutes — measured in claim rounds, because a round
-    is a worker's cycle and wall-clock here is our own loop speed."""
+    """One workspace enqueues 50, another 1: the single job starts within a couple of claim rounds."""
     from jobs import JobQueue
 
     noisy, quiet = workspaces

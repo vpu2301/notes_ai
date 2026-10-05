@@ -1,10 +1,4 @@
-"""Sprint-14 mode-aware (weighted) worker capacity.
-
-A conversation session runs two resident models, so it costs
-``conversation_session_weight`` slots (ADR-0034 §capacity). The cap
-compares WEIGHT, not headcount: with max_sessions=4 that is 4 dictation
-OR 2 conversation OR a 2+1+1 mix. Pure — the manager is in-memory only.
-"""
+"""Weighted worker capacity: the cap compares weight, not headcount (pure, in-memory manager)."""
 
 from __future__ import annotations
 

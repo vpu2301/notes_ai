@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-"""CI gate: ``INSERT INTO audit.events`` must only happen inside libs/audit.
-
-Spec § 8 risk E2: a developer might bypass ``AuditWriter`` by inserting
-directly. The audit_writer Postgres role gates this at runtime, but a
-service-account misconfiguration could re-grant INSERT to app_role.
-This grep is the belt to the role-grant's braces.
-
-Allowed locations:
-  - libs/audit/**         (the writer itself)
-  - infra/postgres/**     (migrations)
-  - scripts/**            (DB tooling, e.g. nightly-verify)
+"""CI gate: ``INSERT INTO audit.events`` only inside libs/audit (allowed: libs/audit,
+infra/postgres migrations, scripts tooling). Belt to the audit_writer role's braces.
 """
 
 from __future__ import annotations
@@ -29,8 +20,7 @@ EXCLUDED_DIRS: frozenset[str] = frozenset(
     {".venv", "__pycache__", "node_modules", ".git", "dist", "build"}
 )
 
-# Match `INSERT INTO audit.events` and `INSERT INTO "audit"."events"` etc.
-# Also catch ``COPY audit.events FROM …`` (another way to write rows).
+# INSERT INTO / COPY ... FROM on audit.events, quoted or not.
 PATTERN = re.compile(
     r"(?i)(insert\s+into|copy)\s+(?:\"?audit\"?\.)?\"?events\"?",
     re.MULTILINE,
@@ -58,8 +48,7 @@ def main() -> int:
         except (UnicodeDecodeError, PermissionError):
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            # Only match writes to the audit schema specifically — many
-            # tables have an `events` column or table elsewhere.
+            # Only the audit schema: `events` exists elsewhere too.
             if re.search(
                 r"audit\.events|audit\"\.\"events", line, re.IGNORECASE
             ) and PATTERN.search(line):

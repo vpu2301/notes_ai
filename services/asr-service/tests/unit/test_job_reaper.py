@@ -1,15 +1,5 @@
-"""The reaper collects what a dead worker left behind — and nothing else.
-
-Two properties matter, and they pull against each other. It must collect
-jobs no worker is coming back for, because each one permanently burns a
-slot in ``per_tenant_concurrent_jobs`` and shows the user a spinner
-that will never stop. And it must never collect a job that finished
-between the scan and the write, because a stored transcript being
-overwritten by "the worker looked dead" loses real dictation.
-
-The DB is faked at the repository boundary: what is under test is the
-reaper's decisions, not asyncpg.
-"""
+"""The reaper collects what a dead worker left behind, and never a job that finished
+between the scan and the write. The DB is faked at the repository boundary."""
 
 from __future__ import annotations
 
@@ -122,8 +112,7 @@ async def test_running_job_is_reaped_as_worker_lost(db: dict[str, Any]) -> None:
 
     assert await reaper.sweep_once(state) == 1
     assert db["failed"][0]["error_kind"] == str(JobErrorKind.WORKER_LOST)
-    # Conditional on the status we scanned — the interlock against a job
-    # that completed underneath us.
+    # Conditional on the status we scanned.
     assert db["failed"][0]["only_if_status"] == ("running",)
 
 
@@ -137,9 +126,7 @@ async def test_queued_job_is_reaped_as_queue_lost(db: dict[str, Any]) -> None:
 
 
 async def test_a_job_that_finished_first_is_not_counted(db: dict[str, Any]) -> None:
-    # fail_job's conditional UPDATE matched nothing: the job reached a
-    # terminal status between the scan and the write. It keeps its own
-    # outcome, and it is not audited as reaped.
+    # The conditional UPDATE matched nothing: the job keeps its outcome, not audited.
     db["candidates"] = [_stale("running")]
     db["fail_result"] = False
     state = _state([_TENANT])
@@ -182,7 +169,7 @@ async def test_one_bad_tenant_does_not_stop_the_sweep(
     assert calls == [_TENANT, other]
 
 
-# ── Stranded speaker re-runs (Sprint 29) ──────────────────────────────
+# ── Stranded speaker re-runs ──────────────────────────────────────────
 
 
 def _stale_rerun(status: str) -> repository.StaleRediarizeRow:

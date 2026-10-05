@@ -1,18 +1,12 @@
 import AppKit
 import SwiftUI
 
-// The pieces the web's note page has around a generated note (Summary
-// Engine v2 Q5, Sprint 36): the evidence behind a line, the names the
-// engine respelled, what is still open from the last meeting, the client
-// version, and the version history. Members only — none of this is ever
-// rendered on the shared page, the client version or the PDF.
+// The pieces around a generated note: the evidence behind a line, respelled names,
+// carry-over, the client version, and history. Members only — never on the shared page, the client version or the PDF.
 
 // MARK: - The evidence behind one line (Q5)
 
-/// A certainty chip ("Forecast · Reinbold"), a corrected-name chip, and a
-/// quiet mark that opens the quote the line rests on. Labels are data from
-/// the row, drawn here — never words in the note a person would have to
-/// edit around.
+/// A certainty chip ("Forecast · Reinbold"), a corrected-name chip, and a mark that opens the quote. Labels are data from the row, never words in the note.
 struct LineEvidenceView: View {
     @ObservedObject var model: NoteViewModel
     let row: GeneratedItem
@@ -63,9 +57,7 @@ private struct EvidenceChip: View {
     }
 }
 
-/// The quote (verbatim, as the transcriber heard it), when it was said and
-/// by whom, a way to the transcript at that moment, and the other facts
-/// the line rests on.
+/// The quote (verbatim), when and by whom, a way to the transcript, and the other facts the line rests on.
 private struct EvidencePopover: View {
     @ObservedObject var model: NoteViewModel
     let row: GeneratedItem
@@ -123,10 +115,7 @@ private struct EvidencePopover: View {
 
 // MARK: - Names the engine respelled (Q5)
 
-/// For the author to accept or reject. Accept: the name becomes a
-/// workspace glossary term with the heard spelling as a mishearing — the
-/// next generation spells it that way without asking anyone. Reject: the
-/// line goes back to what the recording heard.
+/// Accept: the name becomes a glossary term with the heard spelling as a mishearing. Reject: back to what the recording heard.
 struct CorrectionsPanelView: View {
     @ObservedObject var model: NoteViewModel
 
@@ -175,9 +164,7 @@ struct CorrectionsPanelView: View {
 
 // MARK: - Still open from the last meeting (Sprint 36)
 
-/// The previous meeting's unfinished business, at the top of this one.
-/// The items keep the PREVIOUS note's key, so ticking one here does not
-/// detach it from the meeting where it was agreed.
+/// The previous meeting's unfinished business. Items keep the PREVIOUS note's key, so ticking one here does not detach it.
 struct CarriedItemsView: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var model: NoteViewModel
@@ -244,9 +231,7 @@ struct CarriedItemsView: View {
 
 // MARK: - The client version (Sprint 36)
 
-/// What this note looks like to someone outside the workspace. A preview
-/// of the real thing, not a mock-up of it: the server builds it with the
-/// same function the shared page and the client PDF use.
+/// What this note looks like to someone outside the workspace; the server builds it with the same function the shared page and PDF use.
 struct ClientVersionView: View {
     @ObservedObject var model: NoteViewModel
 

@@ -1,9 +1,4 @@
-"""Password strength rules.
-
-The cases that matter are the ones a naive length check would wave
-through: a blocklisted password wearing a suffix, the user's own email
-local part, and leet substitution.
-"""
+"""Password strength rules: blocklisted password with a suffix, the user's email local part, leet substitution."""
 
 from __future__ import annotations
 
@@ -27,12 +22,7 @@ def test_rejects_short_even_when_complex() -> None:
 
 
 def test_no_composition_rule_is_imposed() -> None:
-    """A long all-lowercase passphrase must pass.
-
-    NIST SP 800-63B §5.1.1.2 says verifiers SHOULD NOT require character
-    variety. If this test ever fails, someone has added a rule the spec
-    explicitly warns against.
-    """
+    """A long all-lowercase passphrase must pass (NIST SP 800-63B §5.1.1.2: no character-variety rules)."""
     assert pol.check_password("thequickbrownfoxjumpsover").ok
 
 
@@ -66,11 +56,7 @@ def test_rejects_password_containing_display_name() -> None:
 
 
 def test_short_identifier_fragments_do_not_block() -> None:
-    """A two-letter fragment must not ban half the dictionary.
-
-    `de@x.com` yields the fragment "de"; banning it would reject an
-    enormous share of legitimate German passphrases for no gain.
-    """
+    """A two-letter fragment ("de" from `de@x.com`) must not ban half the dictionary."""
     assert pol.check_password("wanderlust morning", email="de@x.com").ok
 
 

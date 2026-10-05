@@ -1,17 +1,6 @@
-"""Ask nlp-service to extract typed fields from a dictation (sprint 13).
-
-Delivery path (ADR-0028): the ``field_extraction`` stage emits its
-proposals on ``StageOutput.metadata``, which ``POST /nlp/process``
-returns verbatim in its deterministic ``metadata`` body. Note-service
-— the one service that holds BOTH the template (with its options) and
-the draft — calls it at draft-assembly time and writes the result into
-``NoteSection.field_specific_metadata``.
-
-Fail-open by design: extraction is an assistive proposal, never a
-precondition. A timeout, a non-200, or a malformed body yields no
-metadata and the draft is created with prose only. Losing a proposal
-costs the author one dropdown; failing the draft costs them the
-dictation.
+"""Ask nlp-service to extract typed fields from a dictation (ADR-0028), written
+into ``NoteSection.field_specific_metadata`` at draft assembly. Fail-open: a
+timeout, non-200 or malformed body yields no metadata, never a failed draft.
 """
 
 from __future__ import annotations

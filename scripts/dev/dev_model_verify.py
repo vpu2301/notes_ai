@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Probe the dev-Mac backends through libs/models — fails loudly, not silently.
-
-1. Chat: liveness, JSON-schema structured output, and a ~20k-token context
-   probe (a marker placed at the START of a long prompt must come back; a
-   server that truncates the prompt to a 4k window loses it). Runbook step 2.
-2. ASR: the bundled probe clip must return words[] (ADR-0037 contract).
+"""Probe the dev-Mac backends through libs/models, failing loudly: chat liveness,
+structured output and a long-context marker probe; ASR words[] on the bundled clip.
 """
 
 from __future__ import annotations
@@ -16,9 +12,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-# Sprint L1: the probe is sized from the backend's own `context_window`
-# (16K by default, 32K for notes-chat-long) — 60 % of it, so a server that
-# honours the Modelfile passes and one truncating to 4K fails.
+# Probe = 60 % of the backend's `context_window`, so a server truncating to 4K fails.
 PROBE_SHARE = 0.6
 FILLER_TOKENS_PER_LINE = 14
 
@@ -48,8 +42,7 @@ async def main() -> int:
         r = await chat.complete('Reply with JSON: {"ok": true, "n": 3}', schema, max_tokens=32)
         assert r.json == {"ok": True, "n": 3}, r.text
         print(f"  ✓ chat: structured output mode '{r.structured_mode}' works")
-        # Filler worth PROBE_SHARE of the context window (≈ 14 tokens per
-        # line); marker at the START, where a truncating server loses it.
+        # Marker at the START, where a truncating server loses it.
         context = chat_backend.caps.context_window
         probe_tokens = int(context * PROBE_SHARE)
         marker = "ZEBRA-7741"

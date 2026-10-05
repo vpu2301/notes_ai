@@ -5,6 +5,7 @@ import React, {
   type ClipboardEvent as ReactClipboardEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  useRef,
 } from "react";
 import { messageFor } from "../lib/errorCopy";
 import {
@@ -65,17 +66,7 @@ export function publicLinkUrl(path: string): string {
 /** Loose shape check — the real test is whether a relay accepts it. */
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/**
- * Everything about who can see a note, in one sheet: who to send it to,
- * workspace visibility, and a public link.
- *
- * Sending is the sheet's job, not the mail client's. The old "Email
- * link…" button navigated to a `mailto:` URL, which left the sender
- * staring at an unstyled draft they still had to send — and, on macOS,
- * at whatever Mail.app happened to have open, old attachment and all.
- * Here the addresses are picked, the message is typed, and the server
- * sends the real mail.
- */
+/** Share sheet: recipients, workspace visibility, public link. The server sends the mail. */
 export interface ShareOwner {
   name: string;
   email: string;
@@ -94,21 +85,25 @@ export function ShareDialog({
   noteId,
   noteTitle,
   owner,
+  initialFocus,
   onClose,
 }: {
   noteId: string;
   noteTitle: string;
   /** The note's author, shown first under "People with access". */
   owner?: ShareOwner;
+  /** Which form gets focus once the sheet has loaded. */
+  initialFocus?: "people" | "client";
   onClose: () => void;
 }) {
   const toast = useToast();
+  const root = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<SharingView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // The client link form (Sprint 19).
+  // The client link form.
   const [clientLabel, setClientLabel] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientMessage, setClientMessage] = useState("");
@@ -119,7 +114,6 @@ export function ShareDialog({
   const [publicDays, setPublicDays] = useState<(typeof PUBLIC_EXPIRY_OPTIONS)[number]>(0);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
-  // The compose box: confirmed addresses, plus whatever is half-typed.
   const [recipients, setRecipients] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -184,8 +178,7 @@ export function ShareDialog({
 
   const onDraftKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === "," || e.key === ";" || e.key === " ") {
-      // Space commits too: pasting a list separated by spaces is common,
-      // and no e-mail address anybody types here contains one.
+      // Space commits too (space-separated pastes are common).
       if (draft.trim()) {
         e.preventDefault();
         commitDraft();
@@ -194,8 +187,7 @@ export function ShareDialog({
     }
     const last = recipients[recipients.length - 1];
     if (e.key === "Backspace" && !draft && last) {
-      // Backspace on an empty box edits the last chip rather than
-      // silently deleting it — a typo is the usual reason to press it.
+      // Backspace on an empty box edits the last chip rather than deleting it.
       setRecipients((current) => current.slice(0, -1));
       setDraft(last);
     }
@@ -215,8 +207,7 @@ export function ShareDialog({
   const send = async (e: FormEvent) => {
     e.preventDefault();
     if (!commitDraft()) return;
-    // commitDraft's setState has not landed yet, so fold the last typed
-    // address in by hand rather than sending one recipient short.
+    // commitDraft's setState has not landed yet: fold the draft in by hand.
     const typed = draft.trim().replace(/[,;]+$/, "");
     const all = typed && EMAIL_RE.test(typed) ? [...recipients, typed] : recipients;
     const to = all.filter((a, i) => all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i);
@@ -251,7 +242,7 @@ export function ShareDialog({
   // ── client links ──────────────────────────────────────────────────
 
   const clientLinks = (view?.links ?? []).filter((l) => l.kind === "recipient");
-  // Sprint 23: the workspace's rules. Older servers send no constraints.
+  // Older servers send no constraints.
   const rules = view?.constraints;
   const externalOff = rules ? !rules.external_links_enabled : false;
   const publicOff = rules ? !rules.public_links_enabled : false;
@@ -357,7 +348,6 @@ export function ShareDialog({
   const hasPeople = owner !== undefined || members.length > 0 || clientLinks.length > 0;
   const composing = recipients.length > 0 || draft.trim().length > 0;
 
-  // General access, the way a file's share sheet says it: one choice.
   const accessValue: "private" | "workspace" | "link" = link ? "link" : (view?.visibility ?? "private");
   const setAccess = (value: "private" | "workspace" | "link") => {
     if (!view || value === accessValue) return;
@@ -376,8 +366,7 @@ export function ShareDialog({
     link: "Anyone with the link can read and download it, without signing in — but not respond.",
   }[accessValue];
 
-  /** A public link's expiry can only be set when it is minted: changing
-      it later mints a new link, and the old one stops working. */
+  /** Expiry is set at mint time: changing it mints a new link and the old one stops working. */
   const renewPublicLink = (days: (typeof PUBLIC_EXPIRY_OPTIONS)[number]) => {
     setPublicDays(days);
     if (!link) return;
@@ -402,9 +391,18 @@ export function ShareDialog({
     }
   };
 
+  const loaded = view !== null;
+  useEffect(() => {
+    if (!loaded || !initialFocus) return;
+    const selector = initialFocus === "client" ? 'input[aria-label="Recipient label"]' : 'input[aria-label="E-mail address"]';
+    const el = root.current?.querySelector<HTMLInputElement>(selector);
+    el?.focus();
+    el?.scrollIntoView?.({ block: "center" });
+  }, [loaded, initialFocus]);
+
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share note">
+      <div className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share note" ref={root}>
         <div className="modal-h">
           <h2>Share “{subject}”</h2>
           <button className="icon-btn modal-x" aria-label="Close" onClick={onClose}>

@@ -1,10 +1,5 @@
-"""Jinja environment for the share mail.
-
-``StrictUndefined`` is the load-bearing choice: a typo'd variable must
-fail the render, not quietly produce a mail whose button links to
-nothing. Autoescaping is the other one — a note title and a display name
-are user-written, and unescaped they are an HTML-injection vector in a
-mail client.
+"""Jinja environment for the share mail. ``StrictUndefined``: a typo'd variable must
+fail the render; autoescape: titles and names are user-written.
 """
 
 from __future__ import annotations
@@ -61,9 +56,7 @@ def render(
     access: str,
     shared_at: datetime,
     env: Environment | None = None,
-    # Sprint 22 — the recipient-link mail adds who the workspace is, when
-    # the link expires, the product line and an opt-out. All optional so
-    # the member/public share mail is unchanged.
+    # Recipient-link mail extras; all optional so the member/public share mail is unchanged.
     issuer_name: str = "",
     expires_on: str = "",
     brand_line: str = "",
@@ -72,10 +65,7 @@ def render(
     lang = copy.normalize_lang(lang)
     strings = copy.strings(lang, sharer=sharer_name, access=access)
     strings = {**strings, **copy.recipient_strings(lang)}
-    # Blank lines separate paragraphs; the template renders each as its
-    # own <p>. Splitting here rather than with `nl2br` in the template
-    # keeps the escaping automatic — no `|safe` anywhere near text a
-    # user typed.
+    # Split here, not with `nl2br`: keeps escaping automatic, no `|safe` near user text.
     paragraphs = [p.strip() for p in message.strip().split("\n\n") if p.strip()]
     html = (
         (env or _env())
@@ -103,9 +93,7 @@ def render(
         unsubscribe_url=unsubscribe_url,
     )
     return RenderedEmail(
-        # A newline in a subject is a header-injection primitive: the
-        # bytes after it become additional headers. Stripped here, the
-        # last place before the MIME document is assembled.
+        # A newline in a subject is a header-injection primitive; stripped here.
         subject=copy.subject(lang, sharer=sharer_name, note_title=note_title)
         .replace("\n", " ")
         .replace("\r", " ")

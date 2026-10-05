@@ -2,13 +2,9 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The desktop recording indicator: a small pill that floats above every
-/// window and Space while a meeting is being recorded — a pulsing red dot,
-/// a live waveform that flows with the voice, and the elapsed time.
-///
-/// Click opens the app's window; drag moves it (the spot is remembered).
-/// Hovering slides out Mark moment, Open and Stop; right-click offers the
-/// same. It goes away the moment the recording ends.
+/// The desktop recording indicator: a pill above every window and Space while recording
+/// (pulsing dot, live waveform, elapsed time). Click opens the window; drag moves it;
+/// hover slides out Mark moment, Open and Stop. Gone when the recording ends.
 @MainActor
 final class RecordingBubble {
     static let shared = RecordingBubble()
@@ -72,8 +68,7 @@ final class RecordingBubble {
         container = nil
     }
 
-    /// The remembered spot if it is still on a screen; otherwise the top
-    /// right of the main screen, clear of the menu bar.
+    /// The remembered spot if still on a screen; otherwise the top right of the main screen, clear of the menu bar.
     private static func origin(size: NSSize, screen: NSScreen) -> NSPoint {
         if let saved = UserDefaults.standard.string(forKey: originKey) {
             let point = NSPointFromString(saved)
@@ -86,8 +81,7 @@ final class RecordingBubble {
     }
 }
 
-/// Fixed geometry, so the container knows where the pill's own body ends
-/// and the hover buttons begin without asking SwiftUI.
+/// Fixed geometry, so the container knows where the pill's body ends and the hover buttons begin.
 private enum BubbleMetrics {
     static let height: CGFloat = 30
     static let collapsedWidth: CGFloat = 126
@@ -119,8 +113,7 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// Owns the pill's body (click vs. drag, hover, right-click); the hover
-/// buttons on the right are left to SwiftUI.
+/// Owns the pill's body (click vs. drag, hover, right-click); the hover buttons are SwiftUI's.
 private final class BubbleContainer: NSView {
     var onClick: () -> Void = {}
     var onStop: () -> Void = {}
@@ -132,8 +125,7 @@ private final class BubbleContainer: NSView {
     private var pressAt: NSPoint?
     private var dragged = false
     private var collapseTask: Task<Void, Never>?
-    /// Where the pill rests collapsed; expanding may nudge it left when it
-    /// sits against the right edge of the screen.
+    /// Where the pill rests collapsed; expanding may nudge it left at the screen's right edge.
     private var restingX: CGFloat?
 
     init(frame: NSRect, state: BubbleState) {
@@ -245,8 +237,7 @@ private final class BubbleContainer: NSView {
     @objc private func stop() { onStop() }
 }
 
-/// The pill: ink ground, a pulsing red dot, a waveform that scrolls right
-/// to left with the voice, the elapsed time — and, on hover, the actions.
+/// The pill: ink ground, a pulsing red dot, a scrolling waveform, the elapsed time — and, on hover, the actions.
 private struct RecordingBubbleView: View {
     @ObservedObject var recorder: AudioRecorder
     @ObservedObject var state: BubbleState
@@ -318,8 +309,7 @@ private struct RecordingBubbleView: View {
         .contentShape(Rectangle())
     }
 
-    /// Mirrored bars, newest on the right; the older ones fade out to the
-    /// left so the sound reads as flowing past.
+    /// Mirrored bars, newest on the right; older ones fade out to the left.
     private var waveform: some View {
         HStack(alignment: .center, spacing: 1.5) {
             ForEach(history.indices, id: \.self) { index in

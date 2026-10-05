@@ -1,9 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The full window: a sidebar of meetings on the left, and on the right
-/// whatever is selected — the note itself, opened natively; the live card
-/// while a capture is running; or the home pane. Settings is a sheet.
+/// The full window: sidebar on the left, the selection on the right (note, live card, or home). Settings is a sheet.
 struct MainWindowView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -25,10 +23,7 @@ struct MainWindowView: View {
                     VStack(spacing: 16) {
                         SignInView()
                             .dsCard(padding: 24, radius: DS.radiusXl)
-                        // A session that ended does not take the meetings
-                        // waiting on this Mac with it. They cannot be sent
-                        // until somebody signs in, but they can be seen,
-                        // saved and — deliberately — deleted.
+                        // A session that ended does not take the waiting meetings with it: they can be seen, saved and deleted.
                         if !app.pending.isEmpty {
                             PendingUploadsSection(pending: app.pending, canSend: false)
                         }
@@ -84,8 +79,7 @@ struct MainWindowView: View {
         .sheet(item: $app.reauth) { prompt in
             ReauthSheet(prompt: prompt)
         }
-        // Sprint 31: the call-audio notice. Settings shows its own copy
-        // while it is open (a sheet cannot present over another here).
+        // The call-audio notice. Settings shows its own copy while open (a sheet cannot present over another here).
         .sheet(isPresented: Binding(
             get: { capture.callAudioConsentPresented && !app.settingsPresented },
             set: { if !$0 { capture.callAudioConsentPresented = false } })) {
@@ -100,9 +94,7 @@ struct MainWindowView: View {
         .onAppear {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
-            // Invitations accepted elsewhere, a role changed by an admin, a
-            // membership removed: picked up when the window comes forward,
-            // and throttled to once every five minutes inside.
+            // Membership changes made elsewhere: picked up when the window comes forward, throttled to once every five minutes.
             Task {
                 await app.refreshWorkspaces()
                 await app.retryPendingUploads()
@@ -144,8 +136,7 @@ struct MainWindowView: View {
 
 // MARK: - A meeting without a note yet
 
-/// Selected a meeting that has no note: the live card if it is the capture
-/// in flight, otherwise its status (in progress, failed, transcript ready).
+/// Selected a meeting that has no note: the live card if it is the capture in flight, otherwise its status.
 private struct MeetingStatusPane: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var live: CaptureViewModel

@@ -1,33 +1,8 @@
-"""choice / multi_choice extraction.
+"""choice / multi_choice extraction: the extractor proposes, the user confirms.
 
-**Prime directive: the extractor proposes, the user confirms.**
-Below threshold, ambiguous, or negated ⇒ NO selection. An empty field
-with the prose preserved is always correct; a wrong auto-filled
-field is not.
-
-Pure functions — no I/O, no clock, no randomness, injected thresholds.
-Every decision here is replayable byte-for-byte, which is why the
-edit-distance implementation is local (below) rather than a library
-call: a dependency upgrade that changed edit-distance edge semantics
-would silently alter historical replays under a frozen
-``pipeline_version``.
-
-Matching, per option, per candidate phrase (its label + each alias):
-
-1. Tokenize text and phrase identically (NFC, lower, split on
-   non-alphanumerics, apostrophes folded).
-2. Slide the phrase over the text tokens. A phrase matches at a
-   position when EVERY phrase token is within Levenshtein 1 of the
-   aligned text token — and tokens of ≤ 3 characters must match
-   EXACTLY (the short-token guard; without it "не" fuzzy-matches "ні"
-   and "на", which would invert the meaning of a Ukrainian
-   statement).
-3. A negator in the 2 tokens before the match blocks it, unless the
-   negator is part of the matched phrase itself (aliases like
-   "не підписаний" legitimately contain one).
-4. Confidence = token tightness (1 − Σdistance/Σlength), weighted so a
-   longer phrase match outranks a single-token one; an exact
-   full-phrase match scores 1.0.
+Below threshold, ambiguous, or negated ⇒ no selection. Pure and replayable;
+edit distance is local so a library upgrade cannot alter historical replays.
+Tokens ≤ 3 chars must match exactly (else "не" fuzzy-matches "ні"/"на").
 """
 
 from __future__ import annotations
@@ -41,13 +16,11 @@ from note_models import ChoiceMeta, MultiChoiceMeta
 
 from ...pipeline.base import ChoiceOption
 
-# Tokens shorter than this must match exactly — no fuzzy tolerance.
+# Tokens shorter than this must match exactly.
 SHORT_TOKEN_EXACT_BELOW: Final = 4
-# How many tokens before a match are scanned for a negator.
+# Tokens before a match scanned for a negator.
 NEGATION_WINDOW: Final = 2
-# Multi-choice convention: an "explicitly nothing" option loses to any
-# positive finding. Template authors use this value (see the authoring
-# doc) when a section needs an explicit "none" answer.
+# Multi-choice: an "explicitly nothing" option loses to any positive finding.
 EXCLUSIVE_NONE_VALUE: Final = "none_known"
 
 NEGATORS: Final[frozenset[str]] = frozenset(
@@ -74,11 +47,8 @@ NEGATORS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Contrast markers cancel a preceding negator: in "каналів немає, окрім
-# телефону" the negation governs the first clause only, and reading the
-# whole utterance as "no channels" would DROP a real entry. Dropping a
-# positively named option is the most dangerous error this extractor can
-# make, so the negation guard stops at these words.
+# Contrast markers cancel a preceding negator ("немає, окрім телефону"): dropping
+# a positively named option is the most dangerous error here.
 CONTRAST_MARKERS: Final[frozenset[str]] = frozenset(
     {
         # uk
@@ -108,12 +78,7 @@ def tokenize(text: str) -> list[str]:
 
 
 def _within_distance(a: str, b: str, max_distance: int) -> int | None:
-    """Exact Levenshtein distance if ≤ ``max_distance``, else ``None``.
-
-    Local implementation on purpose — see the module docstring on
-    replay determinism. Bounded work: strings differing in length by
-    more than ``max_distance`` short-circuit.
-    """
+    """Exact Levenshtein distance if ≤ ``max_distance``, else ``None``. Local on purpose (replay)."""
     if a == b:
         return 0
     if abs(len(a) - len(b)) > max_distance:
@@ -155,18 +120,13 @@ def _token_distance(text_token: str, phrase_token: str) -> int | None:
 def _is_negated(text_tokens: list[str], start: int, phrase_tokens: list[str]) -> bool:
     """True when a negator governs the match.
 
-    Three rules, in order:
-    1. A phrase carrying its own negation ("не підписаний") is never
-       self-blocked — otherwise negative options would be unfillable.
-    2. A contrast marker between the negator and the match cancels the
-       negation (see ``CONTRAST_MARKERS``).
-    3. Otherwise, a negator within ``NEGATION_WINDOW`` tokens blocks.
+    A phrase carrying its own negation is never self-blocked; a contrast
+    marker between negator and match cancels the negation.
     """
     if any(t in NEGATORS for t in phrase_tokens):
         return False
     window = text_tokens[max(0, start - NEGATION_WINDOW) : start]
-    # Walk backwards from the match: the nearest of (negator, contrast
-    # marker) decides. A contrast marker shields everything after it.
+    # Nearest of (negator, contrast marker) decides.
     for token in reversed(window):
         if token in CONTRAST_MARKERS:
             return False
@@ -200,9 +160,7 @@ def _match_phrase(text_tokens: list[str], phrase: str, *, value: str) -> PhraseM
             continue
 
         tightness = 1.0 - (total_distance / total_length)
-        # Weight longer phrases up: matching "кинув палити" is stronger
-        # evidence than matching "палити" alone. Single-token matches keep
-        # their raw tightness; each extra token closes 25% of the gap to 1.
+        # Longer phrases weigh more: each extra token closes 25% of the gap to 1.
         weight = 1.0 - 0.75 ** (span - 1)
         confidence = tightness + (1.0 - tightness) * weight
         confidence = round(min(1.0, confidence), 6)
@@ -219,8 +177,7 @@ def _match_phrase(text_tokens: list[str], phrase: str, *, value: str) -> PhraseM
 
 
 def _better(a: PhraseMatch, b: PhraseMatch) -> bool:
-    """Deterministic ordering: confidence, then longer phrase, then
-    earlier position. No ties are ever broken by iteration order."""
+    """Deterministic ordering: confidence, then longer phrase, then earlier position."""
     return (a.confidence, a.phrase_len, -a.start_token) > (
         b.confidence,
         b.phrase_len,
@@ -229,20 +186,11 @@ def _better(a: PhraseMatch, b: PhraseMatch) -> bool:
 
 
 def _subsume_overlaps(matches: list[PhraseMatch]) -> list[PhraseMatch]:
-    """Drop matches whose tokens are already claimed by a longer match.
+    """Drop matches whose tokens are claimed by a longer match (same words read two ways).
 
-    "скасував підписку" matches ``former`` over two tokens, and its
-    second token alone fuzzy-matches ``current``'s "підписка". Those are
-    the SAME words read two ways — not two competing claims — so the
-    longer reading wins and the shorter is discarded. Without this,
-    every "cancelled the subscription" utterance would look ambiguous
-    and fill nothing.
-
-    Genuinely disjoint evidence (e.g. "підписаний ... не підписаний" at
-    different positions) keeps both matches, so real contradictions
-    still surface as ambiguity.
+    Disjoint evidence keeps both matches, so real contradictions still surface.
     """
-    # Longest phrase first, then strongest; ties broken deterministically.
+    # Longest phrase first, then strongest.
     ordered = sorted(
         matches,
         key=lambda m: (-m.phrase_len, -m.confidence, m.start_token, m.value),
@@ -267,8 +215,7 @@ def match_options(text: str, options: tuple[ChoiceOption, ...]) -> list[PhraseMa
     matches: list[PhraseMatch] = []
     for option in options:
         best: PhraseMatch | None = None
-        # Label first, then aliases in template order — but ordering only
-        # affects which equally-scored phrase is reported, never the score.
+        # Order only affects which equally-scored phrase is reported, never the score.
         for phrase in (option.label, *option.aliases):
             found = _match_phrase(text_tokens, phrase, value=option.value)
             if found is not None and (best is None or _better(found, best)):
@@ -283,9 +230,7 @@ def match_options(text: str, options: tuple[ChoiceOption, ...]) -> list[PhraseMa
 
 @dataclass(frozen=True, slots=True)
 class ExtractionResult:
-    """The metadata (or None) plus WHY — the stage reports the reason as
-    a metric label so step 08's dashboard can tell "nothing was said"
-    from "we heard two conflicting things"."""
+    """The metadata (or None) plus the outcome reason, reported as a metric label."""
 
     meta: object | None  # a note_models *Meta, or None
     outcome: str  # 'filled' | 'empty' | 'ambiguous'
@@ -297,11 +242,7 @@ def choose(
     *,
     threshold: float,
 ) -> ExtractionResult:
-    """Single-select extraction with its outcome reason.
-
-    Ambiguity rule: if two DIFFERENT options both clear the threshold,
-    nothing is selected. Competing signals are not a coin flip.
-    """
+    """Single-select extraction; two different options above threshold ⇒ nothing selected."""
     above = [m for m in match_options(text, options) if m.confidence >= threshold]
     if not above:
         return ExtractionResult(None, "empty")
@@ -320,13 +261,7 @@ def choose_multi(
     *,
     threshold: float,
 ) -> ExtractionResult:
-    """Multi-select extraction with its outcome reason.
-
-    All options clearing the threshold are selected. The exclusive
-    "none" convention applies: an explicit ``none_known`` is dropped
-    when any positive entry also matched — the speaker said both,
-    and the positive entry is the safe reading.
-    """
+    """Multi-select extraction; ``none_known`` is dropped when any positive entry also matched."""
     above = [m for m in match_options(text, options) if m.confidence >= threshold]
     if not above:
         return ExtractionResult(None, "empty")
@@ -336,9 +271,7 @@ def choose_multi(
     if positives and EXCLUSIVE_NONE_VALUE in selected:
         selected = positives
 
-    # Report the weakest member's confidence: the metadata describes the
-    # selection as a whole, and a set is only as certain as its least
-    # certain member.
+    # A set is only as certain as its least certain member.
     confidence = round(min(m.confidence for m in above if m.value in selected), 6)
     return ExtractionResult(
         MultiChoiceMeta(

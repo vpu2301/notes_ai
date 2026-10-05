@@ -1,11 +1,6 @@
-"""`generation_service.start`: the snapshot, the row and the job must all
-name the SAME generation id.
-
-The snapshot is sealed with the generation id as authenticated data and
-stored under a key that carries it. Until this was pinned, the row was
-inserted without that id, the database picked another, and the worker
-tried to unwrap the snapshot with the row's id — every real generation
-failed with "DEK unwrap failed" and the note stayed a bare transcript.
+"""`generation_service.start`: the snapshot, the row and the job must all name
+the SAME generation id (the snapshot is sealed with it as AAD), or the worker
+can never unwrap the snapshot.
 """
 
 from __future__ import annotations

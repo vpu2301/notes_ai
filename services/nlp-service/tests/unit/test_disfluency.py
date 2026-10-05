@@ -1,4 +1,4 @@
-"""Sprint I3 T3: a conversation reads clean without a word being touched."""
+"""Disfluency stage: a conversation reads clean without a word being touched."""
 
 from __future__ import annotations
 

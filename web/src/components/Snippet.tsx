@@ -1,11 +1,6 @@
 import { Fragment, useMemo } from "react";
 
-/**
- * Renders a search snippet whose only trusted markup is the
- * `<mark>…</mark>` pairs emitted by ts_headline (StartSel/StopSel).
- * Everything else is rendered as plain text (any stray tags stripped),
- * so nothing from note content can inject HTML.
- */
+/** Search snippet: only ts_headline's `<mark>` pairs are markup; everything else is plain text. */
 export function Snippet({ text }: { text: string }) {
   const parts = useMemo(() => text.split(/<mark>(.*?)<\/mark>/g), [text]);
   return (

@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-M1 M1-03 — every failure these flows can raise says something a
-/// person can act on, and the ones nobody planned for say where to look.
+/// Every auth failure says something a person can act on; unplanned ones say where to look.
 final class AuthCopyTests: XCTestCase {
     /// The codes `docs/api/error-codes.md` lists for the endpoints this app
     /// calls while signing in, refreshing or stepping up.
@@ -15,9 +14,9 @@ final class AuthCopyTests: XCTestCase {
         "origin_not_allowed", "reauth_required", "challenge_required",
         // The email-code path's 409 for an address that has a password.
         "use_password",
-        // IDX-M2 — a workspace that stopped being reachable.
+        // A workspace that stopped being reachable.
         "not_a_member", "membership_suspended", "tenant_dissolved",
-        // MAC-0 — the account BE-0 created, before its address is confirmed.
+        // The account exists, before its address is confirmed.
         "email_not_verified",
     ]
 
@@ -43,20 +42,13 @@ final class AuthCopyTests: XCTestCase {
         XCTAssertGreaterThan(seen.count, 10, "the map should not answer everything the same way")
     }
 
-    /// MAC-0: the sentence the screen shows beside the "Resend" button.
-    /// A 403 would otherwise fall through to the server's `detail`, and
-    /// the person would be told "forbidden" about their own account.
+    /// The sentence beside the "Resend" button; a 403 must not fall through to the server's `detail`.
     func testAnUnconfirmedAddressSaysToConfirmIt() {
         let message = AuthCopy.message(for: error("email_not_verified", status: 403))
         XCTAssertEqual(message, "Confirm your email first — we sent you a code.")
     }
 
-    /// A role denial arrives as a bare 403 whose `detail` is a sentence
-    /// about the permission matrix ("deny: roles=[…] cannot 'note.read'
-    /// on 'note'"). By the time copy is asked for one, `APIClient` has
-    /// already refreshed and retried, so this is a real refusal — and the
-    /// sentence has to be about the person's situation, not our
-    /// vocabulary.
+    /// A role denial is a bare 403 whose `detail` is about the permission matrix; by now `APIClient` has refreshed and retried, so the sentence must be about the person's situation.
     func testARoleDenialDoesNotQuoteThePermissionMatrix() {
         var problem = Problem(title: "Forbidden",
                               detail: "deny: roles=['viewer'] cannot 'note.write' on 'note'",
@@ -67,8 +59,7 @@ final class AuthCopyTests: XCTestCase {
         XCTAssertTrue(message.contains("not allowed to do that in this workspace"))
     }
 
-    /// A 403 that is NOT a role denial gets a fixed sentence: the server's
-    /// `detail` is written for logs and may change under the screen.
+    /// A 403 that is NOT a role denial gets a fixed sentence; `detail` may change under the screen.
     func testAnOtherForbiddenSaysSoWithoutTheServersWording() {
         let problem = Problem(title: "Forbidden", detail: "this note is private",
                               status: 403, code: nil)

@@ -1,17 +1,6 @@
-"""HTTP client to ``note-service`` — draft creation on conversation
-finalize (sprint 14).
+"""HTTP client to ``note-service``: draft creation via ``POST /v1/notes`` with the caller's own bearer.
 
-The sprint-08 hand-off is explicit: conversation sessions create drafts
-through the EXISTING ``POST /v1/notes`` — no parallel write path.
-Draft creation is an *action* in note-service's domain, so it goes
-over HTTP with the caller's own bearer (the repo's cross-service
-pattern), never a shared service identity: note-service enforces
-``note.write`` on the actual author.
-
-Failure policy mirrors the NLP client: never fail the finalize — the
-transcript is already persisted; a missed draft is a
-``conversation.draft.create_failed`` audit row and the user can create
-the note from the session later.
+Never fails the finalize; a missed draft is an audit row.
 """
 
 from __future__ import annotations

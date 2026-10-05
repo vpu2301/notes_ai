@@ -2,14 +2,8 @@ groups:
   - name: autocomplete
     interval: 1m
     rules:
-      # NOTE (accepted decision): this five-alert set substitutes the sprint
-      # doc's "trie size" and "telemetry buffer overflow" alerts with the two
-      # PII-control spike alerts — capacity trends live as dashboard panels
-      # (trie size histogram, dropped counter); PII spikes are security
-      # signals. Recorded in docs/runbooks/autocomplete.md#alerts.
-      #
-      # No Alertmanager routing exists yet: these fire in the Prometheus UI
-      # only (deployment-sprint concern).
+      # Capacity trends are dashboard panels; PII spikes are alerts
+      # (docs/runbooks/autocomplete.md#alerts). No Alertmanager routing yet.
 
       - alert: AutocompleteSuggestLatencyHigh
         expr: |
@@ -25,13 +19,8 @@ groups:
           runbook: "docs/runbooks/autocomplete.md#alert-suggest-latency"
 
       - alert: AutocompleteCacheHitRatioLow
-        # NOTE: no clamp_min — clamping the denominator to 1 turns the ratio
-        # into "absolute hits/sec" below 1 lookup/s and false-fires in quiet
-        # environments (same bug as JwksCacheHitRatioLow). The `or vector(0)`
-        # guards matter too: sum() over a non-existent series is EMPTY, and
-        # empty + vector drops the whole expression, so without them the alert
-        # could never fire while mdx_autocomplete_degraded_total has no series.
-        # Gate on ≥0.1 lookups/s (~90 per 15m window) for a meaningful ratio.
+        # No clamp_min (false-fires when quiet); `or vector(0)` because sum()
+        # over a missing series is EMPTY and would drop the whole expression.
         expr: |
           (
             (sum(rate(mdx_autocomplete_cache_lookups_total{hit="true"}[15m])) or vector(0))

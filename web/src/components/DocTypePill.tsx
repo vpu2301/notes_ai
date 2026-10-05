@@ -1,14 +1,7 @@
 import { recordingTypeLabel } from "../lib/generation";
 import { SparkleIcon } from "./icons";
 
-/**
- * What kind of document this is, in the note's meta row.
- *
- * The template's name ("Meeting notes") — unless the engine found the
- * recording is something else (Summary Engine v2, Q3): a podcast was
- * labelled "Meeting notes" and read as one. The template itself does not
- * change; only the label says what the recording was.
- */
+/** Meta-row pill: the template's name, unless the engine found the recording is something else. */
 export function DocTypePill({
   templateName,
   recordingType,

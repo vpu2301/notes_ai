@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the production secret material and write it to Vault.
+"""Generate production secret material (every ``dev-secret-change-in-prod-*`` placeholder
+regenerated) and write it to Vault in the chart's ExternalSecret layout; prints nothing
+unless ``--show``.
 
-Every `dev-secret-change-in-prod-*` placeholder (threat model) is
-REGENERATED here with cryptographically random values;
-nothing is printed unless --show is passed, nothing ever lands in the
-repo. The Vault KV layout matches the chart's ExternalSecret templates
-(infra/k8s/notes/templates/externalsecrets.yaml).
-
-Usage (operator, against the production Vault):
-
-    MDX_VAULT_ADDR=https://vault... MDX_VAULT_TOKEN=... \\
-    python scripts/k8s/gen-prod-secrets.py            # write to Vault
-    python scripts/k8s/gen-prod-secrets.py --dry-run  # report keys only
-
-The Keycloak realm import with the SAME regenerated client secrets is
-produced by gen-prod-realm.py --vault (reads them back so the realm and
-the services can never disagree).
+    MDX_VAULT_ADDR=... MDX_VAULT_TOKEN=... python scripts/k8s/gen-prod-secrets.py [--dry-run]
 """
 
 from __future__ import annotations
@@ -35,15 +23,13 @@ SECRET_LAYOUT: dict[str, dict[str, str]] = {
         "KEYCLOAK_ADMIN_CLIENT_SECRET": "token",
     },
     "master-key": {
-        # Only for file-provider pods; Transit-mode pods (ADR-0011
-        # amendment, the production default) need no key file at all.
+        # File-provider pods only; Transit-mode pods need no key file.
         "master.key": "bytes32-b64",
     },
     "infra": {
         "password": "token",  # postgres superuser
         "user": "literal:mdx",
-        # keycloak admin shares the postgres row shape; split into
-        # per-store paths if the hosting choice separates them.
+        # Shares the postgres row shape; split if the hosting choice separates them.
     },
 }
 

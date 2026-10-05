@@ -1,12 +1,4 @@
-"""Streaming seam over the shared diarization engine (libs/diarization).
-
-The engine lifecycle (lazy locked load, pinned-digest verification,
-warmup, readiness reporting) was hoisted to ``diarization.engine`` for
-reuse by the batch worker; what stays here is the dictation-specific
-surface: the conversation-mode disabled message and the per-session
-:class:`DiarizationStream` factory (the stream owns mutable clustering
-state and lives in this service — the lib knows nothing about sessions).
-"""
+"""Streaming seam over libs/diarization: the per-session :class:`DiarizationStream` factory."""
 
 from __future__ import annotations
 
@@ -41,17 +33,11 @@ class DiarizationEngine(SharedDiarizationEngine):
 
     @property
     def ready_for_conversation(self) -> bool:
-        """True iff this worker can take a conversation session RIGHT NOW.
-
-        Readiness gates on this: a worker advertising conversation capacity
-        with a cold diarizer would pay weight-loading on the first window
-        and blow the latency budget (sprint-14 deployment).
-        """
+        """True iff this worker can take a conversation session right now (readiness gates on it)."""
         return self.ready
 
     def new_stream(self, config: DiarizationConfig | None = None) -> DiarizationStream:
-        # Property access raises DiarizationUnavailableError when the
-        # engine is not loaded — same fail-loud contract as before.
+        # Property access raises DiarizationUnavailableError when not loaded.
         return DiarizationStream(
             embedder=self.embedder,
             segmenter=self.segmenter,

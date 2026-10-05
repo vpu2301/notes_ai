@@ -1,23 +1,7 @@
-"""Periodic worker-state gauges (sprint-14 deployment).
+"""Periodic worker-state gauges, sampled on a timer.
 
-Counters and histograms are emitted at their event sites. Gauges describe a
-*standing* condition — how loaded this worker is, how much device memory the
-two models hold, whether it can take a conversation session — so they are
-sampled on a timer instead.
-
-Why this exists at all: sprint 04 declared ``mdx_dictation_active_sessions``
-and ``mdx_dictation_model_loaded`` in ``metrics.py`` but never emitted them,
-so the sprint-04 dashboard and the ``DictationWorkerSaturated`` alert have
-been querying series that never existed. Conversation mode makes that
-untenable — the whole point of weighted capacity is that you can watch it.
-
-Device memory is deliberately device-agnostic:
-
-* **CUDA host** — ``torch.cuda.mem_get_info()``: whole-device used/total,
-  which is what a "VRAM at 90%" alert must watch (a co-tenant process
-  filling the card is exactly the failure being guarded against).
-* **CPU host** — process RSS against total system memory. Not VRAM, and
-  labelled ``kind="rss"`` so no dashboard can quietly conflate the two.
+Device memory is whole-device VRAM on CUDA (``kind="vram"``) and process RSS
+on CPU (``kind="rss"``) so dashboards cannot conflate the two.
 """
 
 from __future__ import annotations
@@ -36,18 +20,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# How often the gauges are refreshed. Prometheus scrapes every 15 s
-# (infra/prometheus/prometheus.yml), so 10 s guarantees a fresh sample per
-# scrape without adding measurable load.
+# Prometheus scrapes every 15 s; 10 s guarantees a fresh sample per scrape.
 SAMPLE_INTERVAL_S = 10.0
 
 
 def device_memory() -> tuple[int, int, str]:
-    """Return ``(used_bytes, total_bytes, kind)`` for the inference device.
-
-    ``kind`` is ``"vram"`` on a CUDA host and ``"rss"`` on a CPU host. A
-    ``total`` of 0 means the reading is unavailable; callers skip the ratio.
-    """
+    """``(used_bytes, total_bytes, kind)`` for the inference device; total 0 = unavailable."""
     try:
         import torch
 

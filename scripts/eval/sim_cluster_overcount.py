@@ -1,20 +1,9 @@
-"""No-audio regression for the offline clusterer's roster behaviour.
-
-Runs the production ``cluster_embeddings_with_stats`` (default config) on
-synthetic 192-d embeddings of a TWO-speaker, 400-chunk (~10 min)
-recording, 40 seeds per scenario. Shows mechanism, not magnitude:
-
-    S0  isotropic chunk noise only (same-voice cosine 0.60 / 0.50 / 0.42)
-    S1  + chunks straddling turn boundaries
-    S2  + speaker B has a second acoustic condition (30 % of B's turns,
-          centroid cosine 0.55 — ASSUMED)
-    S3  + 3 % non-speech events that pass VAD (ASSUMED tight cluster)
-    S4  all of the above (+ raised floor, + raised floor and merge 0.50)
+"""No-audio regression for the offline clusterer's roster behaviour on synthetic
+two-speaker embeddings (scenarios S0-S4, 40 seeds each).
 
     uv run python scripts/eval/sim_cluster_overcount.py [--assert]
 
-``--assert`` fails unless S0/S1 stay 100 % exactly-two-speakers: the
-roster logic must never turn random noise into a speaker.
+``--assert`` fails unless S0/S1 stay 100 % exactly-two-speakers.
 """
 
 from __future__ import annotations

@@ -1,26 +1,6 @@
-"""Pytest fixtures for authenticating against a service in-process (IDX-B2 F4).
+"""Pytest fixtures for authenticating against a service in-process (``pytest_plugins = ["auth.pytest_plugin"]``).
 
-Enable in a service's ``conftest.py``::
-
-    pytest_plugins = ["auth.pytest_plugin"]
-
-Then::
-
-    async def test_reads_a_note(auth_client_factory, app):
-        async with auth_client_factory(app, roles=["member"]) as client:
-            assert (await client.get("/v1/notes")).status_code == 200
-
-This replaces the fixtures that logged in through a running Keycloak. Two
-things that bought us, and are kept: a real signature (the token is
-RS256-signed and verified by the service's own ``current_user``, not
-stubbed past it), and a real ``Claims`` round-trip. Two things it cost,
-and are now gone: a container in the loop, and a suite that could only
-run where the dev stack was up.
-
-What it deliberately does NOT do is override ``current_user`` with a
-lambda. That style of fixture passes even when the verifier is broken —
-a wrong audience, an expired token, a forbidden claim all sail through —
-which is precisely the class of bug an auth test exists to catch.
+Tokens are really RS256-signed and verified by the service's own ``current_user``; nothing is stubbed past the verifier.
 """
 
 from __future__ import annotations
@@ -49,12 +29,7 @@ def auth_headers_factory() -> Callable[..., dict[str, str]]:
 
 @pytest.fixture
 def auth_client_factory(test_issuer: TestIssuer) -> Callable[..., Any]:
-    """Yield an ``AsyncClient`` that speaks to ``app`` as an authenticated caller.
-
-    ``state`` is resolved from ``app.state.svc`` when present — every
-    service in this fleet keeps its singletons there — but can be passed
-    explicitly for one that does not.
-    """
+    """Yield an ``AsyncClient`` speaking to ``app`` as an authenticated caller (``state`` defaults to ``app.state.svc``)."""
     import httpx
 
     @asynccontextmanager
@@ -76,9 +51,7 @@ def auth_client_factory(test_issuer: TestIssuer) -> Callable[..., Any]:
                 "cannot find the service state to install the test issuer on; "
                 "pass state=… explicitly"
             )
-        # `issuer`/`audience` are what the service's own `current_user`
-        # demands — pass its `settings.auth_issuer` / `auth_audience`.
-        # Defaulting to the harness's values keeps the simple case simple.
+        # `issuer`/`audience` are what the service's own `current_user` demands.
         install_test_issuer(target, issuer=issuer)
         if issuer is not None:
             claim_overrides.setdefault("iss", issuer)

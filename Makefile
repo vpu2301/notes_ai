@@ -2,9 +2,7 @@
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
-# Kept ahead of the dev-stack Prometheus (v2.51.2) on purpose: promtool is
-# only used to lint/test rule files, and the newer binary parses everything
-# the older server does.
+# Newer than the dev-stack Prometheus on purpose (promtool only lints rules).
 PROMTOOL_IMAGE = prom/prometheus:v2.54.1
 
 ##@ Local Development
@@ -22,10 +20,7 @@ dev-up: ## Start the full local stack (PostgreSQL, Redis, Kafka, Keycloak, obser
 	@echo "  Grafana      : http://localhost:3000  (admin/admin)"
 	@echo "  Loki         : http://localhost:3100"
 
-# No `-v` on purpose: the Postgres volume holds every note, space and
-# recording, plus the Keycloak realm. `dev-restart` runs this target, so a
-# restart must never destroy data. Use `dev-nuke` for a clean slate, or
-# `reset-db` to wipe just Postgres.
+# No `-v`: the volumes hold every note and the Keycloak realm (`dev-nuke` wipes).
 dev-down: ## Stop and remove all containers (named volumes are KEPT)
 	$(COMPOSE) -f $(COMPOSE_FILE) down
 
@@ -74,7 +69,7 @@ run-notification-service: ## Run notification-service on :8004 (needs dev-up + m
 doctor: ## Diagnose local environment issues
 	@bash scripts/doctor.sh
 
-##@ Models (DEP-S0 — libs/models, config/models.yaml)
+##@ Models (libs/models, config/models.yaml)
 
 dev-model: $(if $(ARGS),,dev-up) ## Start the docker stack + model servers on this Mac: `make dev-model` (dev-up+start+verify), `make dev-model ARGS=verify`, `ARGS=stop`
 	@bash scripts/dev/dev-model.sh $(ARGS)
@@ -120,8 +115,7 @@ secret-scan: ## Scan the repo history for committed secrets (gitleaks; CI runs t
 	gitleaks git --config .gitleaks.toml --redact --no-banner .
 
 der-eval: ## Speaker count + DER on the gold set: `make der-eval ENGINE=legacy|pyannote_c1 SPLIT=test [CORPUS=eval/asr/v1]` → docs/eval/der-<date>-<engine>-<split>.json
-	@# pyannote.audio 4 requires pyannote.metrics 4 (the two cannot resolve
-	@# otherwise); scores match 3.2. Only a pyannote_c1 run pulls torch in.
+	@# pyannote.audio 4 requires pyannote.metrics 4; only pyannote_c1 pulls torch in.
 	@case '$(or $(ENGINE),legacy)' in \
 	  pyannote_c1*) extra="--with pyannote.audio>=4.0,<4.1" ;; \
 	  *) extra="" ;; \
@@ -214,10 +208,8 @@ lint-imports: ## Verify architectural contracts (import-linter)
 	# import-linter is not a venv dependency — pull it in for the run.
 	uv run --with "import-linter>=2.0" lint-imports --config pyproject.toml
 
-# The custom gates sweep APPLICATION SOURCE only (services/*/src, libs/*/src) —
-# the domain where architecture rules #7/#8 bind. Integration tests, the
-# migration runner, and operational scripts legitimately use raw asyncpg / env
-# and are out of scope (the scripts' own exclusions cover config.py/tests too).
+# The custom gates sweep application source only (tests, the migration
+# runner and ops scripts legitimately use raw asyncpg / env).
 APP_SRC = git ls-files '*.py' | grep -E '^(services|libs)/[^/]+/src/'
 
 check-no-os-environ: ## CI gate — os.environ/os.getenv reads only in config.py
@@ -310,19 +302,12 @@ smoke-notes: ## Exercise every note operation end to end against the running sta
 	uv run --project services/note-service python scripts/smoke/notes_e2e.py
 
 smoke-ios: ## IOS-0 — web-created account → sign in as the phone does → 1s capture → note (needs the stack up)
-	@# Not run by CI, for the same reason `web-e2e` is not: it needs the
-	@# whole stack including an asr-worker that bakes whisper-large-v3
-	@# (2.7 GiB), and the iOS job runs on a macOS runner with no Docker.
-	@# Point it at a stack that is already up — `make dev-up`, or
-	@# `make web-e2e-stack` if you also want the Mailpit half.
+	@# Not run by CI (needs the whole stack); point it at a stack that is up.
 	uv run --project services/note-service python scripts/smoke/ios_signup_e2e.py $(ARGS)
 
 web-e2e-stack: ## Bring the stack up in the shape the browser tests need (native identity + Mailpit)
-	@# `MDX_IDP_MODE=native` is the whole point: `/auth/email/*` is mounted
-	@# only in that mode, so under the default `keycloak` every one of these
-	@# tests would 404 at the first step. The SMTP override is the other
-	@# half — a developer with a real relay in their `.env` must not have a
-	@# test suite mailing sign-in codes to the internet.
+	@# native mode mounts /auth/email/*; the SMTP override keeps a real relay
+	@# in .env from mailing sign-in codes to the internet.
 	MDX_IDP_MODE=native \
 	MDX_EMAIL_PROVIDER=smtp \
 	MDX_AUTH_SMTP_HOST=mailpit \
@@ -336,9 +321,7 @@ web-e2e-stack: ## Bring the stack up in the shape the browser tests need (native
 	@echo "Put it back with: make dev-up"
 
 web-e2e: ## Run the Playwright first-use suite (needs `make web-e2e-stack`)
-	@# Not depending on web-e2e-stack: recreating four containers on every
-	@# run turns a 40-second suite into a four-minute one, and the stack is
-	@# the slow half. Bring it up once, iterate on the tests.
+	@# Not depending on web-e2e-stack: bring it up once, iterate on the tests.
 	cd web && npm ci && npx playwright install --with-deps chromium && npm run test:e2e
 
 validate-templates: ## CI gate — validate every note-template seed JSON

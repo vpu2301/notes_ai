@@ -1,18 +1,5 @@
-"""NoteContent — the JSON shape stored in ``note_versions.content_jsonb``.
-
-Design notes:
-
-- ``extra='forbid'`` everywhere. The shape is the contract the
-  hash-chain commits to; unknown keys silently dropped would
-  invalidate chain hashes.
-- ``NoteSection.field_specific_metadata`` is an open dict — this is
-  the documented escape hatch for typed fields (sprint-13) and note
-  review (sprint-15) to attach typed metadata without re-versioning
-  every template. The allowed keys per ``field_type`` are documented
-  in ``docs/architecture/notes.md``.
-- ``canonical_content_bytes`` produces the RFC-8785 JCS serialisation
-  used as input to the version hash-chain. The model JSON dump is
-  sorted by Pydantic; we re-sort defensively here.
+"""NoteContent, the ``note_versions.content_jsonb`` shape: ``extra='forbid'`` because the hash-chain commits to it;
+``canonical_content_bytes`` is the RFC-8785 input to that chain.
 """
 
 from __future__ import annotations
@@ -27,8 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class NoteStatus(StrEnum):
     DRAFT = "draft"
-    # Legacy values: the finalize lifecycle was retired (note-service
-    # migration 0042, ADR-0051). Kept so history decodes; never produced.
+    # Legacy (finalize retired, ADR-0051): kept so history decodes, never produced.
     FINALIZED = "finalized"
     AMENDED = "amended"
     CANCELLED = "cancelled"
@@ -74,18 +60,9 @@ class NoteContent(BaseModel):
 
 
 def canonical_content_bytes(content: NoteContent) -> bytes:
-    """RFC-8785 canonical JSON of the content. Used by the hash-chain.
-
-    Stable across Python versions because:
-    - keys sorted alphabetically;
-    - no whitespace;
-    - UTF-8 with no non-ASCII escape;
-    - no Pydantic round-trip drift (model_dump → json with sort_keys).
-    """
+    """RFC-8785 canonical JSON of the content (sorted keys, no whitespace, no ASCII escaping) for the hash-chain."""
     obj = content.model_dump(mode="json", exclude_none=False)
-    # A section without a title has the canonical form it always had:
-    # the field is absent, not null. Every version hashed before titles
-    # existed re-canonicalises to the same bytes.
+    # An absent title stays absent, not null, so versions hashed before titles existed re-canonicalise identically.
     for section in obj.get("sections", []):
         if section.get("title") is None:
             section.pop("title", None)
@@ -98,11 +75,7 @@ def canonical_content_bytes(content: NoteContent) -> bytes:
 
 
 def rendered_text_from_content(content: NoteContent) -> str:
-    """Plain-text projection used for ``rendered_text`` + FTS.
-
-    Concatenates section title + body, separated by double newlines.
-    Order follows ``content.sections`` (template-order, by convention).
-    """
+    """Plain-text projection for ``rendered_text`` + FTS: title, then each section heading + body."""
     parts: list[str] = []
     if content.title:
         parts.append(content.title)

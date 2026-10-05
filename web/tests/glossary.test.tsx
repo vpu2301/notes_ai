@@ -216,7 +216,7 @@ describe("the capture form knows the workspace's names", () => {
   });
 });
 
-// ── Sprint I2: a role label is not a name ─────────────────────────────
+// ── a role label is not a name ──
 
 describe("a role label never gets into the vocabulary (Sprint I2)", () => {
   it("is refused inline before anything is sent", async () => {

@@ -1,4 +1,4 @@
-"""TemplateCache unit tests (sprint 06).
+"""TemplateCache unit tests.
 
 The cache is pure in-process logic — no DB. We verify the tenant-scoped
 key, hit/miss accounting, and invalidation that PUT/DELETE rely on.

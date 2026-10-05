@@ -1,7 +1,4 @@
-"""Service-wide singletons for asr-service.
-
-Constructed in main.py's lifespan; consumed by routers via deps.get_state.
-"""
+"""Service-wide singletons for asr-service."""
 
 from __future__ import annotations
 
@@ -26,14 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
-
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
-    """
+    """The issuers this service trusts (ADR-0047): ``AUTH_ISSUERS_JSON``, else the single
+    issuer trio. JWKS cache and ``build_current_user`` both come from this list."""
     return issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -58,18 +49,14 @@ class ServiceState:
     transcript_store: EncryptedObjectStore
     envelope: Envelope
     nlp_client: NlpBatchClient
-    # Per-user cap on speaker re-labelling (Sprint 29); keys
-    # mdx:asr:rl:<scope>:<subject>:<window>.
+    # Per-user cap on speaker re-labelling; keys mdx:asr:rl:<scope>:<subject>:<window>.
     limiter: FixedWindowLimiter
 
 
 async def build_state() -> ServiceState:
     """Construct every async resource the service needs."""
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
+    # Log the accepted issuers: answerable from one line, not from a mysterious 401.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
 
@@ -79,13 +66,10 @@ async def build_state() -> ServiceState:
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
     )
-    # Sprint I2 T2: store the vocabulary hint on the job only where the
-    # column exists (a service deployed before migration 0061 must not
-    # fail every upload).
+    # Column probes: a service ahead of its migration must not fail every upload.
     from .domain import repository
 
     await repository.probe_hint_column(app_pool)
-    # Sprint F1: the same for the capture-timing columns (migration 0063).
     await repository.probe_capture_timing_columns(app_pool)
     audit_writer_pool = await create_pool(
         settings.db_audit_writer_dsn,

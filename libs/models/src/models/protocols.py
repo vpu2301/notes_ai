@@ -1,10 +1,4 @@
-"""The three provider contracts every worker codes against.
-
-Nothing in here names a vendor. A worker receives a provider from
-``models.registry`` and calls ``complete`` / ``transcribe`` / ``embed``;
-which HTTP server, which weights and which region answered is recorded on
-the result (``backend``, ``model_id``) for provenance and never chosen here.
-"""
+"""The three vendor-neutral provider contracts; ``backend``/``model_id`` on each result record provenance."""
 
 from __future__ import annotations
 
@@ -22,12 +16,7 @@ JsonSchema = dict[str, Any]
 
 @dataclass(frozen=True, slots=True)
 class ProviderResult:
-    """One completed chat call.
-
-    ``text`` is the raw assistant content; ``json`` is populated only when a
-    schema was requested and the content parsed. Token counts come from the
-    backend's ``usage`` block (0 when the server does not report them).
-    """
+    """One completed chat call; ``json`` only when a schema was requested and parsed; token counts 0 if unreported."""
 
     text: str
     json: JsonValue | None
@@ -46,8 +35,7 @@ class ChatProvider(Protocol):
 
     backend: str
     model_id: str
-    # Sprint L1: True when the backend is a small local model the document
-    # engine should give simpler work to (config/models.yaml `small_model`).
+    # A small local model the document engine gives simpler work to.
     small_model: bool
 
     async def complete(
@@ -72,10 +60,7 @@ ShouldCancel = Callable[[], Awaitable[bool]]
 
 @dataclass(frozen=True, slots=True)
 class SpeechRun:
-    """One VAD speech run the worker planned (Sprint TQ2 T1): where it is in
-    the recording, and the language it is decoded in. ``language_detected``
-    is False when the run is decoded in the recording's language by default
-    (no identification, or an undecided one)."""
+    """One planned VAD speech run: where it is in the recording and the language it is decoded in."""
 
     start_ms: int
     end_ms: int
@@ -85,11 +70,7 @@ class SpeechRun:
 
 @runtime_checkable
 class ASRProvider(Protocol):
-    """Batch transcription of 16 kHz mono float32 PCM with per-word timings.
-
-    Word timings are a contract (ADR-0037 clip replay depends on them); a
-    backend that cannot produce them is rejected by ``probe``/``warm_up``.
-    """
+    """Batch transcription of 16 kHz mono float32 PCM; word timings are a contract (ADR-0037), ``warm_up`` rejects without."""
 
     backend: str
 
@@ -115,10 +96,7 @@ class ASRProvider(Protocol):
         should_cancel: ShouldCancel | None = None,
         second_pass: bool = False,
     ) -> TranscriptionOutput:
-        """``second_pass`` (Sprint F1, decision 3): ``audio_pcm`` is one
-        speech run the first decode lost; decode all of it, with no prompt,
-        no conditioning on earlier text and a beam of at least 5 — as far as
-        the backend lets a caller choose (HTTP backends: no prompt only)."""
+        """``second_pass``: a lost speech run, decoded without prompt or conditioning and beam ≥ 5 where the backend allows."""
         ...
 
     async def transcribe_runs(
@@ -131,12 +109,8 @@ class ASRProvider(Protocol):
         should_cancel: ShouldCancel | None = None,
         group_seconds: float = 300.0,
     ) -> TranscriptionOutput:
-        """Sprint TQ2 T1: decode the worker's planned runs — each in its own
-        ``language`` — and return one transcript on the recording's clock.
-        ``language`` is the recording's. A run in another language comes
-        back with ``Segment.language`` set; the recording's runs leave it
-        ``None``. HTTP backends send runs of one language in groups of at
-        most ``group_seconds``."""
+        """Decode the planned runs, each in its own language, onto the recording's clock; other-language runs
+        set ``Segment.language``. HTTP backends group runs of one language by ``group_seconds``."""
         ...
 
     async def aclose(self) -> None: ...
@@ -144,7 +118,7 @@ class ASRProvider(Protocol):
 
 @runtime_checkable
 class EmbeddingProvider(Protocol):
-    """Completed in DEP-S5. Declared now so the registry's kind table is total."""
+    """Declared so the registry's kind table is total; not implemented yet."""
 
     backend: str
     model_id: str

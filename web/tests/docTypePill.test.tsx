@@ -25,8 +25,7 @@ describe("the document-type pill (Summary Engine v2, Q3)", () => {
 
 describe("the rich-text renderer is unchanged", () => {
   it("still reads a user's own 'Hinweis zum Transkript: …' paragraph as a speaker turn", () => {
-    // The engine no longer writes such a line (Q3); what a person types
-    // is rendered exactly as before.
+    // The engine no longer writes such a line; a typed one renders as before.
     const [block] = parseRichText("Hinweis zum Transkript: eine Passage fehlt.");
     expect(block).toMatchObject({ kind: "para", speaker: "Hinweis zum Transkript" });
   });

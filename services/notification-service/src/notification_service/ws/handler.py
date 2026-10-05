@@ -36,8 +36,7 @@ async def run_session(websocket: WebSocket, *, upgrade: UpgradeContext, state: A
     user_id: UUID = claims.sub
     tenant_id: UUID = claims.tid
 
-    # Echo the negotiated subprotocol — a client that offered it expects
-    # it back, and browsers fail the connection if it is absent.
+    # Browsers fail the connection if the offered subprotocol is not echoed.
     await websocket.accept(subprotocol=SUBPROTOCOL)
     await state.socket_registry.add(user_id, websocket)
 
@@ -65,8 +64,7 @@ async def _handle_command(
     try:
         command = parse_client_frame(raw)
     except ValidationError:
-        # A malformed frame is a client bug. Reporting it beats closing
-        # the socket, which would look like a network fault.
+        # Report a client bug instead of closing the socket.
         await websocket.send_text(
             ErrorFrame(code="bad_frame", detail="frame failed validation").model_dump_json()
         )
@@ -78,8 +76,7 @@ async def _handle_command(
 
     if isinstance(command, MarkReadCommand):
         async with tenant_connection(state.app_pool, tenant_id) as conn:
-            # RLS plus the recipient predicate mean a user cannot mark
-            # someone else's notification read even by guessing its id.
+            # RLS + recipient predicate: cannot mark someone else's row by guessing its id.
             await repo.mark_read(conn, user_id=user_id, notification_id=command.notification_id)
             count = await repo.unread_count(conn, user_id=user_id)
         await websocket.send_text(
@@ -90,12 +87,7 @@ async def _handle_command(
 
 
 def make_fanout_handler(state: Any):
-    """Build the callback the pub/sub bridge invokes on every frame.
-
-    The published frame carries ids only, so this re-reads the row under
-    the recipient's own tenant scope. That keeps pub/sub — which has no
-    tenant isolation — from ever carrying notification content.
-    """
+    """Callback for the pub/sub bridge; re-reads the row under the recipient's tenant scope."""
 
     async def handle(payload: dict[str, Any]) -> None:
         raw_user = payload.get("recipient_user_id")
@@ -106,9 +98,7 @@ def make_fanout_handler(state: Any):
         user_id = UUID(raw_user)
         tenant_id = UUID(raw_tenant)
 
-        # Fast path: if this worker holds no socket for that user, the
-        # frame is not ours. Skip before touching the database — most
-        # frames on a multi-worker deployment land here.
+        # Fast path: no local socket, no DB read.
         if not await state.socket_registry.sockets_for(user_id):
             return
 

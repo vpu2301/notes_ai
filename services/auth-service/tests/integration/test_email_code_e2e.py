@@ -1,13 +1,7 @@
-"""IDX-A3 end to end: the real app, the real pools, the real Redis.
+"""Email code end to end: real app, pools and Redis; only SMTP is the shipped `mock` provider.
 
-Nothing is faked except the SMTP relay — and that is the `mock` provider
-the service already ships, so even the rendering and the address the mail
-is bound for are the production path. What this proves that the other two
-suites cannot: the wiring. Config → pools → repositories → limiter →
-mailer → router, in native mode, exactly as a deployment builds it.
-
-Requires: ``RUN_DB_INTEGRATION=1``, ``make migrate-up``, and the dev
-stack's Postgres and Redis.
+Proves the wiring config → pools → repositories → limiter → mailer → router in native mode.
+Requires ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -44,17 +38,12 @@ async def app(monkeypatch: pytest.MonkeyPatch):
     from auth_service.config import settings
     from auth_service.main import create_app
 
-    # A deployment in native mode with the dev signing key and the
-    # in-memory mail provider — the compose defaults for everything else.
+    # Native mode with the dev signing key and the in-memory mail provider.
     monkeypatch.setattr(settings, "idp_mode", "native")
     monkeypatch.setattr(settings, "auth_signing_keys_file", "infra/dev/auth-signing-dev.json")
     monkeypatch.setattr(settings, "email_provider", "mock")
     monkeypatch.setattr(settings, "auth_issuer_url", "http://localhost:8000")
-    # Believe X-Forwarded-For from the ASGI transport's loopback peer, so
-    # each test can present its own client address. Without this every
-    # test shares one per-IP bucket in the dev Redis — which is the
-    # correct production behaviour and a guaranteed flake here, since the
-    # 20/hour cap outlives any single run.
+    # Trust X-Forwarded-For from the loopback peer so each test has its own per-IP bucket (the 20/hour cap outlives a run).
     monkeypatch.setattr(settings, "trusted_proxy_cidrs", "127.0.0.1/32")
 
     a = create_app()
@@ -148,14 +137,7 @@ async def test_a_brand_new_address_signs_up_and_gets_a_workspace_token(app, clie
     assert claims["tid"] == result["tenant_id"]
     assert claims["iss"] == "http://localhost:8000"
     assert claims["aud"] == "mdx-api"
-    # `tenant_admin` AND `member`, because whoever owns a workspace also
-    # works in it. S14's admin/content separation gives `tenant_admin` no
-    # content permission at all, so the first token of every self-serve
-    # account used to be one that could not write a note, submit an ASR
-    # job or dictate — `403 deny: roles=['tenant_admin'] cannot
-    # 'asr.write'` on the first thing the person tried
-    # (docs/auth/roles.md § "a person who administers a workspace and
-    # takes notes holds both").
+    # `tenant_admin` AND `member`: `tenant_admin` alone holds no content permission.
     assert claims["roles"] == ["tenant_admin", "member"]
     assert claims["email"] == email
 
@@ -245,8 +227,7 @@ async def test_start_looks_the_same_for_a_known_and_an_unknown_address(app, clie
     assert set(a.json()) == set(b.json())
     assert a.json()["expires_in"] == b.json()["expires_in"]
     assert a.json()["resend_after"] == b.json()["resend_after"]
-    # Both addresses received a code — the unknown one because that is
-    # how it signs up.
+    # Both addresses received a code; the unknown one signs up that way.
     assert _captured_code(app, known)
     assert _captured_code(app, unknown)
 

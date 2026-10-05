@@ -1,12 +1,5 @@
-"""Per-worker registry of locally-connected sockets.
-
-Deliberately process-local and unreplicated. The cross-worker problem is
-solved by pub/sub (fanout.py), not by sharing this map — a shared
-registry would need cleaning up after every crashed worker, and a stale
-entry there means sending to a dead socket forever.
-
-One user may hold several sockets at once (two browser tabs), so the
-value is a set, not a single connection.
+"""Per-worker registry of locally-connected sockets. Process-local by design (cross-worker
+is pub/sub in fanout.py); one user may hold several sockets.
 """
 
 from __future__ import annotations
@@ -42,8 +35,7 @@ class SocketRegistry:
                 return
             sockets.discard(socket)
             if not sockets:
-                # Drop the empty set so the map does not grow without
-                # bound across a long-lived process.
+                # Keep the map from growing without bound.
                 del self._by_user[user_id]
 
     async def sockets_for(self, user_id: UUID) -> list[SendableSocket]:
@@ -51,13 +43,7 @@ class SocketRegistry:
             return list(self._by_user.get(user_id, ()))
 
     async def send_to_user(self, user_id: UUID, payload: str) -> int:
-        """Best-effort push. Returns how many sockets accepted the frame.
-
-        A send failure means the peer went away between the registry
-        lookup and the write — a normal race on disconnect, not an
-        error. The socket is dropped and the caller carries on; the
-        client will re-read state on reconnect (E5).
-        """
+        """Best-effort push; returns how many sockets accepted. A failed socket is dropped (disconnect race)."""
         sent = 0
         for socket in await self.sockets_for(user_id):
             try:

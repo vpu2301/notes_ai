@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint TQ3: the unified-spelling banner and tooltip, as the web says them.
+/// The unified-spelling banner and tooltip, as the web says them.
 final class EntityCorrectionTests: XCTestCase {
     private func correction(_ status: String, _ forms: [String] = ["Andala", "Handela"],
                             source: String = "majority") -> EntityCorrection {

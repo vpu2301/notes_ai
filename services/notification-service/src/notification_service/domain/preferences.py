@@ -1,12 +1,4 @@
-"""Preference + quiet-hours resolution.
-
-Deliberately PURE: every input is a parameter, including the clock. The
-whole reason a "you turned email off and still got one" bug (E8) is hard
-to fix is usually that the decision is spread across three call sites
-with slightly different conditions. Here there is exactly one function
-that decides, it takes no ambient state, and it is exhaustively unit
-tested against a frozen clock — including across a DST boundary (E9).
-"""
+"""Preference + quiet-hours resolution. Pure: every input, including the clock, is a parameter."""
 
 from __future__ import annotations
 
@@ -55,13 +47,10 @@ class ChannelDecision:
     """What to write to the outbox for one channel."""
 
     channel: Channel
-    # False ⇒ write the row as `suppressed` with `reason`, never dispatch.
-    # Suppressed rows are written rather than skipped so that "we did not
-    # email you, and here is why" is a queryable fact (E8).
+    # False = write the row as `suppressed` with `reason` (queryable), never dispatch.
     dispatch: bool
     reason: SuppressReason | None = None
-    # When set, the row is `pending` but not due until this instant —
-    # quiet-hours deferral and digest batching both use it.
+    # Pending but not due until this instant.
     not_before: datetime | None = None
 
 
@@ -74,12 +63,7 @@ def resolve_timezone(name: str) -> ZoneInfo:
 
 
 def in_quiet_hours(settings: UserSettings, at: datetime) -> bool:
-    """Is `at` inside the user's local quiet window?
-
-    Evaluated in LOCAL wall-clock time, which is what the user set. A
-    window is inclusive of its start and exclusive of its end, and may
-    wrap midnight (22:00 → 07:00 is the common case).
-    """
+    """Is `at` inside the user's local quiet window? [start, end), may wrap midnight."""
     if settings.quiet_hours_start is None or settings.quiet_hours_end is None:
         return False
 
@@ -89,9 +73,7 @@ def in_quiet_hours(settings: UserSettings, at: datetime) -> bool:
     end = settings.quiet_hours_end
 
     if start == end:
-        # Degenerate: a zero-width window silences nothing. Treating it as
-        # "always quiet" would mean a user who set both fields equal never
-        # receives another email, with no visible cause.
+        # Zero-width window silences nothing.
         return False
     if start < end:
         return start <= now_t < end
@@ -100,12 +82,7 @@ def in_quiet_hours(settings: UserSettings, at: datetime) -> bool:
 
 
 def next_quiet_hours_end(settings: UserSettings, at: datetime) -> datetime:
-    """The first instant after `at` at which the quiet window is over.
-
-    Computed by walking forward in LOCAL time and re-localising, so a
-    window that spans a DST transition lands on the correct absolute
-    instant instead of drifting by an hour (E9).
-    """
+    """First instant after `at` when the quiet window is over (walked in LOCAL time, DST-safe)."""
     if settings.quiet_hours_end is None:
         return at
 
@@ -129,10 +106,7 @@ def resolve(
 ) -> tuple[ChannelDecision, ChannelDecision]:
     """Decide both channels for one (user, category). Returns (in_app, email).
 
-    `preference` is None when the user has never overridden this
-    category; the catalog default applies. That is resolved here rather
-    than by a DB column default so a tenant-level default change takes
-    effect for everyone who never expressed an opinion.
+    `preference` None = catalog default, resolved here so default changes apply retroactively.
     """
     spec = spec_for(category)
 
@@ -144,9 +118,7 @@ def resolve(
         dispatch=in_app_enabled,
         reason=None if in_app_enabled else SuppressReason.PREFERENCE,
     )
-    # Quiet hours never touch in-app: a badge that increments silently is
-    # not an interruption, and holding it back would make the feed lie
-    # about what has happened.
+    # Quiet hours never touch in-app.
 
     email = _resolve_email(
         category=category,
@@ -179,13 +151,9 @@ def _resolve_email(
 
     if email_mode is EmailMode.DIGEST:
         if not spec.digest_eligible:
-            # The user asked to batch this, but the category refuses to be
-            # batched (a chain-integrity alert, a failed job). Send it
-            # immediately rather than silently dropping it — a preference
-            # may not downgrade an alert into nothing.
+            # A preference may not downgrade an unbatchable alert into nothing.
             return _immediate_or_deferred(settings, now)
-        # The digest job will pick this up; the outbox row records that
-        # the immediate channel deliberately stood down.
+        # The digest job picks this up.
         return suppressed(SuppressReason.DIGEST_DEFERRED)
 
     return _immediate_or_deferred(settings, now)
@@ -193,8 +161,7 @@ def _resolve_email(
 
 def _immediate_or_deferred(settings: UserSettings, now: datetime) -> ChannelDecision:
     if in_quiet_hours(settings, now):
-        # DEFERRED, not suppressed: the mail still goes, just after the
-        # window closes. Dropping it would lose the notification entirely.
+        # Deferred, not suppressed: the mail still goes after the window.
         return ChannelDecision(
             channel=Channel.EMAIL,
             dispatch=True,

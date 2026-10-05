@@ -4,11 +4,7 @@ export type ThemePref = "system" | "light" | "dark";
 
 const KEY = "notesai.theme";
 
-/**
- * The web is white by default — the paper-and-ink look of the Mac app on a
- * pure white ground — whatever the OS appearance says. Dark and "follow the
- * system" sit in the sidebar account menu and are remembered once chosen.
- */
+/** Light by default whatever the OS says; dark / system are chosen in the account menu and remembered. */
 const DEFAULT_PREF: ThemePref = "light";
 
 function readPref(): ThemePref {
@@ -25,11 +21,7 @@ function systemDark(): boolean {
   return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 }
 
-/**
- * Stamps a CONCRETE light/dark onto <html data-theme> before first paint.
- * Every dark rule in the stylesheets is `[data-theme="dark"]`, so resolving
- * "system" here is what lets the whole cascade stay flat.
- */
+/** Stamps a CONCRETE light/dark onto <html data-theme>; every dark rule is `[data-theme="dark"]`. */
 export function applyThemeNow() {
   const pref = readPref();
   const resolved = pref === "system" ? (systemDark() ? "dark" : "light") : pref;

@@ -1,10 +1,6 @@
-"""Per-user rate limiter for the inline-completion typing path.
+"""Per-user dual fixed-window rate limiter (Redis INCR + EXPIRE).
 
-Dual fixed windows (Redis INCR + EXPIRE, the sprint-10
-``PhraseWriteRateLimiter`` shape): a 1-second bucket caps the burst and
-a 10-second bucket caps the sustained rate (~3 req/s). Fail-open on
-Redis errors — a Redis outage must not freeze ghost text; the model
-slot pool still bounds the damage a runaway client can do.
+Fail-open on Redis errors: the slot pool still bounds a runaway client.
 """
 
 from __future__ import annotations

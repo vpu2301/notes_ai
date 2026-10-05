@@ -20,9 +20,8 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-# Languages a caller may pin a job to, plus ``auto`` (detect from the audio).
 LANGUAGE_REQUEST_PATTERN = r"^(auto|uk|en|de)$"
-# Whisper reports ISO 639-1 codes (``yue`` is its one three-letter code).
+# ISO 639-1, plus Whisper's one three-letter code (``yue``).
 LANGUAGE_CODE_PATTERN = r"^[a-z]{2,3}$"
 AUTO_LANGUAGE = "auto"
 
@@ -37,46 +36,26 @@ class JobEnqueuePayload(BaseModel):
     job_id: UUID
     tenant_id: UUID
     audio_id: UUID
-    # Optional free-text vocabulary hint fed to Whisper's initial_prompt
-    # (product terms, names, jargon). Travels on the queue message only —
-    # it is not persisted on the job row.
+    # Whisper initial_prompt hint; queue message only, not persisted on the job row.
     vocabulary_hint: str | None = None
-    # The language the caller asked for. ``auto`` means "listen and decide":
-    # the worker runs Whisper's language identification on the recording
-    # and transcribes in whatever it hears; the result's ``language`` then
-    # carries the detected code, never the literal ``auto``.
+    # ``auto`` = the worker detects; the result's ``language`` then carries the detected code.
     language: str = Field(pattern=LANGUAGE_REQUEST_PATTERN)
     model: str = "large-v3"
-    # Ambient Capture v1: run offline speaker diarization after
-    # transcription. Travels on the queue message only — no DB column;
-    # the diarized output is visible in the stored result's `speaker`/
-    # `speakers` fields.
+    # Queue message only (no DB column); the stored result's ``speakers`` is the durable record.
     diarize: bool = False
-    # Sprint 29 speaker-count hints (1..8), from a person at capture or on
-    # a re-run. Queue-only; the worker records what it used in
-    # ``DiarizationStats.hint_*``.
+    # Queue-only; the worker records what it used in ``DiarizationStats.hint_*``.
     num_speakers: int | None = Field(default=None, ge=1, le=8)
     max_speakers: int | None = Field(default=None, ge=1, le=8)
-    # ``rediarize`` recomputes speaker labels from the stored audio and the
-    # stored words — no ASR pass. ``target_rev`` is the diarization_rev the
-    # new labelling becomes. Every new field has a default, and the model
-    # ignores unknown fields: an OLD worker reads a rediarize message as a
-    # transcribe of a complete job and acks it without doing anything —
-    # deploy asr-worker before asr-service (the reaper catches stragglers).
+    # ``rediarize`` relabels from stored audio + words, no ASR pass. An OLD worker reads it as a
+    # transcribe of a complete job and acks it: deploy asr-worker before asr-service.
     task: Literal["transcribe", "rediarize"] = "transcribe"
     target_rev: int | None = Field(default=None, ge=1)
-    # Which re-run request this message carries (the row's
-    # diarization_request_id). A message for an older request must not act
-    # for a newer one: the worker claims, swaps and fails only on a match.
+    # The row's diarization_request_id; the worker claims/swaps/fails only on a match.
     rediarize_id: UUID | None = None
-    # Sprint 31: a macOS capture with ch0 = microphone, ch1 = call audio.
-    # An old worker ignores both fields and downmixes (safe; deploy the
-    # worker first anyway). The local name is content: never logged.
+    # ch0 = microphone, ch1 = call audio; an old worker downmixes. The local name is content: never logged.
     channel_layout: Literal["mono", "mic_system"] = "mono"
     local_speaker_name: str | None = Field(default=None, max_length=80)
-    # Sprint F1: ms between the Record press and the first frame the client
-    # wrote. A leading stretch that long never reached the file; the worker
-    # reports it as a ``no_audio`` gap. None from older clients.
+    # Record press → first frame; reported as a ``no_audio`` gap. None from older clients.
     first_frame_offset_ms: int | None = Field(default=None, ge=0, le=600_000)
     requester_sub: UUID
     schema_version: int = 1
@@ -91,28 +70,17 @@ class TranscriptionJobView(BaseModel):
     requester_sub: UUID
     # As requested at submit: ``uk``/``en``/``de`` or ``auto``.
     language: str
-    # What the recording turned out to be in (ISO 639-1). Set by the worker
-    # when the job completes; ``None`` while it is still running. For a
-    # fixed-language job it simply echoes ``language``.
+    # ISO 639-1, set at completion; None while running; echoes ``language`` for a pinned job.
     detected_language: str | None = None
     model: str
     status: JobStatus
-    # Whether offline diarization was requested at submit. Echoed on the
-    # POST /asr/jobs response; `diarize` rides the queue payload only (no
-    # DB column), so views read back later default to False — the stored
-    # result's `speakers` field is the durable record.
+    # Echoed on the POST response only (no DB column); views read back later default to False.
     diarize: bool = False
-    # One of `JobErrorKind` — typed as `str` on the wire so a job failed by
-    # a newer worker than this reader still deserializes instead of 500ing
-    # the list endpoint. `spec_for` maps anything unrecognised to UNKNOWN.
+    # `JobErrorKind`, typed `str` so a kind from a newer worker still deserializes.
     error_kind: str | None = None
     error_detail: str | None = None
-    # Sprint I2 T2: the exact vocabulary string the transcriber was given
-    # (migration 0061). Tenant data; None for older jobs and jobs sent
-    # without one. Served to the job's own tenant only.
+    # Tenant data; served to the job's own tenant only.
     vocabulary_hint: str | None = None
-    # Sprint F1 (migration 0063): capture timing the client reported, and
-    # the share of speech the transcript covers (None before F1 / running).
     record_pressed_at: datetime | None = None
     first_frame_offset_ms: int | None = None
     coverage_share: float | None = None
@@ -123,45 +91,23 @@ class TranscriptionJobView(BaseModel):
     finished_at: datetime | None = None
     attempts: int = 0
 
-    # A cancel that has been ASKED FOR but not yet acted on. DELETE on a
-    # queued job cancels it outright; on a running one it can only set this
-    # flag, and the worker acts on it at its next checkpoint. Without it on
-    # the wire a client had no way to tell "still running" from "stopping",
-    # so the Cancel button looked broken: pressed, acknowledged, nothing
-    # visibly changed.
+    # Cancel asked for on a running job; the worker acts on it at its next checkpoint.
     cancel_requested: bool = False
 
-    # Names people gave the diarized speakers of this job (label →
-    # display name), set via ``PUT /asr/jobs/{id}/speakers``. Empty
-    # until someone names one; the result view merges these into its
-    # ``speaker_names``/``turns``.
+    # label → display name, via ``PUT /asr/jobs/{id}/speakers``.
     speaker_names: dict[str, str] = Field(default_factory=dict)
     # Diarization run that speaker edits apply to (a re-run bumps it).
     diarization_rev: int = 1
-    # Speaker re-labelling (Sprint 29, ``POST …/rediarize``). ``None`` until
-    # the first re-run: the initial diarization rides ``status``. The job's
-    # ``status`` stays ``complete`` throughout — the transcript is readable
-    # while labels are recomputed.
+    # None until the first re-run; ``status`` stays ``complete`` while labels are recomputed.
     diarization_status: Literal["queued", "running", "complete", "failed"] | None = None
     diarization_error: str | None = None
     diarization_runs: int = 0
-    # A previous labelling exists that ``POST …/rediarize/undo`` restores.
     can_undo_rediarize: bool = False
-    # Submit response only: True = the speaker-count hint was forwarded,
-    # False = it was sent but ignored (diarize=false), None = none sent.
+    # Submit response only: False = hint sent but ignored (diarize=false), None = none sent.
     hints_applied: bool | None = None
 
-    # ── Derived from `error_kind`; never stored, never settable ──────
-    # A client should not have to carry a copy of the failure vocabulary to
-    # know whether "try again" is honest advice. These three read straight
-    # off the spec table, so the SPA, the runbooks, and the dashboards all
-    # follow one source.
-    #
-    # Computed rather than validated-in: `model_copy(update=...)` skips
-    # validators, and callers copy these views (e.g. to attach a result
-    # URL). Stored fields would silently desync there — a job whose
-    # `error_kind` says one thing and whose `error_stage` says nothing
-    # at all.
+    # Derived from `error_kind`. Computed, not stored: `model_copy(update=...)` skips
+    # validators and callers copy these views, so stored fields would desync.
 
     @computed_field  # type: ignore[prop-decorator]
     @property

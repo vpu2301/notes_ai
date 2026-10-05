@@ -1,1 +1,1 @@
-"""Sprint-08 note-service test scaffolding."""
+"""note-service test scaffolding."""

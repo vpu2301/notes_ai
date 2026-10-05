@@ -48,12 +48,10 @@ async def current_user(
 
         state._current_user_dep = build_current_user(  # type: ignore[attr-defined]
             jwks_cache=state.jwks_cache,
-            # FND-1: the list, not a single string. The token's `iss`
-            # picks the entry it is verified against.
+            # The token's `iss` picks the entry it is verified against.
             issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
-            # Sprint 16: session-revocation denylist (None when the flag is
-            # off — pre-sprint-16 behaviour, no Redis dependency at runtime).
+            # Session-revocation denylist; None when the flag is off (no Redis at runtime).
             denylist=build_session_denylist(
                 enabled=settings.session_revocation_enabled,
                 redis_url=settings.redis_url,
@@ -105,19 +103,9 @@ def requires(
 def requires_any(
     *options: tuple[Action, TargetKind],
 ) -> Callable[..., Awaitable[Claims]]:
-    """Admit a caller who holds ANY of the given permissions.
-
-    For endpoints reachable by two different standings. The note search
-    is the case this exists for: a member arrives with ``note.read``
-    and gets the full list; a tenant_admin arrives with ``stats.read``
-    and gets the same rows stripped of every content-bearing field (S14).
-
-    The handler decides which it got — ``auth.can_claims`` is the
-    predicate — so this dep only answers "may they be here at all". Put
-    the primary permission first: a denial is reported against it, so the
-    403 and the audit row name what the caller was most likely reaching
-    for rather than the fallback they had never heard of.
-    """
+    """Admit a caller who holds ANY of the given permissions; the handler decides
+    which it got (``auth.can_claims``). Put the primary permission first: a denial
+    is reported against it."""
 
     async def dep(claims: Annotated[Claims, Depends(current_user)]) -> Claims:
         try:

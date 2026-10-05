@@ -40,14 +40,8 @@ _meter = metrics.get_meter("mdx.note")
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
-
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
-    """
+    """The issuers this service trusts (ADR-0047): ``AUTH_ISSUERS_JSON``, else the
+    single-issuer trio. The JWKS cache and ``build_current_user`` both use THIS list."""
     return issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -63,51 +57,35 @@ class ServiceState:
     audit_writer_pool: asyncpg.Pool
     audit_writer: AuditWriter
     template_cache: TemplateCache
-    # Sprint-08 additions.
     diff_cache: DiffCache
     autosave_rate_limiter: AutosaveRateLimiter
     draft_audit_buffer: DraftAuditBuffer
-    # Sprint-12: the notification event bus. Publishing is fire-and-forget
-    # (libs/notification_events.publish_event never raises), so a Redis
-    # outage degrades notifications without touching note writes.
+    # Notification bus; publishing never raises, so a Redis outage only degrades notifications.
     redis: Redis
-    # Sprint 15: audio replay (ADR-0037). Whole-object decrypt is the ONLY
-    # read path — the GCM envelope has no range mode.
+    # Audio replay (ADR-0037). Whole-object decrypt is the ONLY read path (GCM has no range mode).
     crypto_pool: asyncpg.Pool
     audio_store: EncryptedObjectStore
     transcripts_store: EncryptedObjectStore
-    # Sprint 33 — the queue the note-worker drains. `libs/jobs`'s
-    # first consumer; the API only ever enqueues.
+    # The queue the note-worker drains; the API only ever enqueues.
     job_queue: Any
-    # Sprint 37 — the table behind `Registry(settings_source=…)`. Cached
-    # for a minute; the settings route invalidates it on write so a tier
-    # change takes effect while the admin is still on the page.
+    # Settings source for `Registry`; cached a minute, invalidated by the settings route on write.
     workspace_model_settings: Any
-    # Sprint L2 — the one registry this process routes with: loaded with the
-    # settings source above, probed once at startup; in dev the fallback
-    # (the Mac) is chosen here when the API key is missing or the API does
-    # not answer. None when config/models.yaml cannot be loaded at all.
+    # The one registry this process routes with; None when config/models.yaml cannot be loaded.
     model_registry: Any
     clips_store: EncryptedObjectStore
     clip_rate_limiter: ClipRateLimiter
-    # Sprint 15: aggregated search.expanded audit (ADR-0038).
     search_audit_buffer: SearchAuditBuffer
-    # 0019: calendar connections. The envelope seals OAuth tokens at
-    # rest; the Google client is unconfigured (and says so) when the
-    # deployment has no client id.
+    # The envelope seals OAuth tokens at rest; the Google client is unconfigured without a client id.
     envelope: Envelope
     google_calendar: GoogleCalendarClient
-    # 0020: calendar links (iCal feeds) — fetched with the SSRF policy in
-    # domain/ics_calendar; needs no configuration.
+    # iCal feeds, fetched with the SSRF policy in domain/ics_calendar.
     ics_feeds: IcsFeedClient
-    # Sharing a note by e-mail: the provider that actually delivers it,
-    # and the per-sender hourly cap that keeps the endpoint from being a
-    # spam relay wearing our From address.
+    # The per-sender hourly cap keeps the share endpoint from being a spam relay.
     email_provider: EmailProvider
     share_email_rate_limiter: ShareEmailRateLimiter
-    # Sprint 19: abuse caps on the anonymous shared-note surface.
+    # Abuse caps on the anonymous shared-note surface.
     public_rate_limiter: PublicRateLimiter
-    # Sprint 22: sends per link / sender / workspace per day.
+    # Sends per link / sender / workspace per day.
     share_mail_caps: ShareMailCaps
     # Metric handles (kept on state so routers don't recreate them).
     diff_cache_hit_metric: object
@@ -118,10 +96,7 @@ class ServiceState:
 
 async def build_state() -> ServiceState:
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
+    # One log line answers "which issuers does this pod accept?".
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     app_pool = await create_pool(
@@ -165,9 +140,7 @@ async def build_state() -> ServiceState:
         unit="",
     )
 
-    # Sprint 15: S3 + envelope crypto for audio replay (ADR-0037) — the
-    # dictation-service main_deps wiring, ported. Same env names, same
-    # dev master key.
+    # S3 + envelope crypto for audio replay (ADR-0037); same wiring as dictation-service.
     crypto_pool = await create_pool(
         settings.db_crypto_writer_dsn,
         application_name=f"{settings.service_name}/crypto_writer",
@@ -316,13 +289,8 @@ async def build_state() -> ServiceState:
 
 
 async def _model_registry(workspace_model_settings: Any) -> Any:
-    """Load `config/models.yaml` and probe the chat backend once (Sprint L2).
-
-    A registry that cannot load (no models.yaml on this deployment) is
-    None — the routes that need one say so on first use, as before. A
-    probe that fails on staging/prod raises: the process refuses to boot
-    rather than write notes with a processor nobody chose.
-    """
+    """Load `config/models.yaml` and probe the chat backend once. A registry that
+    cannot load is None; a failed probe on staging/prod refuses to boot."""
     try:
         registry = load_registry(workspace_model_settings)
     except Exception:  # noqa: BLE001

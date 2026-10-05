@@ -8,13 +8,9 @@ TRANSCRIPTION_STARTED: Final = "asr.transcription_started"
 TRANSCRIPTION_COMPLETE: Final = "asr.transcription_complete"
 TRANSCRIPTION_FAILED: Final = "asr.transcription_failed"
 JOB_CANCELLED: Final = "asr.job_cancelled"
-# Speaker re-labelling (Sprint 29). Payloads carry counts and the engine,
-# never labels-to-names or text.
+# Speaker re-labelling. Payloads carry counts and the engine, never names or text.
 REDIARIZE_COMPLETED: Final = "asr.rediarize_completed"
 REDIARIZE_FAILED: Final = "asr.rediarize_failed"
 
-# Security / startup. Emitted as a CRITICAL structured log (not a tenant-scoped
-# audit row): a missing master key is a system-wide, pre-tenant fail-closed
-# condition with no tenant context, so it cannot enter the per-tenant audit
-# chain. See docs/audit/event-kinds.md and docs/runbooks/asr-worker.md.
+# Emitted as a CRITICAL log, not an audit row: no tenant context yet (docs/audit/event-kinds.md).
 KEY_MASTER_MISSING: Final = "asr.key.master_missing"  # severity=error

@@ -1,20 +1,4 @@
-"""libs/auth — JWT verification, JWKS caching, FastAPI integration.
-
-Public API (everything else is implementation detail and may change):
-
-- :class:`Claims` — strict pydantic model of the verified token payload.
-- :func:`verify_token` — the single sanctioned verification entry point.
-- :class:`JwksCache` — async JWKS cache with TTL and storm prevention.
-- :class:`IssuerConfig`, :func:`issuers_from_env` — the list of issuers a
-  service trusts (FND-1 / ADR-0047; ``AUTH_ISSUERS_JSON``).
-- :func:`build_current_user` — factory for the FastAPI dependency.
-- :func:`current_claims`, :func:`current_tenant_id` — per-request ContextVar
-  accessors for code that runs outside an explicit ``Depends`` injection.
-- The :mod:`auth.exceptions` module re-exports every distinct failure type.
-
-ADR-0006 covers the design rationale (Keycloak as IdP, RS256-only, strict
-claims model).
-"""
+"""JWT verification, JWKS caching, FastAPI integration (ADR-0006, ADR-0047)."""
 
 from __future__ import annotations
 

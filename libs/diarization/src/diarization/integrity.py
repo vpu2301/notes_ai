@@ -1,16 +1,4 @@
-"""Startup integrity check for the baked diarization weights (sprint 14).
-
-The build-time contract (docs/models/PINS.md) fetches ECAPA at an immutable
-revision and verifies SHA-256 before baking. This module asserts the SAME
-digests again **at process startup**, so a tampered, truncated, or
-wrong-image layer is caught before the first recorded meeting rather
-than silently producing speaker labels from unknown weights.
-
-Fail-closed: a mismatch raises. For a product recording sensitive audio, refusing to start is
-strictly better than diarizing with weights nobody can account for.
-
-Cost is ~0.2 s for the 83 MB artifact — paid once, off the request path.
-"""
+"""Startup re-check of the baked diarization weights against the build-time digests (docs/models/PINS.md). Fail-closed."""
 
 from __future__ import annotations
 
@@ -21,7 +9,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Artifact name -> the settings attribute carrying its pinned digest.
 VERIFIED_ARTIFACTS: tuple[str, ...] = ("embedding_model.ckpt", "mean_var_norm_emb.ckpt")
 
 
@@ -45,22 +32,10 @@ def verify_model_dir(
     revision: str = "",
     required_files: tuple[str, ...] = ("hyperparams.yaml",),
 ) -> dict[str, str]:
-    """Verify each pinned artifact under ``model_dir``.
+    """Verify each pinned artifact under ``model_dir``; returns artifact -> actual digest.
 
-    ``required_files`` are repo-owned configs that must exist (their
-    absence would send the loader to the network). ECAPA: ``hyperparams.yaml``
-    (the default); pyannote community-1: ``config.yaml``.
-
-    ``pins`` maps artifact filename -> expected sha256. An entry with an
-    empty digest is treated as UNPINNED: its presence is still required,
-    but the content is only logged, with a warning — that is the dev path
-    (``make prepare-ecapa``), never a shipped image, because both
-    Dockerfiles bake the digests as ENV.
-
-    Returns the map of artifact -> actual digest for the caller to log.
-
-    Raises ModelIntegrityError if a file is missing or a pinned digest
-    does not match.
+    An empty digest in ``pins`` = UNPINNED (dev path): presence required, content only logged with a warning.
+    ``required_files`` are the repo-owned configs whose absence would send the loader to the network.
     """
     root = Path(model_dir)
     if not root.is_dir():
@@ -82,17 +57,12 @@ def verify_model_dir(
             unpinned.append(name)
             continue
         if got != expected:
-            # Do not log the file path's contents or the expected value as a
-            # secret — these are public digests; the point is loud provenance.
             raise ModelIntegrityError(
                 f"checksum mismatch for {path}: expected {expected}, got {got}. "
                 "Refusing to start (fail-closed, docs/models/PINS.md)."
             )
 
-    # The repo-owned config (ECAPA: hyperparams.yaml, infra/models/ecapa/;
-    # community-1: config.yaml) points the loader at LOCAL files. Its
-    # ABSENCE means the loader would resolve the model over the network —
-    # the offline-hostile behaviour ADR-0034 and ADR-0052 rule out.
+    # Without the repo-owned config the loader would resolve the model over the network (ADR-0034, ADR-0052).
     for required in required_files:
         if not (root / required).is_file():
             raise ModelIntegrityError(

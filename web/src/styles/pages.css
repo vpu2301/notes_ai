@@ -1,5 +1,5 @@
 /* ─── Login ─────────────────────────────────────────────────────────────── */
-/* SignInView: a framed card on the dotted ground, wordmark, "Welcome back". */
+/* SignInView */
 .login-shell {
   min-height: 100vh;
   display: grid; place-items: center;
@@ -47,9 +47,7 @@
 }
 .login-foot code { white-space: nowrap; font-family: var(--mono); font-size: calc(10.5px * var(--fs)); background: var(--surface-2); border-radius: var(--radius-xs); padding: 0 4px; color: var(--text-2); }
 
-/* IDX-W1: the code step, the resend row, and the quiet line under a field.
-   New rules rather than edits to the ones above — the password card still
-   looks exactly as it did, and only the taller screens opt in. */
+/* Code step, resend row, the quiet line under a field */
 .login-hint {
   margin: 0;
   color: var(--muted);
@@ -61,14 +59,10 @@
   display: flex; flex-direction: column; align-items: center;
   gap: calc(10px * var(--density));
 }
-/* The same quiet line, but attached to the field above it rather than
-   centred under the card — a rule about the box you are typing in reads
-   as an aside when it is centred. */
+/* The same quiet line, attached to the field above it. */
 .login-hint.under-field { text-align: left; margin-top: -6px; }
 
-/* BE-0: why a password was refused, one line per `reasons[]` code. A list
-   rather than a paragraph — these are things to fix, and a wall of prose
-   under a red banner is read by nobody. */
+/* Password refusal reasons, one line per `reasons[]` code */
 .login-reasons {
   margin: -4px 0 0;
   padding-left: calc(18px * var(--density));
@@ -78,8 +72,7 @@
 }
 
 /* ─── One-time-code entry ───────────────────────────────────────────────── */
-/* Six boxes rather than one field: that is what earns the iOS/macOS
-   "From Messages" autofill and the Android SMS prompt. */
+/* Six boxes: what earns the iOS/macOS "From Messages" autofill and the Android SMS prompt. */
 .code-input {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -118,23 +111,19 @@
   80% { transform: translateX(2px); }
 }
 
-/* Somebody who has asked for less motion still needs to see the refusal —
-   the border colour and the live-region message carry it without the shake. */
+/* Reduced motion: the border colour and the live region carry the refusal without the shake. */
 @media (prefers-reduced-motion: reduce) {
   .code-input.invalid { animation: none; }
 }
 
-/* On a narrow phone six boxes plus the card padding overflow; let them
-   shrink rather than push the card sideways. */
+/* Narrow phone: the boxes shrink rather than push the card sideways. */
 @media (max-width: 380px) {
   .code-input { gap: calc(5px * var(--density)); }
   .code-input input { font-size: calc(17px * var(--fs)); }
 }
 
 /* ─── Home (notes + in-progress captures) ───────────────────────────────── */
-/* Home, Granola-style: one compact header row — the title, search, and
-   New meeting with a ⋯ for the other ways to start — and the notes begin
-   right under it. The dot print stays behind all of it. */
+/* Home header row */
 .home { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: calc(24px * var(--density)); padding-top: calc(4px * var(--density)); }
 .home-top { display: flex; align-items: center; gap: calc(10px * var(--density)); min-height: 44px; }
 .home-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
@@ -147,7 +136,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .home-sub { font-size: calc(12.5px * var(--fs)); color: var(--muted); margin-top: 2px; }
-/* The search capsule takes the row while it is open; the title gives way. */
+/* The open search capsule takes the row. */
 .home-top .sf { flex: 0 0 auto; --sf-h: 36px; }
 .home-top .sf.on { flex: 1 1 340px; }
 .home-top:has(.sf.on) .home-title { flex: 0 1 auto; }
@@ -159,8 +148,7 @@
   .home-title h1 { font-size: calc(24px * var(--fs)); }
 }
 
-/* The lists, as Claude's "Active" list: no card around them — rows on the
-   page, divided by a hairline, a soft fill under the one you point at. */
+/* Lists: no card, hairline-divided rows */
 .home-list { display: flex; flex-direction: column; }
 .home-list .row {
   padding: calc(8px * var(--density)) calc(12px * var(--density));
@@ -188,7 +176,7 @@
 .home-list-more:hover { background: var(--sidebar-hover); color: var(--text-1); }
 
 .home-group { display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
-/* Sentence-case section label, as Claude's "Active". */
+/* Section label */
 .home-group-h {
   font-family: var(--sans);
   font-size: calc(13px * var(--fs)); font-weight: 400;
@@ -197,10 +185,7 @@
 }
 .home .empty { margin: 0; }
 
-/* ─── First use ─────────────────────────────────────────────────────────
-   The empty workspace: an invitation, one sentence and one button. Like
-   `.empty` it carries no frame and no fill of its own — the empty
-   workspace looks like the workspace, only without the rows. */
+/* ─── First use (empty workspace; no frame, no fill, like `.empty`) ────── */
 .first-use {
   display: flex;
   flex-direction: column;
@@ -258,20 +243,18 @@ section:first-of-type > .tpl-cat { margin-top: 0; }
 .tpl-meta { display: flex; gap: calc(6px * var(--density)); align-items: center; flex-wrap: wrap; }
 
 /* ─── Note document ─────────────────────────────────────────────────────── */
-/* NoteView: a slim bar, then the title in display type, a row of meta
-   pills, the Notes / Transcript pill, and one section per template
-   field — typeset when you are reading it, a seamless editor the moment
-   you click into it. The ask composer floats over the foot of the page.
-
-   --doc-w is the document's column; the body, the ask bar and the shared
-   note view all measure themselves against it so the three line up. */
+/* NoteView. --doc-w is the document column: body, ask bar and shared view all measure against it. */
+/* The note page fills the scroller and drops the page's foot padding, so the ask bar's
+   resting place (14px up) is the same whether the note is short, scrolling, or at its end. */
+.page:has(> .doc-wrap) { display: flex; flex-direction: column; flex: 1 0 auto; padding-bottom: 0; }
 .doc-wrap {
   --doc-w: 720px;
+  flex: 1 0 auto;
   display: flex; gap: calc(16px * var(--density));
   align-items: flex-start; justify-content: center;
-  padding-bottom: calc(72px * var(--density));
+  padding-bottom: calc(14px * var(--density));
 }
-.doc { width: 100%; max-width: var(--doc-w); min-width: 0; display: flex; flex-direction: column; gap: calc(8px * var(--density)); padding-top: calc(16px * var(--density)); }
+.doc { width: 100%; max-width: var(--doc-w); min-width: 0; align-self: stretch; display: flex; flex-direction: column; gap: calc(8px * var(--density)); padding-top: calc(16px * var(--density)); }
 .doc-bar { display: flex; align-items: center; gap: calc(10px * var(--density)); min-height: 32px; }
 .doc .save-status { margin-right: calc(4px * var(--density)); }
 .title-input {
@@ -287,25 +270,21 @@ section:first-of-type > .tpl-cat { margin-top: 0; }
   padding: calc(4px * var(--density)) 0;
   border-radius: 0;
 }
-/* In the note itself the title is the page — it gets the larger cut. The
-   meeting stage keeps the smaller one, where it shares a row. */
+/* The note title gets the larger cut; the meeting stage keeps the smaller one. */
 .doc > .title-input {
   font-family: var(--serif);
   font-size: calc(38px * var(--fs)); font-weight: 400;
   line-height: 1.15; letter-spacing: -0.02em;
 }
 .title-input:focus { outline: none; box-shadow: none; }
-/* No frame on the title, so the focus cue is a hairline underneath it. */
+/* Unframed title: the focus cue is a hairline underneath. */
 .title-input:focus-visible { box-shadow: 0 1px 0 0 var(--line-active); }
-/* A meeting's title is a sentence, not a label — it wraps onto a second
-   line rather than running off the right edge. */
+/* A meeting title wraps. */
 textarea.title-input { resize: none; overflow: hidden; display: block; }
 .title-input:disabled { color: var(--text-1); opacity: 1; -webkit-text-fill-color: var(--text-1); }
 .title-input::placeholder { color: var(--muted); opacity: .7; }
 
-/* The meta line is a row of quiet, unframed items — when it was recorded,
-   whose it is, what wrote it, where it is filed. The ones you can act on
-   take a soft fill on hover; the rest are facts and sit still. */
+/* Meta line: actionable items take a hover fill; facts sit still. */
 .doc-meta {
   display: flex; align-items: center; gap: calc(2px * var(--density)); flex-wrap: wrap;
   margin: calc(4px * var(--density)) calc(-8px * var(--density)) 0;
@@ -330,15 +309,13 @@ textarea.title-input { resize: none; overflow: hidden; display: block; }
 button.doc-pill, a.doc-pill { cursor: pointer; }
 button.doc-pill:hover, a.doc-pill:hover { background: var(--sidebar-hover); color: var(--text-1); }
 button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
-/* The template pill carries the accent — it is the one item on the line
-   that says how the note was written rather than when. */
+/* The template pill carries the accent. */
 .doc-pill.tpl { color: var(--accent-text); background: var(--accent-soft); margin: 0 4px; }
 .doc-pill.tpl svg { color: currentColor; }
 .doc-pill.on { background: var(--surface-2); color: var(--text-1); border-color: transparent; }
 
 .doc-tabs { margin: calc(14px * var(--density)) 0 calc(6px * var(--density)); align-self: flex-start; }
-/* In the note the section names are the document's headings — the same
-   serif as the title, a size down. */
+/* Section names are the document's headings. */
 .doc .section-name {
   font-family: var(--serif);
   font-size: calc(20px * var(--fs)); font-weight: 500;
@@ -347,10 +324,7 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 .doc-body { display: flex; flex-direction: column; }
 .doc-section { padding: calc(10px * var(--density)) 0; }
 .doc-section .field { gap: calc(6px * var(--density)); }
-/* Section names are display type, not tracked caps, as on the Mac, with a
-   "#" hanging in the gutter so the document's outline is legible at a
-   glance. The marker sits outside the text column, so it never pushes the
-   words in — and it is dropped when there is no gutter left to hang in. */
+/* The "#" hangs in the gutter outside the text column; dropped when there is no gutter. */
 .section-name {
   position: relative;
   font-family: var(--display);
@@ -388,9 +362,7 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
   line-height: 1.65;
 }
 .section-ro.empty-val { color: var(--muted); font-style: normal; }
-/* A draft reads as a document until you click a section, so the typeset
-   body needs the same hover paper the editor has — that is the only cue
-   that the text under the pointer is yours to change. */
+/* The typeset body shares the editor's hover paper: the only cue that it is editable. */
 .section-ro.editable, .doc-edit {
   width: calc(100% + 20px);
   margin: 0 -10px;
@@ -402,21 +374,18 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 }
 .section-ro.editable:hover, .doc-edit:hover { background: var(--surface-hover); border-color: var(--line-2); }
 .doc-edit:focus-visible { outline: none; background: var(--surface-hover); border-color: var(--line-hover); }
-/* A pill that opens a list drops it under itself, not off the right edge. */
+/* A pill's list drops under itself. */
 .doc-meta .dropdown-host { display: inline-flex; }
 .dropdown.left { right: auto; left: 0; }
 
 /* ─── Typeset note body (RichText) ──────────────────────────────────────── */
-/* What the model writes — headings, nested bullets, checklists, the odd
-   small table — set as a document instead of dumped as raw markdown. The
-   rhythm is tight on purpose: a note is scanned, not read through. */
+/* Tight rhythm on purpose: a note is scanned, not read through. */
 .rt { color: var(--text-1); font-size: calc(13.5px * var(--fs)); line-height: 1.65; overflow-wrap: anywhere; }
 .rt > :first-child { margin-top: 0; }
 .rt > :last-child { margin-bottom: 0; }
 .rt.empty-val { color: var(--muted); }
 .rt-p { margin: 0 0 calc(9px * var(--density)); }
-/* A transcript turn, as a chat reads: initials in a tinted circle, the
-   name in dark semibold, the words below. No rules, no colour on text. */
+/* Transcript turn */
 .rt-turn, .turn {
   display: grid; grid-template-columns: 28px 1fr; column-gap: calc(12px * var(--density)); row-gap: 2px;
   align-items: start; margin: 0 0 calc(18px * var(--density));
@@ -453,8 +422,7 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 .rt-list .rt-list { margin: calc(3px * var(--density)) 0 0; }
 .rt-list li { position: relative; margin-bottom: calc(3px * var(--density)); }
 .rt-list li:last-child { margin-bottom: 0; }
-/* Three bullet glyphs, one per level, the way an outline is drawn on
-   paper: filled, then hollow, then a dash. */
+/* Bullet glyphs per level: filled, hollow, dash */
 ul.rt-list > li::before {
   content: "";
   position: absolute; left: calc(-13px * var(--density)); top: calc(0.62em - 2px);
@@ -482,8 +450,7 @@ ol.rt-list > li::before {
   width: 13px; height: 13px; flex: none;
   border: 1.5px solid var(--line-active); border-radius: var(--radius-2xs);
 }
-/* The tick is drawn from a rotated corner, not typed — it stays crisp at
-   any text size and needs no glyph the reader's fonts might not have. */
+/* The tick is a rotated corner, not a glyph. */
 .rt-list li.task > .box.done { background: var(--accent); border-color: var(--accent); }
 .rt-list li.task > .box.done::after {
   content: "";
@@ -493,7 +460,7 @@ ol.rt-list > li::before {
   border-width: 0 1.6px 1.6px 0;
   transform: rotate(42deg);
 }
-/* A done task reads as done — the words step back with the box. */
+/* Done task */
 .rt-list li.task > .box.done ~ span { color: var(--text-3); }
 .rt-quote {
   margin: 0 0 calc(9px * var(--density));
@@ -517,9 +484,7 @@ ol.rt-list > li::before {
 .rt-table th { font-weight: 600; color: var(--text-2); border-bottom-color: var(--line); white-space: nowrap; }
 
 /* ─── Ask this note ─────────────────────────────────────────────────────── */
-/* The thread sits at the foot of the document — questions in a quiet
-   bubble on the right, answers as plain text under a spark, one
-   conversation about the note in front of you. */
+/* Thread at the foot of the document */
 .ask-thread { display: flex; flex-direction: column; gap: calc(14px * var(--density)); margin-top: calc(32px * var(--density)); }
 .ask-turn.you { display: flex; justify-content: flex-end; }
 .ask-turn.you > span {
@@ -535,7 +500,7 @@ ol.rt-list > li::before {
 .ask-turn.ai > .spark { color: var(--accent-text); flex: none; margin-top: 2px; }
 .ask-turn.ai > .rt { flex: 1; min-width: 0; }
 .ask-wait { display: flex; align-items: center; gap: calc(8px * var(--density)); color: var(--muted); font-size: calc(13px * var(--fs)); }
-/* Three dots that breathe in turn — the answer is being written. */
+/* Typing dots */
 .ask-wait .dots { display: inline-flex; gap: 3px; }
 .ask-wait .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); animation: ask-pulse 1.1s var(--ease) infinite; }
 .ask-wait .dots i:nth-child(2) { animation-delay: .15s; }
@@ -543,13 +508,15 @@ ol.rt-list > li::before {
 @keyframes ask-pulse { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ask-wait .dots i { animation: none; opacity: .55; } }
 
-/* The composer floats over the foot of the page, centred on the document
-   column so it reads as part of the note rather than as page chrome. */
+/* Composer rests at the foot of the page and stays there while the note scrolls:
+   margin-top:auto pins it to the bottom of a short note, sticky keeps it there on a long one,
+   and both resting places are the same 14px from the edge. */
 .ask-dock {
   position: sticky; bottom: calc(14px * var(--density));
   z-index: 5;
   width: 100%; max-width: var(--doc-w);
-  margin: calc(20px * var(--density)) auto 0;
+  margin: auto auto 0;
+  padding-top: calc(20px * var(--density));
   pointer-events: none;
 }
 .ask-bar {
@@ -574,7 +541,7 @@ ol.rt-list > li::before {
   color: var(--text-1);
 }
 .ask-input:focus { outline: none; box-shadow: none; }
-/* The bar around it lights up on focus-within; the field itself shows the moss caret. */
+/* focus-within lights the bar */
 .ask-input:focus-visible { caret-color: var(--accent); }
 .ask-input::placeholder { color: var(--muted); }
 .ask-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -595,10 +562,7 @@ ol.rt-list > li::before {
 }
 .ask-send:hover:not([disabled]) { transform: scale(1.05); }
 .ask-send[disabled] { opacity: .35; cursor: default; }
-/* SectionEditor: no chrome until hovered or focused, then a faint surface
-   in a warm hairline. The negative margin keeps the text aligned with the
-   page, and the frame stays neutral in both states — a section you are
-   typing into is told apart by its paper, not by a coloured edge. */
+/* SectionEditor: the negative margin keeps the text aligned with the page. */
 .seamless {
   width: calc(100% + 20px);
   margin: 0 -10px;
@@ -660,12 +624,11 @@ ol.rt-list > li::before {
 .turn-time { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .turn-text { grid-column: 2; margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
 .turn-text + .turn-text { margin-top: calc(6px * var(--density)); }
-/* Sprint I2: a turn in another language than the recording. Neutral — a
-   fact about the passage, not something to act on. */
+/* A turn in another language than the recording */
 .turn-lang { color: var(--text-3); background: var(--surface-2); align-self: center; }
 .transcript-include-langs { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 .transcript-diagnostic { margin: calc(-8px * var(--density)) 0 calc(12px * var(--density)); color: var(--text-3); }
-/* Sprint TQ3: a unified spelling — a quiet underline, "unified from …" on hover. */
+/* A unified spelling: quiet underline, "unified from …" on hover */
 .unified-spelling { text-decoration: underline dotted var(--text-3); text-underline-offset: 3px; }
 .unified-spelling.hovered { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 3px; }
 .transcript-spellings { margin-bottom: calc(10px * var(--density)); }
@@ -673,14 +636,14 @@ ol.rt-list > li::before {
 .entity-review .entity-row:last-child { border-bottom: 0; }
 .entity-review .entity-row-h { display: flex; gap: 10px; align-items: baseline; }
 .entity-review .entity-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-/* Sprint TQ2: music / silence / noise markers — a quiet line, not a turn. */
+/* Music / silence / noise markers */
 .transcript-marker {
   margin: calc(6px * var(--density)) 0; color: var(--text-3);
   font-size: 0.875em; font-style: italic; user-select: none;
 }
 
 /* ─── New meeting ───────────────────────────────────────────────────────── */
-/* ActiveCaptureCard: the stage is a framed card with the xl radius. */
+/* ActiveCaptureCard */
 .meeting {
   position: relative;
   max-width: 680px; margin: 0 auto;
@@ -698,15 +661,13 @@ ol.rt-list > li::before {
   text-align: center;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-xl);
-  /* Not a blank slab: a very soft moss light pools under the record button,
-     so the stage reads as a place to start rather than an empty box. */
+  /* Soft moss pool under the record button */
   background:
     radial-gradient(120% 78% at 50% 62%, var(--accent-soft), transparent 62%),
     var(--surface);
   transition: border-color var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
 }
-/* Before anything is recorded the stage has no card at all: the record button
-   sits straight on the paper, with only the soft moss pool behind it. */
+/* Before recording: no card, just the record button on the paper. */
 .meeting-stage.idle {
   border-color: transparent;
   background: radial-gradient(60% 52% at 50% 58%, var(--accent-soft), transparent 70%);
@@ -730,7 +691,7 @@ ol.rt-list > li::before {
   display: flex; align-items: center; gap: calc(12px * var(--density));
   color: var(--text-1);
 }
-/* LevelMeter: 3px capsules, accent → warn → rec by threshold. */
+/* LevelMeter: accent → warn → rec by threshold */
 .level-meter { display: flex; align-items: center; gap: 3px; height: 44px; }
 .level-meter .bar {
   width: 3px; min-height: 3px;
@@ -781,10 +742,7 @@ ol.rt-list > li::before {
   z-index: 5;
 }
 
-/* ─── The live meeting: recorder rail + scratchpad (Sprint 34) ─────────── */
-/* Once Record is pressed the page IS the note. The recorder shrinks to one
-   quiet line and the writing surface takes the room — the meeting is being
-   typed, not watched. */
+/* ─── The live meeting: recorder rail + scratchpad ──────────────────────── */
 .meeting-live { max-width: 760px; gap: calc(12px * var(--density)); }
 .recorder-bar {
   position: sticky; top: 0; z-index: 4;
@@ -794,7 +752,7 @@ ol.rt-list > li::before {
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-pill);
   background: var(--surface);
-  /* The paper must not show through the text scrolling under it. */
+  /* Opaque: text scrolls under it. */
   backdrop-filter: saturate(1.2) blur(6px);
 }
 .recorder-bar .grow { flex: 1; }
@@ -802,14 +760,12 @@ ol.rt-list > li::before {
 .recorder-bar .level-meter.sm { height: 24px; }
 .recorder-bar .stage-pulse.sm { width: 9px; height: 9px; flex: none; }
 .rec-status { font-size: calc(13px * var(--fs)); color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
-/* Sprint F1: "Recording from 0:03" — quiet, beside the clock, in body type. */
+/* "Recording from 0:03", beside the clock */
 .rec-timer .rec-latency { font-family: var(--sans); font-size: calc(12px * var(--fs)); font-weight: 400; color: var(--text-2); margin: 0; }
 
 .scratchpad { display: flex; flex-direction: column; gap: calc(8px * var(--density)); }
 .scratchpad .title-input { font-size: calc(22px * var(--fs)); }
-/* Tall enough that the author never feels they are filling a box, and it
-   grows with the window rather than with the text (a jumping textarea
-   under a live meeting is the wrong kind of movement). */
+/* Grows with the window, not the text: no jumping textarea under a live meeting. */
 .scratch-area {
   min-height: min(52vh, 460px);
   resize: vertical;
@@ -826,7 +782,7 @@ ol.rt-list > li::before {
 .scratch-context-body ul { margin: calc(6px * var(--density)) 0 0; padding-left: 1.1em; }
 .meeting-foot { text-align: center; }
 
-/* Phone: the rail stays one line and the pad fills what is left. */
+/* Phone */
 @media (max-width: 640px) {
   .meeting-live { gap: calc(10px * var(--density)); }
   .recorder-bar { gap: calc(8px * var(--density)); padding-inline: calc(10px * var(--density)); }
@@ -834,10 +790,10 @@ ol.rt-list > li::before {
   .scratch-area { min-height: 44vh; }
 }
 
-/* The meeting-type chips wrap rather than scroll: six short words fit. */
+/* Meeting-type chips wrap. */
 .seg.chips { flex-wrap: wrap; align-self: center; }
 
-/* ─── Workspace vocabulary (Sprint 35) ─────────────────────────────────── */
+/* ─── Workspace vocabulary ──────────────────────────────────────────────── */
 .glossary-add {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: calc(8px * var(--density));
@@ -851,7 +807,7 @@ ol.rt-list > li::before {
 }
 .glossary-list li .grow { flex: 1; }
 .glossary-term { font-weight: 500; color: var(--text-1); }
-/* The kind is a quiet label, not a badge competing with the name. */
+/* Kind label */
 .glossary-kind {
   font-size: calc(11.5px * var(--fs)); color: var(--muted);
   text-transform: lowercase;
@@ -861,9 +817,7 @@ ol.rt-list > li::before {
 .glossary-meta a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .glossary-add-error { margin: calc(6px * var(--density)) 0 0; }
 .glossary-not-sent { margin-top: calc(12px * var(--density)); }
-/* Sprint I2: a stored role label the server no longer sends. Dimmed, tagged,
-   still removable — the list shows what the transcriber gets, so a line it
-   does not get must look like one. */
+/* A stored role label the server no longer sends: dimmed, tagged, still removable. */
 .glossary-list li.not-sent .glossary-term,
 .glossary-list li.not-sent .glossary-kind,
 .glossary-list li.not-sent .glossary-heard { color: var(--text-3); }
@@ -875,7 +829,7 @@ ol.rt-list > li::before {
   border: var(--hairline) solid var(--line); border-radius: var(--radius-xs);
   padding: 0 5px; white-space: nowrap; align-self: center;
 }
-/* The prompt, word for word. A neutral frame: this is a fact, not a warning. */
+/* The prompt, word for word; neutral frame */
 .glossary-hint {
   margin-top: calc(16px * var(--density));
   padding: calc(10px * var(--density)) calc(12px * var(--density));
@@ -894,9 +848,7 @@ ol.rt-list > li::before {
 }
 .remember-term { align-items: center; }
 
-/* ─── Still open from last time (Sprint 36) ────────────────────────────── */
-/* Unfinished business reads as a quiet block above the note, not as a
-   second document competing with it. */
+/* ─── Still open from last time ─────────────────────────────────────────── */
 .carried {
   margin-bottom: calc(20px * var(--density));
   padding: calc(12px * var(--density)) calc(16px * var(--density));
@@ -917,7 +869,7 @@ ol.rt-list > li::before {
   padding: calc(4px * var(--density)) 0;
 }
 .carried-list li .chk-row { flex: 1; align-items: baseline; }
-/* Done is quieter, not gone: it is evidence the meeting moved. */
+/* Done: quieter, not gone */
 .carried-list li.done > .chk-row { color: var(--muted); text-decoration: line-through; }
 .carried-list li.done .help { text-decoration: none; }
 .carried-quote {
@@ -925,7 +877,7 @@ ol.rt-list > li::before {
   font-style: italic; overflow-wrap: anywhere;
 }
 
-/* ─── Client version (Sprint 36) ───────────────────────────────────────── */
+/* ─── Client version ────────────────────────────────────────────────────── */
 .client-version { display: flex; flex-direction: column; gap: calc(14px * var(--density)); }
 .client-warnings {
   list-style: none; margin: 0; padding: calc(10px * var(--density)) calc(14px * var(--density));
@@ -935,7 +887,7 @@ ol.rt-list > li::before {
   font-size: calc(13px * var(--fs)); color: var(--text-2);
 }
 .client-warning-count { font-variant-numeric: tabular-nums; font-weight: 600; }
-/* The preview is the document, so it is typeset like one. */
+/* Typeset like the document */
 .client-doc {
   padding: calc(28px * var(--density)) calc(32px * var(--density));
   border: var(--hairline) solid var(--line);
@@ -970,9 +922,7 @@ ol.rt-list > li::before {
 .shared-foot { padding: calc(14px * var(--density)) calc(20px * var(--density)); color: var(--muted); font-size: calc(12px * var(--fs)); text-align: center; }
 
 /* ─── Coming up (calendar) ──────────────────────────────────────────────── */
-/* ComingUp: one framed card — today's date on the left in display type,
-   the next days' events on the right. Empty states sit in a dashed frame
-   inside the card, as Granola does. */
+/* ComingUp */
 .cu-head { display: flex; align-items: center; gap: 8px; }
 .cu-head .home-group-h { flex: 1; }
 .cu-card {
@@ -997,8 +947,7 @@ ol.rt-list > li::before {
 .cu-date-wd { font-size: calc(12.5px * var(--fs)); color: var(--muted); }
 .cu-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
 .cu-empty {
-  /* A line, not a box: the day column already frames it (Granola's
-     "No events today"), so the card stays one row tall. */
+  /* A line, not a box, so the card stays one row tall. */
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
   min-height: 40px; padding: 0 calc(4px * var(--density));
   border-left: 3px solid var(--line);
@@ -1044,7 +993,7 @@ ol.rt-list > li::before {
   .cu-actions { opacity: 1; }
 }
 
-/* The space a note is filed in, in the note's meta line. */
+/* Space pill in the note's meta line */
 .doc-space {
   display: inline-flex; align-items: center; gap: 4px;
   color: var(--muted); text-decoration: none;
@@ -1052,16 +1001,14 @@ ol.rt-list > li::before {
 }
 .doc-space:hover { color: var(--text-1); }
 
-/* ─── Settings (IDX-W2) ─────────────────────────────────────────────────── */
-/* Cards on the ordinary page ground — no new design system, just the
-   existing .card / .field / .row vocabulary arranged in a column. */
+/* ─── Settings ──────────────────────────────────────────────────────────── */
 .page-h-stack { display: flex; flex-direction: column; gap: calc(16px * var(--density)); }
 .settings-stack { display: flex; flex-direction: column; gap: calc(14px * var(--density)); }
 .settings-stack-sm { display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
 .settings-card { display: flex; flex-direction: column; gap: calc(12px * var(--density)); }
 .settings-card > .seg { align-self: flex-start; }
 .settings-card .row-list { margin-top: calc(-4px * var(--density)); }
-/* Edge to edge inside a padded card; an unpadded card's rows already are. */
+/* Edge to edge inside a padded card */
 .settings-card.pad .row-list { margin: 0 calc(-16px * var(--density)) calc(-16px * var(--density)); }
 .settings-card .row-list .row + .row { border-top: var(--hairline) solid var(--line-2); }
 .settings-h { margin: 0; font-size: calc(14.5px * var(--fs)); font-weight: 600; }
@@ -1080,11 +1027,10 @@ ol.rt-list > li::before {
 .settings-actions { display: flex; gap: calc(8px * var(--density)); align-items: center; flex-wrap: wrap; }
 .danger-card { border-color: var(--danger-soft); }
 
-/* The settings tabs reuse the segmented pill in components.css; only the
-   link-specific bits are new (NavLink renders an <a>). */
+/* Settings tabs reuse the segmented pill; NavLink renders an <a>. */
 .tabs .tab { text-decoration: none; }
 
-/* A small state marker next to a row's name ("This browser", "revoked"). */
+/* Row state marker ("This browser", "revoked") */
 .pill {
   margin-left: calc(8px * var(--density));
   padding: 1px calc(7px * var(--density));
@@ -1131,7 +1077,7 @@ ol.rt-list > li::before {
 .qr-frame svg { width: 100%; height: 100%; display: block; }
 .qr-fallback { color: var(--muted); font-size: calc(11.5px * var(--fs)); text-align: center; }
 
-/* ─── Shared Outcome Page (Sprint 19) ──────────────────────────────────── */
+/* ─── Shared Outcome Page ───────────────────────────────────────────────── */
 .shared-bar { flex-wrap: wrap; gap: 10px; }
 .shared-sender { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .shared-logo { width: 28px; height: 28px; border-radius: var(--radius-xs); object-fit: contain; background: var(--surface); }
@@ -1159,7 +1105,7 @@ ol.rt-list > li::before {
   .shared-title { font-size: calc(22px * var(--fs)); }
 }
 
-/* ─── Shared page: interactive items (Sprint 20) ───────────────────────── */
+/* ─── Shared page: interactive items ────────────────────────────────────── */
 .shared-progress { margin: 0 0 10px; color: var(--muted); font-size: calc(13px * var(--fs)); }
 .shared-item-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .shared-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -1183,7 +1129,7 @@ ol.rt-list > li::before {
   .shared-item-actions { width: 100%; padding-left: 28px; }
 }
 
-/* ─── Editor: responses tab (Sprint 20) ────────────────────────────────── */
+/* ─── Editor: responses tab ─────────────────────────────────────────────── */
 .response-item-head { display: flex; gap: 10px; align-items: flex-start; }
 .response-item-text { font-weight: 500; }
 .response-item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
@@ -1192,18 +1138,17 @@ ol.rt-list > li::before {
 .response-comment { flex-basis: 100%; margin: 0; padding: 8px 10px; background: var(--surface); border: var(--hairline) solid var(--line); border-radius: var(--radius-sm); white-space: pre-wrap; }
 .response-badge { margin-left: 8px; cursor: pointer; border: 0; }
 
-/* ─── Sharing stats (Sprint 22) ─────────────────────────────────────────── */
+/* ─── Sharing stats ─────────────────────────────────────────────────────── */
 .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0 24px; }
 .stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: var(--hairline) solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
 .stat-value { font-family: var(--display); font-size: calc(28px * var(--fs)); letter-spacing: -0.02em; }
 .chip.delivery-sent { color: var(--accent); }
 .chip.delivery-failed, .chip.delivery-suppressed { color: var(--danger); }
 
-/* ─── Shared page: verification, changes, report (Sprint 23) ─────────── */
+/* ─── Shared page: verification, changes, report ────────────────────────── */
 .shared-key.changed, .shared-item.changed { box-shadow: inset 3px 0 0 var(--accent); }
 .shared-changes { align-items: center; }
-/* The recipient's code: title, one line of why, six boxes, two buttons —
-   each with room to breathe (it was one cramped column before). */
+/* Recipient's code step */
 .shared-verify { display: flex; flex-direction: column; gap: 16px; padding: 20px 22px; }
 .shared-verify-head { display: flex; flex-direction: column; gap: 6px; }
 .shared-verify-title {
@@ -1213,8 +1158,7 @@ ol.rt-list > li::before {
 .shared-verify-body { margin: 0; color: var(--muted); font-size: calc(14px * var(--fs)); line-height: 1.5; }
 .shared-verify-form { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
 .shared-verify-form .code-input { width: 100%; max-width: 336px; }
-/* The editor's "#" margin marker belongs to the editor; on a recipient's
-   card it reads as a stray character outside the frame. */
+/* No editor "#" marker on a recipient's card */
 .shared-doc .section-name::before { display: none; }
 .shared-verify-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .shared-verify-done {
@@ -1227,7 +1171,7 @@ ol.rt-list > li::before {
 .shared-privacy p { margin: 0 0 16px; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .shared-shell * { transition: none !important; animation: none !important; } }
 
-/* ─── Speaker roster (Sprint 28) ────────────────────────────────────────── */
+/* ─── Speaker roster ────────────────────────────────────────────────────── */
 .speaker-roster { display: flex; flex-direction: column; gap: calc(8px * var(--density)); flex: 1; min-width: 0; }
 .speaker-chips { display: flex; flex-wrap: wrap; gap: calc(6px * var(--density)); }
 .speaker-chip {
@@ -1241,13 +1185,13 @@ ol.rt-list > li::before {
 .speaker-share { color: var(--muted); font-size: calc(11px * var(--fs)); font-variant-numeric: tabular-nums; }
 .speaker-prompt { align-items: center; }
 .speaker-undo { display: flex; align-items: center; gap: 8px; font-size: calc(12.5px * var(--fs)); color: var(--text-2); }
-/* Sprint 31: microphone / call-audio side, and a name taken from the microphone. */
+/* Microphone / call-audio side, and a name taken from the microphone */
 .speaker-side { display: inline-flex; align-items: center; color: var(--muted); }
 .speaker-source { color: var(--muted); font-size: calc(11px * var(--fs)); }
 .speaker-chip-host { display: inline-flex; align-items: center; gap: 2px; }
 .speaker-chip-clear { width: 22px; height: 22px; border-radius: var(--radius-pill); }
 
-/* ─── Speaker count (Sprint 29) ─────────────────────────────────────────── */
+/* ─── Speaker count ─────────────────────────────────────────────────────── */
 .speaker-count { align-self: flex-start; font-size: calc(12.5px * var(--fs)); }
 .speaker-count-pop {
   width: 260px; min-width: 0;
@@ -1259,9 +1203,8 @@ ol.rt-list > li::before {
 .speaker-error { color: var(--danger); }
 .note-relabel { margin-bottom: calc(12px * var(--density)); }
 
-/* ─── Turn-level correction (Sprint 30) ─────────────────────────────────── */
-/* The avatar is a button that opens "move this turn to"; the host takes the
-   avatar's grid slot so the menu can hang off it. */
+/* ─── Turn-level correction ─────────────────────────────────────────────── */
+/* The host takes the avatar's grid slot so the menu can hang off it. */
 .turn-avatar-host { grid-row: 1 / span 2; grid-column: 1; position: relative; display: inline-flex; }
 .turn-avatar { border: 0; padding: 0; cursor: pointer; grid-row: auto; }
 .turn-avatar:hover:not(:disabled) { box-shadow: 0 0 0 2px var(--line-hover); }
@@ -1293,7 +1236,7 @@ ol.rt-list > li::before {
 .speaker-picklist { min-width: 220px; max-height: 280px; overflow-y: auto; }
 .speaker-pick { width: 100%; }
 
-/* ─── Name suggestions & accessibility (Sprint 32) ──────────────────────── */
+/* ─── Name suggestions & accessibility ──────────────────────────────────── */
 /* Read by screen readers, never seen. */
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -1315,15 +1258,14 @@ ol.rt-list > li::before {
 .turn.highlighted { background: var(--info-soft); box-shadow: 0 0 0 6px var(--info-soft); transition: background var(--t) var(--ease); }
 @media (prefers-reduced-motion: reduce) { .turn.highlighted { transition: none; } }
 
-/* Contrast ≥ 4.5:1 for the small text of the speaker controls (Sprint 28–31):
-   --muted is ~3.7:1 on the surfaces here; --text-3 clears AA in both themes. */
+/* Contrast: --muted is ~3.7:1 on these surfaces; --text-3 clears AA (4.5:1) in both themes. */
 .speaker-share, .speaker-source, .speaker-side, .turn-time, .seg-opt,
 .speaker-roster .help, .transcript-bar .help, .seg + .help { color: var(--text-3); }
-/* Initials in the small avatars (chips, menus) and the turn avatars: less tint, more ink. */
+/* Avatar initials: less tint, more ink */
 .speaker-avatar.sm, .turn-avatar { color: color-mix(in srgb, var(--tint, var(--accent)) 35%, var(--text-1)); }
 .seg-opt[disabled] { color: var(--muted); }
 
-/* Visible focus: the soft accent halo is too faint to see (< 3:1); a solid ring is not. */
+/* Visible focus: the soft halo is < 3:1, so a solid ring. */
 .turn:focus-visible, .turn-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .turn:focus-visible:not(.selected):not(.highlighted), .turn-avatar:focus-visible,
 .speaker-roster .link-btn:focus-visible { box-shadow: none; }
@@ -1331,9 +1273,8 @@ ol.rt-list > li::before {
 .anchored-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .speaker-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-pill); }
 
-/* ── Sprint 37: Settings › Data & AI ──────────────────────────────── */
-/* The processor table is the disclosure itself, so it reads as a table
-   on a phone too: no horizontal scroll, one card per row below 560px. */
+/* ── Settings › Data & AI ─────────────────────────────────────────── */
+/* Processor table: one card per row below 560px, no horizontal scroll. */
 .data-table { width: 100%; border-collapse: collapse; font-size: calc(13.5px * var(--fs)); }
 .data-table th, .data-table td {
   text-align: left; padding: calc(8px * var(--density)) calc(10px * var(--density));
@@ -1362,15 +1303,14 @@ ol.rt-list > li::before {
   .data-table td { color: var(--muted); }
 }
 .gen-status { margin: 0 0 calc(10px * var(--density)); }
-/* Q3: what the engine left out, as data under the status — never a
-   paragraph in the note. */
+/* What the engine left out, as data under the status */
 .gen-excluded {
   display: block;
   margin: 0 0 calc(10px * var(--density));
   font-size: calc(12.5px * var(--fs));
 }
 .banner .gen-excluded { flex-basis: 100%; margin: 4px 0 0; }
-/* The Notes tab before a summary exists: one sentence and the button. */
+/* Notes tab before a summary exists */
 .gen-empty {
   display: flex;
   flex-wrap: wrap;
@@ -1384,11 +1324,7 @@ ol.rt-list > li::before {
 }
 .gen-empty p { margin: 0; flex: 1 1 240px; color: var(--text-2); }
 
-/* ── Summary Engine v2, Q5: evidence on every generated line ──────────
-   Labels are data drawn beside the words, never words in the note: a
-   chip for how sure a line is and whose position it is, a respelled name
-   that shows what was heard, and a quiet quote mark that opens the words
-   and the audio behind the line. */
+/* ── Evidence on every generated line (labels are drawn beside the words, never in them) ── */
 .line-evidence { position: relative; display: inline-flex; align-items: baseline; gap: 4px; margin-left: 6px; }
 .certainty-chip, .name-chip {
   font-size: calc(10.5px * var(--fs)); font-weight: 600; letter-spacing: .02em;
@@ -1397,8 +1333,7 @@ ol.rt-list > li::before {
   border: var(--hairline) solid var(--line);
 }
 .name-chip { font-weight: 500; border-style: dashed; cursor: help; }
-/* F2 — the affordances are not text: a selection across the note never
-   copies a chip or the quote mark into what the reader pastes. */
+/* Affordances are not text: a selection never copies a chip or the quote mark. */
 .line-evidence > .icon-btn, .line-evidence > .certainty-chip, .line-evidence > .name-chip {
   user-select: none; -webkit-user-select: none;
 }
@@ -1425,7 +1360,7 @@ ol.rt-list > li::before {
 .corrections-panel ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
 .corrections-panel li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); }
 
-/* ─── Billing (0068): usage meters and the plan picker ──────────────────── */
+/* ─── Billing: usage meters and the plan picker ─────────────────────────── */
 .usage-meters {
   margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: calc(12px * var(--density));

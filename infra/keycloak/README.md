@@ -34,7 +34,7 @@ export ships a single dev example, `room-device-demo` (secret `dev-room-device-s
 - **client_credentials only** — `standardFlowEnabled`, `directAccessGrantsEnabled` and
   `implicitFlowEnabled` are all false; a room device never runs a browser flow.
 - Its service-account user (`service-account-room-device-demo`) holds the **`device`**
-  realm role — the capture-only grant set (see `docs/auth/roles.md` and
+  realm role — the capture-only grant set (see
   `docs/auth/permissions.csv`) — and a `tenant_id` attribute (tenant A) that the tid
   protocol mapper turns into the `tid` claim `libs/auth` requires on every token.
 - Mappers mirror the other S2S clients (`aud=mdx-api`, flat `roles` array) plus the

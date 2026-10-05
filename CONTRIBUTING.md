@@ -2,7 +2,7 @@
 
 ## Development environment
 
-See [docs/onboarding.md](docs/onboarding.md). Short version:
+See the Quickstart in [README.md](README.md). Short version:
 
 ```bash
 make doctor

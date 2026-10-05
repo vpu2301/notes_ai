@@ -9,14 +9,7 @@ import { useToast } from "../components/Toaster";
 import { attemptsLeft, messageFor, retryAfterSeconds } from "../lib/errorCopy";
 import { Banner, LoginShell, useCountdown } from "./auth/LoginShell";
 
-/**
- * `/login` — one screen for signing up and signing in.
- *
- * The address is typed once and a code is mailed. The server answers 202
- * whether or not it has ever seen the address, so this page must not imply
- * that it knows either — "we sent a code if that address is valid" is the
- * only honest sentence, and it is the same sentence every time.
- */
+/** `/login` — sign up and sign in. The server's 202 is uniform; copy must never imply the address is known. */
 export function LoginPage() {
   useDocumentTitle("Sign in");
   const { status, signInWithEmailCode } = useAuth();
@@ -96,10 +89,7 @@ export function LoginPage() {
     } catch (err) {
       const codeName = err instanceof ApiError ? err.code : undefined;
       if (codeName === "use_password") {
-        // A `dual`-mode deployment still keeps some accounts in Keycloak,
-        // which cannot mint a session from an emailed code. The address is
-        // carried across so the password form does not ask for it twice —
-        // this is a redirect, not a fresh start.
+        // Keycloak accounts (dual mode) cannot sign in by code; carry the address to the password form.
         navigate("/login/password", {
           replace: true,
           state: { from, email: email.trim(), notice: messageFor(err) },
@@ -208,15 +198,11 @@ export function LoginPage() {
         <Link
           className="link-btn"
           to="/login/password"
-          // Carry the address across so switching methods is not a retype.
           state={{ ...(location.state as object | null), from, email: email.trim() }}
         >
           Use a password instead
         </Link>
-        {/* In `keycloak` and `dual` deployments this screen cannot create
-            anything — `/auth/email/*` is not mounted and the code never
-            arrives. `/signup` is the way in there, and a person who needs
-            it should not have to guess the URL. */}
+        {/* In keycloak/dual mode this screen cannot create anything; `/signup` is the way in. */}
         <Link className="link-btn" to="/join">
           Create a free workspace
         </Link>

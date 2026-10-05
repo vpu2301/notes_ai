@@ -1,16 +1,9 @@
 import SwiftUI
 
-/// "Send this note" — pick who gets it, add a line, press Send.
-///
-/// This replaces the old `mailto:` hand-off. That handed the job to the
-/// Mail app, which opens on whatever draft it already had and leaves the
-/// sender to press Send themselves on an unstyled message. Nothing here
-/// touches the mail app: the server sends the mail, and the sheet reports
-/// what happened to each address.
+/// "Send this note" — the server sends the mail; the sheet reports per address.
 struct ShareEmailSheet: View {
     let noteTitle: String
-    /// Sends, and hands back one outcome per recipient (nil = the call
-    /// itself failed; the reason is already on the view model's error).
+    /// Sends; one outcome per recipient, or nil when the call itself failed.
     let send: ([String], String) async -> [ShareEmailOutcome]?
     let onClose: () -> Void
 
@@ -24,8 +17,7 @@ struct ShareEmailSheet: View {
 
     @FocusState private var addressFocused: Bool
 
-    /// Loose shape check — the real test is whether a relay accepts it,
-    /// and this only has to keep obvious typos out of the chip list.
+    /// Loose shape check, only to keep obvious typos out of the chip list.
     static func looksLikeEmail(_ value: String) -> Bool {
         guard !value.contains(where: \.isWhitespace) else { return false }
         let parts = value.split(separator: "@", omittingEmptySubsequences: false)
@@ -39,9 +31,7 @@ struct ShareEmailSheet: View {
             .trimmingCharacters(in: CharacterSet(charactersIn: ",;"))
     }
 
-    /// Everything typed so far, including the address still in the box —
-    /// tapping Send with one address typed and not committed must not
-    /// send to nobody.
+    /// Everything typed so far, including the uncommitted address in the box.
     private var allRecipients: [String] {
         var all = recipients
         let typed = trimmedDraft
@@ -115,8 +105,7 @@ struct ShareEmailSheet: View {
                 .submitLabel(.next)
                 .focused($addressFocused)
                 .onSubmit {
-                    // Return adds the address and leaves the box ready
-                    // for the next one — the reflex from any mail app.
+                    // Return adds the address and keeps the box ready.
                     _ = commitDraft()
                     addressFocused = true
                 }
@@ -201,8 +190,7 @@ struct ShareEmailSheet: View {
         }
         sentCount = results.filter(\.sent).count
         failures = results.filter { !$0.sent }
-        // Only the addresses that failed stay in the box, so tapping
-        // Send again retries exactly those and not the ones that went.
+        // Only the failed addresses stay in the box for a retry.
         recipients = failures.map(\.email)
         draft = ""
         if failures.isEmpty { message = "" }
@@ -248,8 +236,7 @@ private struct RecipientChip: View {
     }
 }
 
-/// A row of chips that wraps. Small enough to keep here rather than grow
-/// a layout component for the one place that needs one.
+/// A row of chips that wraps.
 private struct DSChipWrap<Item: Hashable, Content: View>: View {
     let items: [Item]
     @ViewBuilder let content: (Item) -> Content

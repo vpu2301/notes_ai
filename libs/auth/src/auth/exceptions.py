@@ -1,10 +1,4 @@
-"""Distinct exception classes for every JWT verification failure mode.
-
-Distinct types matter because callers (FastAPI dependency, audit emitter,
-operators reading logs) need to discriminate between, e.g., an expired token
-(common, expected) and a malformed-claims token (rare, suspicious). Lumping
-them under one ``AuthError`` discards the signal.
-"""
+"""Distinct exception classes per JWT verification failure mode, so callers can audit each differently."""
 
 from __future__ import annotations
 
@@ -30,19 +24,11 @@ class InvalidAudienceError(AuthError):
 
 
 class KidNotFoundError(AuthError):
-    """The signing key id (``kid``) from the token header is not in JWKS.
-
-    Raised both when JWKS has been fetched recently and the kid is missing
-    (likely a forged token), and when the rate-limit prevents another fetch.
-    """
+    """Header ``kid`` is not in JWKS (after refresh, or refresh suppressed by the rate limit)."""
 
 
 class MalformedClaimsError(AuthError):
-    """Token decoded successfully but the claims payload violates the Claims schema.
-
-    Examples: missing mandatory ``tid``, presence of an unexpected claim
-    (``extra="forbid"`` on the model), wrong types.
-    """
+    """Token decoded but the claims payload violates the Claims schema (missing, unexpected, wrong type)."""
 
 
 class JwksFetchError(AuthError):

@@ -1,4 +1,4 @@
-// Spaces — personal folders of notes, shared by every client (0021).
+// Spaces — personal folders of notes, shared by every client.
 
 import { api } from "./http";
 import type { Space, SpacesResponse } from "./types";

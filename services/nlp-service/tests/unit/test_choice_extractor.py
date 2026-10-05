@@ -1,10 +1,4 @@
-"""choice / multi_choice extractor — the extraction-safety contract.
-
-The negation guard and the short-token rule get the densest coverage
-on purpose: a wrong auto-filled field is worse than an empty one, and
-in Ukrainian the difference between "підписаний" and "не підписаний"
-is one short token.
-"""
+"""choice / multi_choice extractor safety contract; negation guard and short-token rule get the densest coverage."""
 
 from __future__ import annotations
 

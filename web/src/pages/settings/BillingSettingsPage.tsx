@@ -50,8 +50,7 @@ export function yearlySaving(plans: BillingPlan[]): number {
   return Math.round(best * 100);
 }
 
-/** "4 of 50", "50 min of 300", or "12% used" for the AI allowance —
- *  what the model calls cost us is not the customer's number. */
+/** "4 of 50", "50 min of 300", or "12% used" for the AI allowance. */
 export function meterText(m: UsageMeter): string {
   if (m.key === "ai") {
     if (m.limit === null) return "No limit";
@@ -67,21 +66,15 @@ function share(m: UsageMeter): number | null {
 }
 
 /**
- * `/settings/billing` — the workspace's plan, this month's usage, and the
- * plans it can move to. An admin's page (the tab is hidden for everyone
- * else and the API answers 403).
- *
- * Payments are not connected yet: a change applies at once where the
- * server allows it (`manual`), and is refused with a reason where it does
- * not. When Stripe arrives the server answers `redirect` and the page
- * simply follows the URL.
+ * `/settings/billing` — plan, usage, plans to move to. Admin-only (API answers 403).
+ * No payments yet: `manual` applies at once; a `redirect` answer is followed as a URL.
  */
 export function BillingSettingsPage() {
   const toast = useToast();
   const [billing, setBilling] = useState<Billing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<BillingPlan | null>(null);
-  // The interval the plans are priced in; starts on what the workspace pays.
+  // Pricing interval; starts on what the workspace pays.
   const [chosenInterval, setChosenInterval] = useState<BillingInterval | null>(null);
   const [busy, setBusy] = useState(false);
   // In the URL, so a link can open the plans directly (?view=plans).
@@ -107,7 +100,7 @@ export function BillingSettingsPage() {
   const currentInterval: BillingInterval = billing.subscription?.interval ?? "monthly";
   const shownInterval: BillingInterval = chosenInterval ?? currentInterval;
   const saving = yearlySaving(billing.plans);
-  // On this plan AND paying this way. A plan with no yearly price has one way.
+  // On this plan AND paying this way.
   const isCurrentChoice = (p: BillingPlan) =>
     p.code === current.code && (p.yearly_price_cents === null || shownInterval === currentInterval);
   const month = new Date(billing.period_start).toLocaleDateString(undefined, {
@@ -272,8 +265,7 @@ export function BillingSettingsPage() {
   );
 }
 
-/** "Have a code?" — a link that opens one field. A code puts the
- *  workspace on a plan, for a time or for good, with no payment. */
+/** "Have a code?" — a code puts the workspace on a plan with no payment. */
 function RedeemCode({ onRedeemed }: { onRedeemed: (b: Billing) => void }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);

@@ -21,21 +21,15 @@ final class AppState: ObservableObject {
         /// Pre-0021 local spaces, read once and moved to the server.
         static let legacySpaces = "spaces"
         static let legacySpaceOf = "spaceOfNote"
-        /// IDX-M2: who this Mac was last signed in as, so a session that
-        /// expired while offline still knows whose recordings are waiting.
-        /// Identifiers and an address — never a token.
+        /// Who this Mac was last signed in as (ids and an address, never a token), so an offline-expired session still knows whose recordings wait.
         static let lastIdentity = "lastIdentity"
-        /// Every identity that has local state on this Mac, so Settings can
-        /// offer to remove somebody else's.
+        /// Every identity with local state on this Mac, so Settings can offer to remove another's.
         static let knownIdentities = "knownIdentities"
         /// One-time move of the unscoped keys under the first identity.
         static let migratedV2 = "localStateMigratedV2"
     }
 
-    /// What local state is filed under. Before IDX-M2 there was one
-    /// bucket, so a second account signing in on the same Mac saw the
-    /// first one's meetings — and a workspace switch showed the wrong
-    /// workspace's list until the next refresh.
+    /// What local state is filed under: identity + workspace, so a second account or a switch never shows the first one's meetings.
     struct LocalScope: Equatable, Codable, Sendable {
         var identityId: String
         var tenantId: String
@@ -60,9 +54,7 @@ final class AppState: ObservableObject {
     @Published private(set) var email: String
     @Published private(set) var authState: AuthState = .restoring
     @Published private(set) var recents: [RecentCapture] = []
-    /// Jobs whose speakers are being re-labelled right now (Sprint 29), as
-    /// an open note follows them. Not persisted: a relaunch forgets, and the
-    /// note says so again when it is opened.
+    /// Jobs whose speakers are being re-labelled right now. Not persisted.
     @Published private(set) var relabelling: Set<String> = []
     /// The Settings sheet in the main window; the popover's menu sets it too.
     @Published var settingsPresented = false
@@ -81,11 +73,9 @@ final class AppState: ObservableObject {
     }
     /// What the main window's detail pane shows; nil is the home page.
     @Published var selection: Selection?
-    /// Sprint 23: what the workspace admin allows. Permissive until known,
-    /// so an older server changes nothing.
+    /// What the workspace admin allows. Permissive until known, so an older server changes nothing.
     @Published private(set) var sharingRules: SharingConstraints = .permissive
-    /// A note id the menu-bar popover asked to "Share with client…";
-    /// `NoteView` opens the sheet when it shows that note and clears it.
+    /// A note id the popover asked to "Share with client…"; `NoteView` opens the sheet and clears it.
     @Published var pendingClientShare: String?
 
     /// The sidebar shrunk to an icon rail, persisted like the web app's.
@@ -102,8 +92,7 @@ final class AppState: ObservableObject {
 
     /// The "New from template…" sheet in the main window.
     @Published var templatePickerPresented = false
-    /// A sentence about an action from the sidebar that did not work; the
-    /// window shows it once as an alert.
+    /// A sentence about a sidebar action that failed; the window shows it once as an alert.
     @Published var actionNotice: String?
     /// A note being made by hand (blank or from a template).
     @Published private(set) var creatingNote = false
@@ -148,7 +137,7 @@ final class AppState: ObservableObject {
 
     let api: APIClient
     private(set) lazy var capture = CaptureViewModel(app: self)
-    /// Recordings this Mac is still holding (IDX-M2).
+    /// Recordings this Mac is still holding.
     private(set) lazy var pending = PendingUploads(host: self)
     private var templateCache: [TemplateSummary]?
 
@@ -157,10 +146,7 @@ final class AppState: ObservableObject {
         self.settings = stored
         self.email = UserDefaults.standard.string(forKey: Keys.email) ?? ""
         self.api = APIClient(settings: stored)
-        // Recents belong to an identity and a workspace (IDX-M2). Until the
-        // session is restored the best guess is where this Mac was last
-        // signed in — which is also what a session that expired offline
-        // still has to show.
+        // Recents belong to an identity and a workspace; until the session is restored, the best guess is the last sign-in.
         let store = LocalStore()
         self.local = store
         let last = store.lastIdentity
@@ -194,8 +180,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Set the appearance app-wide (the menu-bar panel included — SwiftUI's
-    /// `preferredColorScheme` does not reach a `MenuBarExtra` window).
+    /// Set the appearance app-wide (SwiftUI's `preferredColorScheme` does not reach a `MenuBarExtra` window).
     private static func applyAppearance(_ pref: ThemePref) {
         switch pref {
         case .system: NSApp.appearance = nil
@@ -206,17 +191,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Auth
 
-    /// Who is signed in, once the server has said so. Kept for the account
-    /// screen and for the sidecar written beside a recording that could
-    /// not be uploaded — a file on disk should say whose it is.
+    /// Who is signed in, once the server said so; also written into the sidecar beside a recording that could not be uploaded.
     @Published private(set) var identity: IdentitySummary?
-    /// Every workspace this identity can reach. Read-only until IDX-M2:
-    /// there is no endpoint to switch between them yet.
+    /// Every workspace this identity can reach, as sign-in knew it.
     @Published private(set) var memberships: [MembershipSummary] = []
     @Published private(set) var tenantId: String?
-    /// Signed in from the stored session, but the server has not confirmed
-    /// it yet (the Mac woke up on a plane). The window shows a banner and
-    /// the app makes no requests until the person does something.
+    /// Signed in from the stored session, unconfirmed by the server; banner shown, no requests until the person acts.
     @Published private(set) var reconnecting = false
     /// Why the app last dropped to the sign-in screen, shown there once.
     @Published var signedOutNotice: String?
@@ -225,19 +205,15 @@ final class AppState: ObservableObject {
     /// "N recordings are not uploaded yet" — shown before signing out.
     @Published var signOutPrompt = false
 
-    // ── workspaces (IDX-M2) ──────────────────────────────────────────
+    // ── workspaces ───────────────────────────────────────────────────
 
-    /// Every workspace this identity can reach, newest membership list
-    /// from the server; `memberships` is what sign-in knew, this is what
-    /// is true now.
+    /// Every workspace this identity can reach, as the server lists it now (`memberships` is what sign-in knew).
     @Published private(set) var workspaces: [Tenant] = []
     /// A switch in flight, so the switcher can show which one.
     @Published private(set) var switchingTo: String?
-    /// A workspace this Mac can no longer reach, and why. Shown as a
-    /// banner until dismissed; its local state stays on disk.
+    /// A workspace this Mac can no longer reach, and why; banner until dismissed, local state stays.
     @Published var workspaceNotice: String?
-    /// Set when the session expired while this Mac was away from the
-    /// network: nothing is lost, but nothing can be sent either.
+    /// The session expired while away from the network: nothing lost, nothing sendable.
     @Published private(set) var expiredWhileOffline = false
     private var lastWorkspaceRefresh: Date?
 
@@ -276,17 +252,12 @@ final class AppState: ObservableObject {
             await loadWorkspaceData()
             await retryPendingUploads()
         case .offline(let stored):
-            // The session is real; the server just could not be reached to
-            // prove it. Never wipe a session for a network error — that
-            // turns a flaky connection into a sign-out.
+            // The server just could not be reached: never wipe a session for a network error.
             adopt(stored)
             reconnecting = true
             authState = .signedIn
         case .expired(let stored):
-            // Thirty days offline, or a Mac that spent the month in a bag.
-            // The session is genuinely over, but nothing local goes with
-            // it: the recordings waiting here are still this person's, and
-            // signing in as them picks them up where they were.
+            // The session is genuinely over, but nothing local goes with it: the recordings are still this person's.
             adopt(stored)
             expiredWhileOffline = true
             authState = .signedOut
@@ -306,10 +277,7 @@ final class AppState: ObservableObject {
         applyScope(identityId: stored.identityId, tenantId: stored.lastTenantId)
     }
 
-    /// Send whatever is waiting, if there is anything and anyone to send
-    /// it as. Called after a sign-in and after reconnecting — never on a
-    /// timer, so a Mac that is offline for a week does not spend the week
-    /// retrying.
+    /// Send whatever is waiting. Called after sign-in and reconnect — never on a timer.
     func retryPendingUploads() async {
         guard authState == .signedIn, !reconnecting else { return }
         pending.reload()
@@ -317,8 +285,7 @@ final class AppState: ObservableObject {
         await pending.retryAll()
     }
 
-    /// A kept recording finally reached the server: file it under the
-    /// workspace it belongs to, which is not necessarily the active one.
+    /// A kept recording reached the server: file it under its own workspace, not necessarily the active one.
     func adoptUploaded(job: TranscriptionJob, capture: PendingCapture) {
         let recent = RecentCapture(jobId: job.id, title: capture.info.title,
                                    createdAt: capture.info.recordedAt,
@@ -329,24 +296,18 @@ final class AppState: ObservableObject {
             persistRecents()
             return
         }
-        // Another workspace's meeting: write it into that workspace's list
-        // without disturbing the one on screen.
+        // Another workspace's meeting: write it into that workspace's list.
         local.addRecent(recent, to: LocalScope(identityId: identityId, tenantId: tenantId))
     }
 
-    /// Carry a re-sent recording the rest of the way: poll the job, then
-    /// draft its note, in the workspace it was recorded in.
-    ///
-    /// Returns as soon as the polling is started — the next kept recording
-    /// should not wait for this one's transcript.
+    /// Poll the job, then draft its note, in the workspace it was recorded in. Returns as soon as polling starts.
     func continuePipeline(jobId: String, capture: PendingCapture) async {
         let tenant = capture.info.tenantId
         let title = capture.info.title
         Task { [weak self] in
             guard let self else { return }
             var status: JobStatus = .queued
-            // Roughly half an hour at three seconds a turn; a job still
-            // running after that is one the recents list will pick up.
+            // About half an hour at three seconds a turn; the recents list picks up anything slower.
             for _ in 0..<600 {
                 try? await Task.sleep(for: .seconds(3))
                 guard let job = try? await self.api.jobStatus(id: jobId, tenant: tenant) else {
@@ -368,18 +329,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// A `notesai://` link arrived. The OAuth and calendar callbacks are
-    /// intercepted before they reach here (`ASWebAuthenticationSession`
-    /// and a loopback listener), so in practice this is invitations.
+    /// A `notesai://` link arrived. OAuth and calendar callbacks are intercepted earlier, so in practice this is invitations.
     func handle(_ url: URL) {
         switch AppURL.parse(url) {
         case .invite(let token):
             pendingInviteToken = token
             NotificationCenter.default.post(name: .openMainWindow, object: nil)
-            // IDX-B1 has not been built: no server in this estate can issue
-            // or redeem an invitation. Saying so is the honest answer; a
-            // preview sheet built against an endpoint that returns 404
-            // would be a screen that renders and lies.
+            // No server can issue or redeem an invitation yet; say so rather than render a sheet that lies.
             workspaceNotice = "This link is an invitation, but the server does not support invitations yet."
         case .calendarConnected, .oauthCallback, .none:
             // Handled by the session that started them.
@@ -400,13 +356,10 @@ final class AppState: ObservableObject {
         await restoreSession()
     }
 
-    /// Sign out, unless there are recordings that have not been sent yet —
-    /// then ask first. "Sign out" and "throw away this morning's meeting"
-    /// should never be the same click.
+    /// Sign out, unless recordings are still unsent — then ask first.
     func requestSignOut() {
         if pendingCount > 0 {
-            // The prompt lives on the main window; from the popover there
-            // may not be one on screen yet.
+        // The prompt lives on the main window; from the popover there may be none yet.
             NotificationCenter.default.post(name: .openMainWindow, object: nil)
             signOutPrompt = true
         } else {
@@ -414,10 +367,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    // ── the sign-in flows (IDX-M1 F) ─────────────────────────────────
+    // ── the sign-in flows ────────────────────────────────────────────
 
-    /// Mail a one-time code. The reply says nothing about whether the
-    /// address is known — by design, upstream.
+    /// Mail a one-time code. The reply never says whether the address is known.
     func startEmailCode(email address: String) async throws -> EmailChallenge {
         try await api.startEmailCode(email: address, language: Locale.preferredLanguageCode)
     }
@@ -460,20 +412,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The welcome step's one field. Skipping it is fine: the server has
-    /// already defaulted the display name to the address's local part.
+    /// The welcome step's one field; skipping it is fine (server-defaulted).
     func setDisplayName(_ name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         identity = try? await api.setDisplayName(trimmed)
     }
 
-    /// Fill in who is signed in after a restart. `GET /auth/me` still
-    /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
-    /// IDX-B2's to extend), so this is a no-op today and the account screen
-    /// falls back to the address the Keychain item carries.
-    /// Sprint 21: true for an account younger than a day that has not
-    /// dismissed the "record your first meeting" card on this device.
+    /// True for an account younger than a day that has not dismissed the "record your first meeting" card on this device.
     @Published var isFirstRun = false
 
     private static let firstRunSeenKey = "notesai.first_run_seen"
@@ -503,8 +449,7 @@ final class AppState: ObservableObject {
         let signedOut = identityId
         await api.logout()
         clearSignedInState()
-        // Sprint 32: the names the account brought to kept recordings and
-        // the per-job answers go with it; the recordings stay.
+        // The names the account brought to kept recordings and the per-job answers go with it; the recordings stay.
         SignOutCleanup.run(identityId: signedOut)
         capture.forgetContext()
         pending.reload()
@@ -512,9 +457,7 @@ final class AppState: ObservableObject {
         authState = .signedOut
     }
 
-    /// The session is gone for good (expired, revoked, replayed): drop to
-    /// the sign-in form with the reason, which is the one thing the person
-    /// needs to know and the one thing a bare "sign in" screen never says.
+    /// The session is gone for good: drop to the sign-in form with the reason.
     private func sessionEnded(_ reason: SessionLostReason) {
         guard authState == .signedIn else { return }
         clearSignedInState()
@@ -536,23 +479,16 @@ final class AppState: ObservableObject {
         reauth = nil
     }
 
-    // ── step-up (plumbing; IDX-M2 uses it) ───────────────────────────
+    // ── step-up ──────────────────────────────────────────────────────
 
-    /// Ask the person to prove it is them, and answer whether they did.
-    ///
-    /// Called from the API client's actor, so it hops to the main actor,
-    /// puts a sheet up, and waits for the sheet to answer — the request
-    /// that triggered it is retried once on `true`.
+    /// Ask the person to prove it is them. Called from the API client's actor: hops to main, shows a sheet, waits; the request retries once on `true`.
     func presentReauth() async -> Bool {
         guard authState == .signedIn else { return false }
         let options = try? await api.startReauth()
-        // The sheet lives in the main window; from the menu-bar popover
-        // there may be no window to put it in, so ask for one.
+        // The sheet lives in the main window; from the popover ask for one.
         NotificationCenter.default.post(name: .openMainWindow, object: nil)
         return await withCheckedContinuation { continuation in
-            // Resumed exactly once, by whichever comes first: the sheet, or
-            // the deadline. A continuation that is never resumed would hang
-            // the request that asked — and every request queued behind it.
+            // Resumed exactly once (sheet or deadline); an unresumed continuation would hang every queued request.
             let answered = Answered()
             let finish: @MainActor (Bool) -> Void = { [weak self] ok in
                 guard answered.claim() else { return }
@@ -580,19 +516,16 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The identity id behind the current session, for the sidecar written
-    /// beside a recording that could not be uploaded.
+    /// The identity id behind the current session, for the sidecar beside an un-uploaded recording.
     private(set) var identityId: String = ""
     /// Which identity + workspace local state is currently filed under.
     private(set) var scope: LocalScope?
     /// Where that state actually lives.
     private let local: LocalStore
     private var urlObserver: NSObjectProtocol?
-    /// An invitation token from a `notesai://invite/…` link, held in memory
-    /// for as long as it takes to use it — never written anywhere (IDX-M2 G).
+    /// An invitation token from a `notesai://invite/…` link, held in memory only.
     private(set) var pendingInviteToken: String?
-    /// Who this Mac was last signed in as. Survives an expired session, so
-    /// the recordings kept for that person can still be found and named.
+    /// Who this Mac was last signed in as; survives an expired session so kept recordings can be found.
     private(set) var lastIdentity: LastIdentity?
 
     // MARK: - Notes list & search
@@ -620,8 +553,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The notes for the home page: the current search, narrowed to the
-    /// selected space.
+    /// The current search, narrowed to the selected space.
     var visibleNotes: [NoteSummary] {
         guard let space = selectedSpaceId else { return notes }
         return notes.filter { spaceOf[$0.noteId] == space }
@@ -692,8 +624,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Reload the spaces from the server. The first time after this
-    /// device's local spaces (pre-0021) are found, they are moved up.
+    /// Reload the spaces; the first time pre-0021 local spaces are found they are moved up.
     func refreshSpaces() async {
         guard authState == .signedIn else { return }
         do {
@@ -706,9 +637,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Move the spaces this device kept in UserDefaults to the server —
-    /// once. Returns the server list afterwards, nil when there was
-    /// nothing to move.
+    /// Move this device's UserDefaults spaces to the server, once. Nil when there was nothing to move.
     private func importLegacySpaces(into current: [Space]) async -> [Space]? {
         guard let legacy = Self.load([LegacySpace].self, key: Keys.legacySpaces), !legacy.isEmpty else {
             UserDefaults.standard.removeObject(forKey: Keys.legacySpaces)
@@ -798,18 +727,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Templates
 
-    /// UUID of the meeting-notes template in `language` (an ISO 639-1
-    /// code). Returns nil when the catalogue is unreachable or the
-    /// language is not yet known ("auto") — the server then picks a
-    /// template in the transcript's own language.
+    /// UUID of the meeting-notes template in `language`; nil when the catalogue is unreachable or the language is "auto" (the server then picks).
     func meetingTemplateID(language: String) async -> String? {
         if language == CaptureViewModel.autoLanguage { return nil }
         if templateCache == nil {
             templateCache = try? await api.fetchTemplates()
         }
         guard let templates = templateCache else { return nil }
-        // Per-language copies share the "meeting_notes" code prefix
-        // ("meeting_notes", "meeting_notes_uk", …).
+        // Per-language copies share the "meeting_notes" code prefix.
         let candidates = templates.filter { $0.code.hasPrefix("meeting_notes") }
         return candidates.first { $0.language == language }?.id
     }
@@ -864,10 +789,7 @@ final class AppState: ObservableObject {
         await resumeUnfinishedCaptures()
     }
 
-    /// Captures whose transcript finished while nothing was waiting for it
-    /// — the app was quit or relaunched mid-transcription — are picked up
-    /// where the pipeline stopped: the transcript goes into the meeting
-    /// note, and the row becomes that note instead of "No note yet".
+    /// Captures whose transcript finished while nothing waited (app quit mid-transcription) are picked up: transcript into the meeting note.
     private func resumeUnfinishedCaptures() async {
         for recent in recents where recent.status == .complete && recent.noteId == nil
             && (recent.errorMessage ?? "").isEmpty {
@@ -889,24 +811,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Hand a finished transcript to its meeting note — unless the note
-    /// was already written up meanwhile (Generate Summary on the web):
-    /// attaching then would start a second run over the first.
+    /// Hand a finished transcript to its meeting note — unless it was already written up meanwhile (a second run would start).
     private func finishMeeting(noteId: String) async throws {
         if (try? await api.generation(noteId: noteId)) != nil { return }
         _ = try await api.attachTranscript(noteId: noteId)
     }
 
-    /// Draft the note for a capture whose transcript finished without one
-    /// (the app was quit mid-pipeline, or the note request failed).
+    /// Draft the note for a capture whose transcript finished without one.
     func draftNote(for capture: RecentCapture, open: Bool = true) async {
         guard capture.status == .complete, capture.noteId == nil,
               !drafting.contains(capture.jobId) else { return }
         drafting.insert(capture.jobId)
         defer { drafting.remove(capture.jobId) }
         do {
-            // The job knows what language it heard; the app's current
-            // setting may be "auto" or have changed since.
+            // The job knows what language it heard; the setting may be "auto" or changed since.
             let job = try? await api.jobStatus(id: capture.jobId)
             let templateId = await meetingTemplateID(
                 language: job?.detectedLanguage ?? self.capture.language)
@@ -915,9 +833,7 @@ final class AppState: ObservableObject {
             updateRecent(jobId: capture.jobId, noteId: note.id, errorMessage: "")
             if open { openNote(note.id) }
         } catch APIError.http(status: 409, problem: let problem) where problem?.noteId != nil {
-            // The transcript already has a note — the meeting note it was
-            // bound to at upload, or one drafted from the web. That IS this
-            // capture's note; finish the meeting on it rather than fail.
+            // The transcript already has a note (bound at upload, or drafted on the web): finish the meeting on it.
             let noteId = problem?.noteId ?? ""
             try? await finishMeeting(noteId: noteId)
             updateRecent(jobId: capture.jobId, noteId: noteId, errorMessage: "")
@@ -931,8 +847,7 @@ final class AppState: ObservableObject {
 
     // MARK: - A note by hand (blank, or from a template)
 
-    /// The template a bare "new note" starts from: meeting notes, English
-    /// first (`web/src/lib/createBlankNote.ts`).
+    /// The template a bare "new note" starts from: meeting notes, English first.
     nonisolated static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
         let live = list.filter { !$0.isArchived }
         return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
@@ -983,9 +898,7 @@ final class AppState: ObservableObject {
         openNote(created.id)
     }
 
-    /// A recording made elsewhere, sent through the same pipeline as one
-    /// made here. The file is copied first: the pipeline deletes what it
-    /// uploads, and the original is the person's.
+    /// A recording made elsewhere, through the same pipeline. The file is copied first: the pipeline deletes what it uploads.
     func uploadRecording() {
         let panel = NSOpenPanel()
         panel.title = "Upload a recording"
@@ -999,8 +912,7 @@ final class AppState: ObservableObject {
         NotificationCenter.default.post(name: .openMainWindow, object: nil)
     }
 
-    /// Stop a transcription that has not finished. The recents row says
-    /// "Cancelled" at once; the pipeline following the job sees the same.
+    /// Stop a transcription; the recents row says "Cancelled" at once.
     func cancelCapture(jobId: String) async {
         do {
             try await api.cancelJob(id: jobId)
@@ -1018,10 +930,7 @@ final class AppState: ObservableObject {
         NotificationCenter.default.post(name: .openMainWindow, object: nil)
     }
 
-    /// Open a note inside this app. A note that came from one of this
-    /// Mac's captures opens as that capture (so the transcript tab is there).
-    /// The fastest post-meeting path: open the note and go straight to
-    /// the per-recipient link sheet.
+    /// The fastest post-meeting path: open the note and go straight to the per-recipient link sheet.
     func shareWithClient(noteId: String) {
         pendingClientShare = noteId
         openNote(noteId)
@@ -1058,35 +967,23 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The web app's password-reset page. Resetting a password is a
-    /// browser flow end to end (the link the server mails lands there), so
-    /// the app hands it over rather than half-implementing it.
+    /// The web app's password-reset page; a browser flow end to end.
     func openPasswordReset() {
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "reset") else { return }
         NSWorkspace.shared.open(url)
     }
 
-    /// Password, two-factor and email changes: the web app owns those
-    /// screens, and a second implementation of them on the Mac would be a
-    /// second thing to keep correct about somebody's account.
+    /// Password, two-factor and email changes: the web app owns those screens.
     func openSecuritySettings() {
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/security") else { return }
         NSWorkspace.shared.open(url)
     }
 
-    /// MAC-0: where a new person creates an account.
-    ///
-    /// The Mac does not carry a signup form of its own. An account is more
-    /// than a row in `users` — terms, the confirmation mail, whatever the
-    /// plan turns out to be — and every one of those is a page the web app
-    /// already owns and would have to be kept in step with a second time
-    /// here. The Mac's job is to get the person to it and to be ready when
-    /// they come back.
+    /// Where a new person creates an account: the web app owns signup (terms, confirmation mail, plan).
     var signupURL: URL? {
-        // Sprint 21: `/join` picks signup or the lead form by the server's
-        // config, so the app never has to know which one is on.
+        // `/join` picks signup or the lead form by the server's config.
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "join")
     }
@@ -1095,9 +992,7 @@ final class AppState: ObservableObject {
         if let signupURL { NSWorkspace.shared.open(signupURL) }
     }
 
-    /// Ask for another confirmation code, for the account that just told
-    /// us it has not confirmed one. Throws so the screen can say why it
-    /// failed (rate limits, mostly) rather than silently doing nothing.
+    /// Ask for another confirmation code. Throws so the screen can say why (rate limits, mostly).
     func resendSignupVerification(email address: String) async throws {
         try await api.resendSignupVerification(
             email: address.trimmingCharacters(in: .whitespaces))
@@ -1108,8 +1003,7 @@ final class AppState: ObservableObject {
         URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
     }
 
-    /// Settings › Data & AI in the web app — where the tier and the
-    /// processor acknowledgement are actually changed.
+    /// Settings › Data & AI in the web app, where the tier and the processor acknowledgement are changed.
     func openWebSettingsData() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/data") {
@@ -1145,8 +1039,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Local state, per identity and workspace (IDX-M2)
 
-    /// Point local state at an identity and a workspace, loading what is
-    /// filed there and leaving what was filed elsewhere alone.
+    /// Point local state at an identity and a workspace, leaving what was filed elsewhere alone.
     func applyScope(identityId: String, tenantId: String?) {
         guard !identityId.isEmpty, let tenantId, !tenantId.isEmpty else { return }
         let next = LocalScope(identityId: identityId, tenantId: tenantId)
@@ -1156,8 +1049,7 @@ final class AppState: ObservableObject {
         recents = local.recents(for: next)
         local.remember(identityId: identityId, email: email, tenantId: tenantId)
         lastIdentity = local.lastIdentity
-        // The template catalogue is per workspace: a template id from
-        // another one is a 404 waiting to happen.
+        // The template catalogue is per workspace: another's template id is a 404.
         templateCache = nil
     }
 
@@ -1166,8 +1058,7 @@ final class AppState: ObservableObject {
         local.otherIdentities(besides: identityId)
     }
 
-    /// Delete one identity's local state. Local only — nothing on the
-    /// server is touched.
+    /// Delete one identity's local state. Local only.
     func removeLocalData(identityId: String) {
         local.removeLocalData(identityId: identityId)
         if lastIdentity?.identityId == identityId { lastIdentity = nil }
@@ -1188,42 +1079,26 @@ final class AppState: ObservableObject {
 
 // MARK: - Workspaces (IDX-M2)
 
-/// A workspace is the boundary everything else is drawn inside: the notes
-/// a search returns, the spaces in the sidebar, the meetings in the list,
-/// and the `tid` claim every service filters rows by. Switching is
-/// therefore not a display preference — it is a new token, minted by the
-/// server after it has re-read the membership, and everything local is
-/// re-read with it.
-///
-/// (Same file as `AppState` on purpose: this reaches its private state,
-/// and widening that access for the sake of a second file would be the
-/// tail wagging the dog.)
+/// A workspace is the boundary everything is drawn inside (notes, spaces, meetings,
+/// the `tid` claim). Switching is a new token minted by the server after it re-read
+/// the membership, and everything local is re-read with it. Same file as `AppState`
+/// on purpose: this reaches its private state.
 extension AppState {
 
-    /// Reload the list of workspaces, at most once every five minutes.
-    ///
-    /// Invitations accepted elsewhere, a role changed by an admin and a
-    /// membership removed all show up here. The server stays the authority
-    /// on every actual switch, so this list only has to be roughly fresh.
+    /// Reload the list of workspaces, at most once every five minutes. The server stays the authority on every actual switch.
     func refreshWorkspaces(force: Bool = false) async {
         guard authState == .signedIn, !reconnecting else { return }
         if !force, let last = lastWorkspaceRefresh, last.timeIntervalSinceNow > -300 { return }
         guard let list = try? await api.workspaces() else { return }
         lastWorkspaceRefresh = Date()
         workspaces = list
-        // The active workspace vanishing from the list is a removal
-        // somebody else made. Find out properly rather than letting the
-        // next request the person makes fail in front of them.
+        // The active workspace vanished from the list: find out properly rather than let the next request fail.
         if let tenantId, !list.isEmpty, !list.contains(where: { $0.id == tenantId }) {
             await moveToAnotherWorkspace(reason: nil)
         }
     }
 
-    /// Move this Mac to another workspace.
-    ///
-    /// Mint first (the server may refuse), then swap the local state, then
-    /// reload. Nothing local is thrown away — the other workspace's
-    /// meetings stay filed under its own key.
+    /// Move this Mac to another workspace: mint first (the server may refuse), then swap local state, then reload. Nothing local is thrown away.
     func switchWorkspace(to tenantId: String) async {
         guard tenantId != self.tenantId, switchingTo == nil else { return }
         switchingTo = tenantId
@@ -1237,8 +1112,7 @@ extension AppState {
             if let loss = WorkspaceLoss(code: error.code) {
                 await noteWorkspaceLoss(loss, tenantId: tenantId)
             } else {
-                // A network failure on a switch changes nothing: the person
-                // stays where they were and is told the attempt failed.
+                // A network failure on a switch changes nothing.
                 workspaceNotice = AuthCopy.message(for: error)
             }
         } catch {
@@ -1258,8 +1132,7 @@ extension AppState {
 
     func loadWorkspaceData() async {
         if let rules = try? await api.sharingConstraints() { sharingRules = rules }
-        // Sprint 34: anything typed while this device was offline goes up
-        // now. Idempotent on the capture id, so a repeat costs one request.
+        // Anything typed while offline goes up now. Idempotent on the capture id.
         await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
@@ -1286,12 +1159,7 @@ extension AppState {
             ?? "that workspace"
     }
 
-    /// Leave the active workspace for one that still works.
-    ///
-    /// The personal workspace first — the server self-heals every identity
-    /// into one — otherwise whatever membership is left. Being signed in
-    /// with nowhere to be is a state worth never producing; if there is
-    /// genuinely nowhere, the banner says so and the local state stays put.
+    /// Leave the active workspace for one that still works: the personal one first, else any membership left; if none, the banner says so.
     private func moveToAnotherWorkspace(reason: String?) async {
         let previous = tenantId.map { displayName(ofWorkspace: $0) } ?? "that workspace"
         let personal = memberships.first { $0.kind == "personal" }?.tenantId
@@ -1316,12 +1184,10 @@ extension AppState {
 // MARK: - Holding the recordings that have not been sent
 
 extension AppState: PendingUploadsHost {
-    /// Sending needs a session and a server; either missing means the
-    /// files simply wait, which is the whole point of keeping them.
+    /// Sending needs a session and a server; either missing means the files wait.
     var canSendUploads: Bool { authState == .signedIn && !reconnecting }
 
-    /// Whose recordings to show: whoever is signed in, or — when a session
-    /// expired offline — whoever was.
+    /// Whose recordings to show: whoever is signed in, or whoever was when the session expired offline.
     var uploadIdentityId: String {
         identityId.isEmpty ? (lastIdentity?.identityId ?? "") : identityId
     }

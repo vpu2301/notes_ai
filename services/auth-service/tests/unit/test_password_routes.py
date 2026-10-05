@@ -1,15 +1,8 @@
-"""The password-recovery HTTP surface.
+"""Password-recovery HTTP surface.
 
-Written around the security properties rather than the happy path,
-because the happy path is the part that would be noticed if it broke:
-
-  * ``/forgot`` must be an enumeration dead end — identical response for
-    a real address, an unknown one, a deactivated one, and a throttled
-    one.
-  * A reset token must be single-use, and must die along with every
-    other outstanding token once a password changes.
-  * Every password change must end every live session.
-  * A password change must always queue the security notification.
+``/forgot`` is an enumeration dead end; a reset token is single-use and dies with every
+other token once a password changes; every change ends every live session and queues
+the security notification.
 """
 
 from __future__ import annotations
@@ -119,14 +112,10 @@ def env(monkeypatch: pytest.MonkeyPatch):
     state = SimpleNamespace(
         keycloak=kc,
         denylist=denylist,
-        # Present so `current_user` can run far enough to reject a
-        # request with no Authorization header, which is what the
-        # unauthenticated-access test asserts.
+        # Lets `current_user` run far enough to reject a missing Authorization header.
         jwks_cache=object(),
         audit_writer=SimpleNamespace(write_event=_write_event),
-        # The tenant-blind lookups acquire an unscoped connection off
-        # this pool; the tenant-scoped ones go through the patched
-        # `tenant_connection`, which ignores the pool object entirely.
+        # Tenant-blind lookups use this pool; tenant-scoped ones go through the patched `tenant_connection`.
         app_pool=SimpleNamespace(acquire=_acquire),
         tenant_writer_pool=SimpleNamespace(acquire=_acquire),
         password_rate_limiter=_Limiter(),
@@ -312,8 +301,7 @@ def test_forgot_is_identical_when_rate_limited(env: Any) -> None:
 
 
 def test_forgot_never_audits_an_unknown_address(env: Any) -> None:
-    """An audit row per probe would rebuild the enumeration oracle the
-    uniform 202 exists to remove."""
+    """An audit row per probe would rebuild the enumeration oracle."""
     env.client().post("/auth/password/forgot", json={"email": "nobody@nowhere.example"})
     assert env.audit == []
 
@@ -362,8 +350,7 @@ def test_reset_token_is_single_use(env: Any) -> None:
 
 
 def test_reset_spends_every_other_outstanding_token(env: Any) -> None:
-    """A second live link would be a spare key to an account the user
-    believes they have just secured."""
+    """A second live link would be a spare key to a just-secured account."""
     stale = _token_for(env, "password_reset")
     fresh = _token_for(env, "password_reset")
     assert (
@@ -406,12 +393,7 @@ def test_reset_refuses_a_weak_password_with_machine_readable_reasons(
 
 
 def test_a_rejected_password_does_not_burn_the_link(env: Any) -> None:
-    """Peek, judge, THEN consume.
-
-    Consuming first would mean one typo costs a locked-out user their
-    only link and a trip back to their inbox — and it stops no attacker,
-    who would simply submit a strong password first time.
-    """
+    """Peek, judge, THEN consume: a typo must not cost the user their only link."""
     token = _token_for(env, "password_reset")
     weak = env.client().post(
         "/auth/password/reset", json={"token": token, "new_password": "password1234"}
@@ -542,8 +524,7 @@ def test_lockdown_token_is_single_use(env: Any) -> None:
 
 
 def test_lockdown_returned_token_actually_resets(env: Any) -> None:
-    """The handed-back token is the user's way straight into setting a
-    new password without waiting for a second email."""
+    """The handed-back token lets the user set a new password without a second email."""
     token = _token_for(env, "account_lockdown")
     reset_token = (
         env.client().post("/auth/security/lockdown", json={"token": token}).json()["reset_token"]
@@ -565,8 +546,7 @@ def test_lockdown_writes_a_dedicated_audit_kind(env: Any) -> None:
 
 
 def test_lockdown_reports_partial_revocation_honestly(env: Any) -> None:
-    """If Keycloak refuses the logout, the response must not claim the
-    account was secured."""
+    """If Keycloak refuses the logout, the response must not claim the account was secured."""
     from auth_service.keycloak_client import KeycloakError
 
     async def _boom(sub: UUID) -> None:

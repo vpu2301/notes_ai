@@ -1,9 +1,5 @@
-"""/v1/synonyms — tenant synonym-group curation (sprint 15, ADR-0038).
-
-Minimal CRUD for tenant_admins ahead of the sprint-17 admin UI. System
-groups are visible but immutable here — RLS has no PERMISSIVE write
-policy for them, so even a bug in this router cannot touch the seeded
-dictionary. Terms are dictionary entries (closed vocabulary), not note content.
+"""/v1/synonyms — tenant synonym-group curation (ADR-0038). System groups are
+visible but immutable: RLS has no PERMISSIVE write policy for them.
 """
 
 from __future__ import annotations

@@ -1,9 +1,5 @@
 """Materialisation against a real Postgres, under real RLS.
 
-Covers the §6 verification items that only a live database can prove:
-tenant isolation, materialisation idempotency, recipient-rule routing,
-and the suppressed-outbox audit trail.
-
 Gated: RUN_DB_INTEGRATION=1, plus `make dev-up && make migrate-up`.
 """
 
@@ -62,13 +58,7 @@ def _event(**over: object) -> NotificationEvent:
 
 
 async def _cleanup(_pool, tenant_id: UUID, dedupe_prefix: str) -> None:
-    """Tear down as the superuser.
-
-    `app_role` is deliberately denied DELETE on notifications and the
-    outbox (the policies are `USING (false)` — delivery history is
-    evidence). Test cleanup therefore cannot reuse the app pool; that it
-    fails to is the schema working correctly.
-    """
+    """Tear down as the superuser: `app_role` is denied DELETE on notifications/outbox by design."""
     admin = await create_pool(ADMIN_DSN, application_name="notification-tests-cleanup")
     try:
         async with admin.acquire() as conn:
@@ -208,9 +198,7 @@ async def test_suppressed_email_is_recorded_not_skipped(pool) -> None:
         assert by_channel["email"]["suppressed_reason"] == "preference"
         assert by_channel["in_app"]["status"] == "pending"
     finally:
-        # Tenant-scoped: an unscoped app_role connection resolves
-        # `app.tenant_id` to '' and the policy's uuid cast rejects it —
-        # RLS refusing an unscoped write, exactly as intended.
+        # Tenant-scoped: an unscoped app_role write is refused by RLS ('' uuid cast).
         async with tenant_connection(pool, TENANT_A) as conn:
             await conn.execute(
                 "DELETE FROM notification_preferences WHERE user_id=$1 AND category=$2",
@@ -239,8 +227,7 @@ async def test_feed_and_unread_count_agree(pool) -> None:
                 before_id=None,
                 unread_only=True,
             )
-        # The row the badge counted must be the row the feed shows —
-        # the two must not be able to disagree.
+        # Badge count and feed must agree.
         assert new_id in {r["id"] for r in rows}
     finally:
         await _cleanup(pool, TENANT_A, str(event.event_id))
@@ -272,8 +259,7 @@ async def test_other_user_cannot_mark_your_notification_read(pool) -> None:
             result = await materialize(event, conn=conn, app_base_url="http://x")
             nid = result.created[0].notification_id
 
-            # Same tenant, wrong recipient — the recipient predicate, not
-            # RLS, is what stops this.
+            # Same tenant, wrong recipient: the recipient predicate stops this, not RLS.
             assert not await repo.mark_read(conn, user_id=MEMBER_A, notification_id=nid)
             row = await conn.fetchrow("SELECT read_at FROM notifications WHERE id = $1", nid)
         assert row["read_at"] is None

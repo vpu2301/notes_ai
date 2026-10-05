@@ -1,14 +1,6 @@
 import type { ExcludedRange } from "../api/types";
 
-/**
- * What the engine left out of a note, in words (Summary Engine v2, Q3).
- *
- * The engine used to write "Hinweis zum Transkript: … wurde nicht
- * berücksichtigt." into the note itself — a paragraph the rich-text
- * renderer took for a speaker called "HT". Exclusions are now data on the
- * generation (`excluded_ranges`), and these labels — a closed vocabulary,
- * in the language that was spoken — are the only words for them.
- */
+/** Words for `excluded_ranges`: a closed vocabulary, in the spoken language. */
 export const NOISE_LABELS: Record<string, Record<string, string>> = {
   en: {
     background: "background speech",
@@ -66,8 +58,7 @@ export function excludedItems(ranges: ExcludedRange[], language?: string | null)
     }));
 }
 
-/** What the recording was taken to be, for the pill that replaces the
- *  template name. `meeting` has no label: the template name stays. */
+/** Pill replacing the template name; `meeting` has no label. */
 export const RECORDING_TYPE_LABELS: Record<string, string> = {
   client_call: "Client call",
   sales_call: "Sales call",

@@ -1,4 +1,4 @@
-"""/v1/calendar routes with the DB, envelope and Google stubbed (0019).
+"""/v1/calendar routes with the DB, envelope and Google stubbed.
 
 Mirrors ``test_notes_create``: the real handlers run against an
 overridden auth dependency and monkeypatched repository functions.

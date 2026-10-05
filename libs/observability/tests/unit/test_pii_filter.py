@@ -1,9 +1,4 @@
-"""Adversarial test corpus for the PII filter.
-
-We exercise every drop-list and mask-list entry, plus nested structures, to
-prove that no live PII or secret material survives the filter on the path to
-a log sink.
-"""
+"""Adversarial corpus for the PII filter: every drop/mask entry plus nested structures."""
 
 from __future__ import annotations
 
@@ -22,9 +17,7 @@ from observability.pii_filter import (
 LIVE_VALUE = "live-value-must-not-appear-in-output"
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Pure scrub() — drop list
-# ──────────────────────────────────────────────────────────────────────
+# ── Pure scrub(): drop list ──
 
 
 @pytest.mark.parametrize("field", sorted(_DROP_NAMES))
@@ -42,9 +35,7 @@ def test_drop_list_case_insensitive(field: str) -> None:
     assert LIVE_VALUE not in str(out)
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Pure scrub() — mask list
-# ──────────────────────────────────────────────────────────────────────
+# ── Pure scrub(): mask list ──
 
 
 @pytest.mark.parametrize("field", sorted(_MASK_NAMES))
@@ -53,9 +44,7 @@ def test_mask_list_replaces_value(field: str) -> None:
     assert out[field] == "<redacted>"
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Nested structures
-# ──────────────────────────────────────────────────────────────────────
+# ── Nested structures ──
 
 
 def test_nested_dict_is_scrubbed() -> None:
@@ -119,9 +108,7 @@ def test_max_depth_does_not_crash() -> None:
     scrub(payload)
 
 
-# ──────────────────────────────────────────────────────────────────────
-# stdlib logging integration
-# ──────────────────────────────────────────────────────────────────────
+# ── stdlib logging integration ──
 
 
 @pytest.fixture
@@ -181,9 +168,7 @@ def test_log_message_string_with_embedded_json_is_masked(
     assert LIVE_VALUE not in out
 
 
-# ──────────────────────────────────────────────────────────────────────
-# False-positive guard: stdlib record attributes pass through.
-# ──────────────────────────────────────────────────────────────────────
+# ── False-positive guard: stdlib record attributes pass through ──
 
 
 def test_logger_module_name_not_dropped() -> None:

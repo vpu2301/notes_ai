@@ -1,4 +1,4 @@
-"""Sprint-13 write-path field-metadata validation tests."""
+"""Write-path field-metadata validation tests."""
 
 from __future__ import annotations
 

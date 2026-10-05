@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Nightly: plans given by a redeem code end when their time does (0069).
+"""Nightly: end redeem-code plans whose time has run out (0069), per tenant on a
+tenant-scoped connection. Idempotent; prints a count.
 
-    DATABASE_URL=postgresql://app_role:...@host/notes \\
-        uv run python scripts/jobs/billing_expiry.py
-
-The Billing page already ends an expired code plan when someone opens it;
-this catches the workspaces nobody looks at, so their limits and the
-premium tier follow the plan they are really on. Per tenant on a
-tenant-scoped connection, as the API does. Idempotent; prints a count.
+    DATABASE_URL=postgresql://app_role:...@host/notes uv run python scripts/jobs/billing_expiry.py
 """
 
 from __future__ import annotations

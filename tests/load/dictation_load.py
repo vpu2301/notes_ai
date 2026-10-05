@@ -1,9 +1,5 @@
-"""Concurrency load test for dictation-service.
-
-Scenario A: 4 simulated users on 1 worker — all within latency
-targets (partial p95 ≤ 1100 ms, final p95 ≤ 2500 ms).
-Scenario B: 5th attempt → `gpu_full`.
-
+"""Concurrency load test for dictation-service: 4 users on 1 worker within latency
+targets (partial p95 <= 1100 ms, final p95 <= 2500 ms); the 5th gets ``gpu_full``.
 Skipped unless RUN_DICTATION_LOAD=1.
 """
 

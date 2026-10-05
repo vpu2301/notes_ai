@@ -1,11 +1,4 @@
-"""Sprint TQ3 T2 — the overlay in the result view and the two routes.
-
-The repository is an in-memory stand-in (the SQL and RLS are covered by
-``tests/integration/test_corrections_db.py``); what is under test here is the
-route logic: plan on first read, apply accepted rows, 404 for another
-tenant's job, 409 on a stale rev, reject reverting, audit without text and
-the artefact's bytes unchanged.
-"""
+"""The spelling overlay in the result view and its routes (in-memory repository)."""
 
 from __future__ import annotations
 

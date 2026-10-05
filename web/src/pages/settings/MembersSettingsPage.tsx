@@ -24,15 +24,7 @@ const ROLE_LABEL: Record<string, string> = {
   viewer: "Viewer",
 };
 
-/**
- * `/settings/members` — who is in this workspace (the Mac app's "Invite
- * people" sheet, on the web).
- *
- * Adding someone links an EXISTING account: the server resolves the
- * address and answers 404 when nobody has signed up with it. So the page
- * pairs the add form with the sign-up link to send them first. The API
- * refuses anyone but an owner or admin; the tab is only shown to them.
- */
+/** `/settings/members`. Adding links an EXISTING account (404 otherwise); owner/admin only. */
 export function MembersSettingsPage() {
   const { activeTenantId, identity, activeRole } = useAuth();
   const toast = useToast();

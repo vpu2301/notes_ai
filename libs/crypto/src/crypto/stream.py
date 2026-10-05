@@ -1,21 +1,5 @@
-"""Ephemeral seekable stream cipher.
-
-Sprint 04's tmpfs ring buffer wants a fast, seekable, single-process,
-ephemeral cipher. It is NOT a replacement for the envelope (which is
-AEAD GCM for at-rest data). This primitive lives in libs/crypto so the
-``check-no-direct-crypto`` CI gate stays strict — callers don't import
-``cryptography.hazmat`` directly.
-
-Properties:
-- AES-256-CTR. Seekable by sample/byte offset because CTR counter
-  increments deterministically per 16-byte block.
-- No authentication. Single writer + single reader in the same process;
-  tampering is not in the threat model for tmpfs.
-- The key never leaves process memory; the helper accepts a key + nonce
-  and returns an encryptor/decryptor at any block-aligned offset.
-
-For AEAD at-rest data use :class:`Envelope`. For everything else, use
-this only if you understand why AEAD isn't needed.
+"""Ephemeral seekable AES-256-CTR for the in-process tmpfs ring buffer: unauthenticated, NOT for data at rest
+(use :class:`Envelope`). Lives here so the ``check-no-direct-crypto`` gate stays strict.
 """
 
 from __future__ import annotations
@@ -41,13 +25,7 @@ def fresh_stream_nonce() -> bytes:
 
 
 def encryptor_at_offset(*, key: bytes, nonce: bytes, byte_offset: int) -> object:
-    """Return an AES-CTR encryptor positioned to ``byte_offset``.
-
-    ``byte_offset`` MUST be a multiple of 16 (the AES block size); the
-    counter index = byte_offset // 16. Callers in sprint-04's audio
-    buffer always start at a sample boundary that's a multiple of 4
-    samples = 16 bytes for float32 audio, so this is naturally aligned.
-    """
+    """AES-CTR encryptor positioned at ``byte_offset`` (must be a multiple of the 16-byte block)."""
     if len(key) != KEY_SIZE:
         raise ValueError(f"key must be {KEY_SIZE} bytes")
     if len(nonce) != NONCE_SIZE:

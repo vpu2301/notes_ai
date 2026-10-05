@@ -1,12 +1,6 @@
-"""Pydantic discriminated unions for the dictation.v1 wire protocol.
+"""Pydantic discriminated unions for the dictation.v1/v2 wire protocol.
 
-Strict (`extra="forbid"`) on every model. The strictness is the point:
-sprint 14 will fork to `dictation.v2` for diarization fields; a
-v1 client receiving a v2 message must reject it cleanly, and an attacker
-must not be able to smuggle `is_admin`-style fields through.
-
-Field naming follows the canonical spec at docs/api/dictation-ws-v1.md.
-Reordering or renaming is a breaking change.
+Every model is ``extra="forbid"``. Field names are the wire contract; renaming is breaking.
 """
 
 from __future__ import annotations
@@ -18,25 +12,17 @@ from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 from .error_catalogue import ErrorCode
 
-# Bumping this is the only way to break v1 compatibly — see ADR-0012.
 PROTOCOL_VERSION_V1: int = 1
-# Sprint 14: dictation.v2 — diarization fields + conversation (meeting)
-# mode. Negotiated via the Sec-WebSocket-Protocol header; a session is
-# exactly one version for its whole lifetime. See docs/api/dictation-ws-v2.md.
+# v2 adds diarization fields + conversation mode; negotiated via Sec-WebSocket-Protocol,
+# one version per session for life.
 PROTOCOL_VERSION_V2: int = 2
 
-# Supported dictation languages. Additive: a new language widens the
-# pattern, so an existing client is unaffected. Must stay in sync with
-# the ``dictation_sessions.language`` CHECK constraint (migration 0066)
-# and with nlp-service's ``ProcessingContext.language``.
+# Must stay in sync with the ``dictation_sessions.language`` CHECK constraint
+# and nlp-service's ``ProcessingContext.language``.
 LANGUAGE_PATTERN = "^(uk|en|de)$"
 
-# Anonymous diarization labels (raw clustering output). The display
-# name a label maps to is a SEPARATE, client-controlled mapping — see
-# SpeakerMappingUpdated / SetSpeakerMapping. Until the client names a
-# speaker, labels render as the neutral SPEAKER_1..N defaults.
+# Raw clustering labels; display names are a separate client-controlled mapping.
 SpeakerLabel = Literal["S1", "S2", "UNKNOWN"]
-# Free-text display name for a speaker (e.g. "Alice", "SPEAKER_1").
 SpeakerName = Annotated[str, Field(min_length=1, max_length=128)]
 
 
@@ -99,7 +85,7 @@ class Final(_StrictModel):
     words: list[TokenTiming] = Field(default_factory=list)
     avg_confidence: float = Field(ge=0.0, le=1.0)
     is_provisional: Literal[False] = False
-    voice_command: object | None = None  # sprint-05 will populate
+    voice_command: object | None = None
 
 
 class VoiceCommand(_StrictModel):
@@ -171,16 +157,10 @@ class StartSession(_StrictModel):
     protocol_version: int = PROTOCOL_VERSION_V1
     language: str = Field(pattern=LANGUAGE_PATTERN)
     target_kind: str = Field(default="generic")
-    # Optional free-text vocabulary hint (product terms, names, jargon)
-    # fed to Whisper's initial_prompt for this session. Empty = none.
-    vocabulary_hint: str = Field(default="", max_length=2000)
-    # Ambient-capture v1 (additive in v1, same as vocabulary_hint): which
-    # surface produced the audio. Persisted on dictation_sessions and
-    # echoed on GET /dictate/sessions; room devices MUST send
-    # "room_device" (docs/runbooks/ambient-device.md).
+    vocabulary_hint: str = Field(default="", max_length=2000)  # Whisper initial_prompt
+    # Room devices MUST send "room_device" (docs/runbooks/ambient-device.md).
     capture_source: Literal["browser", "mobile", "room_device"] = "browser"
-    # Optional stable device/room label (e.g. "Berlin 4F"). Allowed with
-    # ANY capture_source — a browser profile may carry a label too.
+    # Optional stable device/room label, allowed with any capture_source.
     device_name: str | None = Field(default=None, min_length=1, max_length=128)
     template_id: UUID | None = None
     resume_session_id: UUID | None = None
@@ -253,13 +233,8 @@ class AudioFrame(_StrictModel):
 
 
 # ──────────────────────────────────────────────────────────────────────
-# dictation.v2 (sprint 14) — diarization + conversation (meeting) mode.
-#
-# v1 stays byte-stable: none of the classes above changed. The v2
-# unions swap in subclasses for the messages that gained fields and add
-# the two new speaker-mapping messages. A v1 client that receives a v2
-# frame rejects it cleanly via extra="forbid" (the sprint-04 promise —
-# proven in tests/unit/test_protocol_v2.py).
+# dictation.v2 — diarization + conversation mode. v1 classes stay
+# byte-stable; v2 unions swap in subclasses and add speaker-mapping messages.
 # ──────────────────────────────────────────────────────────────────────
 
 

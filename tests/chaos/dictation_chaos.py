@@ -1,40 +1,8 @@
-"""Chaos scenarios for the streaming dictation pipeline.
-
-The 7 scenarios from sprint-04 spec §9 day-9:
-
-1. Random WS close every 30–120 s during a session → reconnect+resume;
-   committed audio is preserved across every drop.
-2. 1% frame drop + ±50 ms jitter → session survives; only recoverable
-   errors; clean termination.
-3. 5% malformed frames → server keeps the session alive, replies
-   ``audio_decode_failed`` (recoverable) per bad frame, never a fatal
-   error → completeness ≥ 95 % of frames accepted without a kill.
-4. Oversized binary frame (16 KiB) → ``bad_message`` + close.
-5. Double-tab simulation → second connection's resume is rejected with
-   the uniform ``session_not_found``.
-6. ``kill -9`` worker mid-session (we restart the service container) →
-   the in-process context is gone but the DB row + worker heartbeat are
-   alive, so a resume returns ``worker_failed`` telling the client to
-   recover via the sprint-3 batch path.
-7. 10-s network outage → reconnect+resume succeeds well within the
-   30-min abandon window.
-
-These tests drive the live dev stack. They are skipped unless
-RUN_DICTATION_CHAOS=1. The harness is intentionally simple — it drives
-synthetic binary frames; real audio is not required, because the chaos
-surface is network/protocol shape, not WER (transcription accuracy is
-covered by the streaming-WER harness). ``audio_decode_failed`` for a
-synthetic frame is therefore the *expected, recoverable* server reply,
-not a failure.
-
-Required env:
-- ``DICTATION_TOKEN``     a valid bearer (issuer must match the service's
-                          AUTH_ISSUER — mint it inside the compose network).
-Optional env:
-- ``DICTATION_WS_URL``    default ws://localhost:8002/ws/dictate
-- ``DICTATION_READY_URL`` default http://localhost:8002/readyz
-- ``DICTATION_RESTART_CMD`` shell command that restarts the worker for
-                          scenario 6 (default: the dev compose restart).
+"""Chaos scenarios for the streaming dictation pipeline against the live dev stack
+(random closes, frame drop + jitter, malformed and oversized frames, double tab,
+worker kill, network outage). Skipped unless RUN_DICTATION_CHAOS=1; drives synthetic
+frames, so ``audio_decode_failed`` is the expected recoverable reply.
+Env: DICTATION_TOKEN (required), DICTATION_WS_URL, DICTATION_READY_URL, DICTATION_RESTART_CMD.
 """
 
 from __future__ import annotations
@@ -95,9 +63,7 @@ class StreamStats:
     session_started: int = 0
 
 
-# Server error codes that are recoverable-in-session (mirrors
-# error_catalogue.RECOVERABLE — duplicated here to keep the harness
-# dependency-free against the running service).
+# Mirrors error_catalogue.RECOVERABLE (duplicated to keep the harness dependency-free).
 _RECOVERABLE = {
     "bad_message",
     "audio_decode_failed",
@@ -155,11 +121,7 @@ def _connect():  # type: ignore[no-untyped-def]
 
 
 async def _start_session(ws, *, resume_session_id: str | None = None) -> dict:  # type: ignore[no-untyped-def]
-    """Send ``start_session`` and return the ``session_started`` payload.
-
-    Returns the full message so callers can read ``session_id``,
-    ``resumed`` and ``committed_audio_until_ms``.
-    """
+    """Send ``start_session`` and return the full ``session_started`` payload."""
     msg = {
         "type": "start_session",
         "language": "uk",
@@ -318,16 +280,14 @@ async def test_scenario_5_double_tab_rejected() -> None:
 
 @pytest.mark.skipif(not RESTART_CMD, reason="DICTATION_RESTART_CMD not set")
 async def test_scenario_6_worker_kill_yields_worker_failed() -> None:
-    """Restart the worker mid-session (≈ kill -9). The DB row + worker
-    heartbeat survive but the in-process context is gone, so a resume
-    returns ``worker_failed`` — the client's cue to recover via batch."""
+    """Restart the worker mid-session: the DB row survives, the context is gone, resume returns ``worker_failed``."""
     async with _connect() as ws:
         started = await _start_session(ws)
         assert started["type"] == "session_started"
         session_id = started["session_id"]
         await _drive(ws, frames=40)
 
-    # Kill -9 the worker. Run from the repo root so the compose paths resolve.
+    # Run from the repo root so the compose paths resolve.
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     await asyncio.to_thread(
         lambda: subprocess.run(RESTART_CMD, shell=True, check=True, cwd=repo_root)  # noqa: S602

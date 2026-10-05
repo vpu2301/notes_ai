@@ -1,18 +1,6 @@
-"""The top of the note, and structure when the model gives none (F3
-amendment after r03, §2.6 and §2.9).
-
-* :func:`first_paragraph` — what this recording is, composed by code from
-  values the engine already verified: the recording type, the subject and
-  themes the context pass named (gated against the facts), the speakers.
-  It exists even when every model pass fails.
-* :func:`composed_sentences` — the third rung of the summary ladder: the
-  most specific facts in time order, joined with per-language connectives.
-  Still prose a reader can follow; bullets are never the overview.
-* :func:`chapters` — when the topics pass fails on a long recording, the
-  facts grouped by time, headed by their first timestamp and the name the
-  span mentions most.
-
-Pure. Facts and values in, strings and structures out.
+"""The top of the note, and structure when the model gives none: paragraph 1
+composed by code from verified values, the summary ladder's third rung, and
+time-grouped chapters when the topics pass fails. Pure.
 """
 
 from __future__ import annotations
@@ -25,7 +13,7 @@ from typing import Final
 from . import support
 from .verify import PARAPHRASE_UNSUPPORTED, VerifiedFact, _has_date_word
 
-# What the recording is, per language (Q3's recording types).
+# What the recording is, per language.
 TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
         "meeting": "Meeting",
@@ -62,9 +50,7 @@ TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
     },
 }
 _ABOUT: Final[dict[str, str]] = {"en": "about", "de": "über", "uk": "про"}
-# No colon anywhere near the start: "Label: text" is what a transcript turn
-# looks like, and the shared page and the client version treat a section
-# that reads like turns as a transcript (client_view.looks_like_transcript).
+# No colon near the start: "Label: text" reads as a transcript turn (client_view.looks_like_transcript).
 _SPEAKERS: Final[dict[str, str]] = {
     "en": "With {who}.",
     "de": "Es sprechen {who}.",
@@ -78,8 +64,7 @@ _THEMES: Final[dict[str, str]] = {
     "uk": "Теми — {themes}.",
 }
 NARRATOR: Final[dict[str, str]] = {"en": "the narrator", "de": "Erzähler/in", "uk": "оповідач"}
-# Connectives for composed prose: a dash, not an adverb that moves the verb
-# ("Zunächst gründet Thiel …") and not a colon (see above).
+# A dash: not an adverb that moves the verb, and not a colon (see above).
 CONNECTIVES: Final[dict[str, tuple[str, str, str]]] = {
     "en": ("First —", "Then —", "Finally —"),
     "de": ("Zunächst —", "Anschließend —", "Schließlich —"),
@@ -90,11 +75,9 @@ COMPOSED_MIN: Final = 3
 COMPOSED_MAX: Final = 6
 CHAPTER_MIN_FACTS: Final = 3
 CHAPTERS_AFTER_MS: Final = 10 * 60_000
-# A window of a long recording can hold ten minutes of talk: a span is at
-# most this long, so a chapter or a reduce block is a part of the story.
+# A span is at most this long, so a chapter is a part of the story.
 SPAN_MAX_MS: Final = 3 * 60_000
-# A name said across most of the recording is its subject, not what one
-# part of it is about: it does not head a chapter.
+# A name said across most of the recording is its subject and heads no chapter.
 TITLE_NAME_MAX_SPAN_SHARE: Final = 0.5
 
 
@@ -118,10 +101,8 @@ def first_paragraph(
     themes: list[str] | None = None,
     others: list[str] | None = None,
 ) -> str:
-    """ "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast
-    Felix Holtermann (Handelsblatt). Es geht um …". A model framing sentence that
-    passed the gate replaces the first clause; speakers and themes are
-    always code."""
+    """ "Podcast-Folge über Palantir. Es sprechen … Es geht um …". A gated model
+    framing replaces the first clause; speakers and themes are always code."""
     types = _pick(TYPE_LABELS, language)
     assert isinstance(types, dict)
     kind = types.get(recording_type or "meeting") or types["meeting"]
@@ -134,8 +115,7 @@ def first_paragraph(
     parts = [first]
     joiner = str(_pick(_AND, language))
     guest_label = str(_pick(_GUEST, language))
-    # SQ3 T2 — the one writer of who speaks: hosts and experts, then the
-    # guests, then interviewees and everybody else (compose.speakers_of).
+    # The one writer of who speaks (compose.speakers_of).
     who = (
         [w for w in (speakers or []) if w]
         + [f"{guest_label} {g}" for g in (guests or []) if g]
@@ -172,10 +152,7 @@ def composed_sentences(
     known: frozenset[str] = frozenset(),
     key_ids: list[str] | None = None,
 ) -> list[tuple[str, list[str]]]:
-    """Ladder rung 3: 3–6 sentences, each one fact's text, in time order,
-    joined by connectives, each citing its fact. The key facts the context
-    pass named come first; otherwise the most specific fact of each part of
-    the recording."""
+    """Ladder rung 3: 3–6 facts' texts in time order, joined by connectives, each citing its fact."""
     usable = [
         f
         for f in facts
@@ -192,9 +169,7 @@ def composed_sentences(
         ordered = sorted(usable, key=lambda f: f.start_ms)
         slices = max(1, min(COMPOSED_MAX, len(ordered)))
         size = max(1, len(ordered) // slices)
-        # One per part of the recording — a fact that names, counts or
-        # dates something; a part with none is passed over unless that
-        # leaves fewer than three sentences.
+        # One specific fact per part; a part with none is passed over unless that leaves under three.
         spare: list[VerifiedFact] = []
         for k in range(0, len(ordered), size):
             part = ordered[k : k + size]
@@ -283,9 +258,7 @@ def _spans(facts: list[VerifiedFact], minimum: int) -> list[list[VerifiedFact]]:
 def chapters(
     facts: list[VerifiedFact], *, language: str, known: frozenset[str] = frozenset()
 ) -> list[tuple[str, list[tuple[str, list[str], list[tuple[str, list[str]]]]], list[str]]]:
-    """§2.6: topics-shaped chapters — ``[(title, bullets, fact ids)]``,
-    headed "07:40 — Alex Karp". Within a chapter a fact that names, counts
-    or dates nothing is written only when nothing beside it does."""
+    """Topics-shaped chapters ``[(title, bullets, fact ids)]``, headed "07:40 — Alex Karp"."""
     usable = [f for f in facts if not f.evidence_only and f.figure is None and f.person is None]
     out: list[tuple[str, list[tuple[str, list[str], list[tuple[str, list[str]]]]], list[str]]] = []
     spans = _spans(usable, CHAPTER_MIN_FACTS)

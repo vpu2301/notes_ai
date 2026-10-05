@@ -1,13 +1,5 @@
-# promtool unit tests for the conversation-capacity alerts.
-#
-# Run:  make check-alert-rules
-#
-# These prove the alerts FIRE on the failure they claim to watch — a rule
-# that is syntactically valid but never fires is worse than no rule, because
-# a green dashboard then reads as "no problem" rather than "not measured".
-#
-# Lives under rules/tests/ deliberately: Prometheus loads /rules/*.yml, and
-# a test file sitting alongside the rules would be parsed as a rule file.
+# promtool unit tests for the conversation-capacity alerts (make check-alert-rules).
+# Under rules/tests/ because Prometheus loads /rules/*.yml as rule files.
 
 rule_files:
   - ../conversation.yml
@@ -19,8 +11,7 @@ tests:
   - interval: 30s
     name: device memory spike above 90% pages
     input_series:
-      # 10 min healthy at 50%, then a spike to 95% — a second resident
-      # model plus session growth walking the device toward OOM.
+      # 10 min healthy at 50%, then a spike to 95%.
       - series: 'mdx_dictation_device_memory_utilization_ratio{worker_id="dictation-1",kind="vram"}'
         values: "0.50+0x20 0.95+0x40"
     alert_rule_test:
@@ -90,8 +81,7 @@ tests:
   - interval: 30s
     name: two conversation sessions saturate the worker on WEIGHT not headcount
     input_series:
-      # 2 conversation sessions = weight 4 of 4. Headcount would say "2",
-      # which is exactly the blind spot the weighted gauge fixes.
+      # 2 conversation sessions = weight 4 of 4 (headcount would say "2").
       - series: 'mdx_dictation_capacity_weight_used{worker_id="dictation-1"}'
         values: "2+0x10 4+0x40"
       - series: 'mdx_dictation_capacity_weight_max{worker_id="dictation-1"}'
@@ -162,8 +152,7 @@ tests:
   - interval: 30s
     name: a sustained UNKNOWN speaker rate above 25% warns
     input_series:
-      # 40% of committed words land UNKNOWN — worse than the rapid-turn
-      # stress case in ADR-0034 (0.38), far worse than the 0.03 baseline.
+      # 40% of committed words land UNKNOWN (baseline 0.03).
       - series: 'mdx_dictation_conversation_words_total{outcome="unknown"}'
         values: "0+40x120"
       - series: 'mdx_dictation_conversation_words_total{outcome="labeled"}'

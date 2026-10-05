@@ -1,9 +1,4 @@
-"""Channel analysis + dual-channel diarization (Sprint 31) on synthetic signals.
-
-"Speech" is noise modulated at a syllable rate (so envelopes correlate the
-way voices do); the segmenter is an energy VAD; the engine is a fake that
-labels speech by a fixed timeline. No models, no audio files.
-"""
+"""Channel analysis + dual-channel diarization on synthetic signals (syllable-modulated noise, energy VAD, fake engine)."""
 
 from __future__ import annotations
 

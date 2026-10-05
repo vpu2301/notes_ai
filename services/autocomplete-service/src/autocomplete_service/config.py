@@ -9,11 +9,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from secret import Secret
 
-# ``Secret[str]`` is a generic, so pydantic-settings classes it as a complex
-# type and json.loads() the raw env value — any plain string (including "")
-# blows up with a JSONDecodeError before the field is ever validated. NoDecode
-# hands the raw string straight to Secret's validator. Every Secret field fed
-# from the environment must use this alias.
+# pydantic-settings json.loads() generic types like ``Secret[str]``; NoDecode passes the raw string through.
+# Every env-fed Secret field must use this alias.
 SecretStrEnv = Annotated[Secret[str], NoDecode]
 
 
@@ -44,19 +41,11 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # ADR-0047: JSON list of `{issuer, jwks_url, audience}`; unset = one-element list from the trio above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
-    # ── CORS (SPA integration) ──────────────────────────────────────────
-    # Comma-separated browser origins allowed to call this service WITH
-    # credentials (the HttpOnly refresh cookie). Must be explicit origins —
-    # never "*" — because allow_credentials=True forbids the wildcard. Mirror
-    # of the auth-service allow-list (sprint A3).
+    # Explicit origins only, never "*": allow_credentials=True forbids the wildcard.
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
         alias="CORS_ALLOWED_ORIGINS",
@@ -89,19 +78,13 @@ class Settings(BaseSettings):
     telemetry_flush_interval_s: float = Field(default=5.0, alias="MDX_TELEMETRY_FLUSH_S")
     telemetry_flush_batch: int = Field(default=100, alias="MDX_TELEMETRY_FLUSH_BATCH")
 
-    # In-process maintenance loops (partition rotation + nightly roll-up).
-    # Disable when an external scheduler (cron/k8s CronJob) owns these jobs.
+    # In-process maintenance loops; disable when an external scheduler owns them.
     background_jobs_enabled: bool = Field(default=True, alias="MDX_BACKGROUND_JOBS")
     background_jobs_interval_s: float = Field(
         default=86400.0, alias="MDX_BACKGROUND_JOBS_INTERVAL_S"
     )
 
-    # ── Telemetry cold-archive (sprint 16 — pays the sprint-10 IOU) ────
-    # When on, partition rotation ARCHIVES a >90-day telemetry partition
-    # to encrypted object storage BEFORE dropping it; an archive failure
-    # blocks the drop (retention becomes non-destructive). Off in dev —
-    # the pre-sprint-16 destructive drop stays the default until ops
-    # provisions the bucket + envelope wiring below.
+    # Archive expired telemetry partitions to encrypted object storage before dropping; archive failure blocks the drop.
     telemetry_cold_archive_enabled: bool = Field(
         default=False, alias="MDX_TELEMETRY_COLD_ARCHIVE_ENABLED"
     )
@@ -113,7 +96,7 @@ class Settings(BaseSettings):
     s3_telemetry_archive_bucket: str = Field(
         default="mdx-telemetry-archive", alias="S3_TELEMETRY_ARCHIVE_BUCKET"
     )
-    # Envelope wiring (archives are encrypted at rest, rule 3/4).
+    # Envelope wiring (archives are encrypted at rest).
     db_crypto_writer_dsn: str = Field(
         default="postgresql://crypto_writer:crypto_writer@localhost:5432/notes",
         alias="DB_CRYPTO_WRITER_DSN",
@@ -125,10 +108,7 @@ class Settings(BaseSettings):
     vault_transit_key: str = Field(default="mdx-master", alias="MDX_VAULT_TRANSIT_KEY")
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
-    # ── Session revocation check (sprint 16) ────────────────────────────
-    # When on, current_user rejects tokens whose sid/sub is on the Redis
-    # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
-    # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
+    # Redis denylist check in current_user; fail-OPEN on Redis outage (ADR-0040).
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 

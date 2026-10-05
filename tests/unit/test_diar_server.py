@@ -1,9 +1,5 @@
-"""deploy/diar-server (Sprint 29 B-9): auth, the payload contract, and the
-promise that nothing about the caller reaches this process.
-
-The real engine needs a GPU and gated weights, so a fake ``PyannoteDiarizer``
-stands in — what is under test is the service around it: who may call,
-what a call may contain, what comes back, and what is refused.
+"""deploy/diar-server with a fake ``PyannoteDiarizer``: auth, the payload contract, and
+the promise that nothing about the caller reaches this process.
 """
 
 from __future__ import annotations
@@ -178,9 +174,7 @@ def _flatten(value: Any) -> list[Any]:
 
 
 def test_the_audio_never_touches_the_filesystem(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Starlette spools a multipart part to a temp FILE above its spool
-    size; the whole promise of this service is that the caller's audio
-    stays in memory."""
+    """Starlette spools a multipart part to a temp FILE above its spool size; audio must stay in memory."""
     import tempfile
 
     from starlette.formparsers import MultiPartParser
@@ -200,9 +194,7 @@ def test_the_audio_never_touches_the_filesystem(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_a_bad_token_is_refused_before_the_body_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The check must happen in middleware: FastAPI parses the form
-    BEFORE a route's dependencies run, so a dependency-based check would
-    already have buffered (and possibly spooled) the upload."""
+    """FastAPI parses the form BEFORE route dependencies run, so the check must be middleware."""
     module = _load_app(monkeypatch, MDX_DIAR_SERVER_TOKEN="s3cret")
     read: list[int] = []
 
@@ -345,9 +337,7 @@ def test_health_answers_before_any_model_is_loaded(monkeypatch: pytest.MonkeyPat
 def test_health_tells_a_caller_its_token_is_wrong_and_hides_internals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Open, because the platform's probe has no token — so it must not
-    leak model paths, and it must let a misconfigured worker find out at
-    startup instead of after a week of speakerless transcripts."""
+    """Open for the platform's probe, so it must not leak model paths; tells a worker its token is wrong."""
     module = _load_app(monkeypatch, MDX_DIAR_SERVER_TOKEN="s3cret")
 
     with TestClient(module.app) as client:

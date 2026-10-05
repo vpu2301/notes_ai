@@ -9,19 +9,8 @@ import {
 } from "./helpers";
 
 /**
- * WEB-1b §3 — the batch's exit criterion.
- *
- * One test, one journey: an address the system has never seen, to a note
- * that exists. Everything it asserts is something a person would notice if
- * it broke — how many screens they pass, whether anything asks for a
- * password, whether the workspace they land in is their own.
- *
- * It is deliberately not decomposed into a screen each. The value here is
- * that the seams hold: the code step's session survives into `/welcome`,
- * `/welcome`'s `PATCH` does not cost the session, the recorder inherits
- * it, and the note that comes back belongs to the workspace signup made.
- * Four passing screen tests and a broken journey is the failure mode this
- * exists to catch.
+ * One journey, deliberately not split per screen: a never-seen address to a note
+ * that exists, with the session surviving every seam on the way.
  */
 test("a stranger becomes a signed-in person with a note", async ({ page }) => {
   const email = freshEmail();
@@ -30,12 +19,11 @@ test("a stranger becomes a signed-in person with a note", async ({ page }) => {
   // ── sign up ────────────────────────────────────────────────────────
   await signInWithCode(page, email);
 
-  // A brand-new identity is asked its name, and nothing else.
+  // A new identity is asked its name, nothing else.
   await expect(page).toHaveURL(/\/welcome$/);
   await expectNoPasswordField(page);
   const nameBox = page.getByLabel(/your name/i);
-  // Prefilled from the address's local part (WEB-1a §4): `first-use-<digits>`
-  // loses the numeric word and title-cases the rest.
+  // Prefilled from the local part: digit words dropped, rest title-cased.
   await expect(nameBox).toHaveValue("First Use");
   await nameBox.fill("Alex Kim");
   await page.getByRole("button", { name: /continue/i }).click();
@@ -43,12 +31,10 @@ test("a stranger becomes a signed-in person with a note", async ({ page }) => {
   // ── the empty workspace ────────────────────────────────────────────
   await expect(page).toHaveURL(/\/$/);
   await expectNoPasswordField(page);
-  // The recorder has the caret: this is the last screen before the thing
-  // they came for, and it should not need a hunt with the mouse.
+  // The recorder has focus.
   await expect(newMeetingButton(page)).toBeFocused();
-  // One line and a call to action, not a list with nothing in it.
   await expect(page.getByRole("region", { name: /get started/i })).toBeVisible();
-  // No calendar consent before there is a note to hang it on (§2).
+  // No calendar consent before there is a note.
   await expect(page.getByRole("button", { name: /connect google calendar/i })).toHaveCount(0);
 
   // ── the workspace signup created ───────────────────────────────────
@@ -62,24 +48,18 @@ test("a stranger becomes a signed-in person with a note", async ({ page }) => {
   await page.getByLabel(/meeting title/i).fill("First meeting");
   await page.getByRole("button", { name: /^record$/i }).click();
 
-  // Two seconds of Chromium's fake audio device. Long enough for
-  // MediaRecorder to emit a chunk and for the timer to move off 00:00,
-  // which is what tells us a stream is genuinely flowing.
+  // Two seconds of Chromium's fake audio: enough for a chunk and for the timer to move.
   await expect(page.getByText(/^00:0[1-9]$/)).toBeVisible({ timeout: 5_000 });
   await page.waitForTimeout(2_000);
   await page.getByRole("button", { name: /stop/i }).click();
 
   // ── the note ───────────────────────────────────────────────────────
-  // A real transcription of real (if synthetic) audio. Slow, and the point:
-  // a mocked ASR would prove the upload and nothing about the hand-off that
-  // turns a finished job into a note.
+  // Real transcription on purpose: a mocked ASR would not prove the job-to-note hand-off.
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}$/, { timeout: 4 * 60_000 });
   await expect(page.getByLabel(/note title/i)).toHaveValue(/first meeting/i);
 
   // ── the shape of the path ──────────────────────────────────────────
-  // "≤ 3 screens before the recorder": /login, /welcome, /. The recorder
-  // itself is the fourth and is where they were going. Asserted on the
-  // list rather than the count, so a regression says WHICH screen crept in.
+  // ≤ 3 screens before the recorder; asserted on the list so a regression names the screen.
   const visited = await screens();
   const beforeRecorder = visited.slice(0, visited.indexOf("/meeting/new"));
   expect(beforeRecorder, `screens: ${visited.join(" → ")}`).toEqual([
@@ -97,12 +77,11 @@ test("a returning person skips /welcome", async ({ page, context }) => {
   await page.getByRole("button", { name: /skip for now/i }).click();
   await expect(page).toHaveURL(/\/$/);
 
-  // Second sign-in, same address, no session carried over.
+  // Second sign-in, same address, no session.
   await context.clearCookies();
   await signInWithCode(page, email);
 
-  // `is_new_identity` is false this time, so the name question does not
-  // come back — being asked twice is how a product looks like it forgot.
+  // `is_new_identity` is false now, so no name question.
   await expect(page).toHaveURL(/\/$/);
   await expectNoPasswordField(page);
 });

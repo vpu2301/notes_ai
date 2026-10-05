@@ -1,18 +1,10 @@
-"""Who processes this workspace's meetings (Sprint 37).
+"""Who processes this workspace's meetings (ADR-0046).
 
     GET /v1/ai/settings   every member: the processors, the tier, the spend
     PUT /v1/ai/settings   tenant_admin: change it, after acknowledging
 
-The page behind this is the one ADR-0046 decision 12 promised. Two rules
-carry the whole thing:
-
-* **The processor list is computed, not written.** It comes from the same
-  `Registry` object that routes the calls, so a change to
-  `config/models.yaml` cannot put a new company in somebody's data path
-  while the page still shows the old list. A disclosure page that can
-  drift from reality is worse than no page, because people believe it.
-* **Every member may read it; only an admin with MFA may change it.**
-  Who processes your employer's meetings is not admin-only information.
+The processor list is computed from the same `Registry` that routes the calls,
+never written by hand. Every member may read; only an admin with MFA may change.
 """
 
 from __future__ import annotations
@@ -39,9 +31,7 @@ router = APIRouter(prefix="/v1/ai", tags=["ai"])
 
 _ADMIN_ROLES = frozenset({"tenant_admin"})
 
-# What each operation's processor does with the data lives with the rules
-# (`domain/ai_settings.PURPOSES`) since Sprint L2, so the generation gate
-# and this page read one table.
+# One table for the generation gate and this page.
 PURPOSES = rules.PURPOSES
 
 
@@ -122,33 +112,22 @@ class UpdateSettingsRequest(BaseModel):
 
 
 def _required_processors() -> list[rules.Processor]:
-    """Every processor a workspace on this environment can be routed to.
-
-    Read from the registry rather than from a list in the code: this is
-    the guarantee that the page and the router agree. Purposes and tiers
-    come from the routing table itself, so a new route cannot appear
-    without appearing here.
-    """
+    """Every processor a workspace on this environment can be routed to, from the registry."""
     try:
         return rules.required_processors(_registry())
     except Exception:  # noqa: BLE001
-        # No registry on this deployment (a dev Mac with no model
-        # config). An empty list is honest: nothing is routed anywhere.
+        # No registry on this deployment: nothing is routed anywhere.
         logger.warning("ai_settings.registry_unavailable", exc_info=True)
         return []
 
 
-# The other routers read the same list before starting a generation
-# (Sprint L2): a processor nobody agreed to blocks the run before a byte
-# leaves the laptop.
+# Read by the other routers before starting a generation.
 def required_processors() -> list[rules.Processor]:
     return _required_processors()
 
 
 def _registry() -> Any:
-    """The process's registry (probed at startup, fallback decided) when the
-    service built one; else a fresh load — so the page and the router read
-    the same object either way."""
+    """The process's registry when the service built one; else a fresh load."""
     registry = getattr(get_state(), "model_registry", None)
     if registry is not None:
         return registry
@@ -163,7 +142,7 @@ def _registry() -> Any:
 
 
 def _writers() -> tuple[WriterView | None, WriterView | None]:
-    """Sprint L2 — the "Notes are written by" line, from the registry."""
+    """The "Notes are written by" line, from the registry."""
     try:
         from ..domain.model_routing import describe
 
@@ -299,7 +278,6 @@ async def put_ai_settings(
         offered = [p.model_dump() for p in body.acknowledge]
         missing = rules.missing_acknowledgement(row, processors, offered)
         # Only a change that REACHES a new processor needs acknowledging.
-        # Turning generation off, or lowering a budget, never does.
         changing_routing = provider != row.provider or tier != row.tier
         if missing and (changing_routing or offered):
             raise HTTPException(
@@ -351,8 +329,7 @@ async def put_ai_settings(
         actor_role=(claims.roles[0] if claims.roles else None),
         target_kind="tenant",
         target_id=claims.tid,
-        # Closed vocabulary and counts. Never a person's name, never a
-        # processor's commercial terms.
+        # Closed vocabulary and counts only.
         payload={
             "tier": row.tier,
             "provider": row.provider,

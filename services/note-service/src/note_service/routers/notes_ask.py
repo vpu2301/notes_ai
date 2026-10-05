@@ -1,14 +1,6 @@
-"""``POST /v1/notes/{id}/ask`` — "Ask this note".
-
-The chat bar at the bottom of a note (Mac app, web) sends one question plus
-the conversation so far; the answer comes from the chat provider the model
-registry routes this environment to (ADR-0046), grounded in the note's
-current content and — when the note came from a recording — its
-transcript, fetched from asr-service with the caller's own bearer.
-
-Nothing is stored: the conversation lives in the client. The audit event
-carries counts and the backend that answered, never the question or the
-answer (content, ADR-0031).
+"""``POST /v1/notes/{id}/ask`` — "Ask this note" (ADR-0046), grounded in the note
+and its transcript (fetched with the caller's own bearer). Nothing is stored; the
+audit event carries counts and the backend, never the question or answer.
 """
 
 from __future__ import annotations

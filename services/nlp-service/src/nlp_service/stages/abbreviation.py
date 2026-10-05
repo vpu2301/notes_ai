@@ -1,22 +1,7 @@
-"""Stage 5 — abbreviation policy (per-tenant + global merge).
+"""Stage 5: abbreviation policy from the per-request snapshot (tenant beats global).
 
-The snapshot pattern is the key abstraction: ``AbbreviationSnapshot`` is
-read ONCE at request entry (see ``main_deps.fetch_abbreviation_snapshot``),
-passed through ``ProcessingContext``, and re-used by every cached-key
-computation. Admin edits in-flight don't affect the current request.
-
-Direction:
-- ``compact`` (default): write the abbreviation form (replace expanded).
-- ``expand``: write the expanded form (replace abbreviation).
-- ``either``: pass through.
-
-Tenant override beats global on the same ``(language, expanded, abbreviated)``.
-Domain filter prefers entries whose ``domain`` matches ``ctx.category``
-(the template's business category, e.g. "legal" or "sales"), falling
-back to ``domain='all'``, then to NULL.
-
-Word-boundary matching is mandatory — never substitute "ІМ" inside
-"імпорт".
+Direction compact/expand/either; domain match beats 'all' beats NULL.
+Word-boundary matching is mandatory (never "ІМ" inside "імпорт").
 """
 
 from __future__ import annotations
@@ -45,7 +30,7 @@ class _CompiledRule:
 
 
 class AbbreviationStage:
-    """Stage 5 — abbreviation expansion/compaction."""
+    """Stage 5: abbreviation expansion/compaction."""
 
     name = "abbreviation"
     runs_on_partials: bool = False
@@ -74,16 +59,7 @@ class AbbreviationStage:
 
 
 def _compile_rules(ctx: ProcessingContext) -> tuple[_CompiledRule, ...]:
-    """Project the snapshot into compiled regex rules.
-
-    Order matters: tenant overrides FIRST so a global rule never wins
-    against a tenant one. Domain-matching rules win over ``all`` which
-    wins over NULL domain.
-
-    Memoized on ``(entries, category)`` — the snapshot is immutable and
-    shared across requests, so a tenant with a large dictionary compiles
-    its Unicode patterns once instead of on every call.
-    """
+    """Compiled regex rules, tenant overrides first; memoized on the immutable snapshot."""
     return _compile_rules_cached(ctx.abbreviation_snapshot.entries, ctx.category)
 
 

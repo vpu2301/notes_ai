@@ -78,10 +78,7 @@ class ServiceState:
 
 async def build_state() -> ServiceState:
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
+    # Log the accepted issuers so a rollout is checkable from one line.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
     app_pool = await create_pool(
@@ -105,9 +102,7 @@ async def build_state() -> ServiceState:
     punctuation = PunctuationStage()
     await punctuation.startup()  # eagerly load the model
 
-    # Order is the contract (ADR-0028). field_extraction sits AFTER
-    # abbreviation (it reads fully normalized text) and BEFORE confidence
-    # (which must see the final text; extraction adds none).
+    # Order is the contract (ADR-0028): field_extraction after abbreviation, before confidence.
     stages: list[Stage] = [
         VoiceCommandStage(specs_by_language=voice_specs),
         punctuation,
@@ -117,8 +112,7 @@ async def build_state() -> ServiceState:
         FieldExtractionStage(
             confidence_threshold=settings.extraction_confidence_threshold,
         ),
-        # Sprint I3: conversation only; before confidence so the spans
-        # address the displayed text.
+        # Conversation only; before confidence so the spans address the displayed text.
         DisfluencyStage(),
         ConfidenceStage(),
     ]

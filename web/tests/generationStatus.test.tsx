@@ -151,7 +151,7 @@ describe("generation status", () => {
   });
 });
 
-// ── Summary Engine v2, Q3: exclusions are a line, not a paragraph ────
+// ── exclusions are a line, not a paragraph ──
 
 describe("not included", () => {
   const DONE = {

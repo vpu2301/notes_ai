@@ -1,10 +1,4 @@
-"""Sprint 34 capture counters (the ``share_metrics`` pattern).
-
-Counts only. No label here can carry content: ``meeting_type`` is a closed
-vocabulary, ``bucket`` and ``state`` are enumerations, and a line's key is
-a hash that never becomes a label (unbounded cardinality, and a hash in the
-metrics store is still a per-line identifier).
-"""
+"""Capture counters. Counts only; no label carries content or a line key."""
 
 from __future__ import annotations
 
@@ -40,8 +34,7 @@ states_swept = _meter.create_counter(
     unit="1",
 )
 
-# U1's histogram, as labels rather than buckets: the question is "did the
-# author type at all, a little, or properly", not the exact count.
+# "Did the author type at all, a little, or properly", as labels.
 _BUCKETS: Final = ((0, "0"), (2, "1-2"), (9, "3-9"))
 
 

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Run the unit tests (IDX-I1) on an iOS Simulator.
-#
-# This BOOTS A SIMULATOR — unlike scripts/check.sh and scripts/build-sim.sh,
-# which only compile. CI runs it on every push; run it yourself when you
-# want the tests, and see ios/CLAUDE.md for why the assistant does not.
+# Run the unit tests on an iOS Simulator. This BOOTS A SIMULATOR (check.sh
+# and build-sim.sh only compile); see ios/CLAUDE.md.
 #
 #   ios/scripts/test.sh                       # first available iPhone runtime
 #   ios/scripts/test.sh 'iPhone 16 Pro'

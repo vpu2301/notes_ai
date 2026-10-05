@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — demo/dev escape hatches can never reach production configs.
+"""CI gate: demo/dev escape hatches (``MD_OBJECT_STORE_DISABLED``, ``MDX_DEMO_MODE``,
+``DEMO_*``, ``AUTH_BYPASS_DEV``) are never set truthy in a production-looking config.
 
-Demo/dev switches would be catastrophic in production:
-
-- ``MD_OBJECT_STORE_DISABLED`` — no audio at rest (fine for a throwaway
-  demo; data loss for real workspaces).
-- ``MDX_DEMO_MODE`` / ``DEMO_*`` — demo rate-limit middleware & friends.
-- ``AUTH_BYPASS_DEV`` — disables JWT enforcement outright.
-
-A violation is any production-looking file (path contains
-prod/production/staging/release) that sets one of these truthy, or any
-config file that sets one truthy alongside
-``ENVIRONMENT=production|staging`` in the same file.
-
-Exit codes: 0 — clean; 1 — violations printed to stderr.
+Exit 0 clean, 1 violations on stderr.
 """
 
 from __future__ import annotations
@@ -34,10 +23,8 @@ TRUTHY = re.compile(
     r"(?P<flag>" + "|".join(FLAGS) + r")\s*[:=]\s*['\"]?(true|1|yes|on)['\"]?",
     re.IGNORECASE,
 )
-# Sprint L2: `MDX_DEV_*` switches (MDX_DEV_CHAT_BACKEND names the chat
-# backend instead of the routing's primary) are dev-only by contract; set
-# to any non-empty literal in a production-looking config they are a
-# violation. `${VAR:-}` pass-throughs (compose) are not literals.
+# `MDX_DEV_*` switches are dev-only by contract: any non-empty literal in a
+# production-looking config is a violation (`${VAR:-}` pass-throughs are not literals).
 DEV_ONLY = re.compile(r"(?P<flag>MDX_DEV_[A-Z0-9_]+)\s*[:=]\s*['\"]?(?!\$\{)[A-Za-z0-9_.:/-]+")
 PROD_ENV = re.compile(r"ENVIRONMENT\s*[:=]\s*['\"]?(production|prod|staging)['\"]?", re.IGNORECASE)
 PRODISH_PATH = re.compile(r"(prod|production|staging|release)", re.IGNORECASE)

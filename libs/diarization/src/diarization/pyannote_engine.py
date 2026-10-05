@@ -1,27 +1,8 @@
-"""v2 engine: pyannote ``speaker-diarization-community-1`` (Sprint 29 B-2).
+"""v2 engine: pyannote ``speaker-diarization-community-1``, in-process from a digest-verified local dir.
 
-Neural segmentation (overlap-aware) + VBx clustering, loaded in-process
-from a baked, digest-verified local directory. Four rules hold whatever
-pyannote's defaults are:
-
-- **Offline, telemetry off.** pyannote.audio 4.x enables usage telemetry
-  by default and posts to ``otel.pyannote.ai``; the hub client would reach
-  ``huggingface.co``. The worker's ``config.py`` (the only module allowed
-  to touch the process environment) sets ``PYANNOTE_METRICS_ENABLED=false``
-  and ``HF_HUB_OFFLINE=1`` before the first import; :meth:`ensure_loaded`
-  checks the environment it is handed and refuses to load otherwise.
-- **No file I/O.** The decoded PCM goes in as an in-memory waveform — no
-  temporary file, no ``torchcodec`` decode path.
-- **One speaker at a time.** Word attribution needs an exclusive timeline,
-  so segments come from ``exclusive_speaker_diarization``; where the
-  overlap-aware annotation shows two voices at once the segment keeps its
-  speaker at confidence 0.5 and the span lands in ``overlap_ms``.
-- **Embeddings never leave the call.** ``speaker_embeddings`` feed the
-  roster guard in memory and are dropped; they are never logged,
-  serialised or returned (they are biometric data).
-
-pyannote and torch are imported lazily: the pure mapping below imports
-without them, which is how it is unit-tested on macOS.
+Rules: refuse to load unless ``PYANNOTE_METRICS_ENABLED=false`` and ``HF_HUB_OFFLINE=1`` (pyannote 4.x phones
+home by default); in-memory waveform only; exclusive timeline with overlaps at confidence 0.5; embeddings are
+biometric and never leave the call. pyannote/torch are imported lazily so the mapping is testable without them.
 """
 
 from __future__ import annotations
@@ -50,21 +31,16 @@ from .roster import RosterGuardConfig, guard_roster
 logger = logging.getLogger(__name__)
 
 ENGINE_ID = "pyannote-community-1"
-# Where overlap-aware segmentation heard two voices at once: the exclusive
-# timeline still names one, but only half-heartedly.
+# Confidence of the exclusive label where two voices overlapped.
 OVERLAP_CONFIDENCE = 0.5
-# With an exact count pyannote forces that many clusters; a recording that
-# holds fewer voices comes back with one voice split. Labels whose centroids
-# are at least this alike are joined afterwards, so a count can only ever
-# yield FEWER speakers, never invented ones. PROVISIONAL: not yet calibrated
-# on community-1 embeddings (Sprint 29 eval, ADR-0052).
+# An exact count forces that many clusters; same-voice centroids are rejoined so a count can only
+# yield FEWER speakers. PROVISIONAL: not calibrated on community-1 embeddings (ADR-0052).
 SAME_VOICE_COSINE = 0.75
 
 
 @dataclass(frozen=True)
 class PipelineResult:
-    """What the adapter keeps from pyannote's ``DiarizeOutput`` — seconds,
-    as pyannote reports them. ``centroids`` is per label, in memory only."""
+    """What is kept from pyannote's ``DiarizeOutput`` (seconds); ``centroids`` per label, in memory only."""
 
     exclusive: Sequence[tuple[float, float, str]]
     overlaps: Sequence[tuple[float, float]]
@@ -105,9 +81,7 @@ def to_diarization(
         display_names=_assign_display_names(outcome.segments),
         duration_ms=duration_ms,
         config=config,
-        # The legacy vocabulary, read for this engine: one "chunk" per
-        # exclusive segment; pyannote's clustering has no separate merge
-        # step, so raw == after-merge and the guard is what drops.
+        # Legacy vocabulary: one "chunk" per exclusive segment; no separate merge step, the guard drops.
         stats=ClusterStats(
             chunks=len(segments),
             clusters_raw=raw_speakers,
@@ -218,8 +192,7 @@ class PyannoteDiarizer:
 
         pipeline = Pipeline.from_pretrained(self._model_dir)
         pipeline.to(torch.device(self._device))
-        # Memory on long recordings is bounded by how many windows are
-        # embedded at once (MDX_DIAR_V2_BATCH).
+        # Bounds memory on long recordings (MDX_DIAR_V2_BATCH).
         if hasattr(pipeline, "embedding_batch_size"):
             pipeline.embedding_batch_size = self._batch_size
         version = (
@@ -236,10 +209,7 @@ class PyannoteDiarizer:
         hints: DiarizationHints,
         roster: RosterGuardConfig | None = None,
     ) -> OfflineDiarization:
-        """``roster`` overrides the floor for this call only — the remote
-        shape (deploy/diar-server) carries the caller's policy per
-        request, so one shared engine serves concurrent callers without
-        any of them changing what the others get."""
+        """``roster`` overrides the floor for this call only (the server carries the caller's policy per request)."""
         if self._pipeline is None:
             raise DiarizationUnavailableError("diarizer not loaded; call ensure_loaded() first")
         if sample_rate_hz != SAMPLE_RATE_HZ:
@@ -271,12 +241,7 @@ class PyannoteDiarizer:
 
 
 def extract(output: Any) -> PipelineResult:
-    """Read what we use off a pyannote.audio 4.0 ``DiarizeOutput``.
-
-    ``speaker_embeddings`` rows follow ``speaker_diarization.labels()``;
-    when the shapes disagree (a pipeline version that orders them
-    differently) the centroids are dropped rather than guessed.
-    """
+    """Read what we use off a pyannote.audio 4.0 ``DiarizeOutput``; centroids are dropped, not guessed, on a shape mismatch."""
     exclusive = [
         (float(seg.start), float(seg.end), str(label))
         for seg, _, label in output.exclusive_speaker_diarization.itertracks(yield_label=True)

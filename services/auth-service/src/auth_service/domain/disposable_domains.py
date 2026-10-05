@@ -1,12 +1,6 @@
-"""Throwaway-mail domains signup quietly ignores (Sprint 21).
+"""Throwaway-mail domains signup quietly ignores (same 202, nothing created).
 
-A bundled floor, not a service: the well-known providers whose whole
-point is an address that stops existing in ten minutes. A signup from
-one of these answers the same 202 as everything else and creates
-nothing — the person would never receive the code anyway, and the
-tenant row would be spam. ``MDX_DISPOSABLE_DOMAINS_FILE`` can point at a
-longer list (one domain per line, ``#`` comments) for deployments that
-keep one.
+``MDX_DISPOSABLE_DOMAINS_FILE`` may add more (one per line, ``#`` comments).
 """
 
 from __future__ import annotations
@@ -46,8 +40,7 @@ BUNDLED: frozenset[str] = frozenset(
 
 
 def load(path: str | None) -> frozenset[str]:
-    """The bundled set plus whatever the file adds. A missing or
-    unreadable file is logged and ignored — the floor still holds."""
+    """The bundled set plus the file's additions; an unreadable file is logged and ignored."""
     domains = set(BUNDLED)
     if path:
         try:

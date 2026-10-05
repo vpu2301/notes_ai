@@ -1,13 +1,5 @@
-"""What the model is allowed to say back.
-
-Two schemas, one per model step. Both are narrow on purpose: a
-schema-constrained response is the first line of defence against a
-transcript that contains "ignore previous instructions", and a small
-enum is easier for a small model than an open field.
-
-Nothing here decides whether a fact is TRUE — :mod:`verify` does that,
-in code, against the transcript. These types only describe the shape the
-model must answer in.
+"""What the model is allowed to say back: narrow schemas, the first defence
+against prompt injection. Truth is decided by :mod:`verify`, not here.
 """
 
 from __future__ import annotations
@@ -26,13 +18,11 @@ AGENDA_ITEM: Final = "agenda_item"
 RISK: Final = "risk"
 NEXT_MEETING: Final = "next_meeting"
 
-# Sprint 36 adds `completion` to the generic set: the engine has to be
-# able to say "that task from last week is done", with the words.
+# "That task from last week is done", with the words.
 COMPLETION: Final = "completion"
 JUDGEMENT: Final = "judgement"
 
-# Sprint F3 — a number a speaker attached to a named quantity; a person
-# introducing themselves (or someone else); what the audience is asked to do.
+# A number attached to a named quantity; an introduction; what the audience is asked to do.
 FIGURE: Final = "figure"
 INTRODUCTION: Final = "introduction"
 NEXT_STEP: Final = "next_step"
@@ -52,13 +42,12 @@ FACT_KINDS: Final[tuple[str, ...]] = (
     COMPLETION,
 )
 
-# The default per-window fact cap; the pipeline sizes each window's own
-# cap from its length (Q2: 8–24), so this is a default, not a ceiling.
+# Default per-window fact cap; the pipeline sizes each window's own (8–24).
 MAX_FACTS_PER_WINDOW: Final = 12
 MAX_FACT_CHARS: Final = 240
 MAX_SUBJECT_CHARS: Final = 60
 MAX_TOPIC_TITLE_CHARS: Final = 80
-MAX_SUMMARY_SENTENCES: Final = 6  # the standard §2: 3–6
+MAX_SUMMARY_SENTENCES: Final = 6
 MIN_TOPICS: Final = 2
 # Fewer verified facts than this and the conversation is one list.
 MIN_FACTS_FOR_TOPICS: Final = 5
@@ -72,9 +61,7 @@ MAX_NOISE_PER_WINDOW: Final = 8
 # A flagged turn above this share of the window's words is the recording, not noise.
 MAX_NOISE_SHARE: Final = 0.5
 
-# How sure the speaker was. The text has to carry it ("was estimated at",
-# "was described as"); the field makes the model decide it explicitly,
-# which is what keeps an estimate from becoming a fact in the notes.
+# How sure the speaker was; decided explicitly so an estimate never becomes a fact.
 CERTAINTIES: Final[tuple[str, ...]] = (
     "fact",
     "estimate",
@@ -83,8 +70,7 @@ CERTAINTIES: Final[tuple[str, ...]] = (
     "proposal",
     "allegation",
 )
-# Why a turn is not part of the conversation. A closed vocabulary: the
-# transcript note is rendered from it in code, never from model prose.
+# Closed vocabulary: the transcript note is rendered from it in code, never from model prose.
 NOISE_REASONS: Final[tuple[str, ...]] = (
     "background",
     "other_language",
@@ -92,8 +78,7 @@ NOISE_REASONS: Final[tuple[str, ...]] = (
     "duplicate",
     "unrelated",
 )
-# F3 amendment — set by code only (a broadcast cue at the recording's edge or
-# between two turns of one speaker), never offered to the model.
+# Set by code only, never offered to the model.
 ADVERTISEMENT: Final = "advertisement"
 MAX_QUOTE_WORDS: Final = 30
 
@@ -184,7 +169,7 @@ class SummarySentence(BaseModel):
     fact_ids: list[str] = Field(default_factory=list)
 
 
-# F2 — a bullet may carry sub-points that elaborate it, one level deep.
+# Sub-points per bullet, one level deep.
 MAX_CHILDREN: Final = 3
 
 
@@ -193,8 +178,7 @@ class SubPoint(BaseModel):
 
     text: str = Field(default="", max_length=MAX_FACT_CHARS)
     fact_ids: list[str] = Field(default_factory=list)
-    # Sprint D2 T2 — a quote sub-point names the fact whose words it is;
-    # code writes it from that fact's quote, never from `text`.
+    # A quote sub-point names its fact; code writes it from the quote, never from `text`.
     quote_of: str | None = None
 
 
@@ -228,12 +212,8 @@ class ReduceOut(BaseModel):
 
 
 # ── JSON schemas handed to the provider ─────────────────────────────
-#
-# Written out rather than generated from the models: the provider sends
-# these to a constrained-decoding backend, and a hand-written schema is
-# what we can keep small and explicit. The Pydantic models above parse
-# whatever comes back, so a backend that ignores the schema still cannot
-# produce a shape the pipeline chokes on.
+# Hand-written to stay small and explicit; the Pydantic models above parse
+# whatever comes back, so a backend that ignores the schema cannot break the pipeline.
 
 
 def extract_schema(
@@ -244,18 +224,9 @@ def extract_schema(
     max_facts: int = MAX_FACTS_PER_WINDOW,
     noise: bool = True,
 ) -> dict[str, Any]:
-    """The extraction schema for ONE family.
-
-    ``noise=False`` (Sprint L1, the small-model profile) drops the ``noise``
-    field: exclusions then come from the language tag and code alone, and
-    the model has one less list to fill.
-
-    Built per call rather than fixed, because the enum is the main lever
-    on a small model's accuracy: a sales call chooses between ten kinds
-    it might actually see, not the union of every kind in the product.
-    Turning a kind off for a family whose precision is poor is deleting
-    an entry in `types.py` — configuration, not code.
-    """
+    """The extraction schema for ONE family; ``noise=False`` (small-model profile)
+    drops the ``noise`` field. Built per call: the kind enum is the main lever on
+    a small model's accuracy."""
     properties: dict[str, Any] = {
         "kind": {"type": "string", "enum": list(kinds)},
         "text": {"type": "string", "maxLength": MAX_FACT_CHARS},
@@ -269,8 +240,7 @@ def extract_schema(
         "subject": {"type": ["string", "null"], "maxLength": MAX_SUBJECT_CHARS},
     }
     if carried_items:
-        # A completion may only point at an item we already had, by its
-        # number in the list the prompt was given — never by free text.
+        # A completion points at a carried item by its number, never by free text.
         properties["refers_to"] = {
             "type": ["integer", "null"],
             "minimum": 1,
@@ -361,7 +331,6 @@ REDUCE_TOPICS_SCHEMA: Final[dict[str, Any]] = {
                                     "minItems": 1,
                                     "items": {"type": "string"},
                                 },
-                                # F2 — sub-points, one level, each citing a fact.
                                 "children": {
                                     "type": "array",
                                     "maxItems": MAX_CHILDREN,
@@ -434,7 +403,7 @@ REDUCE_CONTEXT_SCHEMA: Final[dict[str, Any]] = {
 }
 
 
-# Q4, entity tier (b): one call per generation, names in, spellings out.
+# Entity tier: one call per generation, names in, spellings out.
 MAX_ENTITY_SPANS: Final = 40
 ENTITY_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
@@ -458,12 +427,7 @@ ENTITY_SCHEMA: Final[dict[str, Any]] = {
 }
 
 
-# ── F3: the details of figures a window's answer left without them ───
-#
-# A small model answering the extraction schema leaves optional fields
-# empty. For a figure they are the point, so the ones that came back bare
-# are asked about once more with every field REQUIRED — a constrained
-# decoder then has to fill them. Verification is unchanged.
+# ── Figure details left bare by extraction: asked once more with every field REQUIRED ──
 
 
 class FigureDetail(BaseModel):
@@ -589,7 +553,7 @@ def contact_details_schema(count: int) -> dict[str, Any]:
     }
 
 
-# A-12 — one part of a long recording: ONE heading and its bullets.
+# One part of a long recording: ONE heading and its bullets.
 BLOCK_TOPIC_SCHEMA: Final[dict[str, Any]] = {
     **REDUCE_TOPICS_SCHEMA,
     "properties": {
@@ -602,7 +566,7 @@ BLOCK_TOPIC_SCHEMA: Final[dict[str, Any]] = {
 }
 
 
-# ── Sprint D2: one block of the recording, and heading merges ───────
+# ── One block of the recording, and heading merges ──────────────────
 
 MIN_BLOCK_HEADING_CHARS: Final = 3
 MAX_BLOCK_BULLETS: Final = 6
@@ -665,8 +629,7 @@ BLOCK_SCHEMA: Final[dict[str, Any]] = {
         },
     },
 }
-# Sprint L1 T2 — the small-model profile: a heading in one call, flat bullets
-# (no children) in another, so each answer has one job.
+# Small-model profile: heading in one call, flat bullets in another.
 HEADING_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "additionalProperties": False,

@@ -1,11 +1,4 @@
-"""Sprint 16 — background warmup: /readyz is the traffic gate.
-
-With MDX_WARM_IN_BACKGROUND the lifespan loads Whisper in a thread task
-instead of blocking startup. The contract these tests pin: a worker whose
-model is still loading answers /healthz (liveness never kills a cold pod)
-but /readyz is 503 — the LB sends no traffic before ready — and the flip
-to 200 needs nothing beyond ``engine.is_loaded`` turning true.
-"""
+"""Background warmup: /healthz answers while loading, /readyz is 503 until ``engine.is_loaded``."""
 
 from __future__ import annotations
 

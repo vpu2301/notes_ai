@@ -1,9 +1,5 @@
-"""``POST /v1/notes/{id}/generation`` — the route behind *Generate Summary*.
-
-Same rig shape as ``test_notes_meeting``: real app, real handler, the
-repository and the engine patched at the module seam. The engine's four
-refusals each have a status and a code the clients switch on; this pins
-them.
+"""``POST /v1/notes/{id}/generation`` — the route behind *Generate Summary*; pins
+the status and code of each of the engine's refusals.
 """
 
 from __future__ import annotations
@@ -172,7 +168,7 @@ def test_a_spent_budget_says_how_much(rig: SimpleNamespace) -> None:
     assert (body["spent_cents"], body["budget_cents"]) == (2_100, 2_000)
 
 
-# ── GET: exclusions and coverage (Summary Engine v2, Q2) ────────────
+# ── GET: exclusions and coverage ────────────────────────────────────
 
 
 def _generation_row(stats: dict) -> SimpleNamespace:
@@ -226,7 +222,7 @@ def test_the_generation_says_what_was_left_out_and_how_facts_cover_the_recording
         "speech_ms": 418_000,
         "excluded_ms": 3_000,
     }
-    # Q3: what the recording was taken to be, and who decided.
+    # What the recording was taken to be, and who decided.
     assert (body["recording_type"], body["recording_type_source"], body["language"]) == (
         "podcast_broadcast",
         "classifier",
@@ -262,7 +258,7 @@ def test_another_workspaces_generation_is_not_found(
     assert looked_up == []
 
 
-# ── Q5: rows for every line; key dates as .ics ──────────────────────
+# ── rows for every line; key dates as .ics ──────────────────────
 
 
 def _row(**over: object) -> dict:

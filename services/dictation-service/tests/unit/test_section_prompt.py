@@ -1,10 +1,4 @@
-"""Section-aware dictation lookup (sprint 06).
-
-``section_prompt`` is the validation + prompt-resolution core the WS
-``switch_section`` handler relies on: a valid section_id yields its ASR
-prompt (which the handler swaps into ``StreamingWindower.base_prompt``);
-an unknown id yields None (the handler rejects with a recoverable error).
-"""
+"""``section_prompt``: a valid section_id yields its ASR prompt, an unknown id yields None."""
 
 from __future__ import annotations
 

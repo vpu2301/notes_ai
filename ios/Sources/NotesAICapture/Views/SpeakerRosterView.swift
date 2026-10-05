@@ -1,16 +1,8 @@
 import SwiftUI
 
-/// The transcript's speakers: one chip per speaker with its talk share. A
-/// tap asks rename or merge; a speaker who barely spoke gets one question
-/// ("same person as someone else?"); a merge can be undone for 10 s.
-/// Sprint 29: "Wrong number of speakers?" re-runs the separation for a
-/// count the person gives, and a low-confidence count asks first — in
-/// place of the small-speaker question, never beside it.
-/// Sprint 30: the ⋯ menu resets every merge and moved turn (confirmed
-/// first); a move refused because the speakers changed elsewhere says so.
-/// Sprint 32: a name the server heard ("Hi, this is Anna") is offered
-/// under the chips with its evidence; an older labelling offers a re-label;
-/// every control has a VoiceOver name and grows with Dynamic Type.
+/// The transcript's speakers: a chip per speaker (tap to rename or merge),
+/// the speaker-count and small-speaker questions (never both), name
+/// suggestions with evidence, and the re-label banner.
 struct SpeakerRosterView: View {
     @ObservedObject var model: NoteViewModel
     let onRename: (String) -> Void
@@ -86,8 +78,7 @@ struct SpeakerRosterView: View {
                                 .accessibilityLabel(model.speakerAccessibilityLabel(label))
                                 .accessibilityHint("Rename or merge this speaker")
                             if model.isChannelNamed(label) {
-                                // Sprint 31: a name from the microphone
-                                // channel, not a person — one tap undoes it.
+                                // A name from the microphone channel — one tap undoes it.
                                 Button {
                                     Task { await model.clearChannelName(label) }
                                 } label: {
@@ -276,9 +267,7 @@ struct SpeakerRosterView: View {
     }
 }
 
-/// Sprint 32 — `Probably **Anna Keller** — "Hi, this is Anna from Acme" ·
-/// 00:14` → Accept / Dismiss. The quote is the evidence and is shown
-/// before anything is accepted; tapping it scrolls to the turn it was said in.
+/// `Probably **Anna Keller** — "Hi, this is Anna from Acme" · 00:14` → Accept / Dismiss; the quote scrolls to its turn.
 struct NameSuggestionRow: View {
     @ObservedObject var model: NoteViewModel
     let suggestion: NameSuggestion
@@ -347,8 +336,7 @@ func spoke(_ ms: Int) -> String {
     return s < 60 ? "\(s) s" : "\(Int((Double(s) / 60).rounded())) min"
 }
 
-/// "How many people spoke?" — a count from 1 to 8, then a re-run of the
-/// speaker separation. Warns first when the re-run would throw away merges.
+/// "How many people spoke?" — a count from 1 to 8, then a re-run. Warns when merges would be lost.
 struct SpeakerCountSheet: View {
     @ObservedObject var model: NoteViewModel
     @Environment(\.dismiss) private var dismiss
@@ -394,9 +382,7 @@ struct SpeakerCountSheet: View {
     }
 }
 
-/// Sprint 30 — "Rename speaker" as a sheet: the calendar's invitees not
-/// yet given to another speaker come first (one tap names the speaker),
-/// and typing a name is still there underneath.
+/// "Rename speaker" as a sheet: unused invitees first, typing underneath.
 struct SpeakerNameSheet: View {
     @ObservedObject var model: NoteViewModel
     let label: String

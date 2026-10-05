@@ -1,10 +1,7 @@
-"""Client-type transport for session responses (IDX-A2, F4).
+"""Client-type transport for session responses.
 
-``X-Client-Type: web | macos | ios`` decides where the refresh token
-travels: web gets the HttpOnly ``mdx_rt`` cookie and no ``refresh_token``
-in the body; native clients get it in the JSON body (they keep it in the
-Keychain) and never a cookie. A missing or unknown header means ``web`` —
-today's clients send nothing and must keep working.
+``X-Client-Type: web | macos | ios``: web gets the HttpOnly cookie and no body
+token; native gets the body token and no cookie. Missing/unknown = web.
 """
 
 from __future__ import annotations
@@ -74,7 +71,7 @@ def token_response(
     return body
 
 
-# ── AuthResult (IDX-A3 F3) ───────────────────────────────────────────────
+# ── AuthResult ───────────────────────────────────────────────────────────
 
 
 class IdentitySummary(BaseModel):
@@ -121,12 +118,10 @@ class AuthResult(TokenResponse):
     identity: IdentitySummary | None = None
     memberships: list[MembershipSummary] = Field(default_factory=list)
     default_tenant_id: str | None = None
-    # mfa_required only (A5): the challenge to complete and the methods offered.
+    # mfa_required only: the challenge to complete and the methods offered.
     challenge_id: str | None = None
     methods: list[str] | None = None
-    # Set only when the sign-in spent a recovery code. Zero is the case
-    # that matters: the person has just used their last way back in and
-    # does not otherwise find out until the next time they need one.
+    # Set only when the sign-in spent a recovery code; zero matters.
     recovery_codes_left: int | None = None
     recovery_codes_exhausted: bool | None = None
 
@@ -165,13 +160,7 @@ class AuthResult(TokenResponse):
 
     @classmethod
     def mfa_required(cls, *, challenge_id: str, methods: list[str], expires_in: int) -> AuthResult:
-        """The first factor passed; a second one is owed (IDX-A5 F3).
-
-        Deliberately says nothing else — not the email, not the
-        workspaces, not whether the identity was just created. All of
-        that is on the far side of the second factor, and answering it
-        here would make a stolen password a working directory lookup.
-        """
+        """The first factor passed, a second is owed; deliberately reveals nothing else."""
         return cls(
             status="mfa_required",
             challenge_id=challenge_id,

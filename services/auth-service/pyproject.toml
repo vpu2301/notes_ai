@@ -17,9 +17,7 @@ dependencies = [
     # Password-recovery mail: HTML templates + SMTP delivery.
     "jinja2>=3.1.4",
     "aiosmtplib>=3.0",
-    # The reset rate limiter. Previously only arrived transitively via
-    # libs/auth's optional import for the revocation denylist; the
-    # limiter imports it directly, so it is declared directly.
+    # The reset rate limiter imports it directly.
     "redis>=5.0.0",
     # Internal libs (resolved via uv workspace)
     "observability",
@@ -28,10 +26,9 @@ dependencies = [
     "db",
     "secret",
     "crypto",
-    # S21 MFA reminders: auth-service is the only service that knows a user
-    # has no second factor, so it is the producer for security.mfa_reminder.
+    # MFA reminder producer (security.mfa_reminder).
     "notification_events",
-    # IDX-A3: OTP abuse caps
+    # OTP abuse caps
     "ratelimit",
 ]
 

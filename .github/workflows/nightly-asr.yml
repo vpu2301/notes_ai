@@ -1,22 +1,6 @@
-# Nightly transcript regression on the ASR gold set (Sprint TQ1 T4, ADR-0019).
-#
-# Runs the backends we ship through the worker's own path
-# (asr_worker.processor.decode_recording) over eval/asr/v1 test and fails
-# when, per language, WER rises by more than 1.0 pp or a TR-02 / TR-03
-# metric worsens against the committed baseline report
-# (scripts/eval/compare_asr.py).
-#
-# Self-hosted on purpose: the gold set is personal data and third-party
-# content (check-no-eval-audio keeps it out of git) and lives in the private
-# eval bucket; the runner holds the eval role's credentials and the cached
-# model weights. The runner needs the label `mdx-eval`.
-#
-# Backends:
-#   inproc_cpu_asr — always (faster-whisper large-v3, int8, CPU).
-#   dev_mac_asr    — when whisper-server answers on DEV_MAC_ASR_URL.
-#   hf_eu_asr      — when the HF endpoint secrets are set (scale-to-zero:
-#                    the first file pays the cold start; rtf is reported,
-#                    not gated here).
+# Nightly WER regression on the ASR gold set through the worker's own
+# decode path (ADR-0019). Self-hosted (`mdx-eval`): the gold set is personal
+# data kept out of git. hf_eu_asr runs only when its secrets are set.
 name: nightly-asr
 
 on:
@@ -37,12 +21,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Committed baselines (docs/eval/asr-baseline-2026-10.md explains them).
-  # Replace one in a PR, with its report, only when a change is MEANT to
-  # move the numbers.
+  # Committed baselines; replace in a PR only when a change is MEANT to move the numbers.
   BASELINE_DIR: docs/eval
-  # Per-metric tolerance; unlisted metrics use compare_asr.DEFAULT_MAX_DROP
-  # (wer +0.010, TR-02/TR-03 metrics 0).
+  # Unlisted metrics use compare_asr.DEFAULT_MAX_DROP.
   MAX_DROP: '{"wer": 0.010}'
   HF_HUB_OFFLINE: "1"
   DEV_MAC_ASR_URL: ${{ vars.DEV_MAC_ASR_URL || 'http://localhost:8090' }}
@@ -53,6 +34,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -61,7 +44,6 @@ jobs:
         run: uv sync --all-packages --all-extras
 
       - name: Gold set present
-        # Eval role credentials come from the runner's environment.
         run: |
           uv run python scripts/eval/asr_gold.py fetch eval/asr/v1
           make eval-asr-validate
@@ -116,6 +98,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: asr-reports
-          # Reports are numbers and ids only; transcripts stay in scripts/eval/local.
+          # Numbers and ids only; transcripts stay local.
           path: docs/eval/asr-*-nightly.*
           retention-days: 30

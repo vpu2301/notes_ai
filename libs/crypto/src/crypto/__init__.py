@@ -1,28 +1,4 @@
-"""libs/crypto — envelope encryption for sensitive data at rest.
-
-Three-layer hierarchy (see ADR-0011):
-
-    KEK_master      — single key per environment, mounted from disk or KMS.
-                      Wraps every tenant KEK.
-    KEK_tenant      — one per tenant; lives in `tenant_keks` table, wrapped.
-                      Wraps every per-object DEK.
-    DEK_object      — fresh per object; never persisted. Wrapped by tenant KEK.
-
-Public surface:
-
-- :class:`EnvelopeBlob`        — frozen record of all envelope material.
-- :class:`Envelope`            — the single sanctioned encrypt/decrypt path.
-- :class:`MasterKeyProvider`   — Protocol; ``FileMasterKeyProvider`` for dev.
-- :class:`FileMasterKeyProvider`
-- :class:`KmsMasterKeyProvider` — Vault-Transit-backed master (sprint 16).
-- :class:`CompositeMasterKeyProvider` — mixed-master reads during re-wrap.
-- :func:`build_master_key_provider` — the sanctioned composition helper.
-- :class:`TenantKekRepository` — fetches plaintext tenant KEKs from `tenant_keks`.
-- :mod:`crypto.passwords` — the sanctioned password verifier (scrypt). Not
-  envelope material: a verifier must never be decryptable, so it shares none
-  of the key hierarchy above.
-- Exception classes for every failure mode.
-"""
+"""Envelope encryption for data at rest (ADR-0011): master KEK → tenant KEK → per-object DEK; plus password verifiers."""
 
 from __future__ import annotations
 

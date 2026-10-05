@@ -1,19 +1,4 @@
-"""Test harness for token contract tests (IDX-A2, item 5).
-
-Any service can prove, in-process and without Keycloak, that a token minted
-the way auth-service mints them is accepted by its own ``current_user``
-dependency::
-
-    issuer = TestIssuer()                       # fresh RSA key, deterministic kid
-    cache = issuer.jwks_cache()                 # JwksCache served from memory
-    token = issuer.mint(sub=..., tid=..., roles=["member"])
-    claims = await verify_token(token, expected_audience=issuer.audience,
-                                expected_issuer=issuer.issuer, jwks_cache=cache)
-
-``mint`` builds the exact claim set :class:`auth.claims.Claims` accepts;
-``mint_raw`` lets a test hand over any payload (wrong ``aud``, forbidden
-claim, expired ``exp``) to assert rejection.
-"""
+"""In-process RS256 test issuer: ``mint`` builds the claim set auth-service issues, ``mint_raw`` signs any payload."""
 
 from __future__ import annotations
 
@@ -95,13 +80,7 @@ class TestIssuer:
         return JwksCache(issuer_to_url={self.issuer: self.jwks_url}, http_client=client, **kwargs)
 
     def jwks_cache_for(self, issuer: str, **kwargs: Any) -> JwksCache:
-        """A cache that serves this key under SOMEBODY ELSE'S issuer name.
-
-        A service verifies `iss` against its own configured value, which
-        is not the harness's. Registering the test key under the name the
-        service expects is what lets the real verification path run
-        unchanged rather than being stubbed around.
-        """
+        """A cache serving this key under SOMEBODY ELSE'S issuer name (the one the service expects)."""
         url = f"{issuer.rstrip('/')}/.well-known/jwks.json"
 
         def _handler(request: httpx.Request) -> httpx.Response:
@@ -158,12 +137,7 @@ class TestIssuer:
         return self.mint_raw(self.claims(**kwargs))
 
     def config(self, *, issuer: str | None = None, audience: str | None = None) -> IssuerConfig:
-        """This key's :class:`IssuerConfig`, optionally renamed.
-
-        ``issuer`` renames the entry the way :meth:`jwks_cache_for` does,
-        for a test that must present itself as the issuer a service is
-        configured to trust.
-        """
+        """This key's :class:`IssuerConfig`, optionally renamed like :meth:`jwks_cache_for`."""
         name = (issuer or self.issuer).rstrip("/")
         return IssuerConfig(
             issuer=name,
@@ -176,16 +150,8 @@ def multi_issuer_jwks_cache(
     issuers: Sequence[tuple[IssuerConfig, TestIssuer | None]],
     **kwargs: Any,
 ) -> JwksCache:
-    """A cache serving several issuers at once — the FND-1 fixture.
-
-    Each pair is ``(config, signer)``. A ``None`` signer publishes an
-    **empty but valid** JWKS document: that is the shape auth-service's
-    endpoint has between the FND-1 fleet rollout and BE-2, and a fleet
-    that cannot tolerate it cannot be rolled out in the right order.
-    Verification of the other issuers' tokens must be unaffected by it,
-    and tokens claiming the empty issuer must fail ``kid_not_found`` —
-    not fall back to another issuer's keys.
-    """
+    """A cache serving several ``(config, signer)`` pairs; a ``None`` signer publishes an empty but valid JWKS
+    (tokens claiming it must fail ``kid_not_found``, never fall back to another issuer's keys)."""
     documents = {
         config.jwks_url: (signer.jwks_document() if signer is not None else {"keys": []})
         for config, signer in issuers
@@ -213,16 +179,7 @@ __all__ = [
 ]
 
 
-# ── The one-liner surface (IDX-B2 F4) ────────────────────────────────────
-#
-# `TestIssuer` above is the full harness. What a service's conftest
-# actually wants is "give me a token for this sub/tid/roles" without
-# thinking about keys — and, crucially, without generating an RSA key per
-# test. A 2048-bit keygen is 50-200 ms; done per test across the fleet's
-# suites that is minutes of wall clock for no benefit, since every test
-# wants the same thing: a signature its own `current_user` will accept.
-#
-# So there is one process-wide issuer, built on first use.
+# One process-wide issuer, built on first use: a 2048-bit keygen per test would cost minutes fleet-wide.
 
 _SHARED: TestIssuer | None = None
 
@@ -246,19 +203,7 @@ def mint_test_token(
     key: TestIssuer | None = None,
     **extra: Any,
 ) -> str:
-    """A signed token for a service test. Replaces logging in through Keycloak.
-
-    ``issuer`` sets the ``iss`` claim — which, after FND-1, is what picks
-    the verification config, so a contract test proves "Keycloak-shaped"
-    and "native-shaped" by minting the same claims under two names.
-    ``key`` signs with a different :class:`TestIssuer`, which is how the
-    third-issuer rejection case gets a *real* signature that no
-    configured JWKS contains.
-
-    ``extra`` goes straight into the payload, so a test can assert on
-    `mfa`, a `device` role, or a deliberately wrong `aud` without reaching
-    for the issuer object.
-    """
+    """A signed token for a service test; ``issuer`` sets ``iss``, ``key`` signs with another issuer, ``extra`` → payload."""
     signer = key or shared_issuer()
     if issuer is not None:
         extra.setdefault("iss", issuer)
@@ -276,22 +221,9 @@ def test_jwks_cache(**kwargs: Any) -> JwksCache:
 
 
 def install_test_issuer(state: Any, *, issuer: str | None = None) -> TestIssuer:
-    """Point a service's ``ServiceState`` at the shared test issuer.
+    """Point a service's state at the shared test issuer under the ``issuer`` name its ``current_user`` demands.
 
-    ``issuer`` is the value the service's ``current_user`` will DEMAND —
-    normally its ``settings.auth_issuer``. The cache is registered under
-    that name so the service's own issuer check passes; tokens must then
-    be minted with the same ``iss`` (``auth_headers(iss=…)``). Without
-    this the harness would sign perfectly good tokens that every service
-    rejects for the wrong issuer, which looks exactly like a broken
-    verifier.
-
-    Every service in this fleet builds `current_user` from
-    ``state.jwks_cache`` plus its settings, and caches the built
-    dependency on ``state._current_user_dep``. Swapping the cache alone
-    would be silently ignored once that closure exists, so the stale one
-    is dropped too — the bug this prevents is a test that passes because
-    it is still verifying against the old key.
+    Also drops the cached ``state._current_user_dep`` closure, which would otherwise keep verifying against the old key.
     """
     test_issuer = shared_issuer()
     state.jwks_cache = test_issuer.jwks_cache_for(issuer or test_issuer.issuer)

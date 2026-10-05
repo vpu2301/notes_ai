@@ -1,23 +1,13 @@
-"""Fixing a line without detaching it from its history (Sprint 35).
+"""Fixing a line without detaching it from its history.
 
     POST  /v1/notes/{id}/items/{item_key}/dismiss   {reason}
     POST  /v1/notes/{id}/items/{item_key}/restore
     PATCH /v1/notes/{id}/items/by-key/{item_key}    {owner_label?, due_text?}
 
-The point of all three is the **key**. A line's ``item_key`` is the hash of
-its body with the marker, the owner prefix and the due phrase stripped
-(`domain/lines.py`), so changing who owns a task or when it is due rewrites
-the text and keeps the key — and with it the recipient's confirmation on
-the shared page, the correction history, and (when Sprint 33 lands) the
-evidence chip. Changing what the line *says* changes the key, which is
-correct: it is now a different statement.
-
-Every route writes a real note version through the normal append path, so
-the hash chain, the diff, History and the derived action items all follow
-without knowing this router exists.
-
-``POST …/add`` (accepting a suggestion) is **not** here: suggestions come
-from ``note_generated_items``, which is Sprint 33.
+A line's ``item_key`` hashes its body without marker, owner and due phrase
+(`domain/lines.py`), so fixing owner or date keeps the key and everything
+attached to it; changing what the line says changes the key. Every route
+writes a real note version through the normal append path.
 """
 
 from __future__ import annotations
@@ -49,8 +39,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
-# How far back `restore` looks for the line it is bringing back. A
-# dismissal the author undoes is undone within minutes, not versions ago.
+# How far back `restore` looks for the line it is bringing back.
 RESTORE_LOOKBACK_VERSIONS = 25
 
 DismissReason = Literal[
@@ -86,16 +75,12 @@ class PatchItemRequest(BaseModel):
     due_text: str | None = Field(default=None, max_length=120)
     clear_owner: bool = False
     clear_due: bool = False
-    # Summary Engine v2, Q5 — a name the engine respelled. `accepted` keeps
-    # the line and records it (the client adds the glossary term);
-    # `rejected` puts back what was heard: `canonical` → `surface`.
+    # A name the engine respelled: `accepted` keeps the line, `rejected` puts back `surface`.
     action: Literal["correction_accepted", "correction_rejected"] | None = None
     reason: Literal["wrong_name"] | None = None
     surface: str | None = Field(default=None, min_length=1, max_length=80)
     canonical: str | None = Field(default=None, min_length=1, max_length=80)
-    # Where the engine got the spelling (`meeting_doc/entities.py`:
-    # glossary, candidate, model, recording, …). Logged, never branched
-    # on, so a source the engine adds later must not make the buttons fail.
+    # Where the engine got the spelling. Logged, never branched on.
     source: str | None = Field(default=None, max_length=32, pattern=r"^[a-z_]+$")
 
 
@@ -114,8 +99,7 @@ class CorrectionResponse(BaseModel):
 
 
 def _locate(content: NoteContent, item_key: str) -> tuple[int, lines.Line] | None:
-    """Which section holds the line, and the line. Sections are searched in
-    order, so a line duplicated across sections resolves to the first."""
+    """Which section holds the line, and the line; the first section wins."""
     for index, section in enumerate(content.sections):
         found = lines.find(section.text, item_key)
         if found is not None:
@@ -124,8 +108,7 @@ def _locate(content: NoteContent, item_key: str) -> tuple[int, lines.Line] | Non
 
 
 def _kind_of(section_key: str) -> str:
-    """The item kind for the correction log. Without the generation engine
-    the only kind the note actually distinguishes is an action item."""
+    """The item kind for the correction log."""
     return "action" if section_key in ACTION_SECTION_KEYS else "line"
 
 
@@ -250,7 +233,7 @@ async def dismiss_item(
             kind=kind,
             action="dismiss",
             reason=body.reason,
-            flags_at_time=[],  # flags are Sprint 33's; the column is ready
+            flags_at_time=[],
             actor_sub=claims.sub,
         )
 
@@ -360,8 +343,7 @@ async def restore_item(
 async def _find_in_history(
     conn: object, *, note_id: UUID, item_key: str, before: int
 ) -> tuple[str, str] | None:
-    """``(section_key, the line as it read)`` from the most recent version
-    that still had it."""
+    """``(section_key, the line as it read)`` from the most recent version that still had it."""
     for number in range(before - 1, max(0, before - 1 - RESTORE_LOOKBACK_VERSIONS), -1):
         version = await repo.fetch_version_by_number(
             conn,  # type: ignore[arg-type]
@@ -416,8 +398,7 @@ async def patch_item(
         index, line = located
         section = version.content.sections[index]
 
-        # Re-read the line through the same grammar the key came from, so
-        # the parts we are NOT changing come back exactly as they were.
+        # Same grammar the key came from, so unchanged parts come back exactly.
         parsed = lines.parts(line.content)
         owner = None if body.clear_owner else (body.owner_label or parsed.owner)
         due = None if body.clear_due else (body.due_text or parsed.due_text)
@@ -425,10 +406,7 @@ async def patch_item(
             marker=line.marker, owner=owner, body=parsed.body, due_text=due
         )
 
-        # The key must survive a correction. If it would not, the change
-        # is rewriting the line rather than its owner or date, and
-        # everything attached to it would silently detach — refuse
-        # BEFORE writing a version, not after.
+        # The key must survive, or everything attached would detach: refuse BEFORE writing.
         if lines.key_of(lines.strip_marker(rewritten)[1]) != item_key:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -510,14 +488,8 @@ async def _keys_respelled(conn: object, *, note_id: UUID, body: PatchItemRequest
 async def _name_correction(
     note_id: UUID, item_key: str, body: PatchItemRequest, claims: Claims
 ) -> CorrectionResponse:
-    """Accept or reject a name the engine respelled (Q5).
-
-    Rejecting rewrites the line — the name the recording heard goes back —
-    so, unlike an owner or date fix, the line's key changes; the response
-    carries the new one. Accepting changes nothing in the note: the name
-    stays, and the client adds it to the workspace glossary so the next
-    generation spells it that way without asking.
-    """
+    """Accept or reject a name the engine respelled. Rejecting rewrites the line (the
+    key changes; the response carries the new one); accepting changes nothing in the note."""
     if not body.surface or not body.canonical:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -532,8 +504,7 @@ async def _name_correction(
         if version is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note has no version")
         version_number = note.current_version_number  # type: ignore[attr-defined]
-        # The panel lists a respelling once, but the engine applied it to
-        # every line that names the person: the decision covers them all.
+        # The decision covers every line the respelling was applied to.
         keys = [item_key] + [
             k for k in await _keys_respelled(conn, note_id=note_id, body=body) if k != item_key
         ]
@@ -565,8 +536,7 @@ async def _name_correction(
                 claims=claims,
             )
         else:
-            # Accepting writes nothing, so a line that has moved on since
-            # (another name on it was put back) is no reason to refuse.
+            # Accepting writes nothing, so a line that has moved on is no reason to refuse.
             located = _locate(version.content, item_key)
             if located is None:
                 touched.append((item_key, "", ""))

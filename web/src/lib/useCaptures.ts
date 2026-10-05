@@ -27,18 +27,14 @@ const autoAttempted = new Set<string>();
 export function useCaptures(
   opts: {
     onNoteReady?: (jobId: string, noteId: string) => void;
-    /** Sprint 34: jobs that already have a note, opened when Record was
-     *  pressed. Those finish with `attachTranscript` (which fills the note
-     *  the author typed in) instead of `from-transcript` (which would make
-     *  a second one and get a 409). */
+    /** Jobs whose note was opened at Record: finish with `attachTranscript`, not `from-transcript` (409). */
     meetingNotes?: Record<string, string>;
   } = {},
 ) {
   const [jobs, setJobs] = useState<AsrJob[] | null>(null);
   const [links, setLinks] = useState<Record<string, string>>(loadLinks);
   const [creating, setCreating] = useState<Set<string>>(new Set());
-  /** Why the last note write for a job failed (auth loss aside): shown
-   *  with a retry instead of an endless "Writing your note…". */
+  /** Why the last note write for a job failed; shown with a retry. */
   const [noteErrors, setNoteErrors] = useState<Record<string, string>>({});
   const onNoteReady = useRef(opts.onNoteReady);
   onNoteReady.current = opts.onNoteReady;
@@ -85,9 +81,7 @@ export function useCaptures(
         return rest;
       });
       try {
-        // The note may already exist — the author has been typing in it
-        // since Record. Then the transcript goes INTO it; a second note
-        // would split the meeting in two.
+        // The note may already exist (typed in since Record): attach, do not create.
         const live = meetingNotes.current?.[job.id];
         if (live) {
           try {
@@ -97,9 +91,7 @@ export function useCaptures(
             onNoteReady.current?.(job.id, live);
             return live;
           } catch (err) {
-            // The live note was moved to the bin while the meeting ran
-            // (it looked empty). The recording is not in the bin: it
-            // gets a fresh note below, like an upload would.
+            // Live note binned mid-meeting: the recording gets a fresh note below.
             if (!(err instanceof ApiError && err.status === 404)) throw err;
           }
         }
@@ -117,9 +109,7 @@ export function useCaptures(
         if (err instanceof ApiError && err.status === 409) {
           const [l] = await notesBySourceJob([job.id]).catch(() => []);
           if (l) {
-            // The job belongs to a meeting note this browser did not open
-            // (the phone started it). Finishing it is idempotent, and it
-            // is what "closed the laptop" recovery needs.
+            // Meeting note opened elsewhere (the phone); finishing is idempotent.
             await attachTranscript(l.note_id).catch(() => {});
             rememberLink(job.id, l.note_id);
             setLinks(loadLinks());
@@ -127,8 +117,7 @@ export function useCaptures(
             return l.note_id;
           }
         }
-        // A 401 signs the user out via the http layer; anything else is
-        // this job's problem and must be visible.
+        // 401 signs out via http.ts; anything else must be visible.
         if (!(err instanceof ApiError && err.status === 401)) {
           setNoteErrors((e) => ({ ...e, [job.id]: messageFor(err) }));
         }
@@ -144,10 +133,7 @@ export function useCaptures(
     [],
   );
 
-  // Auto-convert: finished jobs this browser recorded become notes on
-  // their own — including one whose note is already open and waiting for
-  // its transcript, which is how a capture survives the laptop being shut
-  // mid-transcription (Sprint 34).
+  // Auto-convert finished jobs this browser recorded (also ones whose note is already open).
   useEffect(() => {
     if (!jobs) return;
     for (const job of jobs) {
@@ -155,8 +141,7 @@ export function useCaptures(
       const live = meetingNotes.current?.[job.id];
       if (links[job.id] && !live) continue;
       autoAttempted.add(job.id);
-      // One automatic try; after a failure the user retries from the page,
-      // so a broken note write does not hammer the service every poll.
+      // One automatic try; afterwards the user retries from the page.
       void createNote(job).catch(() => {});
     }
   }, [jobs, links, createNote]);

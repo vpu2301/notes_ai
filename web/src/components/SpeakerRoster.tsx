@@ -76,10 +76,7 @@ function SideGlyph({ side }: { side: SpeakerSide }) {
   );
 }
 
-/**
- * The custom names to keep when one label's name is removed: every other
- * name as it is, that label back to its "Speaker N" default.
- */
+/** Names to keep when one label's name is removed (that label reverts to "Speaker N"). */
 export function namesWithout(names: Record<string, string>, label: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [l, n] of Object.entries(names)) {
@@ -112,11 +109,7 @@ export function relabelError(err: unknown): string {
   return messageFor(err);
 }
 
-/**
- * The speakers of a diarized transcript: one chip per speaker with its talk
- * share, a menu to rename or merge it, and — when a speaker barely spoke —
- * one question: is this the same person as someone else?
- */
+/** Speaker chips with talk share, rename/merge menu, and one question at a time. */
 export function SpeakerRoster({
   jobId,
   speakers,
@@ -146,10 +139,7 @@ export function SpeakerRoster({
   names: Record<string, string>;
   stats: SpeakerStat[];
   busy: boolean;
-  /**
-   * The last edit, while it can still be undone: a merge names its target
-   * (`into`), a moved turn says what moved (`message`).
-   */
+  /** The last undoable edit: a merge names `into`, a moved turn `message`. */
   undo: { into?: string; message?: string; onUndo: () => void } | null;
   /** The diarizer's own doubt about the count ("low" asks the person). */
   countConfidence?: "high" | "low" | null;
@@ -157,11 +147,11 @@ export function SpeakerRoster({
   speakersHint?: number | null;
   /** Live speaker edits (merges and moved turns) — a re-run replaces them. */
   mergeCount?: number;
-  /** Microphone or call audio per label (Sprint 31); empty for mono jobs. */
+  /** Microphone or call audio per label; empty for mono jobs. */
   sides?: Record<string, SpeakerSide>;
   /** How each name was chosen; a `channel` name can be removed from its chip. */
   nameSources?: Record<string, SpeakerNameSource>;
-  /** Who speakers probably are (Sprint 32) — already filtered to the open ones. */
+  /** Who speakers probably are — already filtered to the open ones. */
   suggestions?: NameSuggestion[];
   /** The labelling is from an older engine and the audio is kept: offer a re-label. */
   relabelAvailable?: boolean;
@@ -195,9 +185,7 @@ export function SpeakerRoster({
   const byLabel = new Map(stats.map((s) => [s.label, s]));
   const largest = [...stats].sort((a, b) => b.speech_ms - a.speech_ms);
 
-  // One question at a time: an offer to re-label with the current engine
-  // outranks doubt about the count, which outranks "is this small speaker
-  // someone else?", and a re-run in flight asks nothing.
+  // One question at a time: re-label offer > count doubt > small speaker; none during a re-run.
   const offerRelabel =
     relabelAvailable && !relabelLater && !relabel.running && !relabel.working && relabel.outcome !== "done";
   const askCount = countConfidence === "low" && !countOk && !relabel.running && !offerRelabel;
@@ -237,7 +225,6 @@ export function SpeakerRoster({
 
   const locked = busy || relabel.running || relabel.working || clearing.label !== null;
 
-  // "· from your microphone" ✕: the name goes, every other name stays.
   const clearName = async (label: string) => {
     const from = name(label);
     setClearing({ label, error: null });
@@ -481,10 +468,7 @@ export function SpeakerRoster({
   );
 }
 
-/**
- * "Wrong number of speakers?" — a count from 1 to 8, then one confirm that
- * says what a re-run costs (the merges made on the old labels).
- */
+/** Speaker-count picker (1–8) with a confirm naming what a re-run discards. */
 function SpeakerCountPicker({
   open,
   current,
@@ -588,11 +572,7 @@ export function useOnline(): boolean {
   return online;
 }
 
-/**
- * A speaker re-run, as the roster sees it: start it, poll the job every few
- * seconds while it is queued or running (also when the page opens on one
- * already in flight), reload the transcript when it lands, and undo it.
- */
+/** A speaker re-run: start, poll while queued/running (also one already in flight), reload, undo. */
 function useRelabel(jobId: string, onRelabelled?: (kind: "rerun" | "undo") => Promise<void> | void) {
   const [status, setStatus] = useState<DiarizationStatus | null>(null);
   const [canUndo, setCanUndo] = useState(false);
@@ -600,8 +580,7 @@ function useRelabel(jobId: string, onRelabelled?: (kind: "rerun" | "undo") => Pr
   const [outcome, setOutcome] = useState<"done" | "failed" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
-  // Only a run this view watched reports its end; an old failure on the
-  // job is history, not news.
+  // Only a run this view watched reports its end.
   const watching = useRef(false);
   const lastCount = useRef<number | null>(null);
   const reload = useRef(onRelabelled);
@@ -653,7 +632,7 @@ function useRelabel(jobId: string, onRelabelled?: (kind: "rerun" | "undo") => Pr
       watching.current = true;
       setStatus(res.diarization_status);
     } catch (err) {
-      // Someone else's run is already going: watch that one instead.
+      // Watch the run already in flight.
       if (err instanceof ApiError && err.code === "rediarize_in_progress") {
         watching.current = true;
         setStatus("queued");

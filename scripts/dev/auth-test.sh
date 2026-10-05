@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Exercise auth-service's native endpoints against the dev stack.
 #
-# The successor to `scripts/dev/keycloak-test.sh` for everything that is
-# moving off Keycloak. Both exist during the cut-over so the two can be
-# compared side by side; the Keycloak one is deleted in IDX-B2.
-#
 #   ./scripts/dev/auth-test.sh s2s      # client_credentials (IDX-B1b)
 #   ./scripts/dev/auth-test.sh jwks     # discovery + signing keys
 set -euo pipefail
@@ -25,19 +21,15 @@ cmd_s2s() {
       -d "client_id=${DEV_DEVICE_ID}" \
       -d "client_secret=${DEV_DEVICE_SECRET}")"
   status="$(tail -n1 <<<"$body")"
-  # `sed '$d'` drops the trailing status line. NOT `head -n-1`, which is a
-  # GNU extension and fails on the BSD head that ships with macOS — where
-  # half of this team runs the dev stack.
+  # `sed '$d'` drops the status line; `head -n-1` is GNU-only and fails on macOS.
   body="$(sed '$d' <<<"$body")"
   [ "$status" = "200" ] || die "grant returned ${status}: ${body}"
   token="$(jq -r .access_token <<<"$body")"
   [ -n "$token" ] && [ "$token" != "null" ] || die "no access_token in the response"
   ok "device got a token"
 
-  # Decode the payload without verifying — this is a smoke test, and the
-  # signature is what the contract test covers. base64url needs its
-  # padding restored by hand; macOS `base64 -d` rejects the unpadded form
-  # that JWTs use.
+  # Decode without verifying (the contract test covers the signature);
+  # macOS `base64 -d` rejects unpadded base64url, so restore the padding.
   local claims payload pad
   payload="$(cut -d. -f2 <<<"$token" | tr '_-' '/+')"
   pad=$(( (4 - ${#payload} % 4) % 4 ))

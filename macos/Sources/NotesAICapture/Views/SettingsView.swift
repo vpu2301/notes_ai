@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Everything that is not the one-button flow: capture options, theme,
-/// backends, account. Shown as a sheet from the avatar menu — a sidebar of
-/// sections on the left, the selected section on the right.
+/// Everything that is not the one-button flow: capture options, theme, backends, account. A sheet with a sidebar of sections.
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -166,8 +164,7 @@ struct SettingsView: View {
                         selection: $capture.language)
                 }
                 row("Separate speakers") {
-                    // DSToggleStyle draws its label and ignores
-                    // .labelsHidden(); the row already names it.
+                    // DSToggleStyle draws its label and ignores .labelsHidden(); the row already names it.
                     Toggle(isOn: $capture.diarize) { EmptyView() }
                         .toggleStyle(DSToggleStyle())
                         .fixedSize()
@@ -296,7 +293,7 @@ struct SettingsView: View {
         }
     }
 
-    // ── Workspaces, sessions and local data (IDX-M2) ─────────────────
+    // ── Workspaces, sessions and local data ──────────────────────────
 
     private var workspacesGroup: some View {
         group("Workspaces") {
@@ -361,8 +358,7 @@ struct SettingsView: View {
         return app.email.isEmpty ? "Not signed in" : app.email
     }
 
-    /// Read once per appearance of the sheet: this is a directory listing,
-    /// not something to poll.
+    /// Read once per appearance of the sheet: a directory listing, not something to poll.
     private var pendingCount: Int { PendingCaptures.count() }
 
     private var advanced: some View {

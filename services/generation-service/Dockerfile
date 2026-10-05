@@ -1,9 +1,4 @@
-# ── generation-service runtime (sprint 15, Layer C) ────────────────
-# Mirrors the autocomplete-service paved-road pattern (see CLAUDE.md
-# "New service Dockerfile" for why sitecustomize re-adds /deps).
-# The inference backend (llama-server / Ollama) is a SEPARATE container
-# or host process — this image ships no model weights; MDX_GEN_BASE_URL
-# points at the backend (pin: docs/models/PINS.md, ADR-0036).
+# No model weights here: MDX_GEN_BASE_URL points at a separate llama-server/Ollama (docs/models/PINS.md).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -16,9 +11,7 @@ RUN apt-get update \
     && useradd --uid 65532 --gid 65532 --shell /sbin/nologin --no-create-home nonroot
 
 RUN pip install --no-cache-dir --upgrade pip uv==0.10.6
-# PyPI fetches share the link with the torch wheels of the ASR images when
-# `docker compose build` runs everything at once; bump uv's 30s default so a
-# slow index response doesn't fail the build.
+# Parallel compose builds starve PyPI fetches; raise uv's 30s default.
 ENV UV_HTTP_TIMEOUT=600
 
 WORKDIR /build

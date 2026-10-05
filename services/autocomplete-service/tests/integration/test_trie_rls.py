@@ -1,9 +1,4 @@
-"""Step-03 §8 integration — RLS through the builder.
-
-The builder never filters scopes itself: ``fetch_corpus`` runs under a
-tenant connection and the DATABASE enforces visibility. Prove that a
-trie built for tenant A contains system + tenant-A rows and never
-tenant B's.
+"""RLS through the builder: a trie built for tenant A holds system + tenant-A rows, never tenant B's.
 
 Skipped unless ``RUN_DB_INTEGRATION=1``.
 """

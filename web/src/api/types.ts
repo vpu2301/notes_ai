@@ -1,17 +1,6 @@
-// DTOs verified against docs/api/*-openapi.json snapshots — except the
-// auth-service block below. `docs/api/auth-service-openapi.json` predates
-// IDX-A3/A5/B1b (no /auth/email/*, no /auth/reauth*, no /auth/oauth/token),
-// so those DTOs are verified against the routers and
-// `services/auth-service/src/auth_service/domain/transport.py` instead.
-// Re-verify when the snapshot is regenerated (IDX-W1 debt).
-
 // ── auth-service ───────────────────────────────────────────────────────
 
-/**
- * The pre-IDX login body, and the subset every old reader still parses.
- * `POST /auth/login`, `/auth/refresh` answer exactly this today (both are
- * still Keycloak-backed in both `MDX_IDP_MODE`s).
- */
+/** `POST /auth/login` and `/auth/refresh` body. */
 export interface LoginResponse {
   access_token: string;
   expires_in: number;
@@ -29,7 +18,7 @@ export interface Identity {
   mfa_enabled: boolean;
   has_password: boolean;
   status: string;
-  /** Sprint 21: when the account came to exist; drives first-run hints. */
+  /** Drives first-run hints. */
   created_at?: string | null;
 }
 
@@ -43,16 +32,9 @@ export interface Membership {
 }
 
 /**
- * What a sign-in attempt returns (`domain/transport.py::AuthResult`).
- *
- * Discriminated on `status`, NOT on a `kind` field. `mfa_required` is a
- * real 200 carrying an empty `access_token`: the first factor passed and
- * the session has not started. Branch on `status` before reading a token.
- *
- * `refresh_token` is deliberately absent from this type. Native clients
- * get one in the body; a web client must never see or read it — the
- * HttpOnly `mdx_rt` cookie is its only refresh channel, and
- * `tests/no-refresh-token.test.ts` holds that line.
+ * Sign-in result. Discriminated on `status`: `mfa_required` is a 200 with an
+ * empty `access_token`. `refresh_token` is deliberately absent — the web client
+ * must never read it (HttpOnly `mdx_rt` cookie only; tests enforce this).
  */
 export interface AuthResult {
   status: "authenticated" | "mfa_required";
@@ -73,20 +55,14 @@ export interface AuthResult {
   recovery_codes_exhausted: boolean | null;
 }
 
-/**
- * `POST /auth/signup` and `/auth/signup/resend` — the uniform 202.
- *
- * Identical for a new address, an address that already has an account, and
- * one with nothing to resend. Nothing in this body varies by branch, so no
- * UI built on it can imply the server recognised the address.
- */
-/** `GET /auth/signup/config` — answers in every mode; `/join` picks its form by it. */
+/** `GET /auth/signup/config` — `/join` picks its form by it. */
 export interface SignupConfig {
   enabled: boolean;
   min_password_length: number;
   disposable_domains_blocked: true;
 }
 
+/** `POST /auth/signup` and `/resend` 202 — identical whether or not the address exists. */
 export interface SignupAccepted {
   status: "verification_sent";
   /** Seconds before `/auth/signup/resend` will send another code. */
@@ -133,11 +109,7 @@ export interface MeResponse {
     mfa?: boolean;
     iss?: string;
   };
-  /**
-   * The per-tenant `users` row. IDX-B2 deletes it; `AuthContext` derives an
-   * `Identity` from it only when `identity` is null (keycloak mode), and
-   * nothing outside `AuthContext` reads it.
-   */
+  /** Per-tenant `users` row; only `AuthContext` reads it (keycloak mode fallback). */
   db_user: {
     sub: string;
     tenant_id: string;
@@ -148,18 +120,12 @@ export interface MeResponse {
     mfa_enrolled_at: string | null;
     last_login_at: string | null;
   } | null;
-  /**
-   * The global principal, and every workspace it holds (IDX-B3).
-   *
-   * Optional in the type rather than required because both are null/empty
-   * in keycloak mode — and because this is what a page load hydrates from,
-   * so a client older than the server must not break on their absence.
-   */
+  /** Optional: null/empty in keycloak mode and on older servers. */
   identity?: Identity | null;
   memberships?: Membership[];
 }
 
-// ── auth-service: account & security (IDX-A5, W2) ─────────────────────
+// ── auth-service: account & security ──────────────────────────────────
 
 /** One live session on this account (`GET /auth/sessions`). */
 export interface SessionInfo {
@@ -207,7 +173,7 @@ export interface RevokedCount {
   revoked: number;
 }
 
-// ── auth-service: room devices (IDX-B1b) ──────────────────────────────
+// ── auth-service: room devices ────────────────────────────────────────
 
 /** A secret's public half — enough to recognise it, never to use it. */
 export interface CredentialSecret {
@@ -241,7 +207,7 @@ export interface RotatedCredential {
   old_expires_at: string;
 }
 
-// ── auth-service: tenants (pre-IDX routes) ────────────────────────────
+// ── auth-service: tenants ─────────────────────────────────────────────
 
 /** One row of `GET /tenants` — the workspaces the caller belongs to. */
 export interface TenantSummary {
@@ -292,7 +258,7 @@ export interface ChoiceOption {
 }
 
 export interface TemplateSection {
-  id: string; // section identity — becomes NoteSection.section_key
+  id: string; // becomes NoteSection.section_key
   name: string;
   field_type?: FieldType;
   required?: boolean;
@@ -332,16 +298,13 @@ export interface TemplateDetail extends TemplateSummary {
 
 // ── note-service: notes ────────────────────────────────────────────────
 
-/** `finalized` / `amended` are legacy values that no longer occur (ADR-0051). */
+/** `finalized` / `amended` no longer occur (ADR-0051). */
 export type NoteStatus = "draft" | "finalized" | "amended" | "cancelled";
 
 /**
- * field_specific_metadata contract (libs/note_models/field_metadata.py):
- *  - empty dict = no value;
- *  - user-entered values carry source:"manual" (and must OMIT confidence);
- *  - choice: {selected: value}; multi_choice: {selected: [values]} (≥1);
- *  - date/date_with_note: {date: "YYYY-MM-DD"};
- *  - numeric_with_unit: {value: number, unit: string}.
+ * field_specific_metadata: {} = no value; manual values carry source:"manual" and
+ * omit confidence; choice {selected}; multi_choice {selected: []}; date {date:
+ * "YYYY-MM-DD"}; numeric_with_unit {value, unit}.
  */
 export type FieldMetadata = Record<string, unknown>;
 
@@ -350,9 +313,7 @@ export interface NoteSection {
   text?: string;
   field_specific_metadata?: FieldMetadata;
   transcript_segment_ids?: string[];
-  /** The heading of a section the template does not name (one the engine
-   *  made from the conversation). Absent or null: no heading — the block
-   *  is read as the note itself. */
+  /** Engine-made heading; absent/null = the block is the note itself. */
   title?: string | null;
 }
 
@@ -386,25 +347,17 @@ export interface NoteEnvelope {
   /** Who may read it beyond the author team. */
   visibility?: NoteVisibility;
   shared_with_ids?: string[];
-  /**
-   * Set only when the reader is not on the author team and was not shared
-   * the note (an oversight read, sent with `?purpose=`): whose note this
-   * is, so the page can say so.
-   */
+  /** Set only on an oversight read (`?purpose=`), so the page can say whose note it is. */
   primary_author_name?: string | null;
   content?: NoteContent | null;
   section_labels?: SectionLabel[] | null;
 }
 
-// ── note-service: sharing (0016) ────────────────────────────────────────
+// ── note-service: sharing ───────────────────────────────────────────────
 
 export type NoteVisibility = "private" | "workspace";
 
-/**
- * Why someone who is not the note's author is reading it. The server
- * refuses a non-author read without one (422 `missing-read-purpose`) and
- * records the value in the audit trail.
- */
+/** Required on a non-author read (422 `missing-read-purpose` otherwise); audited. */
 export type ReadPurpose = "review" | "audit" | "legal" | "export" | "collaboration";
 
 export interface SharedMember {
@@ -415,7 +368,7 @@ export interface SharedMember {
 
 export type ShareLinkKind = "public" | "recipient";
 
-/** One share link — the public one (0016) or a per-recipient one (Sprint 19). */
+/** One share link — public or per-recipient. */
 export interface LinkView {
   id: string;
   kind: ShareLinkKind;
@@ -433,9 +386,9 @@ export interface LinkView {
   first_viewed_at: string | null;
   last_viewed_at: string | null;
   cta_clicked_at: string | null;
-  /** Sprint 20: live responses from this link. */
+  /** Live responses from this link. */
   response_count?: number;
-  /** Sprint 22: the product mailed the link. */
+  /** Set when the product mailed the link. */
   delivery_status?: DeliveryStatus;
   sent_at?: string | null;
   send_count?: number;
@@ -468,7 +421,7 @@ export interface CreateLinkRequest {
   label: string;
   recipient_email?: string;
   expires_in_days?: number;
-  /** Sprint 22: create and mail in one call. */
+  /** Create and mail in one call. */
   send?: boolean;
   personal_message?: string;
   lang?: string;
@@ -484,7 +437,7 @@ export interface SharingView {
   public_link: LinkView | null;
   /** Every live link, newest first. Empty for readers who may not manage the note. */
   links: LinkView[];
-  /** Sprint 23: the workspace's effective sharing rules. */
+  /** The workspace's effective sharing rules. */
   constraints: SharingConstraints;
 }
 
@@ -565,13 +518,13 @@ export interface SharedNoteView {
     brand_name: string;
     header_text: string;
     cta_path: string;
-    /** Sprint 23: a paid workspace may turn the product line off. */
+    /** A paid workspace may turn the product line off. */
     cta_enabled?: boolean;
   };
   expires_at: string | null;
-  /** Sprint 23: prove the mailbox before acting; reading is still allowed. */
+  /** Prove the mailbox before acting; reading is still allowed. */
   requires_verification?: boolean;
-  /** The note has nothing shareable yet because the writer is still working on it. */
+  /** Nothing shareable yet; the writer is still working. */
   preparing?: boolean;
   lang?: "en" | "de" | "uk";
   changes?: {
@@ -581,14 +534,14 @@ export interface SharedNoteView {
     items_removed: string[];
     items_changed: string[];
   } | null;
-  /** Sprint 20: the action items as objects, and what this link already did. */
+  /** Action items, and what this link already did. */
   items: SharedItem[];
   my_flags: string[];
   /** False on a public link: anyone may read it, so nobody can sign it. */
   can_respond: boolean;
 }
 
-// ── Sprint 20: action items + recipient responses ────────────────────
+// ── action items + recipient responses ───────────────────────────────
 
 export type ItemStatus = "open" | "done" | "dropped";
 export type ResponseKind = "confirm" | "done" | "dispute" | "flag";
@@ -656,7 +609,7 @@ export interface UpdateDraftResponse {
   idempotent_replay?: boolean;
 }
 
-/** History only: amendments were retired with the finalize lifecycle (ADR-0051). */
+/** History only; amendments were retired (ADR-0051). */
 export type NoteAmendmentType = "correction" | "addition" | "clarification";
 
 export interface NoteVersionSummary {
@@ -685,11 +638,11 @@ export interface SearchHit {
   co_author_ids: string[];
   snippet: string;
   updated_at: string;
-  /** Sharing state for the list badge (0016). Absent from an older server. */
+  /** Sharing state for the list badge. Absent from an older server. */
   visibility?: NoteVisibility | null;
   shared_with_count?: number | null;
   has_public_link?: boolean | null;
-  /** Sprint 20 — live recipient disputes, for the "1 disputed" marker. */
+  /** Live recipient disputes, for the "1 disputed" marker. */
   open_disputes?: number;
 }
 
@@ -711,9 +664,9 @@ export interface FromTranscriptResponse {
   template_name: string;
   template_selection: "explicit" | "auto" | "fallback";
   template_score?: number | null;
-  /** Sprint 33: present when the engine is writing this note. */
+  /** Present when the engine is writing this note. */
   generation?: { id: string; status: string } | null;
-  /** Sprint 37: why there is no generation, when there is none. */
+  /** Why there is no generation, when there is none. */
   generation_blocked?:
     | "generation_disabled"
     | "budget_exceeded"
@@ -721,7 +674,7 @@ export interface FromTranscriptResponse {
     | null;
 }
 
-// ── series, carry-over and the client version (Sprint 36) ─────────────
+// ── series, carry-over and the client version ─────────────────────────
 
 /** An item brought forward from the previous meeting in this series. */
 export interface CarriedItem {
@@ -729,9 +682,7 @@ export interface CarriedItem {
   text: string;
   owner_label: string | null;
   due_text: string | null;
-  /** `done_mentioned` is the recording saying so, with a quote;
-   *  `done_marked` is the author ticking it. Only the engine may claim
-   *  the first. */
+  /** `done_mentioned` = the recording says so (engine only, with a quote); `done_marked` = the author ticked it. */
   state: "open" | "done_mentioned" | "done_marked" | "dropped";
   done_quote?: string | null;
   done_speaker?: string | null;
@@ -751,8 +702,7 @@ export interface ClientSection {
   text: string;
 }
 
-/** Exactly what an external surface renders — the preview and the shared
- *  page call the same builder, so they cannot differ. */
+/** What an external surface renders; preview and shared page use the same builder. */
 export interface ClientVersion {
   available: boolean;
   reason: string | null;
@@ -775,7 +725,7 @@ export interface ClientVersionCheck {
   is_empty: boolean;
 }
 
-// ── the workspace glossary + corrections (Sprint 35) ──────────────────
+// ── the workspace glossary + corrections ──────────────────────────────
 
 export type GlossaryKind = "person" | "company" | "product" | "term";
 
@@ -788,11 +738,7 @@ export interface GlossaryTerm {
   created_at: string;
   /** Whether this viewer may remove it (its creator, or an admin). */
   can_delete: boolean;
-  /**
-   * Whether it is still sent to the transcriber (Sprint I2). False = a
-   * stored role label ("Moderator II") the server no longer puts in the
-   * prompt; absent on older servers.
-   */
+  /** Still sent to the transcriber; false = stored role label; absent on older servers. */
   in_hint?: boolean;
   /** The note the rename that added it happened in, when known. */
   source_note_id?: string | null;
@@ -803,8 +749,7 @@ export interface GlossaryHint {
   terms: number;
 }
 
-/** Why a generated line was taken out. A closed vocabulary: the reason is
- *  the signal that tells us what to stop writing, so it is never free text. */
+/** Why a generated line was taken out — closed vocabulary, never free text. */
 export type DismissReason =
   | "not_said"
   | "not_a_decision"
@@ -823,10 +768,9 @@ export interface CorrectionResponse {
   line: string | null;
 }
 
-// ── the live meeting note (Sprint 34) ─────────────────────────────────
+// ── the live meeting note ─────────────────────────────────────────────
 
-/** What a capture is doing right now. Lives on `note_meetings`, not on the
- *  note's status — a note is a draft until it is cancelled (ADR-0051). */
+/** Capture state; lives on `note_meetings`, not on the note's status (ADR-0051). */
 export type MeetingState =
   | "recording"
   | "uploading"
@@ -838,8 +782,7 @@ export type MeetingState =
 
 export type MeetingType = "auto" | "client" | "team" | "sales" | "one_on_one" | "interview";
 
-/** What the invite knew. `description` is read for its agenda on the
- *  server and then dropped — it is never stored. */
+/** What the invite knew. `description` is never stored server-side. */
 export interface MeetingCalendarContext {
   source: "google" | "ics" | "eventkit";
   title?: string;
@@ -940,7 +883,7 @@ export interface AsrJob {
   can_undo_rediarize?: boolean;
   /** Submit response only: the speaker-count hint was used (true), ignored (false), or not sent (null). */
   hints_applied?: boolean | null;
-  /** Sprint F1: transcribed share of the speech (support view); null before F1. */
+  /** Transcribed share of the speech; null on older jobs. */
   coverage_share?: number | null;
 }
 
@@ -994,33 +937,22 @@ export interface TranscriptSegment {
   speaker?: string | null;
   /** Index of this segment in the stored artifact (the space `segment_indices` live in). */
   artifact_index?: number;
-  /** Set only when this passage is in ANOTHER language than the recording (Sprint I2). */
+  /** Set only when this passage is in ANOTHER language than the recording. */
   language?: string | null;
 }
 
-/**
- * One speaker turn, as structured by asr-service: consecutive segments by
- * one speaker, broken into paragraphs at pauses and sentence ends.
- * `speaker` is the neutral label ("SPEAKER_2"), `name` what to show for it
- * (a person's naming, else "Speaker 2"); both null for unattributed speech.
- */
+/** One speaker turn. `speaker` is the neutral label, `name` the display name; both null when unattributed. */
 export interface TranscriptTurn {
   speaker: string | null;
   name: string | null;
   start_ms: number;
   end_ms: number;
   paragraphs: string[];
-  /**
-   * Artifact index space (Sprint 30) — opaque: send back as-is on a
-   * reassign, never use to index into `segments` (use `artifact_index`).
-   */
+  /** Opaque artifact indices: send back as-is on a reassign, never index `segments` with them. */
   segment_indices?: number[];
   /** People talked over each other here, or the label was smoothed. */
   uncertain?: boolean;
-  /**
-   * Set only when the turn is in ANOTHER language than the recording, e.g.
-   * "uk" in an English one (Sprint I2). A turn is never mixed.
-   */
+  /** Set only when the turn is in ANOTHER language than the recording. A turn is never mixed. */
   language?: string | null;
 }
 
@@ -1047,51 +979,28 @@ export interface TranscriptResult {
   count_confidence?: "high" | "low" | null;
   /** The exact speaker count a person asked for on this labelling. */
   speakers_hint?: number | null;
-  /** Names offered for renaming speakers (calendar invitees), Sprint 30. */
+  /** Names offered for renaming speakers (calendar invitees). */
   name_candidates?: string[];
-  /**
-   * Which side of a two-channel capture each label was heard on (Sprint 31):
-   * `local` = this Mac's microphone, `remote` = the call audio. `{}` for mono jobs.
-   */
+  /** `local` = microphone, `remote` = call audio. `{}` for mono jobs. */
   speaker_sides?: Record<string, SpeakerSide>;
   /** How each label's name was chosen; `channel` = named after the owner from the microphone. */
   speaker_name_sources?: Record<string, SpeakerNameSource>;
-  /**
-   * Who a speaker probably is, with the words that say so (Sprint 32).
-   * Absent unless the server turns suggestions on — render nothing then.
-   */
+  /** Absent unless the server turns suggestions on — render nothing then. */
   name_suggestions?: NameSuggestion[];
-  /**
-   * The labelling came from an older engine (or none) and the audio is still
-   * kept: offer a re-label. Absent on older servers.
-   */
+  /** Older labelling with audio still kept: offer a re-label. Absent on older servers. */
   relabel_available?: boolean;
   nlp_applied?: boolean;
-  /**
-   * What the worker took out or set apart (Sprint I2): passages where the
-   * transcriber echoed its own prompt over silence, and how many chunks
-   * were in another language than the recording. Absent on older results.
-   */
+  /** Prompt-echo passages dropped and other-language chunks. Absent on older results. */
   diagnostics?: TranscriptDiagnostics;
-  /**
-   * Sprint F1: how much of the speech the transcript holds, and the gaps
-   * with their cause. Absent/null on results stored before it existed.
-   */
+  /** Transcribed share of the speech and the gaps. Absent/null on older results. */
   coverage?: TranscriptCoverage | null;
-  /** Sprint F1: when Record was pressed and how long until audio flowed. */
+  /** When Record was pressed and how long until audio flowed. */
   capture?: CaptureTiming | null;
-  /**
-   * Sprint TQ2: stretches of ≥ 5 s with no speech, marked instead of
-   * transcribed. Absent on older results. An unknown `kind` renders as noise.
-   */
+  /** Stretches ≥ 5 s with no speech. Absent on older results; unknown `kind` renders as noise. */
   noise?: TranscriptNoise[];
-  /**
-   * Sprint TQ3: spellings unified by the server's overlay (`accepted`,
-   * already applied in segments/turns) or offered for review (`proposed`).
-   * Absent on older servers.
-   */
+  /** `accepted` are already applied in segments/turns; `proposed` await review. Absent on older servers. */
   entity_corrections?: EntityCorrection[];
-  /** What a correction decision must name; a stale one is refused (409). */
+  /** A correction decision must name this; stale = 409. */
   corrections_rev?: number;
   /** Why nothing was unified: "skipped_budget" | "error" | "disabled"; null = ran. */
   entity_unify?: string | null;
@@ -1217,11 +1126,7 @@ export interface ReassignResult extends SpeakerEditResult {
 /** Where a capture came from — a metric, sent with the upload. */
 export type CaptureSource = "calendar_event" | "manual" | "upload";
 
-/**
- * How the channels of an upload are laid out. `mic_system` is a 2-channel
- * file — left = the author's microphone, right = the tab/system audio — so
- * the author's voice comes back as its own speaker ("Me" / "Them").
- */
+/** `mic_system`: 2-channel file, left = microphone, right = system audio. */
 export type ChannelLayout = "mono" | "mic_system";
 
 /** `sources` on a rename: picked from `name_candidates`, typed, or an accepted suggestion. */
@@ -1241,11 +1146,11 @@ export interface SourceJobLink {
   status: string;
 }
 
-// ── note-service: calendar connections (0019) ──────────────────────────
+// ── note-service: calendar connections ─────────────────────────────────
 
 export interface CalendarConnection {
   id: string;
-  /** "google": an OAuth account; "ics": a calendar link (private iCal address, 0020). */
+  /** "google": an OAuth account; "ics": a private iCal address. */
   provider: "google" | "ics";
   account_email: string;
   connected_at: string;
@@ -1258,7 +1163,7 @@ export interface CalendarConnection {
 export interface CalendarConnectionsResponse {
   /** False when the server has no Google client configured. */
   available: boolean;
-  /** True when the server accepts calendar links (0020); absent on older servers. */
+  /** True when the server accepts calendar links; absent on older servers. */
   link_available?: boolean;
   connections: CalendarConnection[];
 }
@@ -1296,8 +1201,7 @@ export interface UpcomingEvent {
   response_status: string | null;
   /** Stable across the copies an invite makes in several calendars. */
   ical_uid: string;
-  /** The agenda the server derived from the invite's description (Sprint
-   *  34). The description itself never leaves the server. */
+  /** Derived from the invite's description, which never leaves the server. */
   agenda_lines: string[];
 }
 
@@ -1317,7 +1221,7 @@ export interface UpcomingEventsResponse {
   fetched_at: string;
 }
 
-// ── spaces (note-service, 0021) ───────────────────────────────────────
+// ── spaces (note-service) ─────────────────────────────────────────────
 
 /** A personal folder of notes, the same on every device. */
 export interface Space {
@@ -1334,11 +1238,7 @@ export interface SpacesResponse {
 
 // ── ask this note (POST /v1/notes/{id}/ask) ───────────────────────────
 
-/**
- * One line of the conversation under a note. The client keeps the
- * thread; the server gets it back as context with every question, so a
- * follow-up ("and who owns that?") lands with something to refer to.
- */
+/** One line of the thread; the client keeps it and sends it back as context. */
 export interface AskTurn {
   role: "user" | "assistant";
   text: string;
@@ -1353,7 +1253,7 @@ export interface AskResponse {
   model_id: string;
 }
 
-// ── Sprint 37: model tiers, processors, budget ─────────────────────
+// ── model tiers, processors, budget ────────────────────────────────
 
 /** One company in the data path, as the registry itself reports it. */
 export interface AiProcessor {
@@ -1366,8 +1266,7 @@ export interface AiProcessor {
   acknowledged: boolean;
 }
 
-/** Sprint L2 — the backend writing notes on this deployment, and whether
- *  it is the configured primary or its fallback (`reason` set). */
+/** The backend writing notes; `reason` set when the fallback is in use. */
 export interface AiWriter {
   backend: string;
   model_id: string | null;
@@ -1383,8 +1282,7 @@ export interface AiSettings {
   provider: string;
   tier: string;
   generation_enabled: boolean;
-  /** What the workspace ACTUALLY resolves to. Differs from `tier` when
-   *  routing gained a processor nobody has acknowledged yet. */
+  /** Differs from `tier` when routing gained an unacknowledged processor. */
   effective_provider: string;
   effective_tier: string;
   processors: AiProcessor[];
@@ -1393,7 +1291,7 @@ export interface AiSettings {
   budget_cents: number;
   may_choose_premium: boolean;
   can_edit: boolean;
-  /** Sprint L2 — who writes notes right now (null where nothing is routed). */
+  /** Who writes notes right now (null where nothing is routed). */
   writer?: AiWriter | null;
   small_writer?: AiWriter | null;
 }
@@ -1406,7 +1304,7 @@ export interface AiSettingsUpdate {
   acknowledge?: { name: string; region: string }[];
 }
 
-// ── The document engine (Sprint 33), as the client sees it ─────────
+// ── The document engine, as the client sees it ─────────────────────
 
 export interface GenerationView {
   id: string;
@@ -1415,8 +1313,7 @@ export interface GenerationView {
   windows_total: number | null;
   windows_done: number | null;
   windows_failed: number | null;
-  /** `[[start_ms, end_ms]]` — which minutes are missing, so the note can
-   *  name them instead of apologising in general. */
+  /** `[[start_ms, end_ms]]` of the missing minutes. */
   failed_ranges: number[][];
   prompt_version: string;
   model_id: string | null;
@@ -1424,21 +1321,18 @@ export interface GenerationView {
   error_kind: string | null;
   created_at: string;
   finished_at: string | null;
-  /** Sections the engine did NOT write because the author had already
-   *  written there; their facts are offered instead of imposed. */
+  /** Sections the engine skipped because the author had already written there. */
   suggested_sections: string[];
-  /** How many sections the run wrote; 0 on a finished run means the
-   *  recording yielded nothing the verifier let through. */
+  /** 0 on a finished run = nothing passed the verifier. */
   sections_written?: number | null;
-  /** Summary Engine v2 (Q2): stretches left out of the notes, confirmed by
-   *  code. `reason` is a closed vocabulary; empty for older generations. */
+  /** Stretches left out of the notes; empty for older generations. */
   excluded_ranges?: ExcludedRange[];
   /** How the facts spread over the recording; null for older generations. */
   coverage?: GenerationCoverage | null;
-  /** Q3: what the recording was taken to be, and who decided. */
+  /** What the recording was taken to be, and who decided. */
   recording_type?: string | null;
   recording_type_source?: "user" | "classifier" | "rule" | "template" | null;
-  /** Q3: the spoken language the run wrote in. */
+  /** The spoken language the run wrote in. */
   language?: string | null;
 }
 
@@ -1479,22 +1373,22 @@ export interface GeneratedItem {
   speaker_label: string | null;
   speaker_name: string | null;
   placement: string;
-  /** Q5: the facts this line rests on (their item keys). */
+  /** Item keys of the facts this line rests on. */
   cites?: string[];
   certainty?: "fact" | "estimate" | "prediction" | "opinion" | "proposal" | "allegation" | null;
-  /** Q5: whose position it is. */
+  /** Whose position it is. */
   attributed_to?: string | null;
-  /** F2: for a sub-point, the row key of the bullet it sits under. */
+  /** For a sub-point, the row key of the bullet it sits under. */
   parent_key?: string | null;
-  /** F3: a figure row's verified fields (every word in its quote). */
+  /** A figure row's verified fields (every word in its quote). */
   figure?: { name: string; value: string; unit: string; qualifier: string } | null;
-  /** Q5: names the engine respelled in this line — the quote keeps what was heard. */
+  /** Names respelled in this line; the quote keeps what was heard. */
   corrections?: { surface: string; canonical: string; source: string }[];
-  /** Q5: dates the line names, resolved against the recording day. */
+  /** Dates the line names, resolved against the recording day. */
   mentions?: { text: string; date: string; time: string | null; direction: string }[];
 }
 
-// ─── Billing (0068) ──────────────────────────────────────────────────────
+// ─── Billing ─────────────────────────────────────────────────────────────
 
 export interface BillingPlan {
   code: string;

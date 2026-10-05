@@ -1,9 +1,4 @@
-"""libs/asr_models — wire-stable types for ASR jobs and outputs.
-
-These types are shared across asr-service and asr-worker (and consumed by
-the NLP postprocessor in sprint 05). Pinning them in their own lib means
-a schema bump is a single PR with cross-service review.
-"""
+"""Wire-stable types for ASR jobs and outputs, shared by asr-service and asr-worker."""
 
 from .errors import (
     ERROR_SPECS,

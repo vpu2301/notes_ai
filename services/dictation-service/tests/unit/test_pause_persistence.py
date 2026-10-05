@@ -1,13 +1,4 @@
-"""Pause/resume must reach the database.
-
-As built, ``Pause``/``Resume`` mutated ``ctx.state`` and nothing else. The
-``'paused'`` value in the 0010 CHECK constraint was therefore dead in the
-DB: ``GET /dictate/sessions`` reported a paused session as active, and so
-did ``count_active_for_tenant``, which gates the per-tenant cap. Anything
-outside the owning worker process — the reaper, the session's
-"is a recording still live?" check, another tab — reads the row, so the row
-has to be true.
-"""
+"""Pause/resume must reach the database; other processes read status from the row."""
 
 from __future__ import annotations
 
@@ -86,7 +77,7 @@ async def test_round_trip_leaves_the_row_active(
 async def test_pausing_a_terminal_session_is_refused_by_the_guard(
     wiring: tuple[SimpleNamespace, list[tuple]], bad: SessionState
 ) -> None:
-    """These paths used to bypass ``assert_transition`` entirely."""
+    """Invalid transitions must be rejected before any write."""
     state, writes = wiring
     with pytest.raises(StateTransitionError):
         await handler.apply_pause(_ctx(bad), state)

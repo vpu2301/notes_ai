@@ -6,12 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setSessionListener } from "../src/api/http";
 import { SharedNotePage } from "../src/pages/SharedNotePage";
 
-/**
- * The Shared Outcome Page (Sprint 19): what an outsider holding a link
- * sees. Sections land in a fixed order regardless of template order, the
- * product CTA is a plain server link, and a dead link is still a
- * touchpoint — the CTA stays.
- */
+/** The shared page: fixed section order, plain server-link CTA, and the CTA stays on a dead link. */
 
 const TOKEN = "t".repeat(43);
 

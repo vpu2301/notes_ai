@@ -1,15 +1,4 @@
-"""Pipeline orchestrator with idempotence cache.
-
-Why a single orchestrator class instead of inlining the loop:
-1. The cache + idempotence key are infrastructure concerns that don't
-   belong in any stage's responsibility.
-2. Sprint 7's eval harness will replay historical inputs through the
-   exact same orchestrator with frozen pipeline_version +
-   abbreviation_snapshot.fingerprint — byte-equal output is the
-   reproducibility contract.
-3. Idempotence violations are detectable HERE (compare cache hit vs
-   fresh run) — the alert lives in ``mdx_nlp_idempotence_violations_total``.
-"""
+"""Pipeline orchestrator with idempotence cache; byte-equal replay under a frozen pipeline_version."""
 
 from __future__ import annotations
 
@@ -64,11 +53,7 @@ class CacheProtocol(Protocol):
 
 
 class Orchestrator:
-    """Run the configured stages in order, with cache + telemetry.
-
-    ``cache`` may be None — tests instantiate without one. Production
-    always supplies a Redis-backed instance.
-    """
+    """Run the configured stages in order, with cache + telemetry. ``cache`` may be None (tests)."""
 
     def __init__(
         self,
@@ -168,21 +153,13 @@ class Orchestrator:
                 operations=out.operations,
                 warnings=out.warnings,
                 metadata={**current.metadata, **out.metadata},
-                # Artifacts accumulate: a stage that emits none must not
-                # erase what an earlier stage produced.
+                # Artifacts accumulate across stages.
                 numeric_artifacts=out.numeric_artifacts or current.numeric_artifacts,
                 date_artifacts=out.date_artifacts or current.date_artifacts,
             )
 
-        # Strip wall-clock telemetry before the value becomes part of the
-        # deterministic output: per-stage ``*.latency_ms`` keys vary run to
-        # run, which would break the sprint-07 byte-equal replay contract and
-        # poison the idempotence-violation detector. True per-stage latency is
-        # already recorded to the ``mdx_nlp_request_duration_ms`` histogram
-        # above; the response body and cache carry only deterministic metadata.
-        # Artifacts are an INTERNAL stage-to-stage channel. They are
-        # deliberately dropped here: they never reach the response body
-        # or the cache, so adding them cannot change replay bytes.
+        # Strip wall-clock telemetry (already in the histogram) and internal
+        # artifacts so the response body and cache stay byte-stable.
         current = StageOutput(
             text=current.text,
             words=current.words,
@@ -202,32 +179,24 @@ class Orchestrator:
 
 
 def idempotence_key(ctx: ProcessingContext, initial: StageInput) -> str:
-    """Stable hash over (input, ctx). Pipeline_version + snapshot
-    fingerprint are part of the hash so a bump invalidates the cache."""
+    """Stable hash over (input, ctx); pipeline_version + snapshot fingerprint invalidate on bump."""
     doc: dict[str, Any] = {
-        "v": "nlp-cache-v6",  # v6: conversation flag (Sprint I3)
+        "v": "nlp-cache-v6",  # v6: conversation flag
         "pipeline_version": ctx.pipeline_version,
         "tenant_id": str(ctx.tenant_id),
         "language": ctx.language,
         "category": ctx.category,
         "reference_date": ctx.reference_date.isoformat(),
         "is_partial": ctx.is_partial,
-        # Same text/words produce DIFFERENT output depending on inline op
-        # application — without this field batch and streaming would share
-        # a cache entry.
+        # Batch and streaming must not share a cache entry.
         "apply_operations_inline": ctx.apply_operations_inline,
-        # A request with a stage disabled must never share a cache entry
-        # with one running the full pipeline.
         "stages_disabled": sorted(ctx.stages_disabled),
         "conversation": ctx.conversation,
         "snapshot_fingerprint": ctx.abbreviation_snapshot.fingerprint,
         "decimal_separator": ctx.decimal_separator,
         "bp_separator": ctx.bp_separator,
         "date_format": ctx.date_format,
-        # Sprint 13: field_type + options participate in the key — two
-        # requests with identical text but different option sets MUST NOT
-        # share a cache entry, or one section's proposals would be served
-        # for another's.
+        # Different option sets must not share a cache entry.
         "template_sections": [
             {
                 "id": str(s.id),
@@ -312,13 +281,7 @@ _NONDETERMINISTIC_METADATA_SUFFIXES = (".latency_ms",)
 
 
 def _strip_nondeterministic(d: dict[str, Any]) -> dict[str, Any]:
-    """Drop wall-clock telemetry keys so the output is byte-stable.
-
-    Per-stage ``*.latency_ms`` values vary run to run; they must not reach
-    the cache or the response body, which are governed by the sprint-07
-    byte-equal replay contract. Deterministic flags (``*.path``,
-    ``*.skipped_partial``, ``*.error``, ``*.fallback``) are preserved.
-    """
+    """Drop ``*.latency_ms`` keys so the output is byte-stable; deterministic flags are preserved."""
     return {
         k: v
         for k, v in d.items()

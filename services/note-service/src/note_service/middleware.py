@@ -18,14 +18,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 class AnonymousCorsMiddleware(BaseHTTPMiddleware):
-    """`/v1/shared/*` answers any origin, without credentials (Sprint 23).
-
-    The recipient page may be embedded or fetched from wherever the link
-    was opened; there is no cookie or bearer on that surface, so a
-    wildcard origin gives away nothing. Mounted OUTSIDE the credentialed
-    CORS middleware so a preflight from an unknown origin is answered
-    here instead of refused there. Everything else keeps the allow-list.
-    """
+    """`/v1/shared/*` answers any origin, without credentials (no cookie or bearer
+    on that surface). Mounted OUTSIDE the credentialed CORS middleware so an
+    unknown origin's preflight is answered here."""
 
     PREFIX = "/v1/shared/"
     _HEADERS = {

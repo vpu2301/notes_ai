@@ -1,20 +1,8 @@
-"""What "supported" means — one definition for the engine and the eval.
+"""What "supported" means: the ONE lexical definition shared by verify, pipeline
+and the eval scorer (``scripts/eval/notes_scoring.py``).
 
-A written line is supported when the facts it cites carry what it says.
-This module is the lexical half of that judgement, and it is the ONLY
-copy of it: :mod:`verify` checks a fact's ``text`` against its quote
-with it, :mod:`pipeline` checks every summary sentence, topic bullet and
-framing sentence against the facts they cite with it, and the eval's
-scorer (``scripts/eval/notes_scoring.py``) imports it. Production and
-the harness cannot disagree about what "supported" means.
-
-The ceiling, stated so nobody claims more: lexical support catches NEW
-content — a name, a number, an event that is not in the evidence — and a
-copied prompt example. It does not catch an inverted relation built from
-the right words ("Kritik an Wahlkreisen" from a turn about criticism and
-constituencies). That is measured by the eval's judge column (Summary
-Engine v2, Q1) and becomes a production judge only if the numbers say so.
-
+Catches NEW content (a name, number or event not in the evidence) and copied
+prompt examples; not an inverted relation built from the right words.
 Pure. No logging: the inputs are content.
 """
 
@@ -26,8 +14,7 @@ from typing import Final
 
 # ── Stop words ──────────────────────────────────────────────────────
 
-# The merge step's list (Sprint 33), unchanged: merging depends on it and
-# a change here would change which facts count as the same fact.
+# The merge step's list: a change here changes which facts count as the same fact.
 MERGE_STOP: Final[frozenset[str]] = frozenset(
     # fmt: off
     [
@@ -84,9 +71,7 @@ MERGE_STOP: Final[frozenset[str]] = frozenset(
     # fmt: on
 )
 
-# Per language, for support: function words that carry no claim. Wider
-# than MERGE_STOP — a support ratio should not be propped up by "was" and
-# "nicht", nor dragged down by "was" missing from a quote.
+# Per language, wider than MERGE_STOP: function words must not move a support ratio.
 STOP_WORDS: Final[dict[str, frozenset[str]]] = {
     "en": frozenset(
         # fmt: off
@@ -353,8 +338,7 @@ _ALL_STOP: Final[frozenset[str]] = frozenset().union(*STOP_WORDS.values())
 STEM: Final = 5
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 CAPITALISED: Final = re.compile(r"\b([A-ZА-ЯІЇЄҐÄÖÜ][\w'’\-]{1,29})\b")
-# What may stand before a word that opens a sentence (or a clause after
-# "Owner:"), so its capital letter says nothing about it being a name.
+# Before these a capital letter says nothing about being a name.
 _OPENERS: Final = ".!?:;—–(\"'„«“‚"
 
 
@@ -363,7 +347,7 @@ def _fold(text: str) -> str:
 
 
 def merge_tokens(text: str) -> frozenset[str]:
-    """The merge step's tokens — exactly what ``merge._tokens`` was."""
+    """The merge step's tokens."""
     return frozenset(w for w in _WORD.findall(_fold(text)) if len(w) > 1 and w not in MERGE_STOP)
 
 
@@ -382,15 +366,10 @@ def content_tokens(text: str, language: str) -> list[str]:
     return [_stem(w) for w in _WORD.findall(_fold(text)) if len(w) > 1 and w not in stops]
 
 
-# F3 amendment §2.10 — a German or Ukrainian word is often a compound or
-# an inflection of the evidence's word ("Geheimdienstdaten" / "Daten des
-# Geheimdienstes"): a claim word also counts as supported when it shares a
-# run of this many letters with an evidence word.
+# A claim word sharing a run of this many letters with an evidence word counts
+# as supported (German/Ukrainian compounds and inflections).
 COMPOUND_MIN: Final = 6
-# §2.10 — the line gate's threshold per language. PROVISIONAL: the values
-# the amendment expects (≈ 0.5 en, ≈ 0.4 de/uk). Calibrate against the
-# judge column on eval/notes/v2 (scripts/eval/support_calibration.py) and
-# replace them with the measured ones.
+# Line gate threshold per language. PROVISIONAL: calibrate with scripts/eval/support_calibration.py.
 LINE_SUPPORT_BY_LANGUAGE: Final[dict[str, float]] = {"en": 0.5, "de": 0.4, "uk": 0.4}
 LINE_SUPPORT_DEFAULT: Final = 0.5
 
@@ -404,10 +383,8 @@ def _runs(word: str) -> set[str]:
 
 
 def support_ratio(claim: str, evidence: str, language: str = "en") -> float:
-    """Share of the claim's content words that the evidence has — by
-    five-letter stem, or by a shared run of :data:`COMPOUND_MIN` letters
-    (compounds and inflections). 1.0 for a claim with no content words:
-    there is nothing to support."""
+    """Share of the claim's content words the evidence has (by stem or a
+    :data:`COMPOUND_MIN` run); 1.0 for a claim with no content words."""
     stops = stop_words(language) | MERGE_STOP
     words = {w for w in _WORD.findall(_fold(claim)) if len(w) > 1 and w not in stops}
     claim_stems = {_stem(w): w for w in sorted(words)}
@@ -426,10 +403,7 @@ def _body(text: str) -> str:
 
 
 def names_in(text: str) -> list[str]:
-    """Capitalised tokens that are not the first word of a sentence (or of
-    the clause after an ``Owner:`` prefix). German capitalises nouns: they
-    are caught here too, and are checked by stem, so "Fraktion" supports
-    "Fraktionsvorsitzende" while "Berlin" is new."""
+    """Capitalised non-initial tokens (German nouns included, compared by stem)."""
     body = _body(text)
     out: list[str] = []
     for match in CAPITALISED.finditer(body):
@@ -441,9 +415,8 @@ def names_in(text: str) -> list[str]:
 
 
 def new_names(claim: str, evidence: str, known: frozenset[str] = frozenset()) -> list[str]:
-    """Capitalised non-initial tokens of ``claim`` that neither the
-    evidence nor ``known`` (speaker names, name candidates, owners) has,
-    compared by stem. In order, once each."""
+    """Capitalised non-initial tokens of ``claim`` that neither the evidence nor
+    ``known`` has, by stem; in order, once each."""
     have = {_stem(w) for w in _WORD.findall(_fold(evidence))}
     have |= {_stem(w) for name in known for w in _WORD.findall(_fold(name))}
     out: list[str] = []
@@ -469,8 +442,7 @@ def cyrillic_share(text: str) -> float:
 
 
 def stop_word_share(text: str, language: str) -> float:
-    """Share of the words that are the language's stop words — high for
-    running speech in that language, near zero for another language."""
+    """Share of the words that are the language's stop words."""
     words = [w for w in _WORD.findall(_fold(text)) if len(w) > 0]
     if not words:
         return 0.0
@@ -480,10 +452,9 @@ def stop_word_share(text: str, language: str) -> float:
     return sum(1 for w in words if w in stops) / len(words)
 
 
-# ── Certainty in words (Q4) ─────────────────────────────────────────
+# ── Certainty in words ──────────────────────────────────────────────
 
-# Words that already say a statement is not a plain fact. The eval's
-# hedge scorer (Q1) and the engine read the same list.
+# Words that already say a statement is not a plain fact; shared with the eval's hedge scorer.
 MODALITY_MARKERS: Final[dict[str, tuple[str, ...]]] = {
     "de": (
         "wahrscheinlich", "vermutlich", "voraussichtlich", "geplant", "erwartet", "könnte",
@@ -532,20 +503,16 @@ def has_marker(text: str, language: str) -> bool:
 
 
 def names_actor(text: str, actor: str) -> bool:
-    """Whether ``text`` names ``actor`` — by the last word of the name,
-    which is how a note refers to a person after the first mention."""
+    """Whether ``text`` names ``actor``, by the last word of the name."""
     last = actor.split()[-1] if actor.split() else ""
     return (
         bool(last) and re.search(rf"(?<!\w){re.escape(_fold(last))}(?!\w)", _fold(text)) is not None
     )
 
 
-# ── Sprint F2: does a line carry information, and whose voice is it in ──
+# ── Does a line carry information, and whose voice is it in ────────
 
-# Words that judge instead of inform. A line whose only content is one of
-# these ("This boat is incredible.") tells a reader who was not there
-# nothing they can use. Per language; a capitalised non-initial use is a
-# name ("Nice" the city) and counts.
+# Words that judge instead of inform. A capitalised non-initial use is a name ("Nice") and counts.
 EVALUATIVE: Final[dict[str, frozenset[str]]] = {
     "en": frozenset(
         {
@@ -659,16 +626,14 @@ FILLER: Final[frozenset[str]] = frozenset(
         "re",
     }
 )
-# Below this many information tokens a line is chatter, unless it is a
-# task or a decision (short by nature) or carries a number, name or date.
+# Below this many information tokens a line is chatter (tasks, decisions, numbers, names, dates exempt).
 MIN_INFORMATION: Final = 4
 
 _DIGITS: Final = re.compile(r"\d")
 
 
 def information_tokens(text: str, language: str) -> list[str]:
-    """The tokens of ``text`` that inform (decision 3): numbers, names, and
-    content words that are neither function words, filler nor judgement."""
+    """The tokens that inform: numbers, names, and content words that are not function words, filler or judgement."""
     body = _body(text)
     names = {n.casefold() for n in names_in(body)}
     stops = stop_words(language) | MERGE_STOP | FILLER
@@ -693,13 +658,10 @@ def information_score(text: str, language: str) -> int:
 def carries_information(
     text: str, language: str, *, short_ok: bool = False, has_date: bool = False
 ) -> bool:
-    """False for a ``no_information`` line (F2, decision 3): nothing in it
-    informs, or it is short (fewer than :data:`MIN_INFORMATION` informing
-    tokens) and judges — "This boat is incredible." A short line that
-    states something ("Ticket prices were discussed", "Das ist nicht
-    verhandelbar") stays: the four-token floor on its own dropped real
-    facts and cost recall. A task or a decision (``short_ok``), and a line
-    with a number, a name or a date, is never too short."""
+    """False for a ``no_information`` line: nothing informs, or it is short and
+    judges ("This boat is incredible."). A short line that states something stays
+    (the bare floor cost recall); ``short_ok`` kinds and lines with a number, name
+    or date are never too short."""
     tokens = information_tokens(text, language)
     if not tokens:
         return False
@@ -712,8 +674,7 @@ def carries_information(
     return not any(w in judging for w in _WORD.findall(_fold(body)))
 
 
-# A line in the speaker's own voice (decision 4): at the start, or one of
-# the unmistakable contractions anywhere.
+# The speaker's own voice: at the start, or an unmistakable contraction anywhere.
 _FIRST_PERSON_START: Final = re.compile(
     r"^(?:I|We|You|Let's|Let’s|I'm|I’m|We're|We’re|I'll|I’ll|We'll|We’ve|We've|I've|"
     r"Ich|Wir|Я|Ми)\b",
@@ -723,14 +684,12 @@ _FIRST_PERSON_ANY: Final = re.compile(
     r"\bmy name\b|\bмене звати\b)",
     re.IGNORECASE,
 )
-# Openers that only keep talk going. Dropping one is the only rewrite code
-# makes of a model's line.
+# Dropping one of these is the only rewrite code makes of a model's line.
 _MECHANICAL_OPENER: Final = re.compile(r"^(?:So|Again|Also)\s*,\s*", re.IGNORECASE)
 
 
 def mechanical_third_person(text: str) -> str | None:
-    """``text`` without a leading "So," / "Again," / "Also," (capitalised
-    again), or None when there is no such opener."""
+    """``text`` without a leading "So," / "Again," / "Also,", or None without one."""
     body = text.strip()
     match = _MECHANICAL_OPENER.match(body)
     if match is None:
@@ -742,17 +701,15 @@ def mechanical_third_person(text: str) -> str | None:
 
 
 def first_person(text: str, language: str = "en") -> bool:
-    """The line speaks as I / we / you — the transcript's voice, not the
-    record's."""
+    """The line speaks as I / we / you."""
     del language  # the patterns cover all three languages
     body = _body(text).strip().lstrip("\"'“„«")
     return bool(_FIRST_PERSON_START.match(body) or _FIRST_PERSON_ANY.search(body))
 
 
-# ── F3 amendment §2.5 / §2.8 / A-13: what is specific, what is scenery ──
+# ── What is specific, what is scenery ───────────────────────────────
 
-# Scene and perception verbs — a line that only says what could be seen or
-# heard (stems, case-folded).
+# Scene and perception verbs (stems, case-folded).
 SCENE_VERBS: Final[dict[str, tuple[str, ...]]] = {
     "de": ("seh", "sieht", "sah", "gesehen", "zeig", "gezeigt", "film", "gefilmt", "hör",
            "gehört", "schau", "steig", "stieg", "entsteh", "entstand", "brenn", "explodier"),
@@ -775,10 +732,8 @@ _QUOTED: Final = re.compile(r"[\"„“«»]([^\"„“«»]{2,60})[\"“”«»
 
 
 def recording_names(texts: list[str], minimum: int = RECORDING_NAME_MIN) -> frozenset[str]:
-    """Capitalised words said at least ``minimum`` times inside a sentence
-    in this recording — what the recording itself spells ("Palantir",
-    "Thiel", "Karp"). German nouns qualify too; the rules that use this set
-    exclude the generic ones."""
+    """Capitalised words said at least ``minimum`` times inside a sentence; German
+    nouns qualify too, the callers exclude the generic ones."""
     counts: dict[str, int] = {}
     for text in texts:
         for name in names_in(text):
@@ -787,9 +742,8 @@ def recording_names(texts: list[str], minimum: int = RECORDING_NAME_MIN) -> froz
 
 
 def entities_in(text: str, language: str, known: frozenset[str] = frozenset()) -> list[str]:
-    """Named things in a line: capitalised words inside the sentence — in
-    German only those the recording or the workspace knows as names (every
-    noun is capitalised there) — and acronyms; never a generic subject."""
+    """Named things in a line: capitalised non-initial words (in German only known
+    names) and acronyms; never a generic subject."""
     out: list[str] = []
     for name in names_in(text):
         folded = name.casefold()
@@ -805,9 +759,7 @@ def entities_in(text: str, language: str, known: frozenset[str] = frozenset()) -
 def descriptive(
     text: str, language: str, *, known: frozenset[str] = frozenset(), has_date: bool = False
 ) -> bool:
-    """§2.5: a scene — a perception or scene verb, a generic subject, and
-    no named thing, number or date ("Menschen auf der Straße werden
-    gefilmt", "Ein riesiger Feuerball entsteht")."""
+    """A scene: a perception/scene verb, a generic subject, no named thing, number or date."""
     body = _body(text)
     if has_date or _DIGITS.search(body):
         return False
@@ -822,9 +774,7 @@ def descriptive(
     return verb and subject
 
 
-# Sprint D1 T3 — an evaluation of a person or thing with no claim after it
-# ("Alex Karp hatte einen ungewöhnlichen Lebenslauf für einen Tech-CEO"):
-# the note learns an opinion of the adjective, nothing checkable.
+# An evaluation with no claim after it teaches the note nothing checkable.
 EVALUATIVE_STEMS: Final[dict[str, tuple[str, ...]]] = {
     "en": ("unusual", "interesting", "special", "remarkable", "impressive", "incredible",
            "fascinating", "amazing", "strange", "extraordinary", "notable", "unique"),
@@ -833,8 +783,7 @@ EVALUATIVE_STEMS: Final[dict[str, tuple[str, ...]]] = {
            "merkwürdig", "einzigartig"),
     "uk": ("незвичайн", "цікав", "особлив", "вражаюч", "дивовижн", "дивн", "унікальн"),
 }  # fmt: skip
-# What follows an evaluation when it says something: a reason, a relative
-# clause, an explanation.
+# What follows an evaluation when it says something.
 _CLAIM_FOLLOWS: Final = re.compile(
     r",\s*(?:weil|da|dass|der|die|das|denn|which|who|that|because|since|бо|який|яка|яке|що)\b"
     r"|\b(?:because|weil|denn|тому що)\b|[:—]",
@@ -853,13 +802,11 @@ def evaluative(text: str, language: str) -> bool:
 def specificity(
     text: str, language: str, *, known: frozenset[str] = frozenset(), has_date: bool = False
 ) -> int:
-    """A-13: how checkable a line is — named things, numbers (digits or
-    words), a date, quoted terms."""
+    """How checkable a line is: named things, numbers, a date, quoted terms."""
     from . import numbers
 
     body = _body(text)
-    # An article is not a count ("ein Feuerball", "a fireball"): a one said
-    # as a word does not make a line checkable; digits always do.
+    # An article is not a count ("ein Feuerball"); digits always are.
     counted = numbers.digit_numbers(body) + [
         n for n in numbers.number_words(body, language) if n != 1
     ]
@@ -871,7 +818,7 @@ def specificity(
     )
 
 
-# ── Sprint D2: subjects ─────────────────────────────────────────────
+# ── Subjects ────────────────────────────────────────────────────────
 
 PRONOUN_SUBJECTS: Final[dict[str, frozenset[str]]] = {
     "en": frozenset({"he", "she", "it", "they", "him", "her", "his", "their", "them"}),
@@ -911,9 +858,7 @@ _CAPITAL_RUN: Final = re.compile(
 
 
 def capital_runs(text: str) -> list[str]:
-    """Two or more capitalised words in a row ("Peter Thiel", "Total
-    Information Awareness") — a sentence's capitalised first word is not
-    part of a name ("Im Jahr" is not one)."""
+    """Two or more capitalised words in a row; a sentence's first word never counts."""
     out = []
     for match in _CAPITAL_RUN.finditer(text):
         words = match.group(0).split()
@@ -925,7 +870,7 @@ def capital_runs(text: str) -> list[str]:
     return out
 
 
-# Sprint D2 — which of the recording's frequent capitalised words are names.
+# Which of the recording's frequent capitalised words are names.
 _DETERMINERS: Final[dict[str, frozenset[str]]] = {
     "de": frozenset({
         "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
@@ -939,10 +884,8 @@ _ADJECTIVE_END: Final = re.compile(r"(?:en|er|es|em|e)$")
 
 
 def proper_names(texts: list[str], candidates: frozenset[str], language: str) -> frozenset[str]:
-    """In German every noun is capitalised: a frequent capitalised word is a
-    name only when it mostly stands without an article or determiner before
-    it ("Thiel", "Palantir"), not "die Menschen", "das Unternehmen". Other
-    languages: the candidates as they are."""
+    """In German a frequent capitalised word is a name only when it mostly stands
+    without an article or determiner; other languages: the candidates as they are."""
     determiners = _DETERMINERS.get(language)
     if not determiners:
         return candidates
@@ -957,8 +900,7 @@ def proper_names(texts: list[str], candidates: frozenset[str], language: str) ->
                     continue
                 seen[word] = seen.get(word, 0) + 1
                 before = words[k - 1]
-                # A noun's company: an article or determiner, a number, or an
-                # inflected adjective ("3000 Menschen", "brennenden Gebäude").
+                # A noun's company: an article, determiner, number or inflected adjective.
                 if (
                     before.casefold() in determiners
                     or before.isdigit()

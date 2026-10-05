@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Regenerate ``web/tests/fixtures/item-keys.json`` (Summary Engine v2, Q5).
-
-The web finds a generated line's evidence row by hashing the line it
-displays the way the server keys it (``lines.key_of`` after
-``lines.strip_marker``). Both test suites read this file, so the two
-implementations cannot drift apart unnoticed.
+"""Regenerate ``web/tests/fixtures/item-keys.json`` so the web's line-key hashing cannot
+drift from the server's (``lines.key_of`` after ``lines.strip_marker``).
 
     uv run --project services/note-service python scripts/dev/item_key_fixtures.py
 """

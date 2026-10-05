@@ -8,11 +8,9 @@ import {
 } from "../src/api/http";
 
 /**
- * §F and §I of IDX-W1, as assertions:
- *   - every auth call declares `X-Client-Type: web` and carries a request id;
- *   - the refresh cookie is the only refresh channel a browser has;
- *   - a 403 `reauth_required` goes through the one dialog and retries once,
- *     and a cancelled dialog does not retry.
+ * Every auth call declares `X-Client-Type: web` and a request id; the refresh
+ * cookie is the browser's only refresh channel; a 403 `reauth_required` goes
+ * through the one dialog and retries once.
  */
 
 type Handler = (url: string, init: RequestInit) => Response | Promise<Response>;
@@ -62,13 +60,9 @@ describe("transport headers", () => {
     expect(header(calls[0]!.init, "X-Client-Type")).toBeUndefined();
   });
 
-  // Each of these bases is a different origin from the SPA, so a request
-  // header the service does not list in `allow_headers` fails the browser
-  // preflight and the real call is never sent — it surfaces as a bare
-  // network error, not as a 4xx. note-service, asr-service and
-  // notification-service still allow only `Authorization` and
-  // `Content-Type`; sending `X-Request-Id` to them took every note, ASR and
-  // notification call offline while auth-service kept working.
+  // Cross-origin: a header a service does not list in `allow_headers` fails the
+  // preflight. Only auth-service allows `X-Request-Id`; sending it elsewhere took
+  // every note/ASR/notification call offline.
   const SAFELISTED = ["accept", "accept-language", "content-language", "content-type"];
   const CORS_ALLOWED: Record<string, string[]> = {
     auth: [...SAFELISTED, "authorization", "x-client-type", "x-request-id"],
@@ -117,9 +111,7 @@ describe("transport headers", () => {
 
 describe("the refresh cookie is the only refresh channel", () => {
   it("never persists a refresh_token that leaks into a web response", async () => {
-    // The server sends this field to native clients only. If one ever
-    // appeared in a web response it must go nowhere — so watch every write
-    // path a browser has.
+    // Native-only field; if it ever appears in a web response it must go nowhere.
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     mockFetch(() =>
       json({
@@ -143,10 +135,7 @@ describe("the refresh cookie is the only refresh channel", () => {
   });
 
   it("has no code anywhere that reads refresh_token", async () => {
-    // The strongest form of §M's "web responses are never inspected for a
-    // refresh token": not an assertion about one call, but the absence of
-    // any reader in the whole client. `AuthResult` deliberately does not
-    // declare the field, so this fails if somebody adds it back.
+    // No reader of the field anywhere in the client; `AuthResult` deliberately omits it.
     const { readFileSync, readdirSync, statSync } = await import("node:fs");
     const { join, resolve } = await import("node:path");
 
@@ -157,12 +146,11 @@ describe("the refresh cookie is the only refresh channel", () => {
       });
 
     const offenders = walk(resolve(__dirname, "../src")).filter((file) => {
-      // Comments are stripped: the field is discussed at length, and should be.
+      // Comments may mention it; code may not.
       const code = readFileSync(file, "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/\/\/.*$/gm, "");
-      // As an identifier, not as a substring: `no_refresh_token` is an
-      // error code the UI is supposed to handle, not a token being read.
+      // As an identifier: `no_refresh_token` is an error code, not a read.
       return /(?<![A-Za-z0-9_])refresh_token(?![A-Za-z0-9_])/.test(code);
     });
 

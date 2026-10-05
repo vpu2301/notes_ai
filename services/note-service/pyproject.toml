@@ -29,18 +29,16 @@ dependencies = [
     # PDF rendering (deterministic export)
     "weasyprint>=62.0",
     "Jinja2>=3.1",
-    # Sharing a note by e-mail: the branded HTML mail the server sends
-    # instead of handing the browser a mailto: URL.
+    # Sharing a note by e-mail
     "aiosmtplib>=3.0",
     "pypdf>=4.2",
-    # Calendar links (0020): RRULE expansion of iCal feeds
+    # Calendar links: RRULE expansion of iCal feeds
     "python-dateutil>=2.9",
     # "Ask this note" (ADR-0046): the model-provider seam
     "models",
-    # Sprint 19: abuse caps on the anonymous shared-note surface
+    # Abuse caps on the anonymous shared-note surface
     "ratelimit",
-    # Sprint 33: the generation queue the API enqueues onto and
-    # `note_service.worker` drains (ADR-0058).
+    # The generation queue (ADR-0058)
     "jobs",
     # Note titles: the common-word and name lists (asr_models/resources).
     "asr_models",

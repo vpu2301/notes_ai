@@ -1,22 +1,9 @@
-"""Frozen-version replay (ADR-0028).
+"""Frozen-version replay (ADR-0028): byte-equal under a frozen ``pipeline_version``.
 
-The contract is byte-equal replay **under a frozen
-``pipeline_version``**. v1.1.0 inserted a stage, so the two versions
-are different pipelines and are replayed as such:
-
-- ``nlp-v1.0.0`` fixtures replay through the SIX-stage pipeline —
-  proving a historical session processed before the field-extraction
-  stage still produces exactly the bytes it produced then.
-- ``nlp-v1.1.0`` fixtures replay through the SEVEN-stage pipeline.
-
-Scope: the deterministic stages only. ``punctuation`` is an ML model
-whose bytes are pinned by the model revision, not by this contract
-(see docs/models/PINS.md), so it is excluded here.
-
-Regenerate with::
-
-    uv run --project services/nlp-service python \\
-        services/nlp-service/tests/fixtures/replay/regenerate.py
+v1.0.0 fixtures replay through the six-stage pipeline, v1.1.0 through the
+seven-stage one. Deterministic stages only (``punctuation`` is pinned by
+model revision, docs/models/PINS.md). Regenerate with
+``tests/fixtures/replay/regenerate.py``.
 """
 
 from __future__ import annotations
@@ -50,11 +37,7 @@ FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "replay"
 
 
 def stages_for_version(version: str) -> list[Stage]:
-    """The deterministic stage list as it stood at ``version``.
-
-    This mapping is what makes historical replay meaningful: a v1.0.0
-    session is replayed through the pipeline that produced it.
-    """
+    """The deterministic stage list as it stood at ``version``."""
     if version == "nlp-v1.0.0":
         return [NumberNormStage(), DateNormStage(), AbbreviationStage(), ConfidenceStage()]
     if version == "nlp-v1.1.0":

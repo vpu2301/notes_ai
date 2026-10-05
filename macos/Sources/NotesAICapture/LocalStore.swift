@@ -1,18 +1,8 @@
 import Foundation
 
-/// Everything this Mac keeps for a signed-in person, filed by **who** and
-/// **which workspace**.
-///
-/// Before IDX-M2 there was one bucket: a second account signing in on the
-/// same Mac saw the first one's meetings, and switching workspace showed
-/// the wrong workspace's list. The fix is a key per identity per tenant,
-/// and one migration that moves what is already there under whoever signs
-/// in first.
-///
-/// A struct over `UserDefaults` rather than a pile of methods on
-/// `AppState` so the rules — what a scope is, what a migration does, what
-/// "remove this account's data" removes — can be tested without standing
-/// up the whole app.
+/// Everything this Mac keeps for a signed-in person, filed by identity and workspace
+/// (one key per identity per tenant, plus one migration from the old single bucket).
+/// A struct over `UserDefaults` so the rules can be tested without the whole app.
 struct LocalStore {
     let defaults: UserDefaults
 
@@ -34,11 +24,7 @@ struct LocalStore {
         defaults.set(data, forKey: scope.key(AppState.Keys.recents))
     }
 
-    /// Add one meeting to a workspace that is not the one on screen.
-    ///
-    /// A recording made in workspace A can finish uploading long after the
-    /// person moved to B; it belongs in A's list, and putting it in B's
-    /// would be filing somebody's meeting in the wrong company.
+    /// Add one meeting to a workspace that is not the one on screen (an upload finishing after a switch).
     func addRecent(_ recent: RecentCapture, to scope: AppState.LocalScope, limit: Int = 10) {
         var list = recents(for: scope)
         list.removeAll { $0.jobId == recent.jobId }
@@ -48,12 +34,8 @@ struct LocalStore {
 
     // MARK: - The one-time move
 
-    /// Move the pre-IDX-M2 keys under the first identity that signs in.
-    ///
-    /// Runs once (`localStateMigratedV2`). The legacy values are copied,
-    /// not moved: one release of overlap means a downgrade still finds its
-    /// meetings, and the keys go away in the release after this one.
-    /// Returns whether anything was carried across.
+    /// Move the pre-scoped keys under the first identity that signs in. Runs once
+    /// (`localStateMigratedV2`); values are copied, not moved, so a downgrade still finds them.
     @discardableResult
     func migrateLegacyRecents(into scope: AppState.LocalScope) -> Bool {
         guard !defaults.bool(forKey: AppState.Keys.migratedV2) else { return false }
@@ -95,13 +77,7 @@ struct LocalStore {
             .sorted { $0.email < $1.email }
     }
 
-    /// Delete one identity's local state: its scoped keys under every
-    /// workspace, its pending recordings, and its entry in the list.
-    ///
-    /// Local only — nothing on the server is touched, and nothing about
-    /// any other account is either. The pending recordings go **because
-    /// the person asked**, which is the only reason anything ever deletes
-    /// one.
+    /// Delete one identity's local state (scoped keys, pending recordings, list entry). Local only; recordings go because the person asked.
     func removeLocalData(identityId: String, pendingDirectory: URL = PendingCaptures.directory) {
         for key in defaults.dictionaryRepresentation().keys where key.contains(".\(identityId).") {
             defaults.removeObject(forKey: key)

@@ -1,4 +1,4 @@
-"""Diff response models. Day-5 endpoint shape."""
+"""Diff response models."""
 
 from __future__ import annotations
 

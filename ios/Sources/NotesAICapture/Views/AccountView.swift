@@ -1,12 +1,6 @@
 import SwiftUI
 
-/// Settings › Account: who you are, where you are signed in, and what this
-/// phone is holding on your behalf.
-///
-/// Everything on this page is about a thing that can be taken away — a
-/// name, a membership, a session, a recording — so every row says what
-/// will actually happen before it happens. The two destructive ones (sign
-/// out with recordings waiting, remove another account's data) ask twice.
+/// Settings › Account: who you are, where you are signed in, what this phone holds. Destructive rows ask twice.
 struct AccountView: View {
     @EnvironmentObject private var app: AppState
 
@@ -23,8 +17,7 @@ struct AccountView: View {
     @State private var confirmRemoveOthers = false
     @State private var gateBusy = false
     @State private var gateError: String?
-    /// Whether this phone holds a saved password (Keycloak sessions only,
-    /// during the dual-issuer period). Read once, then owned by the row.
+    /// Whether this phone holds a saved password (Keycloak sessions only). Read once.
     @State private var savedPassword = CredentialStore.hasSaved
     /// Who is in the open workspace — the roster, read-only here.
     @State private var members: [TenantMember] = []
@@ -183,9 +176,7 @@ struct AccountView: View {
             } else {
                 Button("Switch") { Task { await app.switchWorkspace(to: workspace) } }
                     .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 32))
-                    // Native sessions only, during the dual-issuer period:
-                    // auth-service cannot re-mint a Keycloak token for
-                    // another tenant (ADR-0047).
+                    // Native sessions only (ADR-0047).
                     .disabled(app.switchingTo != nil || !app.canSwitchWorkspace)
             }
         }
@@ -216,12 +207,7 @@ struct AccountView: View {
                 }
                 DSDivider()
             }
-            // The biometric gate is built and tested (IDX-I1) but not
-            // offered in this batch: during the dual-issuer period a phone
-            // may hold a Keycloak session, which has no native refresh
-            // token to seal, and a toggle that works for half the user
-            // base is worse than one that is not there yet. I1-05 turns
-            // `AppState.gateOffered` on once every session is native.
+            // The biometric gate is not offered while Keycloak sessions exist (`AppState.gateOffered`).
             if AppState.gateOffered, app.canGate, Biometrics.isAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle(Biometrics.gateTitle, isOn: gateBinding)
@@ -349,9 +335,7 @@ struct AccountView: View {
             sessions = try await app.api.sessions()
             sessionsError = nil
         } catch {
-            // A session list that cannot be fetched is worth saying so
-            // about: this is the screen people come to when they think
-            // somebody else is signed in as them.
+            // Say so when the session list cannot be fetched.
             sessionsError = AuthCopy.message(for: error)
         }
     }
@@ -369,9 +353,7 @@ struct AccountView: View {
 
     private func revokeOthers() async {
         do {
-            // `403 reauth_required` comes back from the server here and is
-            // answered by the step-up sheet inside `APIClient`, which then
-            // retries this request once. Nothing to do about it here.
+            // `403 reauth_required` is answered inside `APIClient` (step-up + one retry).
             _ = try await app.api.revokeOtherSessions()
             await loadSessions()
         } catch {
@@ -412,9 +394,7 @@ struct AccountView: View {
     private var signOut: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                // A recording that has not been uploaded belongs to the
-                // session that is about to end: say so before it does,
-                // rather than after.
+                // Warn about un-uploaded recordings before the session ends.
                 if app.pending.isEmpty {
                     Task { await performSignOut() }
                 } else {

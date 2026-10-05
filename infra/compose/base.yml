@@ -1,17 +1,6 @@
-# ──────────────────────────────────────────────────────────────
-# Base compose — infrastructure dependencies common to every env.
-# This is a SUBSET of the root docker-compose.yml meant to be merged
-# with `dev.yml` (developer workstation) or `gpu.yml` (worker overlay).
-#
-# Sprint 03 splits the original monolithic docker-compose.yml into
-# layered overlays so a developer without a GPU can still run the
-# rest of the stack via `docker compose -f base.yml -f dev.yml up`.
-#
-# Run:
-#   docker compose -f infra/compose/base.yml -f infra/compose/dev.yml up -d
-#   docker compose -f infra/compose/base.yml -f infra/compose/dev.yml \
-#                  -f infra/compose/gpu.yml up -d
-# ──────────────────────────────────────────────────────────────
+# Base compose: infrastructure common to every env, merged with dev.yml and
+# optionally gpu.yml:
+#   docker compose -f infra/compose/base.yml -f infra/compose/dev.yml [-f infra/compose/gpu.yml] up -d
 name: notes-ai
 
 services:
@@ -45,33 +34,26 @@ services:
       retries: 5
 
   minio:
-    # NOTE: MinIO withdrew its community images from Docker Hub (2025) —
-    # `docker pull minio/minio` now returns "pull access denied". quay.io is
-    # the upstream-published mirror; same digests, same RELEASE tags.
+    # quay.io: MinIO withdrew its images from Docker Hub (same digests, same tags).
     image: quay.io/minio/minio:RELEASE.2024-04-18T19-09-19Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      # Server-side encryption (defence in depth — the envelope is the
-      # actual guarantee; this is belt-and-braces).
+      # Server-side encryption, defence in depth (the envelope is the guarantee).
       MINIO_KMS_SECRET_KEY: "mdx-default-key:${MINIO_SSE_KEY:-Ttvy7TltSnEEHfp2rsCXLgi+aFAH8mFv/CyowJiJ0vc=}"
     volumes:
       - minio_data:/data
     healthcheck:
-      # This MinIO release ships without curl/wget; `mc ready local` is the
-      # bundled readiness probe (matches root docker-compose.yml — Sprint A1).
+      # No curl/wget in the image; `mc ready` is MinIO's bundled probe.
       test: ["CMD", "mc", "ready", "local"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 10s
 
-  # One-shot bucket init container; exits 0 after creating buckets idempotently.
   minio-init:
-    # NOTE: see the MinIO server note — `minio/mc` was withdrawn from Docker
-    # Hub too; quay.io is the upstream registry.
     image: quay.io/minio/mc:RELEASE.2024-04-18T16-45-29Z
     depends_on:
       minio:

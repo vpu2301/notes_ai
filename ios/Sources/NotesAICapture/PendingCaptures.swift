@@ -1,51 +1,28 @@
 import Foundation
 
-/// A recording that was made but never uploaded.
-///
-/// Before IDX-I1 the pipeline deleted the file on **every** exit — including
-/// the one where the upload failed because the session had ended. The
-/// meeting was over, the audio was gone, and the app's only trace of it was
-/// a red banner. Nothing about a failed request justifies destroying the
-/// one copy of something that cannot be recorded again, so a recording that
-/// did not reach the server is moved here instead and kept.
-///
-/// IDX-I2 adds the screen that retries these; until then they are files on
-/// disk with a sidecar that says what they were, which is the part that
-/// must not wait.
+/// A recording that was made but never uploaded: kept on disk with a sidecar, never destroyed by a failed request.
 struct PendingCapture: Identifiable, Equatable, Sendable {
     var id: String { audioURL.lastPathComponent }
     let audioURL: URL
     let info: Info
 
-    /// The sidecar written beside the audio. Everything the upload would
-    /// have carried, plus who was signed in when it was recorded — a phone
-    /// handed round a team should not offer one person another's meeting.
+    /// The sidecar beside the audio: everything the upload would carry, plus who was signed in.
     struct Info: Codable, Equatable, Sendable {
         var title: String
         var language: String
         var diarize: Bool
         var recordedAt: Date
         var identityId: String
-        /// The workspace the recording was made for. The upload is sent
-        /// with a token scoped to it, not to whatever is active now.
+        /// The workspace the recording was made for; the upload uses a token scoped to it.
         var tenantId: String?
-        /// The "People" hint (Sprint 29), so a capture made offline still
-        /// uploads with it. Absent from sidecars written before, which
-        /// decode with nil — no hint, as they were recorded.
+        /// The "People" hint; nil from older sidecars.
         var speakersExpected: Int? = nil
-        /// Sprint 30 — the capture context (calendar invitees as a cap and
-        /// as names to offer, and where the capture started), so a meeting
-        /// kept for later still uploads with it. All absent from older
-        /// sidecars, which decode with nil. The source is kept as a string:
-        /// a value this build does not know must not make the recording
-        /// unreadable.
+        /// The capture context; nil from older sidecars. The source stays a
+        /// string so an unknown value cannot make the recording unreadable.
         var speakersMax: Int? = nil
         var nameCandidates: [String]? = nil
         var captureSource: String? = nil
-        /// Sprint F1 — when Record was pressed and how many milliseconds
-        /// passed before audio reached the file, so a later upload still
-        /// says when the recording really began. Absent from older
-        /// sidecars, which upload without them.
+        /// When Record was pressed and how late audio reached the file; absent from older sidecars.
         var recordPressedAt: Date? = nil
         var firstFrameOffsetMs: Int? = nil
 
@@ -91,27 +68,15 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
 }
 
 enum PendingCaptures {
-    /// `<Application Support>/pending` inside the app's container.
-    ///
-    /// Application Support rather than the temporary directory the recorder
-    /// writes to: the point of moving the file is that it survives, and iOS
-    /// reclaims the other one whenever it feels like it. Application
-    /// Support is also excluded from the iCloud backup of media by default
-    /// only if marked; these are the user's own recordings, so they are
-    /// left backed up.
+    /// `<Application Support>/pending`: survives, unlike the temporary directory; left in the backup on purpose.
     static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? FileManager.default.temporaryDirectory
         return base.appending(path: "pending", directoryHint: .isDirectory)
     }
 
-    /// Move the recording out of harm's way and write its sidecar.
-    ///
-    /// The audio is moved first: if the sidecar cannot be written, a file
-    /// with no description is still a recoverable meeting, while a
-    /// description with no file is nothing at all. Returns where the audio
-    /// ended up, or nil if even the move failed — in which case the
-    /// original is left exactly where it is, which is still not deleted.
+    /// Move the recording to `pending/` and write its sidecar. Audio first:
+    /// a file without a sidecar is still recoverable. Nil if the move failed (original untouched).
     @discardableResult
     static func keep(_ fileURL: URL, info: PendingCapture.Info,
                      in directory: URL = PendingCaptures.directory) -> URL? {
@@ -131,14 +96,8 @@ enum PendingCaptures {
         }
     }
 
-    /// The data-protection class these files are written with.
-    ///
-    /// Not `.complete`: an upload can still be running as the phone locks
-    /// — the whole point of the `audio` background mode — and a file that
-    /// becomes unreadable mid-read would fail the upload it was kept for.
-    /// `.completeUntilFirstUserAuthentication` still means the recordings
-    /// are unreadable on a phone that has not been unlocked since it was
-    /// switched on, which is the threat a stolen handset actually poses.
+    /// Not `.complete`: an upload may still be running while the phone locks.
+    /// `.completeUntilFirstUserAuthentication` still covers a stolen, never-unlocked handset.
     static let protection = FileProtectionType.completeUntilFirstUserAuthentication
 
     /// The sidecar for a kept recording.
@@ -154,13 +113,7 @@ enum PendingCaptures {
                                                ofItemAtPath: url.path)
     }
 
-    /// Point a kept recording at another workspace.
-    ///
-    /// The recording is the person's; the workspace they were in when
-    /// they made it may be one they have since been removed from. Rather
-    /// than lose the meeting, they can send it somewhere they still
-    /// belong — which is a decision only they can make, so nothing here
-    /// does it automatically.
+    /// Point a kept recording at another workspace. Never done automatically.
     @discardableResult
     static func retarget(_ capture: PendingCapture, to tenantId: String,
                          identityId: String? = nil) -> PendingCapture {
@@ -171,35 +124,24 @@ enum PendingCaptures {
         return PendingCapture(audioURL: capture.audioURL, info: info)
     }
 
-    /// Whether this recording can be uploaded at all.
-    ///
-    /// The rule, as a function of the two facts it depends on, so it can
-    /// be exercised without a signed-in app: a recording goes to the
-    /// workspace it was made for, and only if that workspace is still one
-    /// the person belongs to. The client never uploads to a workspace it
-    /// already knows it left — a note appearing in a workspace somebody
-    /// was removed from is a disclosure, however it got there.
+    /// Whether this recording can be uploaded: only to the workspace it was
+    /// made for, and only while the person still belongs to it (a note in a left workspace is a disclosure).
     static func needsWorkspace(_ capture: PendingCapture, memberships: [String]) -> Bool {
         guard let tenant = capture.info.tenantId, !tenant.isEmpty else {
-            // Made before there was a workspace to record (or by a build
-            // that did not write one): the active workspace will do.
+            // No workspace recorded (older sidecar): the active workspace will do.
             return false
         }
         return !memberships.contains(tenant)
     }
 
-    /// Delete a kept recording and its sidecar.
-    ///
-    /// The only path in this app that destroys a recording, and it is
-    /// reached from one place: a confirmation the person tapped through.
+    /// Delete a kept recording and its sidecar. The only path that destroys a recording; behind a confirmation.
     static func delete(_ capture: PendingCapture) {
         let fm = FileManager.default
         try? fm.removeItem(at: capture.audioURL)
         try? fm.removeItem(at: sidecar(of: capture.audioURL))
     }
 
-    /// Every kept recording, newest first. (IDX-I2's list; used here by the
-    /// tests and by the Settings sheet's count.)
+    /// Every kept recording, newest first.
     static func all(in directory: URL = PendingCaptures.directory) -> [PendingCapture] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: directory,
@@ -225,16 +167,13 @@ enum PendingCaptures {
         return entries.filter { $0.pathExtension != "json" }.count
     }
 
-    /// The ones this identity made, newest first. A phone two people share
-    /// must not offer one of them the other's meeting.
+    /// The ones this identity made, newest first (a shared phone must not offer another's meeting).
     static func all(identityId: String,
                     in directory: URL = PendingCaptures.directory) -> [PendingCapture] {
         all(in: directory).filter { $0.info.identityId == identityId }
     }
 
-    /// Kept for more than `days` by an identity that is not signed in here
-    /// any more. Listed under "Old recordings" so they can be exported or
-    /// deleted deliberately — never swept.
+    /// Kept for more than `days` by an identity no longer signed in here. Never swept.
     static func old(before days: Int = 30, excluding identityId: String,
                     in directory: URL = PendingCaptures.directory) -> [PendingCapture] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)

@@ -1,9 +1,4 @@
-"""Step-06 §8 — RLS write-authority mapping through the route handlers.
-
-The DB is the authority matrix; the handlers only map its rejections:
-member posting source='tenant' → 403 forbidden_scope; tenant_admin
-same body → 201; user A deleting user B's row → 404 (no existence
-oracle). Audit events land on the chain for successful writes.
+"""RLS write-authority mapping through the route handlers (403 forbidden_scope / 201 / 404, no existence oracle).
 
 Skipped unless ``RUN_DB_INTEGRATION=1``.
 """

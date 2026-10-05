@@ -4,23 +4,10 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api/http";
 import { attemptsLeft, hasCopy, messageFor, messageWithRef } from "../src/lib/errorCopy";
 
-/**
- * The acceptance criterion: "Every error code emitted by the A3–A5/B1
- * endpoints used here has a mapped, non-technical message (a test iterates
- * docs/api/error-codes.md)."
- *
- * So the catalogue is the fixture. Adding a code to the docs without adding
- * copy for it fails here, which is the point — the alternative is the
- * server's developer-facing `detail` leaking into the UI.
- */
+/** docs/api/error-codes.md is the fixture: every code there needs non-technical copy, or the server's `detail` leaks into the UI. */
 const CATALOGUE = resolve(__dirname, "../../docs/api/error-codes.md");
 
-/**
- * Codes the web client does not raise, each with the reason. This list is
- * the honest part of the test: it says what is NOT covered rather than
- * quietly passing. IDX-W2 removed `rotation_in_progress` and
- * `personal_workspace` from it — the devices screen surfaces both now.
- */
+/** Codes the web client does not raise, each with the reason. */
 const OUT_OF_SCOPE = new Map<string, string>([
   ["invalid_client", "POST /auth/oauth/token — device and service grants (B1b), no web caller"],
   ["unsupported_grant_type", "as above"],

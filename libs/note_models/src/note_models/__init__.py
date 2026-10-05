@@ -1,12 +1,4 @@
-"""``note_models``.
-
-Strict Pydantic shapes for ``notes`` + ``note_versions``. Used by
-note-service routers and by the chain-reconciler integrity check.
-
-The canonical projection committed to the version hash-chain is
-``canonical_content_bytes()`` — stable, deterministic, RFC-8785
-JSON canonicalisation over the fixed schema.
-"""
+"""Strict Pydantic shapes for ``notes`` + ``note_versions``; ``canonical_content_bytes()`` feeds the hash-chain."""
 
 from note_models.content import (
     NoteAmendmentType,

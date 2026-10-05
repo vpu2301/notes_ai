@@ -1,32 +1,12 @@
-"""Scorers for every metric in the Summary Engine v2 audit (Q1 T5).
+"""Scorers for every notes-audit metric: pure functions, a gold meeting and an arm's
+``produced`` dict in, numbers out. Pinned by ``tests/unit/test_notes_scoring.py``.
 
-Pure functions: a gold meeting and what an arm produced in, numbers out.
-The harness (``notes_eval.py``) and the regression checklists
-(``notes_assert.py``) call them; ``tests/unit/test_notes_scoring.py``
-pins each rule on a hand-built case.
+    produced = {"lines": [...], "facts": [...], "stats": {...}, "brief": {...},
+                "noise_ranges": [...], "title": str | None, "evidence": "facts" | "transcript"}
 
-What an arm produces, as this module reads it::
-
-    produced = {
-        "lines": [{"section_key", "kind", "text", "fact_ids"}],
-        "facts": [{"item_key", "kind", "text", "quote", "certainty",
-                   "start_ms", "end_ms", "window_index"}],
-        "stats": {...}, "brief": {...},
-        "noise_ranges": [[start_ms, end_ms, reason]],
-        "title": str | None,
-        "evidence": "facts" | "transcript",
-    }
-
-``evidence`` is what a line's support is checked against. The pipeline
-cites facts, so its lines are checked against the facts they cite. The
-single-pass baseline cites nothing by construction; its lines are checked
-against the whole transcript — the most generous reading, which keeps
-the comparison honest rather than scoring the baseline zero for a column
-it cannot have.
-
-Reports carry numbers and ids only. No scorer returns a line, a gold
-string or a transcript word: a failed ``must_*`` check is reported as
-the INDEX of the string.
+``evidence`` is what a line's support is checked against (the single-pass arm cites
+nothing, so its lines are checked against the whole transcript). Reports carry numbers
+and ids only: a failed ``must_*`` check is reported as the INDEX of the string.
 """
 
 from __future__ import annotations
@@ -45,16 +25,14 @@ if str(_ENGINE_SRC) not in sys.path:
 from note_service.domain.meeting_doc import prompts, verify  # noqa: E402
 from note_service.domain.meeting_doc import support as support_rules  # noqa: E402
 
-# ── Matching gold text to lines (unchanged from the Sprint 33 harness) ──
+# ── Matching gold text to lines ──
 
-# A produced line matches a gold fact when they share this much of the
-# gold fact's content words. Deliberately lenient on wording and strict on
-# content: "Priya sends the release note to support by Thursday" and
-# "Release note to support — Priya, Thursday" are the same fact.
+# Share of a gold fact's content words a line must carry to match it:
+# lenient on wording, strict on content.
 MATCH_THRESHOLD = 0.6
 
 _WORD = re.compile(r"[\w']+", re.UNICODE)
-# Words that carry no content in any of the three languages we ship.
+# Stopwords for the three shipped languages.
 STOP = frozenset(
     # fmt: off
     [
@@ -131,22 +109,19 @@ def best_match(gold: str, lines: list[str]) -> tuple[int, float]:
 
 # ── Support: does what a line says rest on what it cites? ───────────
 
-# The engine's own per-language threshold (F3 amendment §2.10).
+# The engine's own per-language threshold.
 SUPPORT_THRESHOLD = support_rules.LINE_SUPPORT_DEFAULT
 REDUNDANT_JACCARD = 0.6
-# Lines the metrics look at. A heading is structure; the transcript note
-# is ours, rendered from a closed vocabulary.
+# Lines the metrics look at (headings and the transcript note are structure).
 _NOT_CONTENT = frozenset({"heading", "note"})
-# Lines written ABOUT facts rather than FROM one fact: the lines a model
-# composes, and so the ones that can say more than their facts do.
+# Lines a model composes about facts, so the ones that can overstate them.
 COMPOSED = frozenset({"framing", "summary", "bullet"})
 _UNSURE = frozenset({"opinion", "prediction", "proposal", "allegation", "estimate"})
 
-# The hedge markers are the engine's (``support.MODALITY_MARKERS``, Q4).
+# The hedge markers are the engine's (``support.MODALITY_MARKERS``).
 
-# What the context pass may call a recording, mapped onto the gold enum.
-# Q3 replaces the source with `stats.recording_type`; the map stays for
-# the single-pass arm and older reports.
+# Context-pass recording names mapped onto the gold enum (single-pass arm,
+# older reports).
 TYPE_ALIASES: dict[str, str] = {
     "meeting": "meeting",
     "team meeting": "meeting",
@@ -209,10 +184,9 @@ def _body(text: str) -> str:
 def support(
     line: str, cited: list[str], language: str = "en", *, threshold: float | None = None
 ) -> bool:
-    """A line is supported when at least half its content is in the text and
-    quotes of what it cites, every number in it is too, and it names nobody
-    they do not. The ratio and the name rule are the engine's own
-    (``meeting_doc.support``), so the eval and the gate cannot disagree."""
+    """A line is supported when half its content, every number and every name is in what it
+    cites; ratio and name rule are the engine's own (``meeting_doc.support``).
+    """
     evidence = " ".join(cited)
     body = _body(line)
     floor = support_rules.line_support_threshold(language) if threshold is None else threshold
@@ -418,7 +392,7 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     known_names = {*gold.get("name_candidates", []), *(gold.get("speakers") or {}).values()}
     everything = "\n".join([*texts, produced.get("title") or ""])
     entities, knowable = Ratio(), Ratio()
-    # Q4: which tier got a name right, and how often the model tier was right.
+    # Which tier got a name right, and how often the model tier was right.
     corrections = [c for f in facts.values() for c in f.get("corrections") or []]
     by_source: dict[str, int] = {}
     for entity in gold.get("entities", []):
@@ -484,16 +458,15 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
 
     row["date_resolution"] = date_resolution(gold, produced)
 
-    # Q5: every written line can open its evidence, and the key-dates block
-    # carries the dates the recording set.
+    # Every written line can open its evidence; the key-dates block carries
+    # the dates the recording set.
     row["lines_cited"] = [sum(1 for ln in content if ln.get("fact_ids")), len(content)]
     wanted = [d for d in gold.get("dates", []) if d.get("tense") != "past"]
     if wanted and any("kind" in ln for ln in lines):
         in_block = {v for ln in lines if ln.get("kind") == "date" for v in ln.get("dates") or []}
         row["key_dates_recall"] = [sum(1 for d in wanted if d["resolved"] in in_block), len(wanted)]
 
-    # F2: statements, not quotes. A line that is (nearly) a transcript
-    # sentence, a line that informs nobody, a line in the speaker's voice.
+    # Statements, not quotes: copied, empty or first-person lines.
     sentences = transcript_sentences(meeting)
     row["copied_lines"] = sum(1 for ln in content if copies_transcript(ln["text"], sentences))
     row["no_information_lines"] = sum(
@@ -505,13 +478,13 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
         if ln.get("kind") not in _TASK_LINE_KINDS and support_rules.first_person(_body(ln["text"]))
     )
 
-    # F3: figures, presenter, contact.
+    # Figures, presenter, contact.
     row.update(score_f3(gold, produced, lines))
 
     # Error taxonomy detectors (docs/eval/error-taxonomy.md).
     names = {*known_names, *(e["canonical"] for e in gold.get("entities", []))}
     row.update(score_taxonomy(meeting, produced, content, names))
-    # Sprint D2: composition to the standard.
+    # Composition to the standard.
     row.update(score_d2(meeting, produced))
     linted = lint_produced(meeting, produced)
     if linted is not None:
@@ -533,7 +506,7 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     return row
 
 
-# ── Sprint SQ3: reads like a note ───────────────────────────────────
+# ── Reads like a note ───────────────────────────────────
 
 # The web client's speaker rule (web/src/lib/richText.ts), verbatim.
 SPEAKER_TURN = re.compile(r"^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)")
@@ -541,10 +514,7 @@ REDUNDANCY_BAR = 0.05
 
 
 def score_sq3(produced: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
-    """``speaker_shaped_lines`` — paragraph lines a client would draw as a
-    transcript turn (D-FORM); ``order_inversions`` — bullets in a section
-    whose first cited fact was said before the previous bullet's;
-    ``redundancy_ok`` — this note repeats itself on fewer than 5 % of lines."""
+    """``speaker_shaped_lines`` (D-FORM), ``order_inversions``, ``redundancy_ok`` (< 5 % repeats)."""
     facts = {f["item_key"]: f for f in produced.get("facts", [])}
     shaped = 0
     inversions = 0
@@ -589,7 +559,7 @@ def sq3_gates(summary: dict[str, Any]) -> dict[str, bool]:
     return out
 
 
-# ── Sprint SQ2: the whole recording is in the note ──────────────────
+# ── The whole recording is in the note ──────────────────
 
 NEAR_EMPTY_LINES = 3  # fewer cited content lines than this is near-empty
 NEAR_EMPTY_FROM_MS = 2 * 60_000  # recordings shorter than this are not judged
@@ -628,11 +598,10 @@ def sq2_gates(
     baseline_unsupported: float | None = None,
     staging: bool = False,
 ) -> dict[str, bool]:
-    """Sprint SQ2 acceptance on a corpus (01-quality-criteria §3 numbers):
-    recall ≥ 0.70, worst ÷ best third ≥ 0.80, sections within the band on
-    ≥ 90 %, near-empty notes ≤ 10 %, no section with fewer than two points,
-    unsupported no higher than the SQ1 baseline of the same arm; time
-    (≤ 300 s per meeting-hour at p95) only on staging."""
+    """Coverage acceptance on a corpus: recall >= 0.70, worst / best third >= 0.80, sections
+    in band on >= 90 %, near-empty <= 10 %, unsupported no higher than the baseline arm;
+    time (<= 300 s per meeting-hour p95) only on staging.
+    """
     out: dict[str, bool] = {}
     checks = (
         ("sq2_key_fact_recall_70pct", "key_fact_recall", lambda v: v >= 0.70),
@@ -654,14 +623,14 @@ def sq2_gates(
     return out
 
 
-# ── F2: statements, not quotes ──────────────────────────────────────
+# ── Statements, not quotes ──────────────────────────────────────
 
 # Lines that are a task or an outcome: short by nature, phrased as said.
 _TASK_LINE_KINDS = frozenset({"action", "commitment_ours", "commitment_theirs", "decision"})
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
 
 
-# ── Sprint SQ1: the criteria the summary track gates on ──────────────
+# ── The criteria the summary track gates on ──────────────
 
 GENERIC_TITLE_WORDS = frozenset(
     {
@@ -691,11 +660,9 @@ def _orientation(produced: dict[str, Any]) -> str:
 
 
 def _participants(gold: dict[str, Any], produced: dict[str, Any]) -> dict[str, list[int]]:
-    """SM-05: gold participants with ≥ 5 % of the speech or a role other
-    than plain participant, named in the orientation (recall); people the
-    orientation names who are not participants (precision). The universe of
-    people is the gold's — participants, candidates and person entities —
-    so a word that is not a name is never counted against precision."""
+    """Gold participants (>= 5 % of speech or a non-plain role) named in the orientation
+    (recall), and orientation names that are not participants (precision).
+    """
     wanted = [
         p for p in gold.get("participants") or []
         if p.get("name") and (p.get("speech_share", 0) >= PARTICIPANT_MIN_SHARE or p.get("role") != "participant")
@@ -775,10 +742,9 @@ def title_checks(produced: dict[str, Any], evidence: str) -> dict[str, Any]:
 def _faithfulness_vs_truth(
     meeting: dict[str, Any], content: list[dict[str, Any]], asr_evidence: list[str]
 ) -> dict[str, int]:
-    """SM-02b: lines checked against the human-corrected transcript too. A
-    name or number the ASR text has but the truth has not is the
-    transcript's error carried into the note (``propagated_from_asr``), not
-    the writer's invention."""
+    """Lines checked against the human-corrected transcript too: an ASR-only name or number
+    is ``propagated_from_asr``, not the writer's invention.
+    """
     truth = [t["text"] for t in meeting.get("reference_transcript") or []]
     if not truth:
         return {}
@@ -844,7 +810,7 @@ def informs(line: str, kind: str | None, language: str = "en") -> bool:
     )
 
 
-# ── F3: figures, presenter, contact ─────────────────────────────────
+# ── Figures, presenter, contact ─────────────────────────────────
 
 
 def _value(text: str, language: str = "en") -> Any:
@@ -859,11 +825,9 @@ def _name_match(gold: str, produced: str) -> bool:
 
 
 def score_f3(gold: dict[str, Any], produced: dict[str, Any], lines: list[dict[str, Any]]) -> dict:
-    """``figure_recall`` (gold figures found with their value),
-    ``figure_value_accuracy`` (of produced figures naming a gold quantity,
-    the value right), ``qualifier_preservation``, ``presenter_accuracy``,
-    ``contact_present`` — pairs ``[hit, total]``; absent when the gold has
-    nothing to score."""
+    """``figure_recall``, ``figure_value_accuracy``, ``qualifier_preservation``,
+    ``presenter_accuracy``, ``contact_present`` as ``[hit, total]``; absent when the gold has nothing.
+    """
     out: dict[str, Any] = {}
     made = [f["figure"] for f in produced.get("facts", []) if f.get("figure")]
     wanted = gold.get("figures") or []
@@ -885,7 +849,7 @@ def score_f3(gold: dict[str, Any], produced: dict[str, Any], lines: list[dict[st
         out["qualifier_preservation"] = qualifiers.pair()
     presenter = gold.get("presenter")
     if presenter:
-        # SQ3 T2: the presenter is named in paragraph 1 (framing) now.
+        # The presenter is named in paragraph 1 (framing).
         text = "\n".join(ln["text"] for ln in lines if ln.get("kind") in ("presenter", "framing"))
         fields = [presenter["name"], presenter.get("role"), presenter.get("organisation")]
         out["presenter_accuracy"] = [
@@ -942,8 +906,7 @@ def date_resolution(gold: dict[str, Any], produced: dict[str, Any]) -> list[int]
         return None
 
     def found(want: dict[str, Any]) -> bool:
-        # The engine's mention may carry its preposition ("am montag") or
-        # not; the gold text may too. Same words, same resolution.
+        # Either side may carry the preposition ("am montag"); same words, same resolution.
         text = " ".join(want["text"].casefold().split())
         for d in exposed:
             said = " ".join((d.get("text") or "").casefold().split())
@@ -958,8 +921,8 @@ def date_resolution(gold: dict[str, Any], produced: dict[str, Any]) -> list[int]
 
 # ── Error taxonomy detectors (docs/eval/error-taxonomy.md) ──────────
 
-# D-LABEL: a diarizer label or a default name as an actor. "Erzähler/in"
-# and "the narrator" count outside the framing line, which lists speakers.
+# D-LABEL: a diarizer label or default name as an actor (narrator counts
+# outside the framing line, which lists speakers).
 _DEFAULT_LABEL = re.compile(
     r"\bSPEAKER_\d+\b|\b(?:[Ss]peaker|[Ss]precher(?:in)?)\s\d+\b|\b[Uu]nknown speaker\b|\bUNKNOWN\b"
 )
@@ -981,10 +944,9 @@ def score_taxonomy(
     content: list[dict[str, Any]],
     known_names: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    """``label_lines`` (D-LABEL), ``unresolved_subject`` (F-SUBJ),
-    ``unspecific_bullets`` (D-SPEC), ``volume`` = [words, audio seconds]
-    (D-VOL) and ``headings`` = [headed sections, audio seconds]
-    (D-STRUCT)."""
+    """``label_lines`` (D-LABEL), ``unresolved_subject`` (F-SUBJ), ``unspecific_bullets``
+    (D-SPEC), ``volume`` (D-VOL) and ``headings`` (D-STRUCT).
+    """
     from note_service.domain.meeting_doc.verify import _has_date_word
 
     language = meeting.get("language", "en")
@@ -1032,15 +994,11 @@ def score_taxonomy(
     return out
 
 
-# ── Sprint D2: composition to the standard ─────────────────────────
+# ── Composition to the standard ─────────────────────────
 
 
 def score_d2(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any]:
-    """Per note: ``sections_in_band``, ``headings_pass``, ``bullets_specific``,
-    ``children``, ``subject_failures``, ``narrator_attribution_errors``,
-    ``roles_correct``, ``orientation_p1_ok``, ``lint_first_pass``,
-    ``lint_after_regeneration``, ``summary_ladder``. Pairs are
-    ``[hit, total]``; absent when the arm writes no sections."""
+    """Per-note composition metrics as ``[hit, total]`` pairs; absent when the arm writes no sections."""
     from note_service.domain.meeting_doc import doclint
     from note_service.domain.meeting_doc import support as rules
 
@@ -1141,16 +1099,14 @@ def d2_gates(summary: dict[str, Any]) -> dict[str, bool]:
     return out
 
 
-# F- codes that are S2 (docs/eval/error-taxonomy.md); the other F- codes the
-# linter reports are S1.
+# F- codes that are S2; the other F- codes the linter reports are S1.
 _S2_F = frozenset({"F-COPY", "F-DESC", "F-TYPE", "F-DROP", "F-COV"})
 
 
 def d1_gates(summary: dict[str, Any]) -> dict[str, bool]:
-    """Sprint D1 acceptance 2, on eval/notes/v2: no unresolved S1; unresolved
-    S2 in ≤ 2 % of notes; volume and section bands met on ≥ 90 %; no line
-    with a label or pronoun subject, none that names, counts and dates
-    nothing."""
+    """Lint acceptance: no unresolved S1; unresolved S2 in <= 2 % of notes; bands met on
+    >= 90 %; no label/pronoun subject, no empty line.
+    """
     if summary.get("d1_unresolved_s1") is None:
         return {}
     return {
@@ -1208,10 +1164,9 @@ def _lint_inputs(meeting: dict[str, Any], produced: dict[str, Any]) -> tuple[Any
 
 
 def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any] | None:
-    """Sprint D1 — what the linter says about a produced note, by the same
-    module production uses. A note the pipeline arm wrote was enforced
-    already (``stats.lint``): its unresolved findings are what is left. Any
-    other note is checked as it stands."""
+    """The production linter on a produced note; a pipeline-arm note was enforced already
+    (``stats.lint``), so only its unresolved findings remain.
+    """
     from note_service.domain.meeting_doc import doclint
 
     stats_lint = (produced.get("stats") or {}).get("lint")
@@ -1237,7 +1192,7 @@ def rubric_auto(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, 
 
 
 _PAIRS = (
-    # Sprint D2
+    # Composition
     "sections_in_band",
     "headings_pass",
     "bullets_specific",
@@ -1267,7 +1222,7 @@ _PAIRS = (
     "hedge_preservation",
     "attribution",
     "date_resolution",
-    # Sprint SQ1
+    # Summary criteria
     "participant_recall",
     "participant_precision",
     "opinion_attribution",
@@ -1397,7 +1352,7 @@ def aggregate(
         "words_per_minute": (
             sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
         ),
-        # Sprint D2: composition.
+        # Composition.
         "sections_in_band": _rate(sums["sections_in_band"]),
         "headings_pass": _rate(sums["headings_pass"]),
         "bullets_specific_share": _rate(sums["bullets_specific"]),
@@ -1409,8 +1364,7 @@ def aggregate(
         "lint_first_pass": _rate(sums["lint_first_pass"]),
         "lint_after_regeneration": _rate(sums["lint_after_regeneration"]),
         "summary_ladder": dict(sorted(ladders.items())),
-        # Sprint D1: what the linter found, what it could not repair, and the
-        # numbers its gates read.
+        # What the linter found, what it could not repair, and its gate numbers.
         "lint_findings": dict(sorted(lint_found.items())),
         "lint_unresolved": dict(sorted(lint_codes.items())),
         "lint_clean_rate": (lint_clean / linted_docs) if linted_docs else None,
@@ -1426,18 +1380,18 @@ def aggregate(
         "headings_per_10_min": (
             sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
         ),
-        # Sprint SQ1 (01-quality-criteria §3).
+        # Summary criteria.
         "participant_precision": _rate(sums["participant_precision"]),
         "participant_recall": _rate(sums["participant_recall"]),
         "opinion_attribution": _rate(sums["opinion_attribution"]),
         "filler_lines": sq1["filler_lines"],
         "title_ok": _rate(sums["title_ok"]),
         "by_third_ratio": (min(present) / max(present)) if present and max(present) > 0 else None,
-        # Sprint SQ2.
+        # Coverage.
         "sections_count_ok": (sections_ok / linted_docs) if linted_docs else None,
         "near_empty_rate": _rate(near_empty),
         "one_bullet_sections": one_bullet,
-        # Sprint SQ3.
+        # Form.
         "speaker_shaped_lines": shaped,
         "order_inversions": inversions,
         "redundancy_ok_rate": _rate(redundancy_ok),

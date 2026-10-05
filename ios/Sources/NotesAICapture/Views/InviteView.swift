@@ -1,13 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// "Invite people" — add a colleague to the workspace by e-mail, or send
-/// them the link if they have no account here yet. Opened from the avatar
-/// menu; Settings › Account shows only the roster.
-///
-/// The server resolves an address to an account that already exists in the
-/// tenant (`POST /tenants/{id}/members`); anyone else has to sign up first,
-/// so a 404 turns into the share-the-link fallback rather than an error.
+/// "Invite people" — add a colleague by e-mail (`POST /tenants/{id}/members`),
+/// or share the link; a 404 (no account yet) is the link fallback, not an error.
 struct InviteView: View {
     @EnvironmentObject private var app: AppState
     let onClose: () -> Void
@@ -201,8 +196,7 @@ struct InviteView: View {
     }
 }
 
-/// "In this workspace" — who is here and what they may do. Shared by the
-/// invite sheet and Settings › Account.
+/// "In this workspace" — who is here and what they may do.
 struct WorkspaceRoster: View {
     let members: [TenantMember]
     let loading: Bool

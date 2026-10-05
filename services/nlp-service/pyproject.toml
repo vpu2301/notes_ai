@@ -14,8 +14,7 @@ dependencies = [
     "opentelemetry-sdk>=1.24.0",
     "opentelemetry-instrumentation-fastapi>=0.45b0",
     "python-json-logger>=2.0.7",
-    # Punctuation model is heavy; only required at runtime on the service
-    # host. Pinned versions live in the Dockerfile, not here.
+    # transformers/torch are pinned in the Dockerfile, not here.
     # Internal libs
     "observability",
     "auth",
@@ -23,9 +22,7 @@ dependencies = [
     "db",
     "asr_models",
     "secret",
-    # The field_extraction stage emits metadata exclusively through
-    # note_models' typed constructors (no raw dicts).
-    "note_models",
+    "note_models",  # typed metadata constructors for field_extraction
 ]
 
 [tool.uv.sources]

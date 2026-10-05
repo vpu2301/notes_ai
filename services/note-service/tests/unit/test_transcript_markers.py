@@ -1,4 +1,4 @@
-"""Sprint TQ2 T4: the ASR result's non-speech markers reach the note as
+"""The ASR result's non-speech markers reach the note as
 listed passages — music and noise, never silence, unknown kinds as noise."""
 
 from __future__ import annotations

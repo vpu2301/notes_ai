@@ -13,6 +13,6 @@ SNIPPET_DELETED: Final = "autocomplete.snippet.deleted"
 PHRASE_WRITE_REJECTED_PII: Final = "autocomplete.phrase.write_rejected_pii"
 ROLLUP_COMPLETED: Final = "autocomplete.rollup.completed"
 
-# ── Scheduler runs (telemetry cold-archive + partition rotation) ────────
+# Scheduler runs.
 SCHEDULER_JOB_COMPLETED: Final = "scheduler.job.completed"
 SCHEDULER_JOB_FAILED: Final = "scheduler.job.failed"

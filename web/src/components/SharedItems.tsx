@@ -63,12 +63,7 @@ function CommentBox({
   );
 }
 
-/**
- * "Who does what" on the shared page (Sprint 20). Each line is an item
- * the recipient can confirm, mark done, or dispute — no account needed;
- * the link is who they are. Optimistic: the state flips at once and
- * rolls back if the server refuses.
- */
+/** Shared-page items a recipient can confirm/done/dispute (the link is who they are). Optimistic. */
 export function SharedItems({
   token,
   items: initial,
@@ -80,7 +75,7 @@ export function SharedItems({
   items: SharedItem[];
   canRespond: boolean;
   onError: (message: string) => void;
-  /** Sprint 23: item keys the "what changed" strip points at. */
+  /** Item keys the "what changed" strip points at. */
   changedKeys?: string[];
 }) {
   const [items, setItems] = useState(initial);

@@ -1,14 +1,6 @@
-"""Admin "Meeting quality" dashboard — a numbers-only summary per job.
+"""Numbers-only quality summary per job (``transcription_jobs.quality``).
 
-Written to ``transcription_jobs.quality`` when a job completes (and again
-when its speakers are re-run), so the admin dashboard (Grafana, migration
-0067) can show how each real recording went without opening the encrypted
-transcript.
-
-The summary is **numbers and codes only**: counts, shares, seconds, language
-codes, enum reasons, model and backend ids. No word, name, spelling or
-segment text ever reaches it — ``tests/unit/test_quality_summary.py`` feeds
-a transcript full of marker words and asserts none of them comes out.
+No word, name or segment text ever reaches it; the unit test asserts this.
 """
 
 from __future__ import annotations

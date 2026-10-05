@@ -1,4 +1,4 @@
-"""Eval export (Sprint 30): consent, destination and payload checks — no S3, no DB."""
+"""Eval export: consent, destination and payload checks, no S3, no DB."""
 
 from __future__ import annotations
 

@@ -1,10 +1,5 @@
-"""The admin "Meeting quality" dashboard: admin-only Grafana, numbers only.
-
-* the JSON is what the generator builds (no hand edits drift from the SQL);
-* every panel reads the funnel_reader datasource;
-* no query names a content column (0067's grants would refuse it anyway);
-* migration 0067 grants no content column;
-* dev Grafana stays local, with sign-up and anonymous access off.
+"""The admin "Meeting quality" dashboard: generated JSON, every panel on the funnel_reader
+datasource, no content column queried or granted, dev Grafana local with sign-up off.
 """
 
 from __future__ import annotations

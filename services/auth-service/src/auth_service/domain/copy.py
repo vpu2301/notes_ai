@@ -1,19 +1,7 @@
 """Subjects, greetings, dates and plain-text bodies for account mail.
 
-Same split marketing-service uses: the HTML prose lives in whole,
-per-language template files so a proofreader who does not read Python can
-check the German and Ukrainian; everything that has to be *computed* —
-subject lines, a greeting that changes with whether we know a name, a
-formatted timestamp — lives here.
-
-The plain-text alternates use ``str.format`` rather than Jinja, and that
-is not an oversight: Jinja's autoescaping would turn the ``&`` in a URL
-query string into ``&amp;`` inside a text/plain part, where it is not
-markup and the link would arrive broken.
-
-Dates are formatted by hand rather than through ``locale``: the C locale
-is process-global and not thread-safe, so one request formatting a
-Ukrainian date would change what every concurrent request produced.
+Plain-text parts use ``str.format``, not Jinja (autoescaping would break ``&`` in
+URLs). Dates are formatted by hand: ``locale`` is process-global.
 """
 
 from __future__ import annotations
@@ -27,31 +15,20 @@ DEFAULT_LANG: Final = "en"
 
 KIND_PASSWORD_RESET: Final = "password_reset"
 KIND_PASSWORD_CHANGED: Final = "password_changed"
-# IDX-A3: the sign-in code and the "temporarily locked" notice. Neither
-# carries a link — a code mail that trains people to click is a lure.
+# Sign-in code and lock notice: neither carries a link (a code mail that trains clicking is a lure).
 KIND_AUTH_CODE: Final = "auth_code"
 KIND_AUTH_LOCKED: Final = "auth_locked"
-# IDX-A5: the notices a person must receive when their ability to get into
-# the account changes. Only `email_changed` carries a link, because it is
-# the only one with something to undo — and it goes to the address that
-# just LOST access, which is the whole point.
+# Security notices; only `email_changed` carries a link (sent to the address that lost access).
 KIND_MFA_ENABLED: Final = "mfa_enabled"
 KIND_MFA_DISABLED: Final = "mfa_disabled"
 KIND_RECOVERY_CODE_USED: Final = "recovery_code_used"
 KIND_EMAIL_CHANGED: Final = "email_changed"
 KIND_ACCOUNT_DELETION: Final = "account_deletion_scheduled"
-# BE-0: the two mails self-serve signup sends. Which one an address gets is
-# the only thing that differs between a new address and one that already has
-# an account — the HTTP response is identical for both — so the pair has to
-# be read together. `signup_verify` carries a code and no link, like every
-# other auth code. `signup_exists` carries a link and no code, because there
-# is nothing to confirm: the account already exists, and the useful thing to
-# hand somebody who just tried to create it again is the way in.
+# Signup pair: the HTTP response is identical for new and existing addresses,
+# only the mail differs. `signup_verify` = code, no link; `signup_exists` = link, no code.
 KIND_SIGNUP_VERIFY: Final = "signup_verify"
 KIND_SIGNUP_EXISTS: Final = "signup_exists"
-# The concierge mail (OPS-0). The only mail in this service that carries a
-# password, which is why the path that sends it is a CLI an operator runs
-# rather than an endpoint anyone can call.
+# Concierge mail: the only one carrying a password, so it is sent by an operator CLI, not an endpoint.
 KIND_CONCIERGE_WELCOME: Final = "concierge_welcome"
 KINDS: Final[tuple[str, ...]] = (
     KIND_PASSWORD_RESET,
@@ -67,8 +44,7 @@ KINDS: Final[tuple[str, ...]] = (
     KIND_SIGNUP_EXISTS,
     KIND_CONCIERGE_WELCOME,
 )
-# The kinds whose body carries an action link (tests assert the link is in
-# both parts); the auth mails are deliberately absent.
+# Kinds whose body carries an action link (tests assert it is in both parts).
 LINK_KINDS: Final[tuple[str, ...]] = (
     KIND_PASSWORD_RESET,
     KIND_PASSWORD_CHANGED,
@@ -86,12 +62,7 @@ def normalise_lang(lang: str | None) -> str:
     return base if base in SUPPORTED_LANGS else DEFAULT_LANG
 
 
-# ── Subjects ─────────────────────────────────────────────────────────
-#
-# The security-notification subject deliberately leads with the fact, not
-# a question. "Was this you?" in a subject line is the exact shape of a
-# phishing lure, and training users to click it is the opposite of what
-# this mail is for.
+# ── Subjects (lead with the fact, never "was this you?" — that is a phishing shape) ──
 
 SUBJECTS: Final[dict[str, dict[str, str]]] = {
     KIND_PASSWORD_RESET: {
@@ -104,16 +75,13 @@ SUBJECTS: Final[dict[str, dict[str, str]]] = {
         "de": "Ihr Notes AI-Passwort wurde geändert",
         "uk": "Пароль Notes AI було змінено",
     },
-    # The code is NOT in the subject: notification previews on a locked
-    # phone would show it to whoever is holding the device.
+    # The code is NOT in the subject (lock-screen previews).
     KIND_AUTH_CODE: {
         "en": "Your Notes AI sign-in code",
         "de": "Ihr Notes AI-Anmeldecode",
         "uk": "Ваш код входу в Notes AI",
     },
-    # Neither subject says "your code is 123456", for the reason above, and
-    # neither says whether an account existed. Somebody reading a lock-screen
-    # preview over a shoulder learns nothing either way.
+    # No code and no hint whether an account existed.
     KIND_SIGNUP_VERIFY: {
         "en": "Confirm your email address for Notes AI",
         "de": "Bestätigen Sie Ihre E-Mail-Adresse für Notes AI",
@@ -124,9 +92,7 @@ SUBJECTS: Final[dict[str, dict[str, str]]] = {
         "de": "Sie haben bereits ein Notes AI-Konto",
         "uk": "У вас уже є обліковий запис Notes AI",
     },
-    # Says the account is ready, never that a password is inside. A
-    # lock-screen preview reading "your temporary password is…" is a
-    # credential on a screen somebody else can be looking at.
+    # Never says a password is inside.
     KIND_CONCIERGE_WELCOME: {
         "en": "Your Notes AI account is ready",
         "de": "Ihr Notes AI-Konto ist bereit",
@@ -137,8 +103,6 @@ SUBJECTS: Final[dict[str, dict[str, str]]] = {
         "de": "Ihr Notes AI-Konto ist vorübergehend gesperrt",
         "uk": "Ваш обліковий запис Notes AI тимчасово заблоковано",
     },
-    # IDX-A5. Each states the fact plainly: somebody reading only the
-    # subject line on a lock screen should already know whether to worry.
     KIND_MFA_ENABLED: {
         "en": "Two-factor authentication is on for your Notes AI account",
         "de": "Zwei-Faktor-Authentifizierung für Ihr Notes AI-Konto ist aktiv",
@@ -225,7 +189,7 @@ _MONTHS: Final[dict[str, tuple[str, ...]]] = {
         "November",
         "Dezember",
     ),
-    # Genitive — Ukrainian dates read "5 серпня", not "5 серпень".
+    # Genitive: "5 серпня", not "5 серпень".
     "uk": (
         "січня",
         "лютого",
@@ -250,12 +214,7 @@ _DISPLAY_ZONE: Final[dict[str, str]] = {
 
 
 def format_moment(when: datetime, lang: str) -> str:
-    """A timestamp a human can check against their own memory.
-
-    Shown in the recipient's likely local zone with the zone named, since
-    "was that me at 03:14?" is the entire question the security mail
-    asks, and an answer in UTC makes it harder to answer, not easier.
-    """
+    """A timestamp in the recipient's likely local zone, zone named."""
     zone = ZoneInfo(_DISPLAY_ZONE.get(lang, "Europe/Kyiv"))
     local = when.astimezone(zone)
     month = _MONTHS.get(lang, _MONTHS[DEFAULT_LANG])[local.month - 1]
@@ -273,8 +232,7 @@ def minutes_label(seconds: int, lang: str) -> str:
     if lang == "de":
         return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minuten"
     if lang == "uk":
-        # Ukrainian needs three forms; the teens are the trap that a
-        # simple `n == 1` check gets wrong (11 takes the plural).
+        # Ukrainian has three forms; teens take the plural.
         tail_two = minutes % 100
         tail_one = minutes % 10
         if 11 <= tail_two <= 14:
@@ -289,11 +247,7 @@ def minutes_label(seconds: int, lang: str) -> str:
     return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
 
 
-# ── Plain-text alternates ────────────────────────────────────────────
-#
-# Every mail ships both parts. A text/plain alternate is what a screen
-# reader, a text-mode client, and most spam filters actually read, and a
-# mail without one scores measurably worse on delivery.
+# ── Plain-text alternates (every mail ships both parts) ──────────────
 
 _TEXT: Final[dict[tuple[str, str], str]] = {
     (KIND_PASSWORD_RESET, "en"): """\
@@ -523,12 +477,7 @@ _CLIENT_LINE: Final[dict[str, str]] = {
 }
 
 
-# ── IDX-A5 notices ───────────────────────────────────────────────────
-#
-# Every one of these describes a change to how somebody gets into their
-# account, sent to the address that would want to know. They say what
-# happened, when, and what to do if it wasn't you — in that order, because
-# a reader who is alarmed stops reading after the first two lines.
+# ── Security notices: what happened, when, what to do — in that order ──
 
 _TEXT_A5: Final[dict[tuple[str, str], str]] = {
     (KIND_MFA_ENABLED, "en"): """\
@@ -774,14 +723,7 @@ Angefordert: {requested_at}
 
 _TEXT.update(_TEXT_A5)
 
-# ── BE-0 signup ──────────────────────────────────────────────────────
-#
-# The pair has to read as one decision. Whoever typed the address gets a
-# mail either way, and the two bodies are written so that neither confirms
-# nor denies what the other one means: "confirm your address" and "you
-# already have an account" are both plausible first mails to a stranger who
-# mistyped their own address, and neither tells a prober anything the 202
-# did not already refuse to say.
+# ── Signup pair: neither body reveals what the other one means ───────
 _TEXT_BE0: Final[dict[tuple[str, str], str]] = {
     (KIND_SIGNUP_VERIFY, "en"): """\
 {greeting}
@@ -896,12 +838,7 @@ Angefordert: {requested_at}
 }
 _TEXT.update(_TEXT_BE0)
 
-# ── OPS-0 concierge welcome ──────────────────────────────────────────
-#
-# The password is in the body and nowhere else — not in the subject, not
-# in a log line, and not on the operator's screen. The mail leads with the
-# change-password link rather than the password, because the first thing
-# the recipient should do with a mailed credential is replace it.
+# ── Concierge welcome: the password is in the body and nowhere else ──
 _TEXT_OPS0: Final[dict[tuple[str, str], str]] = {
     (KIND_CONCIERGE_WELCOME, "en"): """\
 {greeting}
@@ -981,11 +918,7 @@ def hours_label(seconds: int, lang: str) -> str:
 
 
 def recovery_remaining_label(remaining: int, lang: str) -> str:
-    """How many codes are left — or that there are none, which is urgent.
-
-    Zero is called out rather than reported as "0 codes left", because at
-    zero the user has lost their fallback and does not yet know it.
-    """
+    """How many codes are left; zero is called out explicitly."""
     if remaining <= 0:
         return {
             "de": "Das war Ihr letzter Wiederherstellungscode. Erzeugen Sie jetzt neue — sonst kommen Sie ohne Ihr Gerät nicht mehr hinein.",
@@ -1002,8 +935,7 @@ def recovery_remaining_label(remaining: int, lang: str) -> str:
 
 
 def mfa_disabled_by_line(lang: str, *, by_admin: bool) -> str:
-    """Who turned it off. An admin-initiated reset must say so plainly —
-    the user did not do this and needs to know it was sanctioned."""
+    """Who turned it off; an admin-initiated reset must say so plainly."""
     if by_admin:
         return {
             "de": "Ein Administrator Ihres Arbeitsbereichs hat sie nach einer Anfrage zurückgesetzt.",
@@ -1016,29 +948,19 @@ def mfa_disabled_by_line(lang: str, *, by_admin: bool) -> str:
 
 
 def client_line(lang: str, client_label: str) -> str:
-    """One line describing the requesting client, or nothing.
-
-    Empty when we have no usable description — an empty "Where from:"
-    label reads like missing data and invites the reader to distrust the
-    rest of the mail.
-    """
+    """One line describing the requesting client, or nothing (never an empty label)."""
     label = (client_label or "").strip()
     if not label:
         return ""
     return _CLIENT_LINE.get(lang, _CLIENT_LINE[DEFAULT_LANG]).format(client_label=label)
 
 
-# The legal sender line every mail ends with. The HTML templates carry
-# the same line in their footer.
+# Legal sender line every mail ends with (HTML templates carry the same one).
 LEGAL_LINE: Final = "3Days Labs Inc, 2166 Market Street, San Francisco, CA 94114"
 
 
 def text_body(kind: str, lang: str, values: dict[str, str]) -> str:
-    """Render the plain-text alternate. Raises ``KeyError`` on a gap.
-
-    Deliberately strict: a missing variable that rendered as an empty
-    string would produce a mail telling somebody to open a blank link.
-    """
+    """Render the plain-text alternate; raises ``KeyError`` on a gap (never a blank link)."""
     template = _TEXT.get((kind, lang)) or _TEXT[(kind, DEFAULT_LANG)]
     return template.format(**values).rstrip("\n") + "\n" + LEGAL_LINE
 

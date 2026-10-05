@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Sprint F1 T3 — the coverage report, from ``coverage_eval.py``'s JSON.
+"""The coverage report (numbers only) from ``coverage_eval.py``'s JSON, applying the
+shipping rule: highest coverage within 0.5 point of word change and 1.2x today's time.
 
-    uv run python scripts/eval/coverage_report.py docs/eval/asr-coverage-2026-10.json \\
-        > docs/eval/asr-coverage-2026-10.md
-
-Numbers only. Applies the work order's shipping rule: the configuration with
-the highest coverage whose word change against ``today`` is within 0.5 point
-(the WER bound — see coverage_eval.py) and whose inference time is at most
-1.2× today's.
+    uv run python scripts/eval/coverage_report.py <report.json> > <report.md>
 """
 
 from __future__ import annotations
@@ -89,9 +84,8 @@ def shipped(configs: dict[str, dict[str, Any]]) -> tuple[str, dict[str, str]]:
     verdicts: dict[str, str] = {}
     eligible: list[tuple[float, str]] = []
     for name, c in configs.items():
-        # Inserted words are speech that had no transcript before (a gap the
-        # second pass closed): they cannot raise the error rate they are
-        # counted against. Deleted and substituted words bound it.
+        # Inserted words closed a gap and cannot raise the error rate; deleted
+        # and substituted words bound it.
         ops = c.get("_ops")
         risky = (ops["delete"] + ops["replace"]) if ops else c["word_change_vs_today"]
         if risky > MAX_WORD_CHANGE:

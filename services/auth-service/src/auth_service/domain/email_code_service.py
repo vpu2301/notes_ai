@@ -1,26 +1,7 @@
-"""Email one-time-code sign-in: the orchestration between the pieces.
+"""Email one-time-code sign-in orchestration.
 
-``domain.email_code`` decides things, ``domain.identity_repository``
-stores them, ``libs/ratelimit`` counts them, ``adapters.email`` mails
-them. This module is the sequence, and the sequence is where the
-security properties live:
-
-**Start is an enumeration dead end.** It does the same work for an
-address that has an account and one that does not — the same lookup, the
-same challenge row, the same mail — and returns the same 202 with the
-same fields. Two differences are visible and both are accepted:
-rate-limit rejections are deliberate (the per-email limit applies
-identically to known and unknown addresses, so it says nothing about the
-address), and a locked account that has already been sent its lock
-notice answers faster because it sends no mail — see ``start``.
-
-**Verify never becomes an oracle.** A dead challenge (consumed, expired)
-is refused before the code is compared, so "wrong code" and "wrong
-challenge" cannot be told apart by trying a code you know is right.
-
-**Nothing here logs an address or a code.** Log records carry
-``challenge_id`` / ``identity_id``; both are opaque and both are
-already in the audit trail.
+Start does identical work for known and unknown addresses (same 202); verify
+refuses a dead challenge before comparing the code; nothing logs an address or a code.
 """
 
 from __future__ import annotations
@@ -61,11 +42,9 @@ _signup_counter = _meter.create_counter(
     description="Identities created by self-serve signup",
     unit="1",
 )
-# The send histogram and failure counter live in `domain.mailing`, which
-# owns the actual send; declaring them twice would create two instruments
-# with one name.
+# Send metrics live in `domain.mailing` (one instrument per name).
 
-# Rate-limit scopes (libs/ratelimit key: mdx:auth:rl:<scope>:<subject>:<window>).
+# Rate-limit scopes.
 SCOPE_START_EMAIL = "otp_start_email"
 SCOPE_START_IP = "otp_start_ip"
 SCOPE_VERIFY_IP = "otp_verify_ip"
@@ -99,11 +78,7 @@ class StartResult:
 
 
 class MfaGate(Protocol):
-    """The second-factor check every first factor must pass through (IDX-A5 F3).
-
-    Structural, so this module knows nothing about TOTP; ``MfaService``
-    satisfies it and ``main_deps`` wires the two together.
-    """
+    """The second-factor check every first factor passes through (structural; ``MfaService`` satisfies it)."""
 
     async def challenge_if_required(
         self,
@@ -121,8 +96,7 @@ class VerifyResult:
     identity: Identity
     membership: Membership
     memberships: list[Membership]
-    # None exactly when a second factor is still owed — the first factor
-    # passed but it does not, on its own, buy a session.
+    # None exactly when a second factor is still owed.
     session: StartedSession | None
     is_new_identity: bool
     reactivated: bool
@@ -131,8 +105,7 @@ class VerifyResult:
 
 
 class AccountLockedHook(Protocol):
-    """Notified when a failure count trips a lock, so the route layer can
-    write the ``auth.account_locked`` security event."""
+    """Notified when a failure count trips a lock (the route layer writes the audit event)."""
 
     async def __call__(self, *, identity_id: UUID, locked_until: datetime) -> None: ...
 
@@ -154,14 +127,7 @@ class Limiter(Protocol):
 
 
 class CodeMailer:
-    """Renders and sends the two A3 mails inline, under a timeout.
-
-    Inline rather than through the outbox worker that carries password
-    mail: a sign-in code is only useful for ten minutes, and a queue the
-    user waits on turns a slow relay into "sign-in is broken" with no
-    error anywhere. The cost of inline is that a relay hiccup becomes a
-    503 the user can see and retry, which is the honest failure.
-    """
+    """Renders and sends the code mails inline under a timeout (not via the outbox: a relay hiccup is a visible 503)."""
 
     def __init__(
         self,
@@ -233,9 +199,7 @@ class EmailCodeService:
         self._mailer = mailer
         self._limiter = limiter
         self._cfg = config
-        # Called when a failure trips a lock. A hook rather than an audit
-        # writer dependency: this module has no business knowing what a
-        # tenant is, and the one caller that does is the route layer.
+        # Hook rather than an audit-writer dependency: this module knows no tenants.
         self._on_account_locked = on_account_locked
         self._mfa = mfa
         self._now = clock or (lambda: datetime.now(UTC))
@@ -261,9 +225,7 @@ class EmailCodeService:
 
         await self._check_start_limits(address=address, ip=ip)
 
-        # From here on both branches do identical work. The lookup happens
-        # for an unknown address too — not because the answer is used
-        # differently, but because a skipped query is a timing signal.
+        # Both branches do identical work from here; a skipped query is a timing signal.
         identity = await self._identities.get_by_email(address)
         if identity is not None and identity.status == "deleted":
             identity = None
@@ -273,10 +235,7 @@ class EmailCodeService:
         locked_until = identity.locked_until if identity is not None else None
         locked = ec.is_locked(locked_until, now=self._now())
 
-        # A superseded challenge, then a fresh one — for the locked account
-        # too, so the row the response points at exists and behaves like
-        # any other. Its code is simply never mailed, so it cannot be
-        # verified: the lock holds without the response admitting it.
+        # Fresh challenge for the locked account too; its code is simply never mailed.
         await self._challenges.consume_open_for_email(kind=ec.KIND_EMAIL_LOGIN, email=address)
         code = ec.generate_code()
         challenge = await self._open_challenge(
@@ -289,16 +248,8 @@ class EmailCodeService:
 
         try:
             if locked and identity is not None and locked_until is not None:
-                # One notice per lock, claimed atomically. A locked account
-                # must not become a mail cannon aimed at its owner.
-                #
-                # Residual, accepted: the second request against an
-                # already-notified locked account sends no mail and so
-                # returns faster than a normal start. Reaching that state
-                # costs an attacker ten failures against an account they
-                # must already know exists, so the timing tells them
-                # nothing they did not have to know first — and evening it
-                # out would mean a deliberate delay on every sign-in.
+                # One notice per lock, claimed atomically. Accepted residual: an
+                # already-notified locked account answers faster (no mail).
                 if await self._identities.claim_lock_notice(identity.id):
                     await self._mailer.send_locked(to=address, lang=lang, locked_until=locked_until)
                 _otp_start_counter.add(1, {"result": "locked"})
@@ -312,9 +263,7 @@ class EmailCodeService:
                 )
                 _otp_start_counter.add(1, {"result": "sent"})
         except Exception as exc:
-            # No mail means no way to complete this challenge. Leaving the
-            # row would leave a live code nobody has, which only shortens
-            # the odds for someone guessing six digits.
+            # No mail, no live code left behind to guess.
             await self._challenges.delete(challenge.id)
             raise EmailCodeError(
                 "email_delivery_unavailable",
@@ -346,10 +295,7 @@ class EmailCodeService:
         client_type: str,
         ip: str,
     ) -> ec.Challenge:
-        # The id is drawn here, not by the database, because the stored
-        # hash is bound to it (F1). Letting Postgres assign it would mean
-        # writing a row with a placeholder hash and correcting it a
-        # statement later — a row briefly live with a code nobody can use.
+        # The id is drawn here because the stored hash is bound to it.
         challenge_id = uuid4()
         return await self._challenges.open(
             challenge_id=challenge_id,
@@ -365,10 +311,7 @@ class EmailCodeService:
 
     async def _check_start_limits(self, *, address: str, ip: str) -> None:
         if self._limiter is None:
-            # No limiter configured is the same condition as a limiter that
-            # cannot be reached, and this endpoint's posture for that is
-            # closed. Anything else would make "Redis is missing" the one
-            # way to get an unmetered mail-sending endpoint.
+            # No limiter = unreachable limiter: fail closed.
             _otp_start_counter.add(1, {"result": "limiter_unavailable"})
             raise EmailCodeError(
                 "rate_limiter_unavailable",
@@ -391,9 +334,7 @@ class EmailCodeService:
         )
         for scope, subject, limit, window in subjects:
             try:
-                # Fail CLOSED. This endpoint sends mail to an
-                # attacker-chosen address with no authentication; with the
-                # counter down, "allow everything" is an open relay.
+                # Fail CLOSED: with the counter down, "allow everything" is an open relay.
                 decision = await self._limiter.allow(
                     scope, subject, limit=limit, window_seconds=window, fail_open=False
                 )
@@ -414,15 +355,7 @@ class EmailCodeService:
                 )
 
     async def _check_resend_cooldown(self, *, address: str) -> None:
-        """One code per minute per address.
-
-        The pack keys this on ``challenge_id``; with no separate resend
-        endpoint the client's only way to ask again is another ``start``,
-        which has no challenge id yet — so the subject is the address and
-        the authority is the DB. Redis is the cheap first check and fails
-        OPEN: the ``created_at`` comparison below is the real rule and it
-        does not depend on a cache.
-        """
+        """One code per minute per address; Redis is the cheap first check (fails OPEN), the DB ``created_at`` is the rule."""
         if self._limiter is not None:
             decision = await self._limiter.allow(
                 SCOPE_COOLDOWN,
@@ -468,20 +401,14 @@ class EmailCodeService:
         ip: str,
         client_type: str,
         user_agent: str,
-        # BE-3 F4. Only read on the signup branch, and only to seed the
-        # new workspace: the browser's `Accept-Language` is a decent first
-        # guess at what someone reads, and a much better one than "en" for
-        # a product with Ukrainian and German customers. Anything the
-        # product has no copy for falls back to `en` (`normalise_lang`).
+        # Only read on the signup branch, to seed the new workspace's language.
         locale: str = "en",
     ) -> VerifyResult:
         await self._check_verify_limits(ip=ip)
 
         challenge = await self._challenges.get(challenge_id)
         if challenge is None or challenge.kind != ec.KIND_EMAIL_LOGIN:
-            # Indistinguishable from a challenge that expired and was
-            # purged, which is what an unknown id usually is. The client
-            # needs the same next step either way: ask for a new code.
+            # Same answer as an expired-and-purged challenge.
             _otp_verify_counter.add(1, {"result": "expired"})
             raise EmailCodeError(
                 "challenge_expired", 400, detail="that code has expired; request a new one"
@@ -491,9 +418,7 @@ class EmailCodeService:
         if decision.outcome is not ec.VerifyOutcome.OK:
             await self._handle_failed_attempt(challenge, decision)
 
-        # Success is claimed atomically: the loser of a double submit is
-        # told the challenge is consumed rather than being handed a
-        # second session.
+        # Claimed atomically: the loser of a double submit gets no second session.
         if not await self._challenges.consume(challenge.id):
             _otp_verify_counter.add(1, {"result": "consumed"})
             raise EmailCodeError(
@@ -515,10 +440,7 @@ class EmailCodeService:
             await self._challenges.record_attempt(challenge.id, attempts=decision.attempts_after)
 
         if outcome is ec.VerifyOutcome.EXHAUSTED and challenge.identity_id is not None:
-            # An exhausted challenge is a failed sign-in for lockout
-            # purposes — the counter that eventually locks the account is
-            # per identity, not per challenge, so five guesses on each of
-            # ten challenges is not free.
+            # An exhausted challenge counts towards the per-identity lockout.
             lock = await self._identities.register_failure(
                 challenge.identity_id, policy=self._cfg.lockout, now=self._now()
             )
@@ -561,10 +483,7 @@ class EmailCodeService:
     async def _check_verify_limits(self, *, ip: str) -> None:
         if self._limiter is None:
             return
-        # Fail OPEN: the per-challenge attempt budget in the database is
-        # the real bound on guessing, and it does not need Redis. Locking
-        # everyone out of sign-in because a cache is down would be the
-        # more expensive failure.
+        # Fail OPEN: the per-challenge attempt budget in the DB is the real bound.
         decision = await self._limiter.allow(
             SCOPE_VERIFY_IP,
             ip or "unknown",
@@ -614,19 +533,13 @@ class EmailCodeService:
             memberships = await self._identities.list_memberships(identity.id)
             preferred = _preferred_membership(memberships, identity.last_tenant_id)
             if preferred is None:
-                # An account with no workspace cannot be given a token:
-                # every claim set needs a `tid`. BE-2 F3: give them the
-                # personal workspace every identity is entitled to instead
-                # of refusing a sign-in they cannot do anything about.
+                # No workspace means no `tid`; heal the personal workspace instead of refusing.
                 healed = await self._identities.ensure_personal_workspace(
                     identity.id, identity.email, locale=identity.locale
                 )
                 if healed is None:
                     _otp_verify_counter.add(1, {"result": "no_workspace"})
-                    # 409, not 403: the contract in docs/api/error-codes.md
-                    # already names this code for session start, and the
-                    # meaning is "the account is in a state that cannot be
-                    # served", not "you may not".
+                    # 409, not 403: "cannot be served", not "you may not".
                     raise EmailCodeError(
                         "no_workspace",
                         409,
@@ -636,10 +549,7 @@ class EmailCodeService:
                 preferred = healed
             membership = preferred
 
-        # IDX-A5: a passed first factor is not a session if a second one
-        # is owed. The gate is asked even for a brand-new identity — it
-        # cannot have MFA, but routing signup around the check is exactly
-        # how a bypass gets introduced later.
+        # The MFA gate is asked even for a brand-new identity: never route around it.
         if self._mfa is not None:
             pending = await self._mfa.challenge_if_required(
                 identity,
@@ -668,7 +578,6 @@ class EmailCodeService:
             ip=ip,
             user_agent=user_agent,
         )
-        # Clears the lockout counters and remembers the landing workspace.
         await self._identities.note_successful_login(identity.id, tenant_id=membership.tenant_id)
 
         _otp_verify_counter.add(1, {"result": "new_identity" if is_new_identity else "ok"})
@@ -692,19 +601,12 @@ class EmailCodeService:
         )
 
     async def _resolve_identity(self, challenge: ec.Challenge) -> Identity | None:
-        """Who the challenge is for, as of now — not as of when it was issued.
-
-        The address may have acquired an identity in the ten minutes since
-        (two devices, two codes, the other one finished first), so the
-        address is re-checked rather than trusting the stored id.
-        """
+        """Who the challenge is for, as of now (the address is re-checked, not the stored id)."""
         identity: Identity | None = None
         if challenge.identity_id is not None:
             identity = await self._identities.get(challenge.identity_id)
         if identity is None or identity.status == "deleted":
-            # `deleted` cannot match by address (the purge rewrites it),
-            # so this lookup returns None and signup proceeds — which is
-            # the documented "treat as unknown email".
+            # `deleted` cannot match by address (the purge rewrites it): treated as unknown.
             identity = await self._identities.get_by_email(challenge.email)
         if identity is not None and identity.status == "deleted":
             return None
@@ -712,28 +614,9 @@ class EmailCodeService:
 
 
 def _refuse_legacy_mfa(identity: Identity) -> None:
-    """`409 use_password` for a Keycloak account that has a second factor.
+    """`409 use_password` for a Keycloak account with a second factor: this service cannot challenge it.
 
-    BE-3 F3. This is the one rule that makes the `dual` period safe to
-    switch on. An emailed code is a single factor. For an identity whose
-    credentials still live in Keycloak, the second factor lives there
-    too — this service cannot see it, cannot challenge it, and cannot
-    honour it. Minting a native session from a code alone would therefore
-    take a person who deliberately enabled two-factor authentication and
-    silently give them a one-factor way in, on their behalf, without
-    telling them.
-
-    Both halves of the condition matter. `legacy_idp` alone is the
-    ordinary migrated user, who gets a native session and keeps their
-    password (that is the point of the period). `mfa_enabled` alone is a
-    native account whose own second factor `MfaService` challenges a few
-    lines below. Only together do they describe a factor we can neither
-    check nor skip.
-
-    Not an enumeration leak: the caller has already proved possession of
-    the mailbox by submitting the right code. This is on `verify`, never
-    on `start` — `start` answers 202 for every syntactically valid address
-    by construction (docs/api/error-codes.md).
+    Both halves matter (`legacy_idp` AND `mfa_enabled`). On `verify` only, never `start`.
     """
     if not (identity.legacy_idp and identity.mfa_enabled):
         return
@@ -748,12 +631,7 @@ def _refuse_legacy_mfa(identity: Identity) -> None:
 def _preferred_membership(
     memberships: list[Membership], last_tenant_id: UUID | None
 ) -> Membership | None:
-    """Where a returning sign-in lands: last workspace used, else the first.
-
-    ``list_memberships`` orders personal workspaces first, so the
-    fallback for someone who has never chosen is their own space rather
-    than whichever team happens to sort earliest.
-    """
+    """Where a returning sign-in lands: last workspace used, else the first (personal workspaces sort first)."""
     if not memberships:
         return None
     if last_tenant_id is not None:

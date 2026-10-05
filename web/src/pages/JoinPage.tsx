@@ -7,27 +7,17 @@ import { SignupPage } from "./auth/SignupPage";
 
 import { REF_KEY } from "../lib/storageKeys";
 
-/** Where the shared page's CTA parks its referral code for Sprint 21's `/signup`. */
+/** Where the shared page's CTA parks its referral code for `/signup`. */
 export const REF_STORAGE_KEY = REF_KEY;
 
 /**
- * `/join` — the fake door behind "Create your own workspace free".
- *
- * A recipient of a shared note lands here from the CTA with `?ref=` (the
- * link's opaque referral code). Nothing is created this sprint: the
- * address is stored as a lead and the page says thanks. Whether people
- * get this far, and how many, is what decides if real self-serve signup
- * gets built.
- *
- * No auth calls, no session: `AuthContext` skips its silent refresh on
- * this route on purpose.
+ * `/join` — the CTA landing (`?ref=` referral code). Lead form when signup is off.
+ * No auth calls, no session: `AuthContext` skips its silent refresh here on purpose.
  */
 export function JoinPage() {
   const [params] = useSearchParams();
   const ref = params.get("ref");
-  // Sprint 21: when self-serve signup is on, the CTA lands on the real
-  // thing. The lead form stays as the fallback for a deployment where it
-  // is off (or an old server with no `/config`).
+  // Signup on: go to the real thing; off (or no `/config`): the lead form.
   const [signupOn, setSignupOn] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;

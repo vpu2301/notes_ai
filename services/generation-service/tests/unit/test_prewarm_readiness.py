@@ -1,4 +1,4 @@
-"""Sprint 16 — generation pre-warm: a reachable-but-cold backend is unready."""
+"""Pre-warm: a reachable-but-cold backend is unready."""
 
 from __future__ import annotations
 
@@ -50,8 +50,7 @@ async def test_warmed_backend_reports_ready() -> None:
 
 
 async def test_prewarm_disabled_states_are_ready_by_default() -> None:
-    # build_state constructs warmed=True; the lifespan only flips it to
-    # False when MDX_PREWARM_ENABLED — so the default posture is unchanged.
+    # warmed defaults True; only the lifespan flips it when MDX_PREWARM_ENABLED.
     state = SimpleNamespace(redis=_Redis(), inference=_Inference(), warmed=True)
     resp = Response()
     assert (await readyz(_request(state), resp))["status"] == "ready"

@@ -1,14 +1,6 @@
-"""numeric_with_unit / date binders.
+"""numeric_with_unit / date binders: pick from normalizer artifacts, never re-parse.
 
-These are **binders, not parsers**. They pick from the artifacts the
-normalizer stages reported about their own output; they
-contain no numeral vocabulary, no unit table and no date arithmetic of
-their own. That is the single-source rule: if a binder re-derived
-"сто сорок" → 140 or resolved "три дні тому", it would drift from the
-normalizer the first time either changed.
-
-The choice-extractor ambiguity rule applies unchanged: several candidates
-and no way to choose ⇒ empty field, prose preserved.
+Several candidates and no way to choose ⇒ empty field, prose preserved.
 """
 
 from __future__ import annotations
@@ -20,20 +12,14 @@ from note_models import DateMeta, NumericMeta
 from ...pipeline.base import DateArtifact, NumericArtifact, TemplateSection
 from .choice import tokenize
 
-# Confidence constants — pilot-tunable, documented in ADR-0032.
-#
-# LABELLED sits above the 0.8 threshold: the section's own name or an
-# alias appeared next to the value, which is real evidence of intent.
+# Confidence constants (ADR-0032). LABELLED is above the 0.8 threshold (a
+# section label sat next to the value); SOLE sits exactly at it so a clean
+# single-measurement section binds.
 LABELLED_CONFIDENCE: Final = 0.9
-# SOLE sits EXACTLY at the threshold so a clean single-measurement
-# section binds. Anything lower would make the common case unfillable;
-# anything higher would claim evidence we do not have.
 SOLE_CONFIDENCE: Final = 0.8
-# A date is a stronger signal than a bare number: the normalizer only
-# emits ISO forms it actually recognised as dates.
 DATE_CONFIDENCE: Final = 0.9
 
-# How many tokens around a value are scanned for the section's label.
+# Tokens around a value scanned for the section's label.
 LABEL_WINDOW: Final = 4
 
 
@@ -42,19 +28,12 @@ def _label_tokens(section: TemplateSection) -> set[str]:
     tokens: set[str] = set(tokenize(section.name))
     for alias in section.aliases:
         tokens.update(tokenize(alias))
-    # Very short tokens are noise as labels ("на", "і").
+    # Very short tokens are noise as labels.
     return {t for t in tokens if len(t) >= 4}
 
 
 def _label_distance(text: str, artifact: NumericArtifact, labels: set[str]) -> int | None:
-    """Token distance from the value to its NEAREST section label.
-
-    A distance rather than a boolean: in "вага 80 кг, висота 37,2"
-    both values sit within a few tokens of "висота", so a boolean
-    window would call both labelled and give up. Nearest-wins picks the
-    value the speaker actually attached to the label, and an exact tie
-    still falls through to the ambiguity rule.
-    """
+    """Token distance to the nearest section label (nearest wins; an exact tie stays ambiguous)."""
     if not labels:
         return None
     tokens = tokenize(text)
@@ -84,21 +63,8 @@ def bind_numeric(
 ) -> NumericMeta | None:
     """Bind one measurement to a ``numeric_with_unit`` section.
 
-    Rules, in order:
-
-    1. *(dormant)* match the section's declared expected unit — as-built
-       ``TemplateSection`` carries no unit hint, so this rule cannot
-       fire yet. When a template gains one, it slots in here as the
-       strongest signal.
-    2. A value labelled by the section's name/alias tokens nearby ⇒
-       ``LABELLED_CONFIDENCE``.
-    3. Exactly one unit-bearing value in the section ⇒
-       ``SOLE_CONFIDENCE``.
-
-    Several unlabelled candidates ⇒ empty (ambiguity). A value with no
-    unit ⇒ empty: a ``numeric_with_unit`` field without a unit is not
-    a measurement, and guessing the unit is exactly the kind of
-    fabrication this stage refuses.
+    Labelled nearby ⇒ LABELLED_CONFIDENCE; exactly one unit-bearing value ⇒
+    SOLE_CONFIDENCE; several unlabelled or no unit ⇒ empty (never guess a unit).
     """
     with_units = [a for a in artifacts if a.unit]
     if not with_units:
@@ -132,18 +98,7 @@ def bind_date(
     *,
     threshold: float,
 ) -> DateMeta | None:
-    """Bind one ISO date to a ``date`` / ``date_with_note`` section.
-
-    Exactly one date ⇒ bound. Several ⇒ empty: which one the speaker
-    meant is not inferable, and picking the first would silently
-    misdate the note.
-
-    ``date_with_note`` needs no note extraction — the dictated prose IS
-    the note and already lives in the section's ``text``.
-
-    Relative dates ("три дні тому") appear here only if the
-    date normalizer resolved them; this binder never resolves anything.
-    """
+    """Bind one ISO date to a ``date`` / ``date_with_note`` section; several dates ⇒ empty."""
     if len(artifacts) != 1:
         return None
     if threshold > DATE_CONFIDENCE:

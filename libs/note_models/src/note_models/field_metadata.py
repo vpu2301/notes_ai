@@ -1,30 +1,7 @@
-"""Sprint-13: the typed contract for ``NoteSection.field_specific_metadata``.
+"""Typed contract for ``NoteSection.field_specific_metadata``, enforced at the WRITE path (storage stays a plain dict).
 
-``field_specific_metadata`` stays ``dict[str, Any]`` on the model —
-canonical bytes (the version hash-chain) serialize the dict as-is, so
-the *storage* shape must never depend on this module. Discipline is
-enforced at the WRITE path instead: note-service validates every
-non-empty dict against the section's template ``field_type`` via
-:func:`validate_field_metadata`, and the nlp extractor (sprint-13 step
-04) constructs metadata via these models so it cannot emit invalid
-shapes.
-
-The normative key registry lives in ``docs/architecture/notes.md``.
-Contract rules:
-
-- An empty dict is always valid (every pre-S13 note).
-- ``source`` is required whenever any other key is present:
-  ``extracted`` values are proposals the FE renders as such; ``manual``
-  values are user-confirmed. Nothing ever auto-promotes
-  extracted → manual; that is exclusively an explicit user action.
-- ``confidence`` is required for ``extracted`` entries (the extractor
-  always knows it) and must be OMITTED for ``manual`` entries (a
-  user confirmation is not a probability — documented choice,
-  sprint-13 step 02).
-
-``note_models`` is an import-linter leaf, so ``field_type`` is passed
-as ``str`` — ``template_models.FieldType`` is a ``StrEnum`` and passes
-through unchanged.
+Empty is always valid; ``source`` is required with any other key; ``confidence`` is required for ``extracted`` and
+must be omitted for ``manual``; nothing auto-promotes extracted → manual. ``field_type`` is a ``str`` (leaf package).
 """
 
 from __future__ import annotations
@@ -111,8 +88,7 @@ class DateMeta(_StrictMeta):
 
 FieldMeta = ChoiceMeta | MultiChoiceMeta | NumericMeta | DateMeta
 
-# The registry: field types absent here (free_text) accept no metadata.
-# Sprint-15 (note review) extends this table — never bypasses it.
+# Field types absent here (free_text) accept no metadata.
 META_MODEL_BY_FIELD_TYPE: Final[Mapping[str, type[FieldMeta]]] = {
     "choice": ChoiceMeta,
     "multi_choice": MultiChoiceMeta,
@@ -123,12 +99,7 @@ META_MODEL_BY_FIELD_TYPE: Final[Mapping[str, type[FieldMeta]]] = {
 
 
 def parse_field_metadata(field_type: str, metadata: Mapping[str, Any]) -> FieldMeta | None:
-    """Parse a section's metadata dict into its typed model.
-
-    Returns ``None`` for an empty dict (always valid — every pre-S13
-    note). Raises :class:`FieldMetadataError` for unknown keys, wrong
-    shapes, or metadata on a field type that accepts none.
-    """
+    """Parse a metadata dict into its typed model; ``None`` for empty, :class:`FieldMetadataError` when invalid."""
     if not metadata:
         return None
     model = META_MODEL_BY_FIELD_TYPE.get(field_type)
@@ -143,9 +114,5 @@ def parse_field_metadata(field_type: str, metadata: Mapping[str, Any]) -> FieldM
 
 
 def validate_field_metadata(field_type: str, metadata: Mapping[str, Any]) -> None:
-    """Raise :class:`FieldMetadataError` unless ``metadata`` is valid.
-
-    By construction accepts exactly what :func:`parse_field_metadata`
-    parses (it *is* a parse-and-discard; a property test pins this).
-    """
+    """Raise :class:`FieldMetadataError` unless ``metadata`` is valid (parse-and-discard)."""
     parse_field_metadata(field_type, metadata)

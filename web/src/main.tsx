@@ -14,9 +14,7 @@ import "./styles/pages.css";
 // Resolve light/dark before the first paint so the page never flashes.
 applyThemeNow();
 
-// Mailed password links arrive as `#/reset-password?token=…`. Translate the
-// fragment into a route and take the token out of the URL before the router
-// — or anything else — can see it.
+// Mailed links arrive as `#/reset-password?token=…`: take the token out of the URL before the router sees it.
 captureMailLink();
 
 // Values stored under the product's earlier name move to `notesai.*` once.

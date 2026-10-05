@@ -1,29 +1,14 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IOS-0's smoke, from inside the app: sign in, capture a second, see the
-/// note land in Recents — against a real stack, through the app's own
-/// `APIClient` rather than through `StubServer`.
-///
-/// **Opt-in, and inert by default.** Every case skips unless
-/// `NOTES_STACK_HOST` is set, because the rest of this bundle must stay
-/// runnable on a laptop with nothing up and in a CI job with no Docker.
-/// Point it at a stack and it becomes the real thing:
+/// Smoke from inside the app against a real stack: sign in, upload a second
+/// of generated audio, see the note land in Recents. Opt-in: every case
+/// skips unless `NOTES_STACK_HOST` is set.
 ///
 ///     make dev-up
 ///     NOTES_STACK_HOST=localhost ios/scripts/test.sh "iPhone 16"
 ///
-/// The API half of the same path — including creating and confirming the
-/// account, which is BE-0's and cannot be done from here — is
-/// `scripts/smoke/ios_signup_e2e.py` (`make smoke-ios`). This half exists
-/// because "the note appears in Recents" is a claim about the app's own
-/// state, and only the app can make it.
-///
-/// The one second of audio is generated, not recorded. A simulator on a CI
-/// runner has no audio input device at all, so `Recorder` is the single
-/// step of this pipeline that cannot be exercised without a microphone;
-/// everything after it is identical either way and `RecorderTests` covers
-/// the rest.
+/// The API half (incl. account creation) is `scripts/smoke/ios_signup_e2e.py`.
 final class LiveStackTests: XCTestCase {
 
     private struct Stack {
@@ -45,9 +30,7 @@ final class LiveStackTests: XCTestCase {
                      password: env["NOTES_STACK_PASSWORD"] ?? "dev-password")
     }
 
-    /// A client with no Keychain behind it: a test must not leave a real
-    /// session item in the simulator's keychain, and the storage seam is
-    /// there so it does not have to.
+    /// A client with no Keychain behind it, so no real session item is left behind.
     private func client(for stack: Stack) -> (APIClient, InMemorySessionStorage) {
         let storage = InMemorySessionStorage()
         let client = APIClient(settings: stack.settings,
@@ -61,8 +44,7 @@ final class LiveStackTests: XCTestCase {
         let stack = try stack()
         let (api, storage) = client(for: stack)
 
-        // 1. Sign in the way a BE-0 account does — email and password, no
-        //    different from a seeded user, which is the ticket's claim.
+        // 1. Sign in with email and password.
         _ = try await api.login(email: stack.email, password: stack.password)
         let session = try XCTUnwrap(storage.record, "signing in must leave a session")
         XCTAssertFalse(session.token.isEmpty)
@@ -87,8 +69,7 @@ final class LiveStackTests: XCTestCase {
         XCTAssertFalse(note.id.isEmpty)
         _ = try await api.fetchNote(id: note.id)
 
-        // 5. And in Recents — the app's own bookkeeping, against a
-        //    scratch suite so the simulator's real state is untouched.
+        // 5. And in Recents, against a scratch suite.
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "live-\(UUID().uuidString)"))
         let scope = try XCTUnwrap(StateScope.of(identityId: session.identityId,
                                                 tenantId: session.lastTenantId))
@@ -115,10 +96,7 @@ final class LiveStackTests: XCTestCase {
         throw XCTSkip("the job did not finish inside \(Int(timeout))s — a cold whisper model, probably")
     }
 
-    /// One second of 16 kHz mono tone, in a `.wav` container — the format
-    /// `Recorder` itself falls back to, so the upload path under test is
-    /// one the app really uses. A tone rather than silence: an all-zero
-    /// buffer is the kind of input a decoder is entitled to reject.
+    /// One second of 16 kHz mono tone as `.wav` (the recorder's fallback format); a tone, since silence may be rejected.
     private func oneSecondOfAudio(rate: Int = 16_000) throws -> URL {
         var samples = Data()
         for n in 0..<rate {

@@ -9,11 +9,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from secret import Secret
 
-# ``Secret[str]`` is a generic, so pydantic-settings classes it as a complex
-# type and json.loads() the raw env value — any plain string (including "")
-# blows up with a JSONDecodeError before the field is ever validated. NoDecode
-# hands the raw string straight to Secret's validator. Every Secret field fed
-# from the environment must use this alias.
+# pydantic-settings treats the generic Secret[str] as complex and json.loads() the raw
+# env value; NoDecode hands it straight to Secret's validator. Every env Secret uses this.
 SecretStrEnv = Annotated[Secret[str], NoDecode]
 
 
@@ -46,19 +43,13 @@ class Settings(BaseSettings):
         alias="AUTH_JWKS_URL",
     )
     auth_audience: str = Field(default="mdx-api", alias="AUTH_AUDIENCE")
-    # FND-1 / ADR-0047: the complete list of issuers this service trusts,
-    # as JSON — `[{"issuer": …, "jwks_url": …, "audience": …}, …]`. The
-    # token's own `iss` selects which entry verifies it. Unset (the
-    # default) means the three values above build a one-element list, so
-    # a deployment that has not been migrated behaves exactly as before.
+    # ADR-0047: JSON list `[{"issuer", "jwks_url", "audience"}, …]`; the token's `iss`
+    # selects the entry. Unset = a one-element list from the three values above.
     auth_issuers_json: str = Field(default="", alias="AUTH_ISSUERS_JSON")
     auth_clock_skew_seconds: int = Field(default=30, alias="AUTH_CLOCK_SKEW_SECONDS")
 
     # ── CORS (SPA integration) ──────────────────────────────────────────
-    # Comma-separated browser origins allowed to call this service WITH
-    # credentials (the HttpOnly refresh cookie). Must be explicit origins —
-    # never "*" — because allow_credentials=True forbids the wildcard. Mirror
-    # of the auth-service allow-list (sprint A3).
+    # Explicit origins, never "*": allow_credentials=True forbids the wildcard.
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
         alias="CORS_ALLOWED_ORIGINS",
@@ -104,11 +95,9 @@ class Settings(BaseSettings):
     # ── Master key (envelope crypto) ────────────────────────────────────
     master_key_path: str = Field(default="/etc/mdx/master.key", alias="MDX_MASTER_KEY_PATH")
 
-    # ── Master-key provider (sprint 16, ADR-0011 KMS swap) ───────────────
-    # 'file' (dev default — behaviour identical to pre-sprint-16) or
-    # 'vault' (Vault Transit; fail-closed startup probe). With 'vault', the
-    # file at master_key_path — if present — stays live as a read-only
-    # fallback for rows not yet re-wrapped (scripts/kms/rewrap-tenant-keks.py).
+    # ── Master-key provider (ADR-0011) ──────────────────────────────────
+    # 'file' or 'vault' (fail-closed probe); with 'vault' the file stays a read-only
+    # fallback for rows not yet re-wrapped.
     master_key_provider: str = Field(default="file", alias="MDX_MASTER_KEY_PROVIDER")
     vault_addr: str = Field(default="http://localhost:8200", alias="MDX_VAULT_ADDR")
     vault_token: SecretStrEnv = Field(default_factory=lambda: Secret(""), alias="MDX_VAULT_TOKEN")
@@ -116,15 +105,10 @@ class Settings(BaseSettings):
     vault_transit_mount: str = Field(default="transit", alias="MDX_VAULT_TRANSIT_MOUNT")
 
     # ── Upload validation ───────────────────────────────────────────────
-    # A meeting, not a memo: two hours by default. The clients read this
-    # (GET /asr/limits), warn five minutes before it and stop at it, so a
-    # recording is never refused after the fact. 250 MB covers two hours
-    # of the WAV fallback (16 kHz mono 16-bit ≈ 115 MB/h); FLAC is a third.
+    # Clients read these (GET /asr/limits) and stop at them. 250 MB ≈ two hours of WAV.
     max_upload_mb: int = Field(default=250, alias="MD_ASR_MAX_UPLOAD_MB")
     max_duration_seconds: int = Field(default=2 * 3600, alias="MD_ASR_MAX_DURATION_SECONDS")
-    # Floor, not a cap: below this an upload cannot carry a usable
-    # utterance, and Whisper answers a fraction of a second of noise with a
-    # confident hallucination. Rejecting is safer than storing it.
+    # Floor: below this Whisper answers noise with a confident hallucination.
     min_duration_ms: int = Field(default=400, alias="MD_ASR_MIN_DURATION_MS")
     min_sample_rate_hz: int = Field(default=8000, alias="MD_ASR_MIN_SAMPLE_RATE_HZ")
     max_channels: int = Field(default=2, alias="MD_ASR_MAX_CHANNELS")
@@ -138,45 +122,33 @@ class Settings(BaseSettings):
     per_tenant_concurrent_jobs: int = Field(default=10, alias="MD_ASR_PER_TENANT_CONCURRENT_JOBS")
 
     # ── Stranded-job reaper ─────────────────────────────────────────────
-    # The only terminal writer for a job is the worker that owns it, so a
-    # worker killed mid-inference leaves its row in `running` forever —
-    # burning a per_tenant_concurrent_jobs slot and showing the user a
-    # job that never resolves. The reaper is the out-of-process backstop
-    # (asr_service.domain.reaper).
-    #
-    # The grace windows are the ONLY interlock: asr-worker publishes no
-    # heartbeat. Keep `running` comfortably above the worst case the worker
-    # allows itself — max_duration_seconds × the worker's inference
-    # multiplier (2 h × 6.5 = 13 h at the defaults since Sprint F1 raised it
-    # for the second pass), plus a redelivery.
+    # The grace windows are the ONLY interlock (no worker heartbeat). Keep `running`
+    # above max_duration_seconds × the worker's inference multiplier (2 h × 6.5 = 13 h
+    # at the defaults), plus a redelivery.
     job_reaper_enabled: bool = Field(default=True, alias="MD_ASR_JOB_REAPER_ENABLED")
     job_reaper_interval_s: float = Field(default=300.0, alias="MD_ASR_JOB_REAPER_INTERVAL_S")
     job_reaper_running_grace_s: float = Field(
         default=14 * 3600.0, alias="MD_ASR_JOB_REAPER_RUNNING_GRACE_S"
     )
-    # A job nobody has claimed in this long is not backlogged, it is lost.
+    # Unclaimed this long = lost, not backlogged.
     job_reaper_queued_grace_s: float = Field(
         default=6 * 3600.0, alias="MD_ASR_JOB_REAPER_QUEUED_GRACE_S"
     )
     job_reaper_batch_limit: int = Field(default=100, alias="MD_ASR_JOB_REAPER_BATCH_LIMIT")
 
-    # ── Speaker re-labelling (Sprint 29, POST /asr/jobs/{id}/rediarize) ──
-    # A re-run is a full diarization pass over the stored audio: capped per
-    # job (one in flight, this many in total) and per user per hour.
+    # ── Speaker re-labelling (POST /asr/jobs/{id}/rediarize) ────────────
+    # A full diarization pass: capped per job (one in flight, this many total) and per user/hour.
     rediarize_max_runs: int = Field(default=5, alias="MD_ASR_REDIARIZE_MAX_RUNS")
     rediarize_user_hourly_limit: int = Field(default=10, alias="MD_ASR_REDIARIZE_USER_HOURLY_LIMIT")
 
-    # ── Name suggestions + re-label offer (Sprint 32) ───────────────────
-    # Suggestions ship DARK: on only after the shadow experiment shows
-    # ≥ 95 % precision (docs/product/speaker-decisions.md).
+    # ── Name suggestions + re-label offer ───────────────────────────────
+    # Suggestions ship dark until the shadow experiment shows ≥ 95 % precision.
     name_suggestions_enabled: bool = Field(default=False, alias="MDX_NAME_SUGGESTIONS_ENABLED")
-    # Sprint TQ3: one name, one spelling. Off = no unification, the view is
-    # the artefact. Auto-apply off (the kill switch) = every correction is a
-    # proposal a person accepts; nothing changes the text on its own.
+    # Spelling unification. Off = the view is the artefact; auto-apply off = every
+    # correction is a proposal a person accepts.
     entity_unify_enabled: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_ENABLED")
     entity_unify_auto_apply: bool = Field(default=True, alias="MDX_ENTITY_UNIFY_AUTO_APPLY")
-    # Seconds the unifier may take per audio hour before its result is
-    # dropped (status ``skipped_budget``); never less than the floor.
+    # Unifier budget per audio hour (over = ``skipped_budget``); never below the floor.
     entity_unify_budget_s_per_hour: float = Field(
         default=2.0, alias="MDX_ENTITY_UNIFY_BUDGET_S_PER_HOUR"
     )
@@ -184,24 +156,17 @@ class Settings(BaseSettings):
     entity_unify_recompute_hourly_limit: int = Field(
         default=20, alias="MDX_ENTITY_UNIFY_RECOMPUTE_HOURLY_LIMIT", ge=1
     )
-    # The engine the worker diarizes with now (keep equal to the worker's
-    # MDX_DIAR_ENGINE, as its engine id). A transcript made by another one
-    # is offered "Re-label with the current engine".
+    # The worker's current engine id; a transcript by another one is offered a re-label.
     current_diar_engine: str = Field(default="legacy-ecapa-ahc", alias="MDX_DIAR_CURRENT_ENGINE")
 
-    # ── NLP batch enrichment (sprint 05 pipeline over batch results) ────
-    # GET /asr/jobs/{id}/result runs the raw transcript through
-    # nlp-service (voice commands → punctuation → numbers → …) before
-    # returning it. Degrades gracefully to the raw transcript when the
-    # service is down or the flag is off.
+    # ── NLP batch enrichment ────────────────────────────────────────────
+    # The result view runs through nlp-service; degrades to the raw transcript.
     nlp_enrich_enabled: bool = Field(default=True, alias="MD_ASR_NLP_ENRICH_ENABLED")
     nlp_base_url: str = Field(default="http://localhost:8005", alias="MD_ASR_NLP_BASE_URL")
     nlp_timeout_seconds: float = Field(default=10.0, alias="MD_ASR_NLP_TIMEOUT_SECONDS")
 
-    # ── Session revocation check (sprint 16) ────────────────────────────
-    # When on, current_user rejects tokens whose sid/sub is on the Redis
-    # denylist that auth-service pushes on logout/deactivation. Fail-OPEN
-    # on Redis outage (ADR-0040). Same env name across the fleet; off in dev.
+    # ── Session revocation check ────────────────────────────────────────
+    # Redis denylist pushed by auth-service; fail-OPEN on Redis outage (ADR-0040).
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
 

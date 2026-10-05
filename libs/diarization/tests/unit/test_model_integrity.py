@@ -1,15 +1,4 @@
-"""Startup integrity assertion for the baked diarization weights (sprint 14).
-
-The build verifies the ECAPA digests before baking; this re-asserts them at
-process startup so a tampered or truncated layer is caught before the first
-consultation. Fail-closed is the contract: every failure mode below must
-RAISE, never warn-and-continue — diarizing with unaccountable weights is
-worse than not starting.
-
-Synthetic files, real digests: the point under test is the verification
-logic, not the 83 MB artifact (that path is exercised live in
-docs/runbooks/dictation.md § verify the baked models).
-"""
+"""Startup integrity check of the baked diarization weights: every failure mode must RAISE (synthetic files, real digests)."""
 
 from __future__ import annotations
 

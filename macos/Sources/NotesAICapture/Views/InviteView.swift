@@ -1,13 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// "Invite people" — add a colleague to the workspace by e-mail, or send
-/// them the link if they have no account here yet. Opened from the
-/// sidebar's invite icon (and the account menu).
-///
-/// The server resolves an address to an account that already exists in the
-/// tenant (`POST /tenants/{id}/members`); anyone else has to sign up first,
-/// so a 404 turns into the mail/copy-link fallback rather than an error.
+/// "Invite people" — add a colleague by e-mail, or send them the link if they have no
+/// account yet. The server resolves an address to an existing account; a 404 turns into the mail/copy-link fallback.
 struct InviteView: View {
     @EnvironmentObject private var app: AppState
     var onClose: (() -> Void)? = nil

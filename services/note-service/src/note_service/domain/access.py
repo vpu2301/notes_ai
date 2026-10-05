@@ -1,16 +1,7 @@
-"""Who may see, share, and delete a note (0016).
-
-The rules in one place, so the read routers, the search filter and the
-sharing endpoints cannot drift apart:
-
-* **Author team** — primary author and co-authors — can do everything.
-* **Shared-with** members can read, whatever the visibility.
-* **Workspace** visibility lets every member read (the pre-0016 rule).
-* **tenant_admin / auditor** can read anything in the tenant (they
-  still declare a read purpose, as before) and admins can also manage
-  and delete on the author's behalf.
-* Anyone else gets a 404 — a private note is not something whose
-  existence should be confirmable by guessing ids.
+"""Who may see, share, and delete a note, in one place: author team does
+everything; shared-with members and (under workspace visibility) every member
+read; tenant_admin / auditor read anything with a purpose, admins also manage
+and delete; anyone else gets a 404, never a 403.
 """
 
 from __future__ import annotations
@@ -44,12 +35,12 @@ def is_author_team(note: NoteRow, user_sub: UUID) -> bool:
 
 
 def reads_as_collaborator(note: NoteRow, claims: Claims) -> bool:
-    """The author team, plus anyone the note was shared with (0016).
+    """The author team, plus anyone the note was shared with.
 
     These readers never declare a purpose: the note is theirs to read.
     Everyone else — a workspace member reading a ``workspace``-visible
     note, a tenant_admin or auditor reading across the tenant — is an
-    oversight read and must say why (sprint-08 ``?purpose=``).
+    oversight read and must say why (``?purpose=``).
     """
     return is_author_team(note, claims.sub) or claims.sub in note.shared_with_ids
 

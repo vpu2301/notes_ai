@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# CI gate (DEP-S1-05): a built image must not carry a token in its config
-# (ENV), labels or layer history. Tokens reach the process only from the
-# secret manager at runtime.
+# CI gate: a built image must not carry a token in its config (ENV), labels or layer history.
 #   scripts/ci/check-image-no-secrets.sh <image> [<image>…]
 set -euo pipefail
 [ $# -ge 1 ] || { echo "usage: $0 <image>…" >&2; exit 2; }

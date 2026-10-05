@@ -1,8 +1,4 @@
-"""Speaker re-labelling against the real schema (migration 0044) and RLS.
-
-The unit tests fake the repository; these run its SQL: the claim and its
-refusals, the enqueue rollback, the one-step undo, the reaper's view of a
-stranded re-run, and that another tenant sees none of it.
+"""Speaker re-labelling, edits and erasure against the real schema and RLS.
 
 Skipped unless RUN_DB_INTEGRATION=1 (needs `make dev-up && make migrate-up`).
 Creates two throwaway tenants and deletes only their rows.
@@ -248,7 +244,7 @@ async def test_the_reaper_finds_and_fails_a_stranded_rerun(world: dict[str, obje
     )
 
 
-# ── Sprint 30 (migration 0045) ────────────────────────────────────────
+# ── Speaker edits ─────────────────────────────────────────────────────
 
 
 async def test_reassign_edits_reset_and_first_read(world: dict[str, object]) -> None:
@@ -331,7 +327,7 @@ async def test_capture_context_is_stored_on_the_row(world: dict[str, object]) ->
         assert await repository.name_candidates(c, job_id=job_id) == []
 
 
-# ── Sprint 31 (migration 0047) ────────────────────────────────────────
+# ── Name provenance ───────────────────────────────────────────────────
 
 
 async def test_name_sources_persist_and_a_cleared_channel_name_is_remembered(
@@ -354,7 +350,7 @@ async def test_name_sources_persist_and_a_cleared_channel_name_is_remembered(
         assert await repository.name_sources(c, job_id=job) == {}
 
 
-# ── Sprint 32 (B-6): job erasure ──────────────────────────────────────
+# ── Job erasure ───────────────────────────────────────────────────────
 
 
 class _Store:

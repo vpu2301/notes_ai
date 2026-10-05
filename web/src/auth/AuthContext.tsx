@@ -30,20 +30,15 @@ export type SignInOutcome =
 interface AuthContextValue {
   status: AuthStatus;
   me: MeResponse | null;
-  /** The global principal. Survives IDX-B2's removal of `db_user`. */
+  /** The global principal. */
   identity: Identity | null;
-  /** Every workspace this identity belongs to — W2's switcher reads this. */
+  /** Every workspace this identity belongs to. */
   memberships: Membership[];
   /** The workspace the current access token is scoped to. */
   activeTenantId: string | null;
   /** This account's role in the active workspace, or null when unknown. */
   activeRole: string | null;
-  /**
-   * Whether this session can be re-scoped to another workspace. False for
-   * a Keycloak-issued session (`dual` mode): auth-service cannot mint a
-   * token for another `tid` on its behalf, so the switcher is hidden
-   * rather than left to earn a `409 legacy_session`.
-   */
+  /** False for a Keycloak-issued session: auth-service cannot re-scope it (409 legacy_session). */
   canSwitchWorkspaces: boolean;
   /** Move this session to another workspace. Throws `ApiError`. */
   switchWorkspace: (tenantId: string) => Promise<void>;
@@ -86,15 +81,7 @@ export function useAuthOptional(): AuthContextValue | null {
   return useContext(AuthContext);
 }
 
-/**
- * The person behind a `/auth/me`, whichever half of the cut-over answered.
- *
- * `routers/me.py` returns `identity` since IDX-B3, and it wins whenever it
- * is there. It is null in **keycloak mode**, where there are no
- * `identities` rows at all, so the per-tenant `users` row is still the
- * fallback — that is a live deployment shape, not legacy tolerance, and
- * this branch goes when IDX-B2 retires the table.
- */
+/** `identity` wins; in keycloak mode it is null and the per-tenant `users` row is the fallback. */
 function identityFromMe(me: MeResponse): Identity | null {
   if (me.identity) return me.identity;
   const u = me.db_user;
@@ -104,7 +91,7 @@ function identityFromMe(me: MeResponse): Identity | null {
     email: u.email,
     display_name: u.display_name ?? "",
     mfa_enabled: u.mfa_enrolled_at !== null,
-    has_password: true, // a `users` row only exists in the Keycloak era
+    has_password: true, // `users` rows are Keycloak-era accounts
     status: u.status,
   };
 }
@@ -122,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [activeTenantId, setActiveTenantId] = useState<string | null>(null);
   const [reauthPending, setReauthPending] = useState(false);
   const refreshTimer = useRef<number | null>(null);
-  // The promise `http.ts` is waiting on while the dialog is open.
+  // In a ref, not state: a re-render must not lose the pending request.
   const reauthWaiter = useRef<{ resolve: () => void; reject: (e: Error) => void } | null>(null);
 
   const clearTimer = useCallback(() => {
@@ -158,8 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const adopt = useCallback(
     async (result: AuthResult): Promise<SignInOutcome> => {
       if (result.status === "mfa_required") {
-        // No token, no identity, nothing to hydrate — that is the whole
-        // point of the challenge. Do NOT touch the session state here.
+        // First factor only: do not touch session state.
         return {
           kind: "mfa_required",
           challengeId: result.challenge_id ?? "",
@@ -173,8 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setMemberships(result.memberships ?? []);
       setActiveTenantId(result.tenant_id || result.default_tenant_id || null);
       setStatus("authenticated");
-      // Best-effort: the session is already real, and a `/auth/me` that
-      // fails should not undo a successful sign-in.
+      // Best-effort: a failed `/auth/me` must not undo a real sign-in.
       try {
         const meResp = await authApi.fetchMe();
         setMe(meResp);
@@ -203,11 +188,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     if (isAnonymousRoute(window.location.pathname)) {
-      // A recipient opening a shared link, or the lead page behind its
-      // CTA, has no account and must not be the reason `/auth/refresh`
-      // fires: the refresh cookie rotates, and a stray call from a page
-      // that never needed a session is exactly the kind of re-use that
-      // revokes every session the person does have elsewhere.
+      // Never fire `/auth/refresh` here: the cookie rotates, and a stray
+      // re-use revokes every session the person has elsewhere.
       setStatus("anonymous");
       return;
     }
@@ -264,13 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [adopt],
   );
 
-  /**
-   * One `PATCH /auth/me`, whatever combination of fields it carries.
-   *
-   * Omitted keys are left alone by the server, so a caller that only knows
-   * the time zone does not have to re-send a name it never read — which
-   * matters on `/welcome`, where "skip" still has a time zone worth saving.
-   */
+  /** One `PATCH /auth/me`; omitted keys are left alone by the server. */
   const saveProfile = useCallback(async (patch: ProfilePatch) => {
     const updated = await authApi.patchMe(patch);
     setIdentity(updated);
@@ -281,12 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [saveProfile],
   );
 
-  /**
-   * Pull the identity again after a change the server made rather than we
-   * did — enrolling a second factor, or moving the login address. Cheaper
-   * and far less rude than reloading the page, which would throw away an
-   * unsaved note to refresh a boolean.
-   */
+  /** Re-read the identity after a server-side change (MFA, email) without a reload. */
   const refreshIdentity = useCallback(async () => {
     const meResp = await authApi.fetchMe();
     setMe(meResp);
@@ -294,13 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMemberships(meResp.memberships ?? []);
   }, []);
 
-  /**
-   * `POST /auth/token` with `activate`: the new access token replaces the
-   * one in memory, the identity is re-read under the new scope, and
-   * `activeTenantId` changing is what remounts the signed-in tree
-   * (`WorkspaceScope` in App.tsx), so no page keeps the old workspace's
-   * rows on screen.
-   */
+  /** `activeTenantId` changing remounts the signed-in tree (`WorkspaceScope`), so no stale rows stay on screen. */
   const switchWorkspace = useCallback(
     async (tenantId: string) => {
       if (tenantId === activeTenantId) return;
@@ -326,22 +291,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* revocation is best-effort from the client's side */
     }
-    // A saved password stays saved, but signing out has to mean the next
-    // visit asks before using it.
+    // Signing out must make the next visit ask before using a saved password.
     void preventSilentSignIn();
     becomeAnonymous();
   }, [becomeAnonymous]);
 
-  // ── step-up ──────────────────────────────────────────────────────────
-  //
-  // `http.ts` calls `reauth()` and awaits it; the dialog resolves or
-  // rejects the same promise. Keeping the waiter in a ref (not state)
-  // means a re-render cannot lose the pending request.
+  // ── step-up: `http.ts` awaits `reauth()`; the dialog settles the same promise.
 
   const reauth = useCallback((): Promise<void> => {
     if (reauthWaiter.current) {
-      // A second 403 while the dialog is already open: both callers wait
-      // on the one proof rather than stacking two dialogs.
+      // Second 403 while open: chain onto the one proof, no second dialog.
       return new Promise<void>((resolve, reject) => {
         const prev = reauthWaiter.current!;
         reauthWaiter.current = {
@@ -381,22 +340,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [identity],
   );
 
-  /**
-   * The role in the active workspace.
-   *
-   * Prefers the membership list, and falls back to the `users` row's role —
-   * because `/auth/me` does not return `memberships` yet, so on a plain page
-   * load the list is empty and a workspace owner would look like a stranger
-   * in their own workspace. The fallback goes here rather than in a screen so
-   * that `db_user` stays behind this one file (IDX-B2 deletes it).
-   */
+  // Falls back to the `users` row: `/auth/me` may not return memberships. `db_user` stays behind this file.
   const activeRole = useMemo(() => {
     const membership = memberships.find((m) => m.tenant_id === activeTenantId);
     return membership?.role ?? me?.db_user?.role ?? null;
   }, [memberships, activeTenantId, me]);
 
-  // A Keycloak issuer looks like `…/realms/<name>`; the native issuer is
-  // the auth-service origin. `dual` mode is the only time both exist.
+  // Keycloak issuers look like `…/realms/<name>`; the native issuer is the auth-service origin.
   const canSwitchWorkspaces = useMemo(() => {
     const iss = me?.claims.iss ?? "";
     return !iss.includes("/realms/");

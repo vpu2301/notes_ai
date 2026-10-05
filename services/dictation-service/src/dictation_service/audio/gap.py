@@ -1,18 +1,4 @@
-"""Sequence-number gap policy.
-
-The client sends binary frames with a 4-byte BE sequence number. Network
-reorderings, duplicates, and small drops are normal. The policy:
-
-- ``seq < expected`` → duplicate. Drop.
-- ``seq == expected`` → in order. Accept.
-- ``seq > expected`` and gap ≤ 50 frames (1 s) → fill with silence
-  padding; accept.
-- ``seq > expected`` and gap > 50 frames → server asks the client to
-  retransmit from ``expected``.
-
-The thresholds live in the policy struct so chaos tests can shrink them
-without re-flowing through ``settings``.
-"""
+"""Sequence-number gap policy: drop duplicates, pad small gaps with silence, request retransmit for big ones."""
 
 from __future__ import annotations
 

@@ -123,9 +123,7 @@ async def test_storm_prevention_one_fetch_for_100_concurrent_misses(
     client = httpx.AsyncClient(transport=transport, timeout=5.0)
     cache = JwksCache(
         issuer_to_url={ISSUER: JWKS_URL},
-        # Default 5 s rate-limit is what *enables* storm prevention: after the
-        # first fetch leaves the cache without the requested kid, follow-up
-        # lookups within 5 s are rejected without a network call.
+        # The default 5 s rate-limit is what enables storm prevention.
         refresh_rate_limit_seconds=5,
         http_client=client,
     )
@@ -135,9 +133,7 @@ async def test_storm_prevention_one_fetch_for_100_concurrent_misses(
             with contextlib.suppress(KidNotFoundError):
                 await cache.get_key(ISSUER, "storm-test-kid")
 
-        # Note: with the in-process MockTransport, calls return effectively
-        # synchronously; the per-issuer lock still serialises them so only
-        # the first one performs a real fetch.
+        # MockTransport answers synchronously; the per-issuer lock still serialises the fetch.
         await asyncio.gather(*[fetch_unknown() for _ in range(100)])
 
         # The first fetch refreshes; remaining 99 hit the rate-limit branch

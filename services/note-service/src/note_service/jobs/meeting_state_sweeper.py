@@ -1,17 +1,6 @@
-"""Reclaim captures whose client never came back (Sprint 34).
-
-A meeting note is created at record start, so a crashed tab, a killed app
-or a phone that went flat leaves a note stuck in ``recording`` or
-``uploading`` forever. After 12 hours that is no longer a live capture: the
-state becomes ``no_audio`` and the note goes on being an ordinary note with
-whatever the author typed in it.
-
-It never deletes anything. The whole point of creating the note early is
-that the typing survives the recording; a sweeper that tidied it away would
-undo the feature.
-
-Hosted in-process behind ``MDX_BACKGROUND_JOBS`` (ADR-0041), same as
-``idle_draft_cleanup``, plus a ``python -m`` entry point for external cron.
+"""Reclaim captures whose client never came back: ``recording``/``uploading``
+older than the cutoff become ``no_audio``. Never deletes anything. Hosted behind
+``MDX_BACKGROUND_JOBS`` (ADR-0041) plus a ``python -m`` entry point.
 """
 
 from __future__ import annotations

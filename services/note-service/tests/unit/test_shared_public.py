@@ -1,9 +1,5 @@
-"""The anonymous shared page, end to end through the router (Sprint 19).
-
-The first test of ``/v1/shared/{token}`` at all. The DB is a set of
-repository doubles; the rate limiter is the real one over an in-memory
-Redis stand-in, because "61st request in a minute → 429" and "Redis down
-→ still 200" are the two behaviours the sprint has to prove.
+"""The anonymous shared page, end to end through the router: repository doubles,
+the real rate limiter over an in-memory Redis stand-in.
 """
 
 from __future__ import annotations
@@ -98,7 +94,7 @@ def _version(note: repo.NoteRow) -> repo.VersionRow:
             NoteSection(section_key="attendees", text="Anna, Tom"),
             NoteSection(section_key="decisions", text="Go with option B."),
             NoteSection(section_key="agenda", text=""),
-            # Sprint 34 gave every template a scratchpad; Sprint 36 keeps
+            # Every template has a scratchpad; the client view keeps
             # it off every external surface. Both are asserted below.
             NoteSection(section_key="user_notes", text="TOMISSTALLING ask about budget"),
         ],
@@ -198,7 +194,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "cta": 0,
         "logo": None,
         "resolves": True,
-        # Sprint 20: the items of the current version and this link's responses.
+        # The items of the current version and this link's responses.
         "items": [
             items_repo.ItemRow(
                 id=uuid4(),
@@ -415,7 +411,7 @@ def test_page_carries_sender_product_and_section_roles(client: TestClient) -> No
     }
     assert "is_draft" not in body
     assert body["expires_at"] is not None
-    # Sprint 36: an external surface renders the CLIENT DOCUMENT — an
+    # An external surface renders the CLIENT DOCUMENT — an
     # allow-list of roles in a fixed reading order, not the note's own
     # section order. `user_notes` and anything transcript-shaped are gone
     # before they reach here.
@@ -512,7 +508,7 @@ def test_redis_down_fails_open(client: TestClient, caplog: pytest.LogCaptureFixt
     assert any("ratelimit.backend_error" in rec.message for rec in caplog.records)
 
 
-# ── Sprint 20: the recipient acts ────────────────────────────────────
+# ── the recipient acts ────────────────────────────────────
 
 
 def _respond(client: TestClient, kind: str = "confirm", key: str = "k1", **extra):  # noqa: ANN003
@@ -615,7 +611,7 @@ def test_sixty_first_write_on_one_link_is_429(client: TestClient) -> None:
     assert r.json()["scope"] == "write"
 
 
-# ── Sprint 22: one-click opt-out ─────────────────────────────────────
+# ── one-click opt-out ─────────────────────────────────────
 
 
 def test_unsubscribe_with_a_valid_signature_suppresses_the_address(client: TestClient) -> None:
@@ -654,7 +650,7 @@ def test_first_open_of_a_recipient_link_tells_the_sender(client: TestClient) -> 
     assert opened[0]["extra_payload"] == {"link_label": "Tom @ Client", "delivery_status": "opened"}
 
 
-# ── Sprint 23: policy on the page ────────────────────────────────────
+# ── policy on the page ────────────────────────────────────
 
 
 def test_cta_can_be_turned_off_only_on_a_paid_plan(client: TestClient) -> None:
@@ -809,7 +805,7 @@ def test_the_shared_pdf_never_shows_the_authors_scratchpad() -> None:
 
 
 def test_a_dialogue_section_is_the_transcript(client: TestClient) -> None:
-    # Sprint 36 moved the rule into `client_view`, so the page and the
+    # The rule lives in `client_view`, so the page and the
     # document that decides what reaches the page share one copy.
     from note_service.domain.client_view import looks_like_transcript as _is_transcript
 

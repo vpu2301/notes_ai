@@ -1,18 +1,8 @@
-"""Create a draft note from a batch transcription.
+"""Create a draft note from a batch transcription (the caller's bearer is forwarded
+to asr-service, which authorizes and tenant-scopes the read).
 
-``POST /v1/notes/from-transcript`` — fetch a COMPLETE asr job's
-NLP-enriched transcript from asr-service (the caller's own bearer is
-forwarded; asr-service authorizes + tenant-scopes the read and audits
-it), pick a template (explicit ``template_id`` or deterministic
-auto-match), and create a draft note whose first free-text section
-holds the transcript. The note then follows the normal note
-lifecycle (edit, share).
-
-``GET /v1/notes/by-source-job`` — bulk lookup so the transcription
-jobs list can badge jobs that are already assigned.
-
-One note per source job per tenant is enforced by a partial unique
-index (migration 0045); a concurrent double-assign surfaces as 409.
+One note per source job per tenant is enforced by a partial unique index; a
+concurrent double-assign surfaces as 409.
 """
 
 from __future__ import annotations
@@ -74,12 +64,9 @@ class FromTranscriptResponse(BaseModel):
     template_name: str
     template_selection: Literal["explicit", "auto", "fallback"]
     template_score: int | None = None
-    # Sprint 33 — present when the engine is writing this note, so the
-    # client can start polling without a second round trip.
+    # Present when the engine is writing this note, so the client can start polling.
     generation: GenerationStub | None = None
-    # Sprint 37 — why no generation, when there is none. The client says
-    # "your workspace has turned this off" instead of showing a note that
-    # looks like it is still thinking.
+    # Why no generation, when there is none.
     generation_blocked: (
         Literal["generation_disabled", "budget_exceeded", "processor_unacknowledged"] | None
     ) = None
@@ -108,9 +95,8 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
     url = f"{settings.asr_service_base_url.rstrip('/')}/asr/jobs/{job_id}/result"
     try:
         async with httpx.AsyncClient(timeout=_ASR_TIMEOUT) as client:
-            # Building the note is not a person opening the transcript:
-            # asr-service must not count it in the speaker-correction
-            # denominator (Sprint 30 learn loop).
+            # Not a person opening the transcript: asr-service must not count it
+            # in the speaker-correction denominator.
             resp = await client.get(
                 url,
                 headers={"Authorization": auth_header, "X-MDX-Read-Purpose": "note_build"},
@@ -125,9 +111,7 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
     if resp.status_code == status.HTTP_200_OK:
         return resp.json()  # type: ignore[no-any-return]
 
-    # Pass through the statuses that carry meaning for the caller:
-    # 404 unknown job, 409 not complete yet, 410 transcript erased,
-    # 403 the caller may not read that job.
+    # 404 unknown job, 409 not complete yet, 410 transcript erased, 403 may not read.
     if resp.status_code in (403, 404, 409, 410):
         try:
             detail = resp.json().get("detail", resp.json())
@@ -146,10 +130,7 @@ async def _fetch_transcript(job_id: UUID, *, auth_header: str) -> dict[str, Any]
 
 
 def _is_diarized(result: dict[str, Any]) -> bool:
-    """A diarized batch result carries top-level ``speakers`` (distinct
-    labels, first-appearance order) and per-segment ``speaker`` labels.
-    Either signal counts — a producer that labels segments but omits the
-    roster still gets dialogue rendering."""
+    """Top-level ``speakers`` or per-segment ``speaker`` labels; either signal counts."""
     if result.get("speakers"):
         return True
     if any(t.get("speaker") for t in result.get("turns", [])):
@@ -157,29 +138,14 @@ def _is_diarized(result: dict[str, Any]) -> bool:
     return any(seg.get("speaker") for seg in result.get("segments", []))
 
 
-# What an unattributed turn is labelled in a diarized note. Honest, not
-# a guess: the diarizer heard someone it could not place.
+# Label for an unattributed turn in a diarized note.
 UNKNOWN_SPEAKER = "Unknown speaker"
 
 
 def _turns_text(result: dict[str, Any]) -> str:
-    """Render asr-service's ``turns`` as the note body.
-
-    asr-service already decided the structure (``asr_models.structure``:
-    consecutive same-speaker segments are one turn, long turns break into
-    paragraphs at pauses and sentence ends) and the display names (what a
-    person named the speaker, else "Speaker N"). Here that becomes text:
-
-        Mark: First paragraph of Mark's turn.
-        Second paragraph of the same turn.
-
-        Olena: Her reply.
-
-    Turns are separated by a blank line so they read as paragraphs in
-    the editor; the name sits at the start of the turn's first line, the
-    form both apps rewrite when a speaker is renamed later. An undiarized
-    transcript is one unattributed turn and renders as plain paragraphs.
-    """
+    """Render asr-service's ``turns`` as the note body: "Name: first paragraph",
+    blank line between turns. The name at the start of a turn's first line is the
+    form both apps rewrite when a speaker is renamed later."""
     blocks: list[str] = []
     diarized = _is_diarized(result)
     for turn in result.get("turns", []):
@@ -198,25 +164,16 @@ def _turns_text(result: dict[str, Any]) -> str:
 
 
 def default_speaker_name(label: str) -> str:
-    """``SPEAKER_2`` → ``Speaker 2`` (mirrors ``asr_models.default_speaker_name``;
-    note-service reads the transcript as JSON and does not depend on that lib)."""
+    """``SPEAKER_2`` → ``Speaker 2`` (mirrors ``asr_models.default_speaker_name``)."""
     if label.startswith("SPEAKER_") and label[8:].isdigit():
         return f"Speaker {label[8:]}"
     return label
 
 
 def _dialogue_text(result: dict[str, Any]) -> str:
-    """Render a diarized transcript WITHOUT server-side turns as
-    speaker-turn dialogue lines (a producer older than the ``turns``
-    field, or a test fixture).
-
-    Mirrors dictation-service's ``session/draft.py::dialogue_text``: one
-    block per contiguous same-speaker run, a segment without a label
-    rendered under the honesty label rather than silently merged into a
-    neighbouring speaker's turn. Batch labels are the neutral
-    ``SPEAKER_N`` form (ambient-capture contract); a ``speaker_names``
-    map on the result names them, else the default "Speaker N".
-    """
+    """Render a diarized transcript WITHOUT server-side turns as dialogue lines
+    (mirrors dictation-service ``session/draft.py::dialogue_text``): one block per
+    same-speaker run; an unlabelled segment gets UNKNOWN_SPEAKER, never merged."""
     names = result.get("speaker_names") or {}
     lines: list[str] = []
     prev_key: object = object()
@@ -239,17 +196,11 @@ def _dialogue_text(result: dict[str, Any]) -> str:
 
 
 def _transcript_text(result: dict[str, Any]) -> str:
-    # asr-service ships the transcript pre-structured (speaker turns,
-    # paragraphs, display names); render that when it is there.
     if result.get("turns"):
         return _turns_text(result)
-    # Diarized results (ambient capture: batch jobs run with diarize=true)
-    # become speaker-turn dialogue, matching what a live conversation
-    # session's finalize draft looks like.
     if _is_diarized(result):
         return _dialogue_text(result)
-    # No structure at all (an older producer): flat prose, joined with
-    # spaces so a round-trip through the editor keeps it intact.
+    # No structure (an older producer): flat prose joined with spaces.
     parts = [str(seg.get("text", "")).strip() for seg in result.get("segments", [])]
     return " ".join(p for p in parts if p)
 
@@ -279,19 +230,10 @@ def _content_for_template(
     title: str,
     extracted_fields: dict[str, dict[str, Any]] | None = None,
 ) -> NoteContent:
-    """All template sections in order; the transcript lands in ONE
-    free-text section (dictations are linear speech — distributing text
-    across sections is the author's edit, not a guess we make). Which
-    one: a section made for prose (discussion, notes, summary…) first,
-    then any free-text section that is not the attendee list — a 3 KB
-    transcript under "Attendees" reads as a wall of names on the shared
-    page and in the PDF.
-
-    Sprint 13: typed sections additionally carry the extractor's
-    PROPOSALS in ``field_specific_metadata`` (``source: "extracted"``).
-    The prose always stays intact in the free-text section — a proposal
-    never consumes or rewrites what was dictated.
-    """
+    """All template sections in order; the transcript lands in ONE free-text
+    section (a prose home first, else any free-text section but the attendee list).
+    Typed sections carry the extractor's PROPOSALS in ``field_specific_metadata``;
+    the prose always stays intact."""
     ordered = sorted(definition.sections, key=lambda s: s.order)
     target = _transcript_home(ordered)
     proposals = extracted_fields or {}
@@ -311,20 +253,14 @@ def _content_for_template(
     )
 
 
-# Where to look when a transcript's language has no templates of its own
-# (a German or Polish recording under an auto-detected job): the
-# catalogue's lingua franca. The transcript itself is untouched — only
-# the section headings come from the fallback template.
+# Template language when the transcript's has none; only the section headings follow it.
 TEMPLATE_LANGUAGE_FALLBACK = "en"
 
 
 async def _candidates_for_language(
     conn: asyncpg.Connection, language: str
 ) -> tuple[list[template_match.TemplateCandidate], str]:
-    """Active templates in ``language``, else in the fallback language.
-
-    Returns the candidates and the language they are actually in.
-    """
+    """Active templates in ``language``, else in the fallback; returns (candidates, their language)."""
     candidates = await template_match.load_candidates(conn, language=language)
     if candidates or language == TEMPLATE_LANGUAGE_FALLBACK:
         return candidates, language
@@ -355,16 +291,12 @@ async def create_note_from_transcript(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "empty_transcript", "detail": "the job's transcript is empty"},
         )
-    # The language the transcript is IN — for an auto-detected job, what
-    # the worker heard. The note follows it: template (section headings,
-    # prompts) and field extraction are chosen for that language.
+    # The note follows the transcript's language: template and field extraction.
     language = str(result.get("language") or "uk")
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         existing = await conn.fetchrow(
-            # A note in the bin has let go of its job (0056): the author
-            # trashed the live note mid-meeting, and the transcript still
-            # needs somewhere to land.
+            # A note in the bin has let go of its job.
             "SELECT id, code FROM notes WHERE source_asr_job_id = $1 AND deleted_at IS NULL",
             body.asr_job_id,
         )
@@ -414,8 +346,7 @@ async def create_note_from_transcript(
             selection, score = choice.mode, choice.score
 
         title = body.title.strip() or f"{template_name} — {date.today().isoformat()}"
-        # Sprint 13 (ADR-0028): typed-field proposals. Fail-open — an
-        # unreachable nlp-service costs proposals, not the draft.
+        # Typed-field proposals (ADR-0028). Fail-open: costs proposals, not the draft.
         extracted_fields = await extract_fields(
             definition=definition,
             text=transcript,
@@ -458,10 +389,7 @@ async def create_note_from_transcript(
                 detail={"code": "already_assigned", "detail": "assigned concurrently"},
             ) from None
 
-        # Sprint 33: the note writes itself. Same transaction as the
-        # note, so either both exist or neither does — and never able to
-        # cost the note: a stack with no object store or no model still
-        # produces the transcript-in-a-section note it produced before.
+        # Same transaction as the note (both exist or neither); never able to cost the note.
         if settings.note_generation_enabled:
             try:
                 generation_id, generation_status = await generation_service.start(
@@ -477,13 +405,11 @@ async def create_note_from_transcript(
                     required_processors=ai_settings_router.required_processors(),
                 )
             except generation_service.GenerationDisabledError:
-                # The workspace turned it off. Not an error, and not
-                # worth a stack trace on every upload.
+                # The workspace turned it off: not an error.
                 generation_id = None
                 generation_blocked = "generation_disabled"
             except generation_service.ProcessorUnacknowledgedError:
-                # Sprint L2: a processor in the data path nobody agreed to.
-                # The Data page shows the dialog; nothing was sent.
+                # A processor nobody agreed to; the Data page shows the dialog.
                 generation_id = None
                 generation_blocked = "processor_unacknowledged"
             except generation_service.BudgetExceededError as exc:

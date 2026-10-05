@@ -1,8 +1,4 @@
-// The document engine's status for one note (Sprint 33/37).
-//
-// The note is readable the whole time this is running — generation writes
-// into sections the author has not touched, and never over their words.
-// The client polls only while the run is live.
+// The document engine's status for one note. The client polls only while the run is live.
 import { api, apiBlob, BASES } from "./http";
 import type { GeneratedItem, GenerationView } from "./types";
 
@@ -16,8 +12,7 @@ export function regenerate(noteId: string): Promise<{ id: string; status: string
   });
 }
 
-/** Every line the engine wrote, with the words that prove it (Q5: one row
- *  per line). `current` = only the run the reader is looking at. */
+/** Every line the engine wrote, with its evidence. `current` = only the run the reader is looking at. */
 export function getGeneratedItems(
   noteId: string,
   opts: { generation?: "current" | "all" } = {},
@@ -33,8 +28,7 @@ export interface AudioClip {
   expires_at_unix: number;
 }
 
-/** A playable clip of the recording between two moments. The URL carries
- *  its own short-lived token, so an `<audio>` element can play it. */
+/** A playable clip; the URL carries its own short-lived token for `<audio>`. */
 export async function createClip(noteId: string, startMs: number, endMs: number): Promise<string> {
   const clip = await api<AudioClip>("note", "/v1/audio-clips", {
     method: "POST",
@@ -43,12 +37,12 @@ export async function createClip(noteId: string, startMs: number, endMs: number)
   return clip.clip_url.startsWith("http") ? clip.clip_url : `${BASES.note}${clip.clip_url}`;
 }
 
-/** A key date as a calendar file (Q5). */
+/** A key date as a calendar file. */
 export function dateCalendarFile(noteId: string, itemKey: string): Promise<Blob> {
   return apiBlob("note", `/v1/notes/${noteId}/dates/${itemKey}.ics`);
 }
 
-/** Accept or reject a name the engine respelled (Q5). */
+/** Accept or reject a name the engine respelled. */
 export function correctName(
   noteId: string,
   itemKey: string,

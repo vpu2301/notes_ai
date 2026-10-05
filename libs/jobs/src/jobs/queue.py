@@ -28,7 +28,6 @@ class JobQueue:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    # ── enqueue ─────────────────────────────────────────────────────────
     async def enqueue(
         self,
         tenant_id: UUID,
@@ -86,7 +85,6 @@ class JobQueue:
             row = await c.fetchrow("SELECT * FROM jobs WHERE id = $1", job_id)
         return Job.from_row(row) if row else None
 
-    # ── claim / lease ───────────────────────────────────────────────────
     async def claim(
         self,
         kinds: list[str],
@@ -96,13 +94,7 @@ class JobQueue:
         limit: int = 1,
         per_tenant: int | None = None,
     ) -> list[Job]:
-        """Lease up to ``limit`` jobs.
-
-        With ``per_tenant`` the claim is fair (migration 0055): one job
-        per workspace per round, and a workspace already running that
-        many claims nothing more. Without it, plain FIFO by priority —
-        right for a queue whose tenants cannot crowd each other out.
-        """
+        """Lease up to ``limit`` jobs; ``per_tenant`` makes the claim fair per workspace, else FIFO by priority."""
         async with self._pool.acquire() as c:
             rows = (
                 await c.fetch(
@@ -142,7 +134,6 @@ class JobQueue:
             )
         return bool(str(tag).endswith("1"))
 
-    # ── outcomes ────────────────────────────────────────────────────────
     async def complete(
         self,
         job: Job,
@@ -235,7 +226,7 @@ class JobQueue:
         await self._exec(job, sql, job.id, reason)
         metrics.jobs_finished_total.add(1, {"kind": job.kind, "outcome": "cancelled"})
 
-    # ── housekeeping (cross-tenant, SECURITY DEFINER) ───────────────────
+    # Cross-tenant, SECURITY DEFINER.
     async def reap_stale_leases(self, *, grace_seconds: float = 30.0) -> int:
         async with self._pool.acquire() as c:
             n = int(await c.fetchval("SELECT jobs_reap_stale_leases($1)", float(grace_seconds)))

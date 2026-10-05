@@ -1,30 +1,7 @@
-"""``AuditWriter`` — the single sanctioned path for emitting audit events.
+"""``AuditWriter``: the single sanctioned path for audit events (audit_writer pool, RLS-scoped).
 
-Contract:
-
-- Acquires a connection from the audit_writer pool (passed in by the caller,
-  distinct from the app_role pool).
-- Wraps each write in a READ COMMITTED transaction.
-- ``SET LOCAL app.tenant_id`` so RLS policies match.
-- ``SELECT seq, payload_hash FROM audit.events WHERE tenant_id = $1 ORDER BY
-  seq DESC LIMIT 1 FOR UPDATE`` — the FOR UPDATE row lock is the actual
-  serialisation primitive: a second writer for the same tenant blocks until
-  the first commits, then re-reads the latest ``last_seq`` (READ COMMITTED
-  semantics on a row lock).
-- Builds the event_record dict (with ``tenant_id``, ``seq``, ``created_at``,
-  actor + kind + target + the caller-supplied payload), JCS-canonicalises it,
-  computes ``payload_hash = sha256(prev_hash || jcs_bytes)``, and INSERTs.
-- Genesis row (seq=1) has ``prev_hash`` as 32 zero bytes.
-- Retries on serialization failure or primary-key conflict up to 3 times
-  with exponential backoff. Under normal load these never fire — they are
-  defensive in case of unexpected contention modes (e.g. logical replication
-  lag, statement timeouts).
-
-Why not SERIALIZABLE? The spec calls for it but with the per-tenant row
-lock from FOR UPDATE, the additional anomaly checks SERIALIZABLE provides
-become *additional contention* (pivot-anomaly retries) under high write
-fan-out. READ COMMITTED + FOR UPDATE gives the same correctness for the
-"strict per-tenant monotonic seq" invariant without those retries.
+Per-tenant serialisation is an advisory lock + FOR UPDATE under READ COMMITTED (SERIALIZABLE would only add
+pivot-anomaly retries); ``payload_hash = sha256(prev_hash || jcs(event))``, genesis prev_hash is 32 zero bytes.
 """
 
 from __future__ import annotations
@@ -45,7 +22,6 @@ from .canonical import canonicalize
 from .exceptions import ChainWriteError
 from .types import AuditEventReceipt, Severity
 
-# ── Metrics (no-op when no provider is set; OTel proxy handles this) ─
 _meter = metrics.get_meter("mdx.audit")
 _writes_counter = _meter.create_counter(
     "mdx_audit_writes_total",
@@ -71,15 +47,7 @@ _BACKOFF_BASE_SECONDS = 0.05
 
 
 class AuditWriter:
-    """Append a tamper-evident event to a tenant's audit chain.
-
-    Parameters
-    ----------
-    pool
-        An asyncpg.Pool authenticated as the Postgres ``audit_writer``
-        role. SHOULD be a dedicated pool, not the app_role one — keeping
-        them separate makes the documented privilege boundary explicit.
-    """
+    """Append a tamper-evident event to a tenant's audit chain (``pool`` authenticated as ``audit_writer``)."""
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -96,15 +64,7 @@ class AuditWriter:
         payload: Mapping[str, Any] | None = None,
         severity: Severity = Severity.INFO,
     ) -> AuditEventReceipt:
-        """Append a single event to ``tenant_id``'s chain.
-
-        Returns the assigned sequence number and committed ``payload_hash``.
-
-        Raises:
-            ChainWriteError: SERIALIZABLE retries exhausted, or RLS rejected
-                the insert, or any other DB-level failure that wasn't a
-                serialization conflict.
-        """
+        """Append one event to ``tenant_id``'s chain; returns seq + ``payload_hash``, raises ChainWriteError."""
         normalized_payload = _normalize_payload(payload or {})
 
         start = time.perf_counter()
@@ -121,7 +81,6 @@ class AuditWriter:
                     payload=normalized_payload,
                     severity=severity,
                 )
-                # Success path metrics.
                 _writes_counter.add(1, {"tenant_id": str(tenant_id), "severity": severity.value})
                 _write_latency.record(time.perf_counter() - start)
                 return receipt
@@ -129,11 +88,7 @@ class AuditWriter:
                 asyncpg.SerializationError,
                 asyncpg.UniqueViolationError,
             ) as exc:
-                # SerializationError: SERIALIZABLE-tier conflict (shouldn't
-                # happen under READ COMMITTED, but defensive).
-                # UniqueViolationError: two writers raced past the row lock,
-                # e.g. statement-timeout cancel mid-flight — retry yields a
-                # fresh next_seq from the latest committed last_seq.
+                # Defensive: a retry re-reads next_seq from the latest committed row.
                 last_exc = exc
                 _retries_counter.add(
                     1,
@@ -169,24 +124,15 @@ class AuditWriter:
         payload: Mapping[str, Any],
         severity: Severity,
     ) -> AuditEventReceipt:
-        # Per-tenant advisory lock key. Hashing UUID → signed bigint keeps
-        # the lock keyspace tight; the worst case of a hash collision is
-        # benign mutual blocking between two tenants (correctness preserved).
         lock_key = _tenant_lock_key(tenant_id)
 
         async with (
             self._pool.acquire() as conn,
             conn.transaction(isolation="read_committed"),
         ):
-            # Scope RLS to this tenant for the duration of the txn.
             await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
 
-            # Serialise *all* writers for this tenant. The advisory lock
-            # is held until COMMIT/ROLLBACK; the FOR UPDATE below adds
-            # row-level locking once a row exists. With an empty table,
-            # FOR UPDATE LIMIT 1 has nothing to lock — without this
-            # advisory lock, two concurrent first-writes would collide
-            # on seq=1.
+            # Serialises all writers for this tenant; FOR UPDATE alone has nothing to lock on an empty chain.
             await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_key)
 
             last = await conn.fetchrow(
@@ -210,12 +156,7 @@ class AuditWriter:
 
             created_at = datetime.now(UTC)
 
-            # Normalize target_id to str: callers may pass a UUID (incl.
-            # asyncpg's pgproto.UUID from fetchval), but the JCS canonicalizer
-            # can't serialize it AND the audit.events.target_id column is TEXT
-            # (asyncpg rejects a UUID bind). str() is idempotent for the str
-            # callers (e.g. templates.py) already pass. Used for both the
-            # canonical hash record and the INSERT bind below.
+            # str: JCS cannot serialize a UUID and the TEXT column rejects a UUID bind.
             target_id_str = str(target_id) if target_id is not None else None
 
             event_record: dict[str, Any] = {
@@ -265,13 +206,7 @@ class AuditWriter:
 
 
 def _tenant_lock_key(tenant_id: UUID) -> int:
-    """Deterministic UUID → signed-bigint mapping for ``pg_advisory_xact_lock``.
-
-    BLAKE2b-64 of the 16 raw UUID bytes, interpreted as signed big-endian.
-    Collisions in the 2^63 keyspace are statistically negligible; if two
-    tenants ever collide they merely block each other on the advisory
-    lock (no correctness violation, just slight contention).
-    """
+    """UUID → signed bigint for ``pg_advisory_xact_lock`` (BLAKE2b-64); a collision only means benign mutual blocking."""
     import hashlib
 
     h = hashlib.blake2b(tenant_id.bytes, digest_size=8).digest()
@@ -279,13 +214,7 @@ def _tenant_lock_key(tenant_id: UUID) -> int:
 
 
 def _normalize_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Convert common non-JSON types in caller payloads to JSON-natural ones.
-
-    UUID → str, datetime → ISO 8601 str, bytes → base64 str. We do *not*
-    recurse into arbitrary nested objects beyond dict / list / tuple to
-    keep the contract explicit; callers passing deeply nested non-JSON
-    types will hit :class:`CanonicalizationError` and learn to pre-convert.
-    """
+    """UUID → str, datetime → ISO 8601, bytes → base64, through dict/list/tuple only."""
     import base64
 
     def _conv(v: Any) -> Any:

@@ -1,9 +1,4 @@
-"""The document engine's pure core (Sprint 33).
-
-Everything here runs without a model. That is the design: the model
-proposes typed claims, and code decides which of them are true. These
-tests are that code.
-"""
+"""The document engine's pure core: the model proposes typed claims, code decides which are true."""
 
 from __future__ import annotations
 
@@ -306,7 +301,7 @@ def test_a_number_that_was_said_survives() -> None:
         [
             _fact(
                 kind=schema.KEY_POINT,
-                # A restatement (F2: the quote copied would be evidence only).
+                # A restatement (the quote copied would be evidence only).
                 text="The budget stands at 12 thousand euros",
                 quote="the budget is 12 thousand euros",
             )
@@ -400,7 +395,7 @@ def test_agreeing_with_nobody_having_proposed_anything_is_not_a_decision() -> No
 
 
 def test_an_explicit_formula_is_a_decision_on_its_own() -> None:
-    # Each text restates its own quote: since Q2 a decision whose text
+    # Each text restates its own quote: a decision whose text
     # does not mean what was said is dropped, whatever its formula.
     for spoken, text, language in (
         ("we decided to go with option B", "Going with option B", "en"),
@@ -699,7 +694,7 @@ def test_a_bullet_that_echoes_the_fact_listing_becomes_the_fact() -> None:
     topics = next(s for s in written if s.role == roles.TOPICS)
     assert topics.title == "Pricing"
     # The unknown id cites nothing but the topic's fact, which the first
-    # bullet already wrote: one fact, once (Q3).
+    # bullet already wrote: one fact, once.
     assert topics.text == "- we talked about pricing\n- and about the timeline"
     assert [f.item_key for f in topics.facts] == [point.item_key, other.item_key]
 
@@ -903,7 +898,7 @@ def test_one_edited_section_does_not_block_the_others() -> None:
     assert by_key["action_items"] == "- Anna: send the deck"
 
 
-# ── Sprint 36: per-family kinds, completions, judgements, sides ─────
+# ── per-family kinds, completions, judgements, sides ─────
 
 
 def test_a_family_chooses_from_its_own_kinds_only() -> None:
@@ -1261,7 +1256,7 @@ def test_a_flat_passive_opener_is_dropped_but_an_estimate_keeps_its_hedge() -> N
 
 
 def test_the_overview_opens_with_the_framing_and_writes_no_transcript_note() -> None:
-    """Q3: what was left out is `excluded_ranges` for the client, never a
+    """What was left out is `excluded_ranges` for the client, never a
     "Transcript note: …" paragraph a renderer takes for a speaker."""
     point = _verified(
         "the economy has been weak for some time", start_ms=1_000, kind=schema.KEY_POINT
@@ -1274,7 +1269,7 @@ def test_the_overview_opens_with_the_framing_and_writes_no_transcript_note() -> 
         language="en",
     )
     overview = next(s for s in written if s.role == roles.SUMMARY)
-    # F3 amendment §2.9: two paragraphs of prose and never a list — a key
+    # Two paragraphs of prose and never a list — a key
     # point with no heading to live under is left to the Detailed view.
     assert overview.text == (
         "Interview with a defence expert on the war in Ukraine.\n\n"
@@ -1284,7 +1279,7 @@ def test_the_overview_opens_with_the_framing_and_writes_no_transcript_note() -> 
 
 
 def test_key_facts_live_in_their_topics_not_above_them() -> None:
-    """Q3, one fact once: with topics, the overview is framing and summary;
+    """One fact once: with topics, the overview is framing and summary;
     a key fact is written in the topic that covers it."""
     main = _verified(
         "a full US withdrawal was considered unlikely", start_ms=9_000, kind=schema.KEY_POINT
@@ -1314,7 +1309,7 @@ def test_key_facts_live_in_their_topics_not_above_them() -> None:
 
 
 def test_a_conversation_with_one_subject_writes_no_list_above_the_first_heading() -> None:
-    """F3 amendment §2.9 (replaces Q3's one-list rule): with no topics and
+    """With no topics and
     no summary, nothing is listed as bullets above the first heading — the
     pipeline writes the prose; render lists nothing."""
     main = _verified("the timeline is the main risk", start_ms=9_000, kind=schema.KEY_POINT)
@@ -1411,7 +1406,7 @@ def test_a_fact_quoted_from_a_turn_flagged_as_noise_is_dropped() -> None:
         window=window,
         meeting_date=MEETING_DATE,
         stats=stats,
-        # Since Q2 verify receives only CONFIRMED lines (confirm_noise).
+        # verify receives only CONFIRMED lines (confirm_noise).
         noise_lines=frozenset({1}),
     )
     assert [f.text for f in kept] == ["The budget is twelve thousand"]
@@ -1522,7 +1517,7 @@ def test_a_quote_with_an_echoed_turn_header_still_locates() -> None:
 
 
 def test_most_of_the_window_cannot_be_noise() -> None:
-    """ADR-0059's guard, now one of confirm_noise's rules (Q6): the flag is
+    """ADR-0059's guard, one of confirm_noise's rules: the flag is
     advisory, the line stays in the note."""
     from note_service.domain.meeting_doc import pipeline, verify
 

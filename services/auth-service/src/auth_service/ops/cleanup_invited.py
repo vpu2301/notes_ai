@@ -1,26 +1,7 @@
-"""``python -m auth_service.ops.cleanup_invited`` — drop signups nobody finished.
+"""``python -m auth_service.ops.cleanup_invited [--dry-run] [--older-than-days N] [--yes]`` — drop unconfirmed signups.
 
-    python -m auth_service.ops.cleanup_invited --dry-run
-    python -m auth_service.ops.cleanup_invited --older-than-days 30
-    python -m auth_service.ops.cleanup_invited --yes
-
-An account that was created and never confirmed occupies its address
-forever: the person cannot sign up again with it, and the uniform 202
-means they are never told why. Thirty days is long enough that a holiday
-does not lose somebody their signup, short enough that the address frees
-up while they still remember trying.
-
-Four things go, in the order the foreign keys allow: the Keycloak user,
-the `users` row, the membership, and the personal workspace — the last one
-only when it is empty and personal, because a team workspace with other
-people in it is not this command's to delete.
-
-**Only `invited` accounts.** An active account is never touched, whatever
-its age, and neither is one an operator deactivated. The query says so and
-the dry run prints what it matched, which is the part to read before
-passing ``--yes``.
-
-Exit codes: 0 (including "nothing to do"), 1 the command failed.
+Removes the Keycloak user, `users` row, membership and (only if empty and
+personal) the workspace. Only `invited` accounts. Exit codes: 0 ok, 1 failed.
 """
 
 from __future__ import annotations
@@ -34,10 +15,7 @@ from uuid import UUID
 
 logger = logging.getLogger("auth_service.ops.cleanup_invited")
 
-# An identity that never confirmed. `email_verified_at IS NULL` is the
-# marker rather than `users.status = 'invited'` for the reason
-# OnboardingService uses it: `users` is RLS-scoped per tenant and this
-# command has no tenant in hand, while `identities` is person-level.
+# `email_verified_at IS NULL` on `identities` (person-level; `users` is RLS-scoped).
 STALE = """
 SELECT i.id, i.email, i.last_tenant_id, i.created_at
   FROM identities i
@@ -47,8 +25,7 @@ SELECT i.id, i.email, i.last_tenant_id, i.created_at
  ORDER BY i.created_at
 """
 
-# A workspace is only removed when this person is its only member AND it
-# is personal. A team workspace outlives whoever failed to confirm.
+# Only an empty personal workspace is removed.
 IS_LONE_PERSONAL = """
 SELECT t.kind = 'personal'
        AND (SELECT count(*) FROM tenant_memberships m WHERE m.tenant_id = t.id) <= 1
@@ -80,14 +57,11 @@ async def _run(args: argparse.Namespace) -> int:
     from ..deps import install_state
     from ..main_deps import build_state, teardown_state
 
-    # `is None`, not `or`: `--older-than-days 0` is a legitimate request
-    # ("everything unconfirmed, right now") and `or` would silently turn
-    # it back into the 30-day default.
+    # `is None`, not `or`: `--older-than-days 0` is legitimate.
     days = (
         settings.signup_stale_after_days if args.older_than_days is None else args.older_than_days
     )
-    # Deleting accounts is not something to do because a flag was
-    # forgotten, so the safe mode is the default and --yes is the opt-in.
+    # Dry run is the default; --yes is the opt-in.
     dry = args.dry_run or not args.yes
 
     state = await build_state()
@@ -125,12 +99,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 async def _remove_one(state: Any, row: Any) -> None:
-    """Keycloak first, then the rows, in FK order.
-
-    Keycloak first for the same reason signup writes it first: a Keycloak
-    user we failed to delete is visible and fixable, while database rows
-    pointing at a user that is already gone are not.
-    """
+    """Keycloak first (a leftover Keycloak user is visible and fixable), then the rows in FK order."""
     identity_id: UUID = row["id"]
     tenant_id: UUID | None = row["last_tenant_id"]
 

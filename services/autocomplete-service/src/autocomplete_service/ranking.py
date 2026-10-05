@@ -1,14 +1,7 @@
 """Ranking + diversity guard.
 
-Score = source_priority * Beta(1,9)-acceptance * recency_boost * length_score.
-
-The Bayesian prior (Beta(1,9)) gives a 0-out-of-0 phrase a prior
-acceptance rate of 1/10 = 0.1 — non-zero so it can surface, low so it
-doesn't beat proven phrases until it earns its place.
-
-Diversity guard removes near-duplicate suffixes using rapidfuzz's
-Levenshtein implementation; keep the higher-ranked candidate when two
-suffix strings are within Levenshtein 3.
+Score = source_priority * Beta(1,9)-acceptance * recency_boost * length_score;
+near-duplicate suffixes (Levenshtein <= 3) keep only the higher-ranked candidate.
 """
 
 from __future__ import annotations
@@ -47,8 +40,7 @@ def bayesian_acceptance(impressions: int, accepts: int) -> float:
 def recency_boost(last_accepted_at: datetime | None, *, now: datetime | None = None) -> float:
     if last_accepted_at is None:
         return 1.0
-    # Defensive: naive datetimes (e.g. asyncpg's decoding of ±infinity) must
-    # degrade to "no boost", never crash the suggest path.
+    # Naive datetimes (asyncpg decoding ±infinity) degrade to "no boost".
     if last_accepted_at.tzinfo is None:
         return 1.0
     now = now or datetime.now(UTC)
@@ -77,11 +69,7 @@ def diversity_filter(
     *,
     levenshtein_threshold: int = 3,
 ) -> list[tuple[PhraseRecord, float, str]]:
-    """Drop near-duplicate suffixes.
-
-    ``ranked`` is iterable of (record, score, suffix); descending by score.
-    Returns the same shape with near-dups removed.
-    """
+    """Drop near-duplicate suffixes from (record, score, suffix) tuples sorted by score desc."""
     kept: list[tuple[PhraseRecord, float, str]] = []
     for cand in ranked:
         _, _, suf = cand
@@ -92,9 +80,5 @@ def diversity_filter(
 
 
 def confidence(score_val: float) -> float:
-    """Map raw score into [0, 1] for FE consumption.
-
-    Sprint-10 uses a sigmoid: a score of 0.1 (zero-prior baseline)
-    maps to ~0.10, a score of 1.0 maps to ~0.73.
-    """
+    """Sigmoid of the raw score into [0, 1]."""
     return 1.0 / (1.0 + math.exp(-(score_val - 0.3) * 4))

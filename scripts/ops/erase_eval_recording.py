@@ -1,15 +1,7 @@
-"""Erase one in-house gold-set recording on request (consent withdrawn).
+"""Erase one in-house gold-set recording (consent withdrawn): bucket objects, local copy,
+RTTM and manifest entry, for the speaker and ASR sets. Public/third-party rows are refused.
 
     uv run python scripts/ops/erase_eval_recording.py FILE_ID
-
-Deletes the object from the private eval bucket (eval role), the local
-copy, its RTTM and its manifest entry. Record the erasure in the consent
-register (docs/eval/speakers-consent.md) and commit the manifest change.
-
-Sprint TQ1: the ASR gold set (``eval/asr/v1``) is covered too — its whole
-bucket prefix ``s3://notes-eval/asr/v1/<id>/`` (audio, reference, spans,
-RTTM, alignment), the local ``eval/asr/v1/<id>/`` folder and the manifest
-row. Public and third-party rows are refused, as for the speaker set.
 """
 
 from __future__ import annotations
@@ -22,8 +14,7 @@ import sys
 from pathlib import Path
 
 SPEAKERS = Path(__file__).resolve().parents[2] / "eval" / "speakers"
-# v1: the recorded gold set; v2: product recordings exported with consent
-# (scripts/ops/export_job_for_eval.py, Sprint 30).
+# v1: the recorded gold set; v2: consented product exports (export_job_for_eval.py).
 ROOTS = (SPEAKERS / "v1", SPEAKERS / "v2")
 
 

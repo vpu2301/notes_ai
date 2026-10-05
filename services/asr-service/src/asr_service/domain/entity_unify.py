@@ -1,41 +1,12 @@
-"""Sprint TQ3 — one name, one spelling (TR-04, TR-05).
+"""One name, one spelling: a read-time overlay, never a rewrite of the artefact (ADR-0061).
 
-A name the transcriber heard five ways ("Hand aller", "Andala", "Handela",
-"Handler", "Handala") is shown one way wherever the transcript is read —
-by a read-time overlay (``transcript_corrections``, migration 0066), never
-by rewriting the ASR artefact (ADR-0061: no model edits the evidence layer;
-this is deterministic code with glossary and calendar priors).
-
-Pure functions: :func:`plan` proposes corrections from a transcript and its
-priors; :func:`apply` returns a copy of the transcript with the accepted ones
-applied. ``routers/jobs.py`` runs :func:`plan` once per job (first result
-read) and :func:`apply` on every read.
-
-The rules (TQ3 design):
-
-- **Mentions**: words of three or more letters that are capitalised but not
-  sentence-initial, or not a common word (the recording's language list ∪
-  English — loanwords cross over); plus any word that is an exact glossary
-  spelling or ``heard_as``. Two-word spans ("Hand aller") only *attach* to a
-  cluster whose member they sound like; they never start one.
-- **Keys**: German — Kölner Phonetik; English — Double Metaphone;
-  Ukrainian — KMU 2010 romanisation (ASCII, so Metaphone can read it; the
-  sprint said ISO 9, whose diacritics Metaphone drops) then Double Metaphone.
-- **Clusters**: same key (with Jaro–Winkler ≥ 0.70) or Jaro–Winkler ≥ 0.85.
-  A cluster holds at most one anchor (a glossary term, a calendar attendee,
-  a hint term): two glossary terms or two attendees are never merged; a
-  form close to two anchors within 0.05 joins neither.
-- **Common words** ("Handler", "Hand", "aller") join a cluster only when its
-  canonical comes from the glossary or the calendar. A cluster whose
-  canonical is itself a common word is never applied without such a source.
-- **Canonical**: glossary > calendar > hint > the majority spelling (tie:
-  the mention in the longest segment).
-- **Status**: glossary/calendar source or confidence ≥ 0.80 → accepted;
-  0.60–0.80 with support ≥ 3 → proposed; otherwise discarded (counted).
-- Never: role words, numbers, dates, the noise markers.
-
-Content rule: this module returns text to its caller (the overlay is text);
-it logs nothing.
+Pure: :func:`plan` proposes corrections from a transcript and its priors (glossary,
+calendar, hint); :func:`apply` returns a copy with the accepted ones applied.
+Mentions cluster by phonetic key (Kölner / Double Metaphone / KMU romanisation) and
+Jaro–Winkler; at most one anchor per cluster; common words join only with a glossary
+or calendar canonical. Canonical: glossary > calendar > hint > majority.
+Status: source or confidence ≥ 0.80 → accepted; 0.60–0.80 with support ≥ 3 → proposed.
+Returns text to its caller; logs nothing.
 """
 
 from __future__ import annotations
@@ -66,8 +37,7 @@ MIN_LETTERS = 3
 SOURCE_CONFIDENCE: dict[str, float] = {"glossary": 0.95, "calendar": 0.90, "hint": 0.85}
 TO_TEXT_MAX = 80
 
-# Kept in step with note-service glossary.ROLE_WORDS — every copy is asserted
-# against tests/fixtures/glossary/role_words.json.
+# Kept in step with note-service glossary.ROLE_WORDS (asserted against the fixture).
 ROLE_WORDS: frozenset[str] = frozenset(
     {
         "speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee",
@@ -389,8 +359,7 @@ def _similar(a: str, b: str, language: str) -> float:
     spellings are not far apart. Inflections of one word score 0."""
     if inflected(a, b, language):
         return 0.0
-    # A much shorter form is a different word with the same start ("Hand" /
-    # "Handala"), which Jaro–Winkler's prefix bonus would otherwise reward.
+    # A much shorter form is a different word with the same start ("Hand"/"Handala").
     if min(len(a), len(b)) < LENGTH_RATIO * max(len(a), len(b)):
         return 0.0
     jw = jaro_winkler(a, b)
@@ -456,8 +425,7 @@ def plan(
             f = parent[f]
         return f
 
-    # Only pairs that share two character trigrams are compared: German
-    # capitalises every noun, and comparing all pairs would cost seconds.
+    # Only pairs sharing two trigrams are compared (all pairs would cost seconds).
     index: dict[str, list[str]] = defaultdict(list)
     for f in loose:
         for g in _trigrams(f):
@@ -500,8 +468,7 @@ def plan(
         for (f, cid), k in span_hits.items():
             if k < 2 or abs(len(f) - len(m.form)) > 4:
                 continue
-            # A span is a mishearing split in two ("Hand aller"), not the
-            # name with its neighbour ("Bei Handala").
+            # A span is a mishearing split in two, not the name with its neighbour.
             cluster = lookup[(f, cid)]
             members = cluster.forms | ({compact(cluster.anchor.text)} if cluster.anchor else set())
             if any(

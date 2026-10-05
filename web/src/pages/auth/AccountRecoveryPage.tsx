@@ -8,16 +8,8 @@ import { Banner, LoginShell } from "./LoginShell";
 import { ResetPasswordPage } from "./ResetPasswordPage";
 
 /**
- * `/account-recovery` — the "this wasn't me" link in a security email.
- *
- * Somebody clicking this believes their account has been taken. The page
- * therefore acts immediately on arrival rather than asking them to confirm:
- * `POST /auth/security/lockdown` ends every session, spends every
- * outstanding link, and hands back a fresh reset token — which drops
- * straight into the set-password step, with no second trip to the inbox.
- *
- * (This is the sprint's `/lockdown/done`, named for the route the server
- * actually mails.)
+ * `/account-recovery` — "this wasn't me". Acts on arrival: lockdown ends every session
+ * and hands back a reset token that drops straight into the set-password step.
  */
 export function AccountRecoveryPage() {
   useDocumentTitle("Account recovery");

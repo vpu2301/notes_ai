@@ -1,16 +1,13 @@
 import Foundation
 import UIKit
 
-/// Central app state: settings, auth, template cache, recent captures, and
-/// the navigation stack. Only base URLs and the email are persisted — never
-/// passwords or tokens.
+/// Central app state. Only base URLs and the email are persisted here — never tokens.
 @MainActor
 final class AppState: ObservableObject {
     enum AuthState: Equatable {
         case restoring
         case signedOut
-        /// There is a session on this phone, behind the biometric gate.
-        /// Nothing carrying a token is sent until it is opened.
+        /// A session behind the biometric gate; nothing carrying a token is sent until it opens.
         case locked
         case signedIn
     }
@@ -47,8 +44,7 @@ final class AppState: ObservableObject {
         settingsPresented = true
     }
 
-    /// Open Settings on Data & AI — from a note that could not be written
-    /// because nobody agreed to a processor yet.
+    /// Open Settings on Data & AI (from a note with no acknowledged processor).
     func showDataAndAI() {
         settingsTab = .dataAI
         settingsPresented = true
@@ -65,8 +61,7 @@ final class AppState: ObservableObject {
     /// The bell: unread count and the feed.
     private(set) lazy var notifications = NotificationsModel(api: api)
 
-    /// Owners and admins may add members; everyone else can send the link
-    /// from Settings › Account's roster, so the menu item is theirs alone.
+    /// Only owners and admins may add members.
     var canManageMembers: Bool {
         if let role = activeWorkspace?.myRole { return role == "owner" || role == "admin" }
         guard let tenantId, let membership = memberships.first(where: { $0.tenantId == tenantId }) else {
@@ -126,17 +121,11 @@ final class AppState: ObservableObject {
         let stored = Self.loadSettings()
         self.settings = stored
         self.email = UserDefaults.standard.string(forKey: Keys.email) ?? ""
-        // Before the client exists, and so before anything can be sent:
-        // the refresh cookie this app used to sign in with is deleted. It
-        // is read by nothing — even the Keycloak login hands a native
-        // client its token in the body — and a credential nothing reads is
-        // one nobody rotates. The saved **password** is deliberately left
-        // alone during `dual`; see `SessionMigration`.
+        // Before anything can be sent: delete the legacy refresh cookie. The
+        // saved password is deliberately left alone during `dual` (`SessionMigration`).
         self.signedOutNotice = SessionMigration.run()
         self.api = APIClient(settings: stored)
-        // Recents are not loaded here: until `restoreSession` says which
-        // identity and which workspace, there is no answer to "whose?" —
-        // and IDX-I2's whole point is that the question has an answer.
+        // Recents load only once `restoreSession` knows the identity and workspace.
         self.themePref = ThemePref(rawValue: UserDefaults.standard.string(forKey: Keys.theme) ?? "") ?? .system
         Task { [weak self] in
             guard let api = self?.api else { return }
@@ -156,47 +145,31 @@ final class AppState: ObservableObject {
 
     // MARK: - Auth
 
-    /// Who is signed in, once the server has said so. Kept for the account
-    /// screen and for the sidecar written beside a recording that could
-    /// not be uploaded — a file on disk should say whose it is.
+    /// Who is signed in; also written to the sidecar of a kept recording.
     @Published private(set) var identity: IdentitySummary?
-    /// Every workspace this identity can reach. Read-only until IDX-I2:
-    /// there is no endpoint to switch between them yet.
+    /// Every workspace this identity can reach.
     @Published private(set) var memberships: [MembershipSummary] = []
     @Published private(set) var tenantId: String?
-    /// The identity id behind the current session, for the sidecar written
-    /// beside a recording that could not be uploaded.
+    /// The identity id behind the current session, for the kept-recording sidecar.
     private(set) var identityId: String = ""
-    /// Signed in from the stored session, but the server has not confirmed
-    /// it yet (the phone woke up on a plane). A banner says so, and the app
-    /// makes no requests until the person does something.
+    /// Signed in from the stored session, not yet confirmed by the server (offline boot).
     @Published private(set) var reconnecting = false
     /// Why the app last dropped to the sign-in screen, shown there once.
     @Published var signedOutNotice: String?
     /// The step-up sheet, when an endpoint asks for recent proof.
     @Published var reauth: ReauthPrompt?
-    /// Which issuer minted the session this phone is holding (ADR-0047).
-    /// Drives three things the person can see: whether there is a password
-    /// worth saving, whether the workspace switcher works, and whether the
-    /// gate can be offered at all.
+    /// Which issuer minted the session (ADR-0047): decides password saving, switcher, gate.
     @Published private(set) var sessionKind: SessionKind?
     /// Whether "Require Face ID to open" is on, for the Settings toggle.
     @Published private(set) var gateOn = false
 
-    /// Whether the biometric gate is offered in Settings at all.
-    ///
-    /// **Off for this batch (IOS-1).** The machinery is built and tested
-    /// (IDX-I1 I1-01) and the gate can be turned on, but during `dual` a
-    /// phone can hold either kind of session and a toggle that silently
-    /// does nothing for half the user base is worse than no toggle. It
-    /// comes back with I1-05, once A4/A5 has made every session native.
+    /// Whether the biometric gate is offered in Settings. Off during `dual`:
+    /// a Keycloak session cannot be gated, so the toggle would do nothing for half the users.
     static let gateOffered = false
 
-    /// Whether this phone's session could carry the gate if it were
-    /// offered — native sessions only.
+    /// Whether the session could carry the gate — native sessions only.
     @Published private(set) var canGate = false
-    /// Set while the unlock prompt is up, so the locked screen does not
-    /// offer a second one behind the first.
+    /// Set while the unlock prompt is up (no second prompt behind the first).
     @Published private(set) var unlocking = false
 
     /// What a sign-in attempt still owes before the app is signed in.
@@ -223,13 +196,10 @@ final class AppState: ObservableObject {
         case .locked(let summary):
             adopt(summary)
             authState = .locked
-            // Ask straight away: a cold start with the gate on should show
-            // Face ID, not a screen with a button that shows Face ID.
+            // Ask straight away on a cold start with the gate on.
             await unlock()
         case .offline(let summary):
-            // The session is real; the server just could not be reached to
-            // prove it. Never wipe a session for a network error — that
-            // turns a flaky connection into a sign-out.
+            // Never wipe a session for a network error.
             adopt(summary)
             reconnecting = true
             authState = .signedIn
@@ -255,11 +225,9 @@ final class AppState: ObservableObject {
         await restoreSession()
     }
 
-    // ── the biometric gate (IDX-I1 D, F) ─────────────────────────────
+    // ── the biometric gate ───────────────────────────────────────────
 
-    /// Open the gate and carry on into the app. A cancelled prompt leaves
-    /// the locked screen up; a changed face empties the Keychain item and
-    /// says so, because nothing on this phone can read that session again.
+    /// Open the gate. Cancelled = locked screen stays; changed biometry = session wiped and said so.
     func unlock() async {
         guard authState == .locked, !unlocking else { return }
         unlocking = true
@@ -298,10 +266,9 @@ final class AppState: ObservableObject {
         authState = .locked
     }
 
-    // ── the sign-in flows (IDX-I1 F) ─────────────────────────────────
+    // ── the sign-in flows ────────────────────────────────────────────
 
-    /// Mail a one-time code. The reply says nothing about whether the
-    /// address is known — by design, upstream.
+    /// Mail a one-time code. The reply never says whether the address is known.
     func startEmailCode(email address: String) async throws -> EmailChallenge {
         try await api.startEmailCode(email: address, language: Locale.preferredLanguageCode)
     }
@@ -345,20 +312,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The welcome step's one field. Skipping it is fine: the server has
-    /// already defaulted the display name to the address's local part.
+    /// The welcome step's one field; skipping it is fine (server default).
     func setDisplayName(_ name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         identity = try? await api.setDisplayName(trimmed)
     }
 
-    /// Fill in who is signed in after a restart. `GET /auth/me` still
-    /// answers the pre-IDX `{claims, db_user}` shape (`routers/me.py` is
-    /// IDX-B2's to extend), so this is a no-op today and the account screen
-    /// falls back to the address the Keychain item carries.
-    /// Sprint 21: true for an account younger than a day that has not
-    /// dismissed the "record your first meeting" card on this device.
+    /// True for an account younger than a day that has not dismissed the first-run card here.
     @Published var isFirstRun = false
 
     private static let firstRunSeenKey = "notesai.first_run_seen"
@@ -384,16 +345,14 @@ final class AppState: ObservableObject {
         if let memberships = response.memberships { self.memberships = memberships }
     }
 
-    /// Sprint 23: what the workspace admin allows. Permissive until known,
-    /// so an older server changes nothing.
+    /// What the workspace admin allows. Permissive until known.
     @Published private(set) var sharingRules: SharingConstraints = .permissive
 
     private func loadWorkspace() async {
         if let rules = try? await api.sharingConstraints() { sharingRules = rules }
         await refreshWorkspaces(force: true)
         refreshPending()
-        // Sprint 34: anything typed while this device was offline goes up
-        // now. Idempotent on the capture id, so a repeat costs one request.
+        // Anything typed offline goes up now; idempotent on the capture id.
         await capture.syncPendingMeetingNotes()
         await refreshNotes()
         await refreshSpaces()
@@ -404,8 +363,7 @@ final class AppState: ObservableObject {
         let signedOut = identityId
         await api.logout()
         clearSignedInState()
-        // Sprint 32: the names the account brought to kept recordings and
-        // the per-job answers go with it; the recordings stay.
+        // The account's names and per-job answers go; the recordings stay.
         SignOutCleanup.run(identityId: signedOut)
         capture.forgetContext()
         gateOn = await api.isGateOn()
@@ -413,10 +371,7 @@ final class AppState: ObservableObject {
         authState = .signedOut
     }
 
-    /// The session is gone for good (expired, revoked, replayed, or behind
-    /// a face that no longer exists): drop to the sign-in form with the
-    /// reason, which is the one thing the person needs to know and the one
-    /// thing a bare "sign in" screen never says.
+    /// The session is gone for good: drop to the sign-in form with the reason.
     private func sessionEnded(_ reason: SessionLostReason) {
         guard authState == .signedIn || authState == .locked else { return }
         clearSignedInState()
@@ -441,9 +396,7 @@ final class AppState: ObservableObject {
         workspaces = []
         workspaceLost = false
         lastWorkspaceRefresh = nil
-        // The recents stay on disk under their scope; only this session's
-        // view of them is dropped. Signing back in brings them back, and
-        // Settings › Account is where they are actually removed.
+        // Recents stay on disk under their scope; only this session's view is dropped.
         scope = nil
         recents = []
         pending = []
@@ -451,26 +404,15 @@ final class AppState: ObservableObject {
         canGate = false
     }
 
-    /// Where an account is created: the web app, in Safari.
-    ///
-    /// Signup is a web flow (BE-0) and stays one. It needs a confirmable
-    /// mailbox, terms to accept and a workspace name — a form with more
-    /// text in it than this screen has room for, on a device where typing
-    /// an address twice is a chore. The app's job is to hand the person
-    /// over and to sign them in afterwards, which it already does: a BE-0
-    /// account is an ordinary password account here.
+    /// Where an account is created: the web app, in Safari (signup stays a web flow).
     func openSignup() {
-        // Sprint 21: `/join` picks signup or the lead form by the server's
-        // config, so the app never has to know which one is on.
+        // `/join` picks signup or the lead form by the server's config.
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "join") else { return }
         UIApplication.shared.open(url)
     }
 
-    /// Mail the confirmation link again, for an account that has not
-    /// followed it yet. Returns the sentence to show either way — this is
-    /// the one place in the sign-in flow where nothing visible happens on
-    /// success, so silence would read as a broken button.
+    /// Mail the confirmation link again. Returns the sentence to show either way.
     func resendVerification(to address: String) async -> String {
         do {
             try await api.resendVerification(email: address)
@@ -480,29 +422,22 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Where a forgotten password is reset: the web app, in Safari. There
-    /// is no reset flow in the app, and there should not be one — the
-    /// mailed code already signs anybody in without a password.
+    /// Where a forgotten password is reset: the web app, in Safari.
     func openPasswordReset() {
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "reset") else { return }
         UIApplication.shared.open(url)
     }
 
-    // ── step-up (plumbing; IDX-I2 uses it) ───────────────────────────
+    // ── step-up ──────────────────────────────────────────────────────
 
-    /// Ask the person to prove it is them, and answer whether they did.
-    ///
-    /// Called from the API client's actor, so it hops to the main actor,
-    /// puts a sheet up, and waits for the sheet to answer — the request
-    /// that triggered it is retried once on `true`.
+    /// Ask the person to prove it is them (sheet on the main actor); the
+    /// triggering request is retried once on `true`.
     func presentReauth() async -> Bool {
         guard authState == .signedIn else { return false }
         let options = try? await api.startReauth()
         return await withCheckedContinuation { continuation in
-            // Resumed exactly once, by whichever comes first: the sheet, or
-            // the deadline. A continuation that is never resumed would hang
-            // the request that asked — and every request queued behind it.
+            // Resumed exactly once, by the sheet or the deadline; never-resumed would hang the request.
             let answered = Answered()
             let finish: @MainActor (Bool) -> Void = { [weak self] ok in
                 guard answered.claim() else { return }
@@ -532,14 +467,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Links into the app (IDX-I2 I2-04)
 
-    /// A link that opens the app.
-    ///
-    /// `notesai://` for now. Universal links on the web host (I2-04) are
-    /// **not** built: invitations have no server — no table in any
-    /// migration, no router in auth-service, no `/invite/:token` page in
-    /// the web app — and IDX-W1 and IDX-W2 recorded the same gate before
-    /// this sprint. The parsing is here so that when IDX-B1 lands, the
-    /// only new work is the preview sheet and the entitlement.
+    /// A link that opens the app (`notesai://`; universal links and invitations are not built server-side).
     enum AppLink: Equatable {
         case invite(token: String)
         case note(id: String)
@@ -558,15 +486,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Something to say about the link that was just opened, shown once on
-    /// the home page.
+    /// Something to say about the link just opened, shown once on the home page.
     @Published var linkNotice: String?
 
-    /// Handle a link. OAuth callbacks (`notesai://oauth/callback`,
-    /// `notesai://calendar/connected`) never reach here — the
-    /// `ASWebAuthenticationSession` that started them intercepts its own
-    /// redirect, which is what keeps a callback from being replayable by
-    /// anything else that can open a URL.
+    /// Handle a link. OAuth callbacks never reach here: `ASWebAuthenticationSession`
+    /// intercepts its own redirect (so a callback is not replayable).
     func handle(_ url: URL) {
         guard let link = AppLink(url) else { return }
         switch link {
@@ -574,25 +498,18 @@ final class AppState: ObservableObject {
             guard authState == .signedIn else { return }
             openNote(id)
         case .invite:
-            // The token is deliberately not kept: there is nothing that
-            // can redeem it, and an unredeemable credential sitting in
-            // memory is only a liability.
+            // The token is deliberately not kept: nothing can redeem it.
             linkNotice = "This invitation link cannot be opened yet. Ask whoever sent it to add you to their workspace from Notes AI instead."
         }
     }
 
     // MARK: - Workspaces (IDX-I2)
 
-    /// Every workspace this identity belongs to, newest reading of the
-    /// membership table. Empty until the first `GET /tenants` answers.
+    /// Every workspace this identity belongs to; empty until the first `GET /tenants` answers.
     @Published private(set) var workspaces: [Workspace] = []
-    /// True when the workspace this session is in is no longer one of
-    /// them — someone removed the membership while the app was open, or
-    /// while it was in a pocket. Everything local becomes read-only and
-    /// the pending recordings need somewhere else to go.
+    /// The session's workspace is no longer a membership: local state is read-only, pending recordings need another home.
     @Published private(set) var workspaceLost = false
-    /// Set while `POST /auth/token` is in flight, so the switcher can
-    /// show which row is being moved to.
+    /// Set while `POST /auth/token` is in flight.
     @Published private(set) var switchingTo: String?
     private var lastWorkspaceRefresh: Date?
     /// How often the membership list is re-read on foreground activation.
@@ -608,12 +525,7 @@ final class AppState: ObservableObject {
         workspaces.filter { $0.isActive && $0.status == "active" }
     }
 
-    /// Re-read the membership list.
-    ///
-    /// `GET /tenants`, not `GET /auth/me` — the pack asks for the latter,
-    /// but `routers/me.py` still answers the pre-IDX `{claims, db_user}`
-    /// shape and carries no memberships at all (IDX-B2 debt). The tenant
-    /// list is the same fact from the table that would have fed it.
+    /// Re-read the membership list (`GET /tenants`; `/auth/me` carries no memberships).
     func refreshWorkspaces(force: Bool = false) async {
         guard authState == .signedIn else { return }
         if !force, let last = lastWorkspaceRefresh,
@@ -622,36 +534,21 @@ final class AppState: ObservableObject {
             let list = try await api.workspaces()
             lastWorkspaceRefresh = Date()
             workspaces = list
-            // A membership that has gone is the only thing this call can
-            // discover that the rest of the app cannot.
+            // A gone membership is the one thing only this call can discover.
             if let tenantId, !list.contains(where: { $0.id == tenantId }) {
                 workspaceLost = true
             } else {
                 workspaceLost = false
             }
         } catch {
-            // Offline, or a 5xx: the list the app has is the last one the
-            // server confirmed, and it is better than none. A membership
-            // is never dropped on a failed request.
+            // Offline or 5xx: keep the last confirmed list; never drop a membership on a failed request.
         }
     }
 
-    /// Move this session to another workspace.
-    ///
-    /// The local state moves with it: recents are re-read from the new
-    /// scope, notes and spaces from the server under the new token. In
-    /// between there is a moment with neither, which is honest — the app
-    /// genuinely does not know yet.
-    /// Whether this session can switch workspace at all.
-    ///
-    /// `POST /auth/token` re-mints an access token for another `tid`, and
-    /// auth-service cannot re-mint a Keycloak token without Keycloak's
-    /// key — so during the dual-issuer period the switch is a native-only
-    /// capability and a Keycloak session gets `409 legacy_session`
-    /// (ADR-0047, recorded there up front). Better to say so on the button
-    /// than to let the tap earn a 409.
+    /// Native sessions only: a Keycloak session gets `409 legacy_session` (ADR-0047).
     var canSwitchWorkspace: Bool { sessionKind?.canGate ?? false }
 
+    /// Move this session to another workspace; local state is re-read under the new scope.
     func switchWorkspace(to workspace: Workspace) async {
         guard workspace.id != tenantId, switchingTo == nil else { return }
         guard canSwitchWorkspace else {
@@ -684,8 +581,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Local state, per identity and workspace
 
-    /// Which identity's and which workspace's data this app is showing.
-    /// Nil when signed out, and then nothing local is written.
+    /// Which identity's and workspace's data is shown; nil when signed out (nothing local is written).
     private(set) var scope: StateScope?
 
     /// Point the local state at the current identity and workspace.
@@ -697,16 +593,12 @@ final class AppState: ObservableObject {
             recents = []
             return
         }
-        // The first identity to sign in after the update inherits the
-        // unscoped recents this app used to keep. Once.
+        // The first identity to sign in inherits the old unscoped recents. Once.
         ScopedDefaults.migrateLegacy(into: next)
         recents = RecentsStore(scope: next).load()
     }
 
-    /// Scopes on this phone that belong to somebody else, or to a
-    /// workspace this identity has left. Offered for removal in Settings;
-    /// never removed automatically — it is the person's data, and a phone
-    /// that quietly forgets things is worse than one that asks.
+    /// Scopes belonging to somebody else or a left workspace; offered for removal, never removed automatically.
     var otherScopes: [StateScope] {
         ScopedDefaults.allScopes()
             .filter { $0 != scope }
@@ -722,8 +614,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Recordings waiting to be uploaded (IDX-I2 I2-03)
 
-    /// The recordings IDX-I1 kept when their upload failed, this
-    /// identity's only.
+    /// Recordings kept when their upload failed, this identity's only.
     @Published private(set) var pending: [PendingCapture] = []
     /// Ids with a retry in flight.
     @Published private(set) var retrying: Set<String> = []
@@ -739,18 +630,12 @@ final class AppState: ObservableObject {
         PendingCaptures.old(excluding: identityId)
     }
 
-    /// Whether this recording can be sent at all: its workspace has to be
-    /// one this identity is still in. The client never uploads to a
-    /// workspace it already knows it left.
+    /// Sendable only when its workspace is still one this identity is in.
     func canRetry(_ capture: PendingCapture) -> Bool {
         !PendingCaptures.needsWorkspace(capture, memberships: availableWorkspaces.map(\.id))
     }
 
-    /// Upload a kept recording and turn it into a note.
-    ///
-    /// The file is deleted only once the server has a job for it —
-    /// `submitJob` returning is the first moment at which the recording
-    /// exists anywhere but this phone.
+    /// Upload a kept recording and turn it into a note; the file is deleted only once the server has a job.
     func retryPending(_ capture: PendingCapture) async {
         guard authState == .signedIn, !retrying.contains(capture.id) else { return }
         retrying.insert(capture.id)
@@ -814,9 +699,7 @@ final class AppState: ObservableObject {
             notesError = nil
         } catch {
             notesError = AuthCopy.message(for: error)
-            // The usual way a removed membership announces itself is that
-            // the workspace's own data stops being served. Ask the
-            // membership table rather than guessing from one 403.
+            // A 403 may be a removed membership: ask the membership table rather than guess.
             if (error as? APIError)?.status == 403 {
                 await refreshWorkspaces(force: true)
             }
@@ -833,8 +716,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The notes for the home page: the current search, narrowed to the
-    /// selected space.
+    /// The current search, narrowed to the selected space.
     var visibleNotes: [NoteSummary] {
         guard let space = selectedSpaceId else { return notes }
         return notes.filter { spaceOf[$0.noteId] == space }
@@ -909,8 +791,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Reload the spaces from the server. The first time after this
-    /// device's local spaces (pre-0021) are found, they are moved up.
+    /// Reload the spaces; pre-0021 local spaces are moved up once.
     func refreshSpaces() async {
         guard authState == .signedIn else { return }
         do {
@@ -923,9 +804,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Move the spaces this device kept in UserDefaults to the server —
-    /// once. Returns the server list afterwards, nil when there was
-    /// nothing to move.
+    /// Move UserDefaults spaces to the server, once; nil when nothing to move.
     private func importLegacySpaces(into current: [Space]) async -> [Space]? {
         guard let legacy = Self.load([LegacySpace].self, key: Keys.legacySpaces), !legacy.isEmpty else {
             UserDefaults.standard.removeObject(forKey: Keys.legacySpaces)
@@ -935,7 +814,7 @@ final class AppState: ObservableObject {
         let legacyOf = Self.load([String: String].self, key: Keys.legacySpaceOf) ?? [:]
         var newIds: [String: String] = [:]
         for old in legacy {
-            // Same name already up there (made from another device): reuse it.
+            // Same name already up there: reuse it.
             if let existing = current.first(where: { $0.name == old.name }) {
                 newIds[old.id] = existing.id
                 continue
@@ -1015,25 +894,19 @@ final class AppState: ObservableObject {
 
     // MARK: - Templates
 
-    /// UUID of the meeting-notes template in `language` (an ISO 639-1
-    /// code). Returns nil when the catalogue is unreachable or the
-    /// language is not yet known ("auto") — the server then picks a
-    /// template in the transcript's own language.
+    /// UUID of the meeting-notes template in `language`; nil when unreachable or "auto" (server picks).
     func meetingTemplateID(language: String) async -> String? {
         if language == CaptureViewModel.autoLanguage { return nil }
         if templateCache == nil {
             templateCache = try? await api.fetchTemplates()
         }
         guard let templates = templateCache else { return nil }
-        // Per-language copies share the "meeting_notes" code prefix
-        // ("meeting_notes", "meeting_notes_uk", …).
+        // Per-language copies share the "meeting_notes" code prefix.
         let candidates = templates.filter { $0.code.hasPrefix("meeting_notes") }
         return candidates.first { $0.language == language }?.id
     }
 
-    /// A note typed from scratch: the given template, or the meeting
-    /// template in the app's language (`createBlankNote.ts`). Returns the
-    /// new note's id, or nil after telling the home page why not.
+    /// A note typed from scratch; the new note's id, or nil after telling the home page why not.
     func createBlankNote(templateId: String? = nil) async -> String? {
         creationError = nil
         do {
@@ -1058,8 +931,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Stop a transcription that is queued or running (Home, the meeting
-    /// page). The row says "Cancelled"; the recording is not deleted.
+    /// Stop a queued or running transcription; the recording is not deleted.
     func cancelCapture(jobId: String) async {
         do {
             try await api.cancelJob(id: jobId)
@@ -1116,16 +988,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Draft the note for a capture whose transcript finished without one
-    /// (the app was quit mid-pipeline, or the note request failed).
+    /// Draft the note for a capture whose transcript finished without one.
     func draftNote(for capture: RecentCapture) async {
         guard capture.status == .complete, capture.noteId == nil,
               !drafting.contains(capture.jobId) else { return }
         drafting.insert(capture.jobId)
         defer { drafting.remove(capture.jobId) }
         do {
-            // The job knows what language it heard; the app's current
-            // setting may be "auto" or have changed since.
+            // The job knows what language it heard.
             let job = try? await api.jobStatus(id: capture.jobId)
             let templateId = await meetingTemplateID(
                 language: job?.detectedLanguage ?? self.capture.language)
@@ -1147,8 +1017,7 @@ final class AppState: ObservableObject {
         show(.capture(jobId: jobId))
     }
 
-    /// Open a note inside this app. A note that came from one of this
-    /// phone's captures opens as that capture (so the transcript tab is there).
+    /// Open a note; one from this phone's captures opens as that capture.
     func openNote(_ noteId: String) {
         if let recent = recents.first(where: { $0.noteId == noteId }) {
             show(.capture(jobId: recent.jobId))
@@ -1185,8 +1054,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Settings › Data & AI in the web app — where the tier and the
-    /// processor acknowledgement are actually changed.
+    /// Settings › Data & AI in the web app (where tier and acknowledgement are changed).
     func openWebSettingsData() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/data") {
@@ -1194,9 +1062,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Passwords, second factors and account deletion are the web app's:
-    /// they are rare, they are typed, and none of them belongs behind a
-    /// thumb on a train.
+    /// Passwords, second factors and account deletion are the web app's.
     func openSecuritySettings() {
         guard let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/security") else { return }
@@ -1218,8 +1084,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Recents are written under the current scope, and nowhere when
-    /// there is none: a signed-out app has nobody to write for.
+    /// Recents are written under the current scope, nowhere when signed out.
     private func persistRecents() {
         guard let scope else { return }
         RecentsStore(scope: scope).save(recents)

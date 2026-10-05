@@ -1,9 +1,4 @@
-"""Voice command matcher coverage.
-
-Each test corresponds to a spec §3.4 gate (true positive, false positive
-on confusable utterances, pause-before, confidence, section args,
-mixed-content, edit-distance).
-"""
+"""Voice command matcher gates: TP, confusable FP, pause-before, confidence, section args, edit-distance."""
 
 from __future__ import annotations
 

@@ -1,31 +1,7 @@
-"""Transcript structure: segments → speaker turns → paragraphs.
+"""Transcript structure: segments → speaker turns → paragraphs (pure; the single place structure is decided).
 
-Whisper hands back a flat list of short timed segments. Diarization
-adds a speaker label to each. Neither is what a person wants to read:
-a meeting is a sequence of *turns* ("Alice said this, then Bob said
-that"), and a long turn is a few paragraphs, not a wall of text.
-
-This module is the single place that structure is decided, so the web
-app, the macOS app and the note built from the transcript all agree.
-It is deliberately pure and dependency-free: a list of anything with
-``text`` / ``start_ms`` / ``end_ms`` / ``speaker`` goes in, turns come
-out. Rules:
-
-* Consecutive segments by the same speaker form one turn.
-* A segment the diarizer could not attribute joins the surrounding
-  turn when the speaker before and after it is the same person (they
-  were clearly mid-sentence); otherwise it stands as an unattributed
-  turn — the honesty label, never silently merged into a neighbour.
-* Inside a turn, a new paragraph starts at a noticeable pause once the
-  paragraph has some length, or at a sentence end once it is long, or
-  unconditionally once it is very long (a speaker who never pauses
-  still gets readable blocks).
-* A turn is ``uncertain`` when two people spoke at once inside it
-  (``overlap_ms``), when a segment's label was smoothed by the worker, or
-  when an unattributed segment was absorbed into it (Sprint 30).
-* ``segment_indices`` address the STORED ARTIFACT (``artifact_indices`` on
-  the served segments) when present, so edits never depend on how the
-  read path rendered the text.
+Unattributed segments join the surrounding turn only when both neighbours are the same speaker;
+``segment_indices`` address the STORED ARTIFACT (``artifact_indices``) when present.
 """
 
 from __future__ import annotations
@@ -45,14 +21,12 @@ class _SegmentLike(Protocol):
 
 @dataclass(frozen=True)
 class StructurePolicy:
-    # A pause at least this long breaks a paragraph once the paragraph
-    # is at least ``paragraph_min_chars`` long.
+    # A pause this long breaks a paragraph once it is ``paragraph_min_chars`` long.
     pause_break_ms: int = 1500
     paragraph_min_chars: int = 160
-    # Past this length a sentence end (". ! ? …") breaks the paragraph.
+    # Past this length a sentence end breaks the paragraph.
     paragraph_soft_chars: int = 600
-    # Past this length the paragraph breaks at the next segment no
-    # matter what.
+    # Past this length the next segment breaks it unconditionally.
     paragraph_hard_chars: int = 1000
 
 
@@ -68,11 +42,7 @@ def build_turns(
     policy: StructurePolicy = DEFAULT_POLICY,
     overlap_ms: list[tuple[int, int]] | None = None,
 ) -> list[TranscriptTurnView]:
-    """Group ``segments`` into speaker turns with paragraphs.
-
-    ``speaker_names`` maps neutral labels to the names people gave them;
-    a label without an entry renders under its neutral default.
-    """
+    """Group ``segments`` into speaker turns with paragraphs; unnamed labels render under their neutral default."""
     names = speaker_names or {}
     overlaps = overlap_ms or []
     runs = _speaker_runs(segments)
@@ -108,9 +78,7 @@ def build_turns(
 def _split_by_language(
     segments: list[_SegmentLike], runs: list[tuple[str | None, list[int], bool]]
 ) -> list[tuple[str | None, list[int], bool]]:
-    """A turn is never in two languages (Sprint I2): a speaker run breaks
-    where a segment's ``language`` changes, so the reader sees "[uk]" on
-    exactly the passage that was in Ukrainian."""
+    """A turn is never in two languages: a speaker run breaks where ``language`` changes."""
     out: list[tuple[str | None, list[int], bool]] = []
     for speaker, indices, absorbed in runs:
         current: list[int] = []
@@ -132,12 +100,9 @@ def _overlaps(seg: _SegmentLike, spans: list[tuple[int, int]]) -> bool:
 
 
 def _speaker_runs(segments: list[_SegmentLike]) -> list[tuple[str | None, list[int], bool]]:
-    """Consecutive same-speaker segment indices, with unattributed
-    segments absorbed when they sit between two runs of one speaker
-    (the flag says whether the run absorbed any)."""
+    """Consecutive same-speaker runs; unattributed segments between two runs of one speaker are absorbed (flag)."""
     labels: list[str | None] = [s.speaker or None for s in segments]
-    # Segments a person made unattributed stay unattributed: never filled,
-    # and they bound the gaps around them.
+    # Person-cleared segments are never filled and bound the gaps around them.
     cleared = [bool(getattr(s, "speaker_cleared", False)) for s in segments]
 
     # Fill None gaps whose neighbours agree.

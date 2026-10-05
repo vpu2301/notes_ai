@@ -1,4 +1,4 @@
-"""The two pure rules of Sprint 34: agenda extraction and line anchoring.
+"""Two pure rules: agenda extraction and line anchoring.
 
 No DB, no app — text in, structure out.
 """

@@ -1,17 +1,6 @@
-"""``python -m auth_service.maintenance <job>`` — the cron twin (IDX-B3 D).
+"""``python -m auth_service.maintenance <job>`` (also ``mdx-auth-maint``): the cron twin of the scheduler.
 
-    python -m auth_service.maintenance --list
-    python -m auth_service.maintenance purge-challenges
-    python -m auth_service.maintenance expire-sessions --dsn postgresql://…
-
-Also installed as ``mdx-auth-maint``. Runs the same :func:`run_job` the
-scheduler does, so a job run by hand emits the same metrics and does the
-same work — the failure mode this avoids is a manual path that quietly
-diverges until nobody trusts it.
-
-Exit codes: 0 success, 1 the job raised, 2 unknown job. The non-zero exit
-is the point of the CLI twin — a cron that cannot fail is a cron nobody
-notices has stopped.
+Exit codes: 0 success, 1 the job raised, 2 unknown job.
 """
 
 from __future__ import annotations
@@ -46,9 +35,7 @@ async def _run(name: str, dsn: str | None) -> int:
         print(f"unknown job {name!r}; try --list", file=sys.stderr)
         return 2
 
-    # min_size=1/max_size=2: a maintenance run is one connection's worth
-    # of work, and a cron that opens the service's full pool on a busy
-    # database is a self-inflicted incident.
+    # A maintenance run is one connection's worth of work.
     pool = await create_pool(
         dsn or settings.db_tenant_writer_dsn,
         application_name=f"{settings.service_name}/maint",

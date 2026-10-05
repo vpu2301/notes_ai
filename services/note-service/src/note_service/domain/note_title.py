@@ -1,25 +1,9 @@
-"""A meeting note names itself (0057).
+"""A meeting note names itself: the ``note.generate`` job asks the model for a title.
 
-A recording opens its note with a placeholder title — the template name
-and the date — because at that moment nothing has been heard. Once the
-transcript is in, the ``note.generate`` job asks the model for a short
-title in the language that was spoken, and puts it on the note.
-
-Four rules, and each is enforced here rather than hoped for:
-
-* **Only a placeholder is replaced.** ``notes.title_source`` must still be
-  ``default`` — checked before the model is asked (a cheap skip) and again
-  under the note's row lock just before the write, so a rename that
-  landed while the model was thinking wins. A person's title, and a title
-  this job already wrote, are never touched.
-* **Once.** The write flips the source to ``ai``; a second run of the same
-  job, a regenerate, or a crash-and-retry finds nothing to do.
-* **Not from nothing.** A recording with too few real words keeps its
-  placeholder, and the model may answer "no topic" — a made-up subject
-  on a microphone test is worse than a date.
-* **Never at the note's expense.** Every failure here is logged and
-  swallowed: the note, the transcript and the rest of the generation go
-  on exactly as if this module did not exist.
+Only a placeholder (``title_source = default``) is replaced, checked again under
+the row lock so a concurrent rename wins; the write flips the source to ``ai``
+so it happens once; too few real words keep the placeholder; every failure is
+logged and swallowed, never at the note's expense.
 """
 
 from __future__ import annotations
@@ -45,24 +29,19 @@ DEFAULT: Final = "default"
 AI: Final = "ai"
 USER: Final = "user"
 
-# Fewer real words than this and there is no topic to name: a greeting,
-# "can you hear me", a silent take. The placeholder stays.
+# Fewer real words than this and the placeholder stays.
 MIN_MEANINGFUL_WORDS: Final = 12
-# How much of the meeting the model reads. Taken from across the whole
-# recording, not the first minutes, so the title is the meeting's main
-# subject rather than whatever was said while people were joining.
+# Sampled across the whole recording, not the first minutes.
 SAMPLE_WORDS: Final = 1_200
 _EXCERPTS: Final = 3
 
 MAX_TITLE_WORDS: Final = 10
-MAX_TITLE_CHARS: Final = doclint.TITLE_MAX_CHARS  # document standard §1
+MAX_TITLE_CHARS: Final = doclint.TITLE_MAX_CHARS
 MAX_TOKENS: Final = 60
 TIMEOUT_SECONDS: Final = 45.0
 
 _WORD = re.compile(r"\w+", re.UNICODE)
-# Words that carry no topic in any language we transcribe. Deliberately
-# short: this only decides "is there anything here", the model decides
-# what it is.
+# Words that carry no topic; only decides "is there anything here".
 _FILLER: Final = frozenset(
     [
         "hi",
@@ -186,10 +165,8 @@ def meaningful_word_count(result: dict[str, Any]) -> int:
 
 
 def sample(result: dict[str, Any], *, budget: int = SAMPLE_WORDS) -> str:
-    """The transcript, or — when it is long — three excerpts (400 words each
-    at the default budget): its opening, its middle and its end, one in each
-    third, so the title can name the whole recording (TI-02, SQ3 T4). The
-    opening is kept whole: it is where a recording says what it is about."""
+    """The transcript, or when long three excerpts (opening, middle, end), so the
+    title can name the whole recording."""
     words = _spoken(result)
     if len(words) <= budget:
         return " ".join(words)
@@ -210,7 +187,7 @@ def clean(raw: str) -> str:
     if len(words) > MAX_TITLE_WORDS:
         text = " ".join(words[:MAX_TITLE_WORDS])
     if len(text) > MAX_TITLE_CHARS:
-        # At a word, never mid-word (the document standard §1: ≤ 80 characters).
+        # At a word, never mid-word.
         text = text[: MAX_TITLE_CHARS + 1].rsplit(" ", 1)[0].rstrip(" ,:;—-")
     return text.strip()
 
@@ -226,8 +203,7 @@ def _answer_text(answer: Any) -> str:
     return str(parsed.get("title") or "") if isinstance(parsed, dict) else ""
 
 
-# SQ3 T4 — what the note found, given as context: its themes and the
-# verified facts that name, count or date the most.
+# Context for the title call: the note's themes and its most specific verified facts.
 CONTEXT_FACTS: Final = 5
 
 
@@ -248,9 +224,7 @@ async def suggest(
     themes: Sequence[str] = (),
     facts: Sequence[str] = (),
 ) -> str | None:
-    """A title for this transcript, or None: not enough said, no topic,
-    or the model failed. Never raises. ``themes`` and ``facts`` (SQ3 T4)
-    are what the note found across the whole recording."""
+    """A title for this transcript, or None (not enough said, no topic, model failed). Never raises."""
     if meaningful_word_count(result) < MIN_MEANINGFUL_WORDS:
         return None
     system = _SYSTEM.format(language=language_name(language), guard=prompts.guard(language))
@@ -278,9 +252,7 @@ async def suggest(
     return title
 
 
-# A title word counts as said when a transcript word shares this many
-# first letters with it: English titles are title-cased, so "Planning"
-# over a transcript that says "plan" is a topic word, not a new name.
+# A title word counts as said when a transcript word shares this many first letters.
 _NAME_PREFIX: Final = 4
 # Shortest part a German compound is split into ("Lehrer|mangel").
 _COMPOUND_PART: Final = 3
@@ -290,8 +262,7 @@ _LINKS: Final = ("s", "es", "n", "en", "e")
 
 @cache
 def _lexicon(name: str) -> frozenset[str]:
-    """One of the Tatoeba lists in ``asr_models/resources`` (CC-BY 2.0 FR,
-    ``scripts/models/build_frequency_lists.py``); empty when absent."""
+    """A Tatoeba frequency list from ``asr_models/resources`` (CC-BY 2.0 FR); empty when absent."""
     try:
         text = resources.files("asr_models").joinpath("resources", name).read_text("utf-8")
     except (FileNotFoundError, ModuleNotFoundError):
@@ -300,11 +271,8 @@ def _lexicon(name: str) -> frozenset[str]:
 
 
 def _common(word: str, language: str, heads: set[str], depth: int = 0) -> bool:
-    """A word the language uses for things rather than names: in its
-    common-word list and never a name in English, or — German — a compound
-    of such words and words that were said ("Lehrermangel"). A summary
-    word the speakers never used ("Krise") is a topic, not a new name;
-    "Berlin" or "Merkel" that nobody said still is a name."""
+    """A common word of the language (or, in German, a compound of common and said
+    words): a topic, not a new name."""
     lang = (language or "").split("-")[0].lower()
     if word in _lexicon("names.txt"):
         return False
@@ -330,31 +298,20 @@ def _common(word: str, language: str, heads: set[str], depth: int = 0) -> bool:
 
 
 def unsupported(title: str, result: dict[str, Any], *, language: str = "") -> str | None:
-    """Why this title may not be written, or None (Summary Engine v2, Q6).
-
-    ``example`` — it repeats a prompt example: the model copied its
-    instructions. ``unsupported`` — it names someone or something the
-    transcript never says. Same rules as the document's lines, except
-    that a common word of ``language`` is a topic, not a name: German
-    capitalises every noun and English titles every word."""
+    """Why this title may not be written, or None: ``example`` (a copied prompt
+    example), ``unsupported`` (a name the transcript never says), or a lint fault."""
     if prompts.echoes_example(title):
         return "example"
-    # The document standard §1: one colon at most, and never the shape of
-    # a placeholder ("Meeting notes — 2026-09-26").
     said = " ".join(_spoken(result))
     heads = {w[:_NAME_PREFIX] for w in _WORD.findall(said.casefold()) if len(w) >= _NAME_PREFIX}
     language = language or str(result.get("language") or "")
-    # `new_names` never counts a sentence's first word; a title's first
-    # word is often the name, so the title is read as a clause.
+    # `new_names` skips a sentence's first word, so the title is read as a clause.
     for name in support.new_names(f"re {title}", said):
         words = [w for w in _WORD.findall(name.casefold()) if len(w) >= _NAME_PREFIX]
         if any(w[:_NAME_PREFIX] not in heads and not _common(w, language, heads) for w in words):
             logger.info("note_title.new_name", extra={"word": name})
             return "unsupported"
-    # Sprint D1 T2 — the document standard §1 as constraints: 30–80
-    # characters, one colon at most, no repeated phrase, not a placeholder.
-    # A failing suggestion is not applied (``title_skipped: lint``); the
-    # name rule is the one above, against the transcript.
+    # The title form rules; a failing suggestion is not applied (``title_skipped: lint``).
     ctx = doclint.LintContext(language="en", speech_ms=0)
     if [f for f in doclint.title_faults(title, ctx) if f != "name"]:
         return "lint"
@@ -374,12 +331,8 @@ async def apply(
     requested_by: UUID,
     generation_id: UUID,
 ) -> bool:
-    """Put ``title`` on the note if it still has its placeholder.
-
-    Holds the note's row lock — the same one every autosave takes — from
-    the check to the write, so a rename cannot slip in between. Returns
-    whether anything was written.
-    """
+    """Put ``title`` on the note if it still has its placeholder, under the note's
+    row lock from check to write. Returns whether anything was written."""
     note = await repo.lock_note_for_update(conn, note_id=note_id)
     if note is None or note.status != NoteStatus.DRAFT:
         return False

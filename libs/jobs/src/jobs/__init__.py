@@ -1,4 +1,4 @@
-"""libs/jobs — Postgres-backed job queue + model-backend warming + usage ledger (DEP-S1)."""
+"""Postgres-backed job queue, model-backend warming and usage ledger."""
 
 from __future__ import annotations
 

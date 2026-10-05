@@ -1,9 +1,4 @@
-"""Orchestrator behaviour: idempotence key, pass-through, cache miss/hit.
-
-The orchestrator is the contract for sprint-7's eval harness — same
-input + same context → same output, byte-for-byte. These tests gate
-that invariant.
-"""
+"""Orchestrator behaviour: idempotence key, pass-through, cache miss/hit, byte-equal replay."""
 
 from __future__ import annotations
 
@@ -119,8 +114,7 @@ def test_idempotence_key_changes_with_partial_flag() -> None:
 
 
 def test_disabled_stage_is_skipped_with_metadata() -> None:
-    # Sprint 14: a disabled stage is skipped and leaves a deterministic
-    # metadata marker (must survive _strip_nondeterministic).
+    # A disabled stage leaves a deterministic metadata marker.
     orch = Orchestrator(stages=[_Identity(), _Uppercase()])
     out = asyncio.run(orch.run(_ctx(stages_disabled=("uppercase",)), StageInput(text="hello")))
     assert out.text == "hello"  # NOT uppercased
@@ -161,9 +155,7 @@ def test_cache_hit_returns_cached_output() -> None:
 
 
 def test_fresh_runs_are_byte_equal_despite_timing() -> None:
-    # Two fresh runs (no cache) with a stage that emits a different
-    # latency every call must still produce byte-equal output — the
-    # sprint-07 replay contract. Timing metadata must be stripped.
+    # Varying latency metadata must still give byte-equal output.
     orch = Orchestrator(stages=[_NondeterministicTelemetry()])
     first = asyncio.run(orch.run(_ctx(), StageInput(text="hello")))
     second = asyncio.run(orch.run(_ctx(), StageInput(text="hello")))

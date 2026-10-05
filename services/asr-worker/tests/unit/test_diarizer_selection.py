@@ -31,9 +31,7 @@ def test_an_unknown_engine_fails_at_startup(name: str) -> None:
 def test_the_http_engine_is_resolved_through_the_backend_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Shape B (ADR-0052): URL, token, timeout and the processor on the
-    Data page all come from config/models.yaml — never from a new env
-    var of this service's own."""
+    """Shape B (ADR-0052): everything comes from config/models.yaml, never a new env var."""
     monkeypatch.setattr(config.settings, "models_env", "dev")
     monkeypatch.setattr(config.settings, "diar_http_backend", "")
 
@@ -64,8 +62,7 @@ def test_a_backend_of_the_wrong_kind_is_refused(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_config_pins_pyannote_offline_with_telemetry_off() -> None:
-    """pyannote.audio 4.x ships telemetry on; importing the worker's config
-    must already have switched it off, before anything imports pyannote."""
+    """Importing the worker's config switches pyannote telemetry off before pyannote loads."""
     assert config.PYANNOTE_PROCESS_ENV == {
         "PYANNOTE_METRICS_ENABLED": "false",
         "HF_HUB_OFFLINE": "1",

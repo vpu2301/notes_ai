@@ -1,15 +1,7 @@
-"""Unit tests for the tenant (company) management surface.
+"""Tenant management surface with ``tenant_connection`` + repo functions stubbed.
 
-The repository SQL is exercised against a real Postgres in the DB-integration
-suite; here we stub ``tenant_connection`` + the repo functions and drive the
-router to assert the authorization / isolation / validation behaviour:
-
-* tenant create + update (happy path, audit, owner bootstrap)
-* role-based access — a member token cannot create/update a tenant
-* tenant isolation — you can't read a tenant you are not a member of
-* writes are scoped to the caller's active tenant
-* membership creation, last-owner guard, role validation
-* unauthorized (no membership) access is blocked
+Covers create/update + audit + owner bootstrap, role-based access, isolation, active-tenant
+scoping, membership creation, the last-owner guard and unauthorized access.
 """
 
 from __future__ import annotations
@@ -92,8 +84,7 @@ def _membership_row(role: str = "owner", tenant_id: UUID = TENANT_A) -> dict[str
 
 @pytest.fixture
 def make_client(monkeypatch: pytest.MonkeyPatch):
-    """Factory: build a TestClient whose current_user resolves to given claims,
-    with tenant_connection + audit stubbed. Repo functions are patched per-test."""
+    """TestClient whose current_user resolves to the given claims; repo functions patched per-test."""
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
 

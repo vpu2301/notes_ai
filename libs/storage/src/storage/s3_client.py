@@ -1,9 +1,4 @@
-"""Async S3 adapter — the only place we touch ``aioboto3``.
-
-Centralizing the client makes it trivial to swap implementations later
-(e.g., to a direct ``aiohttp`` S3 client) and means CI's grep for
-``boto3`` / ``aioboto3`` imports has exactly one allowed origin.
-"""
+"""Async S3 adapter: the only place ``aioboto3`` is imported (CI greps for it)."""
 
 from __future__ import annotations
 
@@ -11,10 +6,7 @@ import contextlib
 import logging
 from typing import Any
 
-# aioboto3 is imported lazily inside ``_session`` so the module can be
-# imported in environments where boto3/aioboto3 isn't installed (e.g.,
-# the asr-service test rig that only exercises EncryptedObjectStore
-# against an in-memory S3 substitute).
+# Importable without aioboto3 installed (test rigs use an in-memory S3 substitute).
 try:  # pragma: no cover  — import-time guard
     import aioboto3
     from botocore.exceptions import ClientError
@@ -26,11 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ObjectNotFoundError(Exception):
-    """The requested key does not exist in the bucket.
-
-    Raised instead of leaking ``botocore.ClientError`` so callers can
-    map "object gone" (retention TTL / erasure) without importing boto.
-    """
+    """The key does not exist in the bucket; raised instead of leaking ``botocore.ClientError``."""
 
     def __init__(self, *, bucket: str, key: str) -> None:
         self.bucket = bucket
@@ -39,28 +27,14 @@ class ObjectNotFoundError(Exception):
 
 
 class ObjectStoreNotConfiguredError(RuntimeError):
-    """No object store endpoint is configured (``S3_ENDPOINT`` is empty).
-
-    A service may start without an object store — the dev stack can run
-    that way and ``/readyz`` reports the leg as skipped — but every read
-    or write against it must then fail as a recognisable dependency error.
-    Left to aiobotocore, an empty endpoint surfaces as
-    ``ValueError: Invalid endpoint:`` from deep inside a request, which the
-    services render as an opaque 500 "An unexpected error occurred."
-    """
+    """``S3_ENDPOINT`` is empty: a recognisable dependency error instead of aiobotocore's opaque ``Invalid endpoint``."""
 
     def __init__(self) -> None:
         super().__init__("object store is not configured (S3_ENDPOINT is empty)")
 
 
 class S3Client:
-    """Lazily-bound aioboto3 session + per-call client context.
-
-    aioboto3 expects you to ``async with session.client(...) as c`` for
-    each call; reusing a single client across requests is supported via
-    its session pool. We expose narrow methods rather than the raw client
-    so callers cannot bypass the envelope.
-    """
+    """aioboto3 session with a per-call client context; narrow methods so callers cannot bypass the envelope."""
 
     def __init__(
         self,
@@ -109,8 +83,7 @@ class S3Client:
             try:
                 resp = await c.get_object(Bucket=bucket, Key=key)
             except ClientError as exc:
-                # getattr: the import-guard fallback aliases ClientError to
-                # Exception, which has no ``response`` attribute.
+                # getattr: the import-guard fallback aliases ClientError to Exception.
                 code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
                 if code in ("NoSuchKey", "404"):
                     raise ObjectNotFoundError(bucket=bucket, key=key) from exc
@@ -150,7 +123,5 @@ class S3Client:
             return url
 
     async def aclose(self) -> None:
-        # aioboto3 Session has no explicit close; per-call clients are
-        # context-managed. The method exists for symmetry with other
-        # libs' teardown signatures.
+        # aioboto3 Session has no explicit close; kept for teardown symmetry.
         return None

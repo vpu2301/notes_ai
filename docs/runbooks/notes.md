@@ -391,7 +391,7 @@ GROUP BY 1, 2;
 
 `example` above zero is a prompt example copied into a note — see
 `docs/security/2026-09-22-november-sentence.md`. Anything else: compare the
-backend against the committed eval baseline (`docs/eval/notes-baseline-*.md`).
+backend against the committed eval baseline (`docs/eval/notes-baseline-*.json`).
 
 ### copied-facts
 
@@ -852,7 +852,7 @@ live link; revoke recipient links first (`DELETE /v1/notes/{id}/links`).
 ## Recipient responses (Sprint 20)
 
 Migration 0037 adds `note_action_items` (derived from the section text
-the first time a version is read — see `docs/architecture/notes.md`) and
+the first time a version is read) and
 `share_link_responses` (what a recipient did on the shared page).
 Anonymous writes: `PUT/DELETE /v1/shared/{token}/items/{key}/response`
 and `…/sections/{key}/flag`, capped at 60 per link per hour

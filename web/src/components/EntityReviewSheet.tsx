@@ -5,14 +5,8 @@ import { ApiError } from "../api/http";
 import type { CorrectionsView, EntityCorrection } from "../api/types";
 import { needsReview } from "../lib/corrections";
 
-/**
- * Sprint TQ3: one row per unified spelling — canonical, the variants it
- * replaced, how often, and where the spelling came from. Accept applies it
- * on every surface; Reject puts every occurrence back. Accepting a spelling
- * from the glossary teaches it the variants (`heard_as`); any other can be
- * added to the glossary from here. Offline the sheet is read-only: the
- * corrections live on the server's view.
- */
+/** One row per unified spelling. Accepting a glossary spelling teaches it the variants
+ *  (`heard_as`). Offline the sheet is read-only. */
 interface EntityReviewSheetProps {
   jobId: string;
   corrections: EntityCorrection[];
@@ -54,7 +48,6 @@ export function EntityReviewSheet({
 
   const rows = corrections.filter(needsReview);
 
-  // The last spelling decided: nothing left to review.
   useEffect(() => {
     if (rows.length === 0) onClose();
   }, [rows.length, onClose]);
@@ -75,8 +68,7 @@ export function EntityReviewSheet({
       });
       onChanged(view);
       setEditing(null);
-      // A spelling the glossary gave: its variants are mishearings worth
-      // remembering (the glossary merges them into the existing term).
+      // Glossary spelling: its variants are mishearings to remember.
       if (status === "accepted" && c.source === "glossary") {
         await remember(c, toText ?? c.to_text).catch(() => undefined);
       }

@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// One meeting row (menu-bar popover): title, time, and a status chip only
-/// when there is something to say (in progress / failed). Click opens the
-/// meeting in the app's window.
+/// One meeting row (menu-bar popover): title, time, and a status chip only when there is something to say. Click opens the meeting.
 struct MeetingRow: View {
     @EnvironmentObject private var app: AppState
     let capture: RecentCapture
@@ -37,8 +35,7 @@ struct MeetingRow: View {
         if compact { compactLabel } else { fullLabel }
     }
 
-    /// The popover's row: title and time on one line, a soft fill on
-    /// hover, the ⋯ taking the time's place while you point at it.
+    /// The popover's row: title and time on one line, a soft fill on hover, the ⋯ taking the time's place.
     private var compactLabel: some View {
         HStack(spacing: 8) {
             Text(capture.title)
@@ -89,7 +86,7 @@ struct MeetingRow: View {
                     Text(capture.createdAt.formatted(date: .omitted, time: .shortened))
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
-                    // Sprint 20: a recipient disputed something on this note.
+                    // A recipient disputed something on this note.
                     if let disputes = app.notes.first(where: { $0.noteId == capture.noteId })?.openDisputes,
                        disputes > 0 {
                         Text("·").font(.dsMeta).foregroundStyle(DS.muted)
@@ -189,8 +186,7 @@ struct MeetingList: View {
         if compact { flat } else { cards }
     }
 
-    /// The popover: a few plain rows under one "Recent" label — no day
-    /// groups, no cards; each row carries its own short date.
+    /// The popover: a few plain rows under one "Recent" label — no day groups, no cards.
     private var flat: some View {
         let items = app.recents.sorted { $0.createdAt > $1.createdAt }
         return VStack(alignment: .leading, spacing: 1) {

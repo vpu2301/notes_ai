@@ -1,4 +1,4 @@
-"""Series, carry-over and the client version (Sprint 36).
+"""Series, carry-over and the client version.
 
     GET  /v1/notes/{id}/carried                  what is still open from last time
     POST /v1/notes/{id}/carried/{item_key}       tick it, re-open it, drop it
@@ -6,10 +6,8 @@
     GET  /v1/notes/{id}/client-version           exactly what a client would see
     GET  /v1/notes/{id}/client-version/check     what to look at before sharing
 
-The carried routes read **another note**, so every one of them goes
-through the visibility rule (ADR-0057): a previous note is used only when
-the author of the new note may view it. `domain/series_service.py` holds
-that rule; the routes never reach past it.
+The carried routes read **another note**, so every one goes through the
+visibility rule (ADR-0057) in `domain/series_service.py`.
 """
 
 from __future__ import annotations
@@ -42,9 +40,7 @@ router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
 CarriedState = Literal["open", "done_marked", "dropped"]
 
-# What each flag means to a person about to send this to a client.
-# Plain language, because a checklist that says `owner_inferred` is a
-# checklist nobody reads.
+# What each flag means to a person about to send this to a client, in plain language.
 FLAG_WARNINGS: dict[str, str] = {
     "owner_inferred": "Some owners were worked out rather than stated — check them.",
     "no_owner": "Some tasks have nobody on them.",
@@ -236,8 +232,7 @@ async def set_previous_note(
         note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
         previous = await repo.fetch_note(conn, note_id=body.note_id)
         if previous is None or not access.can_view(previous, claims):
-            # A 404 rather than a 403: whether a note the author cannot
-            # see exists is not something to confirm by guessing ids.
+            # 404, not 403: do not confirm that an unseen note exists.
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
 
         version = await repo.fetch_version(conn, version_id=note.current_version_id)
@@ -367,10 +362,7 @@ async def client_version_check(
     )
     warnings: list[ChecklistItem] = []
 
-    # Sprint 36: what the engine was not sure about. These are the lines
-    # a person should look at before they go to a client — an owner we
-    # inferred, a number we could not confirm, words that were hard to
-    # hear, a task neither side clearly owns.
+    # What the engine was not sure about: the lines to look at before they go to a client.
     for flag, detail in FLAG_WARNINGS.items():
         count = flags.get(flag, 0)
         if count:

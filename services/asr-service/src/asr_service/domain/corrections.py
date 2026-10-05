@@ -1,17 +1,8 @@
-"""Sprint TQ3 T2 — the spelling overlay's storage and lifecycle.
+"""Spelling overlay storage and lifecycle (``transcript_corrections``).
 
-``transcript_corrections`` (migration 0066) holds what :mod:`entity_unify`
-proposed for a job; the result view applies the accepted rows on every read.
-The unifier runs once per job, on the first result read after completion
-(``ensure_planned``) — after diarization, before anyone sees the text — and
-again only on ``POST …/corrections:recompute``.
-
-The workspace glossary is read here, read-only, from ``workspace_glossary``
-(note-service's table, same database, same RLS — the precedent is
-note-service reading ``transcription_jobs``). Calendar attendees are the
-job's ``speaker_name_candidates``; the hint is ``vocabulary_hint``.
-
-Every row is content: nothing here logs a spelling.
+The unifier runs once per job on the first result read, and again only on recompute.
+The workspace glossary is read read-only (same database, same RLS). Every row is
+content: nothing here logs a spelling.
 """
 
 from __future__ import annotations
@@ -188,11 +179,8 @@ async def store(
     status: str,
     proposals: list[entity_unify.Proposal],
 ) -> bool:
-    """Write a plan and the job's status, once. Returns False when another
-    reader got there first (the status was set meanwhile).
-
-    A row a person decided (``decided_by`` set) is never overwritten by a
-    recompute; the system's own rows are refreshed."""
+    """Write a plan and the job's status once; False when another reader got there first.
+    A row a person decided is never overwritten by a recompute."""
     claimed = await conn.fetchval(
         "UPDATE transcription_jobs SET entity_unify_status = $2,"
         " corrections_rev = corrections_rev + 1"

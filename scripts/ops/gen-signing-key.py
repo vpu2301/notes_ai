@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
-"""Generate one RS256 signing key for the native issuer (IDX-A2, F1).
+"""Generate one RS256 signing key for the native issuer as a JSON object for
+AUTH_SIGNING_KEYS_JSON. The active key is the one whose not_after is furthest ahead;
+keep the old entry until not_after + access TTL. Never paste the output outside the secret store.
 
-Prints a JSON object to append to the AUTH_SIGNING_KEYS_JSON list:
-
-    {"kid": "<sha256(spki)[:12]>", "private_pem": "...", "not_after": "..."}
-
-Usage:
-    python scripts/ops/gen-signing-key.py                 # 3072-bit, valid 180 days
-    python scripts/ops/gen-signing-key.py --days 365
-    python scripts/ops/gen-signing-key.py --not-after 2027-03-01T00:00:00Z
-    python scripts/ops/gen-signing-key.py --list          # wrap in a one-element list
-
-Rotation: generate the next key, append it to the list with a LATER
-not_after (it becomes active immediately — the active key is the one whose
-not_after is furthest ahead), keep the old entry until not_after + access
-TTL has passed, then drop it. Never print or paste the output anywhere but
-the secret store; the dev-only key lives at infra/dev/auth-signing-dev.json
-and CI refuses its kid outside dev configs (scripts/ci/check-dev-keys.py).
+    python scripts/ops/gen-signing-key.py [--days 365 | --not-after <iso>] [--list]
 """
 
 from __future__ import annotations

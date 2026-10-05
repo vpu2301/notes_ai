@@ -9,15 +9,7 @@ import { LoginPage } from "../src/pages/LoginPage";
 import { PasswordLoginPage } from "../src/pages/auth/PasswordLoginPage";
 import { WelcomePage, suggestName } from "../src/pages/auth/WelcomePage";
 
-/**
- * WEB-1: the signup path, at the level Playwright cannot reach cheaply.
- *
- * The browser test (`e2e/first-use.spec.ts`) proves the whole journey
- * against a real auth-service; these prove the branches that need a server
- * answering something specific — a `use_password` refusal, a `PATCH` body
- * carrying a time zone nobody typed — which is fiddly to arrange for real
- * and trivial to arrange here.
- */
+/** The signup branches that need a specific server answer; `e2e/first-use.spec.ts` proves the whole journey. */
 
 const IDENTITY = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -54,11 +46,7 @@ const AUTH_RESULT = {
 
 type Reply = { status?: number; body?: unknown };
 
-/**
- * Route table keyed by `"METHOD /path"`, falling back to `"/path"`;
- * anything unlisted is a 404. The method matters here because `/auth/me`
- * is two different endpoints depending on the verb.
- */
+/** Route table keyed by `"METHOD /path"`, falling back to `"/path"`; unlisted = 404. */
 function server(routes: Record<string, Reply>) {
   const calls: { method: string; path: string; body: unknown }[] = [];
   vi.stubGlobal(
@@ -155,8 +143,7 @@ describe("/welcome", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/#focus"));
     const patch = calls.find((c) => c.method === "PATCH" && c.path === "/auth/me")!;
     expect(patch.body).toMatchObject({ display_name: "Alex Kim" });
-    // Whatever the machine says it is — the assertion is that it was sent
-    // without a question, not that this box is in any particular zone.
+    // Sent without asking; the value is whatever the machine reports.
     expect((patch.body as { timezone?: string }).timezone).toBe(
       Intl.DateTimeFormat().resolvedOptions().timeZone,
     );
@@ -200,8 +187,7 @@ describe("the code step", () => {
     await typeEmailAndCode("482913");
 
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/login/password"));
-    // The address survives the switch: being redirected is not a reason to
-    // make somebody type it again.
+    // The address survives the switch.
     expect(await screen.findByLabelText<HTMLInputElement>(/^email$/i)).toHaveValue(
       "alex.kim@example.test",
     );

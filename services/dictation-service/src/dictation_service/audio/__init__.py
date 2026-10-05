@@ -1,8 +1,4 @@
-"""Audio pipeline: Opus decoder + tmpfs ring buffer + gap policy.
-
-Submodules are imported lazily so unit tests for one piece (e.g.,
-``gap``) don't pay the numpy / cryptography cost of ``buffer``.
-"""
+"""Audio pipeline: Opus decoder + tmpfs ring buffer + gap policy (lazy imports)."""
 
 from typing import TYPE_CHECKING, Any
 

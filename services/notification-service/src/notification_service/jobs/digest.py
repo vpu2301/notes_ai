@@ -1,14 +1,7 @@
-"""Daily digest — one email per user per day, or none at all.
+"""Daily digest: one email per user per day, or none at all.
 
-Idempotency differs deliberately from sprint-10's rollup. That job does
-check-then-act (SELECT marker → work → INSERT marker), which lets two
-runners both pass the check and double-count. For a digest the same race
-sends one user two emails (E6), so the claim here is taken FIRST and a
-unique-violation means "another worker owns this user-day".
-
-Timezone correctness matters as much as idempotency: the digest fires at
-the user's LOCAL `digest_hour`, computed through zoneinfo, so a DST
-transition does not shift everyone's morning summary by an hour (E9).
+The user-day claim is taken FIRST (INSERT, unique violation = another worker owns
+it), never check-then-act. Due time is the user's LOCAL `digest_hour` via zoneinfo.
 """
 
 from __future__ import annotations
@@ -35,8 +28,7 @@ from ..domain.preferences import UserSettings, resolve_timezone
 
 logger = logging.getLogger(__name__)
 
-# Read by the `mdx_notification_digest_last_run_unix_ts` gauge; the
-# DigestStale alert fires on its age.
+# Read by the digest_last_run gauge; the DigestStale alert fires on its age.
 _last_success_unix: float = 0.0
 
 
@@ -45,12 +37,7 @@ def last_success_unix() -> float:
 
 
 def is_due(settings_row: UserSettings, *, now: datetime) -> bool:
-    """Has this user's local digest hour arrived today?
-
-    Compared in local wall-clock time. A user at digest_hour=8 in
-    Europe/Kyiv gets their mail at 08:00 Kyiv all year, not at a fixed
-    UTC offset that drifts across the DST boundary.
-    """
+    """Has this user's local digest hour arrived today? (local wall-clock, DST-safe)"""
     local = now.astimezone(resolve_timezone(settings_row.timezone))
     return local.hour >= settings_row.digest_hour
 
@@ -58,11 +45,7 @@ def is_due(settings_row: UserSettings, *, now: datetime) -> bool:
 async def claim_user_day(
     conn: asyncpg.Connection, *, tenant_id: UUID, user_id: UUID, day: date
 ) -> bool:
-    """Atomically claim (day, tenant, user). False = someone else has it.
-
-    INSERT-first, not SELECT-then-INSERT: the primary key does the
-    mutual exclusion, so two workers racing cannot both proceed.
-    """
+    """Atomically claim (day, tenant, user) via INSERT; False = someone else has it."""
     row = await conn.fetchrow(
         """
         INSERT INTO notification_digest_progress (digest_date, tenant_id, user_id)
@@ -160,8 +143,7 @@ async def run_digest_for_tenant(
 
             items = await pending_digest_rows(conn, user_id=user_id, since=since)
             if not items:
-                # Empty-digest suppression: never email "you have 0
-                # things". The claim stays, so we do not re-check all day.
+                # Never email an empty digest; the claim stays so we do not re-check all day.
                 await finish_user_day(
                     conn, tenant_id=tenant_id, user_id=user_id, day=digest_day, included=0
                 )
@@ -174,9 +156,7 @@ async def run_digest_for_tenant(
                 )
                 continue
 
-            # The lines are the ALREADY-RENDERED content-free titles, so the
-            # digest cannot surface anything the individual notifications
-            # did not.
+            # Already-rendered content-free titles only.
             lines = [r["title"] for r in items]
             rendered = render_email(
                 Category.SYSTEM_DIGEST,
@@ -196,17 +176,14 @@ async def run_digest_for_tenant(
                     )
                 )
             except Exception as exc:  # noqa: BLE001
-                # Leave finished_at NULL: the claim row now reads as a
-                # crashed run, which the runbook treats as investigate
-                # rather than silently retry (and re-send).
+                # finished_at stays NULL: reads as a crashed run to investigate, never re-sent.
                 logger.warning(
                     "digest.send_failed",
                     extra={"user_id": str(user_id), "error": str(exc)},
                 )
                 continue
 
-            # Mark the individual rows as folded into the digest so a
-            # second day's run cannot include them again.
+            # Folded rows must not be included by a later run.
             await conn.execute(
                 "UPDATE notification_outbox SET status = 'sent', "
                 "       suppressed_reason = 'digest_sent' "
@@ -265,9 +242,7 @@ async def run_all(*, now: datetime | None = None) -> int:  # pragma: no cover
     total = 0
     try:
         async with app_pool.acquire() as conn:
-            # SECURITY DEFINER (migration 0051). A plain read of `tenants`
-            # is RLS-filtered to zero rows on an unscoped connection, so
-            # this job reported success while doing nothing at all.
+            # SECURITY DEFINER fn: a plain read of `tenants` is RLS-filtered to zero rows here.
             tenants = await conn.fetch(
                 "SELECT tenant_id AS id FROM notification_active_tenant_ids()"
             )

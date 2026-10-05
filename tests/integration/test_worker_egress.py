@@ -1,13 +1,6 @@
-"""DEP-S1-04: a worker cannot reach an arbitrary host (RUN_EGRESS_TEST=1).
-
-Drives scripts/k8s/egress-allowlist.sh test against the running staging
-cluster (or the compose stack). It is a *deployment* test: it proves the
-allowlist is enforced where the workers actually run, which no unit test can.
-
-Sprint 29 B-8/B-9 add the diarizer-v2 half: with ``otel.pyannote.ai`` (pyannote's
-usage telemetry) and ``huggingface.co`` (the hub) unreachable from the worker,
-a ``diarize=true`` job still completes and was diarized by pyannote
-community-1 — the in-process engine needs no host at all.
+"""A worker cannot reach an arbitrary host (RUN_EGRESS_TEST=1): drives
+scripts/k8s/egress-allowlist.sh against the running cluster, and a ``diarize=true``
+job still completes on pyannote community-1 with the hub and telemetry unreachable.
 """
 
 from __future__ import annotations
@@ -30,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "k8s" / "egress-allowlist.sh"
 
-# Hosts the in-process diarizer must never need (Sprint 29 B-8).
+# Hosts the in-process diarizer must never need.
 DIARIZER_FORBIDDEN_HOSTS = ("otel.pyannote.ai", "huggingface.co")
 PYANNOTE_ENGINE = "pyannote-community-1"
 
@@ -69,9 +62,7 @@ def _worker_exec(code: str) -> str:
 
 
 def _two_voice_wav(seconds: float = 12.0, rate: int = 16_000) -> bytes:
-    """Alternating 2 s turns of two differently pitched, amplitude-modulated
-    tones. Not speech — the assertion is that the pipeline RAN offline, not
-    what it heard. Set EGRESS_DIAR_AUDIO to a real two-speaker WAV instead."""
+    """Two alternating pitched tones, not speech: the assertion is that the pipeline RAN offline."""
     frames = []
     for n in range(int(rate * seconds)):
         t = n / rate
@@ -135,8 +126,6 @@ def test_diarized_job_completes_with_pyannote_and_hub_unreachable() -> None:
     result = httpx.get(f"{ASR_URL}/asr/jobs/{job_id}/result", headers=headers, timeout=30)
     assert result.status_code == 200, result.text
     diarization = result.json()["metadata"].get("diarization") or {}
-    # Not merely "completed": a v2 load failure (e.g. a hub lookup the
-    # allowlist refused) completes the job undiarized or on another engine.
-    # Both hosting shapes name the engine that produced the labels, so this
-    # assertion holds for in-process and endpoint alike.
+    # Not merely "completed": a load failure completes the job undiarized or
+    # on another engine, and both hosting shapes name the engine.
     assert diarization.get("engine") == PYANNOTE_ENGINE, diarization

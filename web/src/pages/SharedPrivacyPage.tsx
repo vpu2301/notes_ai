@@ -1,10 +1,7 @@
 import { useEffect } from "react";
 import { LoginShell } from "./auth/LoginShell";
 
-/**
- * `/s/privacy` — what a shared page collects and who controls it (Sprint 23).
- * Static, no session, no calls. Reviewed copy lives here and nowhere else.
- */
+/** `/s/privacy` — static, no session, no calls. Reviewed copy lives here and nowhere else. */
 export function SharedPrivacyPage() {
   useEffect(() => {
     document.title = "Privacy — shared notes";

@@ -1,17 +1,9 @@
-// Typed fetch wrapper: bearer auth from an in-memory token,
-// single-flight silent refresh + one retry on 401, RFC-9457 problem parsing,
-// and (IDX-W1) the single step-up choke point — a 403 `reauth_required` is
-// answered by the reauth dialog and the original request is retried once.
+// Typed fetch wrapper: in-memory bearer token, single-flight refresh + one
+// retry on 401, RFC 9457 problems, and the single step-up choke point.
 
 import type { LoginResponse } from "./types";
 
-/**
- * Where each service lives. A development build falls back to the dev
- * stack's ports; a production build does not — a bundle shipped without
- * its `VITE_*_BASE` values would otherwise call localhost from every
- * visitor's browser and fail in a way that looks like an outage. Failing
- * at startup with the variable's name is the honest version.
- */
+/** Dev builds fall back to the dev stack's ports; prod fails at startup instead of calling localhost. */
 function base(name: string, value: string | undefined, devDefault: string): string {
   if (value) return value;
   if (import.meta.env.PROD) {
@@ -30,22 +22,9 @@ export const BASES = {
 export type ServiceBase = keyof typeof BASES;
 
 /**
- * The custom request headers each service's CORS `allow_headers` accepts.
- *
- * This table is a hard constraint, not a preference. Every one of these
- * bases is a different origin from the SPA, so any request carrying a
- * header the target does not list fails its *preflight* — the browser
- * never sends the real call, and the failure arrives as an opaque
- * `TypeError`. Sending `X-Request-Id` unconditionally is what made every
- * note, ASR and notification call read as "cannot reach the server" while
- * auth-service kept working: auth-service's allow-list was widened for
- * `X-Client-Type`/`X-Request-Id` (IDX-B3 E) and the other three still
- * allow only `Authorization` and `Content-Type`.
- *
- * Widen a row here only after that service's `allow_headers` has actually
- * caught up — `services/<name>/src/<name>/main.py`. Until then the
- * correlation id stays off the wire for that base, and `ApiError`
- * reports no ref for it rather than a ref the server never saw.
+ * Custom headers each service's CORS `allow_headers` accepts. A header the
+ * target does not list fails preflight as an opaque TypeError, so widen a row
+ * only after that service's `allow_headers` (its main.py) has caught up.
  */
 const CORS_CUSTOM_HEADERS: Record<ServiceBase, readonly string[]> = {
   auth: ["X-Client-Type", "X-Request-Id"],
@@ -104,13 +83,7 @@ export class ApiError extends Error {
     return this.status === 409 || this.status === 412;
   }
 
-  /**
-   * A role denial from the permission gate. Its `detail` is a sentence
-   * about the permission matrix — `deny: roles=['viewer'] cannot
-   * 'note.write' on 'note'` — which is a fact about our vocabulary, not
-   * something to show a person; `messageFor` swaps it for one they can
-   * act on.
-   */
+  /** Role denial from the permission gate (`deny: roles=[…] cannot …`); `messageFor` rewords it. */
   get isRoleDenial(): boolean {
     return this.status === 403 && this.detail.startsWith("deny:");
   }
@@ -128,8 +101,7 @@ export class ApiError extends Error {
 }
 
 async function parseProblem(res: Response): Promise<Problem> {
-  // `Retry-After` is a header, but every caller that needs it is looking at
-  // a problem, so it is folded in rather than threaded separately.
+  // `Retry-After` is folded into the problem.
   const retryAfter = Number(res.headers.get("Retry-After"));
   const withRetry = (p: Problem): Problem =>
     Number.isFinite(retryAfter) && retryAfter > 0 ? { retry_after: retryAfter, ...p } : p;
@@ -137,15 +109,13 @@ async function parseProblem(res: Response): Promise<Problem> {
     const body: unknown = await res.json();
     if (body && typeof body === "object") {
       const p = body as Record<string, unknown>;
-      // FastAPI sometimes wraps plain HTTPException as {detail: "..."} and
-      // validation errors as {detail: [...]}.
+      // FastAPI validation errors arrive as {detail: [...]}.
       if (Array.isArray(p.detail)) {
         const first = p.detail[0] as { msg?: string } | undefined;
         return withRetry({ status: res.status, detail: first?.msg ?? "Validation failed" });
       }
       if (p.detail && typeof p.detail === "object") {
-        // An older service that raised a whole problem document as the
-        // exception detail: its members are the problem, not the wrapper.
+        // Older services raise the whole problem document as the detail.
         return withRetry({ status: res.status, ...p, ...(p.detail as Problem) });
       }
       return withRetry({ status: res.status, ...(p as Problem) });
@@ -159,9 +129,13 @@ async function parseProblem(res: Response): Promise<Problem> {
 // ── in-memory access token ────────────────────────────────────────────
 
 let accessToken: string | null = null;
+/** Set once the server has said the session is over; a new token clears it. While set, bearer
+ *  calls fail locally instead of each costing a 401 plus another doomed refresh. */
+let sessionGone = false;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  if (token) sessionGone = false;
 }
 
 export function getAccessToken(): string | null {
@@ -181,8 +155,7 @@ export function setSessionListener(l: SessionListener): void {
 
 // ── correlation id ────────────────────────────────────────────────────
 
-/** UUID v4. `crypto.randomUUID` needs a secure context; dev over plain
- *  http on a LAN address is not one, so there is a fallback. */
+/** UUID v4; `crypto.randomUUID` needs a secure context, so dev over LAN http needs the fallback. */
 function requestId(): string {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === "function") return c.randomUUID();
@@ -198,13 +171,9 @@ function requestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// ── step-up (IDX-W1) ──────────────────────────────────────────────────
+// ── step-up ───────────────────────────────────────────────────────────
 
-/**
- * Opens the reauth dialog and resolves once the server has accepted the
- * proof. Registered by `AuthContext`; owned here so that no page can
- * bypass the step-up by handling its own 403.
- */
+/** Opens the reauth dialog; owned here so no page can bypass the step-up. */
 type ReauthHandler = () => Promise<void>;
 
 let reauthHandler: ReauthHandler | null = null;
@@ -218,8 +187,7 @@ const REAUTH_CODE = "reauth_required";
 
 async function isReauthRequired(res: Response): Promise<boolean> {
   if (res.status !== 403 || !reauthHandler) return false;
-  // The body is read from a clone: the caller still needs the original if
-  // the step-up is declined and this becomes an ordinary ApiError.
+  // Clone: the caller still needs the original body if the step-up is declined.
   try {
     const problem = (await res.clone().json()) as Problem;
     return problem?.code === REAUTH_CODE;
@@ -229,16 +197,8 @@ async function isReauthRequired(res: Response): Promise<boolean> {
 }
 
 /**
- * A permission denial from `libs/auth`'s role gate — `403 deny: roles=[…]
- * cannot 'note.read' on 'note'`. It carries no machine code, so the
- * prefix of `detail` is the only marker there is.
- *
- * Worth telling apart from every other 403: the `roles` claim is re-read
- * from the workspace membership every time a token is minted, so a token
- * taken out before the person was granted what they now hold keeps being
- * refused until it rotates. One silent refresh is the whole fix, and
- * without it a just-created or just-promoted account sits in front of a
- * wall until it happens to expire.
+ * Role-gate denial (`403 deny: …`, no machine code). Roles are re-read at
+ * token mint, so a token that predates a grant is refused until refreshed.
  */
 async function isRoleDenial(res: Response): Promise<boolean> {
   if (res.status !== 403) return false;
@@ -270,7 +230,10 @@ async function doRefresh(): Promise<boolean> {
       headers: corsSafeHeaders("auth", requestId()),
       credentials: "include",
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      if (res.status === 401) sessionGone = true;
+      return false;
+    }
     const login = (await res.json()) as LoginResponse;
     setAccessToken(login.access_token);
     sessionListener.onRefreshed?.(login);
@@ -313,12 +276,7 @@ export function buildUrl(base: ServiceBase, path: string, query?: RequestOptions
   return url.toString();
 }
 
-/**
- * The correlation/identity headers this base will accept at preflight.
- * `X-Client-Type` decides where the refresh token travels; the server
- * defaults a missing header to `web`, but saying it out loud keeps the
- * native transports honest when they diverge (M1/I1).
- */
+/** Headers this base accepts at preflight. `X-Client-Type` decides where the refresh token travels. */
 function corsSafeHeaders(base: ServiceBase, rid: string): Record<string, string> {
   const headers: Record<string, string> = {};
   if (allowsHeader(base, "X-Client-Type")) headers["X-Client-Type"] = "web";
@@ -341,8 +299,7 @@ async function rawRequest(
     body = JSON.stringify(opts.json);
   }
 
-  // Built per attempt, not once: a retry after a silent refresh must carry
-  // the NEW access token, and a retry after a step-up must not be stale.
+  // Built per attempt: a retry must carry the NEW access token.
   const doFetch = () =>
     fetch(buildUrl(base, path, opts.query), {
       method: opts.method ?? "GET",
@@ -357,6 +314,11 @@ async function rawRequest(
       signal: opts.signal,
     });
 
+  if (opts.auth !== false && sessionGone) {
+    sessionListener.onAuthLost?.();
+    throw new ApiError(401, { status: 401, code: "session_expired", detail: "Your session ended." }, rid);
+  }
+
   let res = await doFetch();
 
   // One silent refresh + retry on 401 for bearer-authenticated calls.
@@ -369,17 +331,12 @@ async function rawRequest(
     }
   }
 
-  // One silent refresh + retry on a 403 role denial, for the same reason
-  // the 401 above gets one: the token may simply predate the roles the
-  // membership now carries. A genuine denial earns the same 403 twice and
-  // reaches the caller unchanged.
+  // One silent refresh + retry on a 403 role denial (token may predate the grant).
   if (opts.auth !== false && (await isRoleDenial(res))) {
     if (await refreshSession()) res = await doFetch();
   }
 
-  // One step-up + retry on 403 reauth_required. Cancelling the dialog
-  // rejects, and the caller sees the original 403 as an ordinary refusal
-  // rather than a thrown cancellation.
+  // One step-up + retry on 403 reauth_required; a declined dialog falls through with the 403.
   if (await isReauthRequired(res)) {
     try {
       await reauthHandler!();
@@ -388,8 +345,7 @@ async function rawRequest(
       /* declined or failed — fall through with the 403 */
     }
   }
-  // Only reported when it actually travelled — a ref the server never
-  // saw is worse than no ref at all.
+  // Only reported when it actually travelled.
   return { res, requestId: staticHeaders["X-Request-Id"] };
 }
 

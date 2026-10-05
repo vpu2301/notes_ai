@@ -1,22 +1,6 @@
-"""The agenda hiding in a calendar invite's description.
-
-Deterministic, no model. An invite description is mostly boilerplate — a
-dial-in block, a Meet link, a signature, a legal footer — with, sometimes,
-the three things the organiser actually wants to talk about. Those three
-things are worth putting in the note before the meeting starts; nothing
-else in the description is.
-
-Rules, in order of how much they matter:
-
-* a line is a candidate when it is **list-like** (bullet, ``1.``, ``a)``)
-  or sits under an ``Agenda:`` heading;
-* boilerplate — a URL, a phone number, a dial-in/PIN/ID line, an
-  unsubscribe or a signature — is dropped wherever it appears;
-* 2 to 20 lines survive, each ≤ 160 characters. Fewer than two candidates
-  is not a list, and the note gets no agenda at all.
-
-The raw description is never stored and never returned: the caller hands
-it in, takes the lines, and drops it (:mod:`routers.notes_meeting`).
+"""The agenda hiding in a calendar invite's description, deterministically: list-like
+lines or lines under an ``Agenda:`` heading, boilerplate dropped, 2 to 20 lines of
+<= 160 characters. The raw description is never stored and never returned.
 """
 
 from __future__ import annotations

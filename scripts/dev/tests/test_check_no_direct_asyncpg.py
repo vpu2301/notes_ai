@@ -1,9 +1,5 @@
-"""Unit tests for the ``check-no-direct-asyncpg`` gate.
-
-Proves both directions: the gate REJECTS a raw ``asyncpg.connect`` /
-``create_pool`` in a service module (exit 1, file named) and PERMITS it inside
-``libs/db/`` (the sanctioned driver home) or under an explicit
-``# noqa: DB001``.
+"""The ``check-no-direct-asyncpg`` gate rejects raw asyncpg in a service module and
+permits it inside ``libs/db/`` or under ``# noqa: DB001``.
 """
 
 from __future__ import annotations

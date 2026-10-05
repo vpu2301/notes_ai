@@ -1,13 +1,4 @@
-"""Integration test against a live Keycloak instance.
-
-Skipped unless ``RUN_KEYCLOAK_INTEGRATION=1``. Expects the Sprint-02 dev
-realm to be running at ``http://localhost:8088``.
-
-Run::
-
-    make dev-up
-    RUN_KEYCLOAK_INTEGRATION=1 uv run pytest libs/auth/tests/integration -v
-"""
+"""Integration test against a live Keycloak (``RUN_KEYCLOAK_INTEGRATION=1``, dev realm at ``http://localhost:8088``)."""
 
 import os
 from urllib.parse import urljoin

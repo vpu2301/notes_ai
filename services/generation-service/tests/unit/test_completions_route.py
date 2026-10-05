@@ -1,10 +1,4 @@
-"""Inline completion route — outcome matrix.
-
-Handler exercised directly with a fake state (the sprint-10 telemetry
-route test pattern): 200 served, 204 disabled/tenant/timeout/empty/
-filtered, 429 rate-limited. The mock inference client lives HERE — no
-mock ships in the service (sprint-15 delivery mandate).
-"""
+"""Inline completion route outcome matrix, handler exercised directly with a fake state."""
 
 from __future__ import annotations
 

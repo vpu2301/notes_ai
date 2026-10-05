@@ -50,8 +50,7 @@ _extractions = _meter.create_counter(
 CHOICE_FIELD_TYPES: Final = frozenset({"choice", "multi_choice"})
 NUMERIC_FIELD_TYPES: Final = frozenset({"numeric_with_unit"})
 DATE_FIELD_TYPES: Final = frozenset({"date", "date_with_note"})
-# Every field type this stage acts on. free_text (and anything else)
-# passes through untouched.
+# Field types this stage acts on; anything else passes through.
 EXTRACTABLE_FIELD_TYPES: Final = CHOICE_FIELD_TYPES | NUMERIC_FIELD_TYPES | DATE_FIELD_TYPES
 
 
@@ -71,9 +70,7 @@ class FieldExtractionStage:
     async def process(self, ctx: ProcessingContext, input: StageInput) -> StageOutput:
         typed = [s for s in ctx.template_sections if s.field_type in EXTRACTABLE_FIELD_TYPES]
         if not typed:
-            # No typed sections ⇒ emit NOTHING, not even a marker key.
-            # Requests from callers without typed sections must stay
-            # byte-identical.
+            # No typed sections ⇒ emit nothing; such requests must stay byte-identical.
             return StageOutput(
                 text=input.text,
                 words=input.words,
@@ -97,14 +94,12 @@ class FieldExtractionStage:
             )
             meta = result.meta
             if meta is not None:
-                # mode="json" so the metadata dict is JSON-native — it is
-                # cached, replayed and compared byte-for-byte downstream.
+                # mode="json": the dict is cached and compared byte-for-byte.
                 fields[key] = meta.model_dump(mode="json", exclude_none=True)
 
         metadata: dict[str, Any] = {}
         if fields:
-            # Sorted so the metadata dict's iteration order can never
-            # depend on template ordering — replay compares bytes.
+            # Sorted: replay compares bytes.
             metadata[f"{self.name}.fields"] = {k: fields[k] for k in sorted(fields)}
 
         return StageOutput(
@@ -120,8 +115,7 @@ class FieldExtractionStage:
     async def _extract_one(self, section: TemplateSection, input: StageInput) -> ExtractionResult:
         if section.field_type in CHOICE_FIELD_TYPES:
             if not section.options:
-                # A choice section without options is a template-authoring
-                # bug the model already rejects; stay inert rather than guess.
+                # A choice section without options: stay inert rather than guess.
                 return ExtractionResult(None, "no_options")
             if section.field_type == "choice":
                 return choose(input.text, section.options, threshold=self._threshold)

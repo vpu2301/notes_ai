@@ -1,11 +1,7 @@
 """Liveness + readiness probes.
 
-Readiness includes the Layer C posture: a pod with the feature disabled
-is READY (a switched-off feature is not an outage), but reports
-``layer_c_enabled: false`` so dashboards can tell the two states apart.
-With the feature on, an unreachable inference backend means unready —
-serving guaranteed-204s while pretending health would hide a real
-failure (the MDX_CONVERSATION_ENABLED /readyz precedent).
+Feature disabled = ready (reported as ``layer_c_enabled: false``); feature on with
+an unreachable backend = unready.
 """
 
 from __future__ import annotations
@@ -43,9 +39,7 @@ async def readyz(request: Request, response: Response) -> dict[str, object]:
             "layer_c_enabled": True,
             "reason": "inference backend unreachable",
         }
-    # Sprint 16 pre-warm: a reachable backend that hasn't produced its
-    # first token yet is not ready — the LB must not send traffic that
-    # would pay the residency cost inline.
+    # Reachable but cold backend is not ready.
     if not getattr(state, "warmed", True):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {

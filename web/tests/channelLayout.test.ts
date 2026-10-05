@@ -3,11 +3,7 @@ import { submitJob, submitWithLayoutFallback, type SubmitJobParams } from "../sr
 import { ApiError } from "../src/api/http";
 import { chooseLayout } from "../src/lib/useRecorder";
 
-/**
- * Sprint I3 T4 — "Me" and "Them" on web. The recorder's fallback rule,
- * the two upload fields, and the once-only mono retry on
- * `channel_layout_mismatch` (the macOS app's behaviour, mirrored).
- */
+/** "Me" / "Them": the recorder's fallback rule, the upload fields, and the once-only mono retry on `channel_layout_mismatch`. */
 
 const http = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("../src/api/http", async (orig) => ({

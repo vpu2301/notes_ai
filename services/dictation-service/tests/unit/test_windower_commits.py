@@ -1,12 +1,7 @@
 """Windower→committer integration: finals must actually be produced.
 
-Regression for the sprint-04 defect found in sprint 14: the committer
-was asked for words older than one FULL window while ``integrate()``
-only ever offers words from inside that same window, so no candidate
-could ever qualify and a session emitted partials forever, finalizing
-an empty transcript. Unit-testing the committer alone missed it (those
-tests hand it word ages the windower cannot produce), so these tests
-drive the REAL StreamingWindower with synthetic Whisper output.
+Regression: a full-window horizon never committed anything; these drive the
+real StreamingWindower with synthetic Whisper output.
 """
 
 from __future__ import annotations

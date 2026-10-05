@@ -1,5 +1,4 @@
-"""The admin dashboard's per-job summary (migration 0067): numbers and
-codes only — no word, name or spelling from the transcript reaches it."""
+"""The per-job quality summary: numbers and codes only, no transcript content."""
 
 from __future__ import annotations
 

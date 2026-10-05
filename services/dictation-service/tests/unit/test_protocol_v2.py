@@ -1,10 +1,4 @@
-"""dictation.v2 protocol proofs (sprint 14).
-
-Three contracts from the sprint-04 hand-off:
-  1. v1 stays byte-stable — no v1 model changed, no v1 frame gains a key.
-  2. A v1 client receiving a v2 message rejects it cleanly (extra="forbid").
-  3. Negotiation selects correctly from the client's offered subprotocols.
-"""
+"""dictation.v2 proofs: v1 stays byte-stable, a v1 client rejects v2 frames, negotiation picks correctly."""
 
 import json
 from uuid import uuid4

@@ -1,8 +1,4 @@
-"""Admin list surface — GET /autocomplete/phrases + /snippets.
-
-Handlers exercised directly with a fake pool/connection (same style as
-test_phrases_route.py); RLS visibility itself is integration-tested.
-"""
+"""Admin list surface (GET /autocomplete/phrases + /snippets) with a fake pool; RLS is integration-tested."""
 
 from __future__ import annotations
 

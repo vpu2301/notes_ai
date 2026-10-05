@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""Apply / diff Hugging Face Inference Endpoint specs (DEP-S1-01).
+"""Apply / diff Hugging Face Inference Endpoint specs (deploy/hf/endpoints/*.yaml) over
+plain HTTPS, no vendor SDK. Needs HF_TOKEN (never printed) and HF_NAMESPACE.
 
-    hf_endpoints.py plan   --env staging          # diff live vs deploy/hf/endpoints/*.yaml (exit 2 on drift)
-    hf_endpoints.py apply  --env staging          # create or update to match the specs
-    hf_endpoints.py status --env staging          # state, URL, replicas
-    hf_endpoints.py pause|resume --env staging
-    hf_endpoints.py delete --env staging --yes
-    hf_endpoints.py validate                      # schema-check the specs offline (no token)
-
-Plain HTTPS against https://api.endpoints.huggingface.cloud/v2/endpoint/{namespace}
-— no vendor SDK. Needs HF_TOKEN (fine-grained, endpoints:write) and
-HF_NAMESPACE. The token is never printed; API error bodies are redacted.
+    hf_endpoints.py plan|apply|status|pause|resume|delete --env staging
+    hf_endpoints.py validate   # offline schema check
 """
 
 from __future__ import annotations

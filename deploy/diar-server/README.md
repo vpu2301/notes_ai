@@ -1,6 +1,6 @@
 # diar-server
 
-Speaker diarization as an endpoint — shape B of [ADR-0052](../../docs/adr/0052-diarizer-v2-engine-and-hosting.md).
+Speaker diarization as an endpoint — shape B of ADR-0052.
 
 It runs the same `PyannoteDiarizer` the worker can run in-process, so the
 labels are identical; only the compute moves to a GPU. The worker reaches

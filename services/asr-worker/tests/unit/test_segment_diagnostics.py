@@ -1,13 +1,5 @@
-"""Sprint TQ1 T5: the decoder's own numbers per segment reach
-``diagnostics.segments`` through the job's path, for every backend.
-
-Two replies of the HTTP backend: the recorded whisper.cpp one
-(``libs/models/tests/cassettes/whispercpp_verbose.json``: ``no_speech_prob``
-and ``avg_logprob``, no ``compression_ratio``) and one in the shape
-Speaches / faster-whisper serves (all three). A missing number is ``None``,
-never a failure. The in-process engine is covered with a stand-in model
-object shaped like faster-whisper's segments.
-"""
+"""The decoder's own numbers per segment reach ``diagnostics.segments`` for every
+backend; a missing number is ``None``, never a failure."""
 
 from __future__ import annotations
 
@@ -30,8 +22,7 @@ from models import HTTPASRProvider
 
 @pytest.fixture(autouse=True)
 def _speech_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The stand-in audio is zeros but stands for speech: VAD says so, so
-    the TQ2 gates (which protect speech VAD heard) leave the text alone."""
+    """Zeros that stand for speech: VAD says so, so the gates leave the text alone."""
     from asr_worker import vad as _vad
 
     def runs(pcm: np.ndarray, **_kw: Any) -> _vad.SpeechRuns:
@@ -128,8 +119,7 @@ async def test_speaches_shape_records_all_three_numbers_and_the_empty_segment() 
     first, empty = out.diagnostics.segments
     assert (first.no_speech_prob, first.avg_logprob, first.compression_ratio) == (0.02, -0.21, 0.9)
     assert (empty.start_ms, empty.end_ms, empty.no_speech_prob) == (1600, 3000, 0.91)
-    # TQ2: runs are sent with the language the worker planned (the job pins
-    # "en" here); the diagnostics carry that, not the server's echo.
+    # Runs carry the language the worker planned, not the server's echo.
     assert {first.language, empty.language} == {"en"}
 
 

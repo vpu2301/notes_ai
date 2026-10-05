@@ -27,7 +27,7 @@ make sim-overcount                                           # no-audio clustere
 - Product recordings (`eval/speakers/v2`, Sprint 30): opt-in, one consented
   job at a time via `scripts/ops/export_job_for_eval.py` →
   `s3://notes-eval/speakers/v2/`, audited as `asr.audio_exported_for_eval`.
-  Procedure: `docs/runbooks/speakers-eval.md`. The erase script covers v2 too.
+  The erase script covers v2 too.
 - Metrics: count exact / ±1 / over / under, DER collar 0 with overlap (headline),
   DER collar 0.25 without overlap, JER, unknown share, extra-speaker share, RTF.
 - Bake-off: `--engine 'pyannote_c1:{"max_speakers": 8}'` with
@@ -56,15 +56,13 @@ make der-eval ENGINE=pyannote_c1 SPLIT=test CORPUS=eval/asr/v1   # de/uk DER on 
 
 - Every recording goes through `asr_worker.processor.decode_recording`, the
   job's own path, on the backend named in `config/models.yaml`.
-- The labelling rules (verbatim-lite) with worked examples per language are
-  in `docs/eval/asr-labelling.md`. Formats are the pydantic models in
-  `scripts/eval/asr_gold.py`.
+- The labelling rules (verbatim-lite) are encoded in `scripts/eval/asr_scoring.py`;
+  formats are the pydantic models in `scripts/eval/asr_gold.py`.
 - The metrics are in `scripts/eval/asr_scoring.py`. Each maps to a taxonomy
   code, and `test_notes_gates.py` enforces that.
 - The nightly workflow `nightly-asr.yml` compares each backend to
   `docs/eval/asr-baseline-<backend>-test.json`. Per language, WER may rise
   at most 1.0 pp, and TR-02/TR-03 may not worsen (ADR-0019 amendment).
-- Decisions taken on these numbers go in `docs/product/asr-decisions.md`.
 
 ## Sprint 29 — engines behind the seam, guard, user-stated count
 

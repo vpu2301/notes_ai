@@ -1,30 +1,9 @@
-"""Cutting a transcript into pieces a small model can actually read.
+"""Cutting a transcript into windows a small model can read.
 
-The single-pass baseline — one prompt, the whole meeting — loses the
-middle of a long meeting: attention thins out, and an hour of talk does
-not fit in a small model's context anyway. So the transcript is cut into
-windows, each extracted separately, and the results merged.
-
-Three rules make the cut safe:
-
-* **Never mid-turn.** A window boundary inside someone's sentence
-  produces half a commitment, and half a commitment is a wrong one. A
-  single turn longer than the cap is split at sentence ends instead.
-* **One turn of overlap.** A decision stated at the very end of one
-  window is usually agreed at the start of the next; without overlap the
-  agreement marker lands in a different call and the decision is
-  downgraded to a key point.
-* **Every millisecond covered exactly once**, so coverage by third
-  (hypothesis E2) means something.
-
-Lines are numbered — ``[7] Anna (12:04): …`` — because a fact cites its
-line by that number, and :mod:`verify` uses the number to find the words
-again. A LINE is one piece of a turn: a monologue cut into three pieces
-is three lines with three numbers, so a flag or a citation on one piece
-never reaches the others (Summary Engine v2, Q2 — until then the pieces
-shared their turn's number, and one "noise" flag silenced a whole story).
-
-Pure: turns in, windows out.
+Never mid-turn (long turns split at sentence ends); one turn of overlap so an
+agreement lands in the same call as its proposal; every millisecond covered once.
+Lines are numbered (``[7] Anna (12:04): …``) and a LINE is one piece of a turn,
+so a flag or citation on one piece never reaches the others. Pure.
 """
 
 from __future__ import annotations
@@ -33,24 +12,15 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
-# Roughly 1.5–2.7 k tokens depending on the language — Ukrainian and
-# German cost more characters per token than English, so the cap is in
-# characters and deliberately conservative.
+# In characters, conservatively: Ukrainian and German cost more characters per token.
 MAX_WINDOW_CHARS: Final = 6_000
-# Sprint L2 — a backend with a long context (128K: the hosted API) takes
-# windows of 16 000 characters; anything up to 32K keeps today's size. The
-# threshold sits between the two so a 32K local model never gets the
-# large window by rounding.
+# Threshold between 32K and 128K so a 32K local model never gets the large window by rounding.
 LARGE_CONTEXT_TOKENS: Final = 65_536
 LARGE_WINDOW_CHARS: Final = 16_000
-# Sprint SQ2 T2 — extraction windows on a long context stop at 8 000
-# characters (about 8 minutes): a model reading 16 000 characters lists the
-# head of the window, and one failed call cannot cost more than ~8 minutes.
-# The context still holds LARGE_WINDOW_CHARS for everything else.
+# Extraction windows on a long context stop at 8 000 chars: a model reading
+# 16 000 lists only the head, and one failed call cannot cost more than ~8 minutes.
 EXTRACT_WINDOW_CHARS: Final = 8_000
-# A single turn past this is a monologue; it is split at sentence ends.
-# Small enough that a window holds at least two pieces, so the overlap
-# carries real context rather than a window of one piece and nothing else.
+# A longer turn is a monologue, split at sentence ends; small enough that a window holds two pieces.
 MAX_TURN_CHARS: Final = 2_500
 OVERLAP_TURNS: Final = 1
 
@@ -72,14 +42,10 @@ class Turn:
     :func:`build_windows`. ``None`` for a turn nobody numbered (a test's
     hand-built window), which then answers to its turn index."""
     line: int | None = None
-    """Q4 — a sound bite: someone quoted in the recording rather than taking
-    part in it (see :func:`mark_clips`). Their opinions have no holder
-    among the participants."""
+    """A sound bite: someone quoted rather than taking part (see :func:`mark_clips`)."""
     clip: bool = False
-    """Sprint I2 — the language this turn was decoded in when the ASR says it
-    is not the recording's (ISO 639-1); None = the recording's. Code
-    confirms an ``other_language`` exclusion from this, not from a script
-    heuristic."""
+    """The language this turn was decoded in when not the recording's (ISO 639-1);
+    None = the recording's. Code confirms ``other_language`` from this."""
     language: str | None = None
 
     @property
@@ -128,8 +94,7 @@ class Window:
 
 
 def _language_tag(turn: Turn) -> str:
-    """ " [uk]" before a line in another language, so the extractor sees
-    that it is one (Sprint I2); nothing for the recording's own."""
+    """ " [uk]" before a line in another language; nothing for the recording's own."""
     return f" [{turn.language}]" if turn.language else ""
 
 
@@ -139,12 +104,7 @@ def _mmss(ms: int) -> str:
 
 
 def turns_from_result(result: dict[str, Any]) -> list[Turn]:
-    """asr-service's ``/result`` → turns.
-
-    Prefers the structured ``turns`` the ASR already built (consecutive
-    same-speaker segments, display names applied); falls back to segments
-    for an older producer or a fixture.
-    """
+    """asr-service's ``/result`` → turns: the structured ``turns`` when present, else segments."""
     out: list[Turn] = []
     for raw in result.get("turns") or []:
         text = " ".join(str(p).strip() for p in (raw.get("paragraphs") or []) if str(p).strip())
@@ -174,7 +134,6 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
         end = int(seg.get("end_ms") or round(float(seg.get("end") or 0) * 1000)) or start
         language = _language_of(seg, result)
         if out and out[-1].speaker_label == label and out[-1].language == language:
-            # Merge consecutive segments from one speaker into a turn.
             previous = out.pop()
             out.append(
                 Turn(
@@ -203,9 +162,7 @@ def turns_from_result(result: dict[str, Any]) -> list[Turn]:
 
 
 def _language_of(raw: dict[str, Any], result: dict[str, Any]) -> str | None:
-    """A turn's or segment's ``language`` when the ASR marked it as not the
-    recording's (Sprint I2); None otherwise — including an older result
-    view without the field."""
+    """The ``language`` when the ASR marked it as not the recording's; else None."""
     language = raw.get("language")
     if not language or language == result.get("language"):
         return None
@@ -213,12 +170,8 @@ def _language_of(raw: dict[str, Any], result: dict[str, Any]) -> str | None:
 
 
 def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
-    """A monologue, cut at sentence ends.
-
-    The pieces keep the ORIGINAL turn's ``index`` (what the sidecar and the
-    speaker roster key on); :func:`build_windows` gives each its own
-    ``line``.
-    """
+    """A monologue, cut at sentence ends. The pieces keep the ORIGINAL turn's
+    ``index`` (the sidecar and roster key on it); :func:`build_windows` assigns ``line``."""
     if len(turn.text) <= cap:
         return [turn]
     pieces: list[str] = []
@@ -234,8 +187,7 @@ def split_long_turn(turn: Turn, *, cap: int = MAX_TURN_CHARS) -> list[Turn]:
     if current:
         pieces.append(current)
     if len(pieces) <= 1:
-        # One sentence longer than the cap: cut on the character, which
-        # is ugly but bounded. Better than one call that cannot run.
+        # One sentence longer than the cap: cut on the character, ugly but bounded.
         pieces = [turn.text[i : i + cap] for i in range(0, len(turn.text), cap)]
 
     span = max(1, turn.end_ms - turn.start_ms)
@@ -272,12 +224,8 @@ CLIP_CUE_WITHIN_MS: Final = 15_000
 
 
 def mark_clips(turns: list[Turn]) -> list[Turn]:
-    """Mark the turns of a speaker who is played rather than present.
-
-    A Hypothesis (Q4): a speaker with under 8 % of the speech, at most two
-    turns, whose first turn follows a cue ("O-Ton", "sagte", "here is")
-    in the previous speaker's words within 15 seconds. Measured against
-    the ``speakers`` gold on broadcast recordings."""
+    """Mark the turns of a speaker who is played rather than present: under 8 % of
+    the speech, at most two turns, first turn within 15 s of a cue ("O-Ton", "here is")."""
     total = sum(max(0, t.end_ms - t.start_ms) for t in turns) or 1
     by_label: dict[str, list[Turn]] = {}
     for turn in turns:
@@ -304,8 +252,7 @@ def mark_clips(turns: list[Turn]) -> list[Turn]:
 
 
 def window_chars(context_window: int | None) -> int:
-    """The extraction window for a backend's context: 8 000 characters at
-    128K (SQ2 T2; 16 000 before), 6 000 at 32K and below (Sprint L2 T5)."""
+    """The extraction window for a backend's context: 8 000 characters at 128K, 6 000 at 32K and below."""
     if (context_window or 0) >= LARGE_CONTEXT_TOKENS:
         return EXTRACT_WINDOW_CHARS
     return MAX_WINDOW_CHARS
@@ -330,8 +277,7 @@ def build_windows(
         cost = len(piece.text) + 24  # the "[7] Anna (12:04): " prefix
         if current and size + cost > max_chars:
             windows.append(Window(index=len(windows), turns=tuple(current)))
-            # Carry the last turn(s) forward so an agreement that follows
-            # a proposal is in the same call as the proposal.
+            # Overlap: an agreement stays in the same call as its proposal.
             current = current[-overlap:] if overlap else []
             size = sum(len(t.text) + 24 for t in current)
         current.append(piece)
@@ -342,12 +288,7 @@ def build_windows(
 
 
 def thirds(windows: list[Window]) -> dict[int, int]:
-    """``{window index: 1|2|3}`` — which third of the meeting it is in.
-
-    Coverage by third is hypothesis E2: a pipeline that quietly loses the
-    middle of an hour-long meeting is the thing this design exists to
-    avoid, and it is invisible without this split.
-    """
+    """``{window index: 1|2|3}``: which third of the meeting it is in."""
     if not windows:
         return {}
     start, end = windows[0].start_ms, windows[-1].end_ms
@@ -361,23 +302,14 @@ def thirds(windows: list[Window]) -> dict[int, int]:
 
 
 def third_of(ms: int, start_ms: int, end_ms: int) -> int:
-    """Sprint SQ2 T1 — which third of the recording a moment is in, by time.
-
-    ``thirds`` places a whole WINDOW by its middle, so a recording that fits
-    one window (an 11-minute podcast on a 16 000-character backend) puts
-    every fact in the middle third and the split says nothing. Facts and
-    lines are placed by their own time."""
+    """Which third of the recording a moment is in, by time (``thirds`` places a
+    whole WINDOW by its middle, which says nothing for a one-window recording)."""
     span = max(1, end_ms - start_ms)
     share = (ms - start_ms) / span
     return 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
 
 
-# ── The engine's view of the turns (F3 amendment, r03) ──────────────
-#
-# Two things the diarizer's output is not changed for, but the engine
-# should not read as it comes: a one-word "turn" by another label in the
-# middle of somebody's sentence, and an advertisement or a trailer before,
-# inside or after the recording's own content.
+# ── The engine's view of the turns: micro-turns merged, adverts cut ──
 
 MICRO_TURN_WORDS: Final = 3
 MICRO_TURN_MS: Final = 1_500
@@ -404,9 +336,8 @@ class Prepared:
 
 
 def merge_micro_turns(turns: list[Turn]) -> tuple[list[Turn], int]:
-    """A turn of ≤ 3 words and ≤ 1.5 s whose neighbours on both sides carry
-    one label is part of that speaker's sentence ("Kann" between two halves
-    of one question). Merged into them, text in time order."""
+    """A turn of <= 3 words and <= 1.5 s between two turns of one other label is
+    part of that speaker's sentence: merged, text in time order."""
     out: list[Turn] = []
     merged = 0
     i = 0
@@ -499,8 +430,7 @@ def advert_runs(turns: list[Turn]) -> list[tuple[int, int]]:
 
 
 def prepare_turns(turns: list[Turn]) -> Prepared:
-    """The engine's view: adverts cut (before windowing — the extractor
-    never sees them), micro-turns merged."""
+    """The engine's view: adverts cut before windowing, micro-turns merged."""
     cut = advert_runs(turns)
     drop = {i for a, b in cut for i in range(a, b + 1)}
     adverts = [(turns[a].start_ms, turns[b].end_ms) for a, b in cut]

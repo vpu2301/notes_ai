@@ -1,28 +1,7 @@
-"""Assemble the pinned ECAPA speaker-embedding model dir (sprint 14, ADR-0034).
+"""Assemble the pinned ECAPA speaker-embedding model dir (ADR-0034): fetch at an
+immutable revision, verify SHA-256 fail-closed, load fully offline.
 
-Mirrors the Whisper/punctuation bake contract (docs/models/PINS.md): fetch at
-an immutable revision, verify SHA-256 fail-closed, and produce a directory
-that loads FULLY OFFLINE. Used both by developers (default target under
-~/.cache/mdx-models) and by the Dockerfile model-fetch stage (target
-/opt/models/ecapa).
-
-The directory layout it produces:
-
-    <target>/
-      hyperparams.yaml        <- repo-owned patched copy (infra/models/ecapa/)
-      embedding_model.ckpt    <- upstream artifact, checksum-verified
-      mean_var_norm_emb.ckpt  <- upstream artifact, checksum-verified
-
-Usage:
-    uv run python scripts/models/prepare_ecapa.py [--target DIR]
-
-Re-pinning without editing this file (the same contract the Whisper bake
-offers via --build-arg, docs/models/PINS.md § Re-pinning):
-
-    uv run python scripts/models/prepare_ecapa.py \
-        --revision <new-commit> \
-        --embedding-sha256 <new-embedding_model.ckpt-sha256> \
-        --meanvar-sha256 <new-mean_var_norm_emb.ckpt-sha256>
+    uv run python scripts/models/prepare_ecapa.py [--target DIR] [--revision ... --embedding-sha256 ... --meanvar-sha256 ...]
 """
 
 from __future__ import annotations
@@ -34,10 +13,10 @@ import sys
 from pathlib import Path
 
 REPO = "speechbrain/spkrec-ecapa-voxceleb"
-# Immutable commit, resolved 2026-07-26 (docs/models/PINS.md).
+# Immutable commit (docs/models/PINS.md).
 REVISION = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
 
-# artifact -> pinned SHA-256. A mismatch fails the run — never bake anyway.
+# artifact -> pinned SHA-256; a mismatch fails the run.
 PINNED: dict[str, str] = {
     "embedding_model.ckpt": "0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2",
     "mean_var_norm_emb.ckpt": "cd70225b05b37be64fc5a95e24395d804231d43f74b2e1e5a513db7b69b34c33",

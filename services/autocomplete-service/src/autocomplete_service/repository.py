@@ -1,9 +1,6 @@
-"""Repository — SQL wrappers over phrases / snippets / telemetry.
+"""SQL wrappers over phrases / snippets / telemetry.
 
-Every tenant-scoped query runs on an asyncpg connection that has
-already had ``app.tenant_id`` + ``app.user_id`` + ``app.user_role``
-set by the dependency layer (sprint-10 day-1: RLS depends on these
-three GUC keys for the ``write_user_phrases`` policy).
+Tenant-scoped queries expect ``app.tenant_id``, ``app.user_id`` and ``app.user_role`` already set (RLS).
 """
 
 from __future__ import annotations
@@ -120,11 +117,7 @@ async def list_phrases(
 async def fetch_snippet(
     conn: asyncpg.Connection, *, trigger: str, language: str
 ) -> asyncpg.Record | None:
-    """Resolve trigger with user→tenant→system fallback.
-
-    The visibility policy ensures we only see rows in scope; the
-    explicit ORDER BY enforces the precedence.
-    """
+    """Resolve trigger with user→tenant→system precedence (RLS bounds visibility)."""
     return await conn.fetchrow(
         """
         SELECT id, expansion, cursor_position, source
@@ -222,11 +215,7 @@ async def rollup_tenant_day(
     tenant_id: UUID,
     day: date,
 ) -> int:
-    """Aggregate one tenant's telemetry for one day into phrase counters.
-
-    Returns the number of phrase rows updated.
-    Idempotent via the ``autocomplete_rollup_progress`` table.
-    """
+    """Aggregate one tenant-day of telemetry into phrase counters; idempotent via ``autocomplete_rollup_progress``."""
     row = await conn.fetchrow(
         "SELECT 1 FROM autocomplete_rollup_progress WHERE rollup_date = $1::date AND tenant_id = $2",
         day,
@@ -254,9 +243,7 @@ async def rollup_tenant_day(
     )
     updated = 0
     for r in impressions:
-        # SECURITY DEFINER function from migration 0037 — the RESTRICTIVE
-        # update policy blocks app_role from touching system-phrase rows,
-        # which silently no-opped a plain UPDATE here.
+        # SECURITY DEFINER: a plain UPDATE silently no-ops on system rows under the RESTRICTIVE policy.
         bumped: bool = await conn.fetchval(
             "SELECT autocomplete_bump_phrase_counters($1, $2, $3, $4)",
             r["phrase_id"],
@@ -280,12 +267,7 @@ async def rollup_tenant_day(
 async def create_next_telemetry_partition(
     conn: asyncpg.Connection, *, start: datetime, end: datetime
 ) -> str:
-    """Idempotent partition creation. ``start`` and ``end`` are
-    timezone-aware datetimes at month boundaries.
-
-    Goes through the SECURITY DEFINER function from migration 0036 —
-    app_role has no DDL rights on the partitioned table itself.
-    """
+    """Idempotent partition creation via SECURITY DEFINER (app_role has no DDL rights)."""
     name: str = await conn.fetchval(
         "SELECT autocomplete_create_telemetry_partition($1, $2)",
         start.date(),

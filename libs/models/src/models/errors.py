@@ -1,14 +1,4 @@
-"""Error types shared by every provider and by the registry.
-
-Two families, deliberately distinct:
-
-* ``ConfigError`` — raised at *startup* (registry load / validate / build).
-  A misconfigured environment refuses to start; it never fails a job at
-  3 a.m. Carries a stable ``code`` so runbooks can name it.
-* ``ProviderError`` — raised at *call time* by a provider. Carries a
-  ``kind`` from a closed taxonomy so callers (job policies, circuit
-  breakers in DEP-S4) branch on the kind, never on vendor status codes.
-"""
+"""``ConfigError`` (startup, stable ``code``) and ``ProviderError`` (call time, closed ``kind`` taxonomy)."""
 
 from __future__ import annotations
 
@@ -35,9 +25,7 @@ class ErrorKind(StrEnum):
     UNKNOWN = "unknown"
 
 
-# Kinds a caller may retry without changing the request. `rate_limited` is
-# retryable by the *job policy* (DEP-S1), not by the provider itself — the
-# provider retries only warming/unavailable/timeout (spec §D).
+# `rate_limited` is retryable by the job policy, not by the provider (which retries only warming/unavailable/timeout).
 RETRYABLE_KINDS: frozenset[ErrorKind] = frozenset(
     {ErrorKind.WARMING, ErrorKind.RATE_LIMITED, ErrorKind.UNAVAILABLE, ErrorKind.TIMEOUT}
 )
@@ -50,11 +38,7 @@ _REDACT: list[str] = []
 
 
 def register_secret(value: str | None) -> None:
-    """Register a token so no ``ProviderError`` text can ever carry it.
-
-    Providers call this with their bearer token at construction; vendor
-    error bodies occasionally echo the ``Authorization`` header back.
-    """
+    """Register a token so no ``ProviderError`` text can carry it (vendor error bodies echo the header)."""
     if value and len(value) >= 8 and value not in _REDACT:
         _REDACT.append(value)
 
@@ -66,13 +50,7 @@ def redact(text: str) -> str:
 
 
 class ProviderError(RuntimeError):
-    """Call-time provider failure.
-
-    ``message`` must never contain prompt or transcript content — only
-    status codes, backend names and the vendor's *error* text (which is
-    truncated to keep accidental echoes short and redacted of every
-    registered token).
-    """
+    """Call-time provider failure; ``message`` never carries prompt/transcript content and is redacted of tokens."""
 
     def __init__(
         self,
@@ -97,8 +75,4 @@ class ProviderError(RuntimeError):
 
 
 class TranscriptionCancelledError(Exception):
-    """Raised by an ``ASRProvider`` when ``should_cancel`` answered True.
-
-    Service-local cancellation errors subclass this so the worker can catch
-    one type regardless of which backend served the job.
-    """
+    """Raised by an ``ASRProvider`` when ``should_cancel`` answered True; service-local variants subclass it."""

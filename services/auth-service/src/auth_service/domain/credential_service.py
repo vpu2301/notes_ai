@@ -1,22 +1,7 @@
-"""The `client_credentials` grant and credential lifecycle (IDX-B1b F2/F4).
+"""The `client_credentials` grant and credential lifecycle.
 
-Two things here are unlike everything else in this program:
-
-**The lock fails CLOSED.** Every other Redis-backed control in the estate
-fails open, because locking people out of their own accounts because a
-cache blinked is the worse failure. Not this one. The alternative here is
-unlimited secret guessing at the rate limit's ceiling against a
-credential that never gets tired, never notices, and holds a token for a
-whole workspace's recordings. A room that cannot be verified as unlocked
-waits and retries with backoff — which the devices already do for network
-errors, so the degraded behaviour is one they are built for.
-
-**A successful grant writes no audit row.** A single room fetches around
-96 tokens a day. Recording each one would put a workspace's audit chain —
-the thing an auditor reads to reconstruct what happened — several
-thousand rows deep in "a device asked for a token and got one". Success
-is a metric; failure is an audit row, because failure is the shape of
-somebody guessing.
+Unlike the rest of the estate the guessing lock fails CLOSED (503 + Retry-After),
+and a successful grant writes no audit row: success is a metric, failure is audited.
 """
 
 from __future__ import annotations
@@ -62,20 +47,13 @@ LOCK_THRESHOLD = 10
 LOCK_WINDOW_SECONDS = 600
 LOCK_SECONDS = 900
 
-DEFAULT_ROTATION_TTL_SECONDS = 86_400  # 24 h
-MAX_ROTATION_TTL_SECONDS = 604_800  # 7 d
+DEFAULT_ROTATION_TTL_SECONDS = 86_400
+MAX_ROTATION_TTL_SECONDS = 604_800
 MAX_LIVE_SECRETS = 2
 
 
 class CredentialError(ApiError):
-    """A refusal from the credential surface. See :class:`ApiError`.
-
-    ``tripped_lock`` says this particular failure was the one that locked
-    the client, so the route can write the `auth.client_locked` security
-    event exactly once. It rides on the exception rather than on the
-    service because the service is a shared singleton — an attribute
-    there would be read by whichever request got there first.
-    """
+    """A refusal from the credential surface; ``tripped_lock`` lets the route audit `auth.client_locked` exactly once."""
 
     tripped_lock: bool = False
 
@@ -98,8 +76,7 @@ class Denylist(Protocol):
 
 
 class ClientLock(Protocol):
-    """See :mod:`auth_service.adapters.client_lock`. ``is_locked`` raises
-    when the backend is unreachable — the caller must refuse, not allow."""
+    """See :mod:`auth_service.adapters.client_lock`; ``is_locked`` raises when unreachable (caller refuses)."""
 
     async def is_locked(self, subject: str) -> bool: ...
 
@@ -141,15 +118,10 @@ class CredentialService:
         self._revoked_ttl = revoked_ttl_seconds
         self._now = clock or (lambda: datetime.now(UTC))
 
-    # ── the grant (F2) ───────────────────────────────────────────────
+    # ── the grant ────────────────────────────────────────────────────
 
     async def issue_token(self, *, client_id: str, client_secret: str, ip: str) -> IssuedToken:
-        """RFC 6749 §4.4. Every refusal answers the same `invalid_client`.
-
-        One body for "no such client", "wrong secret", "revoked secret"
-        and "revoked credential", because telling them apart would let
-        somebody enumerate which rooms exist by their error messages.
-        """
+        """RFC 6749 §4.4; every refusal answers the same `invalid_client` (no enumeration)."""
         subject = _subject(client_id)
         await self._check_locked(subject)
         await self._check_rate(subject)
@@ -169,9 +141,7 @@ class CredentialService:
             )
 
         credential, _secret_id = found
-        # The secret resolved to *a* credential; it must be the one being
-        # claimed. Without this, a valid secret for room A would open a
-        # token for room B by simply changing the client_id.
+        # The secret must resolve to the credential being claimed.
         if credential.id != credential_id:
             raise _invalid_client(
                 await self._register_failure(subject, client_id=client_id, ip=ip, reason="mismatch")
@@ -183,11 +153,7 @@ class CredentialService:
 
         minted = self._tokens.mint(
             identity_id=credential.id,
-            # `Claims.sid` is required and a client credential has no
-            # session, so the credential's own id stands in. That makes
-            # `sid == sub`, which is honest (there is exactly one "session"
-            # per credential, forever) and useful: a denylist push against
-            # either key revokes the credential.
+            # No session for a client credential: `sid == sub`, so a denylist push on either revokes it.
             session_id=str(credential.id),
             tenant_id=self._tid_for(credential),
             roles=credential.roles,
@@ -205,16 +171,7 @@ class CredentialService:
         )
 
     def _tid_for(self, credential: Credential) -> UUID:
-        """The `tid` claim. Never taken from the request.
-
-        A device's workspace comes from its row, so a room cannot ask to
-        be somewhere else. A service credential has no workspace at all
-        (migration 0026 forbids one), and ``Claims.tid`` is required — so
-        it is minted against the platform tenant, which owns no customer
-        data. A service token is therefore useless for reaching a
-        customer's notes, which is the correct default for a principal
-        nobody has scoped yet.
-        """
+        """The `tid` claim, never from the request: the device's row, or the platform tenant for a service credential."""
         if credential.tenant_id is not None:
             return credential.tenant_id
         return self._platform_tenant_id
@@ -239,12 +196,7 @@ class CredentialService:
             )
 
     async def _check_locked(self, subject: str) -> None:
-        """Fail CLOSED — see the module docstring.
-
-        A client we cannot verify as unlocked is refused with 503 and a
-        `Retry-After`, not let through. This is the one place in the
-        program where availability yields to correctness.
-        """
+        """Fail CLOSED: a client we cannot verify as unlocked gets 503 + `Retry-After`."""
         if self._lock is None:
             return
         try:
@@ -273,11 +225,10 @@ class CredentialService:
         _grant_counter.add(1, {"kind": "unknown", "result": "invalid"})
         logger.warning(
             "auth.client_credentials.failed",
-            # `client_id` is an opaque UUID, never the secret. The reason
-            # is for us; the client is told only `invalid_client`.
+            # `client_id` is an opaque UUID, never the secret.
             extra={"client_id": client_id[:64], "reason": reason},
         )
-        del ip  # hashed and recorded by the route's audit row, not here
+        del ip  # recorded by the route's audit row
         if self._lock is None:
             return False
         if await self._lock.record_failure(subject):
@@ -285,7 +236,7 @@ class CredentialService:
             return True
         return False
 
-    # ── lifecycle (F3/F4) ────────────────────────────────────────────
+    # ── lifecycle ────────────────────────────────────────────────────
 
     async def create(
         self,
@@ -328,8 +279,7 @@ class CredentialService:
             raise CredentialError("not_found", 404, detail="no such credential")
         live = await self._repo.live_secrets(credential_id)
         if len(live) >= MAX_LIVE_SECRETS:
-            # A third live secret would make "which one is deployed"
-            # unanswerable, which is the state rotation exists to avoid.
+            # Never a third live secret.
             raise CredentialError(
                 "rotation_in_progress",
                 409,
@@ -357,9 +307,7 @@ class CredentialService:
         if credential is None or not credential.active:
             raise CredentialError("not_found", 404, detail="no such credential")
         await self._repo.revoke(credential_id)
-        # The database row stops the next grant; the denylist stops the
-        # token already in the device's hands. Only both together make
-        # revocation immediate (ADR-0040).
+        # The DB row stops the next grant; the denylist stops the token already issued (ADR-0040).
         if self._denylist is not None:
             try:
                 await self._denylist.revoke_sub(str(credential_id), ttl_seconds=self._revoked_ttl)
@@ -399,6 +347,5 @@ def _parse_uuid(value: str) -> UUID | None:
 
 
 def _subject(client_id: str) -> str:
-    """The rate-limit / lock key. Bounded, so an attacker-chosen client_id
-    cannot become an unbounded Redis key."""
+    """The rate-limit / lock key, bounded so an attacker-chosen client_id cannot become an unbounded Redis key."""
     return (client_id or "unknown")[:64]

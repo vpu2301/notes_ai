@@ -19,9 +19,7 @@
   recording (`diarize=true` batch jobs). Transcripts come back as speaker
   turns with paragraphs; speakers are `Speaker 1..N` until someone names
   them (`PUT /asr/jobs/{id}/speakers`), and the name follows into every
-  app and the note. See
-  [docs/architecture/ambient-capture.md](docs/architecture/ambient-capture.md)
-  and [docs/product/ambient-use-cases.md](docs/product/ambient-use-cases.md).
+  app and the note.
 - **Notes** — template-based structured notes (meeting notes, 1-on-1s, sales calls,
   interview debriefs, project updates), autosaving drafts, append-only versions with
   diff and tamper-evident hash-chaining, full-text search with synonyms, PDF export
@@ -98,6 +96,7 @@ notes_ai/
 | uv | 0.4 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | make | any | OS package manager |
 | git | 2.40 | https://git-scm.com |
+| git-lfs | 3.x | https://git-lfs.com — run `git lfs install` once per clone (word lists + eval audio) |
 
 > **Windows:** WSL2 is required for acceptable Docker performance. Run `make doctor` to verify.
 
@@ -205,9 +204,8 @@ root folders:
 - Every service serves interactive docs at `http://localhost:<port>/docs` (Swagger UI).
 - Committed OpenAPI snapshots live in [`docs/api/`](docs/api/) — one JSON per
   service, kept fresh by `make openapi-dump` and gated by `make openapi-check` in CI.
-- WebSocket protocols are hand-documented: [`docs/api/dictation-ws-v1.md`](docs/api/dictation-ws-v1.md),
-  [`docs/api/dictation-ws-v2.md`](docs/api/dictation-ws-v2.md),
-  [`docs/api/notifications-ws-v1.md`](docs/api/notifications-ws-v1.md).
+- WebSocket protocols (dictation v1/v2, notifications v1) are defined by the
+  message models in `dictation_service.protocol` and `notification_service.ws.protocol`.
 
 ---
 
@@ -246,6 +244,24 @@ make dev-nuke      # DESTRUCTIVE: also delete all volumes (asks to confirm)
 make doctor        # environment health check
 make help          # full target list
 ```
+
+### Local models on a dev Mac
+
+Note generation and dev ASR run against local servers on the Mac, not inside
+Docker. `ENV=dev` in `.env.local` routes chat to `dev_mac` (Ollama, `:11434`)
+and ASR to `dev_mac_asr` (whisper-server, `:8090`); asr-worker also needs
+`ASR_BACKEND=dev_mac_asr`.
+
+```bash
+make dev-model                 # start Ollama + whisper-server if missing, create the model, verify
+make dev-model ARGS=verify     # probes only: context, structured output, ASR words[], 100 % GPU
+make dev-model ARGS=status
+make dev-model ARGS=stop       # stops the whisper-server this script started
+```
+
+`verify` fails loudly on context truncation, ASR without word timings and CPU
+offload; run it after every model change. Without a running chat server,
+`note.generate` fails with "connection refused" and shared notes look empty.
 
 ---
 

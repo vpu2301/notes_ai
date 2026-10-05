@@ -1,16 +1,6 @@
-"""Sprint-15 query expansion — live-DB contract (RUN_DB_INTEGRATION=1).
-
-Covers the VERIFY matrix:
-  * «КП» finds a note containing only «комерційна пропозиція» — and
-    vice versa (via a tenant-curated synonym group the test seeds)
-  * expand=false (no ts_query) does NOT
-  * snippet still carries <mark> highlights under the expanded tsquery
-  * synonyms RLS: tenant A never sees B's rows; app_role cannot write
-    system rows
-  * EXPLAIN: the expanded to_tsquery still hits the GIN bitmap plan
-    (first-of-kind plan-shape regression test)
-
-Needs `make dev-up && make migrate-up && make seed` (tenants, templates).
+"""Query expansion, live-DB contract (RUN_DB_INTEGRATION=1): synonym hits both
+ways, expand=false, <mark> snippets, synonyms RLS, and the GIN bitmap plan.
+Needs `make dev-up && make migrate-up && make seed`.
 """
 
 from __future__ import annotations

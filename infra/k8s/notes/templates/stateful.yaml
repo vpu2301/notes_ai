@@ -2,7 +2,7 @@
 STAGING-ONLY in-cluster stateful stores (single replica + PVC).
 Production sets stateful.inCluster=false and points the DSNs/hosts at
 operator-managed stores (CloudNativePG, Redis operator)
-or managed services — docs/deploy/hosting-gap.md records the mapping.
+or managed services.
 */ -}}
 {{- if .Values.stateful.inCluster }}
 ---
@@ -51,7 +51,7 @@ spec:
   selector: {app: postgres}
   ports: [{port: 5432, targetPort: pg}]
 ---
-# Role bootstrap — same init.sql the compose stack mounts.
+# Same init.sql the compose stack mounts.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -114,7 +114,7 @@ spec:
               value: postgres
             - name: KC_DB_URL
               value: jdbc:postgresql://postgres:5432/keycloak
-            # init.sql creates the keycloak role + database (compose parity).
+            # init.sql creates the keycloak role + database.
             - name: KC_DB_USERNAME
               value: keycloak
             - name: KC_DB_PASSWORD
@@ -131,9 +131,8 @@ spec:
             - {name: realm, mountPath: /opt/keycloak/data/import, readOnly: true}
       volumes:
         - name: realm
-          # Staging: the dev realm export. Production: the realm import is
-          # produced by scripts/k8s/gen-prod-realm.py — dev client secrets
-          # REGENERATED, dev users absent (see values-prod + the gate).
+          # Staging: the dev realm export. Prod: scripts/k8s/gen-prod-realm.py
+          # (secrets regenerated, dev users absent).
           configMap: {name: mdx-keycloak-realm}
 ---
 apiVersion: v1

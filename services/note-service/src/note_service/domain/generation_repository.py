@@ -1,4 +1,4 @@
-"""``note_generations`` + ``note_generated_items`` (migration 0052).
+"""``note_generations`` + ``note_generated_items``.
 
 Every function takes an RLS-scoped connection; the tenant predicate is
 the policy's.
@@ -100,15 +100,9 @@ async def create(
     snapshot_key: str | None,
     generation_id: UUID | None = None,
 ) -> UUID:
-    """Start a run. Raises ``UniqueViolationError`` when one is already
-    live for this note — the 409 the regenerate route returns is that
-    index, not a race-prone SELECT.
-
-    ``generation_id`` is the id the caller already used as the snapshot's
-    authenticated data (AAD) and in its object key; the row MUST carry the
-    same id or the worker can never unwrap the snapshot. Left out, the
-    database picks one — only right for callers that store no snapshot.
-    """
+    """Start a run. Raises ``UniqueViolationError`` when one is already live (the
+    regenerate route's 409). ``generation_id`` MUST be the id the snapshot was
+    sealed with (AAD + object key), or the worker can never unwrap it."""
     stored: UUID = await conn.fetchval(
         """
         INSERT INTO note_generations (
@@ -150,14 +144,8 @@ async def latest_for_note(conn: asyncpg.Connection, *, note_id: UUID) -> Generat
 async def last_written(
     conn: asyncpg.Connection, *, note_id: UUID, before: UUID
 ) -> GenerationRow | None:
-    """The last run that actually wrote something — the one whose
-    `section_hashes` say whether a section is still ours to rewrite.
-
-    A superseded run counts: it wrote its sections before a later run
-    (or an operator reset) superseded it, and its hashes are what tell
-    the next run those sections are still the engine's, not a person's.
-    A run that superseded itself without writing has no hashes and
-    changes nothing."""
+    """The last run that actually wrote something (superseded runs count): its
+    `section_hashes` say whether a section is still ours to rewrite."""
     record = await conn.fetchrow(
         f"SELECT {_COLUMNS} FROM note_generations "
         "WHERE note_id = $1 AND id <> $2 "
@@ -244,11 +232,7 @@ async def put_items(
     facts: list[tuple[VerifiedFact, str, str]],
     audience_of: Any = None,
 ) -> int:
-    """``[(fact, section_key, placement)]`` → rows.
-
-    Idempotent on ``(note_id, generation_id, item_key)`` so a re-delivered
-    job after a crash does not double-write.
-    """
+    """``[(fact, section_key, placement)]`` → rows; idempotent on ``(note_id, generation_id, item_key)``."""
     if not facts:
         return 0
     written = 0
@@ -283,9 +267,7 @@ async def put_items(
             fact.speaker_label,
             fact.speaker_name,
             placement,
-            # Sprint 36: internal-by-kind. An objection, a competitor
-            # mention or what we think of a candidate never leaves the
-            # workspace, whatever the note's sharing says.
+            # Internal-by-kind never leaves the workspace, whatever the note's sharing says.
             audience_of(fact) if audience_of else "all",
         )
         if result.endswith(" 1"):
@@ -301,11 +283,8 @@ async def put_lines(
     generation_id: UUID,
     rows: list[dict[str, Any]],
 ) -> int:
-    """One row per written LINE (Summary Engine v2, Q5): the line's text and
-    kind, what it cites, and the evidence of the first cited fact.
-
-    Idempotent on ``(note_id, generation_id, item_key)`` like ``put_items``;
-    ``corrections`` and ``mentions`` are JSON lists of plain values."""
+    """One row per written LINE: text, kind, citations, evidence of the first cited
+    fact. Idempotent like ``put_items``; ``corrections`` and ``mentions`` are JSON lists."""
     written = 0
     for row in rows:
         result = await conn.execute(
@@ -357,8 +336,7 @@ async def put_lines(
 async def items_for_note(
     conn: asyncpg.Connection, *, note_id: UUID, current_only: bool = False
 ) -> list[asyncpg.Record]:
-    """The note's generated rows. ``current_only``: the latest run that
-    wrote (complete or partial) — what the reader is looking at."""
+    """The note's generated rows; ``current_only``: the latest run that wrote."""
     current = (
         "AND generation_id = (SELECT id FROM note_generations WHERE note_id = $1 "
         "AND status IN ('complete','partial') ORDER BY created_at DESC LIMIT 1)"
@@ -380,8 +358,7 @@ async def items_for_note(
 
 
 async def regenerations_today(conn: asyncpg.Connection, *, note_id: UUID) -> int:
-    """How many runs this note has had in the last day — the regenerate
-    cap, counted where the rows are rather than in a separate limiter."""
+    """Runs this note has had in the last day (the regenerate cap)."""
     total: int = await conn.fetchval(
         "SELECT count(*) FROM note_generations "
         "WHERE note_id = $1 AND created_at > now() - interval '1 day'",
@@ -391,11 +368,7 @@ async def regenerations_today(conn: asyncpg.Connection, *, note_id: UUID) -> int
 
 
 async def internal_item_keys(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]:
-    """Keys of lines the engine marked internal by kind.
-
-    The client document drops these without the author having to notice
-    that an "objection" is not something to send the person who raised it.
-    """
+    """Keys of lines the engine marked internal by kind; the client document drops them."""
     rows = await conn.fetch(
         """
         SELECT item_key FROM note_generated_items
@@ -408,8 +381,7 @@ async def internal_item_keys(conn: asyncpg.Connection, *, note_id: UUID) -> set[
 
 
 async def flag_counts(conn: asyncpg.Connection, *, note_id: UUID) -> dict[str, int]:
-    """``{flag: how many written lines carry it}`` — the pre-share
-    checklist's input. Counts only; no text leaves this query."""
+    """``{flag: how many written lines carry it}``. Counts only."""
     rows = await conn.fetch(
         """
         SELECT unnest(flags) AS flag, count(*) AS n
@@ -431,11 +403,7 @@ async def suggested_count(conn: asyncpg.Connection, *, note_id: UUID) -> int:
 
 
 async def clear_snapshot(conn: asyncpg.Connection, *, generation_id: UUID) -> str | None:
-    """Forget where the transcript snapshot was. Returns the key it held.
-
-    The object is deleted by the caller — this only stops the row
-    pointing at something that is no longer there.
-    """
+    """Forget where the transcript snapshot was; returns the key. The caller deletes the object."""
     return await conn.fetchval(
         "UPDATE note_generations SET snapshot_key = NULL "
         "WHERE id = $1 AND snapshot_key IS NOT NULL RETURNING snapshot_key",
@@ -446,13 +414,7 @@ async def clear_snapshot(conn: asyncpg.Connection, *, generation_id: UUID) -> st
 async def stale_snapshots(
     conn: asyncpg.Connection, *, older_than_hours: int = 24, limit: int = 500
 ) -> list[tuple[UUID, str]]:
-    """Snapshots still on disk after the generation that needed them.
-
-    A snapshot is a whole transcript. It exists so the worker can read
-    what the user read, minutes later — not so we keep a second copy of
-    every meeting forever. A finished generation's snapshot goes at the
-    end of the job; this catches the ones whose worker died first.
-    """
+    """Snapshots still on disk after the generation that needed them (worker died first)."""
     rows = await conn.fetch(
         f"""
         SELECT id, snapshot_key FROM note_generations

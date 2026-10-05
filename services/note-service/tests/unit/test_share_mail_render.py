@@ -1,10 +1,5 @@
-"""The share mail's two body parts.
-
-The properties worth pinning are the ones a broken mail does not
-announce: that a note title goes out escaped in the HTML and unescaped
-in the text, that the link survives its own query string in both, and
-that the sentence about who can read the note follows the recipient
-rather than a default.
+"""The share mail's two body parts: the title escaped in HTML and not in text,
+the link survives its query string, the access sentence follows the recipient.
 """
 
 from __future__ import annotations

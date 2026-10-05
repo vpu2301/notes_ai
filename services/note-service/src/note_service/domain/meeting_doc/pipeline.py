@@ -1,23 +1,7 @@
-"""Transcript in, document out.
+"""Transcript in, document out: windows → extract → verify → merge → context → reduce → render.
 
-    windows → extract (one model call each) → verify → merge
-            → context (one model call) → reduce (two, in parallel) → render
-
-The context pass reads the verified facts once and says what the
-conversation was — its type, subject, themes, the facts a reader must
-know first — before anything is written. Topics and summary are then
-written about that conversation rather than about a pile of facts, and
-the overview opens with a sentence a reader who was not there can use.
-
-The shape is the sprint's architecture decision, and the reason for it is
-in the middle of that line: **verify**. Every claim the model makes has to
-survive a check against the words that were actually spoken before it can
-reach a note. A window whose call fails is reported, not silently
-dropped; a meeting where nothing verifies produces an empty document
-rather than filler.
-
-`run()` is used by the worker and, unchanged, by the eval harness — the
-harness measures the production code or it measures nothing.
+Every model claim is verified against the spoken words; a failed window is reported,
+never silently dropped. `run()` serves both the worker and the eval harness.
 """
 
 from __future__ import annotations
@@ -56,62 +40,34 @@ from .windows import Window
 
 logger = logging.getLogger(__name__)
 
-# One retry on a malformed answer; a second failure means this window is
-# reported as failed rather than retried forever.
+# One retry on a malformed answer; then the window is reported as failed.
 EXTRACT_ATTEMPTS = 2
-# Output budgets are sized from the schema's own caps, not from a typical
-# answer: a window may legally carry MAX_FACTS_PER_WINDOW facts of up to
-# MAX_FACT_CHARS plus a 400-character quote each (~3 000 tokens), and a
-# topics answer MAX_TOPICS × MAX_BULLETS_PER_TOPIC bullets. With 900 / 700
-# a small model that used its allowance was cut off mid-JSON, the
-# provider reported `context_exceeded`, and every window "failed" —
-# the note stayed a bare transcript. Unused budget costs nothing.
+# Budgets sized from the schema caps, not a typical answer: smaller values cut
+# a full answer off mid-JSON (`context_exceeded`) and failed every window.
 EXTRACT_MAX_TOKENS = 3000
 REDUCE_MAX_TOKENS = 2500
-# F2, decision 2 — a window whose verified facts copy the transcript into
-# `text` is asked once more, told which rule it broke. Tuned (as the work
-# order says to when recall drops): the 40 % share it named left windows
-# of three copies in eight unasked, and each copy is a fact the note loses;
-# the 2026-09-26 eval on Gemma 3 4B lost 2 of 3 key facts on m04 that way.
-# Any copy now asks — still at most one extra call per window.
+# Any copied fact triggers one restate call per window (a higher share lost recall).
 RESTATE_COPY_SHARE: Final = 0.0
 RESTATE_MIN_FACTS: Final = 1
-# A sub-point that cites only its parent's facts and says mostly the same
-# words is the parent again, not an elaboration.
+# A sub-point citing only its parent's facts with mostly the same words is a restatement.
 CHILD_RESTATES_JACCARD: Final = 0.6
 
-# Sprint L1 T2 — the small-model profile (config/models.yaml `small_model`):
-# a fixed twelve facts per window instead of the density rule, one
-# extraction example, no `noise` field, reduce calls over at most fifteen
-# facts with the heading asked separately and no sub-points, the strict
-# summary rung first, and a schema-echo retry after a malformed answer.
-# Verification is untouched: the profile changes what the model is asked,
-# never what code accepts.
+# Small-model profile (config/models.yaml `small_model`): changes what the model
+# is asked, never what code accepts. Window budget: one fact per 500 chars, 8..12.
 SMALL_MODEL_MAX_FACTS: Final = 12
-# Sprint SQ2 T2 — under the profile a window's budget follows its length:
-# one fact per 500 characters, between 8 and SMALL_MODEL_MAX_FACTS.
 SMALL_MODEL_MIN_FACTS: Final = 8
 SMALL_MODEL_CHARS_PER_FACT: Final = 500
 SMALL_MODEL_REDUCE_FACTS: Final = 15
 HEADING_MAX_TOKENS: Final = 120
 
-# Sprint SQ2 T3 — the coverage guard. A third of the recording with at
-# least three minutes of speech whose facts per minute fall below 0.6 of
-# the best third's is read once more (its own turns, the coverage variant
-# of the extraction prompt). Still below 0.6 afterwards: the third is named
-# as missing (``coverage_gaps``) instead of a silently short note. The work
-# order retries below 0.5 and lints below 0.6, with the lint's regenerate
-# hook as the second chance; one threshold for both does the same work in
-# one place (the hook has nothing left to do) and leaves no third that is
-# reported missing without having been read again.
+# Coverage guard: a third with >= 3 min of speech and facts/minute below 0.6 of
+# the best third is re-read once; still thin afterwards, it is named in coverage_gaps.
 COVERAGE_MIN_MINUTES: Final = 3.0
 COVERAGE_RETRY_SHARE: Final = 0.6
 COVERAGE_GAP_SHARE: Final = 0.6
 COVERAGE_WINDOW_BASE: Final = 1000
 
-# A topic bullet with its sub-points: ``(text, fact ids, [(text, ids)])``.
-# A sub-point: ``(text, fact ids)``, or ``(text, fact ids, "quote")`` for a
-# quote written by code from its fact (Sprint D2 T2).
+# Sub-point: ``(text, fact ids)`` or ``(text, fact ids, "quote")`` for a code-written quote.
 Child = tuple[str, list[str]] | tuple[str, list[str], str]
 QUOTE: Final = "quote"
 Bullet = tuple[str, list[str], list[Child]]
@@ -121,8 +77,7 @@ Topics = list[tuple[str, list[Bullet], list[str]]]
 class ChatLike(Protocol):
     backend: str
     model_id: str
-    # True for a small local model (the fallback path): the engine applies
-    # its small-model profile. Providers without the attribute are capable.
+    # Providers without the attribute are capable.
     small_model: bool
 
     async def complete(
@@ -137,8 +92,7 @@ class ChatLike(Protocol):
 
 
 def small_model(provider: ChatLike) -> bool:
-    """Whether the profile applies: the backend says so (``small_model`` on
-    the resolved backend); a provider without the attribute is capable."""
+    """Whether the small-model profile applies; a provider without the attribute is capable."""
     return bool(getattr(provider, "small_model", False))
 
 
@@ -155,16 +109,12 @@ class DocumentResult:
     so the note can say WHICH minutes are missing instead of apologising
     in general."""
     failed_ranges: list[list[int]] = field(default_factory=list)
-    """SQ2 T3 — ``[[start_ms, end_ms]]`` of thirds that stayed thin after
-    the coverage retry; also in ``failed_ranges``, so the status line names
-    them."""
+    """``[[start_ms, end_ms]]`` of thirds still thin after the coverage retry; also in ``failed_ranges``."""
     coverage_gaps: list[list[int]] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
     backend: str | None = None
     model_id: str | None = None
-    """Sprint 36 — carried items the recording says are done, and
-    judgement values offered for a person to accept. Neither is a line
-    of the document."""
+    """Carried items the recording says are done, and judgement values offered; neither is a line."""
     completions: list[VerifiedFact] = field(default_factory=list)
     judgements: list[VerifiedFact] = field(default_factory=list)
     """What the context pass understood — type, subject, themes, framing,
@@ -176,12 +126,9 @@ class DocumentResult:
     end, so the eval can say how much SPEECH was set aside, not how many
     passages."""
     noise_ranges: list[tuple[int, int, str]] = field(default_factory=list)
-    """Q2 — the lines left out, CONFIRMED by code (``verify.confirm_noise``)
-    and within the cap. ``noise`` and ``noise_ranges`` are derived from it."""
+    """The lines left out, CONFIRMED by code and within the cap; ``noise`` and ``noise_ranges`` derive from it."""
     excluded: list[verify.Exclusion] = field(default_factory=list)
-    """Sprint D2 — D1's regeneration hook for this run (``doclint.Regenerate``):
-    it re-extracts a window whose facts left a line without a named subject.
-    Not data; never stored."""
+    """The regeneration hook for this run (``doclint.Regenerate``). Not data; never stored."""
     regenerator: Any = field(default=None, repr=False, compare=False)
 
     @property
@@ -199,8 +146,7 @@ MARKER_REASONS = frozenset({"music", "noise"})
 
 
 def transcript_markers(result: dict[str, Any]) -> list[verify.Exclusion]:
-    """Sprint TQ2 T4: the ASR result's non-speech markers the note lists —
-    music and noise, never silence. An unknown kind is read as noise."""
+    """The ASR result's non-speech markers the note lists: music and noise, never silence."""
     out: list[verify.Exclusion] = []
     for item in result.get("noise") or []:
         try:
@@ -237,19 +183,10 @@ async def run(
 ) -> DocumentResult:
     """Build a document from an ASR result.
 
-    ``retry_budget_s`` (SQ2 T3): past this many seconds since the start, the
-    coverage retry is skipped (``stats.coverage_retry_skipped``) and a thin
-    third is reported as a gap. ``None``: no limit.
-
-    ``entity_provider`` (Sprint L2) answers the entity tier when it is
-    routed to another backend than the writing model; ``provider`` by
-    default. ``provider.context_window`` sizes the windows and budgets
-    (:func:`sizes_for`): today's values up to 32K, larger ones on 128K.
-
-    ``family`` (Sprint 36) decides which fact kinds this call may return
-    and where each lands; ``carried`` is ``[(item_key, text)]`` for the
-    items still open from the previous meeting, which the extractor may
-    mark done — by their NUMBER in this list, never by free text.
+    ``retry_budget_s``: past this, the coverage retry is skipped and a thin third
+    is reported as a gap. ``entity_provider`` answers the entity tier (defaults to
+    ``provider``). ``carried`` is ``[(item_key, text)]`` of still-open items the
+    extractor may mark done by their NUMBER in this list, never by free text.
     """
     started = time.monotonic()
     family = family or types.FALLBACK
@@ -263,17 +200,14 @@ async def run(
     carried = carried or []
     carried_keys = tuple(key for key, _ in carried)
     turns = windows.turns_from_result(result)
-    # F3 amendment: adverts and trailers are cut before windowing (the
-    # extractor never sees them) and one-word turns inside somebody's
-    # sentence are merged into it. When that changed anything, the windows
-    # the worker built for classification are rebuilt from the result.
+    # Adverts are cut and micro-turns merged before windowing; if that changed
+    # anything, the worker's classification windows are rebuilt.
     raw_turns = list(turns)  # the roles table reads every voice, adverts included
     prepared = windows.prepare_turns(turns)
     if prepared.adverts or prepared.microturns_merged:
         turns = prepared.turns
         built = None
-    # The worker builds the windows once, to classify the recording from
-    # the first of them before extraction (Q3), and hands them in.
+    # The worker builds the windows once (for classification) and hands them in.
     built = (
         built if built is not None else windows.build_windows(turns, max_chars=sizes.window_chars)
     )
@@ -289,8 +223,7 @@ async def run(
     verified: list[VerifiedFact] = []
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
 
-    # F3 — lines with an introduction in the first windows, pointed out to
-    # the extractor when this family writes introductions.
+    # Introduction lines in the first windows, pointed out to the extractor.
     suggested_quotes = [
         str(s.get("quote") or "")
         for s in (result.get("name_suggestions") or [])
@@ -308,7 +241,6 @@ async def run(
         return [t.number for t in window.turns if verify.calls_to_action(t.text, language)] or None
 
     async def one(window: Window) -> tuple[Window, schema.ExtractOut | None]:
-        # The profile: 8–12 by length (SQ2 T2), not the density rule (Q2).
         budget = small_budget(window) if small else fact_budget(window, sizes.max_facts_budget)
         window_schema = schema.extract_schema(
             offered,
@@ -368,17 +300,14 @@ async def run(
         key=lambda e: e.start_ms,
     )
     out.excluded = excluded
-    # Sprint TQ2 T4: music and noise the transcript marked (no lines, no
-    # speech) are listed with the passages left out, so the note says what
-    # the recording also held. Not in ``noise_ranges`` / ``excluded_ms``:
-    # those measure SPEECH set aside. Silence is not listed.
+    # Transcript music/noise markers are listed but not counted in
+    # ``noise_ranges`` / ``excluded_ms`` (those measure speech set aside).
     markers = transcript_markers(result)
     out.noise = sorted({(e.start_ms, e.reason) for e in [*excluded, *markers]})
     out.noise_ranges = sorted({(e.start_ms, e.end_ms, e.reason) for e in excluded})
 
-    # F3 amendment §2.8 — what the recording itself spells three times or more.
+    # Words the recording spells three times or more; then those that are names (not German nouns).
     rec_names = support.recording_names([t.text for t in turns])
-    # Sprint D2 — of those, the ones that are names (not German nouns).
     rec_proper = support.proper_names([t.text for t in turns], rec_names, language)
 
     def check(
@@ -402,8 +331,7 @@ async def run(
 
     restate = {"improved": 0, "unchanged": 0}
     details_asked = 0
-    # Sprint SQ2 T1 — per window, numbers only: what the model returned,
-    # what verification kept, what survived the merge, whether it failed.
+    # Per-window diagnosis, numbers only.
     per_window: dict[int, dict[str, int]] = {
         w.index: {
             "index": w.index,
@@ -415,15 +343,13 @@ async def run(
             "facts_verified": 0,
             "facts_kept_after_merge": 0,
             "call_failed": 0,
-            # SQ2 — where in the window its verified facts were said:
-            # first half, second half (a model that reads only the head
-            # of a long window shows here, not in any third).
+            # A model that reads only the head of a long window shows here.
             "facts_first_half": 0,
             "facts_second_half": 0,
         }
         for w in built
     }
-    # F3 amendment §2.4 — a table is for a demonstration or a lecture.
+    # A figures table is for a demonstration or a lecture.
     tables = recording_type is None or recording_type in TABLE_TYPES
     for window, extracted in extracted_windows:
         if extracted is None:
@@ -445,16 +371,12 @@ async def run(
         await _person_details(provider, window, extracted, language)
         kept = check([*extracted.facts, *twins], window, stats)
         if tables:
-            # A verified figure replaces the key point it was promoted from
-            # only where figures are written as a table; elsewhere the
-            # statement stays and the figure is stored as a row.
+            # A verified figure replaces its key point only where figures are tabled.
             kept = _without_figure_twins(kept)
-        # A figure or introduction is written from its payload: its text
-        # being a copy is no reason to ask again, nor to replace it.
+        # Figures and introductions are written from their payload: a copy is no reason to restate.
         copies = sum(1 for f in kept if f.copied and f.figure is None and f.person is None)
         if copies and len(kept) >= RESTATE_MIN_FACTS and copies / len(kept) > RESTATE_COPY_SHARE:
-            # F2, decision 2: once per window, told the rule it broke, with
-            # no more facts than it gave the first time.
+            # Once per window, told the rule it broke, same budget as the first answer.
             again_budget = max(1, len(extracted.facts))
             again = await _extract(
                 provider,
@@ -483,7 +405,7 @@ async def run(
             per_window[window.index][half] += 1
         verified.extend(kept)
 
-    # ── SQ2 T3 — the coverage guard ─────────────────────────────────
+    # ── coverage guard ──────────────────────────────────────────────
     span_start, span_end = (turns[0].start_ms, turns[-1].end_ms) if turns else (0, 1)
     bounds = [span_start + round((span_end - span_start) * k / 3) for k in range(4)]
     third_minutes = [
@@ -584,14 +506,13 @@ async def run(
         verified.extend(kept)
 
     facts = merge_rules.merge_facts(verified)
-    # Still thin after the retry (or with the retry skipped): named, never silent.
-    # The same rule the linter's ``coverage.thirds`` applies.
+    # Still thin after the retry: named, never silent (same rule as doclint ``coverage.thirds``).
     out.coverage_gaps = [[bounds[k], bounds[k + 1]] for k in thin(facts, COVERAGE_GAP_SHARE)]
     out.failed_ranges.extend(out.coverage_gaps)
     for fact in facts:
         if fact.window_index in per_window:
             per_window[fact.window_index]["facts_kept_after_merge"] += 1
-    # Sprint D2 decision 5 — who each voice is to this recording, by code.
+    # Who each voice is to this recording, by code.
     table = roles_table.build(
         raw_turns,
         [f for f in facts if f.person is not None],
@@ -608,7 +529,7 @@ async def run(
         else f
         for f in facts
     ]
-    # Decision 6 — cues settle a close call between a lecture and a podcast.
+    # Cues settle a close call between a lecture and a podcast.
     cue_type, type_cues = classify.type_cues(raw_turns, table, prepared.adverts)
     if (
         recording_type in classify.CUE_PAIR
@@ -617,7 +538,7 @@ async def run(
         and cue_type != recording_type
     ):
         recording_type, recording_type_source = cue_type, classify.SOURCE_CUES
-    # Decision 4 — narrators report; they do not hold.
+    # Narrators report; they do not hold.
     facts, reattributed = _narrator_attribution(facts, table, recording_type)
     out.facts = facts
     # Completions and judgements are not lines of the document: one
@@ -634,7 +555,7 @@ async def run(
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
-    # F3 — a person introduced in the recording is somebody a line may name.
+    # A person introduced in the recording is somebody a line may name.
     introduced = {f.person.name for f in document_facts if f.person is not None}
     gate = _Gate(
         language=language,
@@ -651,8 +572,7 @@ async def run(
         # Understand the conversation first; then write topics and the
         # summary about it, side by side.
         brief = await _context(provider, document_facts, language, gate=gate)
-        # Q4, tier (b): names nobody in the workspace knows, asked of the
-        # model once — before anything is written from the facts.
+        # Names nobody in the workspace knows, asked of the model once before writing.
         people = gate.known | {g.term for g in glossary if getattr(g, "kind", "") == "person"}
         renamed = await _model_names(
             entity_provider or provider,
@@ -673,14 +593,11 @@ async def run(
             if n and not _DEFAULT_NAME.match(n.strip())
             for w in (n, *n.split())
         )
-        # Sprint D2 decisions 1–2 — the budget from the length of speech,
-        # then one small reduce per time-contiguous block, then the headings
-        # merged where the section band allows. Paragraph 2 follows the
-        # blocks, so it is written after them.
+        # Budget from the length of speech, one reduce per block, headings merged
+        # within the section band; paragraph 2 follows the blocks.
         excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
         minutes = max(0, speech_ms - excluded_speech) / 60_000
-        # SQ2 T4 — the parts come from the transcript (spoken cues, then
-        # lexical shifts), not from where the facts happen to fall.
+        # Parts come from the transcript (cues, then lexical shifts), not from fact positions.
         segmentation = compose.segment(
             turns, minutes, language, classify.structure_cues(turns, language)
         )
@@ -698,7 +615,7 @@ async def run(
             small=small,
         )
         if topics:
-            # Q4 — an uncited fact with a number, a date or a holder is kept.
+            # An uncited fact with a number, a date or a holder is kept.
             _append_salient(topics, document_facts, gate)
         tops = compose.top_per_block(parts, language, gate.people)
         summary = await _summary(
@@ -712,10 +629,7 @@ async def run(
             small=small,
         )
     topics_fallback: str | None = "chapters" if gate.block_chapters else None
-    # T5 ladder rung 3 — the summary is prose, always: composed from the most
-    # specific fact of each block when both model rungs failed. Which model
-    # rung wrote it is the gate's record (the profile runs them in the other
-    # order).
+    # Rung 3: when both model rungs failed, prose composed from each block's most specific fact.
     ladder = gate.summary_rung if summary else None
     if document_facts and not summary:
         summary = (
@@ -742,9 +656,7 @@ async def run(
         fallback = "key_facts"
         if not key_fact_ids:
             key_fact_ids = _earliest_per_window(document_facts)
-    # T4, paragraph 1 — what this recording is, from the roles table, the
-    # reader's type word, the show, the subject and the themes (code); the
-    # model's framing replaces only its first clause.
+    # Paragraph 1 is built by code; the model's framing replaces only its first clause.
     opening = ""
     if document_facts:
         speakers, guests, others = compose.speakers_of(table, language)
@@ -770,10 +682,8 @@ async def run(
             themes=list(orientation["themes"]),
             show=show,
         )
-        # D1 — the verified roles and values paragraph 1 is built from, so
-        # the linter can check it and rebuild it by code (doclint.p1_faults).
-        # Names are people and things verified as names — not the recording's
-        # frequent capitalised words (German nouns) and never a default label.
+        # Verified roles/values paragraph 1 is built from (doclint.p1_faults rebuilds it).
+        # Only verified names: never frequent capitalised words or a default label.
         names = sorted(
             n
             for n in (gate.known - rec_names) | rec_proper
@@ -803,8 +713,7 @@ async def run(
         figure_tables=tables,
         recording_names=gate.known,
     )
-    # SQ2 T1 — thirds by TIME over the speech, not by window: one window
-    # (a short recording on a long-context backend) is not "the middle".
+    # Thirds by TIME over the speech, not by window.
     span = (turns[0].start_ms, turns[-1].end_ms) if turns else (0, 1)
 
     def third(ms: int) -> int:
@@ -832,8 +741,6 @@ async def run(
         "facts_dropped_example": stats.dropped_example,
         "facts_dropped_paraphrase": stats.dropped_paraphrase,
         "facts_flagged_paraphrase": stats.flagged_paraphrase,
-        # F2 — copies in the final document (evidence only), windows asked
-        # to restate and how that went, and what code dropped or fixed.
         "facts_copied": sum(1 for f in facts if f.copied),
         "windows_restated": restate["improved"] + restate["unchanged"],
         "restate_outcomes": dict(restate),
@@ -843,10 +750,8 @@ async def run(
         "recording_names": len(rec_names),
         "third_person_fixed": stats.third_person_fixed + gate.third_person_fixed,
         "children_restated": gate.children_restated,
-        # F3 amendment — the engine's view of the turns.
         "microturns_merged": prepared.microturns_merged,
         "adverts_cut": len(prepared.adverts),
-        # F3 — figures, introductions, calls to action.
         "figure_details_asked": details_asked,
         "figures_kept": stats.figures_kept,
         "figures_dropped_value": stats.figures_dropped_value,
@@ -890,7 +795,6 @@ async def run(
             for e in sorted([*excluded, *markers], key=lambda x: x.start_ms)
         ],
         "facts_by_third": by_third,
-        # SQ2 T3 — the coverage guard (numbers only).
         "speech_minutes_by_third": [round(m, 2) for m in third_minutes],
         "coverage_retry": coverage_retry,
         "coverage_retry_facts": coverage_retry_facts,
@@ -918,7 +822,6 @@ async def run(
         "salient_appended": gate.salient_appended,
         "salient_skipped_full": gate.salient_skipped_full,
         "topics_merged": gate.topics_merged,
-        # Sprint D2 — blocks, headings, roles, subjects.
         "blocks": gate.blocks,
         "block_calls": gate.block_calls,
         "block_chapters": gate.block_chapters,
@@ -936,7 +839,6 @@ async def run(
         "narrator_reattributed": reattributed,
         "subject_unresolved": stats.subject_unresolved,
         "lines_by_third": _lines_by_third(out.sections, document_facts, third),
-        # Sprint SQ2 T1 — the diagnosis numbers (numbers only).
         "windows": [per_window[k] for k in sorted(per_window)],
         "reduce_input_facts": sum(len(b.facts) for b in parts),
         "reduce_cited_facts": len(cited_ids),
@@ -952,9 +854,7 @@ async def run(
         "language": language,
         "recording_type": recording_type,
         "recording_type_source": recording_type_source,
-        # Sprint L1 — whether the small-model profile shaped this run.
         "small_model_profile": small,
-        # Sprint L2 — the budgets this run used (from the backend's context).
         "window_chars": sizes.window_chars,
         "context_window": sizes.context_window,
     }
@@ -962,9 +862,8 @@ async def run(
     async def regenerate(
         requests: list[doclint.RegenRequest], sections: list[render.RenderedSection]
     ) -> list[render.RenderedSection] | None:
-        """D1 ``line.subject`` → re-extract each window once, told to name
-        every subject; a verified fact on the same line with a subject
-        replaces the line whose subject was a pronoun or a label."""
+        """``line.subject``: re-extract each window once, told to name every subject;
+        a verified fact on the same line with a subject replaces the faulted line."""
         wanted = {i for r in requests if r.rule == "line.subject" for i in r.fact_ids}
         by_id = {f.item_key: f for f in out.facts}
         targets = {by_id[i].window_index for i in wanted if i in by_id}
@@ -1042,7 +941,7 @@ async def run(
     return out
 
 
-# F3 — introductions happen at the start: the first windows are searched.
+# Introductions happen at the start: only the first windows are searched.
 INTRODUCTION_WINDOWS: Final = 2
 _INTRODUCTION_CUE: Final = re.compile(
     r"\b(?:my name is|i'm|i’m|i am|this is|ich bin|ich heiße|ich heisse|mein name ist|"
@@ -1071,13 +970,9 @@ def introduction_lines(window: Window, suggested_quotes: list[str]) -> list[int]
 
 TABLE_TYPES: Final = frozenset({"presentation_demo", "lecture_webinar"})
 
-# F3 amendment §2.1 — the presenter is the recording's own voice.
-
 
 def standing_of(fact: VerifiedFact, turns: list[windows.Turn]) -> str:
-    """``presenter``, ``guest`` or ``clip`` for an introduction, read from
-    the roles table of these turns (Sprint D2 decision 5; the amendment's
-    §2.1 gating is subsumed by it)."""
+    """``presenter``, ``guest`` or ``clip`` for an introduction, from the roles table."""
     table = roles_table.build(turns, [fact], "podcast_broadcast")
     return roles_table.standing(fact, table)
 
@@ -1085,9 +980,8 @@ def standing_of(fact: VerifiedFact, turns: list[windows.Turn]) -> str:
 def restated(
     first: list[VerifiedFact], second: list[VerifiedFact]
 ) -> tuple[list[VerifiedFact], int]:
-    """F2's merge rule: each copied fact of the first answer is replaced by
-    a second-answer fact that cites the same line and is not a copy; every
-    other fact stays as it was. ``(facts, how many were replaced)``."""
+    """Each copied first-answer fact is replaced by a non-copy second-answer fact
+    citing the same line; others stay. ``(facts, how many were replaced)``."""
     spare: dict[int | None, list[VerifiedFact]] = {}
     for fact in second:
         if not fact.copied and not fact.evidence_only:
@@ -1106,8 +1000,7 @@ def restated(
 
 
 def small_budget(window: Window) -> int:
-    """SQ2 T2 — the small-model profile's facts for a window:
-    ``clamp(chars // 500, 8, 12)`` (a fixed twelve starved long windows)."""
+    """Small-model profile budget: ``clamp(chars // 500, 8, 12)``."""
     return max(
         SMALL_MODEL_MIN_FACTS,
         min(SMALL_MODEL_MAX_FACTS, len(window.text) // SMALL_MODEL_CHARS_PER_FACT),
@@ -1115,17 +1008,14 @@ def small_budget(window: Window) -> int:
 
 
 def fact_budget(window: Window, max_budget: int | None = None) -> int:
-    """How many facts a window may carry: one per ~250 characters, between
-    8 and 24 (the cap scales with the window on a long-context backend).
-    A dense news passage holds far more than twelve points, and a cap
-    below that is how the audit's note lost most of a story."""
+    """Facts a window may carry: one per ~250 characters, between 8 and 24."""
     cap = MAX_FACTS_BUDGET if max_budget is None else max_budget
     return min(cap, max(MIN_FACTS_BUDGET, len(window.text) // 250))
 
 
 @dataclass(frozen=True, slots=True)
 class Sizes:
-    """Sprint L2 T5 — the size constants for one backend's context."""
+    """Size constants for one backend's context."""
 
     context_window: int
     window_chars: int
@@ -1135,10 +1025,7 @@ class Sizes:
 
 
 def sizes_for(provider: ChatLike | None, context_window: int | None = None) -> Sizes:
-    """Today's values on 32K and below; on a long context (≥ 64K, the
-    hosted API's 128K) windows of 16 000 characters, budgets scaled with
-    them. The composition pass (M1 T3) is not merged, so nothing else
-    changes with the context yet."""
+    """Defaults on 32K and below; on >= 64K, 16 000-character windows and scaled budgets."""
     context = context_window or int(getattr(provider, "context_window", 0) or 0) or 32_768
     chars = windows.window_chars(context)
     scale = chars / windows.MAX_WINDOW_CHARS
@@ -1166,15 +1053,11 @@ async def _model_names(
     entity: dict[str, int],
     enabled: bool,
 ) -> dict[str, str]:
-    """Tier (b): the names in the facts nobody in the workspace knows, asked
-    of the model once. Returns ``{old item_key: new item_key}`` for the
-    facts whose text changed (a fact's key is its text).
+    """Names nobody in the workspace knows, asked of the model once; returns
+    ``{old item_key: new item_key}`` for facts whose text changed.
 
-    A proposal is applied only when it is close to what was heard
-    (similarity ≥ ``entities.MODEL_THRESHOLD``) and is not a person already
-    in the recording — the model may respell a name, never swap one
-    participant for another. A proposal far from what was heard is not
-    applied; the spelling stays and is marked "(?)"."""
+    A proposal applies only when similarity >= ``entities.MODEL_THRESHOLD`` and it
+    is not another participant: the model may respell, never swap people."""
     if not enabled or not facts:
         return {}
     known = {p.casefold() for p in people} | {t.casefold() for p in people for t in p.split()}
@@ -1267,8 +1150,7 @@ def _lines_by_third(
     facts: list[VerifiedFact],
     third: Callable[[int], int],
 ) -> list[int]:
-    """Written lines per third of the recording, by the time of their first
-    cited fact (SQ2 T1: by time, not by window)."""
+    """Written lines per third of the recording, by the time of their first cited fact."""
     by_id = {f.item_key: f for f in facts}
     out = [0, 0, 0]
     for section in sections:
@@ -1288,21 +1170,15 @@ def _earliest_per_window(facts: list[VerifiedFact]) -> list[str]:
 
 
 def section_hashes(sections: list[render.RenderedSection]) -> dict[str, str]:
-    """``{section_key: sha256 of the text we wrote}``.
-
-    The writer compares against these next time: a section whose text
-    still equals what the last generation put there has not been touched
-    by a person and may be rewritten. Anything else is the author's.
-    """
+    """``{section_key: sha256 of the text we wrote}``: a section still equal to the
+    last generation's text may be rewritten; anything else is the author's."""
     import hashlib
 
     return {s.section_key: hashlib.sha256(s.text.encode("utf-8")).hexdigest() for s in sections}
 
 
 def _language_lines(window: Window, language: str) -> list[tuple[int, int, int, str]]:
-    """Sprint I2: lines the ASR decoded in another language are flagged by
-    CODE, whether or not the extractor noticed; ``confirm_noise`` confirms
-    them from the same field."""
+    """Lines the ASR decoded in another language, flagged by CODE regardless of the extractor."""
     return [
         (t.number, t.start_ms, t.end_ms, "other_language")
         for t in window.turns
@@ -1323,12 +1199,8 @@ def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int
     return out
 
 
-# A composed line must carry at least this share of its content from the
-# facts it cites (Q2). Half: a sentence may connect and condense, it may
-# not add. Per language since the F3 amendment (§2.10):
-# ``support.line_support_threshold``.
-# More than this share of a summary failing the gate means the model is
-# writing from somewhere other than the facts: ask once more, strictly.
+# Line support share is per language: ``support.line_support_threshold``.
+# More than this share of a summary failing the gate: ask once more, strictly.
 SUMMARY_FAIL_SHARE: Final = 0.3
 MAX_FACTS_BUDGET: Final = 24
 MIN_FACTS_BUDGET: Final = 8
@@ -1367,22 +1239,20 @@ class _Gate:
         )
     )
     retries: int = 0
-    """Sprint L1 — the rung that wrote the summary: ``model`` or ``strict``."""
+    """The rung that wrote the summary: ``model`` or ``strict``."""
     summary_rung: str | None = None
-    """Sprint L2 — the output budget of a reduce call on this backend."""
+    """The output budget of a reduce call on this backend."""
     reduce_tokens: int = REDUCE_MAX_TOKENS
     salient_appended: int = 0
     salient_skipped_full: int = 0
     topics_merged: int = 0
-    """F2 — sub-points that restated their parent; openers dropped."""
+    """Sub-points that restated their parent; openers dropped."""
     children_restated: int = 0
     third_person_fixed: int = 0
-    """A-12 — why the topics pass gave nothing (None when it did)."""
+    """Why the topics pass gave nothing (None when it did)."""
     topics_failure: str | None = None
-    """Sprint D2 — verified names only: `known` less the recording's frequent
-    capitalised words (German nouns), for headings and specificity."""
+    """Verified names only: `known` less the recording's frequent capitalised words."""
     people: frozenset[str] = frozenset()
-    # Sprint D2 — the blocks.
     blocks: int = 0
     block_calls: int = 0
     block_chapters: int = 0
@@ -1394,7 +1264,7 @@ class _Gate:
 
     @property
     def dropped(self) -> int:
-        """Q1's name for the example count."""
+        """Alias for the example count."""
         return self.counts["example"]
 
     def echo(self, text: str) -> bool:
@@ -1406,17 +1276,14 @@ class _Gate:
     def reason(self, text: str, cited: list[VerifiedFact], *, claims: bool = False) -> str | None:
         """Why this line may not be written, or None when it may.
 
-        ``claims`` (summary sentences, Q4): a sentence resting on somebody's
-        opinion or forecast must name them and keep its hedge. A sentence
-        is prose and is dropped, not patched; a bullet is a record and is
-        patched by render."""
+        ``claims`` (summary sentences): a sentence resting on an opinion or forecast
+        must name its holder and keep its hedge; sentences are dropped, bullets patched."""
         plain = render.strip_inline_ids(text)[0]
         if prompts.echoes_example(plain):
             return "example"
         if not cited:
             return "unsupported"
-        # F2 — a transcript sentence is evidence, not a line; a remark that
-        # informs nobody, or a line in the speaker's own voice, is not one.
+        # A transcript copy, an uninformative remark or first-person voice is not a line.
         if any(verify.is_copied(plain, f.quote) for f in cited):
             return "copied"
         if not support.carries_information(
@@ -1451,8 +1318,7 @@ class _Gate:
         return None
 
     def third_person(self, text: str) -> str:
-        """Decision 4's one mechanical rewrite: a leading "So," / "Again,"
-        / "Also," goes. Nothing else is ever changed in code."""
+        """The one mechanical rewrite: a leading "So," / "Again," / "Also," goes."""
         fixed = support.mechanical_third_person(text)
         if fixed is None:
             return text
@@ -1502,11 +1368,8 @@ async def _extract(
     contact_lines: list[int] | None = None,
     small: bool = False,
 ) -> schema.ExtractOut | None:
-    """One window. ``None`` when the model could not answer in shape.
-    ``system_suffix`` (F2) is the rule the last answer broke;
-    ``introduction_lines`` (F3) the lines code found an introduction in.
-    ``small`` (L1) is the profile: one example, no noise rule, and the
-    retry after a malformed answer carries the schema."""
+    """One window; ``None`` when the model could not answer in shape.
+    ``system_suffix`` is the rule the last answer broke; ``small`` is the profile."""
     prompt = prompts.extract_prompt(
         window.render(),
         language,
@@ -1569,16 +1432,12 @@ async def _figure_details(
     *,
     promote: bool = False,
 ) -> tuple[int, list[schema.Fact]]:
-    """F3: fill the fields of figures the extraction left bare, with one
-    call per window whose schema REQUIRES them. Fields the model already
-    gave are kept; everything is still verified against the words. Returns
-    ``(how many figures were asked about, the promoted twins)`` — the twins
-    are NOT added to the model's answer (its size is the restate budget).
+    """Fill bare figure fields with one call whose schema REQUIRES them; everything
+    is still verified. Returns ``(figures asked about, promoted twins)``; twins are
+    NOT added to the model's answer (its size is the restate budget).
 
-    ``promote``: a fact of another kind whose quote says a number is asked
-    about too, as a figure next to it (a small model files "the beam is
-    sixteen and a half feet" as a key point). The key point stays unless
-    its figure verifies (:func:`_without_figure_twins`)."""
+    ``promote``: a fact of another kind whose quote says a number gets a figure twin;
+    the original stays unless the figure verifies (:func:`_without_figure_twins`)."""
     bare = [f for f in extracted.facts if f.kind == schema.FIGURE and not (f.value and f.name)]
     twins: list[schema.Fact] = []
     if promote:
@@ -1587,17 +1446,14 @@ async def _figure_details(
             if (
                 fact.kind not in (schema.FIGURE, schema.INTRODUCTION, schema.JUDGEMENT)
                 and (fact.turn, fact.quote) not in figured
-                # The words, not the "[4] Speaker 1 (00:23):" header the
-                # window shows: its digits are not anything anyone said.
+                # Strip the "[4] Speaker 1 (00:23):" header: its digits were not spoken.
                 and numbers.numbers_in(verify.strip_turn_header(fact.quote), language)
             ):
                 twin = fact.model_copy(update={"kind": schema.FIGURE})
                 twins.append(twin)
                 bare.append(twin)
-        # A line that says a number and that no fact covers at all: a small
-        # model extracting a long window stops early, and "length overall,
-        # sixty six feet" two minutes in is exactly what it skips. Code only
-        # picks the line; the model names the quantity; code verifies it.
+        # Uncovered lines with a number (a small model stops early on long windows):
+        # code picks the line, the model names the quantity, code verifies it.
         covered = {
             verify.normalise_quote(verify.strip_turn_header(f.quote)) for f in extracted.facts
         }
@@ -1614,8 +1470,7 @@ async def _figure_details(
             bare.append(twin)
     if not bare:
         return 0, twins
-    # One line per call: asked about a dozen lines at once, a small model
-    # answers the first few and skips the rest. Bounded per window.
+    # One line per call (a small model skips most of a dozen); bounded per window.
     bare = bare[:FIGURE_DETAILS_MAX_LINES]
     for fact in bare:
         located = verify.locate_quote(fact.quote, window, fact.turn)
@@ -1648,9 +1503,7 @@ async def _figure_details(
 
 
 def _contact_twins(extracted: schema.ExtractOut, language: str) -> list[schema.Fact]:
-    """F3: a fact of another kind whose quote asks the listener to act
-    ("email me or leave a comment") gets a `next_step` twin — a small model
-    files the call to action as a key point. Verification still decides."""
+    """A fact whose quote asks the listener to act gets a `next_step` twin; verification decides."""
     have = {(f.turn, f.quote) for f in extracted.facts if f.kind == schema.NEXT_STEP}
     return [
         f.model_copy(update={"kind": schema.NEXT_STEP})
@@ -1668,10 +1521,8 @@ async def _contact_details(
     language: str,
     hinted: list[int] | None,
 ) -> list[schema.Fact]:
-    """F3: a line that asks the listener to act and that no fact states as a
-    `next_step` is stated once, by one call whose schema requires the
-    sentence. The sentence is a fact like any other: its quote is the line,
-    and verification checks it (a copy of the line is evidence only)."""
+    """A call-to-action line no fact states as a `next_step` is stated once by a
+    call whose schema requires the sentence; verification checks it like any fact."""
     if not hinted:
         return []
     stated = {f.turn for f in facts if f.kind == schema.NEXT_STEP}
@@ -1719,7 +1570,7 @@ def _without_figure_twins(facts: list[VerifiedFact]) -> list[VerifiedFact]:
 async def _person_details(
     provider: ChatLike, window: Window, extracted: schema.ExtractOut, language: str
 ) -> None:
-    """F3: the same one follow-up for introductions without a name."""
+    """The same one follow-up for introductions without a name."""
     bare = [f for f in extracted.facts if f.kind == schema.INTRODUCTION and not f.name]
     if not bare:
         return
@@ -1729,8 +1580,7 @@ async def _person_details(
         if turn is None:
             lines.append(verify.strip_turn_header(fact.quote))
             continue
-        # The sentence after an introduction often says the rest ("We are
-        # the … dealer for the Great Lakes") — verification reads it too.
+        # The sentence after an introduction often says the rest; verification reads it too.
         following = verify._next_line_same_speaker(window, turn)
         lines.append(f"{turn.text} {following}".strip())
     try:
@@ -1808,13 +1658,12 @@ def _children(
     by_id: dict[str, VerifiedFact],
     gate: _Gate,
 ) -> list[tuple[str, list[str]]]:
-    """A bullet's sub-points that pass on their own (F2, decision 5): each
-    cites a fact, passes the gate, and is not the parent said again."""
+    """A bullet's sub-points that cite a fact, pass the gate and do not restate the parent."""
     out: list[tuple[str, list[str]]] = []
     parent_words = support.merge_tokens(parent)
     for child in bullet.children[: schema.MAX_CHILDREN]:
         if child.quote_of:
-            continue  # Sprint D2 T2: a quote sub-point is written by code
+            continue  # a quote sub-point is written by code
         text = gate.third_person(child.text.strip())
         ids = list(dict.fromkeys(i for i in child.fact_ids if i in by_id))
         if not text or not ids or not gate.ok(text, [by_id[i] for i in ids]):
@@ -1828,14 +1677,13 @@ def _children(
     return out
 
 
-# Sprint D2 T1 — a block's call is retried once; a heading once more.
+# A block's call is retried once; a heading once more.
 BLOCK_ATTEMPTS: Final = 2
 BLOCK_CONCURRENCY: Final = 4
 
 
 def _heading_faults(heading: str, facts: Sequence[VerifiedFact], gate: _Gate) -> list[str]:
-    """Why a model heading cannot head its block: D1's form rules, a
-    generic label, or a name its facts do not say."""
+    """Why a model heading cannot head its block: form rules, a generic label, or an unsaid name."""
     faults = [f for f in doclint.heading_faults(heading) if f not in ("punctuation", "question")]
     if heading.casefold().rstrip(":.!?") in doclint.GENERIC_HEADINGS:
         faults.append("generic")
@@ -1863,14 +1711,10 @@ async def _reduce_block(
     table: roles_table.RolesTable,
     small: bool = False,
 ) -> tuple[str, list[Bullet], list[str]] | None:
-    """One block: a phase heading and its bullets, gated line by line —
-    the support gate, a subject that is not a pronoun, specificity — kept
-    to the budget by specificity and written in time order. A call that
-    fails twice, or leaves fewer than two bullets, is the block's chapter:
-    its statements by time under its name and first time.
+    """One block: a heading and gated bullets, kept to the budget by specificity and
+    written in time order. Two failed calls or fewer than two bullets: the block's chapter.
 
-    ``small`` (L1): the heading and the bullets are separate calls over at
-    most fifteen facts each, without sub-points."""
+    ``small``: heading and bullets are separate calls over at most fifteen facts, no sub-points."""
     facts = list(block.facts)
     by_id = {f.item_key: f for f in facts}
     if small:
@@ -1908,9 +1752,7 @@ async def _reduce_block(
 
 
 def introduce_first(bullets: list[Bullet], by_id: dict[str, VerifiedFact]) -> list[Bullet]:
-    """SQ3 T3 — a bullet that introduces a person comes before any bullet
-    that names them ("wurde vorgestellt" before "beschrieb"); otherwise
-    the time order stands."""
+    """A bullet introducing a person comes before any bullet naming them; else time order."""
     out = list(bullets)
     for bullet in bullets:
         people = [
@@ -2153,8 +1995,7 @@ def _cite_names(
 def _block_chapter(
     facts: list[VerifiedFact], language: str, gate: _Gate, budget: compose.VolumeBudget
 ) -> tuple[str, list[Bullet], list[str]] | None:
-    """Amendment §2.6 for one block: its statements by time, the specific
-    ones when there are any, under its name and first time."""
+    """One block's chapter: its statements by time (the specific ones when any), under its name."""
     usable = [
         f
         for f in facts
@@ -2259,10 +2100,8 @@ async def _merge_headings(
 def _narrator_attribution(
     facts: list[VerifiedFact], table: roles_table.RolesTable, recording_type: str | None
 ) -> tuple[list[VerifiedFact], int]:
-    """Decision 4 — in a broadcast, the dominant voice reports: a statement
-    it makes about somebody is that person's, never the narrator's. The Q4
-    default (an opinion is its speaker's) stands only when the speaker says
-    it in the first person ("ich finde", "I think")."""
+    """In a broadcast the dominant voice reports: its statement about somebody is
+    that person's, unless said in the first person ("ich finde", "I think")."""
     if not any(s.role in (roles_table.NARRATOR, roles_table.HOST) for s in table.speakers.values()):
         return facts, 0
     out, changed = [], 0
@@ -2324,9 +2163,8 @@ def _append_salient(
     facts: list[VerifiedFact],
     gate: _Gate,
 ) -> None:
-    """A key point with a number, a date or a person in it is kept even
-    when no bullet wrote about it (Q4): it joins the topic nearest to it in
-    time. Coverage is a budget, not a hope."""
+    """A key point with a number, a date or a person is kept even when no bullet
+    wrote about it: it joins the topic nearest in time."""
     if not topics:
         return
     by_id = {f.item_key: f for f in facts}
@@ -2334,14 +2172,12 @@ def _append_salient(
     for fact in facts:
         if fact.kind != schema.KEY_POINT or not fact.salient or fact.item_key in written:
             continue
-        # F2 — the fact's own text is the line here: evidence stays evidence.
+        # The fact's own text is the line here: evidence stays evidence.
         if fact.evidence_only:
             continue
 
-        # SQ2 — the topic nearest in time, while it has room under the
-        # standard's six points (a full topic keeps the fact as a fact: it
-        # never moves to a part of the recording it was not said in), and
-        # in recording order there.
+        # Nearest topic in time with room under six points; a full topic keeps the
+        # fact as a fact (it never moves to another part of the recording).
         index = min(range(len(topics)), key=lambda k, f=fact: _distance(topics[k], f, by_id))
         title, bullets, ids = topics[index]
         if len(bullets) >= compose.BULLETS[1]:
@@ -2371,18 +2207,10 @@ async def _summary(
 ) -> list[tuple[str, list[str]]] | None:
     """``[(sentence, the fact ids it rests on)]``, or None.
 
-    Sprint D2 T5 — rung 1 is told the blocks' headings ("one sentence per
-    part, in order"); rung 2 names the fact for each sentence: the most
-    specific of each block (``skeleton_ids``).
-
-    Every sentence passes the gate or is dropped. When more than
-    ``SUMMARY_FAIL_SHARE`` of an answer fails, the model is asked once
-    more with the strict suffix ("use the wording of the facts"); failing
-    that too, there is no summary and the overview is written by code.
-
-    ``small`` (L1) runs the rungs in the other order: the strict skeleton
-    first — a small model writes best when told which facts and in what
-    order — and the free rung only when that fails."""
+    Rung 1 is told the block headings; rung 2 names the fact per sentence
+    (``skeleton_ids``). Every sentence passes the gate or is dropped; above
+    ``SUMMARY_FAIL_SHARE`` failures the model is asked once more strictly, then
+    the overview is written by code. ``small`` runs the rungs in the other order."""
     gate = gate or _Gate(language=language)
     block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     by_id = {f.item_key: f for f in facts}
@@ -2421,9 +2249,7 @@ async def _summary(
                 continue
             answered += 1
             cited = [by_id[i] for i in dict.fromkeys(line.fact_ids) if i in by_id]
-            # "Der Start im November bleibt das Ziel": the 2026-09-22
-            # audit's invented sentence was the prompt's own example and
-            # cited a real fact. A cited id is not support.
+            # A cited id is not support (a prompt example once cited a real fact).
             if gate.ok(sentence, cited, claims=True):
                 out.append((sentence, [f.item_key for f in cited]))
         failed = answered - len(out)

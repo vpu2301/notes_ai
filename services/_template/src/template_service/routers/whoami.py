@@ -1,9 +1,4 @@
-"""Example protected route. Confirms libs/auth wires correctly.
-
-``GET /whoami`` returns the verified claims for the bearer token. Sprint 02
-uses this endpoint as the integration sanity check ("can a real Keycloak
-token authenticate against a real service?").
-"""
+"""Example protected route: returns the verified claims for the bearer token."""
 
 from typing import Annotated
 

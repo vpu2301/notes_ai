@@ -1,18 +1,5 @@
-"""Jinja2 email rendering.
-
-Three properties this module must hold, in priority order:
-
-1. **Content-free.** A template can only see the variables handed to it,
-   and the only source of those is `domain/render.safe_payload`, which is
-   a per-category allow-list. There is no `**event.payload` splat
-   anywhere, so a producer cannot widen what a template can reach — no
-   note content or personal data can render (ADR-0031).
-2. **Autoescaped.** Note codes and display names are attacker-
-   influenced in principle; unescaped they are an HTML-injection vector
-   in a mail client (the sprint-09 lesson).
-3. **Deterministic.** The same input renders byte-identical output, so
-   the PII CI gate and the round-trip test can assert on exact bytes.
-   Nothing here reads a clock or a random source.
+"""Jinja2 email rendering: content-free (templates see only the allow-listed
+projection, never a payload splat), autoescaped, and deterministic (no clock, no random).
 """
 
 from __future__ import annotations
@@ -38,11 +25,9 @@ class RenderedEmail:
 def build_environment(template_dir: Path | None = None) -> Environment:
     return Environment(
         loader=FileSystemLoader(str(template_dir or TEMPLATE_DIR)),
-        # StrictUndefined: a typo'd variable must fail the render, not
-        # quietly produce "Note  was shared with you".
+        # A typo'd variable must fail the render.
         undefined=StrictUndefined,
         autoescape=select_autoescape(["html", "xml"]),
-        # Deterministic output — no trailing-newline drift between runs.
         keep_trailing_newline=False,
         trim_blocks=True,
         lstrip_blocks=True,
@@ -70,14 +55,8 @@ def render_email(
 ) -> RenderedEmail:
     """Render one category's mail.
 
-    `fields` MUST already be the allow-listed projection — this function
-    does not filter, it only renders, and passing a raw payload here
-    would defeat the boundary.
-
-    `items` is the digest's per-line summary. It is a separate parameter
-    rather than a `fields` key so it cannot be populated from an event
-    payload — only the digest job, which builds the lines from already-
-    rendered content-free titles, can supply it.
+    `fields` MUST already be the allow-listed projection; nothing is filtered here.
+    `items` (digest lines) is a separate parameter so an event payload can never supply it.
     """
     environment = env or _env()
     context = {

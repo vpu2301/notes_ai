@@ -1,15 +1,4 @@
-"""Token alignment between consecutive overlapping windows.
-
-Whisper's output for the overlap region (sprint 04: 2 s) is not
-deterministic across calls — different windowing can produce slightly
-different tokenisation, especially across word boundaries. The aligner
-chooses the higher-probability transcription for each aligned word and
-emits a 'boundary uncertainty' signal when the two transcriptions
-disagree substantially.
-
-The alignment is plain Levenshtein on word tokens; the input volumes
-(≤ 50 words per overlap) make the O(N×M) cost negligible.
-"""
+"""Levenshtein word alignment of consecutive overlap regions; keeps the higher-probability word."""
 
 from __future__ import annotations
 
@@ -34,11 +23,8 @@ def align_overlap(
 ) -> AlignResult:
     """Merge two overlap-region word lists.
 
-    - Pairs of words with the same string position (Levenshtein-aligned)
-      → keep whichever has the higher probability; ties go to ``curr``.
-    - Unaligned words → keep iff probability > ``keep_threshold``.
-    - Returns the merged list AND a normalized Levenshtein distance to
-      drive the boundary-uncertainty warning.
+    Aligned pairs keep the higher probability (ties to ``curr``); unaligned
+    words survive iff probability > ``keep_threshold``.
     """
     if not prev and not curr:
         return AlignResult(merged=[], boundary_uncertainty=0.0)
@@ -87,12 +73,7 @@ def normalized_levenshtein(a: list[str], b: list[str]) -> float:
 
 
 def _backtrace_alignment(a: list[str], b: list[str]) -> list[tuple[str, int, int]]:
-    """Produce the alignment operations (match/sub/ins/del) for two strings.
-
-    Returned list contains ``(op, i, j)`` tuples in forward order, where
-    ``i`` indexes ``a`` and ``j`` indexes ``b`` (or one of them is -1
-    for pure insert/delete).
-    """
+    """Alignment ops as ``(op, i, j)`` in forward order; -1 index for pure insert/delete."""
     n, m = len(a), len(b)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n + 1):

@@ -1,10 +1,4 @@
-"""DEP-S0: asr-worker resolves ``ASR_BACKEND`` through libs/models.
-
-The default keeps the in-process engine (no config file needed beyond the
-committed one); an HTTP backend is refused outside its env; a
-``ProviderError`` from an HTTP backend is classified, not leaked as
-``unhandled``.
-"""
+"""``ASR_BACKEND`` resolves through libs/models; a ``ProviderError`` is classified."""
 
 from __future__ import annotations
 

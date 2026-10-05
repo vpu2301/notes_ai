@@ -1,10 +1,4 @@
-"""HTTP client to note-service for template lookup.
-
-Sprint-06 lookup happens once at session start (full template loaded
-into session context) and once per section switch (cached on session).
-The dictation hot path doesn't re-fetch; note-service's own
-TTLCache absorbs cross-session repeats.
-"""
+"""HTTP client to note-service for template lookup (once at session start, cached on the session)."""
 
 from __future__ import annotations
 

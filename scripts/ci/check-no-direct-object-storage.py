@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — direct ``boto3``/``aioboto3``/``minio`` imports must live in libs/storage.
+"""CI gate: direct ``boto3``/``aioboto3``/``minio`` imports live only in libs/storage
+(the sanctioned encrypted path).
 
-Sprint 03 introduces ``libs/storage.EncryptedObjectStore`` as the only
-sanctioned write/read path for tenant-bearing object data. Bypassing it
-risks plaintext-at-rest. This script greps the repo and rejects any
-direct import outside ``libs/storage``.
-
-Run as part of ``make ci``:
-
-    python scripts/ci/check-no-direct-object-storage.py
-
-Exit codes:
-    0 — no violations
-    1 — violations printed to stderr
+Exit 0 clean, 1 violations on stderr.
 """
 
 from __future__ import annotations

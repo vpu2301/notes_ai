@@ -1,7 +1,4 @@
-// Who processes this workspace's meetings, and what it may cost
-// (Sprint 37). Every member may read it; only an admin may change it,
-// and the API refuses the rest — the page only hides what it knows will
-// be refused.
+// Who processes this workspace's meetings, and what it may cost. Members read; admins change.
 import { api } from "./http";
 import type { AiSettings, AiSettingsUpdate } from "./types";
 

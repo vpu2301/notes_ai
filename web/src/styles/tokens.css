@@ -1,55 +1,42 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   Notes AI — design tokens
-
-   One palette across web, macOS and iOS (macos|ios/…/Views/Theme.swift):
-   paper and ink with a MOSS accent, hairline frames instead of shadows,
-   generous continuous radii, a display face over a quiet sans.
-
-   Two rules the whole system rests on:
-
-     · Frames never carry the accent. Every hairline — resting, hovered,
-       selected — is a warm neutral. The accent lives in tints, icons and
-       text, never in a border.
-     · The ground is warm paper, not white, and corners are continuous
-       (squircle) wherever the browser can draw them, so the surfaces read
-       soft rather than boxed.
+   Design tokens — one palette with the Mac and iPhone apps (Views/Theme.swift).
+   Two rules: frames never carry the accent (every hairline is a warm neutral);
+   the ground is warm paper and corners are continuous where the browser can draw them.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
   color-scheme: light;
 
-  /* Type. The Mac app sets Avenir Next; on a Mac the web matches it for
-     display text, elsewhere Geist (self-hosted) carries both roles. */
+  /* Type: Avenir Next on a Mac for display text, else self-hosted Geist. */
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: "Avenir Next", "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  /* The bookish serif for the wordmark and the home greeting (Claude's
-     layout); system faces only, nothing to download. */
+  /* Serif for the wordmark and home greeting; system faces only. */
   --serif: "Iowan Old Style", "Charter", "Source Serif 4", "Georgia", ui-serif, serif;
 
-  /* Ground & surfaces — the Mac's warm paper, with white for raised cards. */
+  /* Ground & surfaces */
   --bg: #fbfaf7;
   --surface: #ffffff;
   --surface-2: #f3f1ec;
   --surface-hover: #f6f4f0;
   --sidebar: #f8f7f3;
-  /* Sidebar row fills: hover, the active row / "New" row, and pressed. */
+  /* Sidebar row fills: hover, active, pressed */
   --sidebar-hover: #efede7;
   --sidebar-active: #ebe8e1;
   --sidebar-press: #e3dfd7;
 
-  /* Ink scale — warm, never pure black (as on the Mac). */
+  /* Ink scale — warm, never pure black */
   --text-1: #1a1816;
   --text-2: #3d3936;
   --text-3: #5f5a55;
   --muted: #8a847c;
   --muted-aa: color-mix(in srgb, var(--muted) 88%, #000);
 
-  /* Ink fill — the one filled button (Granola's black pill) and the toggle. */
+  /* Ink fill — the filled button and the toggle */
   --ink: #1a1816;
   --ink-text: #ffffff;
 
-  /* Accent family — moss, the same green the Mac and iPhone apps use. */
+  /* Accent family — moss */
   --accent: #4f7a5e;
   --accent-2: #3f6650;
   --accent-soft: color-mix(in srgb, var(--accent) 11%, #fff);
@@ -57,26 +44,23 @@
   --accent-fill: var(--accent);
   --accent-ink: #ffffff;
 
-  /* Frames. Warm neutrals, all of them — no hue from the accent ever mixes
-     in. --line is every resting hairline; --line-2 the quieter divider
-     between rows inside a card; --line-hover and --line-active are the same
-     neutral walked a step darker so a live frame is felt, not coloured. */
+  /* Frames: warm neutrals only. --line resting, --line-2 row divider, hover/active a step darker. */
   --line: #e6e2db;
   --line-2: #efece6;
   --line-hover: #d9d3c9;
   --line-active: #c8c1b5;
   --hairline: 1px;
 
-  /* Second hue ("amended") — a dusty plum, as on the Mac. */
+  /* Second hue ("amended") — dusty plum */
   --indigo: #6b5b95;
   --indigo-soft: color-mix(in srgb, var(--indigo) 10%, #fff);
 
   --warn: #a8651a;
   --warn-soft: color-mix(in srgb, var(--warn) 10%, #fff);
-  /* --rec is the RECORDING colour — loud on purpose. */
+  /* --rec: recording, loud on purpose */
   --rec: #d9483b;
   --rec-soft: color-mix(in srgb, var(--rec) 10%, #fff);
-  /* --danger is DESTRUCTIVE UI — same family, quieter. */
+  /* --danger: destructive UI, quieter */
   --danger: #b4483e;
   --danger-2: color-mix(in srgb, var(--danger) 86%, #000);
   --danger-soft: color-mix(in srgb, var(--danger) 9%, #fff);
@@ -88,15 +72,11 @@
 
   --mark-bg: #f6ecc4;
 
-  /* Toast dots sit on the ink-filled toast, i.e. on a DARK ground in the
-     light theme, so they take the bright end of the ok/rec pairs and swap
-     over in dark mode where the toast is light. */
+  /* Toast dots sit on the ink-filled (dark) toast: bright end here, swapped in dark mode. */
   --toast-ok: #7fc394;
   --toast-err: #f0796d;
 
-  /* Speaker tints: one stable hue per person across the editor, the
-     shared page and the native apps (same list, same hash). Moss first,
-     then slate, plum, teal, olive and a warm taupe — nothing orange. */
+  /* Speaker tints: same list and hash as the shared page and native apps; nothing orange. */
   --speaker-1: #4f7a5e;
   --speaker-2: #8c7a66;
   --speaker-3: #8a6d2f;
@@ -104,17 +84,12 @@
   --speaker-5: #7a5a8c;
   --speaker-6: #3f7f7a;
 
-  /* Shadows are for floating things only (menus, modals, toasts). Cards
-     and panels are framed by a hairline, never lifted. */
+  /* Shadows: floating things only */
   --shadow-1: none;
   --shadow-2: 0 6px 20px -6px rgba(26, 24, 22, 0.14), 0 1px 3px rgba(26, 24, 22, 0.06);
   --shadow-3: 0 16px 40px -12px rgba(26, 24, 22, 0.22);
 
-  /* Radii. Rounder than the Mac's by a couple of points, because the web
-     draws a circular arc where AppKit draws a continuous one — and where
-     the browser CAN draw a continuous corner (`corner-shape`, base.css)
-     these same numbers turn into true squircles. --radius-pill is the
-     fully round end used by the record control and every capsule. */
+  /* Radii: a touch rounder than the Mac's to offset circular arcs; true squircles via `corner-shape` (base.css). */
   --radius-2xs: 4px;
   --radius-xs: 7px;
   --radius-sm: 9px;
@@ -123,38 +98,31 @@
   --radius-xl: 22px;
   --radius-pill: 999px;
 
-  /* Motion. One organic easing — quick out of the gate, long settle — and
-     three durations. Nothing in the UI moves on a linear curve. */
+  /* Motion: one easing, three durations */
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   --t-fast: 0.14s;
   --t: 0.22s;
   --t-slow: 0.34s;
 
-  /* Two scale knobs: --density scales SPACE, --fs scales TEXT. Every padding
-     is authored as calc(Npx * var(--density)) and every font-size as
-     calc(Npx * var(--fs)). Both live on <html>. */
+  /* --density scales SPACE, --fs scales TEXT; every padding/font-size is calc(Npx * var(…)). */
   --density: 1;
   --fs: 1;
 
   --sidebar-w: 272px;
   --topbar-h: calc(52px * var(--density));
 
-  /* The dot print behind the home page, sign-in and empty states: small
-     ink dots on a 20px grid, fading out from the top (DSDots on the Mac). */
+  /* Dot print (DSDots) */
   --dots: radial-gradient(circle, color-mix(in srgb, var(--text-1) 15%, transparent) 1.1px, transparent 1.4px);
   --dots-size: 20px 20px;
   --dots-fade: radial-gradient(900px 900px at 50% 0, #000, rgba(0, 0, 0, 0.35) 55%, transparent 100%);
-  /* A soft light sweeps around the print: the angle turns, and the dots under
-     the bright band show while the ones off-axis recede. The dots never move.
-     The gradient itself lives on the dot pseudo-elements (base.css, shell.css)
-     because the angle is animated there and var() resolves where declared. */
+  /* Light sweep over the print; the gradient lives on the pseudo-elements (base.css, shell.css). */
   --dots-light-duration: 26s;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* The same warm palette turned over. */
+  /* Dark theme */
   --bg: #171512;
   --surface: #1e1b18;
   --surface-2: #27231f;

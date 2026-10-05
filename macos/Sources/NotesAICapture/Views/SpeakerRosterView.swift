@@ -1,16 +1,9 @@
 import SwiftUI
 
-/// The transcript's speakers: one chip per speaker with its talk share and
-/// a menu to rename or merge it. A speaker who barely spoke gets one
-/// question ("same person as someone else?"); a merge can be undone for 10 s.
-/// Sprint 29: "Wrong number of speakers?" re-runs the separation for a
-/// count the person gives, and a low-confidence count asks first — in
-/// place of the small-speaker question, never beside it.
-/// Sprint 30: the ⋯ menu resets every merge and moved turn (confirmed
-/// first); a move refused because the speakers changed elsewhere says so.
-/// Sprint 32: a name the server heard ("Hi, this is Anna") is offered
-/// under the chips with its evidence; an older labelling offers a re-label;
-/// every control has a name for VoiceOver and a keyboard path.
+/// The transcript's speakers: one chip per speaker with its talk share and a menu to
+/// rename or merge. A small speaker gets one question; a merge can be undone for 10 s;
+/// "Wrong number of speakers?" re-runs the separation; heard names are offered with
+/// evidence; every control has a VoiceOver name and a keyboard path.
 struct SpeakerRosterView: View {
     @ObservedObject var model: NoteViewModel
     let onRename: (String) -> Void
@@ -77,41 +70,43 @@ struct SpeakerRosterView: View {
                 }
                 .disabled(!model.online || model.renamingSpeaker)
             }
-            HStack(spacing: 6) {
+            // Wraps: a long roster must stay visible, not run off the right edge.
+            FlowLayout(spacing: 6, rowSpacing: 6) {
                 ForEach(model.speakers, id: \.self) { label in
-                    Menu {
-                        Button("Rename…") { onRename(label) }
-                        MergeMenu(model: model, label: label)
-                        Divider()
-                        Button("Wrong number of speakers?") { pickingCount = true }
-                            .disabled(!model.online || model.relabel == .running)
-                    } label: {
-                        chip(label)
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Rename or merge this speaker")
-                    .accessibilityLabel(model.speakerAccessibilityLabel(label))
-                    .accessibilityHint("Opens a menu to rename or merge this speaker")
-                    .disabled(model.relabel == .running)
-                    if model.isChannelNamed(label) {
-                        // Sprint 31: the name came from the microphone
-                        // channel, not from a person — one click undoes it.
-                        Button {
-                            Task { await model.clearChannelName(label) }
+                    HStack(spacing: 6) {
+                        Menu {
+                            Button("Rename…") { onRename(label) }
+                            MergeMenu(model: model, label: label)
+                            Divider()
+                            Button("Wrong number of speakers?") { pickingCount = true }
+                                .disabled(!model.online || model.relabel == .running)
                         } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: 16, height: 16)
-                                .contentShape(Rectangle())
+                            chip(label)
                         }
+                        .menuStyle(.button)
                         .buttonStyle(.plain)
-                        .foregroundStyle(DS.muted)
-                        .help(SpeakerChannelMarkers.removeLabel)
-                        .accessibilityLabel(SpeakerChannelMarkers.removeLabel)
-                        .disabled(!model.online || model.renamingSpeaker || model.relabel == .running)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Rename or merge this speaker")
+                        .accessibilityLabel(model.speakerAccessibilityLabel(label))
+                        .accessibilityHint("Opens a menu to rename or merge this speaker")
+                        .disabled(model.relabel == .running)
+                        if model.isChannelNamed(label) {
+                            // The name came from the microphone channel, not a person — one click undoes it.
+                            Button {
+                                Task { await model.clearChannelName(label) }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DS.muted)
+                            .help(SpeakerChannelMarkers.removeLabel)
+                            .accessibilityLabel(SpeakerChannelMarkers.removeLabel)
+                            .disabled(!model.online || model.renamingSpeaker || model.relabel == .running)
+                        }
                     }
                 }
                 Menu {
@@ -131,14 +126,16 @@ struct SpeakerRosterView: View {
                 .help("Speaker options")
                 .accessibilityLabel("Speaker options")
                 if let edit = model.lastEdit {
-                    Text(edit.summary)
-                        .font(.dsMeta)
-                        .foregroundStyle(DS.text2)
-                        .padding(.leading, 6)
-                    Button("Undo") { Task { await model.undoLastSpeakerEdit() } }
-                        .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
-                        .disabled(!model.online || model.renamingSpeaker)
-                        .accessibilityLabel("Undo: \(edit.summary)")
+                    HStack(spacing: 6) {
+                        Text(edit.summary)
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.text2)
+                            .padding(.leading, 6)
+                        Button("Undo") { Task { await model.undoLastSpeakerEdit() } }
+                            .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
+                            .disabled(!model.online || model.renamingSpeaker)
+                            .accessibilityLabel("Undo: \(edit.summary)")
+                    }
                 }
                 if !model.online {
                     Text("Connect to change speakers")
@@ -262,9 +259,7 @@ struct SpeakerRosterView: View {
     }
 }
 
-/// Sprint 32 — `Probably **Anna Keller** — "Hi, this is Anna from Acme" ·
-/// 00:14` → Accept / ✕. The quote is the evidence and is shown before
-/// anything is accepted; clicking it scrolls to the turn it was said in.
+/// `Probably **Anna Keller** — "Hi, this is Anna from Acme" · 00:14` → Accept / ✕. Clicking the quote scrolls to its turn.
 struct NameSuggestionRow: View {
     @ObservedObject var model: NoteViewModel
     let suggestion: NameSuggestion
@@ -322,8 +317,7 @@ struct NameSuggestionRow: View {
     }
 }
 
-/// "Merge into ▸" — the other speakers, earlier labels first so a merge
-/// keeps the lower number.
+/// "Merge into ▸" — the other speakers, earlier labels first so a merge keeps the lower number.
 struct MergeMenu: View {
     @ObservedObject var model: NoteViewModel
     let label: String
@@ -346,8 +340,7 @@ func spoke(_ ms: Int) -> String {
     return s < 60 ? "\(s) s" : "\(Int((Double(s) / 60).rounded())) min"
 }
 
-/// "How many people spoke?" — a count from 1 to 8, then a re-run of the
-/// speaker separation. Warns first when the re-run would throw away merges.
+/// "How many people spoke?" — a count from 1 to 8, then a re-run. Warns first when merges would be lost.
 struct SpeakerCountPopover: View {
     @ObservedObject var model: NoteViewModel
     let onClose: () -> Void

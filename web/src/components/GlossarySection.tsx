@@ -15,8 +15,7 @@ const KINDS: ReadonlyArray<readonly [GlossaryKind, string]> = [
   ["term", "Term"],
 ];
 
-/** Sprint I2: the one sentence for a term that is a label, not a name —
- *  the same whether the client or the server caught it. */
+/** The one sentence for a term that is a label, not a name (client or server caught). */
 export const NOT_VOCABULARY =
   "A role label like 'Moderator II' isn't a name — the transcriber won't be told it.";
 
@@ -29,20 +28,8 @@ function inHint(entry: GlossaryTerm): boolean {
   return entry.in_hint !== false;
 }
 
-/**
- * The workspace's own vocabulary, under Workspace settings.
- *
- * The list is the safety mechanism. Terms get here from corrections — you
- * fix a name once and the workspace offers to remember it — and a
- * vocabulary that learns without showing you what it learned is one you
- * cannot trust. So: everything visible, everything removable by whoever
- * added it, nothing learned silently.
- *
- * Sprint I2: the list is also the transcriber's prompt, word for word, so
- * the prompt is shown here as it will be sent. A speaker's role label
- * ("Moderator II") is refused before it gets in, and one that got in
- * before the rule is marked as no longer sent.
- */
+/** Workspace vocabulary: everything visible, removable by its creator, nothing learned
+ *  silently. The list is the transcriber's prompt, shown as sent; role labels are refused. */
 export function GlossarySection() {
   const toast = useToast();
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null);
@@ -95,7 +82,6 @@ export function GlossarySection() {
     try {
       await forgetTerm(entry.id);
       setTerms((cur) => cur?.filter((t) => t.id !== entry.id) ?? null);
-      // The prompt changed; show the one the next recording will get.
       try {
         setHint(await glossaryHint());
       } catch {

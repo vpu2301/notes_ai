@@ -28,13 +28,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
-# Sprint-13 extraction-quality signal. Grafana reads these directly so the
-# override-rate panel never has to scrape the audit table.
-#
-# LABEL DISCIPLINE: field_type ONLY. Option values are template-authored,
-# so putting them in a label would make cardinality unbounded and put
-# tenant vocabulary into the metrics store. Option-level analysis reads
-# the audit payloads offline.
+# Extraction-quality signal for the override-rate panel. LABEL DISCIPLINE: field_type
+# ONLY; option values are template-authored (unbounded cardinality, tenant vocabulary).
 _meter = metrics.get_meter("mdx.note_fields")
 _confirmed = _meter.create_counter(
     "mdx_field_confirmed_total",
@@ -97,7 +92,7 @@ async def update_draft(
     body_hash = repo.body_hash_for(body.content)
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404 (0016).
+        # A private note the caller was not given is a 404.
         row = access.require_view(await repo.lock_note_for_update(conn, note_id=note_id), claims)
         if row.status != NoteStatus.DRAFT:
             raise HTTPException(
@@ -108,12 +103,10 @@ async def update_draft(
                 },
             )
 
-        # Sprint-13: typed field metadata must be valid at every write.
         await ensure_valid_field_metadata(conn, content=body.content)
         field_types = await template_field_types(conn, content=body.content)
 
-        # Idempotency: same body_hash as most recent version + expected_version
-        # matches current → return prior version, no new row.
+        # Idempotent: same body_hash and expected_version → the prior version, no new row.
         if body.expected_version == row.current_version_number:
             current = await repo.fetch_version(conn, version_id=row.current_version_id)
             if current is not None and current.body_hash == body_hash:
@@ -163,9 +156,7 @@ async def update_draft(
                 },
             ) from exc
 
-    # Sprint-13: confirm/override signals — the extractor-quality loop.
-    # Emitted per event (they are rare and author-initiated), unlike
-    # the aggregated autosave row below. Payloads are slug only.
+    # Confirm/override signals, per event (rare, author-initiated); payloads are slug only.
     for event in diff_field_events(
         before=current.content if current is not None else None,
         after=body.content,

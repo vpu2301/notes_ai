@@ -1,12 +1,10 @@
-# Model-backend alerts (DEP-S1 §S). Instruments: libs/jobs/src/jobs/metrics.py.
+# Model-backend alerts. Instruments: libs/jobs/src/jobs/metrics.py.
 groups:
   - name: model-backends
     interval: 30s
     rules:
       - alert: ModelBackendWarmingTooLong
-        # A job parked on a warming backend for longer than 2 × the longest
-        # declared cold start (300 s for hf_eu) means the endpoint is not
-        # coming up — scaling failed, quota, or a deleted endpoint.
+        # Parked longer than 2x the longest declared cold start: the endpoint is not coming up.
         expr: |
           max by (backend) (mdx_model_waiting_oldest_seconds) > 600
         for: 2m
@@ -20,8 +18,7 @@ groups:
             Runbook: docs/runbooks/model-backends.md#warming-too-long
 
       - alert: ModelBackendAuth
-        # A revoked/rotated token fails every call immediately (kind=auth,
-        # never retried). One is enough: the ledger and the notes stop.
+        # kind=auth is never retried; one is enough.
         expr: |
           (sum by (backend) (increase(mdx_model_calls_total{outcome="auth"}[5m])) or vector(0)) > 0
         for: 0m

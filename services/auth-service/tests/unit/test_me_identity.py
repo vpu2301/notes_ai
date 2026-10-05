@@ -1,16 +1,7 @@
-"""IDX-B3 — `GET /auth/me` carries the identity and its memberships.
+"""`GET /auth/me` carries the identity and its memberships (`_identity_and_memberships`).
 
-Scoped to `_identity_and_memberships`, which is where the decision lives.
-The endpoint's other half (the per-tenant `users` row) is unchanged and
-already covered; what is new is a lookup that must degrade rather than
-fail, because `/auth/me` is what the SPA hydrates from on **every** page
-load. A 500 here is a signed-in person looking at a sign-in screen.
-
-Three behaviours, one property each:
-
-  * keycloak mode has no identity store, and that is not an error;
-  * the native shape is the one the web client's `MeResponse` declares;
-  * a store that raises costs the caller their name, not their session.
+The lookup must degrade, not fail: keycloak mode has no identity store; the native shape
+matches the web client's `MeResponse`; a raising store costs the caller their name, not their session.
 """
 
 from __future__ import annotations
@@ -71,13 +62,7 @@ class FakeIdentities:
 
 @pytest.fixture(autouse=True)
 def _restore_state() -> Any:
-    """Put `deps._state` back afterwards.
-
-    It is a module global, so a test that installs a two-field stand-in and
-    walks away hands the next test in the session an app state with no
-    pools on it. Cheap to undo, and the failure it prevents is the kind
-    that only appears when the suite is run in a different order.
-    """
+    """Put the module-global `deps._state` back so later tests keep their pools."""
     previous = deps._state
     yield
     deps._state = previous
@@ -93,9 +78,7 @@ def _claims(sub: UUID = IDENTITY_ID) -> Any:
 
 @pytest.mark.asyncio
 async def test_keycloak_mode_has_no_identity_and_says_so_quietly() -> None:
-    # `account_services` is None whenever the native surface is not wired,
-    # which is every keycloak-mode deployment. 200 with nulls, not a 404:
-    # the claims in the token are still enough to render a signed-in shell.
+    # `account_services` is None in keycloak mode: 200 with nulls, not a 404.
     _install(None)
 
     identity, memberships = await _identity_and_memberships(_claims())
@@ -110,9 +93,7 @@ async def test_native_mode_returns_the_shape_the_web_client_declares() -> None:
 
     identity, memberships = await _identity_and_memberships(_claims())
 
-    # Every key `web/src/api/types.ts::Identity` names, and no extra: the
-    # SPA reads this on page load and `AuthResult` on sign-in, and the two
-    # have to be the same object or the UI changes shape under people.
+    # Every key `web/src/api/types.ts::Identity` names, and no extra.
     assert identity == {
         "id": str(IDENTITY_ID),
         "email": "olena@acme.example",
@@ -122,9 +103,7 @@ async def test_native_mode_returns_the_shape_the_web_client_declares() -> None:
         "status": "active",
         "created_at": None,
     }
-    # `kind` is what tells a personal workspace from a team one — the whole
-    # signup acceptance criterion (`memberships[0].kind == "personal"`)
-    # rests on it surviving this mapping.
+    # `kind` tells a personal workspace from a team one; the signup criterion rests on it.
     assert memberships == [
         {
             "tenant_id": str(TENANT_ID),
@@ -138,8 +117,7 @@ async def test_native_mode_returns_the_shape_the_web_client_declares() -> None:
 
 @pytest.mark.asyncio
 async def test_an_identity_row_that_vanished_is_not_a_crash() -> None:
-    # A token whose subject no longer has a row: revoked between issue and
-    # use, or a Keycloak-era `sub` on a native deployment.
+    # Subject with no row: revoked between issue and use, or a Keycloak-era `sub`.
     _install(SimpleNamespace(identities=FakeIdentities(identity=None)))
 
     identity, memberships = await _identity_and_memberships(_claims(uuid4()))
@@ -152,9 +130,7 @@ async def test_an_identity_row_that_vanished_is_not_a_crash() -> None:
 async def test_a_broken_identity_store_costs_a_name_not_a_session() -> None:
     _install(SimpleNamespace(identities=FakeIdentities(identity=_identity(), raises=True)))
 
-    # The alternative — letting it propagate — turns a database blip into
-    # every signed-in browser bouncing to /login, because the SPA treats a
-    # failed `/auth/me` as "the session is gone".
+    # Propagating would bounce every signed-in browser to /login on a database blip.
     identity, memberships = await _identity_and_memberships(_claims())
 
     assert identity is None

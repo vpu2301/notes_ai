@@ -1,5 +1,5 @@
 """`GET /v1/admin/sharing/stats` — counts for the person who runs the
-workspace, nothing for anyone else (Sprint 22)."""
+workspace, nothing for anyone else."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def test_a_member_is_refused(client: TestClient) -> None:
     assert client.get("/v1/admin/sharing/stats").status_code == 403
 
 
-# ── Sprint 23: the policy ────────────────────────────────────────────
+# ── the policy ────────────────────────────────────────────
 
 
 def test_admin_reads_and_writes_the_policy_with_an_audit_of_the_keys(client: TestClient) -> None:

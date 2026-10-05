@@ -1,11 +1,4 @@
-"""IDX-B3 D/K — the maintenance jobs, against a real database.
-
-The property that matters most is idempotence, because ADR-0041 buys its
-simplicity with it: there is no advisory lock, so two replicas run the
-same sweep at the same instant. Every job is therefore tested three ways
-— it does the work, a re-run is a no-op, and two concurrent runs converge
-on the same state.
-"""
+"""Maintenance jobs against a real database: each does the work, a re-run is a no-op, two concurrent runs converge (no advisory lock, ADR-0041)."""
 
 from __future__ import annotations
 
@@ -220,8 +213,7 @@ async def test_sample_gauges_counts_live_sessions_and_active_devices(pool, su) -
     assert result.detail is not None
     assert result.detail["sessions_active"] >= 1
     assert result.detail["devices_active"] >= 0
-    # A gauge job affects no rows; reporting otherwise would inflate
-    # mdx_auth_maint_rows_total into meaninglessness.
+    # A gauge job affects no rows; reporting otherwise would inflate mdx_auth_maint_rows_total.
     assert result.rows == 0
 
 

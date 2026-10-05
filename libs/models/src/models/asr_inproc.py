@@ -1,12 +1,4 @@
-"""``ASRProvider`` over the existing in-process faster-whisper engine.
-
-Default for CI and self-host. The engine (asr-worker's ``WhisperEngine``)
-stays where it is — this wrapper adapts it to the provider contract without
-moving 500 lines, so behaviour on ``inproc_cpu_asr`` is identical to the
-pre-seam worker (parity test in ``tests/unit/test_asr_inproc.py``).
-Hoisting the engine itself into a lib is the recorded coupling debt
-(pyproject import-linter note), not this sprint.
-"""
+"""``ASRProvider`` adapting asr-worker's in-process ``WhisperEngine`` to the provider contract (CI / self-host default)."""
 
 from __future__ import annotations
 
@@ -81,7 +73,6 @@ class InProcASRProvider:
         return self._engine.warmup_seconds
 
     async def warm_up(self) -> None:
-        # Weight loading is CPU-bound and synchronous; keep the loop free.
         await asyncio.to_thread(self._engine.load)
 
     async def transcribe(
@@ -143,7 +134,7 @@ class InProcASRProvider:
         should_cancel: ShouldCancel | None = None,
         group_seconds: float = 300.0,
     ) -> TranscriptionOutput:
-        """Sprint TQ2 T1: the worker's planned runs, one engine call each."""
+        """The worker's planned runs, one engine call."""
         started = time.monotonic()
         audio_seconds = sum(r.end_ms - r.start_ms for r in runs) / 1000
         try:

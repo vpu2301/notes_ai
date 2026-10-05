@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""Materialise action items for notes that predate migration 0037.
+"""Warm the action-item projection for notes that predate migration 0037 (items are
+derived lazily since 0042). Idempotent; per tenant on a tenant-scoped connection.
 
     DB_APP_ROLE_DSN=postgresql://... uv run python scripts/ops/backfill_action_items.py [--tenant <uuid>]
-
-Optional: since 0042 items are derived lazily the first time a version is
-read, so this only warms the projection ahead of the first read.
-Idempotent: the (version, item_key) unique constraint makes a rerun a
-no-op. Walks every tenant (or one), every live note's current version,
-on a tenant-scoped connection so RLS applies exactly as it does on read.
-The anchor for relative dates is TODAY in the tenant's zone — the parser
-only needs it for "Friday"-style text.
 """
 
 from __future__ import annotations

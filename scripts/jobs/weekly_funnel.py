@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-"""Weekly loop-funnel report (Sprint 22).
+"""Weekly loop-funnel CSV (counts only) from scripts/ops/loop_funnel.sql as ``funnel_reader``.
 
-    DATABASE_URL=postgresql://funnel_reader:...@host/notes \\
-        uv run python scripts/jobs/weekly_funnel.py [--out DIR]
-
-Runs scripts/ops/loop_funnel.sql as the read-only `funnel_reader` role
-and writes `funnel-YYYY-WW.csv` (ISO week of the run) to --out (default
-`MDX_FUNNEL_REPORT_DIR`, then ./reports). Counts only — the file is the
-input to the weekly product cadence and safe to attach to a ticket.
-Idempotent: a rerun overwrites the same file.
+DATABASE_URL=postgresql://funnel_reader:...@host/notes uv run python scripts/jobs/weekly_funnel.py [--out DIR]
 """
 
 from __future__ import annotations
@@ -25,7 +18,6 @@ import asyncpg
 
 SQL = Path(__file__).resolve().parent.parent / "ops" / "loop_funnel.sql"
 if not SQL.exists():
-    # In the chart the SQL ships next to the job.
     SQL = Path(__file__).resolve().parent / "loop_funnel.sql"
 
 

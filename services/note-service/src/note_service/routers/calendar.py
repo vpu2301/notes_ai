@@ -1,4 +1,4 @@
-"""Calendar connections and the "Coming up" list (0019, 0020).
+"""Calendar connections and the "Coming up" list.
 
     GET    /v1/calendar/connections                    the user's connected accounts and links
     POST   /v1/calendar/google/connect                 start Google sign-in → {authorize_url}
@@ -9,20 +9,9 @@
     PUT    /v1/calendar/connections/{id}/calendars     which of them feed the list
     GET    /v1/calendar/events?days=7                  upcoming events across every account
 
-Connections are personal: every route filters on the caller's ``sub``
-on top of tenant RLS. The callback is the one unauthenticated route —
-a browser navigation from Google carries no bearer token — and it trusts
-only what the HMAC-signed ``state`` says (domain/calendar_state).
-
-Both clients drive the same flow. They differ in ``return_to``: the web
-app asks to come back to its own origin, the Mac app to its
-``notesai://`` scheme, which ASWebAuthenticationSession intercepts.
-
-A calendar link (0020) needs no Google client at all: the user pastes
-the calendar's private iCal address, the service fetches it once to
-check it is a calendar, seals the URL and stores it as a connection with
-``provider = "ics"``. From there it behaves like an account with one
-calendar.
+Connections are personal: every route filters on the caller's ``sub`` on top of
+tenant RLS. The callback is the one unauthenticated route and trusts only the
+HMAC-signed ``state``. A calendar link (``provider = "ics"``) needs no Google client.
 """
 
 from __future__ import annotations
@@ -84,11 +73,9 @@ class ConnectionView(BaseModel):
 class ConnectionsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # False when the deployment has no Google client configured: the
-    # clients hide the connect button instead of showing a dead one.
+    # False without a Google client: clients hide the connect button.
     available: bool
-    # 0020: calendar links need nothing from the deployment; True lets an
-    # older client tell this server from one without the route.
+    # Always True; lets an older client tell this server from one without the route.
     link_available: bool = True
     connections: list[ConnectionView]
 
@@ -96,8 +83,7 @@ class ConnectionsResponse(BaseModel):
 class ConnectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Where the browser lands after Google: the web app's origin (plus a
-    # path) or the Mac app's notesai:// URL. Must match an allowed prefix.
+    # Must match an allowed prefix.
     return_to: str = Field(min_length=1, max_length=1024)
     login_hint: str | None = Field(default=None, max_length=254)
 
@@ -160,10 +146,7 @@ class EventView(BaseModel):
     attendees: list[str]
     organizer: str | None
     response_status: str | None
-    # Sprint 34: what a capture started from this event hands back to
-    # `POST /v1/notes/meeting` — the invite's own identity and the agenda
-    # derived from its description. The description itself never leaves
-    # the server.
+    # Handed back to `POST /v1/notes/meeting`; the description itself never leaves the server.
     ical_uid: str
     agenda_lines: list[str]
 
@@ -209,9 +192,8 @@ def _connection_view(row: repo.ConnectionRow) -> ConnectionView:
 
 
 def return_to_allowed(return_to: str, prefixes: list[str]) -> bool:
-    """A return_to is accepted when it starts with an allowed prefix AND
-    the character after the prefix cannot extend the host (so
-    ``http://localhost:5173.evil.com`` does not pass for ``http://localhost:5173``)."""
+    """Starts with an allowed prefix AND the next character cannot extend the host
+    (``http://localhost:5173.evil.com`` must not pass)."""
     candidate = return_to.strip()
     if not candidate or any(c in candidate for c in "\r\n\t "):
         return False
@@ -342,8 +324,7 @@ async def google_callback(
         )
         return back(calendar="error", reason=exc.code)
     if not tokens.refresh_token:
-        # Consent was skipped (a re-authorisation without prompt=consent):
-        # without a refresh token the connection would die in an hour.
+        # Consent skipped: without a refresh token the connection dies in an hour.
         return back(calendar="error", reason="no_refresh_token")
 
     blob = await repo.seal_tokens(
@@ -377,7 +358,7 @@ async def google_callback(
     return back(calendar="connected", connection_id=str(row.id))
 
 
-# 0020: bad input answers 400; the calendar's server misbehaving, 502.
+# Bad input answers 400; the calendar's server misbehaving, 502.
 _LINK_INPUT_CODES = frozenset(
     {"bad_url", "private_host", "unresolvable", "not_ics", "too_large", "too_many_redirects"}
 )
@@ -406,8 +387,7 @@ async def ics_connect(
     fingerprint = feed_fingerprint(url)
     blob = await repo.seal_feed_url(state.envelope, tenant_id=claims.tid, url=url)
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # Labels share the (provider, account_email) uniqueness with Google
-        # rows; two links with the same calendar name get told apart.
+        # Labels share the (provider, account_email) uniqueness with Google rows.
         taken = {
             r.account_email
             for r in await repo.list_live(conn, user_sub=claims.sub)
@@ -441,8 +421,7 @@ async def disconnect(
     await _audit(claims, audit_kinds.CALENDAR_DISCONNECTED, row.id, {"provider": row.provider})
     if row.provider != "google":
         return
-    # Best effort, after the row is gone from every read path: a dead
-    # token at Google is a bonus, not a precondition.
+    # Best effort: revoking at Google is a bonus, not a precondition.
     try:
         tokens = await repo.open_tokens(
             state.envelope, tenant_id=row.tenant_id, token_blob=row.token_blob

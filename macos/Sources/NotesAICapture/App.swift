@@ -17,8 +17,7 @@ struct NotesAICaptureApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // Full-size window for managing captures; opened on demand from the
-        // popover (or ⌘⇧N while the app is frontmost). Never opened at launch.
+        // Full-size window, opened on demand from the popover (or ⌘⇧N). Never opened at launch.
         Window("Notes AI Capture", id: MainWindow.id) {
             MainWindowView()
                 .environmentObject(app)
@@ -64,30 +63,22 @@ enum MainWindow {
     static let id = "main"
 }
 
-/// The app is menu-bar-only until the main window is shown, at which point
-/// it becomes a regular app (Dock icon, ⌘-Tab, menu bar) and reverts once
-/// the window closes.
+/// Menu-bar-only until the main window is shown; then a regular app (Dock icon, ⌘-Tab), reverting when the window closes.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `notesai://` links clicked outside the app (IDX-M2). SwiftUI's
-        // `onOpenURL` needs a scene that is on screen, and this app spends
-        // most of its life with none; the Apple Event is delivered
-        // whatever is showing.
+        // `notesai://` links clicked outside the app. SwiftUI's `onOpenURL` needs a scene on screen; the Apple Event is delivered regardless.
         NSAppleEventManager.shared().setEventHandler(
             self,
             andSelector: #selector(handleURLEvent(_:withReply:)),
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL))
-        // `swift run` has no Info.plist (no LSUIElement), so enforce it here
-        // too — this also keeps the Window scene from opening at launch.
+        // `swift run` has no Info.plist (no LSUIElement), so enforce it here too; also keeps the Window scene from opening at launch.
         NSApp.setActivationPolicy(.accessory)
-        // Sprint 31: an aggregate device a crashed run left behind. Only
-        // lists devices — no permission is asked for.
+        // An aggregate device a crashed run left behind. Only lists devices — no permission asked.
         if #available(macOS 14.2, *) {
             DispatchQueue.global(qos: .utility).async { SystemAudioTap.removeOrphanAggregateDevices() }
         }
-        // `open "Notes AI Capture.app" --args --window` starts straight into
-        // the full window.
+        // `--args --window` starts straight into the full window.
         if CommandLine.arguments.contains("--window") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 NotificationCenter.default.post(name: .openMainWindow, object: nil)
@@ -113,8 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension Notification.Name {
-    /// Ask the (always-alive) menu-bar label to open the main window; used
-    /// where no SwiftUI `openWindow` environment is available.
+    /// Ask the (always-alive) menu-bar label to open the main window where no `openWindow` environment exists.
     static let openMainWindow = Notification.Name("NotesAICapture.openMainWindow")
     /// A `notesai://` URL arrived from outside the app; the object is the URL.
     static let openAppURL = Notification.Name("NotesAICapture.openAppURL")
@@ -164,9 +154,7 @@ struct MenuBarLabel: View {
             }
     }
 
-    /// Sprint 31: while the call audio is recorded too, the record symbol
-    /// carries a small headphones badge — the one place the state is
-    /// visible whatever window is open.
+    /// While call audio is recorded too, the record symbol carries a small headphones badge.
     @ViewBuilder
     private var icon: some View {
         if capture.isRecording, capture.recorder.captureMode.recordsSystemAudio,
@@ -178,8 +166,7 @@ struct MenuBarLabel: View {
         }
     }
 
-    /// "record.circle.fill" with "headphones" drawn small at its lower
-    /// right, as one template image (a status item shows a single image).
+    /// "record.circle.fill" with "headphones" drawn small at its lower right, as one template image.
     private static let callAudioBadge: NSImage? = {
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         guard let base = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: nil)?

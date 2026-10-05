@@ -1,5 +1,4 @@
-// Sprint TQ3: one name, one spelling — the words the transcript tab shows
-// about the server's spelling overlay. Pure, so the states are testable.
+// The transcript tab's wording for the server's spelling overlay. Pure.
 
 import type { EntityCorrection } from "../api/types";
 
@@ -35,11 +34,7 @@ function words(language: string | null | undefined) {
   return WORDS[(language ?? "") as Lang] ?? WORDS.en;
 }
 
-/**
- * The banner over the transcript, or null when there is nothing to say:
- * "3 Schreibweisen vereinheitlicht · Prüfen". Counts variant spellings —
- * what changed on screen — not clusters.
- */
+/** The banner over the transcript, or null. Counts variant spellings, not clusters. */
 export function correctionsBanner(
   corrections: EntityCorrection[] | undefined,
   language: string | null | undefined,
@@ -53,8 +48,7 @@ export function correctionsBanner(
   return { text: parts.filter(Boolean).join(" · "), action: w.review };
 }
 
-/** Still asks for a look: not rejected, and nobody has decided it yet.
- *  A spelling the user accepted leaves the sheet and the banner. */
+/** Not rejected and not yet decided. */
 export function needsReview(c: EntityCorrection): boolean {
   return c.status !== "rejected" && !c.decided;
 }
@@ -70,11 +64,7 @@ export interface TextPart {
   correction?: EntityCorrection;
 }
 
-/**
- * A paragraph cut into plain text and the spellings accepted corrections
- * put there, so each can carry a quiet underline and its "unified from"
- * tooltip (TR-13: what changed is always visible). Whole words only.
- */
+/** A paragraph split into plain text and accepted-correction spans (whole words only). */
 export function unifiedParts(paragraph: string, corrections: EntityCorrection[] | undefined): TextPart[] {
   const accepted = (corrections ?? []).filter((c) => c.status === "accepted" && c.to_text.trim());
   if (accepted.length === 0) return [{ text: paragraph }];

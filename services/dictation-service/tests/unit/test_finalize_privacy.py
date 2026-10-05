@@ -1,10 +1,4 @@
-"""Sprint-07 (ADR-0018) — the demo privacy envelope on the finalize path.
-
-Proves that ``purge_audio`` / a disabled object store result in *no audio
-at rest*: ``EncryptedObjectStore.put`` is never called and no
-``audio_files`` row is written. The complementary test proves the
-normal path still attempts the upload.
-"""
+"""Privacy envelope (ADR-0018): ``purge_audio`` / a disabled store means no audio at rest."""
 
 from __future__ import annotations
 

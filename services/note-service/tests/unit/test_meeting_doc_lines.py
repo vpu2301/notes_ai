@@ -1,11 +1,5 @@
-"""Line-level provenance (Summary Engine v2, Q1 T3).
-
-Every written line of the document carries its kind and the fact ids it
-rests on. Q1 added lines without changing a byte of the text (the
-snapshot was then taken from the pre-Q1 renderer). Q3 changed the text on
-purpose — one fact once, no single-bullet topics, time order, no
-transcript note — and the snapshot was re-taken from the Q3 renderer
-with the diff reviewed (``render_sections_q3.json``).
+"""Line-level provenance: every written line carries its kind and the fact ids it
+rests on. The text snapshot is ``render_sections_q3.json``.
 """
 
 from __future__ import annotations
@@ -47,7 +41,7 @@ def _fact(text: str, kind: str, start_ms: int, **kw: Any) -> VerifiedFact:
 def snapshot_cases() -> dict[str, dict[str, Any]]:
     """The fixed inputs the snapshot was taken from. Old shapes only
     (bare bullet strings, bare summary sentences) — the shapes the
-    pre-Q1 renderer accepted."""
+    previous renderer accepted."""
     agenda = _fact("Review of the harbour ferry timetable", schema.AGENDA_ITEM, 1_000)
     decision = _fact(
         "The winter timetable starts on the first of the month", schema.DECISION, 9_000
@@ -211,5 +205,5 @@ def test_a_fact_line_cites_its_own_fact() -> None:
     ):
         assert line.fact_ids == (fact.item_key,)
     overview = sections[0]
-    # Q3: no transcript note — every overview line rests on a fact.
+    # No transcript note — every overview line rests on a fact.
     assert all(line.kind != "note" and line.fact_ids for line in overview.lines)

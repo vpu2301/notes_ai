@@ -1,4 +1,4 @@
-"""The shadow script reads transcript text: it may print counts only (Sprint 32 B-7)."""
+"""The shadow script reads transcript text: it may print counts only."""
 
 from __future__ import annotations
 

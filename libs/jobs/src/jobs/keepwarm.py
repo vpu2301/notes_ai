@@ -1,11 +1,4 @@
-"""Scheduled keep-warm probes (DEP-S1-03) — off by default.
-
-A scale-to-zero endpoint costs nothing idle and 1–5 minutes on the first
-job. Keeping it warm during expected traffic trades that latency for an
-hourly bill; the trade is a per-environment decision with cost numbers
-(DEP-S6 for prod). Here: the schedule predicate (pure, tested) and the
-periodic task built on ``observability.run_periodic``.
-"""
+"""Scheduled keep-warm probes for scale-to-zero endpoints, off by default."""
 
 from __future__ import annotations
 

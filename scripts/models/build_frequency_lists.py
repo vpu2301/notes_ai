@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
-"""Sprint TQ3 T1 — the common-word lists ``entity_unify`` reads.
+"""Build ``freq_<de|en|uk>.txt`` (50 000 most frequent lower-cased forms) and
+``names.txt`` for ``entity_unify`` from Tatoeba sentence exports (CC-BY 2.0 FR;
+attribution in docs/legal/third-party-notices.md).
 
     python scripts/models/build_frequency_lists.py <dir with deu.tsv eng.tsv ukr.tsv>
-
-Source: Tatoeba sentence exports (https://downloads.tatoeba.org/exports/per_language/
-<lang>/<lang>_sentences.tsv.bz2), CC-BY 2.0 FR (some sentences CC0) — attribution in
-docs/legal/third-party-notices.md. Fetched 2026-10-01.
-
-Output: ``libs/asr_models/src/asr_models/resources/freq_<de|en|uk>.txt`` — the 50 000
-most frequent lower-cased word forms, one per line, most frequent first. For en and uk a
-form written capitalised in the middle of a sentence more often than not is a name
-("Tom", "Mary" — Tatoeba's favourites) and is left out; German capitalises every noun, so
-the rule cannot apply there.
-
-``names.txt`` — the forms English leaves out by that rule ("tom", "berlin", "merkel",
-"monday"). English capitalises names and almost nothing else, so it is the name list the
-German one cannot carry: "Krise" is a German noun, "Berlin" is a name in both.
 """
 
 from __future__ import annotations

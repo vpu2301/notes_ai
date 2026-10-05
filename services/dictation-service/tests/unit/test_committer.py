@@ -40,9 +40,7 @@ def test_no_silence_boundary_not_committed() -> None:
 
 
 def test_stale_word_commits_without_silence_boundary() -> None:
-    """The backstop: continuous speech with no qualifying pause must not
-    stall the transcript forever (sprint-14 fix, ADR-0013 amendment) —
-    otherwise a pause-free session finalizes an EMPTY transcript."""
+    """Backstop: pause-free speech must not stall the transcript forever."""
     c = Committer(max_provisional_ms=4000)
     decisions = c.evaluate(
         candidates=[_w("hello", 1000, 1500)],

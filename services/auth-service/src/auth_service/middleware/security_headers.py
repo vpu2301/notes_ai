@@ -1,19 +1,7 @@
-"""Response headers and request-size limits for auth-service (IDX-B3 E).
+"""Response headers and request-size limits.
 
-Two middlewares, both deliberately small.
-
-**What is here and what is not.** HSTS is set at the TLS terminator, not
-in FastAPI: an application-set `Strict-Transport-Security` on a response
-that arrived over plain HTTP is ignored by browsers and misleading to
-whoever reads the code. `Secure` on the refresh cookie is likewise a
-terminator-dependent setting and lives in config
-(`AUTH_COOKIE_SECURE`). What FastAPI can set truthfully is set here.
-
-**Why `Cache-Control: no-store` on `/auth/*`.** These responses carry
-access tokens, one-time codes' challenge ids, session lists and email
-addresses. A shared proxy or a browser back-button that re-serves one of
-them is the whole risk; RFC 6749 §5.1 requires it for token responses,
-and the same reasoning covers the rest of the surface.
+HSTS belongs at the TLS terminator, not here. `/auth/*` gets `Cache-Control:
+no-store` (RFC 6749 §5.1 for tokens; the rest carries equally sensitive data).
 """
 
 from __future__ import annotations
@@ -27,15 +15,10 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-# 16 KiB. The largest legitimate body on this service is an OAuth form or
-# a JSON login — hundreds of bytes. The limit exists so an unauthenticated
-# endpoint cannot be made to buffer megabytes per connection.
+# 16 KiB: the largest legitimate body is hundreds of bytes.
 MAX_BODY_BYTES = 16 * 1024
 
-# A page rendered by this service (the email-revert and lockdown pages)
-# needs its own inline styles and nothing else at all: no scripts, no
-# images, no frames, no form posts. `default-src 'none'` with one
-# exception is the tightest policy that still renders.
+# The revert/lockdown pages need inline styles and nothing else.
 HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 
 
@@ -45,23 +28,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         response = await call_next(request)
 
-        # Applied to everything: neither costs anything and both close a
-        # class of browser-side mistake rather than a specific bug.
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
 
         content_type = response.headers.get("content-type", "")
         if content_type.startswith("text/html"):
             response.headers.setdefault("Content-Security-Policy", HTML_CSP)
-            # A revert page acts on load; framing it is the setup for a
-            # click that the user did not mean to make.
+            # A revert page acts on load; never framable.
             response.headers.setdefault("X-Frame-Options", "DENY")
 
         if request.url.path.startswith("/auth") or request.url.path.startswith("/admin"):
-            # `setdefault` so the OAuth route's own explicit `no-store`
-            # (RFC 6749 §5.1) is not overwritten, and so the JWKS
-            # document keeps the `public, max-age=300` it wants — that one
-            # is a public key, and caching it is the point.
+            # `setdefault`: the OAuth route sets its own `no-store` and JWKS wants `public, max-age=300`.
             response.headers.setdefault("Cache-Control", "no-store")
             response.headers.setdefault("Pragma", "no-cache")
 
@@ -69,14 +46,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class BodyLimitMiddleware(BaseHTTPMiddleware):
-    """Refuse oversized request bodies with 413 before they are parsed.
-
-    Checks `Content-Length` only. A chunked request without one is passed
-    through: Starlette streams it, and rejecting all unlengthed requests
-    would break legitimate clients for a limit that ASGI servers already
-    enforce at a coarser level. The value here is stopping the easy case
-    cheaply, not being a substitute for the server's own limits.
-    """
+    """Refuse oversized bodies with 413 by `Content-Length` only; chunked requests pass (the ASGI server bounds them)."""
 
     def __init__(
         self, app: Callable[..., Awaitable[object]], *, max_bytes: int = MAX_BODY_BYTES

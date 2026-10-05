@@ -73,8 +73,7 @@ struct RootView: View {
                         .padding(.top, -12)
                 }
                 if case .idle = capture.phase {
-                    // The six kinds don't fit across the popover as a
-                    // pill; a menu beside the button keeps it one row.
+                    // The six kinds don't fit across the popover as a pill; a menu keeps it one row.
                     HStack(spacing: 6) {
                         NewMeetingButton(fill: true, height: 32)
                         MeetingTypeMenu()
@@ -82,15 +81,13 @@ struct RootView: View {
                 } else {
                     ActiveCaptureCard(compact: true)
                         .dsCard(padding: 12)
-                    // Sprint 34: mark a moment without opening the window —
-                    // the lowest-friction way there is to say "this bit".
+                    // Mark a moment without opening the window.
                     if capture.isRecording { QuickNoteField() }
                 }
                 if app.recents.isEmpty {
                     MeetingsEmptyState(compact: true)
                 } else {
-                    // No ScrollView: inside a MenuBarExtra window it collapses to
-                    // zero height, and six rows fit without one.
+                    // No ScrollView: inside a MenuBarExtra window it collapses to zero height.
                     MeetingList(compact: true, limit: 4)
                     OpenMainWindowButton {
                         Text("All meetings")
@@ -108,13 +105,7 @@ struct RootView: View {
     }
 }
 
-/// "Quick note…" in the menu-bar popover.
-///
-/// One line, Return, gone. It appends to the same `user_notes` the capture
-/// window is typing into and is stamped with the moment it was written, so
-/// a thought marked from the menu bar anchors to the same passage as one
-/// typed in the window. Nothing else in the app is this close to hand
-/// during a call, which is exactly when the note is worth the most.
+/// "Quick note…" in the menu-bar popover: one line, Return, gone. Appends to the same `user_notes` the window types into, stamped with the moment written.
 struct QuickNoteField: View {
     @EnvironmentObject private var capture: CaptureViewModel
     @State private var line = ""

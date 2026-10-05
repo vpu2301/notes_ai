@@ -1,10 +1,5 @@
-"""Aggregated ``layer_c.completion.shown`` audit (sprint-08 buffer pattern).
-
-One audit row per keystroke would pollute the hash chain (the
-note-service ``DraftAuditBuffer`` precedent), so served completions
-are counted per tenant in memory and flushed as ONE aggregated event
-per tenant every flush interval. Losing a count on crash is acceptable;
-the filtered events (warn) are NOT buffered — those write immediately.
+"""Aggregated ``layer_c.completion.shown`` audit: per-tenant counts flushed as one
+event per interval. Losing a count on crash is acceptable; filtered events are not buffered.
 """
 
 from __future__ import annotations

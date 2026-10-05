@@ -1,12 +1,4 @@
-"""Stable error codes for the dictation.v1 wire protocol.
-
-These are PUBLIC. Once a frontend ships against them they're a contract:
-new codes can be added, existing ones can't be renamed or repurposed.
-
-`recoverable` indicates whether the client should attempt to recover
-the session (reconnect, retransmit, restart) or treat the error as
-terminal.
-"""
+"""Stable, public error codes for the dictation wire protocol; codes may be added, never renamed."""
 
 from __future__ import annotations
 
@@ -36,9 +28,7 @@ class ErrorCode(StrEnum):
     INTERNAL = "internal"
 
 
-# Codes flagged recoverable mean: client should not give up — retry,
-# reconnect, or pause-then-resume can usually recover. Non-recoverable
-# means the session is over; the client should surface a UI error.
+# Recoverable: retry/reconnect/resume can recover. Otherwise the session is over.
 RECOVERABLE: Final[frozenset[ErrorCode]] = frozenset(
     {
         ErrorCode.BAD_MESSAGE,

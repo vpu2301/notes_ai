@@ -2,7 +2,7 @@
 Staging observability: otel-collector (OTLP → Prometheus exposition) +
 a Prometheus scraping it — the minimum for the product metrics and the
 KEDA scaler. Production replaces both with kube-prometheus-stack + the
-repo dashboards/alerts (docs/deploy/observability.md); flip
+repo dashboards/alerts; flip
 observability.*.enabled=false there.
 */ -}}
 {{- if .Values.observability.otelCollector.enabled }}

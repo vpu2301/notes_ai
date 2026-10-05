@@ -15,7 +15,8 @@ Makefile text eol=lf
 *.jpg   binary
 *.gz    binary
 
-# Eval-corpus audio via Git LFS. The sprint-07 spec intended this but it was
-# never wired (found in the sprint-21 deployment verification); wavs added
-# from here on are LFS pointers. Onboarding: `git lfs install` once per clone.
+# Eval-corpus audio via Git LFS (`git lfs install` once per clone).
 eval/**/*.wav filter=lfs diff=lfs merge=lfs -text
+
+# Tatoeba word lists (1.7 MB, generated) via Git LFS; CI checkouts set `lfs: true`.
+libs/asr_models/src/asr_models/resources/*.txt filter=lfs diff=lfs merge=lfs -text

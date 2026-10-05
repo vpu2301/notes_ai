@@ -1,9 +1,4 @@
-"""Minting a per-recipient share link (0035, Sprint 19).
-
-A link can be created for any live note — the note is a living document
-and the page always shows its current text (Sprint 23's "what changed"
-tells the recipient when it moved).
-"""
+"""Minting a per-recipient share link; the page always shows the note's current text."""
 
 from __future__ import annotations
 
@@ -32,9 +27,7 @@ def normalise_email(value: str | None) -> str | None:
 
 
 def new_ref_code() -> str:
-    """12 base32 characters from 8 random bytes. Opaque: it pre-fills
-    referral attribution and nothing else, so it carries no tenant or
-    note information a reader could learn from."""
+    """12 base32 characters from 8 random bytes; opaque, carries no tenant or note information."""
     return base64.b32encode(secrets.token_bytes(8)).decode("ascii").rstrip("=").lower()[:12]
 
 

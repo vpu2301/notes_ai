@@ -1,34 +1,10 @@
 #!/usr/bin/env python3
-"""CI gate: every active identity has its bridge ``users`` row (BE-1).
-
-``users`` is how the rest of the estate turns a ``sub`` into a person.
-note-service reads it to offer share recipients; notification-service
-reads it to find an address to mail. An identity without one holds a
-perfectly valid token, writes notes nobody can share with them, and
-receives no mail — and every one of those failures is silent on the path
-that produces it. Nothing 500s; the person is simply not there.
-
-(The authorship foreign keys — ``notes.primary_author_id``,
-``note_versions.created_by``, ``autocomplete_*.owner_user_id`` — moved to
-``identities`` in migration 0028, so this is no longer about being able
-to save a note. It is about being findable.)
-
-The rule (ADR-IDX-03: "``users`` is a bridge until B2") is that the row is
-written in the SAME transaction as the identity and its personal tenant —
-``create_with_personal_workspace`` and ``ensure_personal_workspace`` are
-the only writers. This gate is what keeps that true: a second code path
-that creates identities, or a transaction boundary drawn in the wrong
-place, shows up here rather than as a person who cannot be shared with.
-
-Runs against a live database, beside ``check-rls-policies.py`` and
-``check-identity-grants.py``::
+"""CI gate against a live database: every active identity has its bridge ``users`` row,
+on a tenant it is a member of (written in the same transaction as the identity).
 
     DATABASE_URL=postgres://... uv run python scripts/ci/check-identity-bridge.py
 
-Exit codes:
-    0 — every active identity is bridged (and on a fresh DB, there are none)
-    1 — unbridged identities found; their ids are printed
-    2 — could not reach the database
+Exit 0 clean, 1 unbridged identities (ids printed), 2 database unreachable.
 """
 
 from __future__ import annotations
@@ -39,13 +15,11 @@ import sys
 
 import asyncpg
 
-# The superuser DSN, as `check-rls-policies.py` uses. It has to be:
-# `app_role` holds NO grant on `identities` — that is `check-identity-grants.py`
-# talking, and this gate must not be the reason somebody widens it.
+# Superuser DSN: `app_role` holds NO grant on `identities`, and this gate
+# must not be the reason somebody widens it.
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 
-# The assertion from the sprint brief, verbatim in intent: an active
-# identity with no `users` row is a person who cannot author content.
+# An active identity with no `users` row is a person who cannot be found.
 UNBRIDGED = """
 SELECT i.id, i.email, i.legacy_idp
   FROM identities i
@@ -62,9 +36,7 @@ SELECT count(*) FROM identities i
  WHERE u.sub IS NULL AND i.status = 'active'
 """
 
-# The other half of the rule: a bridge row must point at a tenant the
-# identity is actually a member of. A `users` row on a tenant with no
-# matching membership authors content into a workspace nobody can reach.
+# A bridge row must point at a tenant the identity is actually a member of.
 ORPHAN_BRIDGE = """
 SELECT u.sub, u.tenant_id
   FROM users u

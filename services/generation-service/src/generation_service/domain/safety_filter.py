@@ -1,15 +1,7 @@
-"""Output safety filter — completions are linguistic, never factual.
+"""Output safety filter: completions are linguistic, never factual.
 
-Sprint-15 rule: a completion may finish a sentence's grammar; it may
-NOT supply a budget figure. Every money amount, percentage, date-like
-fragment or bare number in the completion must appear VERBATIM in the
-text the author already typed, otherwise the completion is dropped
-(the endpoint answers 204 and audits ``layer_c.completion.filtered``).
-
-Same regex-sweep family as the nlp-service numeric artifacts: match
-classes are enumerated so the filter can report WHICH class fired
-(metric label), and the catch-all bare-number pattern runs last so a
-"$1,234.56" is reported as money, not as two bare numbers.
+Every money amount, percentage, date-like fragment or bare number in the completion
+must appear verbatim in the typed text, otherwise the completion is dropped.
 """
 
 from __future__ import annotations
@@ -19,8 +11,7 @@ from dataclasses import dataclass
 from typing import Final
 
 # Order matters: specific classes first; `bare_number` is the catch-all.
-# Amount: digit run with optional thousands groups (space/NBSP/comma/dot)
-# and an optional decimal part — covers 1,234.56 / 1 200 / 1200.50.
+# Digit run with optional thousands groups (space/NBSP/comma/dot) and decimals.
 _AMOUNT = "\\d+(?:[ \u00a0,.]\\d{3})*(?:[.,]\\d+)?"
 # Scale suffix: $1.2M, €50k, 3 млн грн.
 _SCALE = r"(?:\s?(?:[kmb]|тис|млн|млрд)\.?)?"
@@ -60,9 +51,7 @@ def check_completion(completion: str, *, text_before_cursor: str) -> FilterVerdi
     for reason, pattern in _PATTERNS:
         for match in pattern.finditer(completion):
             span = match.span()
-            # A fragment already attributed to a more specific class (e.g. the
-            # "1,234" inside an approved "$1,234.56") is not re-judged as a
-            # bare number.
+            # Already attributed to a more specific class.
             if any(span[0] >= s and span[1] <= e for s, e in consumed):
                 continue
             if match.group(0) not in text_before_cursor:

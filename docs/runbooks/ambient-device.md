@@ -11,8 +11,7 @@ use it: a Keycloak room-device token is rejected by `libs/auth.Claims`
 (no `sid`, plus `client_id`/`clientHost`/`clientAddress`, which the model
 forbids), so devices provisioned that way cannot call the API at all.
 
-**Requires:** auth-service in `MDX_IDP_MODE=native`. See
-`docs/runbooks/idx-issuer-cutover.md`.
+**Requires:** auth-service in `MDX_IDP_MODE=native`.
 
 ---
 

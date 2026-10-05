@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Sprint 31 M-5 — shown the first time "Record call audio" is turned on
-/// (and again whenever `CallAudioConsent.currentVersion` is raised). It
-/// cannot be dismissed any other way than by answering: Accept turns the
-/// setting on, Not now keeps recordings microphone-only.
+/// Shown the first time "Record call audio" is turned on (and whenever `CallAudioConsent.currentVersion` is raised). Only answering dismisses it.
 struct CallAudioConsentSheet: View {
     @EnvironmentObject private var capture: CaptureViewModel
 

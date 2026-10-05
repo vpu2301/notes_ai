@@ -1,26 +1,10 @@
 #!/usr/bin/env python3
-"""Sprint SQ2 T1 — why a note misses the middle and end of a recording.
+"""Why a note misses the middle and end of a recording: per-window tables and one
+verdict per hypothesis (H1-H8) from ``notes_eval.py`` pipeline reports.
 
-    uv run python scripts/eval/sq2_diagnose.py REPORT.json [REPORT.json …] \\
-        --out docs/eval/sq2-diagnosis-<date>.md
+    uv run python scripts/eval/sq2_diagnose.py REPORT.json [...] --out <diagnosis.md>
 
-Reads ``notes_eval.py`` pipeline reports (each meeting row carries the
-engine's per-window numbers since SQ2 T1) and writes, per report, the
-per-window table and one verdict per hypothesis:
-
-* **H1** later windows failed (``call_failed`` in thirds 2–3);
-* **H2** the small-model profile starves long windows (fixed budget hit);
-* **H3** the merge drops later facts (kept ÷ verified in thirds 2–3 ≪ third 1);
-* **H4** reduce cites only the head (cited ÷ available per third uneven);
-* **H5** noise exclusion removed content (excluded share of speech);
-* **H6** a one-section family (one block planned for ≥ 5 minutes);
-* **H7** (added in SQ2) the model lists the head of each window
-  (facts in the window's second half ≪ its first half);
-* **H8** (added in SQ2) the window's fact budget binds on any profile
-  (the model returns as many facts as it may, so the cap, not the
-  recording, decides where the list stops).
-
-Numbers and meeting ids only — never transcript or note text.
+Numbers and meeting ids only.
 """
 
 from __future__ import annotations

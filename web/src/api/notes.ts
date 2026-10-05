@@ -56,11 +56,7 @@ export function createNote(content: NoteContent): Promise<NoteCreatedResponse> {
   });
 }
 
-/**
- * The problem `type` the server answers a non-author read that came without
- * `?purpose=`. The page retries once with a purpose and says whose note it
- * is showing; see `ReadPurpose`.
- */
+/** Problem `type` for a non-author read without `?purpose=`; the page retries once with one. */
 export const READ_PURPOSE_REQUIRED = "https://errors.notes-ai/missing-read-purpose";
 
 export function needsReadPurpose(err: unknown): boolean {
@@ -131,7 +127,7 @@ export function createFromTranscript(params: {
   });
 }
 
-// ── series, carry-over and the client version (Sprint 36) ─────────────
+// ── series, carry-over and the client version ─────────────────────────
 
 /** What is still open from the previous meeting in this series. */
 export function getCarried(id: string): Promise<CarriedView> {
@@ -167,12 +163,9 @@ export function getClientVersionCheck(id: string): Promise<ClientVersionCheck> {
   return api<ClientVersionCheck>("note", `/v1/notes/${id}/client-version/check`);
 }
 
-// ── corrections (Sprint 35) ───────────────────────────────────────────
-//
-// All three address a line by its `item_key` — the hash of its body with
-// the owner and the due date stripped. That is what lets an owner or a
-// date be fixed without detaching the line from the recipient's
-// confirmation on the shared page, or from its correction history.
+// ── corrections ───────────────────────────────────────────────────────
+// Lines are addressed by `item_key` (body hash, owner/due stripped), so an
+// owner or date fix keeps the line's confirmations and history.
 
 /** Take a line out of the note, and say why. */
 export function dismissItem(
@@ -199,13 +192,7 @@ export function restoreItem(
   });
 }
 
-/**
- * Fix a line's owner or due date in place. The key does not change, which
- * is the whole point of the route.
- *
- * Addressed under `/items/by-key/` because `PATCH /items/{item_id}` was
- * already taken by the Sprint 20 status route, which uses the row UUID.
- */
+/** Fix a line's owner or due date in place; the key does not change. `/items/{item_id}` is the status route (row UUID). */
 export function patchItem(
   id: string,
   itemKey: string,
@@ -223,16 +210,9 @@ export function patchItem(
   });
 }
 
-// ── the live meeting note (Sprint 34) ─────────────────────────────────
+// ── the live meeting note ─────────────────────────────────────────────
 
-/**
- * Open the note as Record is pressed. Idempotent on `client_capture_id`:
- * a retry, a double click and a second device all get the same note.
- *
- * The caller must NOT wait for this and must never let it stop a
- * recording — a note we failed to create is recoverable, a meeting we
- * failed to record is not.
- */
+/** Idempotent on `client_capture_id`. The caller must NOT await this or let it stop a recording. */
 export function startMeeting(body: StartMeetingRequest): Promise<StartMeetingResponse> {
   return api<StartMeetingResponse>("note", "/v1/notes/meeting", { method: "POST", json: body });
 }
@@ -276,7 +256,7 @@ export function notesBySourceJob(jobIds: string[]): Promise<SourceJobLink[]> {
   });
 }
 
-// ── delete, visibility, sharing (0016) ────────────────────────────────
+// ── delete, visibility, sharing ───────────────────────────────────────
 
 export function deleteNote(id: string): Promise<{ id: string; deleted_at: string }> {
   return api("note", `/v1/notes/${id}`, { method: "DELETE" });
@@ -298,15 +278,7 @@ export function shareWithMember(id: string, email: string): Promise<SharingView>
   return api<SharingView>("note", `/v1/notes/${id}/share`, { method: "POST", json: { email } });
 }
 
-/**
- * Mail the note to people, from the server.
- *
- * The old "Email link…" built a `mailto:` URL and let the browser hand it
- * to the desktop mail client, which produced an unstyled draft the sender
- * still had to send — and on macOS surfaced whatever Mail.app already had
- * open. This sends the real thing: workspace members are granted access
- * and pointed at the note, everyone else gets their own link.
- */
+/** Server-sent mail: members are granted access, everyone else gets their own link. */
 export function shareByEmail(
   id: string,
   body: { recipients: string[]; message?: string; lang?: string; expires_in_days?: number },
@@ -317,8 +289,7 @@ export function shareByEmail(
       recipients: body.recipients,
       message: body.message ?? "",
       expires_in_days: body.expires_in_days,
-      // The sender's UI language. The recipient's is unknowable — half of
-      // them have no account here — and people share within a team.
+      // The sender's UI language; the recipient's is unknowable.
       lang: body.lang ?? navigator.language,
     },
   });
@@ -328,8 +299,7 @@ export function unshareMember(id: string, sub: string): Promise<SharingView> {
   return api<SharingView>("note", `/v1/notes/${id}/share/${sub}`, { method: "DELETE" });
 }
 
-/** Idempotent: returns the existing live link if there is one. */
-/** `expiresInDays` undefined → the link never expires. */
+/** Idempotent (returns the existing live link). `expiresInDays` undefined → never expires. */
 export function createPublicLink(id: string, expiresInDays?: number): Promise<SharingView> {
   return api<SharingView>("note", `/v1/notes/${id}/public-link`, {
     method: "POST",
@@ -341,15 +311,14 @@ export function revokePublicLink(id: string): Promise<SharingView> {
   return api<SharingView>("note", `/v1/notes/${id}/public-link`, { method: "DELETE" });
 }
 
-/** Anonymous — no bearer, no session. */
-// ── Sprint 19: per-recipient links ────────────────────────────────
+// ── per-recipient links ───────────────────────────────────────────
 
 /** 201 with the new link, or 200 with the existing one for that e-mail. */
 export function createLink(id: string, body: CreateLinkRequest): Promise<LinkView> {
   return api<LinkView>("note", `/v1/notes/${id}/links`, { method: "POST", json: body });
 }
 
-/** Sprint 22: mail the link from the product. 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap. */
+/** Mail the link from the product. 422 `no_recipient_email`, 409 `recipient_opted_out`, 429 on a cap. */
 export function sendLink(
   id: string,
   linkId: string,
@@ -380,7 +349,7 @@ export function sharedCtaUrl(token: string): string {
   return buildUrl("note", `/v1/shared/${encodeURIComponent(token)}/cta`);
 }
 
-// ── Sprint 20: action items + recipient responses ────────────────
+// ── action items + recipient responses ───────────────────────────
 
 export function getItems(id: string): Promise<ItemView[]> {
   return api<ItemView[]>("note", `/v1/notes/${id}/items`);
@@ -438,7 +407,7 @@ export function unflagSection(token: string, sectionKey: string): Promise<void> 
   );
 }
 
-// ── Sprint 23: verification + report ──────────────────────────────
+// ── verification + report ─────────────────────────────────────────
 
 export function requestSharedVerification(token: string): Promise<void> {
   return api<void>("note", `/v1/shared/${encodeURIComponent(token)}/verify/request`, { method: "POST", auth: false });
@@ -471,12 +440,7 @@ export function downloadSharedPdf(token: string): Promise<Blob> {
 
 // ── ask this note ─────────────────────────────────────────────────────
 
-/**
- * Ask a question about one note. The answer comes from the model the
- * workspace is configured for, over the note's text and its transcript;
- * `history` is the conversation so far, oldest first, and the server
- * takes at most `ASK_HISTORY_LIMIT` turns of it.
- */
+/** `history` is oldest first; the server takes at most `ASK_HISTORY_LIMIT` turns. */
 export function askNote(id: string, question: string, history: AskTurn[]): Promise<AskResponse> {
   return api<AskResponse>("note", `/v1/notes/${id}/ask`, {
     method: "POST",

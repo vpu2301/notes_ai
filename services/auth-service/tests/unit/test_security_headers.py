@@ -1,10 +1,4 @@
-"""IDX-B3 E/K — response headers, body limits and the CORS contract.
-
-What is asserted here is only what FastAPI can truthfully control. HSTS
-and the cookie's `Secure` flag depend on the TLS terminator; asserting
-them in-process would prove nothing and hide where they actually live
-(`docs/runbooks/idx-secrets.md` and `AUTH_COOKIE_SECURE`).
-"""
+"""Response headers, body limits and the CORS contract. HSTS and the cookie `Secure` flag belong to the TLS terminator and `AUTH_COOKIE_SECURE`."""
 
 from __future__ import annotations
 
@@ -32,10 +26,7 @@ def test_every_response_refuses_content_sniffing_and_referrers(client: TestClien
 
 
 def test_auth_json_is_never_stored(client: TestClient) -> None:
-    """These bodies carry tokens, challenge ids, session lists, addresses.
-
-    A shared proxy or a back-button re-serving one is the whole risk.
-    """
+    """These bodies carry tokens, challenge ids, session lists, addresses; a proxy or back-button must not re-serve them."""
     response = client.post("/auth/password/policy")
     assert response.headers.get("Cache-Control") == "no-store"
     assert response.headers.get("Pragma") == "no-cache"
@@ -44,12 +35,7 @@ def test_auth_json_is_never_stored(client: TestClient) -> None:
 def test_the_jwks_document_keeps_its_own_cache_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The one `/auth`-adjacent response that SHOULD be cached.
-
-    It is a public key. `setdefault` in the middleware is what preserves
-    the router's `public, max-age=300`; a plain assignment would have
-    quietly made every service re-fetch it on every token.
-    """
+    """The public key SHOULD be cached; the middleware's `setdefault` preserves the router's `public, max-age=300`."""
     monkeypatch.setenv("TESTING", "true")
     from auth_service import deps
     from auth_service.config import settings
@@ -96,14 +82,12 @@ def test_a_normal_body_passes(client: TestClient) -> None:
         json={"email": "someone@example.com"},
         headers={"Origin": "http://localhost:5173"},
     )
-    # 404 in keycloak mode (the route is native-only) — the point is that
-    # it was not refused for size.
+    # 404 in keycloak mode (native-only route); the point is it was not refused for size.
     assert response.status_code != 413
 
 
 def test_cors_allows_the_headers_the_new_clients_send(client: TestClient) -> None:
-    """`X-Client-Type` is IDX-A2's; without it in `allow_headers` a browser
-    preflight fails and the SPA cannot declare itself."""
+    """Without `X-Client-Type` in `allow_headers` a browser preflight fails."""
     response = client.options(
         "/auth/email/start",
         headers={

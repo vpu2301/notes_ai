@@ -8,8 +8,6 @@ import { AlertIcon, CalendarClockIcon, CalendarIcon, LinkOffIcon, MicIcon, PlusI
 import { Menu, type MenuItem } from "./Menu";
 import { useToast } from "./Toaster";
 
-// Google events change rarely; a refresh every few minutes, on focus, and
-// after any connect/disconnect keeps the list honest without hammering.
 const REFRESH_MS = 5 * 60_000;
 
 /** Where Google sends the browser back: this page, flagged. */
@@ -182,11 +180,7 @@ function CalendarPicker({
   );
 }
 
-/**
- * Paste a calendar's private iCal address: the way in that needs no
- * Google client on the server (and works for Outlook / iCloud too). The
- * server fetches the feed before answering, so a wrong link fails here.
- */
+/** Calendar-link form (private iCal address); the server fetches the feed before answering. */
 function CalendarLinkDialog({
   onAdded,
   onClose,
@@ -268,19 +262,7 @@ function CalendarLinkDialog({
   );
 }
 
-/**
- * The home page's "Coming up" card: today's date, then the next days'
- * events from the user's connected calendars — a Google account or a
- * calendar link — or a one-button invitation to connect one. Start a
- * meeting note from any event.
- *
- * `invite` is that invitation, and a workspace with no notes in it turns
- * it off (WEB-1b). Somebody who has never recorded anything has no idea
- * yet what a connected calendar would be *for*; offering an OAuth consent
- * screen as the first thing they see puts a decision about Google in front
- * of the one-line reason they came. The card comes back, prompt and all,
- * the moment there is a first note.
- */
+/** Home "Coming up" card. `invite` = show the connect prompt; off while the workspace has no notes. */
 export function ComingUp({ invite = true }: { invite?: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -288,7 +270,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
   const [data, setData] = useState<UpcomingEventsResponse | null>(null);
   const [connections, setConnections] = useState<CalendarConnection[]>([]);
   const [available, setAvailable] = useState<boolean | null>(null);
-  // 0020: the server takes calendar links (false until it says so).
+  // False until the server says it takes calendar links.
   const [linkAvailable, setLinkAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
@@ -313,8 +295,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
       setData(events);
     } catch (err) {
       if (controller.signal.aborted) return;
-      // A missing backend route or a down service hides the card rather
-      // than filling the home page with an error the user cannot act on.
+      // A missing route or a down service hides the card rather than erroring.
       if (available === null) setAvailable(false);
       if (!quiet) toast.error(messageFor(err));
     } finally {
@@ -323,7 +304,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Back from Google: say how it went, tidy the URL, reload.
+  // Back from Google OAuth.
   useEffect(() => {
     const outcome = params.get("calendar");
     if (!outcome) return;
@@ -384,8 +365,7 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
     }
   };
 
-  // The title and the event id ride the URL; the invitees' names never do
-  // (URLs end up in history and logs) — they wait in sessionStorage.
+  // Invitee names never ride the URL (history, logs): they go via sessionStorage.
   const start = (ev: UpcomingEvent) => {
     saveCaptureContext(ev);
     const q = new URLSearchParams({ title: ev.title, event: ev.id });
@@ -427,12 +407,8 @@ export function ComingUp({ invite = true }: { invite?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connections, available, linkAvailable]);
 
-  // No way to connect anything and nothing connected: nothing to show.
   if (available === false && !linkAvailable && connections.length === 0) return null;
-  // Nothing connected and this is not the moment to ask: the card would be
-  // a date and an empty box. Note the ordering — a workspace that HAS a
-  // connected calendar still shows it on day one, because those events are
-  // real content rather than a request.
+  // Ordering: a connected calendar still shows on day one; only the prompt waits.
   if (!invite && connections.length === 0) return null;
 
   const now = new Date();

@@ -1,4 +1,4 @@
-"""Behavioural test for ``POST /templates`` plain create (M1·A4).
+"""Behavioural test for ``POST /templates`` plain create.
 
 Real handler, auth overridden, DB/audit stubbed — no infra required.
 """

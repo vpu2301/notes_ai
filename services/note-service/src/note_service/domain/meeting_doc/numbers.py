@@ -1,22 +1,6 @@
-"""Numbers as they are said (Sprint F3, T1).
-
-Sprint G0 switched the post-processor's number normalisation off for
-conversations, so a conversation's transcript says "eighteen and a half",
-"just under three hundred", "achthundert", "півтора". A figure is verified
-against its quote, and "check_numbers" asks whether every number in a
-fact was said — both have to read numbers written as words, not only
-digits.
-
-:func:`numbers_in` returns every number in a text — digits and words — as a
-:class:`~decimal.Decimal`. :func:`parse_value` reads one value the model
-wrote ("18.5", "1,200", "eighteen and a half"). Pure; en, de, uk.
-
-Coverage, stated so nobody assumes more: cardinals up to the millions,
-decimals said with "point"/"Komma"/"кома", "a half" / "and a half" /
-"quarter(s)" / "three quarters", German compounds ("einundzwanzig",
-"achtzehneinhalb", "zweitausendfünfhundert"), Ukrainian cardinals in their
-common forms and "півтора". Ordinals and years-as-words are not numbers
-here.
+"""Numbers as they are said (digits and words; en, de, uk): :func:`numbers_in`
+and :func:`parse_value`, as :class:`~decimal.Decimal`. Covers cardinals up to the
+millions, decimals, halves and quarters, German compounds; not ordinals or years as words.
 """
 
 from __future__ import annotations

@@ -1,5 +1,4 @@
-"""Sprint TQ2 T2/T3 — the segment gates, rule by rule, on synthetic
-segments; the rollback switch; and the no-content rule for diagnostics."""
+"""The segment gates rule by rule; the rollback switch; no content in diagnostics."""
 
 from __future__ import annotations
 

@@ -1,13 +1,4 @@
-"""Energy-based VAD over the sliding buffer.
-
-The streaming committer needs a silence-boundary signal to know when
-it's safe to graduate a word from PARTIAL to FINAL. We don't want to
-spin up the Silero model per window (latency + memory); a cheap
-short-term energy threshold is good enough for boundary detection.
-
-For higher-quality VAD on the full session (sprint 14 diarization), we
-fall back to the asr-worker's Silero wrapper.
-"""
+"""Cheap energy-based VAD for the committer's silence-boundary signal (no Silero per window)."""
 
 from __future__ import annotations
 
@@ -23,14 +14,8 @@ SAMPLES_PER_FRAME: int = SAMPLE_RATE_HZ * FRAME_MS // 1000
 @dataclass(frozen=True, slots=True)
 class VadConfig:
     energy_threshold: float = 0.005  # normalised RMS
-    # 240 ms. Was 500 ms (sprint 04) — measured against real speech in
-    # sprint 14 that was unreachable: inter-utterance pauses in natural
-    # dictation and in meeting turn-taking run
-    # ~200-450 ms, so a 500 ms contiguous-silence requirement returned
-    # None for every window and (with committer rule 2) NO word ever
-    # committed. 240 ms matches the standard inter-pause threshold and
-    # Silero's own turn-splitting default. See ADR-0013 amendment.
-    min_silence_frames: int = 12  # 240 ms
+    # 240 ms: natural pauses run ~200-450 ms, so 500 ms never fired and nothing committed.
+    min_silence_frames: int = 12
     smooth_frames: int = 3
 
 
@@ -40,13 +25,7 @@ _DEFAULT_VAD_CONFIG = VadConfig()
 def last_silence_boundary_ms(
     pcm: np.ndarray, *, end_ms: int, config: VadConfig = _DEFAULT_VAD_CONFIG
 ) -> int | None:
-    """Return the timestamp of the most recent silence-boundary (end of
-    speech, start of silence) within ``pcm``, or None if no boundary
-    has yet been observed.
-
-    The ``end_ms`` argument is the absolute time of the END of ``pcm`` in
-    the session's clock; the returned timestamp is in that same clock.
-    """
+    """Most recent speech→silence boundary in ``pcm`` (session clock, ``end_ms`` = end of pcm), or None."""
     if pcm.size < SAMPLES_PER_FRAME:
         return None
     n_frames = pcm.size // SAMPLES_PER_FRAME
@@ -54,17 +33,13 @@ def last_silence_boundary_ms(
     rms = np.sqrt(np.mean(frames * frames, axis=1))
     is_silence = (rms < config.energy_threshold).astype(np.int8)
 
-    # Walk back: find the most recent run of >= min_silence_frames silence.
     run = 0
     boundary_frame: int | None = None
     for i in range(n_frames - 1, -1, -1):
         if is_silence[i]:
             run += 1
             if run >= config.min_silence_frames:
-                # The silence run starts at i; the speech→silence boundary
-                # is i + min_silence_frames - 1 frames back from the end.
-                # The boundary timestamp is the START of the silence run.
-                boundary_frame = i
+                boundary_frame = i  # start of the silence run
                 break
         else:
             run = 0

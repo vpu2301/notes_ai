@@ -1,10 +1,4 @@
-"""RLS property tests for sprint-03 tables: audio_files + transcription_jobs.
-
-Extends the sprint-02 suite to cover the new PHI-bearing tables. Audio
-metadata leakage is a regulatory-grade incident; this suite gates merges.
-
-Skipped unless RUN_DB_INTEGRATION=1.
-"""
+"""RLS property tests for audio_files + transcription_jobs. Skipped unless RUN_DB_INTEGRATION=1."""
 
 from __future__ import annotations
 

@@ -1,19 +1,8 @@
 """Drain the account-mail outbox.
 
-**One row per transaction.** This is the whole design note. Claiming a
-batch inside a single transaction is the obvious implementation and it
-loses mail: a failure on row N rolls back the already-recorded sends of
-rows 1..N-1, so those messages are gone from the database but not from
-the recipients' inboxes, and the next poll sends them again. That bug
-was found and fixed in marketing-service; it is not being re-introduced
-here, where a duplicate means a second live password-reset link.
-
-The other half of the shape: because the outbox is RLS-scoped and this
-loop has no tenant of its own, it asks the unscoped writer pool which
-tenants have due mail and then opens a properly scoped connection per
-tenant. The alternative — granting the worker a pool that bypasses RLS —
-would put a permanent hole in the tenancy boundary for the sake of a
-background job.
+One row per transaction: a batch per transaction re-sends rows 1..N-1 after a
+failure on N (a second live reset link). The outbox is RLS-scoped, so the loop
+asks which tenants have due mail and opens a scoped connection per tenant.
 """
 
 from __future__ import annotations
@@ -81,9 +70,7 @@ async def deliver_one(
             context={**fields, **secrets},
         )
     except Exception as exc:  # noqa: BLE001
-        # A render failure is deterministic — the same row will fail
-        # identically forever. Retrying it would burn attempts and delay
-        # every mail behind it, so it dead-letters immediately.
+        # A render failure is deterministic: dead-letter immediately.
         logger.error(
             "auth.mail.render_failed",
             extra={"mail_id": str(mail_id), "kind": kind, "error": str(exc)},
@@ -154,9 +141,7 @@ async def deliver_once(
     backoff_base_s: float,
 ) -> int:
     """One drain pass. Returns how many rows were handled."""
-    # Unscoped app_role connection: the lookup is a SECURITY DEFINER
-    # function, which is the only thing on this pool that can see across
-    # tenants. Every row of actual work below runs scoped.
+    # Unscoped connection: the lookup is a SECURITY DEFINER function. All real work runs scoped.
     async with app_pool.acquire() as conn:
         tenant_ids = await repo.tenants_with_due_mail(conn)
     if not tenant_ids:
@@ -165,8 +150,7 @@ async def deliver_once(
     handled = 0
     for tenant_id in tenant_ids:
         while handled < batch_size:
-            # A fresh scoped connection — and therefore a fresh
-            # transaction — per row. See the module docstring.
+            # A fresh scoped connection (and transaction) per row.
             async with tenant_connection(app_pool, tenant_id) as conn:
                 did_work = await deliver_one(
                     conn,
@@ -204,16 +188,13 @@ async def run_forever(
                 max_attempts=max_attempts,
                 backoff_base_s=backoff_base_s,
             )
-            # A full batch means there is probably more waiting; go
-            # straight round again rather than sleeping on a backlog.
+            # A full batch means more is probably waiting: no sleep.
             if sent >= batch_size:
                 continue
         except asyncio.CancelledError:
             logger.info("auth.mail.worker_stopped")
             raise
         except Exception as exc:  # noqa: BLE001
-            # The loop must outlive any single failure — a worker that
-            # dies on one bad poll stops all account mail until the next
-            # deploy, and nothing else in the system would notice.
+            # The loop must outlive any single failure.
             logger.exception("auth.mail.drain_failed", extra={"error": str(exc)})
         await asyncio.sleep(interval_s)

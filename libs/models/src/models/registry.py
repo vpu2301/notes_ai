@@ -1,19 +1,6 @@
-"""Resolve ``(workspace, operation)`` to a backend — at startup, not per call.
+"""Resolve ``(workspace, operation)`` to a backend: provider setting → tier → env override → enabled/allowed/resolved.
 
-Resolution order (spec §D):
-
-1. workspace ``provider`` setting: ``platform`` → routing table;
-   ``anthropic`` → the ``anthropic`` backend (BE-S3); ``custom`` → the
-   workspace's own endpoint (S7, not yet).
-2. workspace **tier** (``standard`` in beta; ``premium`` flips to
-   ``hosted_eu`` at gate H0 by config PR).
-3. ``env_overrides[env][kind]`` — dev routes chat/asr to the Mac, test to
-   recorded cassettes / in-process CPU whisper.
-4. The chosen backend must be ``enabled``, allowed in this env, and have
-   every ``${VAR}`` resolved — else ``ConfigError``.
-
-``Registry.validate()`` walks every route for the current env so a broken
-environment refuses to boot instead of failing jobs.
+``validate()`` walks every route for the env so a broken environment refuses to boot instead of failing jobs.
 """
 
 from __future__ import annotations
@@ -58,7 +45,7 @@ def _platform_standard(_workspace_id: str) -> WorkspaceModelSettings:
     return WorkspaceModelSettings()
 
 
-# Sprint L2 — why the env override landed where it did.
+# Why an env override landed where it did.
 REASON_MISSING_ENV = "missing_env"
 REASON_FORCED = "forced"
 REASON_PROBE_FAILED = "probe_failed"
@@ -66,12 +53,7 @@ REASON_PROBE_FAILED = "probe_failed"
 
 @dataclass(frozen=True, slots=True)
 class ActiveOverride:
-    """What an env override resolved to, and why (Sprint L2).
-
-    ``reason`` is None when the primary is in use; otherwise one of
-    ``missing_env`` (the primary's ``${VAR}`` is unset), ``forced`` (the
-    service's dev switch named another backend) or ``probe_failed`` (the
-    primary did not answer at startup). Log-safe: names only."""
+    """What an env override resolved to; ``reason`` is None on the primary, else missing_env/forced/probe_failed."""
 
     kind: str
     name: str
@@ -139,9 +121,7 @@ class Registry:
         self._config = loaded.config
         self._env = env
         self._settings_source: SettingsSource = settings_source or _platform_standard
-        # Sprint L2 — the env overrides as chosen for this process. A
-        # `{primary, fallback}` override lands on the fallback only in a
-        # local env (dev/test) and only for a reason that is logged.
+        # A `{primary, fallback}` override lands on the fallback only in dev/test, for a logged reason.
         self._active: dict[str, ActiveOverride] = {}
         for kind, value in self._config.env_overrides.get(env, {}).items():
             self._active[kind] = self._choose(kind, value, (forced or {}).get(kind))
@@ -171,11 +151,9 @@ class Registry:
             return ActiveOverride(
                 kind, fallback, primary=primary, fallback=fallback, reason=REASON_MISSING_ENV
             )
-        # Staging/prod, or no fallback: the primary stands, and `backend()`
-        # refuses to boot with `missing_env` exactly as before.
+        # Staging/prod, or no fallback: the primary stands and `backend()` refuses to boot.
         return ActiveOverride(kind, primary, primary=primary, fallback=fallback)
 
-    # ── construction ────────────────────────────────────────────────────
     @classmethod
     def load(
         cls,
@@ -187,9 +165,7 @@ class Registry:
         validate: bool = True,
         forced: Mapping[str, str] | None = None,
     ) -> Registry:
-        """``forced`` (Sprint L2): ``{kind: backend}`` a dev switch names
-        instead of the override's primary — read by the service's config
-        (``MDX_DEV_CHAT_BACKEND``), never by this library."""
+        """``forced``: ``{kind: backend}`` from a dev switch (``MDX_DEV_CHAT_BACKEND``), read by the service's config."""
         loaded = (
             parse_config(source, environ=environ, source="<dict>")
             if isinstance(source, Mapping)
@@ -208,7 +184,6 @@ class Registry:
     def backend_names(self) -> list[str]:
         return list(self._config.backends)
 
-    # ── validation ──────────────────────────────────────────────────────
     def validate(self) -> None:
         """Every route reachable in this env must resolve. Raises ``ConfigError``."""
         for operation, tiers in self._config.routing.items():
@@ -227,33 +202,19 @@ class Registry:
             self.backend(active.name, expect_kind=OPERATION_KINDS.get(key, key))  # type: ignore[arg-type]
 
     def override_for(self, kind: str) -> str | None:
-        """The backend this env pins for an operation kind, if any.
-
-        Used by callers that are not routed by tier (the diarizer names
-        its backend directly), so dev still lands on the Mac without
-        every service repeating the mapping. With a ``{primary, fallback}``
-        override this is the one actually chosen for the process. ``kind``
-        may also be an operation name (``classify``, ``title``,
-        ``entities``) when the env pins those separately.
-        """
+        """The backend this env pins for a kind (or operation name), as chosen for this process."""
         active = self._active.get(kind)
         return active.name if active else None
 
     def active_override(self, kind: str) -> ActiveOverride | None:
-        """Sprint L2 — what the env override for ``kind`` (or operation)
-        resolved to and why (for the startup log and the AI-settings page)."""
+        """What the env override for ``kind`` (or operation) resolved to and why."""
         return self._active.get(kind)
 
     def active_overrides(self) -> list[ActiveOverride]:
         return list(self._active.values())
 
     def fall_back(self, kind: str, reason: str = REASON_PROBE_FAILED) -> ActiveOverride:
-        """Switch ``kind`` to its fallback for the rest of this process.
-
-        Dev/test only: on staging and prod a processor never changes
-        without an admin acknowledging it, so a failed probe there is a
-        ``ConfigError`` and the process refuses to boot, as before.
-        """
+        """Switch ``kind`` to its fallback for this process. Dev/test only: a processor never changes silently elsewhere."""
         active = self._active.get(kind)
         if active is None or not active.fallback:
             raise ConfigError(
@@ -273,7 +234,6 @@ class Registry:
         logger.warning("models.override_fallback", extra=switched.log_fields())
         return switched
 
-    # ── lookups ─────────────────────────────────────────────────────────
     def backend(self, name: str, *, expect_kind: OperationKind | None = None) -> ResolvedBackend:
         """Direct lookup by backend name (eval scripts, ``ASR_BACKEND``). Enforces env rules."""
         cfg = self._config.backends.get(name)
@@ -331,8 +291,7 @@ class Registry:
             raise ConfigError(
                 "unknown_operation", f"operation {operation!r}; known: {sorted(OPERATION_KINDS)}"
             )
-        # An operation-level override wins over the kind-level one (L2:
-        # classify/title/entities on the small model, the rest on chat).
+        # An operation-level override wins over the kind-level one.
         override = self.override_for(operation) or self.override_for(kind)
         if override is not None:
             return self.backend(override, expect_kind=kind)
@@ -349,8 +308,7 @@ class Registry:
         if settings.provider == "platform":
             return self._resolve_platform(operation, settings.tier)
         if settings.provider == "anthropic":
-            # Decision 12: opt-in processor, acknowledged on the Data page.
-            # Landing in BE-S3; `backend()` raises provider_not_configured.
+            # Opt-in processor; `backend()` raises provider_not_configured until BE-S3.
             return self.backend("anthropic", expect_kind=OPERATION_KINDS[operation])
         raise ConfigError(
             "provider_not_configured",
@@ -368,14 +326,7 @@ class Registry:
         return list(seen.values())
 
     def processor_routes(self) -> list[tuple[ProcessorInfo, str, str]]:
-        """``(processor, operation, tier)`` for every route in this env.
-
-        The Data page has to say what a company DOES with the data —
-        "transcription", "notes", "answers" — and a bare processor list
-        cannot answer that. Same walk as `processors_for_env`, one level
-        less collapsed, so the page and the router still read the same
-        object rather than a description of it.
-        """
+        """``(processor, operation, tier)`` for every route in this env (the Data page says what each processor does)."""
         routes: list[tuple[ProcessorInfo, str, str]] = []
         for operation, tiers in self._config.routing.items():
             for tier in tiers:

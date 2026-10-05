@@ -15,8 +15,7 @@ GENERATION_URL="${GENERATION_URL:-http://localhost:8009}"
 JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 LOKI_URL="${LOKI_URL:-http://localhost:3100}"
-# Host 3001, not 3000 — see docker-compose.yml: 3000 is the most-contended
-# dev-server default, so Grafana is published one port up.
+# Grafana is published on 3001 (see docker-compose.yml).
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3001}"
 
 PASS=0

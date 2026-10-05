@@ -1,21 +1,5 @@
-"""Scheduled maintenance for auth-service (IDX-B3 D), per ADR-0041.
-
-One registry, two hosts:
-
-* in-process, wrapped in ``observability.run_periodic`` inside the
-  service lifespan, behind ``MDX_BACKGROUND_JOBS``;
-* out-of-process, ``python -m auth_service.maintenance <job>`` (also
-  installed as ``mdx-auth-maint``), for a cron or a one-off.
-
-Both go through the same :func:`run_job`, so a job run by hand does
-exactly what the scheduler does — including the audit row and the
-metrics. The alternative, a CLI that reimplements the job, is how the
-two drift until the manual path is the one nobody trusts.
-
-No advisory lock, deliberately: ADR-0041's stated trade-off is that every
-job is idempotent, so a second replica running the same job is redundant
-rather than harmful.
-"""
+"""Scheduled maintenance registry (ADR-0041): run in-process behind ``MDX_BACKGROUND_JOBS``
+or via ``python -m auth_service.maintenance <job>``; both go through :func:`run_job`. No advisory lock."""
 
 from __future__ import annotations
 
@@ -29,9 +13,7 @@ from .jobs import JobResult
 
 logger = logging.getLogger(__name__)
 
-# The reserved tenant scheduler audit rows are written under (ADR-0041).
-# The same platform tenant IDX-A3 introduced for events that belong to no
-# customer — a purge sweep is nobody's workspace's business.
+# The platform tenant scheduler audit rows are written under.
 GLOBAL_TENANT_SETTING = "auth_platform_tenant_id"
 
 
@@ -79,9 +61,7 @@ JOBS: tuple[Job, ...] = (
         jobs.signing_key_status,
         "report the active signing key and warn when it is within 30 days of expiry",
     ),
-    # Manual: re-keying every second factor in the estate is not a
-    # decision a timer should make, and the operator wants the dry run
-    # first.
+    # Manual: the operator wants the dry run first.
     Job("rotate-kek", None, jobs.rotate_kek, "re-wrap TOTP secrets under the current keys"),
 )
 
@@ -89,12 +69,7 @@ BY_NAME: dict[str, Job] = {j.name: j for j in JOBS}
 
 
 async def run_job(job: Job, pool: Any) -> JobResult:
-    """Run one job and record its success. Errors propagate to the caller.
-
-    ``run_job_once`` (the scheduler) swallows and logs; the CLI wants a
-    non-zero exit. Neither wants a job that reports success after failing,
-    so ``record_success`` is reached only on the way out.
-    """
+    """Run one job and record its success; errors propagate (``record_success`` only on the way out)."""
     result = await job.fn(pool)
     jobs.record_success(job.name, result.rows)
     logger.info("auth.maint.completed", extra=result.as_payload())

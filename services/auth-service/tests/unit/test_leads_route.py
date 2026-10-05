@@ -1,9 +1,4 @@
-"""`POST /auth/leads` — the fake door behind the shared page's CTA.
-
-What matters: the row is written with the code, the address reaches no
-audit payload, a repeat is not a second lead, and a missing consent or a
-bad address is refused before anything is stored.
-"""
+"""`POST /auth/leads`: row written with the code, address in no audit payload, repeat is not a second lead, consent/address refused before storing."""
 
 from __future__ import annotations
 

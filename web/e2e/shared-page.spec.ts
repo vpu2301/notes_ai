@@ -1,12 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-/**
- * The shared page must be usable by everyone it is sent to (Sprint 23).
- * Runs against the dev stack (`make web-e2e-stack`); the API is stubbed
- * so no link has to exist. Zero serious/critical axe violations in both
- * colour schemes.
- */
+/** Shared page axe scan, both colour schemes; the API is stubbed so no link has to exist. */
 const TOKEN = "t".repeat(43);
 const PAGE = {
   code: "N-1", title: "Kickoff: Website relaunch", status: "draft", updated_at: "2026-09-12T10:00:00Z", issuer_name: "Acme",

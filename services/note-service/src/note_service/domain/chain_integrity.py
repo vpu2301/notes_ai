@@ -1,12 +1,5 @@
-"""Pure-Python chain integrity verifier.
-
-Used both by:
-- ``tests/property/test_amendment_chain.py`` (Hypothesis property test;
-  takes random in-memory chains and asserts integrity invariants), and
-- ``jobs/chain_reconciler.py`` (daily DB sweep; loads each note's
-  version rows and runs the same checks).
-
-The verifier is data-only — no DB types, no asyncpg dependency.
+"""Pure-Python chain integrity verifier, shared by the property test and
+``jobs/chain_reconciler.py``. Data-only: no DB types.
 """
 
 from __future__ import annotations

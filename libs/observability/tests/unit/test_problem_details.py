@@ -1,10 +1,4 @@
-"""RFC 9457 rendering of ``HTTPException`` bodies.
-
-A raiser may hand ``HTTPException`` a plain string or a whole problem
-document as ``detail``. Both must come out as one flat problem+json body:
-a client branches on ``type`` and shows ``detail`` to a person, and a
-Python repr of a dict is neither.
-"""
+"""RFC 9457 rendering of ``HTTPException`` bodies: a string or an inline problem document, one flat body either way."""
 
 from __future__ import annotations
 

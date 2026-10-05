@@ -8,15 +8,7 @@ from uuid import UUID
 
 
 class Severity(StrEnum):
-    """Audit event severity. Drives alerting + retention policy.
-
-    - ``info``  — routine business events (logout, read, list).
-    - ``warn``  — suspicious but not necessarily malicious (rate-limit hit).
-    - ``sec``   — security-relevant (login failed, refresh replayed, MFA
-                  disabled, RLS denial). Triggers SIEM alerting.
-    - ``error`` — system error worth recording (audit writer retry exhausted,
-                  chain divergence detected by nightly verify).
-    """
+    """Audit event severity, drives alerting + retention: ``sec`` triggers SIEM alerting."""
 
     INFO = "info"
     WARN = "warn"
@@ -26,12 +18,7 @@ class Severity(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AuditEventReceipt:
-    """Returned by :meth:`AuditWriter.write_event` on success.
-
-    Useful when the caller wants to log the assigned sequence number, or
-    when an admin-facing endpoint wants to surface the chain receipt as
-    proof of recording.
-    """
+    """Returned by :meth:`AuditWriter.write_event` on success."""
 
     tenant_id: UUID
     seq: int

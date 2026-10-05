@@ -76,11 +76,7 @@ interface MenuAction {
   onClick: () => void;
 }
 
-/**
- * The single "create" control: a primary action plus a caret that drops the
- * other ways to start. Menu is `fixed` off the trigger so it escapes the
- * sidebar's overflow clipping when the rail is collapsed.
- */
+/** The "create" split button. Menu is `fixed` so it escapes the collapsed rail's overflow clipping. */
 function NewMenu({
   primary,
   actions,
@@ -183,12 +179,7 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
   );
 }
 
-/**
- * The workspaces this account belongs to, read when the menu first opens.
- * `GET /tenants` rather than the memberships on `/auth/me`: the tenant
- * list carries the display name and `is_active`, which is what the
- * switcher shows, and it is the same call the Mac and iPhone apps make.
- */
+/** `GET /tenants` (not `/auth/me` memberships): it carries display name and `is_active`. */
 function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
   const { activeTenantId, canSwitchWorkspaces, switchWorkspace } = useAuth();
   const navigate = useNavigate();
@@ -259,8 +250,7 @@ function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
 
 function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
   const { pref, setPref } = useTheme();
-  // `identity`, not `db_user`: IDX-B2 deletes the per-tenant `users` row,
-  // and `AuthContext` already reconciles whichever shape `/auth/me` sends.
+  // `identity`, not `db_user`: AuthContext already reconciles the `/auth/me` shape.
   const { identity, displayName } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -595,7 +585,7 @@ export function AppShell() {
         <nav className="sb-nav" aria-label="Main">
           <SideLink to="/" end icon={<NotesIcon size={16} />} label="All notes" collapsed={collapsed} />
           {(activeRole === "owner" || activeRole === "admin") && (
-            /* Sprint 22: the workspace's recipient loop, counts only; the API refuses everyone else. */
+            /* counts only; the API refuses everyone else */
             <SideLink to="/admin/sharing" icon={<ShareIcon size={16} />} label="Sharing" collapsed={collapsed} />
           )}
           <SpacesNav collapsed={collapsed} />

@@ -1,20 +1,4 @@
-"""Strict claims model. ``extra="forbid"`` is the defining contract.
-
-If a token arrives with a claim we don't recognise — e.g. an attacker tries
-to inject ``is_admin: true`` — Pydantic raises and ``MalformedClaimsError``
-fires. That guarantees no service can be tricked by a claim it doesn't know
-to check.
-
-**Deviation from the sprint-02 spec.** The spec lists only the
-security-bearing fields (``sub``, ``tid``, ``roles``, ``scope``, ``mfa``,
-``sid``, ``iss``, ``aud``, ``exp``, ``iat``, ``nbf``). In practice Keycloak
-always emits a handful of standard JOSE/OIDC fields that we don't act on
-(``jti``, ``typ``, ``azp``, ``auth_time``, ``acr``, ``session_state``,
-``allowed-origins``, plus profile/email-scope fields). We enumerate those
-explicitly as Optional defaults so the allowlist remains explicit and
-unknown claims still raise — preserving the spec's defence against
-``is_admin``-style injection while not fighting the IdP.
-"""
+"""Strict claims model: ``extra="forbid"`` rejects injected claims; Keycloak's standard extras are allow-listed."""
 
 from uuid import UUID
 
@@ -37,13 +21,8 @@ class Claims(BaseModel):
     roles: list[str]
     scope: str = ""
     mfa: bool = False
-    # Sprint 16: TOTP enrolment status, mapped from the `mfa_enrolled`
-    # Keycloak user attribute. Drives the grace flow: a gated route
-    # distinguishes "enrol first" (403 mfa_enrolment_required) from
-    # "re-login with your TOTP" (401). auth-service refuses to release a
-    # token to an enrolled user without a valid TOTP code, so on tokens it
-    # issues `mfa` ⇔ `mfa_enrolled`; the two claims exist so that a future
-    # flow-based step-up (acr/amr) can decouple them without a schema change.
+    # TOTP enrolment (Keycloak `mfa_enrolled` attribute); lets a gated route tell
+    # "enrol first" (403) from "re-login with TOTP" (401).
     mfa_enrolled: bool = False
     sid: str
     iss: str

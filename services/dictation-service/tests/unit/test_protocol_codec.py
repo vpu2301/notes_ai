@@ -1,13 +1,4 @@
-"""Wire-protocol codec tests.
-
-Covers every error-path the spec lists in §2 verification:
-- malformed JSON → BadMessageError(bad_message)
-- extra field → BadMessageError(bad_message)
-- wrong type → BadMessageError(bad_message)
-- subprotocol enforcement is in upgrade.py, not here
-- binary frame size limits
-- audio_frame parsing
-"""
+"""Wire-protocol codec: bad_message error paths, binary frame limits, audio_frame parsing."""
 
 from __future__ import annotations
 
@@ -158,7 +149,7 @@ def test_encode_server_heartbeat() -> None:
 
 
 def test_encode_server_final_voice_command_null() -> None:
-    """Sprint-04 reservation: voice_command field present, always null."""
+    """voice_command field present, always null."""
     sid = uuid4()
     s = encode_server(
         Final(

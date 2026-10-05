@@ -1,10 +1,4 @@
-"""Known Whisper non-speech artefacts (Sprint TQ1 T3; drop logic is TQ2).
-
-``artefacts.yaml`` beside this module is the single list. This module
-loads it and says whether a segment's text is one of its phrases — the
-same answer for the eval harness (which counts) and the worker (which,
-from TQ2, drops). Text in, a phrase entry out; nothing is logged.
-"""
+"""Known Whisper non-speech artefacts, loaded from ``artefacts.yaml``; shared by the eval harness and the worker."""
 
 from __future__ import annotations
 
@@ -42,7 +36,7 @@ def normalise(text: str) -> str:
 
 @cache
 def load_artefacts(path: str | None = None) -> tuple[ArtefactPhrase, ...]:
-    import yaml  # the only yaml user in this lib; imported on first use
+    import yaml  # imported on first use
 
     raw = yaml.safe_load(Path(path or ARTEFACTS_PATH).read_text(encoding="utf-8"))
     out: list[ArtefactPhrase] = []
@@ -60,9 +54,7 @@ def load_artefacts(path: str | None = None) -> tuple[ArtefactPhrase, ...]:
 
 
 def match_artefact(text: str, language: str | None = None) -> ArtefactPhrase | None:
-    """The phrase ``text`` is, or ``None``. ``language`` narrows the list to
-    that language's phrases; ``None`` checks every language (a German
-    decoder can emit an English sign-off)."""
+    """The phrase ``text`` matches, or ``None``; ``language=None`` checks every language."""
     normalised = normalise(text)
     if not normalised:
         return None

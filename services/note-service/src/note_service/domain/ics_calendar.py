@@ -1,23 +1,8 @@
-"""Calendar links — iCal/ICS feeds the service fetches and parses (0020).
-
-The no-OAuth way in: every calendar product publishes a private
-subscription address (Google Calendar → *Settings → Integrate calendar →
-Secret address in iCal format*; Outlook → *Publish calendar*; iCloud →
-*Public calendar*). The user pastes it, the service fetches it on every
-"Coming up" read and expands it into ``CalendarEvent`` rows shaped
-exactly like the Google ones, so the merge, the picker and the clients do
-not know the difference.
-
-Only the subset of RFC 5545 a "next seven days" list needs is handled:
-VEVENT with DTSTART/DTEND/DURATION, all-day (``VALUE=DATE``) and timed
-events, ``TZID`` via zoneinfo, RRULE/RDATE/EXDATE expansion through
-``dateutil.rrule``, RECURRENCE-ID overrides, cancelled and declined
-instances. Anything else is ignored rather than rejected.
-
-Fetching a user-supplied URL is the risky part: the host must be public
-(no loopback, RFC 1918, link-local, or metadata addresses — resolved
-before the request and again after every redirect), the scheme https,
-the body capped.
+"""Calendar links: private iCal/ICS feeds fetched on every "Coming up" read and
+expanded into ``CalendarEvent`` rows shaped like the Google ones. Only the RFC
+5545 subset a week's list needs; anything else is ignored, not rejected.
+SSRF guard: public host only (checked before the request and after every
+redirect), https, body capped.
 """
 
 from __future__ import annotations

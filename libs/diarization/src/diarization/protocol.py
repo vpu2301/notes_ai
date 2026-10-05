@@ -1,17 +1,6 @@
-"""The diarizer seam (Sprint 29).
+"""The diarizer seam: every engine yields chunk-level :class:`SpeakerSegment` evidence in an :class:`OfflineDiarization`.
 
-The batch worker calls one function and keeps its word-level attribution
-unchanged because every engine is reduced to the structure that code
-already consumes: chunk-level :class:`SpeakerSegment` evidence wrapped in
-an :class:`OfflineDiarization`. One protocol, two implementations in this
-library (legacy ECAPA + agglomeration, pyannote community-1) — not a
-generic model backend.
-
-Hints are how a person's knowledge reaches the engine. ``num_speakers`` is
-a count someone stated ("there were 2 of us") and wins over everything the
-engine would decide on its own; ``max_speakers`` is a cap (Sprint 30 fills
-it from the calendar). An engine may return FEWER speakers than asked —
-one voice in the recording stays one voice — but never invents one.
+``num_speakers`` is a person's stated count and wins; ``max_speakers`` is a cap. An engine may return fewer, never more.
 """
 
 from __future__ import annotations
@@ -24,8 +13,7 @@ if TYPE_CHECKING:
 
     from .offline import OfflineDiarization
 
-# What a person may state. Eight matches the roster cap of both engines
-# and the 1..8 range the API validates.
+# Eight matches the roster cap of both engines and the API's 1..8 range.
 MIN_HINT = 1
 MAX_HINT = 8
 
@@ -38,15 +26,10 @@ class InvalidHintsError(ValueError):
 class DiarizationHints:
     num_speakers: int | None = None  # exact, from a person
     min_speakers: int | None = None
-    max_speakers: int | None = None  # cap, e.g. from the calendar (Sprint 30)
+    max_speakers: int | None = None  # cap, e.g. from the calendar
 
     def validated(self) -> DiarizationHints:
-        """Range-check and normalise: every value 1..8, ``min <= max``.
-
-        ``num_speakers`` is the strongest statement there is, so it
-        overrides min/max rather than being checked against them — a
-        calendar cap of 3 does not veto a person saying "there were 4".
-        """
+        """Range-check (1..8, ``min <= max``); ``num_speakers`` overrides min/max rather than being checked against them."""
         for name in ("num_speakers", "min_speakers", "max_speakers"):
             value = getattr(self, name)
             if value is not None and not MIN_HINT <= value <= MAX_HINT:
@@ -88,11 +71,7 @@ class Diarizer(Protocol):
     engine: str
     # Model revision / package version; lands in ``DiarizationStats``.
     engine_version: str
-    # True when the engine runs on another host (shape B, ADR-0052). The
-    # worker reads it to decide what a failure means: an in-process
-    # engine that cannot load is a broken deployment and fails the job,
-    # while a remote one that is down must not cost the user a
-    # transcript — the job completes without speakers and offers a re-run.
+    # Remote engine down → the job completes without speakers and offers a re-run; in-process failure fails the job.
     remote: bool
 
     @property

@@ -1,26 +1,8 @@
-"""Stage 4 — date & time normalization.
+"""Stage 4: date & time normalization (relative + absolute, uk/en/de).
 
-Two parsers operating on the post-Stage-3 text:
-
-- **Relative**: "сьогодні"/"today"/"heute", "вчора"/"yesterday"/"gestern",
-  "завтра"/"tomorrow"/"morgen", "у п'ятницю"/"on Friday"/"am Freitag",
-  "наступного тижня"/"next week"/"nächste Woche", "минулого місяця"/"last month".
-  Anchored to ``ctx.reference_date``.
-- **Absolute**: "1 травня 2026", "May 1, 2026", "5. März 2026", "перше травня
-  двадцять двадцять шостого" (spelled-out Ukrainian year), "am fünften März".
-
-German carries two traps this module handles explicitly: "morgen" is
-both *tomorrow* and *morning* (resolved only outside the morning
-readings), and "halb acht" is 07:30, not 08:30.
-
-Output respects ``ctx.date_format``:
-- ``DD.MM.YYYY`` (default Ukrainian + German)
-- ``YYYY-MM-DD`` (ISO)
-- ``WORD`` (e.g., "1 травня 2026", "5. März 2026")
-
-Ambiguous dates (e.g., "31.04.2026") are NOT corrected; they pass
-through with a ``Warning{code="ambiguous_date"}`` for downstream
-validation rules.
+Output follows ``ctx.date_format``; ambiguous dates pass through with a
+``Warning{code="ambiguous_date"}``. German traps: "morgen" is also
+"morning", "halb acht" is 07:30.
 """
 
 from __future__ import annotations
@@ -161,9 +143,7 @@ _MONTHS_DE = {
 }
 _MONTH_NAMES_DE = {v: k.capitalize() for k, v in _MONTHS_DE.items() if k not in {"jänner", "maerz"}}
 
-# Spelled German ordinal days, as dictated: "am fünften März", "dritter
-# Mai". The four case endings (-te/-ter/-ten/-tes) are generated rather
-# than listed so the table cannot go half-updated.
+# Spelled German ordinal days; the case endings (-te/-ter/-ten/-tes) are generated.
 _ORD_STEMS_DE: dict[str, int] = {
     "erst": 1,
     "zweit": 2,
@@ -230,10 +210,7 @@ _HOURS_DE: dict[str, int] = {
 }
 
 
-# Spelled-out Ukrainian ordinal days in the genitive case, as speakers
-# dictate them: "третього травня" (the third of May). Number normalization
-# (Stage 3) only knows cardinals ("три"), so these ordinals reach Stage 4
-# as words and must be mapped here.
+# Spelled Ukrainian genitive ordinals ("третього травня"); Stage 3 only knows cardinals.
 _ORD_UNITS_UK = {
     "першого": 1,
     "другого": 2,
@@ -279,7 +256,7 @@ _ORD_DAYS_UK = _build_ordinal_days_uk()
 
 
 class DateNormStage:
-    """Sprint-05 Stage 4."""
+    """Stage 4."""
 
     name = "date_norm"
     runs_on_partials: bool = False
@@ -328,10 +305,7 @@ _REL_EN = {
     "yesterday": -1,
     "tomorrow": 1,
 }
-# "morgen" is BOTH "tomorrow" and "morning" ("am Morgen", "morgen früh",
-# "guten Morgen"). Case can't disambiguate it — the punctuation model
-# capitalizes unreliably — so the morning readings are excluded by
-# context below and only the bare adverb is resolved to a date.
+# "morgen" is also "morning"; case is unreliable, so morning readings are excluded by context.
 _REL_DE = {
     "heute": 0,
     "gestern": -1,
@@ -348,11 +322,7 @@ _REL_TABLES = {"uk": _REL_UK, "en": _REL_EN, "de": _REL_DE}
 
 @lru_cache(maxsize=8)
 def _relative_pattern(language: str) -> re.Pattern[str]:
-    """The alternation over a language's relative-day table.
-
-    Built from module-level constants, so it is compiled once per
-    language rather than reassembled on every request.
-    """
+    """The alternation over a language's relative-day table, compiled once per language."""
     table = _REL_TABLES.get(language, _REL_EN)
     alternation = r"\b(" + "|".join(re.escape(k) for k in table) + r")\b"
     if language == "de":
@@ -596,16 +566,13 @@ _TIME_HOUR_WORD_UK = re.compile(
     r"\bо\s+(\d{1,2})(?:\s+годині)?(?:\s+(\d{1,2})\s+хвилин)?",
     re.IGNORECASE | re.UNICODE,
 )
-# "um 8 Uhr", "um 8 Uhr 30". "Uhr" is required — a bare "um 8" is as
-# often a dose interval as a clock time.
+# "Uhr" is required: a bare "um 8" is as often a dose interval as a clock time.
 _TIME_HOUR_WORD_DE = re.compile(
     r"\bum\s+(\d{1,2})\s+Uhr(?:\s+(\d{1,2}))?",
     re.IGNORECASE | re.UNICODE,
 )
 _HOUR_ALT = "|".join(sorted(_HOURS_DE, key=len, reverse=True))
-# "halb acht" is 07:30 — HALF TO the named hour, not half past it. The
-# English reading (08:30) is the single most expensive mistranslation in
-# this file: it silently moves an appointment or a dose by an hour.
+# "halb acht" is 07:30 (half TO the named hour), not 08:30.
 _TIME_HALF_DE = re.compile(rf"\bhalb\s+(\d{{1,2}}|{_HOUR_ALT})\b", re.IGNORECASE | re.UNICODE)
 _TIME_QUARTER_DE = re.compile(
     rf"\bviertel\s+(vor|nach)\s+(\d{{1,2}}|{_HOUR_ALT})\b", re.IGNORECASE | re.UNICODE
@@ -661,13 +628,7 @@ def _hour_value_de(token: str) -> int | None:
 
 
 def _hour_before_de(hour: int) -> int:
-    """The hour "halb"/"Viertel vor" counts down from.
-
-    "halb eins" is 12:30, not 00:30 — a spoken 12-hour clock names the
-    coming hour, and midday is overwhelmingly the intended one in a
-    consultation. (Every spelled hour is 12-hour ambiguous either way;
-    this picks the same daytime reading the UK/EN paths already do.)
-    """
+    """The hour "halb"/"Viertel vor" counts down from; "halb eins" is 12:30 (daytime reading)."""
     return hour - 1 if hour > 1 else 12
 
 

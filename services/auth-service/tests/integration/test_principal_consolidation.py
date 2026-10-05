@@ -1,16 +1,8 @@
-"""IDX-B2 — the principal consolidation, against a real database.
+"""Principal consolidation against a real database.
 
-Three things to prove:
-
-  * every foreign key now points at `identities`, with its `ON DELETE`
-    semantics unchanged;
-  * `profile_of_subs` is a tenant-scoped window onto `identities` that
-    `app_role` can use and cannot abuse;
-  * the bug in IDX-B2 §C is actually fixed — a member of two workspaces
-    now renders in both, where the per-tenant `users` table showed them
-    as blank in the second.
-
-Requires ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
+Every FK points at `identities` with unchanged `ON DELETE`; `profile_of_subs` is a
+tenant-scoped window `app_role` can use and not abuse; a member of two workspaces renders
+in both. Requires ``RUN_DB_INTEGRATION=1`` and ``make migrate-up``.
 """
 
 from __future__ import annotations
@@ -68,11 +60,7 @@ async def test_no_foreign_key_points_at_users_any_more(su) -> None:
 
 
 async def test_all_thirteen_moved_to_identities(su) -> None:
-    """The pack's inventory listed six; the live catalogue had thirteen.
-
-    Pinned by name so a future migration that adds a fourteenth without
-    pointing it at `identities` is caught here rather than at the drop.
-    """
+    """Pinned by name so a future FK that misses `identities` is caught here rather than at the drop."""
     rows = await su.fetch(
         "SELECT conrelid::regclass::text AS t, conname FROM pg_constraint"
         " WHERE confrelid = 'identities'::regclass AND contype = 'f'"
@@ -85,7 +73,6 @@ async def test_all_thirteen_moved_to_identities(su) -> None:
         "autocomplete_snippets_owner_user_id_fkey",
         "mfa_reminders_subject_sub_fkey",
         "mfa_reminders_requested_by_fkey",
-        # The seven the pack's inventory missed.
         "auth_mail_outbox_subject_sub_fkey",
         "auth_password_events_subject_sub_fkey",
         "auth_password_reset_tokens_subject_sub_fkey",
@@ -158,14 +145,7 @@ async def _seed_identity(su, email: str, name: str, tenants: list[uuid.UUID]) ->
 
 
 async def test_a_member_of_two_workspaces_renders_in_both(su) -> None:
-    """The IDX-B2 §C bug, fixed.
-
-    `users` is keyed on `sub`, so a principal has exactly one row in one
-    home tenant. A colleague invited into a second workspace had no row
-    there, and every author/roster join was a LEFT JOIN that rendered
-    them blank. `profile_of_subs` reads `identities`, which is not
-    per-tenant, so both workspaces see the same person.
-    """
+    """`users` is per-tenant so a colleague in a second workspace rendered blank; `profile_of_subs` reads `identities`."""
     sub = await _seed_identity(su, f"both-{MARK}@x.example", "Ada Both", [TENANT_A, TENANT_B])
 
     for tenant in (TENANT_A, TENANT_B):
@@ -201,8 +181,7 @@ async def test_a_suspended_membership_does_not_resolve(su) -> None:
 
 
 async def test_an_unscoped_connection_gets_nothing(su) -> None:
-    """Without `app.tenant_id` the predicate compares to NULL, so the
-    function cannot be used as a directory of everybody."""
+    """Without `app.tenant_id` the predicate compares to NULL: no directory of everybody."""
     sub = await _seed_identity(su, f"scope-{MARK}@x.example", "Scoped", [TENANT_A])
     conn = await _app_conn(None)
     try:
@@ -245,12 +224,7 @@ async def test_the_function_is_security_definer_and_not_public(su) -> None:
 
 
 async def test_note_service_finds_a_cross_tenant_member_by_email(su) -> None:
-    """`find_member_by_email` used to miss exactly this person.
-
-    Sharing a note with a colleague who joined from another workspace
-    failed with "no such member"; the address was in `identities` but not
-    in this tenant's `users` rows.
-    """
+    """`find_member_by_email` used to miss a colleague whose home tenant is elsewhere."""
     from note_service.domain import notes_repository as repo
 
     email = f"cross-{MARK}@x.example"
@@ -291,8 +265,7 @@ async def test_notification_service_resolves_an_address_and_admins(su) -> None:
     try:
         assert await repo.user_email(conn, sub) == f"notify-{MARK}@x.example"
         assert await repo.filter_to_tenant_members(conn, [sub]) == [sub]
-        # `tenant_admin_ids` now reads memberships, so it finds an admin
-        # of THIS workspace even if their home tenant is elsewhere.
+        # `tenant_admin_ids` reads memberships, so it finds an admin whose home tenant is elsewhere.
         admins = await repo.tenant_admin_ids(conn)
         assert isinstance(admins, list)
     finally:

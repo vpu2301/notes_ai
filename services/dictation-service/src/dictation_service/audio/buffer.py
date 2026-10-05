@@ -1,23 +1,7 @@
 """Per-session tmpfs ring buffer for decoded PCM.
 
-Why tmpfs:
-- The decrypted audio is sensitive. tmpfs lives in RAM and dies with
-  the process; it never touches disk.
-- We size it for 30 minutes of mono 16 kHz float32 (115.2 MB).
-- mode 0700 on the directory, owner = service account.
-
-Why encrypt anyway:
-- Defence in depth. A debug coredump that flushes process pages to
-  swap (unlikely on a properly-configured worker, but possible) would
-  contain plaintext PCM. Per-session AES-CTR with an ephemeral key
-  mitigates that. The key never leaves process memory.
-
-Why AES-CTR rather than GCM:
-- We don't need authentication here — the buffer is single-writer,
-  single-reader, in-process. CTR is simple, fast, and doesn't carry the
-  tag-storage overhead.
-- The envelope on finalised audio (sprint 03 ``EncryptedObjectStore``)
-  IS authenticated (GCM); that's where AEAD matters.
+tmpfs never touches disk; the mirror is AES-CTR encrypted with an ephemeral
+in-process key as defence in depth (no AEAD needed: single-writer, in-process).
 """
 
 from __future__ import annotations
@@ -38,14 +22,11 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# 32 bytes = AES-256.
-_DEK_BYTES: int = 32
-# CTR uses a 16-byte initial counter. We split it 8/8: 8 bytes random
-# nonce (fixed per session) + 8 bytes counter (incremented per block).
+_DEK_BYTES: int = 32  # AES-256
+# 16-byte CTR counter split 8/8: per-session random nonce + block counter.
 _CTR_BLOCK_SIZE: int = 16
 
-# 4 bytes per float32 sample.
-BYTES_PER_SAMPLE: int = 4
+BYTES_PER_SAMPLE: int = 4  # float32
 SAMPLE_RATE_HZ: int = 16_000
 
 
@@ -55,20 +36,9 @@ class RingFullError(Exception):
 
 @dataclass
 class SessionAudioBuffer:
-    """In-memory + on-tmpfs PCM ring for one session.
+    """In-memory float32 ring (what the windower reads) mirrored to an encrypted tmpfs blob.
 
-    The PCM is stored in two forms:
-    - An in-process float32 ndarray ring (`_ring`) — what the windower
-      reads from; addressed by sample index modulo ring_samples.
-    - A tmpfs-backed encrypted blob (`_path`) — what survives if the
-      worker is restarted but the host is still alive (it isn't,
-      typically; the file is unlinked at session start anyway).
-      This is a defensive trail for forensic recovery.
-
-    ``write(pcm)`` advances the producer cursor. ``read(start_sample,
-    end_sample)`` returns a view that's always within the ring; if the
-    caller asks for a window that's been overwritten, :class:`RingFullError`
-    is raised.
+    ``read`` raises :class:`RingFullError` for a range the writer has overwritten.
     """
 
     session_id: UUID
@@ -98,13 +68,11 @@ class SessionAudioBuffer:
         try:
             dir_path.mkdir(parents=True, exist_ok=False, mode=0o700)
         except FileExistsError:
-            # Pre-existing dir is a red flag — wipe and start clean.
+            # Pre-existing dir is a red flag; wipe and start clean.
             shutil.rmtree(dir_path, ignore_errors=True)
             dir_path.mkdir(parents=True, exist_ok=False, mode=0o700)
-        # Belt-and-braces chmod in case the mkdir mode was umasked.
-        os.chmod(dir_path, 0o700)
+        os.chmod(dir_path, 0o700)  # in case the mkdir mode was umasked
         self._path = dir_path / "audio.bin"
-        # O_CREAT|O_RDWR; 0600 file mode.
         self._fd = os.open(
             self._path,
             os.O_RDWR | os.O_CREAT | os.O_TRUNC,
@@ -124,8 +92,7 @@ class SessionAudioBuffer:
         with self._lock:
             if self._fd >= 0:
                 try:
-                    # Overwrite the file once before unlinking. tmpfs makes
-                    # this paranoid (RAM-backed) but cheap.
+                    # Overwrite once before unlinking; paranoid on tmpfs but cheap.
                     size = os.fstat(self._fd).st_size
                     if size > 0:
                         os.lseek(self._fd, 0, 0)
@@ -152,13 +119,7 @@ class SessionAudioBuffer:
     # ── Crypto ──────────────────────────────────────────────────────
 
     def _encryptor(self, sample_offset: int) -> object:
-        """Build an AES-CTR encryptor positioned at ``sample_offset`` samples.
-
-        Each sample is 4 bytes; AES block is 16 bytes (4 samples). The
-        offset MUST be a multiple of 4 samples; sprint-04's writes are
-        whole-Opus-frame-aligned (320 samples = 1280 bytes), so this is
-        always satisfied.
-        """
+        """AES-CTR encryptor positioned at ``sample_offset``; must be a multiple of 4 samples (one block)."""
         byte_offset = sample_offset * BYTES_PER_SAMPLE
         return encryptor_at_offset(
             key=self._key,
@@ -186,21 +147,16 @@ class SessionAudioBuffer:
                 self._ring[start:] = pcm[:head]
                 self._ring[: end - self._ring_samples] = pcm[head:]
 
-            # Mirror to tmpfs (encrypted). Best-effort: failures don't
-            # block the in-memory write because the windower only reads
-            # from the in-process ring.
+            # Encrypted tmpfs mirror, best-effort: the windower reads only the in-process ring.
             if self._fd >= 0:
                 try:
                     encryptor = self._encryptor(self._producer_cursor)
                     ct = encryptor.update(pcm.tobytes()) + encryptor.finalize()  # type: ignore[attr-defined]
-                    # Write to absolute byte offset; sparse beyond ring is
-                    # bounded by the ring length on disk.
                     offset = (self._producer_cursor * BYTES_PER_SAMPLE) % (
                         self._ring_samples * BYTES_PER_SAMPLE
                     )
                     os.lseek(self._fd, offset, 0)
-                    # If the write would wrap past EOF of the ring file,
-                    # split.
+                    # Split a write that wraps past the ring file's end.
                     write_end = offset + len(ct)
                     ring_bytes = self._ring_samples * BYTES_PER_SAMPLE
                     if write_end <= ring_bytes:
@@ -233,11 +189,7 @@ class SessionAudioBuffer:
         return self._producer_cursor * 1000 // SAMPLE_RATE_HZ
 
     def read(self, start_sample: int, end_sample: int) -> np.ndarray:
-        """Return a copy of samples in [start, end).
-
-        Raises :class:`RingFullError` if the requested range has been
-        overwritten (writer wrapped past it).
-        """
+        """Copy of samples in [start, end); :class:`RingFullError` if overwritten."""
         if start_sample < 0 or end_sample < start_sample:
             raise ValueError(f"bad range [{start_sample},{end_sample})")
         with self._lock:

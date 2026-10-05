@@ -1,9 +1,4 @@
-"""Offline diarizer tests with fake embedder/segmenter (no torch, no models).
-
-Same synthetic vector geometry as test_clustering: voice A around e0,
-voice B around ``0.2*e0 + sqrt(0.96)*e1`` (cross-voice cosine 0.19,
-intra-voice 0.90) — comfortably on either side of ``split_threshold``.
-"""
+"""Offline diarizer tests with fake embedder/segmenter; same synthetic vector geometry as test_clustering."""
 
 from __future__ import annotations
 
@@ -110,9 +105,7 @@ def test_single_voice_is_one_speaker_one_turn() -> None:
 
     assert diar.speakers == ["SPEAKER_1"]
     assert [(t.start_ms, t.end_ms) for t in diar.turns] == [(0, 4000)]
-    # Attribution works without a 2-way split ever landing (one voice in
-    # the whole recording); the very first chunk carries zero confidence
-    # by design, so probe a later span.
+    # One voice only; the first chunk carries zero confidence by design, so probe a later span.
     assert diar.attribute(1100, 1900) == "SPEAKER_1"
 
 
@@ -194,9 +187,7 @@ def test_three_voices_become_three_speakers_in_first_appearance_order() -> None:
 
 
 def test_a_single_stray_chunk_never_becomes_a_speaker() -> None:
-    # One chunk of a third voice (a cough, a bystander) is below the
-    # speaker floor: it is folded into the nearest real speaker if it is
-    # close enough, otherwise it stays UNKNOWN — never SPEAKER_3.
+    # One chunk of a third voice is below the floor: folded into the nearest speaker or UNKNOWN, never SPEAKER_3.
     embedder = FakeEmbedder(_voice_a(3) + _voice_c(1) + _voice_b(3))
     segmenter = FakeSegmenter(_regions(7))
 

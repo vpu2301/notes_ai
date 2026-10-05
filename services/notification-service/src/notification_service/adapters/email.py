@@ -1,10 +1,5 @@
-"""Email provider abstraction.
-
-One ABC, a real
-implementation, and a mock that REFUSES TO RUN IN PRODUCTION. The
-refusal is the point — a mock that silently accepts mail in production
-looks exactly like a working system while every notification is
-discarded, and nothing in the metrics distinguishes the two.
+"""Email provider abstraction: one ABC, an SMTP implementation, and a mock that
+refuses to run in production (silently discarded mail looks like success).
 """
 
 from __future__ import annotations
@@ -40,7 +35,7 @@ class SendResult:
 
 
 class EmailProvider(ABC):
-    """One method. Adding a channel (sprint 18 push) copies this shape."""
+    """One method; a new channel copies this shape."""
 
     @abstractmethod
     async def send(self, message: OutboundEmail) -> SendResult: ...
@@ -54,8 +49,7 @@ def _build_mime(message: OutboundEmail, *, from_address: str, from_name: str) ->
     mime["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     mime["To"] = message.to_address
     mime["Subject"] = message.subject
-    # Marks the mail as automatic so recipients' out-of-office replies do
-    # not bounce back into the noreply mailbox.
+    # Keeps out-of-office replies away from the noreply mailbox.
     mime["Auto-Submitted"] = "auto-generated"
     mime.set_content(message.text_body)
     if message.html_body:
@@ -103,9 +97,7 @@ class SmtpProvider(EmailProvider):
             )
         except Exception as exc:  # noqa: BLE001
             code = getattr(exc, "code", None)
-            # 5xx is a permanent refusal (unknown mailbox); retrying it
-            # burns attempts and, on some relays, reputation. 4xx and
-            # connection errors are transient.
+            # 5xx is permanent; 4xx and connection errors are transient.
             if isinstance(code, int) and 500 <= code < 600:
                 raise EmailPermanentError(f"smtp permanent {code}: {exc}") from exc
             raise EmailDeliveryError(f"smtp failure: {exc}") from exc
@@ -114,8 +106,7 @@ class SmtpProvider(EmailProvider):
         return SendResult(provider_message_id=str(message_id))
 
     async def aclose(self) -> None:
-        # aiosmtplib.send() opens and closes a connection per call, so there
-        # is no pooled client to tear down here.
+        # aiosmtplib.send() connects per call; nothing pooled to close.
         return None
 
 

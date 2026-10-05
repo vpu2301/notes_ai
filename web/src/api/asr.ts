@@ -21,24 +21,18 @@ export interface SubmitJobParams {
   vocabularyHint?: string;
   /** How many people spoke, when someone said so (1–8); omitted for "don't know". */
   speakersExpected?: number | null;
-  /**
-   * An upper bound on the speakers (1–8): a calendar event's invitee count,
-   * never sent as `speakersExpected`. A set "People" value wins server-side.
-   */
+  /** Upper bound on the speakers (1–8), e.g. invitee count; `speakersExpected` wins server-side. */
   speakersMax?: number | null;
   /** Names to offer when renaming speakers (≤ 12, sent as one JSON string field). */
   nameCandidates?: string[] | null;
   captureSource?: CaptureSource;
-  /**
-   * Sprint I3: `mic_system` declares a 2-channel file (L = microphone,
-   * R = tab/system audio). Only sent when set to that; mono is the default.
-   */
+  /** `mic_system` declares a 2-channel file (L = microphone, R = system audio); only sent when set. */
   channelLayout?: ChannelLayout;
   /** The author's name for their own channel's speaker (≤ 400 chars; the server trims). */
   localSpeakerName?: string;
-  /** Sprint F1: when Record was clicked (ISO 8601); omitted for uploaded files. */
+  /** When Record was clicked (ISO 8601); omitted for uploaded files. */
   recordPressedAt?: string;
-  /** Sprint F1: ms from the click to the first frame written (0–600 000). */
+  /** ms from the click to the first frame written (0–600 000). */
   firstFrameOffsetMs?: number;
 }
 
@@ -83,13 +77,7 @@ export function refusedLayout(err: unknown): boolean {
   return err instanceof ApiError && err.code === "channel_layout_mismatch";
 }
 
-/**
- * Submit, and if a `mic_system` upload is refused as `channel_layout_mismatch`
- * (the browser wrote one channel after all), post the same file once more as
- * mono: the recording is worth more than the channel split. Mirrors the
- * macOS app's fallback. `send` is injectable so a page can hand in its own
- * (mocked) `submitJob`.
- */
+/** Submit; a `mic_system` upload refused as `channel_layout_mismatch` is re-posted once as mono. `send` is injectable for tests. */
 export async function submitWithLayoutFallback(
   send: (params: SubmitJobParams) => Promise<AsrJob>,
   params: SubmitJobParams,
@@ -120,11 +108,7 @@ export function getResult(id: string): Promise<TranscriptResult> {
   return api<TranscriptResult>("asr", `/asr/jobs/${id}/result`);
 }
 
-/**
- * Name the diarized speakers of a job. The full label → name mapping is
- * stored on the job, so every surface (web, desktop, the note) agrees;
- * an empty name puts a label back to its "Speaker N" default.
- */
+/** The full label → name mapping lives on the job; an empty name restores the "Speaker N" default. */
 export function setSpeakerNames(
   id: string,
   names: Record<string, string>,
@@ -135,11 +119,7 @@ export function setSpeakerNames(
   return api("asr", `/asr/jobs/${id}/speakers`, { method: "PUT", json });
 }
 
-/**
- * Turn down a name suggestion: that label/name pair never comes back for
- * this job (204, idempotent). Accepting one is a `setSpeakerNames` with
- * `sources[label] = "suggestion"`.
- */
+/** 204, idempotent. Accepting one is a `setSpeakerNames` with `sources[label] = "suggestion"`. */
 export function dismissNameSuggestion(id: string, label: string, name: string): Promise<void> {
   return api<void>("asr", `/asr/jobs/${id}/speakers/suggestions/dismiss`, {
     method: "POST",
@@ -147,12 +127,7 @@ export function dismissNameSuggestion(id: string, label: string, name: string): 
   });
 }
 
-/**
- * Move turns to another speaker: an existing label, `"new"` (someone the
- * diarizer missed) or `null` (Unknown). `segmentIndices` are the turns'
- * own `segment_indices`, concatenated — one call per action. A reversible
- * edit like a merge; 409 `stale_result_rev` means reload first.
- */
+/** Move turns to a label, `"new"` or `null` (Unknown); `segmentIndices` = the turns' `segment_indices`. 409 `stale_result_rev` means reload. */
 export function reassignTurns(
   id: string,
   params: { resultRev: number; segmentIndices: number[]; to: string | null },
@@ -181,12 +156,7 @@ export function undoSpeakerEdit(id: string, editId: string): Promise<void> {
   return api<void>("asr", `/asr/jobs/${id}/speakers/edits/${editId}`, { method: "DELETE" });
 }
 
-/**
- * Re-label a finished transcript's speakers, optionally with the number of
- * people who spoke (null lets the diarizer decide). Runs in the background:
- * poll `getJob` while `diarization_status` is queued/running. Replaces any
- * speaker merges, which belong to the old labelling.
- */
+/** Background re-label: poll `getJob` while `diarization_status` is queued/running. Drops existing speaker merges. */
 export function rediarize(id: string, speakersExpected: number | null): Promise<RediarizeAccepted> {
   return api<RediarizeAccepted>("asr", `/asr/jobs/${id}/rediarize`, {
     method: "POST",
@@ -199,15 +169,12 @@ export function undoRediarize(id: string): Promise<RediarizeAccepted> {
   return api<RediarizeAccepted>("asr", `/asr/jobs/${id}/rediarize/undo`, { method: "POST" });
 }
 
-/** Sprint TQ3: the spellings unified (or proposed) for this transcript. */
+/** The spellings unified (or proposed) for this transcript. */
 export function listCorrections(id: string): Promise<CorrectionsView> {
   return api<CorrectionsView>("asr", `/asr/jobs/${id}/corrections`);
 }
 
-/**
- * Accept or reject one unified spelling. `to_text` edits the spelling on
- * accept. `corrections_rev` is the one the view showed; a stale one is a 409.
- */
+/** `to_text` edits the spelling on accept; a stale `corrections_rev` is a 409. */
 export function decideCorrection(
   id: string,
   correctionId: string,

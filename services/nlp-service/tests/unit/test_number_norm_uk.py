@@ -1,9 +1,4 @@
-"""Ukrainian number normalization corpus.
-
-Each row is a hand-authored (input, expected) pair representing the
-patterns speakers actually dictate. Target: ≥ 95% pass on
-the full set per language.
-"""
+"""Ukrainian number normalization corpus: hand-authored (input, expected) pairs."""
 
 from __future__ import annotations
 

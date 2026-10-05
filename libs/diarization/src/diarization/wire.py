@@ -1,22 +1,7 @@
-"""The diar-server wire format (Sprint 29 B-9, shape B).
+"""The diar-server wire format, imported by both client and server so they cannot drift.
 
-One module, imported by both sides, so the client and the server cannot
-drift: :class:`HttpDiarizer` (``http_engine.py``) posts audio and reads
-:func:`from_payload`; the server (``deploy/diar-server``) runs the same
-in-process engine and answers with :func:`to_payload`.
-
-**What crosses the network, and what never does.** The request carries
-16 kHz mono audio, the hints a person stated, and the roster-guard
-policy — the floor stays the worker's decision, but it is applied where
-the embeddings are, so a remote run grades its roster exactly like an
-in-process one. The reply carries labelled spans, overlap spans and
-counts. Speaker embeddings stay inside the server's ``diarize()`` call
-and are dropped there: they are biometric data (concept §7) and there is
-no field for them here.
-
-Audio goes over the wire as FLAC when ``soundfile`` is importable (it is
-in the worker image) and as WAV otherwise — lossless either way, so the
-labels do not depend on which one was used.
+Request: 16 kHz audio (lossless FLAC or WAV), hints, roster policy. Reply: labelled spans, overlaps, counts.
+Embeddings are biometric data and have no field here.
 """
 
 from __future__ import annotations
@@ -35,13 +20,9 @@ from .roster import RosterOutcome
 SAMPLE_RATE_HZ = 16_000
 DIARIZATIONS_PATH = "/v1/audio/diarizations"
 HEALTH_PATH = "/health"
-# The server reads our token from here first: on a managed endpoint the
-# gateway takes `Authorization` for its own check, and what it forwards
-# is its business.
+# Read first by the server: a managed gateway consumes `Authorization` itself.
 TOKEN_HEADER = "X-MDX-Diar-Token"
-# Payload version: bumped when a field changes meaning. The server sends
-# it; a client that reads a version it does not know refuses the answer
-# rather than guessing what a field means.
+# Bumped when a field changes meaning; an unknown version is refused, not guessed.
 WIRE_VERSION = 1
 
 
@@ -70,12 +51,7 @@ def _wav_bytes(samples: np.ndarray) -> bytes:
 
 
 def audio_seconds(data: bytes) -> float:
-    """How long the upload claims to be, from its header alone.
-
-    Read before decoding so the decoded float32 array — which a highly
-    compressible recording can blow up to gigabytes — is bounded by
-    something other than hope.
-    """
+    """Duration from the header alone, read before decoding (a compressible upload can decode to gigabytes)."""
     try:
         import soundfile  # noqa: PLC0415
     except ImportError:
@@ -125,19 +101,10 @@ def hint_fields(hints: DiarizationHints) -> dict[str, str]:
 
 
 def to_payload(diar: OfflineDiarization, *, model_id: str, seconds: float) -> dict[str, Any]:
-    """``OfflineDiarization`` → JSON body. Labels and numbers only.
+    """``OfflineDiarization`` → JSON body, labels and numbers only.
 
-    Segments carry the DISPLAY labels (``SPEAKER_1`` …, ``UNKNOWN``
-    kept), which is what the worker's attribution reads, so the
-    engine's internal cluster names never travel and the renumbering
-    happens once, on the server. ``display_names`` is therefore the
-    identity map, with ONE exception that decides whether the remote
-    path produces the same transcript as the in-process one:
-    ``UNKNOWN`` is left out of it. Unattributed evidence has no display
-    name by construction (``_assign_display_names`` skips it), which is
-    how ``_merge_turns`` drops it; an identity entry for ``UNKNOWN``
-    would turn "nobody could be attributed here" into a speaker called
-    UNKNOWN, with a turn of its own and a place in ``speakers``.
+    Segments carry DISPLAY labels, so ``display_names`` is the identity map EXCEPT ``UNKNOWN``: an entry for it
+    would turn unattributed evidence into a speaker called UNKNOWN with a turn of its own.
     """
     roster = diar.roster
     stats = diar.stats
@@ -200,8 +167,7 @@ def from_payload(
     display = payload.get("display_names") or {}
     if not isinstance(display, dict):
         raise WirePayloadError("display_names must be an object")
-    # Belt and braces for the rule in `to_payload`: an older or third
-    # server that names UNKNOWN must not make it a speaker here.
+    # A server that names UNKNOWN must not make it a speaker here (see `to_payload`).
     display = {k: v for k, v in display.items() if k != UNKNOWN}
     return OfflineDiarization(
         segments=segments,

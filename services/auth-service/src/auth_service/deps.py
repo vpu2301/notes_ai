@@ -1,15 +1,4 @@
-"""Module-level holders for the lifespan-built dependencies.
-
-FastAPI dependency injection needs callable factories at route-registration
-time, but our deps (``current_user``, DB pools, audit writer) are
-async-constructed during the lifespan. We bridge with module globals that
-lifespan fills, plus thin functions that routers wire via ``Depends(...)``.
-
-Public surface:
-- :func:`current_user`  — verifies the bearer; returns :class:`Claims`.
-- :func:`requires`       — factory; returns a ``Depends``-shaped function
-  that checks the perms matrix and emits an ``authz.denied`` audit on 403.
-"""
+"""Module-level holders for the lifespan-built dependencies, wired via ``Depends(...)``."""
 
 from __future__ import annotations
 
@@ -53,12 +42,7 @@ async def current_user(
     request: Request,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> Claims:
-    """The auth dep, callable as a FastAPI Depends.
-
-    Defers the actual verification to the libs/auth-built closure, which
-    needs the JwksCache from ServiceState. By making this a thin wrapper
-    we keep the FastAPI signature stable for OpenAPI introspection.
-    """
+    """The auth dep; thin wrapper over the libs/auth closure so the signature stays stable."""
     state = get_state()
     if not hasattr(state, "_current_user_dep"):
         from auth import build_current_user
@@ -68,10 +52,7 @@ async def current_user(
 
         state._current_user_dep = build_current_user(  # type: ignore[attr-defined]
             jwks_cache=state.jwks_cache,
-            # FND-1: a list, chosen by mode. In `native` it is this
-            # service's own issuer alone — a Keycloak-signed token must
-            # not open a native endpoint after cut-over. In `dual` it is
-            # both, which is the point of the period (ADR-0047).
+            # Issuer list chosen by mode (ADR-0047).
             issuers=auth_issuers(),
             clock_skew_seconds=settings.auth_clock_skew_seconds,
             denylist=state.denylist,
@@ -84,20 +65,7 @@ async def current_user(
 def requires(
     action: Action, target_kind: TargetKind, *, scope: str | None = None
 ) -> Callable[..., Awaitable[Claims]]:
-    """Return a FastAPI dependency that enforces the perms matrix.
-
-    Usage::
-
-        @router.get("/things")
-        async def list_things(
-            claims: Annotated[Claims, Depends(requires("thing.read", "thing"))],
-        ): ...
-
-    On deny: raises HTTPException(403) with an RFC 9457 detail; emits an
-    ``authz.denied`` audit event (severity ``sec``) with the caller's tid+sub
-    plus the attempted action/target. Audit emission is best-effort —
-    failure to write the audit row never blocks the 403 response.
-    """
+    """Dependency enforcing the perms matrix: 403 + best-effort ``authz.denied`` audit on deny."""
 
     async def dep(claims: Annotated[Claims, Depends(current_user)]) -> Claims:
         try:
@@ -122,25 +90,10 @@ def requires(
 
 
 def requires_mfa() -> Callable[..., Awaitable[Claims]]:
-    """Feature-flagged MFA gate.
+    """MFA gate behind ``MDX_REQUIRE_MFA`` (read per call so tests can monkeypatch).
 
-    Sprint 02 ships with MFA off — see ``MDX_REQUIRE_MFA``. When the flag
-    is **off**, this dep is a no-op (returns whatever ``current_user``
-    resolves). When **on**, it asserts ``claims.mfa is True`` and otherwise
-    responds 401 with ``WWW-Authenticate: MFA``, signalling to the frontend
-    that the user must satisfy a TOTP challenge.
-
-    Flag is read on every call (not at module import) so an operator can
-    flip ``MDX_REQUIRE_MFA`` and bounce the service without code changes,
-    and so tests can monkeypatch the setting per-case.
-
-    Sprint 16 grace flow: with the flag on, a caller whose token lacks
-    ``mfa`` is split by enrolment status —
-
-    - not enrolled → **403** with machine code ``mfa_enrolment_required``
-      (the FE routes to ``POST /auth/mfa/enrol``);
-    - enrolled but holding a pre-enrolment token → **401** with the MFA
-      challenge (re-login; auth-service now demands the TOTP code).
+    Token without ``mfa``: not enrolled → 403 ``mfa_enrolment_required``;
+    enrolled → 401 with the MFA challenge.
     """
     from .config import settings
 
@@ -166,8 +119,7 @@ def requires_mfa() -> Callable[..., Awaitable[Claims]]:
 
 
 async def _emit_authz_denied(exc: AuthzDeniedError) -> None:
-    """Write an ``authz.denied`` sec event. Never raise — the caller is
-    already responding 403; a failed audit write must not become a 500."""
+    """Write an ``authz.denied`` sec event; never raise (a failed audit must not become a 500)."""
     _authz_denied_counter.add(
         1,
         {

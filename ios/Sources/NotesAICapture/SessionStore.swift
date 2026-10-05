@@ -3,17 +3,8 @@ import Foundation
 import LocalAuthentication
 import Security
 
-/// Which issuer minted the session this phone is holding.
-///
-/// During the dual-issuer period (ADR-0047) both are live at once:
-/// auth-service mints for email-code sign-ins, Keycloak keeps minting for
-/// password sign-ins, and a client has to know which one it has because
-/// the two behave differently in ways the person can feel — how long the
-/// refresh token idles, and whether there is a password to save.
-///
-/// The discriminator is the refresh token's own prefix, which is also what
-/// BE-2 routes `/auth/refresh` and `/auth/logout` on, so the phone and the
-/// server cannot disagree about what a token is.
+/// Which issuer minted the session (ADR-0047). The discriminator is the
+/// refresh token's prefix, the same one the server routes on.
 enum SessionKind: String, Codable, Equatable, Sendable {
     /// auth-service's own session (`nrt_…`), owned by `session_native`.
     case native
@@ -27,43 +18,21 @@ enum SessionKind: String, Codable, Equatable, Sendable {
         self = refreshToken.hasPrefix(Self.nativePrefix) ? .native : .keycloak
     }
 
-    /// Keycloak's refresh token dies after the realm's idle timeout —
-    /// thirty minutes in this deployment — while a native one idles for
-    /// thirty days (`AUTH_REFRESH_TTL_SECONDS`). Only the first kind needs
-    /// the app to refresh in the background to survive a long recording,
-    /// and running a keepalive for the second would be a phone waking up
-    /// every quarter of an hour for nothing.
+    /// Keycloak tokens idle out after ~30 minutes, native ones after 30 days;
+    /// only the first needs a background keepalive.
     var needsKeepAlive: Bool { self == .keycloak }
 
-    /// Only a Keycloak user has a password to save: the native issuer has
-    /// no password grant until IDX-A4, and email codes are the way in.
+    /// Only a Keycloak user has a password to save.
     var canSavePassword: Bool { self == .keycloak }
 
-    /// The biometric gate is native-only, and off in this batch anyway
-    /// (IOS-1). A Keycloak session already sits behind the saved-password
-    /// item's own `.biometryCurrentSet`, and stacking a second face prompt
-    /// on top of it protects nothing new.
+    /// The gate is native-only: a Keycloak session already sits behind the saved password's biometry.
     var canGate: Bool { self == .native }
 }
 
-/// The signed-in session, as this phone keeps it.
-///
-/// Everything here is a credential or names one, which is why it lives in
-/// the Keychain and not in UserDefaults beside the backend URLs. The
-/// access token is deliberately absent: it lives fifteen minutes, it is
-/// re-mintable from the refresh token, and writing it to disk would be
-/// storing a secret with none of the benefits of storing it.
-///
-/// Both kinds of session live here during the dual-issuer period: a native
-/// refresh token and a Keycloak one are both tokens this phone holds and
-/// presents in a body, and `X-Client-Type: ios` is what makes even the
-/// Keycloak login hand one over rather than set a cookie
-/// (`routers/login.py:243`). `kind` is what tells them apart.
-///
-/// Before IDX-I1 this app stored the **password** instead, behind Face ID.
-/// It still does, for Keycloak users only, because during `dual` that is
-/// still their way in — see `CredentialStore`. `SessionMigration` deletes
-/// it when IDX-A4/A5 move them.
+/// The signed-in session, kept in the Keychain. The access token is
+/// deliberately absent (short-lived, re-mintable). Either issuer's refresh
+/// token lives here; `kind` tells them apart. Keycloak users' passwords are
+/// still kept separately (`CredentialStore`) during `dual`.
 struct StoredSession: Equatable, Sendable {
     var refreshToken: String
     var refreshExpiresAt: Date
@@ -73,27 +42,18 @@ struct StoredSession: Equatable, Sendable {
 
     var isExpired: Bool { refreshExpiresAt <= Date() }
 
-    /// Read off the token itself, so a stored record and the token in it
-    /// can never disagree.
+    /// Read off the token itself, so record and token can never disagree.
     var kind: SessionKind { SessionKind(refreshToken: refreshToken) }
 }
 
-/// What the Keychain item actually holds.
-///
-/// `token` is the refresh token in the clear when the gate is off, and the
-/// base64 of an AES-GCM sealed box when it is on. Everything else stays
-/// readable either way: at boot the app has to know whether there is a
-/// session, whose it is and whether it has expired **before** it can ask
-/// for Face ID, and none of those fields is a secret.
+/// What the Keychain item holds. `token` is in the clear with the gate off,
+/// an AES-GCM sealed box when on; the other fields stay readable so boot can
+/// decide before any Face ID prompt.
 struct SessionRecord: Codable, Equatable, Sendable {
     var token: String
     var gated: Bool = false
-    /// Which issuer minted the token. Stored in the clear alongside the
-    /// address and the expiry, and for the same reason: with the gate on
-    /// the token itself is unreadable until a face opens it, and the app
-    /// has to know at boot whether to arm the keepalive — before it can
-    /// put a prompt on screen. Defaults to `.native` for an item written
-    /// before this field existed, which is what every such item is.
+    /// Which issuer minted the token; in the clear so the keepalive decision
+    /// precedes any prompt. Defaults to `.native` for older items.
     var kind: SessionKind = .native
     var refreshExpiresAt: Date
     var identityId: String
@@ -128,14 +88,11 @@ enum SessionStoreError: LocalizedError, Equatable {
     case writeFailed(OSStatus)
     /// The gate is on and the key has not been unlocked in this launch.
     case locked
-    /// The gate item is gone — biometry was re-enrolled, or the passcode
-    /// was removed. The session cannot be read again, ever.
+    /// The gate item is gone (biometry re-enrolled or passcode removed); the session is unreadable for good.
     case gateLost
-    /// The item is there, the key is there, and the bytes still will not
-    /// open: the wrong key, or a tampered item.
+    /// Item and key present but the bytes will not open: wrong key or tampered item.
     case undecipherable
-    /// The gate was asked for on a session that cannot carry one — a
-    /// Keycloak session, during the dual-issuer period.
+    /// The gate was asked for on a Keycloak session, which cannot carry one.
     case gateUnavailable
 
     var errorDescription: String? {
@@ -157,9 +114,7 @@ enum SessionStoreError: LocalizedError, Equatable {
 
 // MARK: - Storage seams
 
-/// Where the session bytes actually go. One implementation in the app
-/// (the Keychain), another in the tests — the session logic is worth
-/// exercising without a Keychain to depend on.
+/// Where the session bytes go: the Keychain in the app, a fake in the tests.
 protocol SessionStorage: Sendable {
     func read() -> Data?
     func write(_ data: Data) -> OSStatus
@@ -183,15 +138,9 @@ struct KeychainSessionStorage: SessionStorage {
     }
 }
 
-/// The optional biometric gate: a random 32-byte key in its own Keychain
-/// item, created with `.biometryCurrentSet` so that re-enrolling a face or
-/// finger destroys it — and with it the readability of the refresh token.
-///
-/// The key is a separate item from the session on purpose. The session has
-/// to be readable after the first unlock (an upload that finishes while
-/// the phone is in a pocket still has to refresh); the gate key must not
-/// be readable without a face. Two accessibility classes cannot live on
-/// one item, so they live on two.
+/// The optional biometric gate: a random 32-byte key in its own Keychain item
+/// (`.biometryCurrentSet`, so re-enrolling destroys it). Separate from the
+/// session item because the two need different accessibility classes.
 protocol SessionGateKeyring: Sendable {
     /// Whether a gate key exists, without showing any UI.
     func exists() -> Bool
@@ -227,11 +176,8 @@ struct KeychainSessionGate: SessionGateKeyring {
     func create() throws -> SymmetricKey {
         destroy()
         var error: Unmanaged<CFError>?
-        // `.biometryCurrentSet` is the point of the gate: re-enrolling a
-        // face or a finger destroys the key, and with it the readability
-        // of the refresh token. A phone with no biometry enrolled cannot
-        // hold such an item at all, so there the gate falls back to
-        // `.userPresence` — the passcode (IDX-I1 J).
+        // `.biometryCurrentSet` is the point of the gate; with no biometry
+        // enrolled such an item cannot exist, so fall back to `.userPresence` (passcode).
         let flags: SecAccessControlCreateFlags =
             Biometrics.name == nil ? .userPresence : .biometryCurrentSet
         guard let access = SecAccessControlCreateWithFlags(
@@ -269,8 +215,7 @@ struct KeychainSessionGate: SessionGateKeyring {
                 }
                 return SymmetricKey(data: data)
             case errSecItemNotFound:
-                // `.biometryCurrentSet` invalidated the item: the face or
-                // finger that could open it is no longer enrolled.
+                // `.biometryCurrentSet` invalidated the item: biometry re-enrolled.
                 throw SessionStoreError.gateLost
             case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed:
                 throw SessionStoreError.locked
@@ -291,20 +236,13 @@ private extension SymmetricKey {
 
 // MARK: - The store
 
-/// The session's one home, serialised.
-///
-/// An actor because the refresh path both reads and writes it while other
-/// requests are in flight, and the ordering there is the whole point:
-/// `APIClient` persists a rotated refresh token **before** it publishes
-/// the new access token, so a crash in between leaves the newest token on
-/// disk rather than a token the server has already retired — which, after
-/// the grace window, the server would treat as a replay and sign the
-/// person out for security.
+/// The session's one home. An actor: `APIClient` persists a rotated refresh
+/// token BEFORE publishing the new access token, so a crash never leaves a
+/// retired (replayable) token on disk.
 actor SessionStore {
     private let storage: SessionStorage
     private let gate: SessionGateKeyring
-    /// Read once, then kept: every authorised request that needs a refresh
-    /// would otherwise go to the Keychain first.
+    /// Read once, then kept.
     private var cached: SessionRecord?
     private var loaded = false
     /// The gate key, once this launch has been unlocked. Memory only.
@@ -318,8 +256,7 @@ actor SessionStore {
 
     // ── what can be read without a face ──────────────────────────────
 
-    /// Who the stored session belongs to and whether it is gated. Never
-    /// prompts; nil when there is no session.
+    /// Who the stored session belongs to and whether it is gated. Never prompts.
     func summary() -> SessionSummary? {
         guard let record = record() else { return nil }
         return SessionSummary(identityId: record.identityId,
@@ -332,9 +269,7 @@ actor SessionStore {
 
     var isGateOn: Bool { record()?.gated ?? gate.exists() }
 
-    /// Which issuer minted the stored session. Nil when there is none.
-    /// Never prompts: the field is in the clear precisely so the keepalive
-    /// decision can be made before any face prompt (see `SessionRecord`).
+    /// Which issuer minted the stored session; nil when none. Never prompts.
     var kind: SessionKind? { record()?.kind }
 
     /// True when the refresh token can be read right now.
@@ -345,9 +280,7 @@ actor SessionStore {
 
     // ── the token itself ─────────────────────────────────────────────
 
-    /// The session, decrypted. Throws `.locked` when the gate is on and
-    /// this launch has not been unlocked, `.gateLost` when the key is gone
-    /// for good.
+    /// The session, decrypted. Throws `.locked` while gated, `.gateLost` when the key is gone.
     func load() throws -> StoredSession? {
         guard let record = record() else { return nil }
         let token = try open(record)
@@ -358,11 +291,7 @@ actor SessionStore {
                              lastTenantId: record.lastTenantId)
     }
 
-    /// Show the biometric prompt and keep the key for this launch.
-    ///
-    /// `.gateLost` wipes the session on the way out: an item nothing can
-    /// ever open again is not a session, and leaving it there would make
-    /// every later launch ask for a face that no longer works.
+    /// Show the biometric prompt and keep the key for this launch. `.gateLost` wipes the session.
     func unlock(reason: String) async throws {
         guard let record = record(), record.gated else { return }
         do {
@@ -374,16 +303,9 @@ actor SessionStore {
     }
 
     func save(_ session: StoredSession) throws {
-        // Signing in again on a phone whose owner asked for the gate must
-        // not quietly turn it off. If the gate item is there but this
-        // launch holds no key — the usual case, since signing out drops it
-        // — mint a fresh one rather than prompting: the key that is being
-        // replaced protected a session that no longer exists.
-        //
-        // A Keycloak session is the exception: it cannot be gated (see
-        // `SessionKind.canGate`), so an existing gate key is left alone —
-        // untouched, not destroyed, because the next native sign-in on
-        // this phone should still find the gate the owner asked for.
+        // Signing in again must not silently turn the gate off: with a gate item
+        // but no key this launch, mint a fresh key rather than prompt. A Keycloak
+        // session cannot be gated, so its gate key is left untouched for the next native sign-in.
         if session.kind.canGate, gateKey == nil, gate.exists() {
             gateKey = try gate.create()
         }
@@ -402,10 +324,7 @@ actor SessionStore {
     func rotate(refreshToken: String, expiresAt: Date, tenantId: String?) throws {
         guard var record = record() else { return }
         if record.gated, gateKey == nil { throw SessionStoreError.locked }
-        // The issuer follows the token, not the record it replaces. A
-        // rotation should never change it, but if a deployment flips mode
-        // under a live session the phone must believe the token it is
-        // actually holding — that is what decides the keepalive.
+        // The issuer follows the token actually held, not the record it replaces.
         record.kind = SessionKind(refreshToken: refreshToken)
         record.token = try seal(refreshToken, gated: record.gated)
         record.refreshExpiresAt = expiresAt
@@ -413,8 +332,7 @@ actor SessionStore {
         try write(record)
     }
 
-    /// Remember which workspace the session is in, without touching the
-    /// token. `POST /auth/token` rotates nothing, so neither does this.
+    /// Remember which workspace the session is in, without touching the token.
     func rotateTenant(tenantId: String) throws {
         guard var record = record(), record.lastTenantId != tenantId else { return }
         record.lastTenantId = tenantId
@@ -430,16 +348,11 @@ actor SessionStore {
 
     // ── the gate ─────────────────────────────────────────────────────
 
-    /// Turn the gate on or off, re-writing the session item either way.
-    ///
-    /// Turning it on needs the token in the clear right now, which is why
-    /// it can only be done from a signed-in, unlocked app. Turning it off
-    /// destroys the key first: a key nothing references is a key that
-    /// should not survive the switch being flipped.
+    /// Turn the gate on or off, re-writing the session item. On needs the
+    /// token in the clear (signed in, unlocked); off destroys the key first.
     func setGate(enabled: Bool) async throws {
         guard var record = record() else {
-            // Not signed in: still honour the switch, so the preference is
-            // in force by the time there is a session to protect.
+            // Not signed in: still honour the switch for the next session.
             if enabled {
                 gateKey = try gate.create()
             } else {
@@ -449,13 +362,8 @@ actor SessionStore {
             return
         }
         guard record.kind.canGate else {
-            // A Keycloak session has no native refresh token to seal, so
-            // there is nothing to gate: its way back in is the saved
-            // password, which carries a face of its own. Turning the gate
-            // *on* is reported rather than silently ignored, so the toggle
-            // does not sit there looking as though it worked. Turning it
-            // *off* is honoured — de-escalation should never be refused,
-            // and the key it drops belonged to a session that is gone.
+            // A Keycloak session cannot be gated: turning *on* is reported,
+            // turning *off* is honoured (de-escalation is never refused).
             guard enabled else {
                 gate.destroy()
                 gateKey = nil
@@ -485,8 +393,7 @@ actor SessionStore {
         guard let data = storage.read() else { return nil }
         cached = try? JSONDecoder.session.decode(SessionRecord.self, from: data)
         if cached == nil {
-            // Unreadable (an older shape, a truncated write): treat it as no
-            // session rather than leaving a value nothing can use.
+            // Unreadable (older shape, truncated write): treat as no session.
             storage.delete()
         }
         return cached
@@ -522,8 +429,7 @@ actor SessionStore {
 }
 
 extension JSONEncoder {
-    /// ISO-8601 dates, so the item stays readable by eye when something
-    /// goes wrong.
+    /// ISO-8601 dates, readable by eye.
     static let session: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -564,9 +470,7 @@ enum Biometrics {
         }
     }
 
-    /// A passcode will do when there is no biometry to enrol against — the
-    /// gate item is created with `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly`,
-    /// so a phone with no passcode at all cannot hold one.
+    /// A passcode will do without biometry; the gate item needs `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly`.
     static var isAvailable: Bool {
         LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
     }
@@ -583,13 +487,7 @@ enum Biometrics {
 enum LegacyCookies {
     static let name = "mdx_rt"
 
-    /// Delete any `mdx_rt` cookie left in the shared store.
-    ///
-    /// Before IDX-I1 the refresh token lived here — on disk, attached
-    /// automatically to every request to the auth host. The app no longer
-    /// uses cookie storage at all (`URLSession` is built with none), so a
-    /// cookie left behind would be a credential nothing reads and nobody
-    /// rotates. Returns how many were removed.
+    /// Delete any legacy `mdx_rt` cookie left in the shared store. Returns how many were removed.
     @discardableResult
     static func purge(from storage: HTTPCookieStorage = .shared) -> Int {
         let stale = (storage.cookies ?? []).filter { $0.name == name }
@@ -598,19 +496,12 @@ enum LegacyCookies {
     }
 }
 
-/// The password vault, and the one place its service string is written.
-///
-/// IDX-I1 retired it; IOS-1 un-retired it for the dual-issuer period,
-/// because a Keycloak user's password is still their way in (ADR-0047) and
-/// `CredentialStore` is what reads and writes it. What survives here is
-/// `purge()` — the delete side — which is called by `SessionMigration`
-/// only once IDX-A4/A5 have moved these users onto native sessions and
-/// there is no longer a password worth keeping.
+/// The password vault's service string and its delete side (`purge()`);
+/// `CredentialStore` reads and writes it during `dual` (ADR-0047).
 enum LegacyCredentials {
     static let service = "ai.notes.capture.credentials"
 
-    /// Whether the old item is still there. Does not prompt: the query is
-    /// told to fail rather than show UI, and "would need UI" means "exists".
+    /// Whether the old item is still there. Does not prompt ("would need UI" means "exists").
     static var exists: Bool {
         let context = LAContext()
         context.interactionNotAllowed = true
@@ -623,9 +514,7 @@ enum LegacyCredentials {
         return status == errSecSuccess || status == errSecInteractionNotAllowed
     }
 
-    /// Delete every item under the old service. Deleting a biometry-bound
-    /// item does not need the biometry, which is the whole reason this can
-    /// run unattended at launch.
+    /// Delete every item under the old service; deleting a biometry-bound item needs no biometry.
     @discardableResult
     static func purge() -> Int {
         let existed = exists
@@ -637,26 +526,13 @@ enum LegacyCredentials {
     }
 }
 
-/// The one-time cut-over from the password vault to a device session.
-///
-/// **Held back during `dual`.** The cut-over this was written for deletes
-/// the saved password, and during the dual-issuer period that password is
-/// still how every pre-existing user signs in: running it now would log
-/// them out of their own phone in the release that was supposed to add
-/// email codes. So this batch cleans up only the refresh **cookie** — a
-/// credential nothing in this app has read since IDX-I1, because even the
-/// Keycloak login hands a native client its token in the body — and leaves
-/// the password alone.
-///
-/// `purgeCredentials` stays a parameter, defaulted to a no-op, so that
-/// IDX-A4/A5 turns this back on by changing one default rather than by
-/// rewriting a migration under a user's live session.
+/// The one-time cut-over from the password vault to a device session. Held
+/// back during `dual`: only the refresh cookie is cleaned; `purgeCredentials`
+/// defaults to a no-op until every user is native.
 enum SessionMigration {
     static let key = "sessionMigrationV1"
 
-    /// Runs once per install. Returns the notice to show on the sign-in
-    /// screen, or nil when there was nothing worth telling anybody about
-    /// — which, during `dual`, is every case: a purged cookie is not news.
+    /// Runs once per install. Returns the sign-in notice, or nil (a purged cookie is not news).
     @discardableResult
     static func run(defaults: UserDefaults = .standard,
                     purgeCredentials: () -> Int = { 0 },

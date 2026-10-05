@@ -1,20 +1,8 @@
-"""Speaker edit overlay (Sprint 28 merge, Sprint 30 reassign): pure folding.
+"""Speaker edit overlay (merge, reassign): pure folding in ``seq`` order.
 
-The stored transcript is the raw diarization artifact and is never
-rewritten. Edits are an ordered overlay: every read folds the live edits
-of the current diarization run (``result_rev``) onto the segments in
-``seq`` order, before the roster, names and turns are built. Labels are
-never renumbered, so names stay keyed by label.
-
-Fold order is ``seq`` and nothing else, so the result is deterministic and
-independent of when it is read:
-
-* ``merge`` relabels every segment currently carrying ``from_label`` —
-  including segments an EARLIER reassign moved there;
-* ``reassign`` relabels the segments it names (by ARTIFACT index) to
-  ``to_label`` (``None`` = unattributed); a LATER merge of that label
-  carries them along. The route resolves ``to_label`` through the merges
-  that precede it, so a reassign always targets a surviving label.
+The artifact is never rewritten and labels are never renumbered. ``merge`` relabels
+every segment carrying ``from_label`` (earlier reassigns included); ``reassign``
+relabels by ARTIFACT index, and a later merge carries those along.
 """
 
 from __future__ import annotations
@@ -86,13 +74,8 @@ def host_index(seg: object, position: int) -> int:
 
 
 def apply_edits[S: _Segment](segments: Sequence[S], edits: Sequence[SpeakerEdit]) -> list[S]:
-    """Relabel segments by folding ``edits`` (already filtered).
-
-    A segment a reassign touched is a person's decision: it is no longer
-    ``speaker_uncertain``, and when it was made unattributed it is marked
-    ``speaker_cleared`` so turn building never folds it back into a
-    neighbour.
-    """
+    """Fold ``edits`` onto segments. A reassigned segment is a person's decision: not
+    ``speaker_uncertain``, and ``speaker_cleared`` when made unattributed."""
     ordered = sorted(edits, key=lambda e: e.seq)
     out: list[S] = []
     for position, seg in enumerate(segments):

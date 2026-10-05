@@ -14,7 +14,7 @@ Every voice in an in-house recording signs before recording. No consent, no file
 ## Register
 
 Product recordings exported with `scripts/ops/export_job_for_eval.py`
-(Sprint 30, `docs/runbooks/speakers-eval.md`) list the job as `job:<job-uuid>`
+(Sprint 30) list the job as `job:<job-uuid>`
 in "recording ids" before the export, and the printed `export_id` after it.
 
 | consent_ref | recording ids | people | date | withdrawn |

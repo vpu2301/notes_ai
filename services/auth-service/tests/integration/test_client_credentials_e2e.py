@@ -1,15 +1,7 @@
-"""IDX-B1b end to end: the OAuth endpoint as a device actually speaks it.
+"""OAuth client-credentials endpoint as a device speaks it: form-encoded, HTTP Basic, no-store, RFC 6749 errors.
 
-Form-encoded, HTTP Basic, `Cache-Control: no-store`, RFC 6749 error
-bodies — the wire details that decide whether a room device can be
-re-pointed by changing one URL.
-
-Includes the seeded dev device, whose secret is the same string the
-Keycloak realm uses, so this proves the "dev configs need no change"
-claim rather than asserting it.
-
-Requires ``RUN_DB_INTEGRATION=1``, ``make migrate-up``, ``make seed``,
-and the dev stack's Postgres and Redis.
+Includes the seeded dev device (same secret as the Keycloak realm). Requires
+``RUN_DB_INTEGRATION=1``, ``make migrate-up``, ``make seed``.
 """
 
 from __future__ import annotations
@@ -154,8 +146,7 @@ async def test_a_wrong_secret_answers_rfc6749_invalid_client(client, app, su) ->
     )
     assert response.status_code == 401
     body = response.json()
-    # Both vocabularies: `error` for a stock OAuth client library, `code`
-    # for everything else in this API.
+    # `error` for stock OAuth client libraries, `code` for the rest of this API.
     assert body["error"] == "invalid_client"
     assert body["code"] == "invalid_client"
     assert "WWW-Authenticate" in response.headers
@@ -252,8 +243,7 @@ async def test_the_lock_is_per_client_not_global(client, app, su) -> None:
 
 
 async def test_revoking_pushes_the_credential_onto_the_denylist(app, su) -> None:
-    """The DB row stops the next grant; the denylist stops the token the
-    device is already holding. Only both make revocation immediate."""
+    """The DB row stops the next grant; the denylist stops the token already held."""
     pushed: list[str] = []
 
     class FakeDenylist:

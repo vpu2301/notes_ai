@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// The single live card: title, timer and Stop while recording; the three
-/// pipeline steps while working; "Note ready" when done. Nothing to fill in
-/// before pressing record — the title can be typed while the meeting runs.
+/// The single live card: title, timer and Stop while recording; the pipeline steps while working; "Note ready" when done.
 struct ActiveCaptureCard: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -34,9 +32,7 @@ struct ActiveCaptureCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 PulsingDot()
-                // Sprint F1: "Starting…" until audio actually reaches the
-                // file; then the counter, with one quiet line when the
-                // audio began noticeably after the press.
+                // "Starting…" until audio reaches the file; then the counter, with one quiet line when the audio began late.
                 VStack(alignment: .leading, spacing: 1) {
                     if let offset = capture.recorder.firstFrameOffsetMs {
                         Text(formatElapsed(capture.recorder.elapsed))
@@ -55,7 +51,7 @@ struct ActiveCaptureCard: View {
                     }
                 }
                 if capture.recorder.captureMode.recordsSystemAudio {
-                    // Sprint 31: one meter per channel.
+                    // One meter per channel.
                     VStack(alignment: .leading, spacing: 3) {
                         labelledMeter("You", level: capture.recorder.level)
                         labelledMeter("Call audio", level: capture.recorder.systemLevel)
@@ -68,8 +64,7 @@ struct ActiveCaptureCard: View {
                 Button {
                     capture.toggleRecording()
                 } label: {
-                    // The popover is too narrow for the word beside two
-                    // meters; the square says Stop on its own.
+                    // The popover is too narrow for the word beside two meters.
                     if compact {
                         Image(systemName: "stop.fill")
                             .accessibilityLabel("Stop")
@@ -86,8 +81,7 @@ struct ActiveCaptureCard: View {
                 .font(.dsDisplay(compact ? 17 : 20, .medium))
                 .foregroundStyle(DS.text1)
             if let invited = capture.context.inviteLine {
-                // Sprint 30: a capture from a calendar event says what the
-                // invitation will be used for — quietly.
+                // A capture from a calendar event says what the invitation will be used for.
                 Text(invited)
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)
@@ -110,8 +104,7 @@ struct ActiveCaptureCard: View {
 
     private func labelledMeter(_ title: String, level: Double) -> some View {
         HStack(spacing: 6) {
-            // Compact (the popover) has no room for the words: a mic and a
-            // speaker say the same, with the name kept for hover and VoiceOver.
+            // Compact has no room for the words; the name is kept for hover and VoiceOver.
             if compact {
                 Image(systemName: title == "You" ? "mic.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 9, weight: .semibold))
@@ -130,8 +123,7 @@ struct ActiveCaptureCard: View {
         .accessibilityLabel("\(title) level")
     }
 
-    /// Sprint 31: what this recording captures, and a way to fix it when
-    /// the call audio was wanted but could not be recorded.
+    /// What this recording captures, and a way to fix it when call audio could not be recorded.
     @ViewBuilder
     private var captureStateLine: some View {
         let recorder = capture.recorder
@@ -256,11 +248,7 @@ struct ActiveCaptureCard: View {
     }
 }
 
-/// "People": how many speakers the meeting has, sent with the upload so
-/// the speaker separation looks for that many. Auto and 6+ leave the count
-/// to it. Can be set while recording — it is read when the upload goes (or
-/// kept with the recording if that has to wait). Off with "Separate
-/// speakers", which it only refines.
+/// "People": how many speakers the meeting has, sent with the upload. Auto and 6+ leave the count to the diarizer. Off with "Separate speakers".
 struct PeoplePicker: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var height: CGFloat = 30
@@ -285,12 +273,7 @@ struct PeoplePicker: View {
     }
 }
 
-/// "My notes": what the author types while the meeting runs (Sprint 34).
-///
-/// It is the note's `user_notes` section, not a scratch buffer — autosaved
-/// as it is typed, on disk within half a second, and on every other device
-/// of the same person. Nothing downstream ever rewrites a character of it:
-/// the document is built AROUND these lines.
+/// "My notes": the note's `user_notes` section, autosaved as typed, on disk within half a second, on every device. Nothing downstream rewrites it.
 struct MyNotesEditor: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var compact = false
@@ -327,9 +310,7 @@ struct MyNotesEditor: View {
     }
 }
 
-/// What kind of meeting the next one is: picks the template family the note
-/// is written into. "Auto" is the default and is always right enough, so
-/// this is a thing to notice rather than a step to complete.
+/// What kind of meeting the next one is; picks the template family. "Auto" is the default.
 struct MeetingTypePicker: View {
     @EnvironmentObject private var capture: CaptureViewModel
     var height: CGFloat = 26
@@ -345,8 +326,7 @@ struct MeetingTypePicker: View {
     }
 }
 
-/// The kind of meeting as a compact menu ("Auto ▾"), for the menu-bar
-/// popover where the pill would not fit.
+/// The kind of meeting as a compact menu ("Auto ▾"), for the menu-bar popover.
 struct MeetingTypeMenu: View {
     @EnvironmentObject private var capture: CaptureViewModel
 

@@ -25,8 +25,7 @@ extension RecorderError {
 }
 
 /// Audio container the recorder writes. Both are in the ASR service's MIME
-/// allow-list (`audio/mp4`/`.m4a` is not, and the service also verifies the
-/// magic bytes, so the file really has to be one of these).
+/// allow-list (`audio/mp4` is not; magic bytes are verified).
 enum RecordingFormat {
     case flac
     case wav
@@ -45,8 +44,7 @@ enum RecordingFormat {
         }
     }
 
-    /// 16 kHz mono is what the speech models resample to anyway; it keeps a
-    /// one-hour meeting well under the service's upload limit.
+    /// 16 kHz mono: what the speech models resample to; keeps an hour under the upload limit.
     var fileSettings: [String: Any] {
         switch self {
         case .flac:
@@ -68,23 +66,15 @@ enum RecordingFormat {
     }
 }
 
-/// Records mono 16 kHz FLAC (falling back to WAV) into a temporary file via
-/// `AVAudioEngine`, publishing the elapsed time and a normalized input level
-/// for the live meter.
-///
-/// `AVAudioRecorder` cannot encode FLAC, so the input tap is resampled with an
-/// `AVAudioConverter` and written through `AVAudioFile` instead. The audio
-/// session is `.playAndRecord` and the app declares the `audio` background
-/// mode, so a recording keeps going when the phone is locked or another app
-/// is in front. A phone call interrupts it; the engine is restarted when the
-/// call ends and the recording simply misses those minutes.
+/// Records mono 16 kHz FLAC (WAV fallback) via `AVAudioEngine` + `AVAudioConverter`
+/// (`AVAudioRecorder` cannot encode FLAC). Keeps going in the background; a
+/// phone call interrupts it and the engine restarts when the call ends.
 @MainActor
 final class AudioRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Double = 0
-    /// The server's cap on one recording. The app reads the real value
-    /// before each recording (`AsrLimits`); this is the fallback.
+    /// Fallback cap on one recording (`AsrLimits` is read before each recording).
     @Published var limitSeconds: TimeInterval = 2 * 3600
     /// Seconds until the cap.
     var remaining: TimeInterval { max(0, limitSeconds - elapsed) }
@@ -97,11 +87,9 @@ final class AudioRecorder: ObservableObject {
     private var limitHit = false
     /// True while a call or Siri has the microphone.
     @Published private(set) var interrupted = false
-    /// Sprint F1: milliseconds from the Record press to the first buffer
-    /// written to the file; nil until that buffer arrives.
+    /// Milliseconds from the Record press to the first buffer written; nil until then.
     @Published private(set) var firstFrameOffsetMs: Int?
-    /// Sprint F1: the wall clock at the Record press (kept after `stop()`
-    /// so the upload can carry it).
+    /// The wall clock at the Record press (kept after `stop()` for the upload).
     private(set) var recordPressedAt: Date?
 
     private(set) var fileURL: URL?
@@ -114,8 +102,7 @@ final class AudioRecorder: ObservableObject {
     private let sink = TapSink()
 
     func start() async throws {
-        // Sprint F1: the press, before the permission and session setup —
-        // that wait is exactly what the offset measures.
+        // The press, before permission and session setup — that wait is what the offset measures.
         recordPressedAt = Date()
         firstFrameOffsetMs = nil
         sink.firstFrame.reset()
@@ -181,8 +168,7 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
-    /// Sprint F1: the press and the first frame of the last recording, for
-    /// the upload; nil when no buffer ever reached the file.
+    /// The press and the first frame of the last recording; nil when no buffer reached the file.
     var captureTiming: CaptureTiming? {
         CaptureTiming(pressedAt: recordPressedAt, firstFrameAt: sink.firstFrame.firstFrameAt)
     }
@@ -243,8 +229,7 @@ final class AudioRecorder: ObservableObject {
                 }
             }
         })
-        // AirPods in, headset out: the input format may change under the
-        // tap, so it is re-installed against the new format.
+        // The input format may change under the tap on a route change: re-install it.
         observers.append(center.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
         ) { [weak self] _ in
@@ -269,8 +254,7 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
-    /// Prefer FLAC; if CoreAudio refuses to open a FLAC writer on this
-    /// device, fall back to 16-bit WAV (larger, but universally supported).
+    /// Prefer FLAC; fall back to 16-bit WAV when CoreAudio refuses a FLAC writer.
     private static func openOutputFile(base: URL) throws -> (AVAudioFile, URL, RecordingFormat) {
         for format in [RecordingFormat.flac, .wav] {
             let url = base.appendingPathExtension(format.fileExtension)
@@ -283,12 +267,10 @@ final class AudioRecorder: ObservableObject {
     }
 }
 
-/// Receives input buffers on the audio thread, resamples them to the file's
-/// processing format and appends them. Also keeps the latest RMS level for
-/// the meter. Everything is guarded by a lock because the tap callback and
-/// `start`/`stop` run on different threads.
+/// Receives input buffers on the audio thread, resamples and appends them;
+/// keeps the RMS level. Locked: the tap and `start`/`stop` run on different threads.
 private final class TapSink: @unchecked Sendable {
-    /// Sprint F1: when the first buffer was written to the file.
+    /// When the first buffer was written to the file.
     let firstFrame = FirstFrameClock()
     private let lock = NSLock()
     private var file: AVAudioFile?

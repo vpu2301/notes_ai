@@ -1,9 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint TQ2 T4: music / silence / noise markers render as their own
-/// lines in the spoken language, unknown kinds as noise, and between turns
-/// without becoming turns.
+/// Music / silence / noise markers render as their own lines, unknown kinds as noise, never as turns.
 final class TranscriptNoiseTests: XCTestCase {
     private func noise(_ start: Int, _ end: Int, _ kind: String) -> TranscriptNoise {
         let json = #"{"start_ms": \#(start), "end_ms": \#(end), "kind": "\#(kind)"}"#

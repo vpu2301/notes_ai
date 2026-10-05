@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# IDX-B3 G — load proof for the native auth hot paths.
-#
+# Load proof for the native auth hot paths.
 #   ./scripts/loadtest/run-auth-loadtest.sh [smoke|main|locked] [outdir]
-#
-# Requires a NATIVE-mode auth-service (MDX_IDP_MODE=native) with the dev
-# signing key, the mock mail provider, Postgres and Redis. The wrapper
-# does not start one — pointing a load test at whatever happens to be on
-# :8000 is how you measure the wrong build.
-#
-# k6 runs from the grafana/k6 image; host.docker.internal reaches the
-# local service. Thresholds are enforced inside k6, so a red run exits
-# non-zero here too.
+# Requires a NATIVE-mode auth-service (not started here) with the dev signing
+# key, the mock mail provider, Postgres and Redis. k6 runs from the grafana/k6
+# image; thresholds are enforced inside k6.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -30,8 +23,7 @@ die() { printf '\033[31mFAIL\033[0m %s\n' "$1" >&2; exit 1; }
 
 log "preflight"
 curl -sf "$AUTH_URL/healthz" >/dev/null || die "auth-service is not up on $AUTH_URL"
-# The native routes only exist in native mode; without this the run would
-# measure a wall of 404s and report them as fast.
+# Native routes only exist in native mode; otherwise the run measures 404s.
 curl -sf "$AUTH_URL/.well-known/jwks.json" >/dev/null \
   || die "no JWKS — auth-service is not in MDX_IDP_MODE=native"
 echo "  ok: native auth-service on $AUTH_URL"

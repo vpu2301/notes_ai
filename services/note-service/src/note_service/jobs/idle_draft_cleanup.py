@@ -1,14 +1,6 @@
-"""Idle-draft cleanup (auto-archive).
-
-Sprint-08 shipped the SQL + the service method; sprint-16 attaches it to
-the scheduler (``run_for_all_tenants`` hosted in the service lifespan
-behind ``MDX_BACKGROUND_JOBS``, plus the ``python -m`` CLI for external
-cron — ADR-0041).
-
-Policy (spec §4.4): drafts untouched for 30 days transition to
-``cancelled`` with reason ``auto_archive_idle_draft``. The owning
-tenant is preserved in the audit event so DPO can re-open within 90
-days if needed.
+"""Idle-draft cleanup (auto-archive): drafts untouched for 30 days become
+``cancelled`` with reason ``auto_archive_idle_draft``. Hosted behind
+``MDX_BACKGROUND_JOBS`` (ADR-0041) plus a ``python -m`` CLI.
 """
 
 from __future__ import annotations
@@ -27,8 +19,7 @@ from .. import audit_kinds
 
 logger = logging.getLogger(__name__)
 
-# Reserved global tenant (migration 0068): the audit home for
-# fleet-level scheduler runs that belong to no single tenant.
+# Reserved global tenant: the audit home for fleet-level scheduler runs.
 GLOBAL_TENANT = UUID("00000000-0000-0000-0000-000000000000")
 
 
@@ -83,17 +74,9 @@ async def run_for_all_tenants(
     audit_writer: AuditWriter,
     idle_for: timedelta = timedelta(days=30),
 ) -> dict[str, int]:
-    """One scheduler iteration: sweep every active tenant.
-
-    Tenant enumeration goes through the SECURITY DEFINER
-    ``active_tenant_ids()`` (migration 0071) because ``tenants`` is
-    RLS-FORCEd to self-select for app_role. Idempotent by construction —
-    an already-archived draft no longer matches ``status = 'draft'``.
-
-    Emits one ``scheduler.job.completed`` audit row per run (global
-    tenant), carrying per-tenant counts; per-note events are written by
-    :func:`auto_archive_idle_drafts` under the owning tenant as before.
-    """
+    """One scheduler iteration: sweep every active tenant (enumerated via the
+    SECURITY DEFINER ``active_tenant_ids()``, since ``tenants`` is RLS-FORCEd).
+    Idempotent. Emits one ``scheduler.job.completed`` row per run."""
     async with app_pool.acquire() as conn:
         tenant_rows = await conn.fetch("SELECT public.active_tenant_ids() AS id")
     tenants = [r["id"] for r in tenant_rows]

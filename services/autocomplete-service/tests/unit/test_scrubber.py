@@ -43,8 +43,6 @@ def test_intl_phone_redacted():
 
 
 def test_separated_phone_redacted():
-    # Digit groups broken by spaces used to be a documented gap — the
-    # generic scrubber closes it.
     out = scrub_prefix("call 050 123 45 67 after 9")
     assert "050 123 45 67" not in out.text
     assert out.redactions["phone"] == 1

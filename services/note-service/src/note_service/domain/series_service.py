@@ -1,15 +1,7 @@
-"""Linking a new meeting to the one before it, and bringing its open
-items forward (Sprint 36).
-
-The one rule that matters is the visibility rule (ADR-0057):
-
-    a previous note is used only when the AUTHOR OF THE NEW NOTE may
-    view it.
-
-RLS scopes every query to the tenant, and "my colleague's private 1:1"
-is inside my tenant — so the tenant boundary is not the boundary here.
-Every path through this module resolves the candidate note and puts it
-through :func:`access.can_view` before reading a word of it.
+"""Linking a new meeting to the one before it and bringing its open items forward.
+The visibility rule (ADR-0057): a previous note is used only when the AUTHOR OF
+THE NEW NOTE may view it (:func:`access.can_view`), since RLS alone does not
+separate colleagues inside a tenant.
 """
 
 from __future__ import annotations

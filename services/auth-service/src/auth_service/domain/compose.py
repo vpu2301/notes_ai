@@ -1,16 +1,6 @@
-"""Turn "we decided to mail this person" into the variables a template needs.
+"""Template variables for account mail, computed at request time and frozen into the outbox row.
 
-Everything a template will interpolate is computed here, at request
-time, and frozen into the outbox row. The renderer that runs later gets
-a plain dict and makes no decisions — which is what makes a queued mail
-reproducible: the row records exactly what will be said, not a recipe
-that could produce something different once settings change.
-
-The one structural rule this module exists to enforce is the split
-between :func:`render_fields` and :func:`secret_fields`. Only the second
-carries a redeemable token, and only the second is destroyed once the
-mail is sent. See migration 0076 for the CHECK constraint that keeps
-that from being merely a convention.
+Only ``secret_fields`` carries a redeemable token, and only it is destroyed once sent.
 """
 
 from __future__ import annotations
@@ -22,19 +12,14 @@ from urllib.parse import quote
 
 from . import copy as copy_mod
 
-# Shown when the request carries no usable User-Agent. A blank row reads
-# like missing data and invites the reader to distrust the whole mail,
-# which is the last thing a security notification can afford.
+# Shown when the request carries no usable User-Agent.
 _UNKNOWN_CLIENT: Final[dict[str, str]] = {
     "en": "Unrecognised device",
     "de": "Unbekanntes Gerät",
     "uk": "Невідомий пристрій",
 }
 
-# Coarse, deliberately lossy User-Agent parsing. We want "Chrome on
-# macOS", not a fingerprint: the point is to let the account holder
-# recognise their own device, and a full UA string in an email is both
-# unreadable and a gift to anyone who gets hold of the mailbox.
+# Deliberately lossy User-Agent parsing: "Chrome on macOS", not a fingerprint.
 _BROWSERS: Final[tuple[tuple[str, str], ...]] = (
     ("Edg/", "Edge"),
     ("OPR/", "Opera"),
@@ -70,14 +55,7 @@ def client_label(user_agent: str, lang: str) -> str:
 
 
 def hash_ip(ip: str, *, salt: str) -> str:
-    """Salted, truncated hash of a client IP.
-
-    Truncated to 128 bits because the full digest buys nothing here and
-    the shorter value is easier to eyeball in an incident. Salted
-    because the IPv4 space is small enough to reverse an unsalted hash
-    by brute force in seconds — an unsalted "anonymised" IP is just an
-    IP with extra steps.
-    """
+    """Salted, 128-bit-truncated hash of a client IP (unsalted IPv4 hashes are brute-forceable)."""
     if not ip:
         return ""
     digest = hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()
@@ -89,14 +67,7 @@ def _sanitise_base(base_url: str) -> str:
 
 
 def reset_url(*, app_base_url: str, token: str) -> str:
-    """Deep link into the SPA's reset screen.
-
-    The token rides in the hash fragment's query, matching the SPA's
-    hash router. That placement is also the safer one: a fragment is
-    never sent to the server, so the token stays out of access logs on
-    every proxy between the office network and the app, and out of the Referer
-    header when the reset page loads a third-party resource.
-    """
+    """Deep link into the SPA's reset screen; the token rides in the fragment (never sent to servers or Referer)."""
     return f"{_sanitise_base(app_base_url)}/#/reset-password?token={quote(token, safe='')}"
 
 
@@ -191,13 +162,7 @@ def auth_code_fields(
     user_agent: str,
     requested_at: Any,
 ) -> dict[str, Any]:
-    """Variables for the sign-in code mail (IDX-A3).
-
-    No email address, no link, no support URL: the mail is the code and
-    the sentence that says nobody will ask for it. The address is already
-    in the envelope header; repeating it in the body only helps a
-    screenshot travel.
-    """
+    """Variables for the sign-in code mail: no address, no link, no support URL."""
     return {
         "greeting": copy_mod.greeting(lang),
         "code": format_code(code),
@@ -208,12 +173,7 @@ def auth_code_fields(
 
 
 def signin_url(*, app_base_url: str) -> str:
-    """Where "sign in instead" points. The SPA's login page, not Keycloak's.
-
-    Keycloak's own forms are never rendered in this topology — the SPA
-    proxies login through auth-service — so a link into the realm would
-    land somebody on a page that cannot sign them in to the product.
-    """
+    """Where "sign in instead" points: the SPA's login page, never Keycloak's forms."""
     return f"{_sanitise_base(app_base_url)}/login"
 
 
@@ -225,16 +185,7 @@ def signup_verify_fields(
     user_agent: str,
     requested_at: Any,
 ) -> dict[str, Any]:
-    """Variables for the signup confirmation mail (BE-0).
-
-    Deliberately the same shape as :func:`auth_code_fields`: a code, an
-    expiry and where it was asked from, with no address and no link. A
-    confirmation link would be consumed by the scanners that open every
-    URL in inbound mail — corporate filters, some mobile clients — and
-    the person would arrive at a page telling them their confirmation had
-    already been used. A code cannot be spent by a machine that merely
-    reads the message.
-    """
+    """Variables for the signup confirmation mail: a code, not a link (mail scanners open links)."""
     return {
         "greeting": copy_mod.greeting(lang),
         "code": format_code(code),
@@ -251,14 +202,7 @@ def signup_exists_fields(
     user_agent: str,
     requested_at: Any,
 ) -> dict[str, Any]:
-    """Variables for the "you already have an account" mail (BE-0).
-
-    A link and no code, because there is nothing to confirm. The pair with
-    :func:`signup_verify_fields` is what makes the uniform ``202`` honest:
-    the HTTP response cannot tell a prober whether the address is
-    registered, so the only place that fact appears is in a mailbox the
-    prober would have to already control.
-    """
+    """Variables for the "you already have an account" mail: a link, no code."""
     return {
         "greeting": copy_mod.greeting(lang),
         "signin_url": signin_url(app_base_url=app_base_url),
@@ -280,13 +224,7 @@ def concierge_welcome_fields(
     app_base_url: str,
     created_at: Any,
 ) -> dict[str, Any]:
-    """Variables for the operator-onboarding mail (OPS-0).
-
-    The only field set in this module that carries a live credential. It
-    is passed straight through and never stored: the challenge tables hold
-    hashes, the outbox is bypassed (this mail is sent inline), and the
-    operator who ran the CLI never sees the value.
-    """
+    """Variables for the concierge mail: the only set carrying a live credential, sent inline and never stored."""
     return {
         "greeting": copy_mod.greeting(lang, display_name),
         "temporary_password": temporary_password,
@@ -296,7 +234,7 @@ def concierge_welcome_fields(
 
 
 def auth_locked_fields(*, lang: str, locked_until: Any) -> dict[str, Any]:
-    """Variables for the temporary-lock notice (IDX-A3 F5)."""
+    """Variables for the temporary-lock notice."""
     return {
         "greeting": copy_mod.greeting(lang),
         "locked_until": copy_mod.format_moment(locked_until, lang),
@@ -335,13 +273,7 @@ def lockdown_secret_fields(*, app_base_url: str, token: str) -> dict[str, Any]:
 def text_values(
     kind: str, lang: str, fields: dict[str, Any], secrets: dict[str, Any]
 ) -> dict[str, str]:
-    """Flatten both halves into the ``str.format`` inputs the text body wants.
-
-    The text template also needs a ``client_line`` that collapses to
-    nothing when there is no client to describe — computed here rather
-    than stored, so the stored row keeps the raw label and the
-    presentation stays in one place.
-    """
+    """Flatten both halves into the ``str.format`` inputs; ``client_line`` is computed here, not stored."""
     merged: dict[str, str] = {k: str(v) for k, v in {**fields, **secrets}.items()}
     label = merged.get("client_label", "")
     unknown = set(_UNKNOWN_CLIENT.values())
@@ -353,27 +285,15 @@ _EMAIL_RE: Final = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def looks_like_email(value: str) -> bool:
-    """Cheap shape check for the unauthenticated request endpoint.
-
-    Not validation — Pydantic's ``EmailStr`` does that. This exists so
-    the rate-limit key for a malformed address cannot be an unbounded
-    attacker-chosen string.
-    """
+    """Cheap shape check so the rate-limit key cannot be an unbounded attacker-chosen string (not validation)."""
     return bool(_EMAIL_RE.match((value or "").strip()))
 
 
-# ── IDX-A5 account notices ───────────────────────────────────────────
+# ── account notices ──────────────────────────────────────────────────
 
 
 def mask_email(address: str) -> str:
-    """``ada.lovelace@example.com`` → ``a***e@example.com``.
-
-    Goes to the address that just LOST the account, so the reader is not
-    necessarily the person who made the change. Showing the full new
-    address would hand an attacker's mailbox to a stranger — or, in a
-    domestic-abuse case, tell the wrong person where the account went.
-    Enough is shown to recognise your own other address.
-    """
+    """``ada.lovelace@example.com`` → ``a***e@example.com`` (the reader may not be who made the change)."""
     local, _, domain = (address or "").partition("@")
     if not domain:
         return "***"

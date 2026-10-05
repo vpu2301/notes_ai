@@ -1,11 +1,4 @@
-"""Stale-session reaper.
-
-A worker that dies takes its in-process abandon timers with it, stranding
-every session it held in a non-terminal status forever — each one burning a
-slot in ``per_tenant_max_active_sessions`` and each one still showing as
-"recording" to the user. These pin the reaper's one safety interlock:
-it collects a session **only** when the owning worker's heartbeat is gone.
-"""
+"""Stale-session reaper: collects a session only when the owning worker's heartbeat is gone."""
 
 from __future__ import annotations
 

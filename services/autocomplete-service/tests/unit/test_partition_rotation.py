@@ -1,13 +1,4 @@
-"""Partition rotation must cover the CURRENT month, not just the next.
-
-Regression: the original implementation only ever created next month's
-partition, so a service that was down (or a job that never ran) over a
-month boundary silently dropped every telemetry row for the whole month
-— observed live on 2026-07-07 with only 2026-05/06 partitions present.
-
-Step-05 extends the window to current + MONTHS_AHEAD (2) and adds the
-90-day retention leg (integration-tested against the real DB).
-"""
+"""Partition rotation covers the CURRENT month, not just the next (regression: a month-boundary outage lost a whole month)."""
 
 from __future__ import annotations
 

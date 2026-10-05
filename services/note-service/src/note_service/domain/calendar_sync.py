@@ -1,15 +1,6 @@
-"""Upcoming events across every connection a user has (0019, 0020).
-
-The read path behind ``GET /v1/calendar/events``: for each live
-connection — a Google account: refresh the access token when it is about
-to expire, list the account's calendars, fetch the chosen ones' events in
-parallel; a calendar link (0020): fetch the ICS and expand it — then
-merge, drop duplicates (an invite that landed in two calendars), sort by
-start, cap.
-
-One connection's failure never hides another's events: it is recorded
-on the row (``last_error``, ``needs_reauth``) and reported in the
-response's ``problems`` so the client can offer "Sign in again".
+"""Upcoming events across every connection a user has (``GET /v1/calendar/events``):
+refresh, fetch in parallel, merge, de-duplicate, sort, cap. One connection's
+failure never hides another's events; it is recorded on the row and reported in ``problems``.
 """
 
 from __future__ import annotations
@@ -114,9 +105,7 @@ def visible_calendars(
 def merge_events(
     batches: list[list[UpcomingEvent]], *, now: datetime, limit: int = MAX_EVENTS
 ) -> list[UpcomingEvent]:
-    """Flatten, drop what already ended, de-duplicate by iCalUID+start
-    (keeping the first copy — calendars are listed primary-first, and
-    connections oldest-first), sort by start."""
+    """Flatten, drop what already ended, de-duplicate by iCalUID+start (first copy wins), sort."""
     seen: set[tuple[str, datetime]] = set()
     out: list[UpcomingEvent] = []
     for batch in batches:
@@ -141,9 +130,7 @@ async def upcoming_for_feed(
     time_min: datetime,
     time_max: datetime,
 ) -> list[CalendarEvent]:
-    """0020: one calendar link → its occurrences in the window. The link
-    is one "calendar" (``FEED_CALENDAR_ID``); switched off in the picker
-    means nothing to fetch."""
+    """One calendar link → its occurrences in the window; switched off in the picker means nothing."""
     if FEED_CALENDAR_ID in row.hidden_calendar_ids:
         return []
     url = await repo.open_feed_url(envelope, tenant_id=row.tenant_id, token_blob=row.token_blob)

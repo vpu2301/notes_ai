@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 30 — moving turns to another speaker, resetting speaker edits,
-/// names offered from the calendar, and the capture context on upload.
+/// Moving turns, resetting speaker edits, calendar names, and the capture context on upload.
 final class TurnCorrectionTests: XCTestCase {
     private var directory: URL!
 
@@ -210,9 +209,7 @@ final class TurnCorrectionTests: XCTestCase {
         XCTAssertEqual(items[0].captureContext.inviteLine, "4 invited · names will be offered for speakers")
         XCTAssertEqual(items[1].captureContext.speakersMax, 2)
         XCTAssertEqual(items[1].captureContext.nameCandidates, ["Ida"])
-        // Sprint 34: what goes ON the note — the people and the invite's
-        // own agenda. A device calendar has no agenda of its own, only the
-        // raw notes field for the server to read once.
+        // What goes ON the note; a device calendar has only the raw notes field.
         XCTAssertEqual(items[0].meetingCalendar?.agendaLines, ["Roadmap", "Hiring"])
         XCTAssertEqual(items[0].meetingCalendar?.icalUid, "g1@google.com")
         XCTAssertEqual(items[0].meetingCalendar?.source, "google")

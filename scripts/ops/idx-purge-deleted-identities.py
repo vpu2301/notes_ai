@@ -1,31 +1,10 @@
 #!/usr/bin/env python3
-"""Purge identities whose 30-day deletion grace has run out (IDX-A5 F6).
+"""Purge identities whose 30-day deletion grace has run out: crypto-shred credentials,
+rewrite the address to ``deleted:<id>``, drop sessions/challenges, mark memberships
+deleted. Notes (author renders as "Deleted user") and the hash-chained audit trail survive.
+One transaction per identity; re-running is a no-op.
 
-Scheduled in IDX-B3; runnable by hand now:
-
-    uv run python scripts/ops/idx-purge-deleted-identities.py --dry-run
-    uv run python scripts/ops/idx-purge-deleted-identities.py --apply
-
-What "purge" means here is crypto-shredding the credentials and
-pseudonymising the identity, not deleting rows everywhere. The address is
-rewritten to ``deleted:<id>`` so it can never match a login lookup again
-(and so the UNIQUE index frees the real address for reuse), the TOTP
-secret and recovery codes are dropped, sessions and challenges go, and
-memberships are marked deleted.
-
-What deliberately survives:
-
-* **Notes and their author id.** A note written in a shared workspace
-  belongs to that workspace's history; deleting the person must not
-  silently rewrite what colleagues can still see. The author renders as
-  "Deleted user" because ``profile_of_subs`` returns no row for the id.
-* **The audit trail.** It is hash-chained — a deletion inside it would
-  break verification for every event after it — and by this point it
-  refers to nothing but an opaque UUID.
-
-Each identity is one transaction, so a crash mid-run leaves earlier
-identities purged and later ones untouched, and re-running is a no-op for
-the ones already done.
+    uv run python scripts/ops/idx-purge-deleted-identities.py --dry-run | --apply
 """
 
 from __future__ import annotations

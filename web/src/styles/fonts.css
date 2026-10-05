@@ -1,11 +1,5 @@
-/* fonts.css — self-hosted webfonts.
- *
- * Geist (UI) and Geist Mono (codes, timers, numerals) are served from
- * public/fonts/ so the app renders offline against a local backend and the
- * page never references a third-party origin. Both are VARIABLE fonts: one
- * woff2 per subset covers the whole weight range. Subsets: latin, latin-ext,
- * cyrillic, cyrillic-ext — `unicode-range` keeps a page from downloading
- * scripts it does not use. */
+/* Self-hosted variable webfonts (public/fonts/): no third-party origin;
+ * `unicode-range` per subset keeps unused scripts from downloading. */
 
 @font-face {
   font-family: "Geist";

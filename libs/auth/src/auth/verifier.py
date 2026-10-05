@@ -1,24 +1,6 @@
-"""``verify_token`` — the single sanctioned entry point for JWT verification.
+"""``verify_token``: the single JWT verification entry point (named ``verifier`` to avoid shadowing ``jose.jwt``).
 
-The function is intentionally narrow: it accepts a raw token string and the
-list of issuers the caller trusts, then either returns a :class:`Claims` or
-raises one of the distinct exception classes from :mod:`auth.exceptions`.
-Every failure mode is mapped to its own type so callers can audit/alert
-appropriately (e.g. ``InvalidTokenError`` is a sec-severity event).
-
-FND-1 (ADR-0047) turned the single ``expected_issuer`` string into a list
-of :class:`auth.issuers.IssuerConfig`. The unverified ``iss`` claim selects
-**one** entry; the token is then verified against that entry's issuer,
-audience and JWKS URL and nothing else. Selection is not relaxation: an
-``iss`` that matches no entry is rejected before a key is fetched, and a
-token signed by issuer A claiming issuer B's audience still fails.
-
-The legacy ``expected_issuer`` / ``expected_audience`` pair is still
-accepted and builds a one-element list, so every pre-FND-1 caller behaves
-bit for bit as it did.
-
-This module is named ``verifier`` rather than ``jwt`` to avoid shadowing
-the ``jose.jwt`` import inside our own package.
+The unverified ``iss`` selects ONE trusted issuer; the token is then verified against that entry only (ADR-0047).
 """
 
 from __future__ import annotations
@@ -53,8 +35,7 @@ def _resolve_issuers(
     if issuers:
         return issuers
     if expected_issuer and expected_audience:
-        # jwks_url is unused on this path: the caller already built the
-        # cache, and a legacy caller has exactly one entry in it.
+        # jwks_url is unused here: the legacy caller already built the cache.
         return (
             IssuerConfig(
                 issuer=expected_issuer, jwks_url=expected_issuer, audience=expected_audience
@@ -67,13 +48,7 @@ def _resolve_issuers(
 
 
 def _select(issuers: Sequence[IssuerConfig], token: str) -> IssuerConfig:
-    """Pick the trusted issuer whose name matches the token's own ``iss``.
-
-    The claim is read WITHOUT verifying the signature — it has to be, the
-    key to verify with is what we are looking up. Nothing else is trusted
-    from this read: it decides which config to apply, and that config then
-    re-checks ``iss`` cryptographically inside ``jwt.decode``.
-    """
+    """Pick the trusted issuer matching the UNVERIFIED ``iss``; ``jwt.decode`` re-checks it cryptographically."""
     try:
         unverified: dict[str, Any] = jwt.get_unverified_claims(token)
     except JWTError as exc:
@@ -98,28 +73,13 @@ async def verify_token(
     expected_issuer: str | None = None,
     clock_skew_seconds: int = 30,
 ) -> Claims:
-    """Verify ``token`` and return parsed :class:`Claims`.
+    """Verify ``token`` against ``issuers`` (or the legacy issuer/audience pair) and return :class:`Claims`.
 
-    Pass ``issuers`` — the list this service trusts. ``expected_issuer`` +
-    ``expected_audience`` remain accepted as the pre-FND-1 shorthand for a
-    one-element list.
-
-    Raises:
-        InvalidTokenError: token is structurally malformed, signature
-            does not verify, or the header algorithm is not RS256.
-        ExpiredTokenError: ``exp`` is in the past (after applying
-            ``clock_skew_seconds`` of leeway).
-        InvalidIssuerError: ``iss`` claim matches no trusted issuer.
-        InvalidAudienceError: ``aud`` does not include the selected
-            issuer's audience.
-        KidNotFoundError: header ``kid`` is missing or not in JWKS.
-        MalformedClaimsError: claims payload violates the Claims schema
-            (missing mandatory field, unexpected field, wrong type).
+    Raises the matching :mod:`auth.exceptions` type for each failure mode.
     """
     trusted = _resolve_issuers(issuers, expected_issuer, expected_audience)
 
-    # Parse header without verifying signature, then assert alg upfront so
-    # we never let python-jose pick an alg for us (algorithm-confusion CVE class).
+    # Assert alg before any key material: never let python-jose pick (algorithm confusion).
     try:
         header = jwt.get_unverified_header(token)
     except JWTError as exc:
@@ -162,8 +122,7 @@ async def verify_token(
     except ExpiredSignatureError as exc:
         raise ExpiredTokenError(str(exc)) from exc
     except JWTClaimsError as exc:
-        # python-jose lumps aud/iss errors under JWTClaimsError; discriminate
-        # by message so we emit the right audit kind.
+        # python-jose lumps aud/iss errors under JWTClaimsError; discriminate by message.
         msg = str(exc).lower()
         if "audience" in msg or "aud " in msg:
             raise InvalidAudienceError(str(exc)) from exc

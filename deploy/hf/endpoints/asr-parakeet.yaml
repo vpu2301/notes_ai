@@ -1,14 +1,10 @@
-# cand_parakeet_asr — the TQ4 bake-off's arm C (ADR-0067).
-#
-# Our own image (deploy/asr-server): nvidia/parakeet-tdt-0.6b-v3 under NeMo,
-# weights baked at a pinned revision and sha256-checked, hub offline at
-# runtime. Serves the same /v1/audio/transcriptions route as hf_eu_asr, so
-# the worker reaches it as an ordinary asr_http backend.
+# cand_parakeet_asr: bake-off arm C (ADR-0067), our own deploy/asr-server image
+# (weights baked, hub offline) on the same route as hf_eu_asr.
 name: notes-asr-parakeet-{env}
 task: custom
 type: protected
 model:
-  # Recorded for provenance; the weights are baked, not fetched here.
+  # Provenance only; the weights are baked.
   repository: nvidia/parakeet-tdt-0.6b-v3
   revision: 541d1f99c6b0c3cd0b11a95167540bb8edefd82b   # docs/models/PINS.md (fetched 2026-10-01)
   framework: pytorch
@@ -23,8 +19,7 @@ model:
         MDX_ASR_MODEL_PATH: /opt/models/parakeet/parakeet-tdt-0.6b-v3.nemo
         HF_HUB_OFFLINE: "1"
         TRANSFORMERS_OFFLINE: "1"
-        # MDX_ASR_SERVER_TOKEN comes from the endpoint's secret store
-        # (docs/deploy/inventory.md); the process refuses to start without it.
+        # From the endpoint's secret store; the process refuses to start without it.
 provider:
   vendor: aws
   region: eu-west-1

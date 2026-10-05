@@ -1,4 +1,4 @@
-"""The generation surface (Sprint 33).
+"""The generation surface.
 
     GET  /v1/notes/{id}/generation        how the writing is going
     POST /v1/notes/{id}/generation        regenerate
@@ -270,9 +270,8 @@ async def regenerate(
             )
         job_id = note.source_asr_job_id
 
-    # Outside the transaction: a network call must not hold a pooled
-    # connection, and asr-service authorises the read with the caller's
-    # own bearer rather than a service identity we do not have.
+    # Outside the transaction: a network call must not hold a pooled connection;
+    # asr-service authorises the read with the caller's own bearer.
     transcript = await _fetch_transcript(job_id, auth_header=auth_header)
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
@@ -307,8 +306,7 @@ async def regenerate(
                 },
             ) from None
         except generation_service.ProcessorUnacknowledgedError as exc:
-            # Sprint L2 — the list in the error is what the client shows
-            # in the dialog, from the same registry the router uses.
+            # The list in the error is what the client shows in the dialog.
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 detail={
@@ -407,8 +405,7 @@ def _get(row: object, key: str) -> object:
 
 
 def _undecided(corrections: list[object], reviewed: set[str]) -> list[object]:
-    """The respellings still waiting for the author: one accepted or
-    rejected anywhere in the note is not offered again."""
+    """The respellings still waiting for the author; one decided anywhere in the note is not offered again."""
     if not reviewed:
         return corrections
     return [

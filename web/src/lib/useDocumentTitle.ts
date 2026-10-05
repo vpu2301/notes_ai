@@ -2,11 +2,7 @@ import { useEffect } from "react";
 
 const APP = "Notes AI";
 
-/**
- * The browser tab's title for this screen: "{what} — Notes AI", or the
- * app name alone. Restored to the app name when the screen goes away, so
- * a page that sets nothing never inherits the previous one's.
- */
+/** Tab title "{what} — Notes AI"; restored on unmount so nothing inherits it. */
 export function useDocumentTitle(what: string | null | undefined): void {
   useEffect(() => {
     const trimmed = (what ?? "").trim();

@@ -13,15 +13,7 @@ export interface PendingTerm {
   noteId?: string;
 }
 
-/**
- * "Remember *John Mayer* for this workspace?" — offered once, after the
- * author fixes a name.
- *
- * The offer is the design. A vocabulary that learned silently would, the
- * first time it learned something wrong, quietly mis-spell a customer's
- * name in every note afterwards with nobody able to say why. So: one
- * term, one question, and an answer the author gives.
- */
+/** "Remember *John Mayer* for this workspace?" — offered once after a rename; never learned silently. */
 export function RememberTermPrompt({
   pending,
   onDone,
@@ -32,8 +24,7 @@ export function RememberTermPrompt({
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   if (!pending) return null;
-  // Sprint I2: a role label ("Moderator II") is not a name. The server
-  // would refuse it; not asking at all is the honest version.
+  // A role label ("Moderator II") is not a name; the server would refuse it.
   if (!isVocabulary(pending.term, "person")) return null;
 
   const remember = async () => {
@@ -70,15 +61,9 @@ export function RememberTermPrompt({
   );
 }
 
-// Characters a term may not contain — the same set the server refuses.
-// Built from code-point RANGES rather than written as a literal class:
-// half of them are invisible, and a source file that contains a bidi
-// override in order to reject bidi overrides is one nobody can review.
-//
-//   0000-001F, 007F-009F  C0 / C1 controls
-//   200B-200F             zero-width space, joiners, LRM/RLM
-//   2028-202E             line/paragraph separators, bidi embedding
-//   2066-2069             bidi isolates
+// Characters the server refuses in a term, as code-point ranges (half are invisible):
+//   0000-001F, 007F-009F controls; 200B-200F zero-width/LRM/RLM;
+//   2028-202E separators, bidi embedding; 2066-2069 bidi isolates.
 const FORBIDDEN: ReadonlyArray<readonly [number, number]> = [
   [0x0000, 0x001f],
   [0x007f, 0x009f],
@@ -97,26 +82,18 @@ function hasForbidden(text: string): boolean {
 
 const PLACEHOLDER = /^speaker\s*\d+$/i;
 
-/** Whitespace collapsed, exactly as the server stores it — so a rename
- *  that only changes the spacing compares as no change. */
+/** Whitespace collapsed, as the server stores it. */
 function normalise(name: string): string {
   return name.trim().split(/\s+/).join(" ");
 }
 
-/**
- * Whether a rename is worth offering to remember.
- *
- * Only a real correction: the author typed a name where there was a
- * placeholder or a different name. A name cleared back to "Speaker 2", or
- * one that only changed case or spacing, teaches nothing.
- */
+/** Only a real correction is offered: not a reset to "Speaker 2", nor a case/spacing change. */
 export function isWorthRemembering(from: string, to: string): boolean {
   const term = normalise(to);
   if (term.length < 2 || term.length > 80) return false;
   if (PLACEHOLDER.test(term)) return false;
   if (normalise(from).toLocaleLowerCase() === term.toLocaleLowerCase()) return false;
-  // The server refuses these; not offering them at all is friendlier
-  // than a toast explaining why.
+  // The server refuses these.
   return !hasForbidden(term);
 }
 

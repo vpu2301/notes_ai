@@ -1,11 +1,6 @@
-"""synonyms repository (sprint 15, ADR-0038).
-
-Free functions on an RLS-scoped connection (house idiom). Lexemes are
-computed IN the database via ``to_tsvector('simple', …)`` so write-time
-normalization can never drift from query-time normalization. RLS
-enforces scope: app_role writes reach only tenant rows of the caller's
-tenant; system rows are read-only to the app (no PERMISSIVE write
-policy grants them).
+"""synonyms repository (ADR-0038). Lexemes are computed IN the database via
+``to_tsvector('simple', …)`` so write- and query-time normalisation cannot drift;
+system rows are read-only to the app (no PERMISSIVE write policy).
 """
 
 from __future__ import annotations

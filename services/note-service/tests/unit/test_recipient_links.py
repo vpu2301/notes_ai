@@ -1,13 +1,6 @@
-"""Per-recipient share links (Sprint 19, migration 0035).
-
-Mirrors ``test_share_by_email``: the real handlers run against an
-overridden auth dependency and monkeypatched repository functions.
-
-What is worth pinning: that any live note can be shared (0042 removed
-the finalized-only gate), that a note can hold several live links at once, that the
-same address gets the same link back, that revoking one leaves the
-others alone, and that nobody outside the author team (or an admin) can
-touch any of it.
+"""Per-recipient share links: any live note can be shared, several live links at
+once, the same address gets the same link back, revoking one leaves the others,
+and nobody outside the author team (or an admin) can touch any of it.
 """
 
 from __future__ import annotations
@@ -373,7 +366,7 @@ def test_audit_carries_kind_and_flags_but_no_address_or_token(client: TestClient
     assert body["ref_code"] not in blob
 
 
-# ── Sprint 22: the product sends the link ────────────────────────────
+# ── the product sends the link ────────────────────────────
 
 
 def test_send_mails_the_link_without_the_note(client: TestClient) -> None:
@@ -477,7 +470,7 @@ def test_unsubscribe_token_round_trips_and_rejects_forgery() -> None:
     assert recipient_mail.verify_unsubscribe_token("garbage") is None
 
 
-# ── Sprint 23: the workspace's policy ────────────────────────────────
+# ── the workspace's policy ────────────────────────────────
 
 
 def test_policy_can_switch_external_links_off(client: TestClient) -> None:

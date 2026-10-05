@@ -1,13 +1,6 @@
-"""POST /v1/notes/{id}/share/email with the DB and the relay stubbed.
-
-Mirrors ``test_spaces_router``: the real handler runs against an
-overridden auth dependency, monkeypatched repository functions and the
-in-memory mail provider.
-
-What is worth asserting here is the split — a member is granted access
-and sent into the app, a stranger gets their own recipient link —
-and that one bad address does not swallow the rest of the batch. That
-split is the whole reason the endpoint exists.
+"""POST /v1/notes/{id}/share/email with the DB and the relay stubbed: a member is
+granted access, a stranger gets a recipient link, and one bad address does not
+swallow the batch.
 """
 
 from __future__ import annotations

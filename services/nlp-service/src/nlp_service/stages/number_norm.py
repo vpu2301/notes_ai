@@ -1,11 +1,4 @@
-"""Stage 3 — number & unit normalization.
-
-Rule-based per-language modules implement word-tagging + pattern
-matching. UK + EN shipped first and German joined them with the
-dictation language rollout; all three deliberately err on the side of
-"pass through unchanged" rather than "normalize aggressively wrong" —
-correctness of dictated figures is the gate.
-"""
+"""Stage 3: number & unit normalization. Rule-based per language; pass through unchanged when doubtful."""
 
 from __future__ import annotations
 
@@ -25,9 +18,7 @@ from .number_norm_en import normalize_en
 from .number_norm_uk import _UNITS as _UNITS_UK
 from .number_norm_uk import normalize_uk
 
-# The normalizer's OWN canonical unit vocabulary — imported, never
-# re-declared, so the artifact reader cannot drift from what the
-# normalizer actually writes.
+# Imported, never re-declared, so the artifact reader cannot drift from the normalizer.
 _CANONICAL_UNITS = {
     "uk": frozenset(_UNITS_UK.values()) | {"мм рт. ст."},
     "en": frozenset(_UNITS_EN.values()) | {"mmHg"},
@@ -38,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class NumberNormStage:
-    """Sprint-05 Stage 3."""
+    """Stage 3."""
 
     name = "number_norm"
     runs_on_partials: bool = False

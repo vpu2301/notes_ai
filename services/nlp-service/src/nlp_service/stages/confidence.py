@@ -1,19 +1,6 @@
-"""Stage 6 — confidence annotation.
+"""Stage 6: confidence spans over the post-processed text from per-word Whisper probabilities.
 
-Produces :class:`ConfidenceSpan` instances over the post-processed text
-based on per-word Whisper probabilities. The frontend renders spans
-with subtle visual cues so users can spot low-confidence words at
-a glance.
-
-Span computation:
-1. Project each (non-command) word onto the post-processed text by
-   greedy fuzzy lookup. Sprint 5 uses ASCII-case-insensitive prefix
-   matching; pilot session will surface any drift cases.
-2. Assign a level per word:
-   - probability < high_concern_below → high_concern
-   - high_concern_below ≤ probability < moderate_below → moderate
-   - probability ≥ moderate_below → no annotation
-3. Merge adjacent same-level spans separated only by whitespace.
+Levels: < high_concern_below → high_concern, < moderate_below → moderate; adjacent same-level spans merge.
 """
 
 from __future__ import annotations
@@ -35,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConfidenceStage:
-    """Sprint-05 Stage 6."""
+    """Stage 6."""
 
     name = "confidence"
     runs_on_partials: bool = True
@@ -69,8 +56,7 @@ def _compute_spans(
     high_below: float,
     moderate_below: float,
 ) -> list[ConfidenceSpan]:
-    """Walk the words list, locate each non-command word in ``text``,
-    and label by probability. Adjacent same-level spans merged."""
+    """Locate each non-command word in ``text`` and label by probability; adjacent same-level spans merge."""
     out: list[ConfidenceSpan] = []
     cursor = 0
     text_lower = text.lower()
@@ -82,17 +68,11 @@ def _compute_spans(
         level: Literal["high_concern", "moderate"] = (
             "high_concern" if w.probability < high_below else "moderate"
         )
-        # Find the word in ``text`` starting from cursor. Whole-word match
-        # only: a bare substring search lets a short word ("і", "a", "о")
-        # match *inside* a longer word and paint a low-confidence cue over
-        # the wrong region. Boundaries are any non-alphanumeric char.
+        # Whole-word match only, else a short word ("і") paints a cue inside a longer one.
         needle = w.text.lower()
         start = _find_word(text_lower, needle, cursor)
         if start == -1:
-            # The text was reformatted enough that we can't locate this
-            # word — sprint-5 budget accepts the drop; pilot session
-            # validates this is rare.
-            continue
+            continue  # reformatted beyond locating; drop the word
         end = start + len(needle)
         cursor = end
         # Merge with previous if adjacent + same level.
@@ -110,10 +90,7 @@ def _compute_spans(
 
 
 def _find_word(haystack: str, needle: str, start_at: int) -> int:
-    """Index of the next whole-word occurrence of ``needle`` at or after
-    ``start_at``, or -1. A match is whole-word when both flanks are a
-    string edge or a non-alphanumeric char (Unicode-aware, so Cyrillic
-    counts as word characters)."""
+    """Index of the next whole-word (Unicode-aware) occurrence of ``needle`` at or after ``start_at``, or -1."""
     if not needle:
         return -1
     nlen = len(needle)

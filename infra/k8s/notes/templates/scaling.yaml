@@ -38,8 +38,7 @@ spec:
     - type: prometheus
       metadata:
         serverAddress: {{ .Values.keda.prometheusAddress }}
-        # Fleet-weighted utilisation: sum of admitted session weights over
-        # the sum of per-worker budgets. Above the threshold KEDA adds pods.
+        # Admitted session weights over per-worker budgets, fleet-wide.
         query: |
           sum(mdx_dictation_capacity_weight_used_ratio)
             /

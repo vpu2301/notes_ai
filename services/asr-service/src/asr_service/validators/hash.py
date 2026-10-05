@@ -1,9 +1,4 @@
-"""Step 7 — streaming SHA-256 of the upload.
-
-We compute the hash from the buffered bytes at this stage; in a streaming
-upload path the hash is fed incrementally and reused here. Either way
-the persisted digest matches the bytes that get encrypted and stored.
-"""
+"""Step 7 — SHA-256 of the upload; the persisted digest matches the stored bytes."""
 
 from __future__ import annotations
 

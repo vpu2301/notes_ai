@@ -6,13 +6,7 @@ export interface SelectOption<T extends string | number> {
   label: string;
 }
 
-/**
- * A dropdown that looks like ours all the way down. A native <select>
- * paints its list with the operating system's widgets, which no CSS
- * reaches; this one is a button and the app's own menu panel, with a
- * check on the current choice. `variant="text"` is the borderless form
- * for a choice that reads as a sentence ("Restricted ▾").
- */
+/** App-styled dropdown (a native <select> list is unstylable). `variant="text"` is the borderless form. */
 export function Select<T extends string | number>({
   label,
   value,

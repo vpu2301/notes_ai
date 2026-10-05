@@ -1,19 +1,9 @@
 import Foundation
 
-/// The recordings that never reached the server, and what can be done
-/// about them.
-///
-/// IDX-M1 made the app stop deleting them; this is where they become
-/// something the person can act on. The rule the whole file is built
-/// around: **nothing here deletes a recording that the server has not
-/// taken**. Not a failed retry, not a lost membership, not a sign-out —
-/// only an upload the server confirmed, or the person saying so.
-/// What `PendingUploads` needs from the rest of the app.
-///
-/// A protocol rather than a reference to `AppState` because the rules
-/// here — send, keep, never delete without confirmation — are the ones
-/// worth testing, and testing them should not require an `EventKit`
-/// service, a Keychain and a live session.
+/// The recordings that never reached the server, and what can be done about them.
+/// Rule: nothing here deletes a recording the server has not taken — only a
+/// confirmed upload, or the person saying so.
+/// What `PendingUploads` needs from the rest of the app; a protocol so the rules can be tested without the whole app.
 @MainActor
 protocol PendingUploadsHost: AnyObject {
     var api: APIClient { get }
@@ -24,8 +14,7 @@ protocol PendingUploadsHost: AnyObject {
     func workspaceName(_ tenantId: String?) -> String
     func uploaded(job: TranscriptionJob, capture: PendingCapture) async
     func workspaceLost(_ loss: WorkspaceLoss, tenantId: String) async
-    /// The signed-in account's display name, for a two-channel recording
-    /// whose sidecar lost it at a sign-out (Sprint 32).
+    /// The signed-in account's display name, for a two-channel recording whose sidecar lost it at a sign-out.
     var uploadLocalSpeakerName: String? { get }
 }
 
@@ -49,19 +38,16 @@ final class PendingUploads: ObservableObject {
         case uploading
         /// The last attempt failed; the recording is untouched.
         case failed(String)
-        /// The workspace this was recorded in is no longer reachable, so
-        /// there is nowhere to send it until the person picks another.
+        /// The workspace this was recorded in is no longer reachable.
         case needsWorkspace(String)
     }
 
     @Published private(set) var rows: [Row] = []
-    /// True while a retry pass is running, so the view can say so once
-    /// rather than once per row.
+    /// True while a retry pass is running, so the view says so once.
     @Published private(set) var isRetrying = false
 
     private unowned let host: PendingUploadsHost
-    /// Where the files are. Its own property so a test can point at a
-    /// scratch directory instead of the real Application Support.
+    /// Where the files are; a test can point at a scratch directory.
     private let directory: URL
 
     init(host: PendingUploadsHost, directory: URL = PendingCaptures.directory) {
@@ -70,8 +56,7 @@ final class PendingUploads: ObservableObject {
         reload()
     }
 
-    /// Re-read the directory. Cheap, and the only source of truth: a file
-    /// the user moved or deleted in Finder is simply gone.
+    /// Re-read the directory — the only source of truth.
     func reload() {
         let identity = host.uploadIdentityId
         let kept = PendingCaptures.all(in: directory).filter {
@@ -85,10 +70,7 @@ final class PendingUploads: ObservableObject {
 
     // MARK: - Sending
 
-    /// Try everything that is waiting, oldest first.
-    ///
-    /// Called after a sign-in and after reconnecting; never on a timer, so
-    /// a Mac that is offline for a week does not spend the week retrying.
+    /// Try everything waiting, oldest first. Called after sign-in and reconnect; never on a timer.
     func retryAll() async {
         guard host.canSendUploads, !isRetrying else { return }
         isRetrying = true
@@ -105,8 +87,7 @@ final class PendingUploads: ObservableObject {
         setState(.uploading, for: capture)
         let tenantId = capture.info.tenantId
         let layout = capture.info.uploadChannelLayout(for: capture.audioURL)
-        // A sign-out dropped the name from the sidecar (Sprint 32); the
-        // same person signed in again gives it back.
+        // A sign-out dropped the name from the sidecar; the same person signed in again gives it back.
         let speakerName = capture.info.localSpeakerName
             ?? (layout != nil && capture.info.identityId == host.uploadIdentityId ? host.uploadLocalSpeakerName : nil)
         do {
@@ -121,15 +102,13 @@ final class PendingUploads: ObservableObject {
                 localSpeakerName: speakerName,
                 captureTiming: capture.info.captureTiming,
                 tenant: tenantId)
-            // The server has the audio now — and only now is the local copy
-            // redundant.
+            // The server has the audio now — only now is the local copy redundant.
             PendingCaptures.remove(capture)
             await host.uploaded(job: job, capture: capture)
             reload()
         } catch let error as APIError {
             if let loss = WorkspaceLoss(code: error.code) {
-                // The workspace is gone, not the recording. Say which, and
-                // offer the two repairs: another workspace, or a file.
+                // The workspace is gone, not the recording: offer another workspace, or a file.
                 setState(.needsWorkspace(loss.message(workspace: host.workspaceName(tenantId))),
                          for: capture)
                 if let tenantId {

@@ -25,8 +25,7 @@ const cal = vi.hoisted(() => ({
 }));
 vi.mock("../src/api/calendar", async (orig) => ({ ...(await orig<typeof import("../src/api/calendar")>()), ...cal }));
 
-// The microphone is not the subject: hand the page's own "done" callback
-// to the test so a recording can "finish" on demand.
+// Hand the page's "done" callback to the test so a recording can finish on demand.
 const recorder = vi.hoisted(() => ({ onDone: null as null | ((a: RecordedAudio) => void) }));
 vi.mock("../src/lib/useRecorder", async (orig) => ({
   ...(await orig<typeof import("../src/lib/useRecorder")>()),
@@ -258,8 +257,7 @@ describe("Start from the home page", () => {
     expect(params.get("title")).toBe("Design review");
     expect(params.get("event")).toBe("evt_42");
     expect(url).not.toMatch(/Anna|Tom|Keller|Berg|example/);
-    // Sprint 34: the agenda and the invite's identity ride along too —
-    // they go on the note as the capture starts. Still never in the URL.
+    // The agenda and the invite's identity go on the note at capture start, never in the URL.
     expect(JSON.parse(sessionStorage.getItem("capture.ctx.evt_42") ?? "null")).toEqual({
       attendee_count: 3,
       attendees: ["Anna Keller", "Tom Berg"],

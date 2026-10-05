@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-M1 — what leaves this Mac on every request, and what does not.
+/// What leaves this Mac on every request, and what does not.
 final class TransportTests: XCTestCase {
 
     func testEveryRequestDeclaresItselfAsThisApp() async {
@@ -15,8 +15,7 @@ final class TransportTests: XCTestCase {
         _ = try? await client.fetchSpaces()
 
         for request in StubServer.requests {
-            // Without this header the server puts the refresh token in a
-            // cookie and the origin check treats the app as a browser.
+            // Without this header the server puts the refresh token in a cookie and treats the app as a browser.
             XCTAssertEqual(request.headers["X-Client-Type"], "macos", "\(request.path)")
             XCTAssertNotNil(UUID(uuidString: request.headers["X-Request-Id"] ?? ""),
                             "\(request.path) carried no request id")
@@ -25,8 +24,7 @@ final class TransportTests: XCTestCase {
     }
 
     func testNoCookieIsEverSentToTheAuthHost() async {
-        // A cookie planted in the shared jar, of the kind the app used to
-        // rely on. The session must not carry it.
+        // A cookie planted in the shared jar, of the kind the app used to rely on. The session must not carry it.
         let jar = HTTPCookieStorage.shared
         let cookie = HTTPCookie(properties: [
             .domain: "localhost", .path: "/", .name: "planted", .value: "v",

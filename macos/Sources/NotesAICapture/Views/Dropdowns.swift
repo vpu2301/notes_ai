@@ -3,12 +3,8 @@ import SwiftUI
 
 // MARK: - Dropdown menus
 //
-// SwiftUI's `Menu` draws a native NSMenu that cannot take the design
-// tokens. These widgets draw the web app's `.dropdown` instead: a surface
-// panel with a hairline, 6 pt inset, 28 pt rows with a leading symbol, an
-// optional trailing hint (a shortcut, a value), separators, and a danger
-// tint for destructive rows. They open as transient popovers so they can
-// hang off anything — a ⋯ button, an avatar, a select field.
+// SwiftUI's `Menu` draws a native NSMenu that cannot take the design tokens; these
+// widgets draw the web app's `.dropdown` instead, as transient popovers.
 
 struct DSMenuItem: Identifiable {
     enum Kind { case action, separator, header }
@@ -131,8 +127,7 @@ struct DSMenu<Label: View>: View {
     let items: () -> [DSMenuItem]
     var width: CGFloat = 220
     var edge: Edge = .bottom
-    /// Told when the panel opens and closes — for a trigger that only
-    /// shows on hover and must stay put while its menu is up.
+    /// Told when the panel opens and closes, for a trigger that only shows on hover and must stay put.
     var onOpenChange: ((Bool) -> Void)?
     @ViewBuilder let label: () -> Label
 
@@ -189,8 +184,7 @@ struct DSMoreLabel: View {
     }
 }
 
-/// A select field: the current value in an input-shaped button, the
-/// options in the same dropdown panel with a check on the chosen one.
+/// A select field: the current value in an input-shaped button, the options in the dropdown panel.
 struct DSSelect<T: Hashable>: View {
     struct Option {
         let value: T

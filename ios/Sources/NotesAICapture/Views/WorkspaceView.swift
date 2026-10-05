@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Which workspace this phone is in, and how to change it.
-///
-/// One identity can be in several — an agency and each of its clients, a
-/// consultant and their own company. Everything the app shows is scoped to
-/// one of them at a time, so the name has to be visible without going
-/// looking for it: a meeting recorded into the wrong workspace is a
-/// disclosure, not a filing error.
+/// Which workspace this phone is in, and how to change it. Always visible:
+/// a meeting recorded into the wrong workspace is a disclosure.
 struct WorkspaceChip: View {
     @EnvironmentObject private var app: AppState
     @State private var picking = false
@@ -55,10 +50,7 @@ struct WorkspacePicker: View {
                     }
                     .dsCard(padding: 0)
                     if !app.canSwitchWorkspace, app.workspaces.count > 1 {
-                        // ADR-0047 records this as the one capability the
-                        // dual-issuer period splits by token origin, so
-                        // the reason is named rather than left as a row
-                        // that does nothing when tapped.
+                        // Name the reason (ADR-0047) rather than leave a dead row.
                         DSNotice(tone: .info, symbol: "key.fill",
                                  text: "Switching needs the new sign-in. Sign out and sign in with an emailed code, or switch in the web app.")
                     }

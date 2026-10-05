@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The root: connecting → sign-in → the app. Applies the theme choice and
-/// refreshes the lists whenever the app comes back to the front.
+/// The root: connecting → sign-in → the app. Applies the theme; refreshes on foreground.
 struct RootView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -45,17 +44,14 @@ struct RootView: View {
         .preferredColorScheme(app.themePref.colorScheme)
         .tint(DS.accentText)
         .onChange(of: scenePhase) { _, phase in
-            // Coming back to a locked app asks for the face again; coming
-            // back to an unchecked session (the phone was asleep on a
-            // train) tries the server once more.
+            // Locked: ask for the face again; unchecked session: try the server once more.
             if phase == .active, app.authState == .locked {
                 Task { await app.unlock() }
             }
             guard phase == .active, app.authState == .signedIn else { return }
             if app.reconnecting { Task { await app.reconnect() } }
             app.calendar.recheckAccess()
-            // A recording kept while the app was away, and a membership
-            // removed while it was away, are both only discoverable here.
+            // A kept recording and a removed membership are only discoverable here.
             app.refreshPending()
             Task {
                 await app.refreshWorkspaces()
@@ -68,8 +64,7 @@ struct RootView: View {
     }
 }
 
-/// Signed in: the home page with the pages it opens pushed on top, the
-/// capture bar pinned underneath, Settings as a sheet.
+/// Signed in: the home page and its pushed pages, the capture bar, Settings as a sheet.
 struct MainView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -108,8 +103,7 @@ struct MainView: View {
     }
 }
 
-/// What a pushed page shows: the note itself, or the meeting's status
-/// while it has no note yet.
+/// What a pushed page shows: the note, or the meeting's status while it has none.
 private struct DetailView: View {
     @EnvironmentObject private var app: AppState
     let selection: Selection

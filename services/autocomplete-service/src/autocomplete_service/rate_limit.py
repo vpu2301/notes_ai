@@ -1,9 +1,4 @@
-"""Per-user hourly rate limiter for phrase/snippet writes (Redis-backed).
-
-Fixed-window INCR+EXPIRE bucket: a runaway SPA loop must not flood the
-phrase corpus. Fail-open on Redis errors — a Redis outage must not block
-a user saving a phrase (the write path is already RLS- and PII-guarded).
-"""
+"""Per-user hourly fixed-window rate limiter for phrase/snippet writes; fails open on Redis errors."""
 
 from __future__ import annotations
 

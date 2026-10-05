@@ -1,10 +1,4 @@
-"""Single entry point that wires logs + traces + metrics consistently.
-
-Services call ``bootstrap(...)`` once at startup. It is idempotent: calling
-it twice with the same ``service_name`` is a no-op (handlers are not
-duplicated). Disabling the OTel SDK via ``disable_otel=True`` is supported
-for unit tests.
-"""
+"""``bootstrap(...)``: wires logs + traces + metrics once at startup; idempotent."""
 
 from __future__ import annotations
 
@@ -23,17 +17,7 @@ def bootstrap(
     disable_otel: bool = False,
     prometheus_port: int | None = None,
 ) -> None:
-    """Configure logs / traces / metrics for a service.
-
-    Args:
-        service_name: short, kebab-case name (e.g. ``dictation-service``).
-        otlp_endpoint: OTel collector URL.
-        log_level: stdlib level for the root logger.
-        deployment_environment: ``development`` / ``staging`` / ``production``.
-        package_name: distribution name for ``importlib.metadata.version``.
-        disable_otel: skip tracing + metrics initialisation (for tests).
-        prometheus_port: when set, start a ``/metrics`` HTTP exporter.
-    """
+    """Configure logs / traces / metrics; ``disable_otel`` skips tracing + metrics (tests)."""
     setup_logging(service_name, log_level)
     if disable_otel:
         return

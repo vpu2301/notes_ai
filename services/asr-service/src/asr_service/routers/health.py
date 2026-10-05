@@ -1,11 +1,5 @@
-"""Liveness + readiness for asr-service.
-
-``/readyz`` actively probes DB, Redis, and object storage to support k8s readiness
-gating. With no ``S3_ENDPOINT`` configured there is no object store to probe
-(a stack deliberately run without one), so that leg reports ``skipped`` rather
-than holding the pod out of the load balancer forever. Sprint 03 introduces the first multi-dependency readiness path —
-keep it cheap (each probe ≤ 250 ms) so the cluster doesn't churn replicas.
-"""
+"""Liveness + readiness. ``/readyz`` probes DB, Redis and object storage (``skipped``
+without ``S3_ENDPOINT``); keep each probe ≤ 250 ms."""
 
 from __future__ import annotations
 
@@ -71,8 +65,7 @@ async def readyz(response: Response) -> ReadyResponse:
         except Exception as exc:  # noqa: BLE001
             s3_ok = f"fail: {type(exc).__name__}"
 
-    # Any failing dependency flips the response code (a skipped object
-    # store does not: there is nothing to be unready about).
+    # Any failing dependency flips the code; a skipped store does not.
     if db_ok != "ok" or redis_ok != "ok" or s3_ok.startswith("fail"):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return ReadyResponse(status="not_ready", db=db_ok, redis=redis_ok, s3=s3_ok)

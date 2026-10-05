@@ -3,15 +3,8 @@ import { expect, test } from "@playwright/test";
 import { freshEmail, signInWithCode } from "./helpers";
 
 /**
- * WEB-1b §5 — axe on the sign-up path: `/login`, `/welcome`, and the empty
- * workspace. No critical issues.
- *
- * Scoped to `critical` deliberately. A gate that fails on every `moderate`
- * contrast note gets muted within a sprint, and a muted gate protects
- * nothing; a critical axe finding on a sign-in screen is somebody who
- * cannot get in at all. The serious/moderate findings are printed on
- * failure so they are visible without blocking, and the codes are listed
- * rather than summarised so a failure names the element.
+ * axe on the sign-up path. Gated on `critical` only (a gate that fails on every
+ * moderate finding gets muted); lesser findings are printed, not blocking.
  */
 
 /** Fails on `critical` only, but reports everything it saw. */
@@ -43,9 +36,7 @@ test("the sign-up path has no critical accessibility failures", async ({ page })
   await page.goto("/login");
   await scan(page, "/login (address)");
 
-  // The code step is a different screen inside the same route, and the
-  // boxed input is the part most likely to fail — six inputs that are one
-  // control need names axe can resolve.
+  // The code step: six inputs that are one control need names axe can resolve.
   await page.getByLabel(/email/i).fill(email);
   await page.getByRole("button", { name: /email me a code/i }).click();
   await expect(page.getByText(/check your email/i)).toBeVisible();
@@ -54,9 +45,7 @@ test("the sign-up path has no critical accessibility failures", async ({ page })
   await page.goto("/login/password");
   await scan(page, "/login/password");
 
-  // BE-0's screen. Its first step renders without a server call, so this
-  // scan holds on the native-mode e2e stack too, where `/auth/signup` is
-  // not mounted at all.
+  // The first step renders without a server call, so this holds where `/auth/signup` is not mounted.
   await page.goto("/signup");
   await scan(page, "/signup");
 });
@@ -75,13 +64,8 @@ test("/welcome and the empty workspace have no critical accessibility failures",
 });
 
 /**
- * Sprint 32 — the transcript page's speaker controls (roster chips and
- * menus, the name suggestion, the re-label offer, the turn avatars and the
- * move menu), against a mocked backend.
- *
- * Every call to the four service origins is answered here and none goes on
- * to the network: this scan needs no stack, and must never touch the dev
- * database a developer happens to have running on those ports.
+ * The transcript page's speaker controls against a mocked backend. Every call to
+ * the service origins is answered here; none may reach a dev database on those ports.
  */
 const ORIGINS = /^http:\/\/localhost:800[0-9]\//;
 const NOTE_ID = "11111111-1111-4111-8111-111111111111";
@@ -199,11 +183,7 @@ function mockBody(method: string, path: string): unknown {
   return method === "GET" ? [] : {};
 }
 
-/**
- * The transcript itself holds to more than `critical`: every axe finding
- * inside it fails (contrast included) — Sprint 32 made these controls meet
- * AA, and the page chrome around them is out of this gate's reach.
- */
+/** Inside `.transcript` every axe finding fails (AA, contrast included); the page chrome is only gated on `critical`. */
 async function scanTranscript(page: import("@playwright/test").Page, label: string) {
   await scan(page, label);
   const results = await new AxeBuilder({ page })
@@ -239,7 +219,7 @@ test("the transcript's speaker controls have no critical accessibility failures"
   await page.goto(`/notes/${NOTE_ID}`);
   await page.getByRole("tab", { name: /transcript/i }).click();
 
-  // What Sprint 32 adds, visible before the scan.
+  // The speaker controls, visible before the scan.
   const roster = page.locator(".speaker-roster");
   await expect(roster.getByText(/older method/)).toBeVisible();
   await expect(page.getByRole("group", { name: "Name suggestion for Speaker 2" }).first()).toBeVisible();
@@ -271,7 +251,7 @@ test("the transcript's speaker controls have no critical accessibility failures"
 });
 
 test("the transcript's speaker controls hold AA contrast in the dark theme too", async ({ page }) => {
-  // The web is light by default; dark is a remembered choice.
+  // Light by default; dark is a remembered choice.
   await page.addInitScript(() => localStorage.setItem("notesai.theme", "dark"));
   await mockBackend(page);
   await page.goto(`/notes/${NOTE_ID}`);

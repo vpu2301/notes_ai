@@ -1,11 +1,6 @@
-"""End-to-end auth-service tests against the live dev stack.
+"""End-to-end auth-service tests against the live dev stack (Keycloak on :8088, migrated Postgres).
 
-Requires:
-  * Keycloak running on http://localhost:8088 with the sprint-02 realm.
-  * Postgres with migrations applied (``make migrate-up``).
-
-Run with both env flags set:
-  ``RUN_DB_INTEGRATION=1 RUN_KEYCLOAK_INTEGRATION=1 pytest``
+Run with ``RUN_DB_INTEGRATION=1 RUN_KEYCLOAK_INTEGRATION=1 pytest``.
 """
 
 from __future__ import annotations
@@ -65,9 +60,7 @@ async def superuser_conn():
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_state(superuser_conn: asyncpg.Connection):
-    # Each test starts clean — wipe both DB and Keycloak side. The `email=`
-    # query param does a substring match (Keycloak's `search=` doesn't span
-    # the `@`, so we don't use it here).
+    # Wipe both DB and Keycloak side; `email=` does a substring match (`search=` does not span the `@`).
     async def _wipe_keycloak() -> None:
         try:
             admin = await _kc_admin_token()
@@ -184,9 +177,7 @@ async def test_refresh_without_cookie_401(client: AsyncClient):
 async def test_refresh_replay_emits_security_audit(
     client: AsyncClient, superuser_conn: asyncpg.Connection
 ):
-    """AC-A1-7: replaying a rotated (already-consumed) refresh token must be
-    rejected AND must write an ``auth.refresh_replay_detected`` audit event with
-    severity ``sec``."""
+    """Replaying a consumed refresh token is rejected AND writes an ``auth.refresh_replay_detected`` sec event."""
     r1 = await client.post(
         "/auth/login", json={"username": "dev-member", "password": "dev-password"}
     )
@@ -198,9 +189,7 @@ async def test_refresh_replay_emits_security_audit(
     r2 = await client.post("/auth/refresh")
     assert r2.status_code == 200, r2.text
 
-    # Replay the now-consumed cookie explicitly — this is the attack. Clear the
-    # jar (which now holds the rotated cookie) and set only the stale one so the
-    # request deterministically carries the consumed token.
+    # Replay the consumed cookie: clear the jar and set only the stale one.
     client.cookies.clear()
     client.cookies.set("mdx_rt", stale_cookie)
     replay = await client.post("/auth/refresh")
@@ -241,9 +230,7 @@ async def test_logout_clears_cookie(client: AsyncClient, superuser_conn):
 
 
 async def test_logout_without_access_token_still_clears_cookie(client: AsyncClient, superuser_conn):
-    """Logout works even without the access token — the refresh is still
-    revoked. The auth.logout audit is skipped because tid is unrecoverable
-    from a refresh token alone."""
+    """Logout without the access token still revokes the refresh; the audit is skipped (tid unrecoverable)."""
     await client.post("/auth/login", json={"username": "dev-member", "password": "dev-password"})
     r = await client.post("/auth/logout")
     assert r.status_code == 204
@@ -263,9 +250,7 @@ async def test_me_with_valid_token(client: AsyncClient):
     body = r2.json()
     assert body["claims"]["tid"] == str(TENANT_A)
     assert "member" in body["claims"]["roles"]
-    # dev-member is a seeded dev fixture (scripts/seed/seed.sql), so the
-    # endpoint joins the token `sub` to its DB row. (db_user stays None only for
-    # genuinely Keycloak-only users with no DB record.)
+    # dev-member is a seeded fixture, so the endpoint joins the token `sub` to its DB row.
     assert body["db_user"] is not None
     assert body["db_user"]["role"] == "member"
     assert body["db_user"]["tenant_id"] == str(TENANT_A)
@@ -344,8 +329,7 @@ async def test_deactivate_unknown_user_404(client: AsyncClient):
 async def test_authz_denied_emits_audit_event(
     client: AsyncClient, superuser_conn: asyncpg.Connection
 ):
-    """The ``requires()`` dep must emit an ``authz.denied`` audit row with
-    severity ``sec`` whenever it rejects a caller with the wrong role."""
+    """``requires()`` emits an ``authz.denied`` sec audit row when it rejects the wrong role."""
     # Log in as a member — has no auditor/tenant_admin permissions.
     r1 = await client.post(
         "/auth/login", json={"username": "dev-member", "password": "dev-password"}
@@ -380,8 +364,7 @@ async def test_authz_denied_emits_audit_event(
 async def test_mfa_off_admin_invite_succeeds(
     client: AsyncClient, superuser_conn: asyncpg.Connection
 ):
-    """With MDX_REQUIRE_MFA=false (the sprint-02 default) the requires_mfa()
-    dep is a no-op — admin invite works even though dev tokens have mfa=false."""
+    """With MDX_REQUIRE_MFA=false the requires_mfa() dep is a no-op."""
     from auth_service.config import settings
 
     assert settings.require_mfa is False, "default must be off in sprint 02"
@@ -399,9 +382,7 @@ async def test_mfa_off_admin_invite_succeeds(
 
 
 async def test_mfa_on_admin_invite_rejected_with_mfa_challenge(client: AsyncClient, monkeypatch):
-    """Flipping MDX_REQUIRE_MFA=true makes the requires_mfa() dep enforce.
-    Dev tokens carry mfa=false (no TOTP enrolled) → expect HTTP 401 with
-    WWW-Authenticate: MFA so the frontend can prompt for the OTP."""
+    """MDX_REQUIRE_MFA=true: dev tokens carry mfa=false, so expect 401 with WWW-Authenticate: MFA."""
     from auth_service.config import settings
 
     monkeypatch.setattr(settings, "require_mfa", True)
@@ -420,9 +401,7 @@ async def test_mfa_on_admin_invite_rejected_with_mfa_challenge(client: AsyncClie
 
 
 async def test_mfa_on_audit_routes_unaffected(client: AsyncClient, monkeypatch):
-    """The MFA gate is wired only on /admin/* in sprint 02. /audit/* is
-    role-gated but not MFA-gated — flipping the flag must not break audit
-    reads for an auditor."""
+    """/audit/* is role-gated but not MFA-gated; flipping the flag must not break auditor reads."""
     from auth_service.config import settings
 
     monkeypatch.setattr(settings, "require_mfa", True)
@@ -665,9 +644,7 @@ async def test_set_roles_unknown_role_422(client: AsyncClient):
 
 
 async def test_user_crud_audit_coverage(client: AsyncClient, superuser_conn):
-    """C2: every mutation across the user CRUD surface lands an audit event of
-    the right kind + severity in the hash-linked chain. Walks
-    invite → role-change → deactivate → reactivate in one pass."""
+    """Every user-CRUD mutation lands the right audit kind + severity: invite → role-change → deactivate → reactivate."""
     token = await _login(client, "dev-admin")
     sub = await _invite(client, token, email="audited@e2e.test", role="member")
 
@@ -707,12 +684,9 @@ async def test_user_crud_audit_coverage(client: AsyncClient, superuser_conn):
 
 
 async def test_set_roles_last_admin_409(client: AsyncClient, superuser_conn):
-    """Demoting the *last* active tenant_admin of a tenant is refused with 409.
+    """Demoting the *last* active tenant_admin is refused with 409 before any mutation.
 
-    The seed has more than one tenant_admin in tenant A, so we promote a fresh
-    user to tenant_admin and temporarily deactivate every other admin (restored
-    in ``finally``) to create the last-admin condition deterministically. The
-    guard fires before any Keycloak/DB mutation, so the target is unharmed."""
+    Every other admin is temporarily deactivated (restored in ``finally``) to create the condition."""
     token = await _login(client, "dev-admin")
     sub = await _invite(client, token, email="lastadmin@e2e.test", role="member")
     promote = await client.put(

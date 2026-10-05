@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Everything that is not the one-button flow: capture options, theme,
-/// connectors, account, backends. A sheet with cards; Connectors is a page
-/// of its own inside it.
+/// Settings: capture options, theme, connectors, account, backends.
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -22,8 +20,7 @@ struct SettingsView: View {
                         dataRow
                         account
                     }
-                    // Last, and one group: which server this phone talks
-                    // to is set once and then left alone.
+                    // Last: the server is set once and left alone.
                     advanced
                 }
                 .padding(.horizontal, DS.gutter)
@@ -143,8 +140,7 @@ struct SettingsView: View {
         .dsCard(padding: 14)
     }
 
-    /// Who processes this workspace's meetings (Sprint 37). Read-only
-    /// here; the change — and the acknowledgement it needs — is on the web.
+    /// Who processes this workspace's meetings. Read-only here; changed on the web.
     private var dataRow: some View {
         NavigationLink(value: AppState.SettingsTab.dataAI) {
             HStack(spacing: 12) {
@@ -172,8 +168,7 @@ struct SettingsView: View {
         .dsCard(padding: 14)
     }
 
-    /// Account, workspaces and sessions are a page of their own: there is
-    /// too much there to read past on the way to the capture settings.
+    /// Account, workspaces and sessions are a page of their own.
     private var account: some View {
         NavigationLink(value: AppState.SettingsTab.account) {
             HStack(spacing: 12) {
@@ -209,8 +204,7 @@ struct SettingsView: View {
         return app.email.isEmpty ? "Not signed in" : app.email
     }
 
-    /// The workspace comes first: it is the thing that changes what the
-    /// app shows, and the address is only ever confirmation.
+    /// The workspace comes first; the address is only confirmation.
     private var subtitle: String {
         var parts: [String] = []
         if let workspace = app.activeWorkspace { parts.append(workspace.title) }

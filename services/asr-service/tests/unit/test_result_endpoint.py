@@ -1,13 +1,6 @@
-"""Behavioural tests for ``GET /asr/jobs/{id}/result`` (spec §2.5).
+"""Behavioural tests for ``GET /asr/jobs/{id}/result``.
 
-The result endpoint decrypts the stored transcript through
-``EncryptedObjectStore.get()``, runs it through nlp-service's batch
-pipeline (dictated punctuation, number normalization), and returns a
-``TranscriptResultView`` (ADR-0011 forbids client-side decrypt; presigned
-URLs only ever serve ciphertext). NLP failures degrade to the raw
-transcript. Not-ready is an explicit 409; an erased ciphertext is 410.
-We exercise the real handler with the auth dependency overridden and the
-DB/store/NLP boundaries stubbed, so no infra is required.
+Real handler, auth overridden, DB/store/NLP boundaries stubbed.
 """
 
 from __future__ import annotations
@@ -223,9 +216,7 @@ def test_result_409_when_not_complete(
 def test_result_409_on_a_failed_job_carries_the_failure_vocabulary(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A client polling for a transcript should learn in one response that
-    it is not coming, and whether resubmitting would help — not keep
-    polling a job that failed hours ago."""
+    """A poller learns in one response that the transcript is not coming."""
     from asr_service.routers import jobs
 
     view = _job_view(JobStatus.FAILED).model_copy(update={"error_kind": "corrupt_audio"})
@@ -347,12 +338,7 @@ def test_result_410_when_ciphertext_erased(
 def test_result_503_when_object_store_not_configured(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The stack may run with ``S3_ENDPOINT`` empty. A complete job's
-    transcript then cannot be read, and the answer has to say so: 503 with
-    a code, not the opaque 500 that aiobotocore's ``Invalid endpoint``
-    ValueError produced (request 39BEEB90-…, NOTE-2026-00016). This is
-    not the 410: the ciphertext is still there, the service just has
-    nowhere to read it from — and nothing was served, so nothing is audited."""
+    """Empty ``S3_ENDPOINT``: 503 with a code, not a 500 and not the 410; nothing audited."""
     from asr_service import deps
     from asr_service.routers import jobs
     from storage import EncryptedObjectStore, S3Client
@@ -412,9 +398,7 @@ def _diarized_output() -> TranscriptionOutput:
 def test_result_keeps_speakers_through_nlp_enrichment(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The bug this guards: the enriched view used to rebuild every
-    segment without its ``speaker`` and drop the roster, so a diarized
-    job reached every client as one unstructured block of text."""
+    """The enriched view must keep every segment's ``speaker`` and the roster."""
     from asr_service.routers import jobs
 
     rig.store.body = _diarized_output().model_dump_json().encode("utf-8")
@@ -441,9 +425,7 @@ def test_result_keeps_speakers_through_nlp_enrichment(
         ("SPEAKER_1", "Speaker 1", ["Скарги на кашель."]),
         ("SPEAKER_2", "Olena", ["Так."]),
     ]
-    # Artifact index space (Sprint 30): artifact segment 1 is punctuation
-    # only and NLP folded it into segment 0, so the first turn stands for
-    # artifact segments 0 AND 1 — moving that turn must move both.
+    # Artifact segment 1 (punctuation only) folded into 0: the first turn stands for both.
     assert body["turns"][0]["segment_indices"] == [0, 1]
     assert body["turns"][1]["segment_indices"] == [2]
     assert [s["artifact_indices"] for s in body["segments"]] == [[0, 1], [2]]
@@ -551,7 +533,7 @@ def test_limits_say_what_one_upload_may_be(
     assert resp.json() == {"max_duration_seconds": 5400, "max_upload_mb": 250}
 
 
-# ── Sprint G0 / Summary Engine v2 Q3: a conversation stays verbatim ─
+# ── A conversation stays verbatim ───────────────────────────────────
 
 
 def _serve(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, diarized: bool) -> None:
@@ -645,7 +627,7 @@ def test_the_batch_client_posts_stages_sorted_and_only_when_set() -> None:
     assert "stages_disabled" not in sent[1]
 
 
-# ── Sprint I2 T4: a passage in another language is labelled, not enriched ──
+# ── A passage in another language is labelled, not enriched ───────────────
 
 
 def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
@@ -689,18 +671,18 @@ def test_an_other_language_segment_keeps_its_raw_text_and_labels_its_turn(
         "prompt_echo": [{"start_ms": 0, "end_ms": 900, "words": 3}],
         "prompt_echo_segments_dropped": 0,
         "other_language_chunks": 1,
-        # Sprint F1 fields; an artifact from before F1 carries no coverage.
+        # An older artifact carries no coverage.
         "coverage": None,
         "second_pass": {"chunks": 0, "recovered_words": 0, "by_cause": {}},
-        # Sprint TQ1 T5: per-segment decoder numbers stay in the artifact.
+        # Per-segment decoder numbers stay in the artifact.
         "segments": [],
     }
-    # Later sprints add fields (TQ2: drops, loops, …); these must hold as-is.
+    # Later fields (drops, loops, …) must hold as-is.
     assert {k: body["diagnostics"][k] for k in expected} == expected
     assert body["coverage"] is None and body["capture"] is None
 
 
-# ── Sprint I3 T2: the view says how much the post-processor shaped it ──
+# ── The view says how much the post-processor shaped it ───────────────
 
 
 def test_enrichment_is_full_partial_or_raw(

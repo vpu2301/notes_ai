@@ -1,13 +1,7 @@
 """A silent recording must come out as `no_speech`, never as a transcript.
 
-Regression for NOTE-2026-00033 (2026-09-21): a 28-minute microphone
-recording that contained digital silence was decoded end to end because
-the VAD, hearing nothing, handed Whisper the whole file — and Whisper,
-given silence plus the workspace glossary as `initial_prompt`, wrote the
-prompt back ("Gysi, Moderator." for 28 minutes). The names belonged to
-the previous day's interview; they reached this job through the
-workspace vocabulary hint, which is by design, and became text only
-because silence reached the decoder, which is the bug.
+Regression for NOTE-2026-00033: VAD hearing nothing handed Whisper the whole file,
+and Whisper given silence plus a prompt wrote the prompt back.
 """
 
 from __future__ import annotations

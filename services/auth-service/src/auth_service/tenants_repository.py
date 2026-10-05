@@ -1,16 +1,7 @@
-"""SQL for tenants (company profile / branding) and tenant memberships.
+"""SQL for tenants and memberships.
 
-Two connection roles are used, mirroring the rest of auth-service:
-
-* ``app_role`` (RLS-scoped via ``tenant_connection``) for reads of the
-  caller's *active* tenant and its member roster.
-* ``tenant_writer`` (unrestricted, ``USING (true)`` policies) for tenant
-  creation/lifecycle, all membership writes, and the cross-tenant
-  "which tenants can this principal reach" lookup — the one query that
-  must span tenants and therefore cannot run under RLS.
-
-Every function takes an already-acquired connection; the router owns the
-pool choice so the isolation contract stays visible at the call site.
+``app_role`` (RLS) for reads of the active tenant; ``tenant_writer`` for lifecycle,
+membership writes and the cross-tenant lookup. The router owns the pool choice.
 """
 
 from __future__ import annotations
@@ -20,8 +11,7 @@ from uuid import UUID
 
 import asyncpg
 
-# Columns surfaced by the tenant API (excludes the raw ``logo_bytes`` blob,
-# which is served by a dedicated endpoint).
+# Columns surfaced by the tenant API (``logo_bytes`` has its own endpoint).
 TENANT_COLUMNS = """
     id, name, display_name, legal_name, slug, locale, timezone, status,
     is_active, logo_url, logo_content_type, contact_email, phone_number,
@@ -30,7 +20,7 @@ TENANT_COLUMNS = """
     created_at, updated_at
 """
 
-# Whitelisted columns the PATCH endpoint may set (router maps request → these).
+# Whitelisted columns the PATCH endpoint may set.
 UPDATABLE_TENANT_COLUMNS = frozenset(
     {
         "display_name",
@@ -118,8 +108,7 @@ async def create_tenant(
 async def update_tenant(
     conn: asyncpg.Connection, *, tenant_id: UUID, fields: dict[str, Any]
 ) -> asyncpg.Record | None:
-    """Patch a whitelist of tenant columns. The router owns the whitelist;
-    callers never pass raw request keys through."""
+    """Patch a whitelist of tenant columns; callers never pass raw request keys."""
     fields = {k: v for k, v in fields.items() if k in UPDATABLE_TENANT_COLUMNS}
     if not fields:
         return await get_tenant(conn, tenant_id=tenant_id)
@@ -181,16 +170,7 @@ MEMBERSHIP_COLUMNS = "id, tenant_id, user_sub, role, status, invited_by, created
 async def list_tenants_for_user(
     conn: asyncpg.Connection, *, user_sub: UUID
 ) -> list[asyncpg.Record]:
-    """The tenants the principal has JOINED, with their membership role.
-
-    Only ``active`` memberships in ``active`` tenants: an invitation the
-    person has not accepted yet (``invited``) or one an admin has paused
-    (``suspended``) is not a workspace they can open, so it must not appear
-    in the switcher until it is accepted / reinstated.
-
-    Cross-tenant by design → must run on the ``tenant_writer`` pool (its
-    ``USING (true)`` policies), never under app_role RLS.
-    """
+    """Active memberships in active tenants, with role; cross-tenant, so ``tenant_writer`` only."""
     return list(
         await conn.fetch(
             f"""
@@ -220,9 +200,7 @@ async def get_membership(
 
 
 async def list_members(conn: asyncpg.Connection, *, tenant_id: UUID) -> list[asyncpg.Record]:
-    """Roster of a tenant's members, joined to the local ``users`` row for
-    display where available. LEFT JOIN so a cross-tenant member (whose
-    ``users`` home row lives elsewhere) still lists, with null profile."""
+    """Member roster; LEFT JOIN ``users`` so cross-tenant members still list with a null profile."""
     return list(
         await conn.fetch(
             """
@@ -285,7 +263,6 @@ async def remove_member(conn: asyncpg.Connection, *, tenant_id: UUID, user_sub: 
         tenant_id,
         user_sub,
     )
-    # asyncpg returns e.g. "DELETE 1"
     return result.endswith(" 1")
 
 
@@ -305,10 +282,7 @@ async def count_active_owners(
 
 
 async def resolve_sub_by_email(conn: asyncpg.Connection, *, email: str) -> UUID | None:
-    """Best-effort global email → sub lookup for adding an existing platform
-    user by email. Runs on the ``tenant_writer`` pool (unrestricted). Email is
-    unique per tenant, not globally; the deterministic ordering picks the
-    oldest active match when a rare cross-tenant collision exists."""
+    """Global email → sub lookup (``tenant_writer``); oldest active match wins on a cross-tenant collision."""
     row = await conn.fetchrow(
         """
         SELECT sub FROM users

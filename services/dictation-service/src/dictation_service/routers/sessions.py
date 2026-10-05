@@ -1,12 +1,4 @@
-"""HTTP companion endpoints for the WS surface.
-
-The frontend uses these to:
-- List sessions running on other devices ("you are dictating on another tab").
-- Fetch a finalized session's transcript JSONB.
-- Force-finalize a stuck `reconnecting` session (sprint 04 spec §6).
-
-All endpoints are RLS-scoped via :func:`db.tenant_connection`.
-"""
+"""HTTP companion endpoints for the WS surface: list, transcript, force-finalize. RLS-scoped."""
 
 from __future__ import annotations
 
@@ -34,16 +26,7 @@ router = APIRouter(prefix="/dictate", tags=["dictate"])
 
 
 def _transcript_from_row(raw: Any) -> list[dict[str, Any]]:
-    """Decode ``transcript_jsonb`` off an asyncpg row.
-
-    No dict/list↔jsonb codec is registered on the pool (the same reason
-    finalize writes the column with ``json.dumps``), so this column reads
-    back as a JSON **string**. Handing it straight to the response model
-    raised ``ValidationError`` → 500 on every read of this endpoint. The
-    conversation review swallows that error and falls back to what it
-    rendered live, so it stayed invisible until a transcript existed to
-    read back. Same defensive shape note-service uses for its jsonb.
-    """
+    """Decode ``transcript_jsonb``; no jsonb codec on the pool, so it reads back as a JSON string."""
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -57,8 +40,6 @@ class SessionSummary(BaseModel):
     status: str
     language: str
     target_kind: str
-    # Ambient-capture v1 provenance: which surface produced the audio
-    # ('browser' | 'mobile' | 'room_device') + optional device/room label.
     capture_source: str = "browser"
     device_name: str | None = None
     started_at: datetime | None
@@ -178,17 +159,14 @@ async def finalize_session_endpoint(
     claims: Annotated[Claims, Depends(requires("dictation.finalize", "dictation_session"))] = ...,  # type: ignore[assignment]
 ) -> dict[str, str]:
     state = get_state()
-    # Two cases: the session is still in-process (live ctx exists) or
-    # it's "abandoned"-shaped but the user wants to commit whatever's
-    # left. We honour both.
     ctx = state.session_manager.get(session_id)
     if ctx is not None and ctx.user_id == claims.sub:
-        from ..ws.handler import _finalize_normal  # local import — avoid cycle
+        from ..ws.handler import _finalize_normal  # avoid import cycle
 
         await _finalize_normal(ctx, state, reason="force_finalize")
         return {"status": "finalized"}
 
-    # No in-process ctx — just verify ownership and mark the DB row.
+    # No in-process ctx: verify ownership and mark the DB row.
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await repository.get_session(conn, session_id=session_id)
         if row is None or row["user_id"] != claims.sub:

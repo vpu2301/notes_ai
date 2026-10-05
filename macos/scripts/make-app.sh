@@ -28,8 +28,7 @@ sed -e 's/\$(EXECUTABLE_NAME)/NotesAICapture/g' \
     -e 's/\$(MACOSX_DEPLOYMENT_TARGET)/14.0/g' \
     Support/Info.plist > "$CONTENTS/Info.plist"
 
-# Sprint 31: the call-audio (process tap) permission prompt needs its usage
-# string; without it macOS refuses the tap instead of asking.
+# The call-audio (process tap) prompt needs its usage string; without it macOS refuses the tap.
 for key in NSMicrophoneUsageDescription NSAudioCaptureUsageDescription; do
   if ! /usr/libexec/PlistBuddy -c "Print :$key" "$CONTENTS/Info.plist" >/dev/null 2>&1; then
     echo "error: $key missing from Info.plist" >&2
@@ -37,10 +36,8 @@ for key in NSMicrophoneUsageDescription NSAudioCaptureUsageDescription; do
   fi
 done
 
-# Sign with a PERSISTENT identity. The microphone permission is keyed to the
-# signature's designated requirement; an ad-hoc signature changes with every
-# build and makes macOS forget (and silently deny) the grant. The identity is
-# created once by scripts/make-signing-identity.sh.
+# Sign with a PERSISTENT identity: the microphone grant is keyed to the signature's
+# designated requirement, and an ad-hoc signature changes every build (grant silently denied).
 IDENTITY="${NOTES_AI_SIGN_IDENTITY:-Notes AI Capture Dev}"
 if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
   scripts/make-signing-identity.sh || true

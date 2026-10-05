@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-# Frontend emits these via POST /audit/events/voice_command_*; nlp-service
-# never emits voice_command.* itself (cardinality concern + the frontend
-# knows the actual outcome).
+# Emitted by the frontend via POST /audit/events/voice_command_*, never by nlp-service.
 VOICE_COMMAND_EXECUTED: Final = "voice_command.executed"
 VOICE_COMMAND_UNDONE: Final = "voice_command.undone"
 VOICE_COMMAND_EXECUTED_FAILED: Final = "voice_command.executed_failed"
@@ -15,6 +13,5 @@ VOICE_COMMAND_EXECUTED_FAILED: Final = "voice_command.executed_failed"
 ABBREVIATION_POLICY_SET: Final = "abbreviation.policy.set"
 ABBREVIATION_POLICY_DELETED: Final = "abbreviation.policy.deleted"
 
-# Dictation-service emits this when our 200-ms call times out and it falls
-# back to raw Whisper text. Listed here because it's about NLP.
+# Emitted by dictation-service when its NLP call times out.
 DICTATION_NLP_TIMEOUT: Final = "dictation.nlp_timeout"

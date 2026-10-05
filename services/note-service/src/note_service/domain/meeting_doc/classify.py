@@ -1,15 +1,6 @@
-"""What a recording is — decided before anything is extracted.
-
-Summary Engine v2, Q3. The kinds a family offers the extractor are what
-keeps a "Decisions" section off a news podcast: the model cannot answer
-with a kind that is not in its enum. So the type has to be known BEFORE
-extraction — which is why this is not the context pass (that runs after).
-
-One small model call on the opening of the recording, then code rules
-that override the model where the signal is unambiguous. The author's own
-choice of meeting type is never second-guessed: the worker only calls
-this for `auto`. A failed call is a meeting — the family every note had
-before Q3.
+"""What a recording is, decided BEFORE extraction (the kind enum keeps a
+"Decisions" section off a podcast): one model call on the opening, then code
+rules where the signal is unambiguous. Only for `auto`; a failed call is a meeting.
 """
 
 from __future__ import annotations
@@ -24,8 +15,7 @@ from .types import RECORDING_TYPES
 
 logger = logging.getLogger(__name__)
 
-# The opening of the recording the model sees: the first two windows,
-# capped. The first minutes decide the type in practice.
+# The opening the model sees: the first two windows, capped.
 MAX_HEAD_CHARS: Final = 8_000
 CLASSIFY_MAX_TOKENS: Final = 50
 VOICE_MEMO_MAX_MINUTES: Final = 5.0
@@ -34,13 +24,10 @@ SOURCE_USER: Final = "user"
 SOURCE_CLASSIFIER: Final = "classifier"
 SOURCE_RULE: Final = "rule"
 SOURCE_TEMPLATE: Final = "template"
-# Sprint D2 decision 6 — code cues settled a close call.
+# Code cues settled a close call.
 SOURCE_CUES: Final = "cues"
 
-# The order the model sees the types in. Not the table's order: a small
-# model picks the first option when unsure, and "meeting" first labelled
-# the audit's news podcast a meeting (Q3 eval: 0/3 → 3/3 on m06 with this
-# order). Meeting last, as in the context prompt since Q1.
+# Meeting last: a small model picks the first option when unsure.
 OFFERED_ORDER: Final[tuple[str, ...]] = (
     "podcast_broadcast",
     "presentation_demo",
@@ -97,11 +84,7 @@ async def classify(
         logger.warning("meeting_doc.classify_failed", exc_info=True)
         said = None
 
-    # One voice, a few minutes, nothing in the calendar: somebody talking
-    # to their phone, whatever the model heard.
-    # F3: one voice demonstrating something to an audience is one voice
-    # too — the model's presentation answer stands (a short walkthrough is
-    # exactly this shape; Q3's podcast rule is unchanged).
+    # One voice, a few minutes, no calendar: a voice memo, unless the model heard a demo.
     if (
         speakers <= 1
         and minutes < VOICE_MEMO_MAX_MINUTES
@@ -124,7 +107,7 @@ async def classify(
     return said, SOURCE_CLASSIFIER
 
 
-# ── Sprint D2 decision 6 — lecture or podcast, settled by cues ──────
+# ── Lecture or podcast, settled by cues ─────────────────────────────
 
 PODCAST: Final = "podcast_broadcast"
 LECTURE: Final = "lecture_webinar"
@@ -137,8 +120,7 @@ _SLIDE_WORDS: Final = re.compile(
 )
 
 
-# Sprint SQ2 T4 — a speaker saying the recording moves to its next part.
-# Closed per-language patterns; the match is a time, never stored as text.
+# A speaker saying the recording moves to its next part; the match is a time, never stored as text.
 STRUCTURE_CUES: Final[dict[str, re.Pattern[str]]] = {
     "de": re.compile(
         r"\b(?:kapitel\s+(?:\d+|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)"

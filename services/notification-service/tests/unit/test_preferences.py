@@ -1,9 +1,4 @@
-"""Preference + quiet-hours resolution, against a frozen clock.
-
-Covers E8 (preference bypass) and E9 (quiet-hours / DST). Europe/Kyiv
-observes DST, so the boundary cases here are the real ones for the
-pilot, not a synthetic zone.
-"""
+"""Preference + quiet-hours resolution against a frozen clock (Europe/Kyiv observes DST)."""
 
 from __future__ import annotations
 
@@ -54,7 +49,7 @@ def _resolve(
     )
 
 
-# ── quiet-hours window arithmetic ───────────────────────────────────
+# ── quiet-hours window arithmetic ──
 
 
 @pytest.mark.parametrize(
@@ -97,16 +92,11 @@ def test_bad_timezone_falls_back_instead_of_raising() -> None:
     assert in_quiet_hours(broken, _at(2026, 7, 19, 23)) is True
 
 
-# ── DST boundaries (E9) ─────────────────────────────────────────────
+# ── DST boundaries ──
 
 
 def test_deferral_across_spring_forward() -> None:
-    """Kyiv springs forward 2026-03-29: 03:00 local never happens.
-
-    A mail held at 23:00 the night before must still resolve to 07:00
-    LOCAL the next morning — an offset-based calculation lands an hour
-    out.
-    """
+    """Kyiv springs forward 2026-03-29: a 23:00 hold must still resolve to 07:00 LOCAL."""
     at = _at(2026, 3, 28, 23)
     end = next_quiet_hours_end(NIGHT, at)
     assert end.astimezone(KYIV).hour == 7
@@ -136,7 +126,7 @@ def test_deferral_next_morning_when_after_start() -> None:
     assert end.hour == 7
 
 
-# ── channel resolution (E8) ─────────────────────────────────────────
+# ── channel resolution ──
 
 
 def test_defaults_apply_when_user_never_expressed_an_opinion() -> None:

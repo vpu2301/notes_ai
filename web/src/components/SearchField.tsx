@@ -14,14 +14,7 @@ interface SearchFieldProps {
   className?: string;
 }
 
-/**
- * The expandable search field.
- *
- * Collapsed it is a single magnifier the size of a button; a click, a `/` or
- * ⌘K grows it into a full-width field and puts the caret in it. It stays open
- * while there is a query and folds back to the icon once the query is cleared,
- * so the page carries one small mark instead of an empty bar.
- */
+/** Expandable search field: a magnifier until clicked, `/` or ⌘K; folds back when the query is cleared. */
 export function SearchField({
   value,
   onChange,
@@ -35,7 +28,6 @@ export function SearchField({
   const inputRef = useRef<HTMLInputElement>(null);
   const expanded = open || value !== "";
 
-  // "/" or ⌘K from anywhere on the page opens the field, as in the Mac app.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -80,7 +72,7 @@ export function SearchField({
         onKeyDown={(e) => {
           if (e.key !== "Escape") return;
           e.preventDefault();
-          // Esc clears a query first, and folds the field only once it is empty.
+          // Esc clears first, folds only when empty.
           if (value !== "") onChange("");
           else {
             setOpen(false);
@@ -97,7 +89,7 @@ export function SearchField({
             className="sf-clear"
             title="Clear (esc)"
             aria-label="Clear search"
-            // Keep the caret in the field: mousedown would blur it first.
+            // mousedown would blur the field first.
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();

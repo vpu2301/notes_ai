@@ -33,20 +33,10 @@ const TAB_TITLES: Record<string, string> = {
   billing: "Billing",
 };
 
-/**
- * `/settings` — the account's own screens, inside the app shell: a menu
- * on the left (as on the Mac), the page on the right. Below 760 px the
- * menu becomes one scrolling row above the page.
- *
- * The workspace rows other than Data & AI appear only for a workspace
- * manager. That is a convenience, not a boundary: every route re-checks
- * the role server-side, and a member who types the URL gets a 403
- * rendered as a message rather than a broken page.
- */
+/** `/settings` shell. Hiding manager rows is a convenience, not a boundary: every route re-checks server-side. */
 export function SettingsLayout() {
   const { activeRole } = useAuth();
-  // A membership role (owner/admin), or — before /auth/me carries the
-  // memberships — the platform role the user row falls back to.
+  // Membership role (owner/admin), else the platform role on the user row.
   const manages = activeRole === "owner" || activeRole === "admin" || activeRole === "tenant_admin";
   const { pathname } = useLocation();
   const section = pathname.split("/")[2] ?? "";
@@ -63,8 +53,7 @@ export function SettingsLayout() {
         </div>
         <div className="settings-nav-group">
           <span className="settings-nav-label">Workspace</span>
-          {/* Every member, not only a manager: which companies process
-              your employer's meetings is not admin-only information. */}
+          {/* Every member, not only a manager. */}
           <SettingsLink to="/settings/data" label="Data & AI" icon={<ShieldIcon />} />
           {manages && <SettingsLink to="/settings/members" label="Members" icon={<UsersIcon />} />}
           {manages && (

@@ -1,23 +1,5 @@
-"""`POST /auth/email/start` and `POST /auth/email/verify` (IDX-A3).
-
-One pair of endpoints serves both signup and login, and the response
-never says which one happened for the address — that is the point of the
-design, not an implementation detail. A person who has never used
-Notes AI and a person who signed in yesterday send the same request, get
-the same 202, and receive the same-looking mail; only the second step
-differs, and only after the code has proved possession of the mailbox.
-
-This module is deliberately thin. Deciding is
-:mod:`auth_service.domain.email_code_service`; here we resolve who is
-asking (client type, IP), translate the service's refusals into RFC 9457
-problems with the machine codes the API contract names, place the
-refresh cookie for browsers, and write the audit trail.
-
-Mounted only when ``MDX_IDP_MODE=native``: in keycloak mode the identity
-tables these read do not participate in login, and an endpoint that
-mints a native session against a Keycloak deployment would be a second,
-unpoliced way in.
-"""
+"""`POST /auth/email/start` and `POST /auth/email/verify`: one pair serves signup and login,
+and the response never says which. Deciding lives in :mod:`auth_service.domain.email_code_service`."""
 
 from __future__ import annotations
 
@@ -55,8 +37,7 @@ class _Strict(BaseModel):
 
 class StartRequest(_Strict):
     email: EmailStr
-    # The interface language, for the mail. There is no session to infer
-    # it from — the whole point is that the person may not have an account.
+    # Mail language (no session to infer it from).
     lang: Literal["en", "de", "uk"] | None = None
 
 
@@ -71,8 +52,7 @@ class StartResponse(_Strict):
 
 class VerifyRequest(_Strict):
     challenge_id: UUID
-    # Accepts the grouped form the mail shows ("482 913"); the service
-    # strips the separators before comparing.
+    # Accepts the grouped form the mail shows ("482 913").
     code: str = Field(min_length=1, max_length=32)
 
 
@@ -80,12 +60,7 @@ class VerifyRequest(_Strict):
 
 
 def _resolve_ip(request: Request) -> str:
-    """The address the rate-limit keys are built from.
-
-    ``X-Forwarded-For`` is only consulted when the peer is one of
-    ``TRUSTED_PROXY_CIDRS``; otherwise the header is client-supplied
-    text and believing it would make the per-IP cap a formality.
-    """
+    """The address the rate-limit keys use; ``X-Forwarded-For`` only from ``TRUSTED_PROXY_CIDRS`` peers."""
     resolved: str = client_ip(
         peer=request.client.host if request.client else None,
         forwarded_for=request.headers.get("x-forwarded-for"),
@@ -95,12 +70,7 @@ def _resolve_ip(request: Request) -> str:
 
 
 def _service() -> Any:
-    """The wired :class:`EmailCodeService`, or 404 if this deployment has none.
-
-    404 rather than 503: a deployment running in keycloak mode, or one
-    with no mail relay configured, should look like one that has no such
-    endpoint — the same posture ``/auth/password/*`` takes.
-    """
+    """The wired :class:`EmailCodeService`, or 404 (not 503) if this deployment has none."""
     service = getattr(get_state(), "email_code_service", None)
     if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
@@ -131,12 +101,7 @@ async def _audit(
     actor_sub: UUID | None = None,
     target_id: UUID | None = None,
 ) -> None:
-    """Best-effort audit. Never blocks a sign-in.
-
-    The house rule on security paths: a hash-chain outage must not stop
-    people signing in, but it must be loud enough that an operator knows
-    the trail has a gap.
-    """
+    """Best-effort audit; never blocks a sign-in, but logs loudly."""
     try:
         await state.audit_writer.write_event(
             tenant_id=tenant_id if isinstance(tenant_id, UUID) else UUID(str(tenant_id)),
@@ -178,9 +143,7 @@ async def start(body: StartRequest, request: Request) -> StartResponse:
     except EmailCodeError as exc:
         raise _as_problem(exc) from exc
 
-    # The platform tenant: at this point the address may belong to
-    # nobody, so there is no customer whose trail this belongs on. The
-    # payload carries the challenge id and never the address.
+    # Platform tenant: the address may belong to nobody. Never the address in the payload.
     await _audit(
         state,
         tenant_id=settings.auth_platform_tenant_id,
@@ -211,10 +174,7 @@ async def verify(body: VerifyRequest, request: Request, response: Response) -> A
             ip=_resolve_ip(request),
             client_type=str(client_type),
             user_agent=request.headers.get("user-agent", ""),
-            # BE-3 F4: the new workspace's locale. The timezone is NOT
-            # guessed here — a header cannot carry one, and `UTC` that the
-            # welcome step corrects (`PATCH /auth/me`) beats a guess from
-            # an IP that is wrong for anyone travelling.
+            # The new workspace's locale; the timezone is NOT guessed (the welcome step sets it).
             locale=copy_mod.normalise_lang(request.headers.get("accept-language")),
         )
     except EmailCodeError as exc:
@@ -229,9 +189,7 @@ async def verify(body: VerifyRequest, request: Request, response: Response) -> A
         raise _as_problem(exc) from exc
 
     if result.mfa_challenge is not None:
-        # IDX-A5: the code was right, but it does not buy a session on its
-        # own. Nothing about the account is disclosed here — not the
-        # address, not the workspaces, not whether it was just created.
+        # Second factor owed: nothing about the account is disclosed.
         await _audit(
             state,
             tenant_id=settings.auth_platform_tenant_id,
@@ -252,9 +210,7 @@ async def verify(body: VerifyRequest, request: Request, response: Response) -> A
     await _write_success_audit(state, result)
 
     if not client_type.native:
-        # Browsers keep the refresh token in an HttpOnly cookie and never
-        # see it in the body; native clients get it in the body for the
-        # Keychain and are never given a cookie.
+        # Browsers: HttpOnly cookie, never the body. Native: body, never a cookie.
         response.set_cookie(
             key=settings.auth_cookie_name,
             value=result.session.refresh_token,
@@ -292,9 +248,7 @@ async def _write_success_audit(state: Any, result: VerifyResult) -> None:
     tenant_id = result.session.tenant_id
     identity_id = result.identity.id
     if result.is_new_identity:
-        # On the NEW personal tenant: this is the first line of that
-        # workspace's history, and it belongs to its owner, not to the
-        # platform.
+        # On the NEW personal tenant: the first line of that workspace's history.
         await _audit(
             state,
             tenant_id=tenant_id,

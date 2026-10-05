@@ -1,10 +1,7 @@
 import Foundation
 import Network
 
-/// One open note: the envelope, its template's sections, the editable
-/// content with debounced autosave, the
-/// transcript it came from, and PDF / Markdown export through the share
-/// sheet. Mirrors the web editor page.
+/// One open note: envelope, sections, autosaved content, transcript, export. Mirrors the web editor.
 @MainActor
 final class NoteViewModel: ObservableObject {
     enum SaveState: Equatable {
@@ -22,7 +19,7 @@ final class NoteViewModel: ObservableObject {
 
     enum Tab: Hashable { case notes, transcript, client }
 
-    /// Q5: how much of a generated note to show. A view, never an edit.
+    /// How much of a generated note to show. A view, never an edit.
     enum DetailLevel: String, CaseIterable { case short, standard, detailed }
 
     /// A file handed to the share sheet (PDF, Markdown).
@@ -32,22 +29,18 @@ final class NoteViewModel: ObservableObject {
     }
 
     let noteId: String
-    /// Given by the caller (a recording made here) or learnt from the
-    /// note itself, so a note made elsewhere still opens its transcript.
+    /// From the caller (a recording made here) or learnt from the note itself.
     @Published private(set) var jobId: String?
 
     @Published private(set) var note: NoteEnvelope?
     @Published private(set) var sections: [TemplateSectionDef] = []
-    /// The template's display name, for the note's meta line; nil when the
-    /// template could not be read (deprecated, or not ours to see).
+    /// The template's display name; nil when the template could not be read.
     @Published private(set) var templateName: String?
     @Published var content: NoteContent?
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
     @Published private(set) var conflict = false
-    /// Set when this is not our note and nobody shared it with us — a
-    /// workspace admin opening a colleague's note. Every read is then sent
-    /// with this purpose (the server records it) and the screen says so.
+    /// Set for an oversight read (not ours, not shared); every read sends it and the screen says so.
     @Published private(set) var readPurpose: ReadPurpose?
     @Published private(set) var loadError: String?
     @Published private(set) var isLoading = true
@@ -55,17 +48,14 @@ final class NoteViewModel: ObservableObject {
     @Published var actionError: String?
     @Published var tab: Tab = .notes
 
-    /// Sections whose text is the raw transcript (dialogue-shaped): shown
-    /// behind the Transcript tab, never among the notes.
+    /// Dialogue-shaped sections: shown behind the Transcript tab, never among the notes.
     var transcriptSections: [TemplateSectionDef] {
         sections.filter { TranscriptText.isTranscript(content?.section($0.id).text ?? "") }
     }
     /// The author's own pad — always there to type into, never headed.
     static let padKey = "user_notes"
 
-    /// One block per section the content HAS, in its order — never one
-    /// per template section. A block without a title is read as the note
-    /// itself. See `blocks(editable:)`.
+    /// One block per section the content HAS (not per template section); untitled = the note itself.
     struct NoteBlock: Identifiable {
         let key: String
         let title: String?
@@ -80,12 +70,8 @@ final class NoteViewModel: ObservableObject {
 
     var blocks: [NoteBlock] { blocks(editable: editable) }
 
-    /// Structure follows content. A block is shown when it has text.
-    /// While editable, three kinds of empty block are shown too, because
-    /// there is no other way to put something in them: the pad; a typed
-    /// field (its picker is the only way to set it); and, on a template
-    /// without a pad (the older, form-shaped ones), the template's own
-    /// free-text fields. A dialogue-shaped section is the transcript.
+    /// A block is shown when it has text; while editable also the empty pad,
+    /// typed fields, and (on a pad-less template) its free-text fields.
     func blocks(editable: Bool) -> [NoteBlock] {
         let byId = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let hasPad = byId[Self.padKey] != nil
@@ -128,39 +114,31 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var sharing: SharingView?
     /// Set after a successful delete so the view can close itself.
     @Published private(set) var deleted = false
-    /// The engine's status for this note (Sprint 33); nil when the note
-    /// was never written up.
+    /// The engine's status for this note; nil when never written up.
     @Published private(set) var generation: GenerationView?
-    /// True once the server has answered about `generation`, so the button
-    /// does not flash before the first answer.
+    /// True once the server has answered about `generation` (no button flash).
     @Published private(set) var generationKnown = false
     @Published private(set) var generating = false
     @Published private(set) var generationError: String?
-    /// The code behind `generationError`, when the server sent one —
-    /// `processor_unacknowledged` gets a button to Settings › Data & AI.
+    /// The code behind `generationError`; `processor_unacknowledged` gets a Settings button.
     @Published private(set) var generationErrorCode: String?
     var generationPollInterval: Duration = .seconds(2)
     private var generationTask: Task<Void, Never>?
 
-    /// *Generate Summary* lives in exactly one place: the Notes tab of a
-    /// draft we may edit, made from a recording, never written up.
+    /// *Generate Summary* is offered only on an editable draft from a recording, never written up.
     var canGenerateSummary: Bool {
         editable && jobId != nil && generationKnown && generation == nil
     }
     @Published private(set) var turns: [TranscriptTurn]?
-    /// Label → display name for the transcript's speakers (people's names
-    /// where given, "Speaker N" elsewhere). Kept apart from `turns` so a
-    /// rename repaints every turn of that speaker at once.
+    /// Label → display name; kept apart from `turns` so a rename repaints every turn at once.
     @Published private(set) var speakerNames: [String: String] = [:]
     @Published private(set) var transcriptError: String?
-    /// Sprint F1: speech the transcript is missing — "Not transcribed: …".
+    /// Speech the transcript is missing — "Not transcribed: …".
     @Published private(set) var coverageLine: CoverageGapsFormatter.Line?
-    /// Sprint TQ2: music / silence / noise markers, and the language that
-    /// names them. Left out of the copied transcript.
+    /// Music / silence / noise markers and their language. Left out of the copied transcript.
     @Published private(set) var noise: [TranscriptNoise] = []
     @Published private(set) var transcriptLanguage: String?
-    /// Sprint TQ3: the spelling overlay — applied and proposed corrections,
-    /// and the rev a decision must name.
+    /// The spelling overlay: applied and proposed corrections, and the rev a decision must name.
     @Published private(set) var entityCorrections: [EntityCorrection] = []
     @Published private(set) var correctionsRev = 0
     @Published private(set) var spellingError: String?
@@ -168,32 +146,25 @@ final class NoteViewModel: ObservableObject {
     /// Roster (after merges) and talk time per speaker.
     @Published private(set) var speakers: [String] = []
     @Published private(set) var speakerStats: [SpeakerStat] = []
-    /// The latest speaker edit, while it can be undone ("Merged into Anna ·
-    /// Undo", "Moved 3 turns to Tom · Undo").
+    /// The latest speaker edit, while it can be undone.
     @Published private(set) var lastEdit: LastSpeakerEdit?
-    /// Sprint 30: the result revision the turns were read from; every move
-    /// sends it back. Nil from servers that cannot move turns.
+    /// The result revision the turns were read from; every move sends it back.
     @Published private(set) var resultRev: Int?
     /// Names offered when renaming (the calendar event's invitees).
     @Published private(set) var nameCandidates: [String] = []
-    /// Sprint 31: label → "local"/"remote" (empty for mono jobs).
+    /// Label → "local"/"remote" (empty for mono jobs).
     @Published private(set) var speakerSides: [String: String] = [:]
-    /// Sprint 31: label → how its name was given ("channel", "typed", …).
+    /// Label → how its name was given ("channel", "typed", …).
     @Published private(set) var speakerNameSources: [String: String] = [:]
-    /// Sprint 32: names the server heard people give themselves, not yet
-    /// accepted or dismissed. Empty while the server's switch is off.
+    /// Names the server heard people give themselves, not yet accepted or dismissed.
     @Published private(set) var nameSuggestions: [NameSuggestion] = []
-    /// Sprint 32: an older engine labelled this transcript and its audio
-    /// is still there — the re-label banner offers a fresh run.
+    /// Labelled by an older engine with audio still there: the re-label banner offers a fresh run.
     @Published private(set) var relabelAvailable = false
     /// The re-label banner was closed in this view.
     @Published private(set) var relabelBannerDismissed = false
-    /// Sprint 32: the turn a suggestion's quote points at — scrolled to and
-    /// highlighted for `highlightDuration`.
+    /// The turn a suggestion's quote points at, highlighted for `highlightDuration`.
     @Published private(set) var revealedTurn: TurnReveal?
-    /// Sprint 32: what assistive technology should say after a speaker
-    /// edit ("Merged", "Moved 3 turns", "Re-labelling finished"). The view
-    /// posts it; the model only decides the words.
+    /// What assistive technology should say after a speaker edit; the view posts it.
     @Published private(set) var announcement: Announcement?
     /// Turns picked for a multi-turn move (ids = `TranscriptTurn.id`).
     @Published var selectedTurnIds: Set<Int> = []
@@ -207,7 +178,7 @@ final class NoteViewModel: ObservableObject {
     private var mergeRewrite: (before: NoteContent, after: NoteContent)?
     /// Speaker edits need the network; offline the controls are disabled.
     @Published private(set) var online = true
-    /// Sprint 29 — "Wrong number of speakers?": the re-label in this view.
+    /// "Wrong number of speakers?": the re-label in this view.
     @Published private(set) var relabel: RelabelState = .idle
     /// The server can put back the labelling the last re-run replaced.
     @Published private(set) var canUndoRelabel = false
@@ -221,16 +192,14 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var countBannerDismissed = false
     /// How often a running re-label is polled.
     var relabelPollInterval: Duration = .seconds(3)
-    /// Told when a re-label starts following and when it stops (job id,
-    /// running) — the Mac's recents list says "Re-labelling speakers…".
+    /// Told when a re-label starts and stops being followed (job id, running).
     var onRelabellingChange: (@MainActor (String, Bool) -> Void)?
     /// The count the last re-label asked for, for "Try again".
     private var lastRelabelRequest: Int?
     private var relabelTask: Task<Void, Never>?
     private let pathMonitor = NWPathMonitor()
 
-    /// "Ask this note": the thread under the document. Lives here only —
-    /// the server answers one question at a time and keeps nothing.
+    /// "Ask this note": the thread under the document; the server keeps nothing.
     @Published private(set) var chat: [ChatMessage] = []
     @Published private(set) var asking = false
     @Published var askError: String?
@@ -274,8 +243,7 @@ final class NoteViewModel: ObservableObject {
         let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
         return name.isEmpty ? "A colleague's note" : "\(name)'s note"
     }
-    /// A note is editable while it is a draft and the reader is looking
-    /// at it as it stands — an old version is a record.
+    /// Editable while a draft and not reading an old version.
     var editable: Bool { isDraft && viewing == nil }
 
     // MARK: - History
@@ -284,8 +252,7 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var versions: [NoteVersionSummary] = []
     @Published private(set) var versionsLoading = false
     @Published private(set) var versionsError: String?
-    /// An old version being read. The document shows its content, read
-    /// only; nil is the note as it stands.
+    /// An old version being read (read only); nil is the note as it stands.
     @Published private(set) var viewing: NoteVersionDetail?
     @Published private(set) var viewingLoading = false
 
@@ -363,14 +330,12 @@ final class NoteViewModel: ObservableObject {
 
     // MARK: - Generate Summary (Sprint 33)
 
-    /// Ask once how the engine is doing with this note. 404 is an answer:
-    /// never written up, so the button is offered.
+    /// Ask once how the engine is doing; 404 = never written up, so the button is offered.
     func loadGeneration() async {
         guard jobId != nil else { return }
         do {
             let view = try await api.generation(noteId: noteId)
-            // A latest run that is `superseded` was reset by an operator:
-            // as far as the reader is concerned there is none.
+            // `superseded` = reset by an operator: treat as no run.
             generation = view.status == "superseded" ? nil : view
             generationKnown = true
             if view.isLive { followGeneration() }
@@ -378,7 +343,7 @@ final class NoteViewModel: ObservableObject {
             generation = nil
             generationKnown = true
         } catch {
-            // A blip: the tab shows the note as it is, without the button.
+            // A blip: show the note without the button.
         }
     }
 
@@ -392,9 +357,7 @@ final class NoteViewModel: ObservableObject {
             try await api.regenerate(noteId: noteId)
             await loadGeneration()
         } catch {
-            // Never the server's `detail`: the sentence for every code the
-            // engine can answer with lives in `AuthCopy`, and an unknown
-            // one gets a generic line with a reference.
+            // Never the server's `detail`: wording lives in `AuthCopy`.
             generationError = AuthCopy.message(for: error)
             generationErrorCode = AuthCopy.code(of: error)
         }
@@ -415,14 +378,13 @@ final class NoteViewModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 guard let self else { return }
-                // A failed poll is a blip, not a verdict: keep asking.
+                // A failed poll is a blip: keep asking.
                 guard let view = try? await api.generation(noteId: self.noteId) else { continue }
                 self.generation = view
                 if !view.isLive { break }
             }
             guard !Task.isCancelled, let self else { return }
-            // Unsaved typing wins; the autosave's version check then says
-            // the note moved on, and "Reload latest" brings the text in.
+            // Unsaved typing wins; the autosave's version check then offers "Reload latest".
             if self.saveState == .saved { await self.load() }
         }
     }
@@ -436,8 +398,7 @@ final class NoteViewModel: ObservableObject {
             return
         }
         countBannerDismissed = UserDefaults.standard.bool(forKey: Self.countBannerKey(jobId))
-        // A re-label started earlier (here, on the web, on another device)
-        // may still be running: follow it rather than offer a second one.
+        // A re-label started elsewhere may still be running: follow it.
         if let job = try? await api.jobStatus(id: jobId) {
             canUndoRelabel = job.canUndoRediarize ?? false
             if job.isRelabelling { followRelabel(jobId: jobId) }
@@ -468,8 +429,7 @@ final class NoteViewModel: ObservableObject {
         selectedTurnIds.formIntersection(ids)
     }
 
-    /// Sprint TQ2: the markers shown just before `turn` (after the turn
-    /// before it), and those after the last turn.
+    /// The markers shown just before `turn`, and those after the last turn.
     func markers(before turn: TranscriptTurn) -> [TranscriptNoise] {
         let all = turns ?? []
         guard let index = all.firstIndex(where: { $0.id == turn.id }) else { return [] }
@@ -487,9 +447,8 @@ final class NoteViewModel: ObservableObject {
         EntityCorrection.banner(entityCorrections, language: transcriptLanguage)
     }
 
-    /// Accept or reject; the text changes with it, so the transcript is
-    /// read again. Accepting a spelling the glossary gave teaches the
-    /// glossary its variants. A stale view reloads and says so.
+    /// Accept or reject, then re-read the transcript; accepting a glossary
+    /// spelling teaches it the variants. A stale view reloads and says so.
     func decide(_ correction: EntityCorrection, accept: Bool, toText: String? = nil) async {
         guard let jobId else { return }
         spellingError = nil
@@ -527,25 +486,16 @@ final class NoteViewModel: ObservableObject {
         return speakerNames[label] ?? turn.name ?? defaultSpeakerName(label)
     }
 
-    /// Sprint 35 — a name the author fixed, waiting on
-    /// "Remember this for the workspace?". Nil when nothing is pending.
+    /// A name the author fixed, waiting on "Remember this for the workspace?".
     @Published var rememberOffer: RememberOffer?
 
-    /// Rename a speaker everywhere: on the job (so the web app agrees), in
-    /// this transcript, and — while the note is live — in the note body,
-    /// whose turn lines start with the name. A cancelled note is a record;
-    /// its text stays and only the transcript shows the new name.
-    ///
-    /// Sprint 30: `picked` says the name was chosen from the candidate
-    /// list (sent as `sources`, a metric only); nil works it out from the
-    /// candidates. Sprint 32: `source` overrides both (an accepted
-    /// suggestion). Returns whether a new name was saved.
+    /// Rename a speaker on the job, in this transcript and (while the note is
+    /// live) in the note body. `picked`/`source` only feed the `sources` metric.
+    /// Returns whether a new name was saved.
     @discardableResult
     func renameSpeaker(label: String, to rawName: String, picked: Bool? = nil,
                        source: SpeakerNameSource? = nil) async -> Bool {
-        // Without a readable job the "label" is the name as it stands in
-        // the note text; the rename rewrites the turn prefixes and the note
-        // autosaves, so it is on the server either way.
+        // Without a readable job the "label" is the name in the note text; the autosave carries it.
         let textOnly = jobId == nil || transcriptError != nil
         let from = textOnly ? label : (speakerNames[label] ?? defaultSpeakerName(label))
         let trimmed = rawName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -604,23 +554,19 @@ final class NoteViewModel: ObservableObject {
         SpeakerChannelMarkers.side(of: label, in: speakerSides)
     }
 
-    /// The name was given from the channel split — shown with
-    /// "· from your microphone" and an ✕.
+    /// The name came from the channel split (marker + ✕).
     func isChannelNamed(_ label: String) -> Bool {
         SpeakerChannelMarkers.isChannelNamed(label, sources: speakerNameSources)
     }
 
-    /// The ✕: remove the channel name. The PUT leaves the label out of
-    /// `names` (every other name kept); the server records "cleared" and
-    /// never applies the channel name again.
+    /// The ✕: PUT without this label; the server records "cleared" and never re-applies the channel name.
     func clearChannelName(_ label: String) async {
         await renameSpeaker(label: label, to: "")
     }
 
     /// The one small speaker worth asking about (largest first), if any.
     var smallSpeakerPrompt: (speaker: SpeakerStat, targets: [String])? {
-        // The count question comes first: merging a small speaker is moot
-        // until the number of people is settled. Never both banners.
+        // The count question comes first; never both banners.
         guard speakers.count > 1, !showsCountBanner, !showsRelabelBanner, relabel != .running else { return nil }
         let largest = speakerStats.sorted { $0.speechMs > $1.speechMs }
         guard let small = largest.first(where: {
@@ -629,9 +575,8 @@ final class NoteViewModel: ObservableObject {
         return (small, largest.filter { $0.label != small.label }.prefix(2).map(\.label))
     }
 
-    /// Merge `from` into `into` on the job; the transcript reloads and the
-    /// note's turn lines follow, as on a rename. Needs the network: an edit
-    /// replayed later against a changed roster would be wrong, so nothing queues.
+    /// Merge `from` into `into` on the job; transcript and note lines follow.
+    /// Online only: a queued edit replayed against a changed roster would be wrong.
     func mergeSpeaker(from: String, into: String) async {
         guard let jobId, online, !renamingSpeaker else { return }
         let fromName = name(for: from)
@@ -656,7 +601,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Keep "… · Undo" up for ten seconds (Sprint 28's window).
+    /// Keep "… · Undo" up for ten seconds.
     private func offerUndo(_ edit: LastSpeakerEdit) {
         lastEdit = edit
         Task { [weak self] in
@@ -695,8 +640,7 @@ final class NoteViewModel: ObservableObject {
     struct LastSpeakerEdit: Equatable {
         let editId: String
         let summary: String
-        /// Sprint 32: an accepted suggestion is undone by putting these
-        /// names back, not by the server's edit log.
+        /// An accepted suggestion is undone by putting these names back, not via the server's edit log.
         var restore: NameRestore? = nil
     }
 
@@ -713,9 +657,7 @@ final class NoteViewModel: ObservableObject {
     /// …and at most this many live speakers.
     nonisolated static let maxSpeakers = 8
 
-    /// Whether speakers can be changed right now: a readable job, online
-    /// (an edit replayed later against a changed roster would be wrong),
-    /// nothing else in flight, and no re-label running.
+    /// Readable job, online, nothing in flight, no re-label running.
     var canEditSpeakers: Bool {
         jobId != nil && transcriptError == nil && online && !renamingSpeaker && relabel != .running
     }
@@ -729,8 +671,7 @@ final class NoteViewModel: ObservableObject {
     /// "New speaker" is offered while there is room for one more.
     var canAddSpeaker: Bool { speakers.count < Self.maxSpeakers }
 
-    /// Where the given turns can go: every roster speaker except the one
-    /// they all already belong to.
+    /// Every roster speaker except the one all given turns already belong to.
     func moveTargets(for turns: [TranscriptTurn]) -> [String] {
         let current = Set(turns.map(\.speaker))
         return speakers.filter { !(current.count == 1 && current.contains($0)) }
@@ -758,9 +699,7 @@ final class NoteViewModel: ObservableObject {
         selectedTurnIds = []
     }
 
-    /// One move's indices: the turns' own `segment_indices`, concatenated
-    /// as they came (opaque — artifact space, never an index into
-    /// `segments`), each index once.
+    /// The turns' `segment_indices` concatenated (opaque artifact space), each once.
     nonisolated static func segmentIndices(of turns: [TranscriptTurn]) -> [Int] {
         var seen = Set<Int>()
         return turns.flatMap { $0.segmentIndices ?? [] }.filter { seen.insert($0).inserted }
@@ -775,9 +714,8 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Move turns to another speaker, a new one, or Unknown — one call for
-    /// however many turns. A result changed elsewhere since it was read is
-    /// reloaded and the person told so; nothing is retried behind their back.
+    /// Move turns to another speaker, a new one, or Unknown, in one call. A
+    /// stale result is reloaded and reported, never retried silently.
     func moveTurns(_ moving: [TranscriptTurn], to target: ReassignTarget) async {
         guard let jobId, let rev = resultRev, canEditSpeakers else { return }
         let indices = Self.segmentIndices(of: moving.filter(canMove))
@@ -810,8 +748,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// The move was refused because the speakers changed elsewhere: show
-    /// the result as it is now, drop the picks made on the old one.
+    /// Stale move refused: reload the result, drop the picks.
     private func reloadAfterConflict() async {
         guard let jobId else { return }
         endSelection()
@@ -847,8 +784,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Candidate names for renaming `label`: the offered ones not already
-    /// used on another speaker.
+    /// Offered names not already used on another speaker.
     func nameSuggestions(for label: String) -> [String] {
         Self.picklist(candidates: nameCandidates, names: speakerNames, renaming: label)
     }
@@ -859,9 +795,7 @@ final class NoteViewModel: ObservableObject {
         return candidates.filter { !used.contains($0.lowercased()) }
     }
 
-    /// The picklist as a completion list for what is typed so far: all of
-    /// it while the field still holds the current name (or nothing), else
-    /// the names containing the text.
+    /// Completion list: everything while the field holds the current name (or nothing), else matches.
     func nameCompletions(for label: String, typed: String) -> [String] {
         Self.completions(nameSuggestions(for: label), typed: typed, current: name(for: label))
     }
@@ -884,9 +818,7 @@ final class NoteViewModel: ObservableObject {
         case failed
     }
 
-    /// "We're not sure how many people spoke." — the diarizer said so, the
-    /// person has not already answered (a count, or "Looks right"), and no
-    /// re-label is on its way.
+    /// Low confidence, not yet answered, and no re-label on its way.
     var showsCountBanner: Bool {
         !showsRelabelBanner
             && Self.showsCountBanner(confidence: countConfidence, hint: speakersHint,
@@ -898,8 +830,7 @@ final class NoteViewModel: ObservableObject {
         confidence == "low" && hint == nil && !dismissed && !relabelling
     }
 
-    /// "Only 2 voices could be told apart." — the person asked for more
-    /// speakers than the recording holds; none are made up to match.
+    /// More speakers asked for than the recording holds.
     var hintShortfall: String? {
         guard let hint = speakersHint, !speakers.isEmpty, speakers.count < hint else { return nil }
         return "Only \(speakers.count) \(speakers.count == 1 ? "voice" : "voices") could be told apart."
@@ -925,9 +856,7 @@ final class NoteViewModel: ObservableObject {
 
     nonisolated static func countBannerKey(_ jobId: String) -> String { "speakerCountConfirmed.\(jobId)" }
 
-    /// Re-run speaker separation for `expected` people (nil: let the
-    /// diarizer count). Needs the network — nothing queues offline, for the
-    /// same reason a merge does not.
+    /// Re-run speaker separation for `expected` people (nil: diarizer counts). Online only.
     func relabelSpeakers(expected: Int?) async {
         guard let jobId, online, relabel != .running, !renamingSpeaker else { return }
         lastRelabelRequest = expected
@@ -935,7 +864,7 @@ final class NoteViewModel: ObservableObject {
         do {
             _ = try await api.rediarize(jobId: jobId, speakersExpected: expected)
         } catch RediarizeError.inProgress {
-            // One is already running (another device, the web app): follow it.
+            // One is already running elsewhere: follow it.
         } catch {
             renamingSpeaker = false
             actionError = error.localizedDescription
@@ -980,11 +909,8 @@ final class NoteViewModel: ObservableObject {
         if relabel != .running { relabel = .idle }
     }
 
-    /// Poll the job every `relabelPollInterval` until the re-label settles.
-    ///
-    /// The task holds the client, not this model: a note closed mid-run
-    /// stops being updated, but whoever listens on `onRelabellingChange`
-    /// still hears when the run ends.
+    /// Poll until the re-label settles. The task holds the client, not this
+    /// model, so `onRelabellingChange` fires even after the note is closed.
     private func followRelabel(jobId: String) {
         relabelTask?.cancel()
         relabel = .running
@@ -997,14 +923,14 @@ final class NoteViewModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 if self == nil && report == nil { return }
-                // A failed poll is a blip, not a verdict: keep asking.
+                // A failed poll is a blip: keep asking.
                 guard let job = try? await api.jobStatus(id: jobId) else { continue }
                 if !job.isRelabelling {
                     settled = job
                     break
                 }
             }
-            // Cancelled: a newer follow took over and reports for itself.
+            // Cancelled: a newer follow took over.
             if Task.isCancelled { return }
             report?(jobId, false)
             guard let settled, let self else { return }
@@ -1031,8 +957,7 @@ final class NoteViewModel: ObservableObject {
 
     // MARK: - Name suggestions and the re-label banner (Sprint 32)
 
-    /// Something for assistive technology to say once. The token makes
-    /// the same words said twice two announcements.
+    /// Something for assistive technology to say once; the token makes repeats distinct.
     struct Announcement: Equatable {
         let text: String
         var token = UUID()
@@ -1057,8 +982,7 @@ final class NoteViewModel: ObservableObject {
             .first { $0.label == label }
     }
 
-    /// The suggestions worth showing: one per speaker still on the roster,
-    /// and never the name that speaker already has.
+    /// One per speaker still on the roster, never the name it already has.
     nonisolated static func visibleSuggestions(_ all: [NameSuggestion], speakers: [String],
                                                names: [String: String]) -> [NameSuggestion] {
         var seen = Set<String>()
@@ -1069,8 +993,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// What VoiceOver reads for a roster chip: the name, its share of the
-    /// talking, the side of the call, and where the name came from.
+    /// VoiceOver text for a roster chip.
     func speakerAccessibilityLabel(_ label: String) -> String {
         var parts = [name(for: label)]
         if let share = speakerStats.first(where: { $0.label == label })?.share {
@@ -1090,9 +1013,7 @@ final class NoteViewModel: ObservableObject {
         SpeakerChannelMarkers.isSuggested(label, sources: speakerNameSources)
     }
 
-    /// Accept: the same PUT as a rename — every other name kept, this
-    /// label's set, `sources[label] = "suggestion"`. Undo puts the names
-    /// back as they were.
+    /// Accept: same PUT as a rename with `sources[label] = "suggestion"`. Undo restores the names.
     func accept(_ suggestion: NameSuggestion) async {
         guard jobId != nil, canEditSpeakers else { return }
         let restore = NameRestore(label: suggestion.label, names: givenNames,
@@ -1123,8 +1044,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// ✕: never offer this name for this speaker again. Gone at once; put
-    /// back if the server could not be told.
+    /// ✕: never offer this pair again. Optimistic; put back if the server could not be told.
     func dismiss(_ suggestion: NameSuggestion) async {
         guard let jobId, online else { return }
         let before = nameSuggestions
@@ -1138,8 +1058,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// The turn holding the quote: the one whose segments include the
-    /// suggestion's first index, else the one it started in.
+    /// The turn whose segments include the suggestion's first index, else the one it started in.
     nonisolated static func turnId(for suggestion: NameSuggestion, in turns: [TranscriptTurn]) -> Int? {
         if let first = suggestion.segmentIndices?.first,
            let turn = turns.first(where: { ($0.segmentIndices ?? []).contains(first) }) {
@@ -1155,24 +1074,20 @@ final class NoteViewModel: ObservableObject {
         reveal(turnId: id)
     }
 
-    /// Q3: whether a moment in the recording can be shown — only a
-    /// transcript read from the job has timed turns to scroll to.
+    /// Whether a moment can be shown: only a job-read transcript has timed turns.
     var canSeekTranscript: Bool { jobId != nil && transcriptError == nil }
 
-    /// The turn a moment of the recording falls in (the first turn for a
-    /// moment before anyone spoke).
+    /// The turn a moment falls in (the first turn before anyone spoke).
     nonisolated static func turnId(at ms: Int, in turns: [TranscriptTurn]) -> Int? {
         (turns.last { $0.startMs <= ms } ?? turns.first)?.id
     }
 
-    /// "Not included: 00:45–00:52 …" was tapped: open the transcript at
-    /// that moment and highlight the turn, as a suggestion's quote does.
+    /// An excluded-passage tap: open the transcript at that moment and highlight the turn.
     func seekTranscript(to ms: Int) async {
         guard canSeekTranscript else { return }
         tab = .transcript
         await loadTranscript()
-        // One turn of the run loop so the transcript is laid out before
-        // the scroll view is asked to reach into it.
+        // One run-loop turn so the transcript is laid out before scrolling.
         await Task.yield()
         guard let id = Self.turnId(at: ms, in: turns ?? []) else { return }
         reveal(turnId: id)
@@ -1214,9 +1129,7 @@ final class NoteViewModel: ObservableObject {
     nonisolated static let relabelBannerText =
         "Speakers were detected with an older method. Re-label? Your speaker names are kept where possible."
 
-    /// "Speakers were detected with an older method." — offered while
-    /// nothing else is happening to the speakers and the person has not
-    /// closed it here.
+    /// Older-method banner: offered while nothing else is happening and not closed here.
     var showsRelabelBanner: Bool {
         Self.showsRelabelBanner(available: relabelAvailable, dismissed: relabelBannerDismissed,
                                 relabel: relabel, hasJob: jobId != nil && transcriptError == nil)
@@ -1227,7 +1140,7 @@ final class NoteViewModel: ObservableObject {
         available && !dismissed && relabel == .idle && hasJob
     }
 
-    /// The banner's "Re-label": the Sprint 29 flow, the diarizer counting.
+    /// The banner's "Re-label": the diarizer counting.
     func relabelFromBanner() async {
         await relabelSpeakers(expected: nil)
     }
@@ -1238,12 +1151,7 @@ final class NoteViewModel: ObservableObject {
 
     // MARK: - The workspace glossary (Sprint 35)
 
-    /// A name the author just fixed, waiting on "Remember this?".
-    ///
-    /// The offer is the design. A vocabulary that learned silently would,
-    /// the first time it learned something wrong, quietly misspell a
-    /// customer's name in every note afterwards with nobody able to say
-    /// why. One term, one question, an answer the person gives.
+    /// A name the author just fixed, waiting on "Remember this?". Never learned silently.
     struct RememberOffer: Identifiable, Equatable, Sendable {
         var id: String { term }
         let term: String
@@ -1258,10 +1166,7 @@ final class NoteViewModel: ObservableObject {
                                       heardAs: RememberableName.heardAs(from))
     }
 
-    /// "Remember" was tapped. Failure is not worth a banner: the name in
-    /// this note is already fixed, and the glossary is next time's help.
-    /// That includes the server's 422 `term_not_vocabulary` — a role label
-    /// the app should not have offered; the offer is already gone.
+    /// "Remember" was tapped. Failure (incl. 422 `term_not_vocabulary`) is silent: the note is already fixed.
     func acceptRememberOffer() async {
         guard let offer = rememberOffer else { return }
         rememberOffer = nil
@@ -1285,8 +1190,7 @@ final class NoteViewModel: ObservableObject {
         commit(next)
     }
 
-    /// "Speaker 2: …" → "Olena: …" at the start of lines only — the
-    /// from-transcript note puts the name at the head of each turn.
+    /// "Speaker 2: …" → "Olena: …" at the start of lines only.
     static func renameSpeaker(in text: String, from: String, to: String) -> String {
         let pattern = "(^|\\n)" + NSRegularExpression.escapedPattern(for: from) + ": "
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
@@ -1305,8 +1209,7 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var clientVersion: ClientVersion?
     @Published private(set) var clientCheck: ClientVersionCheck?
     @Published private(set) var clientVersionLoading = false
-    /// A 1:1 or an interview has no client version at all; the server
-    /// says so with a 409 and this is the sentence for it.
+    /// The sentence for the 409 a 1:1 or interview answers (no client version).
     @Published private(set) var clientVersionNotice: String?
 
     func loadClientVersion(force: Bool = false) async {
@@ -1328,8 +1231,7 @@ final class NoteViewModel: ObservableObject {
 
     // MARK: - Evidence, detail and corrections (Summary Engine v2, Q5)
 
-    /// The rows behind the generated note, by line key. Empty for a note
-    /// nobody generated, and for rows written before Q5.
+    /// The rows behind the generated note, by line key; empty when not generated.
     @Published private(set) var generatedRows: [GeneratedItem] = []
     @Published private(set) var rowsByKey: [String: GeneratedItem] = [:]
     /// Short / Standard / Detailed, remembered per note on this phone.
@@ -1345,15 +1247,13 @@ final class NoteViewModel: ObservableObject {
 
     nonisolated static func detailKey(_ noteId: String) -> String { "note-detail:\(noteId)" }
 
-    /// Evidence and the detail toggle only for the note as it stands, and
-    /// only when the engine wrote it (it has rows).
+    /// Only for the note as it stands, and only when the engine wrote it.
     var isGenerated: Bool { viewing == nil && !generatedRows.isEmpty }
 
     func loadGeneratedRows() async {
         let stored = UserDefaults.standard.string(forKey: Self.detailKey(noteId))
         if let stored, let level = DetailLevel(rawValue: stored), level != detail { detail = level }
-        // A note nobody generated answers with an empty list or a 404;
-        // either way the lines simply have no evidence to open.
+        // Not generated: empty list or 404, either way no evidence.
         let rows = (try? await api.generatedItems(noteId: noteId)) ?? []
         generatedRows = rows
         rowsByKey = Dictionary(rows.map { ($0.itemKey, $0) }, uniquingKeysWith: { a, _ in a })
@@ -1370,8 +1270,7 @@ final class NoteViewModel: ObservableObject {
         (row.cites ?? []).dropFirst().compactMap { rowsByKey[$0] }
     }
 
-    /// The fact rows no displayed line is, grouped by the section they
-    /// belong under — what "Detailed" adds (`uncitedBySection`).
+    /// Fact rows no displayed line is, by section — what "Detailed" adds.
     var alsoSaidBySection: [String: [GeneratedItem]] {
         guard isGenerated, detail == .detailed else { return [:] }
         var shown = Set<String>()
@@ -1428,9 +1327,7 @@ final class NoteViewModel: ObservableObject {
         GeneratedLineKey.doubtedNames(in: text)
     }
 
-    /// Accept: the name becomes a workspace glossary term with the heard
-    /// spelling as a mishearing. Reject: the line goes back to what the
-    /// recording heard. Nothing is learned without a person saying so.
+    /// Accept: glossary term with the heard spelling as a mishearing. Reject: back to what was heard.
     func act(on fix: NameCorrection, accept: Bool) async {
         correctionBusy = fix.id
         correctionError = nil
@@ -1463,9 +1360,7 @@ final class NoteViewModel: ObservableObject {
 
     // MARK: - Carry-over (Sprint 36)
 
-    /// "Still open from 12 Sep" — the previous meeting's unfinished
-    /// business. Nil when there is no series, or the previous note is no
-    /// longer readable: either way there is nothing to show.
+    /// The previous meeting's unfinished business; nil when there is nothing to show.
     @Published private(set) var carried: CarriedView?
     @Published private(set) var carriedBusy: String?
 
@@ -1505,7 +1400,7 @@ final class NoteViewModel: ObservableObject {
             let reply = try await api.askNote(id: noteId, question: text, history: Array(history))
             chat.append(ChatMessage(role: .assistant, text: reply.answer))
         } catch {
-            // The question stays in the thread so it can be retried by eye.
+            // The question stays in the thread for a retry.
             askError = error.localizedDescription
         }
     }
@@ -1546,10 +1441,8 @@ final class NoteViewModel: ObservableObject {
 
     /// Write the pending content now (also called when the page goes away).
     func flush() async {
-        // Stop the timer. When flush() runs *inside* the timer task this
-        // cancels the current task too, and a cancelled task makes
-        // URLSession fail with "cancelled" before anything is sent — so the
-        // write below runs in its own task, out of reach of that cancellation.
+        // flush() may run inside the timer task; cancelling that would make
+        // URLSession fail with "cancelled", so the write runs in its own task.
         saveTask?.cancel()
         saveTask = nil
         if let inFlight = saveInFlight { await inFlight.value }
@@ -1602,16 +1495,8 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Write an export to a directory of its own.
-    ///
-    /// The per-export subdirectory is the point. Writing every export to
-    /// `exports/<code>.pdf` meant the same file URL every time, and a
-    /// share sheet keyed on that URL could hand Mail the PREVIOUS file —
-    /// the one still on disk from the last export, or from the last run
-    /// of the app. A fresh directory makes each export a distinct URL,
-    /// so what is attached is always what was just exported. Earlier
-    /// ones are swept as we go rather than left in tmp for iOS to
-    /// reclaim whenever it feels like it.
+    /// Write an export to a directory of its own: a reused file URL lets the
+    /// share sheet hand Mail the PREVIOUS file. Earlier exports are swept.
     private static func exportFile(named name: String, data: Data) throws -> URL {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("exports", isDirectory: true)
@@ -1655,14 +1540,13 @@ final class NoteViewModel: ObservableObject {
 
     var recipientLinks: [LinkView] { sharing?.recipientLinks ?? [] }
 
-    /// Sprint 23: the note's sharing view carries the workspace rules.
+    /// The workspace rules carried on the note's sharing view.
     var rules: SharingConstraints { sharing?.constraints ?? .permissive }
 
-    /// Mint a link for one recipient and hand back its full URL, or nil
-    /// when the call failed (the reason is on `actionError`).
     /// The last link the product mailed from this screen, for the sheet's notice.
     @Published var lastSent: LinkView?
 
+    /// Mint a link for one recipient; its full URL, or nil on failure (see `actionError`).
     func createRecipientLink(label: String, email: String, expiresInDays: Int,
                              webAppURL: String, send: Bool = false, message: String = "",
                              source: String = "native") async -> URL? {
@@ -1684,8 +1568,7 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// Sprint 22: mail (again). The outcome lands on the link row; a
-    /// refusal (opted out, cap) is the error the sheet shows.
+    /// Mail (again); the outcome lands on the link row, a refusal on the sheet's error.
     func sendLink(_ link: LinkView, message: String = "") async {
         busy = true
         actionError = nil
@@ -1719,8 +1602,7 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var items: [ActionItem] = []
     @Published private(set) var responses: [ItemResponse] = []
 
-    /// Items are derived from the note text on read. Read-only cache: nothing
-    /// user-authored lives here, so nothing can be lost offline.
+    /// Derived from the note text on read; read-only cache.
     func loadItems() async {
         guard isDraft else {
             items = []
@@ -1786,12 +1668,8 @@ final class NoteViewModel: ObservableObject {
             .appending(path: String(link.path.dropFirst()))
     }
 
-    /// Mail the note to the people named, from the server.
-    ///
-    /// Returns the per-recipient outcomes, or nil when the call itself
-    /// failed (the reason is on `actionError`). Members are granted
-    /// access as a side effect, so the sharing view is refreshed from
-    /// the reply rather than re-fetched.
+    /// Mail the note from the server. Per-recipient outcomes, or nil on failure
+    /// (see `actionError`); the sharing view is refreshed from the reply.
     func sendShareEmail(recipients: [String], message: String) async -> [ShareEmailOutcome]? {
         busy = true
         actionError = nil
@@ -1801,9 +1679,7 @@ final class NoteViewModel: ObservableObject {
                 id: noteId,
                 recipients: recipients,
                 message: message,
-                // The sender's language. The recipient's is unknowable —
-                // half of them have no account here — and people share
-                // within a team.
+                // The sender's language; the recipient's is unknowable.
                 lang: Locale.current.language.languageCode?.identifier ?? "en")
             sharing = result.sharing
             return result.results

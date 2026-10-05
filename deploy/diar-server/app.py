@@ -1,24 +1,8 @@
-"""diar-server — speaker diarization as an endpoint (Sprint 29 B-9, shape B).
-
-Our own image, our own code: it runs the same ``PyannoteDiarizer`` the
-worker would run in-process (ADR-0052 shape A), so moving the compute to
-a GPU does not change a single label. The worker talks to it through
-``diarization.HttpDiarizer``; both sides share ``diarization.wire``.
-
-What it does NOT do, by design:
-
-* **No storage.** The uploaded audio lives in the request's memory and is
-  gone when the response is written. No disk, no bucket, no queue.
-* **No identifiers.** The worker sends audio, the hints a person stated
-  and the roster policy — never a tenant id, job id, user or filename —
-  so nothing here can be tied back to a person or a workspace.
-* **No embeddings out.** They exist inside ``diarize()`` for the roster
-  guard and are dropped with it. The reply has no field for them.
-* **No text.** It never sees the transcript.
-
-Logs carry timings and counts only. Authentication is a bearer token
-(``MDX_DIAR_SERVER_TOKEN``); with none set the server refuses to start
-unless ``MDX_DIAR_SERVER_ALLOW_ANONYMOUS=1``, which is for a laptop.
+"""diar-server: the worker's ``PyannoteDiarizer`` as an endpoint (ADR-0052 shape B),
+reached through ``diarization.HttpDiarizer``. No storage, no identifiers, no
+embeddings out, no text; logs carry timings and counts only. Bearer
+``MDX_DIAR_SERVER_TOKEN``; refuses to start without one unless
+``MDX_DIAR_SERVER_ALLOW_ANONYMOUS=1``.
 
     uvicorn app:app --host 0.0.0.0 --port 8081
 """
@@ -57,31 +41,19 @@ DEVICE = os.environ.get("MDX_DIAR_DEVICE", "cuda")
 BATCH_SIZE = int(os.environ.get("MDX_DIAR_V2_BATCH", "32"))
 TOKEN = os.environ.get("MDX_DIAR_SERVER_TOKEN", "")
 ALLOW_ANONYMOUS = os.environ.get("MDX_DIAR_SERVER_ALLOW_ANONYMOUS", "") == "1"
-# Our own token travels in its own header: on a managed endpoint the
-# gateway consumes `Authorization` for ITS check, and what reaches this
-# process there is the gateway's business, not ours. `Authorization` is
-# still accepted so a bare container (dev, compose) needs no special
-# client.
+# Own header because a managed endpoint's gateway consumes `Authorization`;
+# `Authorization` is still accepted for a bare container.
 TOKEN_HEADER = "x-mdx-diar-token"
-# One pass at a time by default: two community-1 passes share one CUDA
-# device and one pyannote Pipeline object, which is neither documented
-# as thread-safe nor sized for two batches at once.
+# One pass at a time: the Pipeline object is not documented as thread-safe.
 MAX_CONCURRENT = max(1, int(os.environ.get("MDX_DIAR_MAX_CONCURRENT", "1")))
-# The longest recording the platform accepts is 2 h; decoded at 16 kHz
-# float32 that is ~460 MB, and a compressed cap alone would not bound it
-# (a near-silent FLAC expands enormously).
+# 2 h at 16 kHz float32 is ~460 MB; a compressed cap alone would not bound it.
 MAX_AUDIO_SECONDS = float(os.environ.get("MDX_DIAR_MAX_AUDIO_SECONDS", "7500"))
-# The worker rejects longer recordings before they ever reach a job, so a
-# bigger body here is either a bug or an abuse attempt.
+# The worker rejects longer recordings first; a bigger body is a bug or abuse.
 MAX_UPLOAD_BYTES = int(os.environ.get("MDX_DIAR_MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
-# Starlette spools a multipart part to a TEMP FILE above this size, which
-# would write the caller's audio to disk — the one thing this service
-# promises not to do. Raised past the body cap so a part never rolls over;
-# the body is refused before parsing anyway (see `guard`).
+# Starlette spools a multipart part to a TEMP FILE above this size; raised
+# past the body cap so the caller's audio never touches disk.
 MultiPartParser.spool_max_size = MAX_UPLOAD_BYTES + (1 << 20)
-# pyannote's own guards, mirrored from the worker image (config.py owns
-# these values there; here they are the process environment because this
-# service IS the model host).
+# pyannote's own guards, mirrored from the worker image.
 PIN_ENVIRON = {"PYANNOTE_METRICS_ENABLED": "false", "HF_HUB_OFFLINE": "1"}
 HEALTH_ROUTE = "/health"
 
@@ -100,9 +72,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "MDX_DIAR_SERVER_ALLOW_ANONYMOUS=1 for a local dev server"
         )
     if DEVICE == "cpu" and os.environ.get("MDX_DIAR_ALLOW_CPU") != "1":
-        # Measured 0.64-0.85 x audio on four CPU threads (ADR-0052):
-        # every recording over ~70 s would blow the client's default
-        # timeout and be retried, which is worse than refusing to start.
+        # CPU runs 0.64-0.85x audio: recordings over ~70 s would time out and
+        # be retried, which is worse than refusing to start.
         raise RuntimeError(
             "MDX_DIAR_DEVICE=cpu cannot meet the latency budget (ADR-0052); "
             "use cuda/mps, or set MDX_DIAR_ALLOW_CPU=1 deliberately"
@@ -117,8 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         model_repo=os.environ.get("MDX_DIAR_V2_MODEL_REPO", ""),
         model_revision=os.environ.get("MDX_DIAR_V2_MODEL_REVISION", ""),
         batch_size=BATCH_SIZE,
-        # The floor is the caller's policy and travels with each request;
-        # the engine itself grades nothing on its own here.
+        # The floor is the caller's policy and travels with each request.
         roster=RosterGuardConfig(min_speaker_speech_ms=0, min_speaker_share=0.0),
     )
     yield
@@ -138,11 +108,7 @@ app = FastAPI(title="diar-server", lifespan=lifespan, docs_url=None, redoc_url=N
 
 
 def _authenticated(headers: Any) -> bool:
-    """Is this request allowed to spend GPU time here?
-
-    Constant-time, and byte-wise so a non-ASCII token is a refusal
-    rather than a 500.
-    """
+    """Constant-time, byte-wise token check (a non-ASCII token is a refusal, not a 500)."""
     if not TOKEN:
         return ALLOW_ANONYMOUS
     presented = headers.get(TOKEN_HEADER) or ""
@@ -209,9 +175,7 @@ async def diarize(
     min_speaker_share: Annotated[float, Form()] = 0.0,
     reassign_min_cosine: Annotated[float, Form()] = 0.5,
 ) -> Any:
-    # The token and the declared size were checked in `guard`, before
-    # anything was read; this is the honest byte count for a request that
-    # lied about (or omitted) content-length.
+    # `guard` checked the declared size; this is the honest byte count.
     body = await file.read()
     if len(body) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="audio too large")
@@ -221,9 +185,7 @@ async def diarize(
         ).validated()
     except InvalidHintsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # Bound the DECODED size before decoding: the cap above is on
-    # compressed bytes, and a near-silent FLAC expands by orders of
-    # magnitude into one float32 allocation.
+    # Bound the DECODED size before decoding (a near-silent FLAC expands enormously).
     try:
         seconds = audio_seconds(body)
     except Exception as exc:  # noqa: BLE001 — unreadable header, same answer
@@ -248,9 +210,7 @@ async def diarize(
         reassign_min_cosine=reassign_min_cosine,
     )
     t0 = time.monotonic()
-    # One pass at a time (MDX_DIAR_MAX_CONCURRENT): the pipeline object
-    # and the GPU are shared, so a second concurrent pass risks both
-    # pyannote's own state and CUDA memory.
+    # One pass at a time (MDX_DIAR_MAX_CONCURRENT): pipeline and GPU are shared.
     async with app.state.slots:
         result = await asyncio.to_thread(
             lambda: diarizer.diarize(pcm, 16_000, hints=hints, roster=roster)

@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-M1 — the session this Mac keeps, and how it is spent.
+/// The session this Mac keeps, and how it is spent.
 final class SessionTests: XCTestCase {
 
     // MARK: - The store
@@ -39,8 +39,7 @@ final class SessionTests: XCTestCase {
             try await store.save(Fixtures.storedSession())
             XCTFail("a refused write must not look like a stored session")
         } catch {
-            // The message names the Keychain, because that is what the
-            // person has to go and unlock.
+            // The message names the Keychain: that is what the person has to unlock.
             XCTAssertTrue(error.localizedDescription.contains("Keychain"))
         }
     }
@@ -73,9 +72,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testASessionWithNoRefreshTokenIsRefused() async {
-        // What a server that took this app for a browser answers: the token
-        // is in a `Set-Cookie` the app has nowhere to put. Signing in
-        // "successfully" here would end fifteen minutes later.
+        // A server that took this app for a browser: the token is in a `Set-Cookie` the app has nowhere to put.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -90,8 +87,7 @@ final class SessionTests: XCTestCase {
             XCTFail("a cookie-only session is not a session this app can keep")
         } catch APIError.noNativeSession {
             XCTAssertNil(storage.session)
-            // And it says which of the two problems it is, because the fix
-            // is on the server, not in anything the person can retype.
+            // It says which of the two problems it is: the fix is on the server.
             XCTAssertTrue(AuthCopy.message(for: APIError.noNativeSession)
                 .contains("cannot keep this Mac signed in"))
         } catch {
@@ -160,8 +156,7 @@ final class SessionTests: XCTestCase {
             if request.path == "/auth/refresh" {
                 return (200, Fixtures.authenticated(refreshToken: "rt-\(UUID().uuidString)"), [:])
             }
-            // The first two calls to the API answer 401; both callers then
-            // want a refresh at the same moment.
+            // The first two API calls answer 401; both callers want a refresh at the same moment.
             return unauthorised.next() <= 2
                 ? (401, Fixtures.problem("session_expired"), [:])
                 : (200, Fixtures.json(["spaces": []]), [:])
@@ -172,10 +167,7 @@ final class SessionTests: XCTestCase {
         let results = try? await [first, second]
 
         XCTAssertEqual(results?.count, 2)
-        // Two refreshes in total: one because the app had no access token
-        // at all, one shared by the two 401s. Not three, which is what a
-        // client without single-flight would send — and what the server
-        // would read as a replayed refresh token.
+        // Two refreshes: one for no access token, one shared by the two 401s. Three would be a replayed refresh token.
         XCTAssertEqual(StubServer.requests(to: "/auth/refresh").count, 2)
     }
 
@@ -221,9 +213,7 @@ final class SessionTests: XCTestCase {
 
         let restored = await client.restoreSession()
 
-        // The token is gone, but who it belonged to is not (IDX-M2): the
-        // recordings kept for that person are still on this Mac, and the
-        // app has to be able to name and find them.
+        // The token is gone, but who it belonged to is not: kept recordings must still be found.
         guard case .expired(let carried) = restored else {
             return XCTFail("an expired session is not the same as never having had one")
         }
@@ -340,10 +330,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testALongRecordingCostsExactlyOneRefresh() async throws {
-        // A native session idles for thirty days, so nothing keeps it
-        // warm. A 45-minute recording followed by an upload therefore
-        // looks like this: nothing at all while recording, then one
-        // refresh because the access token expired, then the upload.
+        // A native session idles for thirty days: nothing while recording, one refresh when the access token expired, then the upload.
         let storage = InMemorySessionStorage(seed: Fixtures.storedSession())
         let client = makeClient(storage: storage)
         StubServer.install { request in
@@ -360,8 +347,7 @@ final class SessionLifecycleTests: XCTestCase {
 
     // MARK: - Keeping a short-lived session alive
 
-    /// Sign in against a server that states `refreshExpiresIn` seconds of
-    /// refresh-token life, and report whether the app decided to keep it warm.
+    /// Sign in against a server stating `refreshExpiresIn` seconds of refresh-token life; report whether the app kept it warm.
     private func armedAfterSignIn(refreshExpiresIn: Int) async throws -> APIClient {
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
@@ -373,8 +359,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testANativeSessionArmsNoKeepAlive() async throws {
-        // Thirty days of idle life. Waking the Mac to refresh it would be
-        // the app telling the server something the server already knows.
+        // Thirty days of idle life: no keepalive.
         let client = try await armedAfterSignIn(refreshExpiresIn: 2_592_000)
 
         let armed = await client.keepAliveIsArmed
@@ -382,11 +367,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testAKeycloakSessionIsKeptWarm() async throws {
-        // `ssoSessionIdleTimeout` is 1800 in the realm, and it is a
-        // property of the Keycloak session rather than of the cookie the
-        // token used to arrive in — so a token in the Keychain idles out
-        // just as fast. Without this, an existing user who signs in and
-        // then leaves the app alone for half an hour is signed out.
+        // `ssoSessionIdleTimeout` is 1800 in the realm and belongs to the Keycloak session, so a token in the Keychain idles out just as fast.
         let client = try await armedAfterSignIn(refreshExpiresIn: 1800)
 
         let armed = await client.keepAliveIsArmed
@@ -394,9 +375,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testARealmReconfiguredToTwoHoursIsStillKeptWarm() async throws {
-        // The rule reads the lifetime the server states, not a token
-        // prefix (ADR-0047's `nrt_` never reached the wire), so a realm
-        // that is retuned rather than replaced keeps working.
+        // The rule reads the lifetime the server states, not a token prefix (`nrt_` never reached the wire).
         let client = try await armedAfterSignIn(refreshExpiresIn: 7200)
 
         let armed = await client.keepAliveIsArmed
@@ -404,9 +383,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testAPrefixedNativeTokenIsNeverKeptWarm() async throws {
-        // Belt to the lifetime's braces: if BE-2 ever mints the `nrt_`
-        // prefix ADR-0047 specifies, a native session stays unarmed even
-        // if the server also understates its life.
+        // Belt and braces: an `nrt_` prefix (ADR-0047) keeps a native session unarmed even if the server understates its life.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -419,8 +396,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testSigningOutDisarmsTheKeepAlive() async throws {
-        // A timer that outlived the session would refresh a token that is
-        // gone and report the session lost to somebody already signed out.
+        // A timer that outlived the session would refresh a gone token and report the session lost to somebody signed out.
         let client = try await armedAfterSignIn(refreshExpiresIn: 1800)
         let armedBefore = await client.keepAliveIsArmed
         XCTAssertTrue(armedBefore)
@@ -432,9 +408,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testAKeycloakSessionSignsInAndIsKept() async throws {
-        // The acceptance criterion for existing users: the `/auth/login`
-        // proxy hands a native client the Keycloak refresh token in the
-        // body, and the app keeps it exactly as it keeps a native one.
+        // The `/auth/login` proxy hands a native client the Keycloak refresh token in the body; kept like a native one.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -449,9 +423,7 @@ final class SessionLifecycleTests: XCTestCase {
     }
 
     func testTheKeycloakLoginShapeStillParses() throws {
-        // `/auth/login` answers the three token fields and nothing else.
-        // It must decode — and then be refused for having no refresh token,
-        // which is a different failure with a different fix (IDX-A4).
+        // `/auth/login` answers the three token fields only. It must decode, then be refused for having no refresh token.
         let data = Fixtures.json(["access_token": "at", "expires_in": 900, "token_type": "Bearer"])
         let dto = try JSONDecoder().decode(AuthResultDTO.self, from: data)
 

@@ -1,25 +1,7 @@
-"""Which meetings are the same meeting, week after week.
-
-A weekly client call is one conversation held in instalments, and the most
-useful line in instalment three is *"still open from last week"*. To say
-that, the notes need an edge between them.
-
-The edge is a **series key**, and it is a hash of something stable:
-
-1. the calendar event's **iCalendar UID** — every instance of a recurring
-   event shares it, and Sprint 34 already stores it on the note. This is
-   the only source that survives a renamed meeting, a moved slot or a
-   changed guest list. A one-off event has a unique UID, so it simply
-   never matches anything; no special case needed.
-2. failing that, the **normalised title plus the attendee set**, and only
-   when there are attendees. "Weekly sync" with three different clients
-   is three series, and without the attendee half it would be one.
-3. failing that, nothing. Two meetings called "Catch-up" are not a series
-   on the strength of the word "catch-up".
-
-Everything here is pure, and nothing here decides *whether* a previous
-note may be read — that is the visibility rule, enforced at the point of
-use (ADR-0057).
+"""Which meetings are the same meeting, week after week: a series key hashed from
+the calendar event's iCalendar UID, else the normalised title plus the attendee
+set (only with attendees), else nothing. Pure; visibility is decided at the
+point of use (ADR-0057).
 """
 
 from __future__ import annotations
@@ -60,12 +42,8 @@ def series_key(
     *,
     title: str = "",
 ) -> tuple[str | None, str | None]:
-    """``(key, source)`` — a hex hash and how it was derived, or
-    ``(None, None)`` when this meeting belongs to no series we can prove.
-
-    The key is a hash so the column holds no content: an event UID
-    contains the organiser's domain, and a title is the customer's name.
-    """
+    """``(key, source)``, or ``(None, None)`` for no provable series. A hash, so the
+    column holds no content (a UID carries the organiser's domain)."""
     context = calendar_context or {}
     ical_uid = str(context.get("ical_uid") or "").strip()
     if ical_uid:
@@ -74,16 +52,14 @@ def series_key(
     names = [str(n).strip() for n in (context.get("attendee_names") or []) if str(n).strip()]
     heading = normalise_title(title or str(context.get("title") or ""))
     if names and len(heading) >= _MIN_TITLE_CHARS and heading not in _GENERIC_TITLES:
-        # The attendee SET, order-independent: people join and leave a
-        # recurring call, and the organiser's list order is not stable.
+        # The attendee SET, order-independent.
         roster = ",".join(sorted({n.casefold() for n in names}))
         return _hash("ta", f"{heading}|{roster}"), TITLE_ATTENDEES
     return None, None
 
 
 def manual_key(note_id: str) -> str:
-    """The key for a series the author linked by hand. Derived from the
-    FIRST note of the chain, so every later instalment joins the same one."""
+    """The key for a hand-linked series, derived from the FIRST note of the chain."""
     return _hash("manual", note_id)
 
 

@@ -1,13 +1,4 @@
-"""Admin endpoints for the per-tenant abbreviation dictionary.
-
-- ``GET /nlp/abbreviations`` — paginated; returns merged tenant + global rows.
-- ``PUT /nlp/abbreviations`` — upsert one tenant row; audit logged.
-- ``DELETE /nlp/abbreviations/{id}`` — remove one tenant row; audit logged.
-
-Read available to any authenticated user (sprint 17 admin UI will
-surface this); write requires the ``tenant_admin`` role per perms
-matrix.
-"""
+"""Admin endpoints for the per-tenant abbreviation dictionary (read: any user; write: tenant_admin)."""
 
 from __future__ import annotations
 

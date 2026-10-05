@@ -1,15 +1,7 @@
-// Sprint I2: what may go into the workspace glossary.
-//
-// The glossary is the prompt the transcriber is given before every
-// recording. The 2026-09-25 incident put speaker role labels in it
-// ("Moderator II", "moderatorin", "narrator", "speaker background") and
-// Whisper echoed them into a transcript. A label a person gave a voice is
-// not a spelling worth teaching, so it never reaches the list.
-//
-// The tables below are the one list every client and the server read:
-// tests/fixtures/glossary/role_words.json at the repo root. The vitest
-// suite asserts they are equal, so they cannot drift. The rule mirrors
-// note_service.domain.glossary.is_vocabulary.
+// What may go into the workspace glossary (the transcriber's prompt): speaker
+// role labels ("Moderator II") were once echoed into a transcript, so they never
+// reach it. Tables mirror tests/fixtures/glossary/role_words.json (asserted equal)
+// and note_service.domain.glossary.is_vocabulary.
 
 import type { GlossaryKind } from "../api/types";
 
@@ -102,13 +94,8 @@ function tokens(term: string): string[] {
 }
 
 /**
- * Whether a term is vocabulary — a name, a company, a product, a word —
- * rather than a label for a voice.
- *
- * - no word tokens → not vocabulary
- * - every token a role word (any language) or an ordinal → not vocabulary
- *   ("Moderator II", "speaker background", "Sprecher 2")
- * - a person whose parts all start lowercase → not vocabulary ("moderatorin")
+ * Vocabulary (a name, company, product, word) rather than a voice label:
+ * no tokens, all role words/ordinals ("Moderator II"), or an all-lowercase person → not vocabulary.
  */
 export function isVocabulary(term: string, kind: GlossaryKind): boolean {
   const words = tokens(term);

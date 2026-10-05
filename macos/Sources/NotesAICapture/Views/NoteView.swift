@@ -1,10 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The note as a document, the way the web editor shows it: a slim bar
-/// (status, save state, ⋯), the title, a meta line, Notes / Transcript
-/// tabs, and one seamless text area per template section. Every note
-/// autosaves until it is cancelled (history stays in the web app).
+/// The note as a document, as the web editor shows it: slim bar, title, meta line, Notes / Transcript tabs, one text area per section. Autosaves until cancelled.
 struct NoteView: View {
     @EnvironmentObject private var app: AppState
     @StateObject private var model: NoteViewModel
@@ -12,15 +9,14 @@ struct NoteView: View {
     @State private var shareByEmail = false
     @State private var shareWithClient = false
     @State private var confirmMarkDone = false
-    /// Which speaker label is being renamed inline, and the text so far.
     @State private var reviewingSpellings = false
+    /// Which speaker label is being renamed inline, and the text so far.
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
     /// What is typed in the ask bar at the bottom.
     @State private var askDraft = ""
     @FocusState private var askFocused: Bool
-    /// Which section is open in its editor. A draft reads as a document
-    /// until you click into one, and only one is ever open at a time.
+    /// Which section is open in its editor; only one at a time.
     @State private var editingSection: String?
 
     /// The capture this note came from, when it is one of this Mac's.
@@ -52,9 +48,7 @@ struct NoteView: View {
         }
         .task(id: model.noteId) { await model.loadSharing() }
         .onChange(of: model.note?.title) { old, title in
-            // The server's name for the note — the one a recording gets
-            // once it has been heard — replaces this device's placeholder
-            // in the recents and the notes list.
+            // The server's name for the note replaces this device's placeholder in the lists.
             guard let title, !title.isEmpty else { return }
             if let jobId = capture?.jobId { app.updateRecent(jobId: jobId, title: title) }
             if old != nil, old != title { Task { await app.refreshNotes() } }
@@ -109,9 +103,7 @@ struct NoteView: View {
 
     private var bar: some View {
         HStack(spacing: 10) {
-            // The way back out of the document. The sidebar has Home too,
-            // but a note is read full-width and the way out should be
-            // where the eyes already are.
+            // The way back out of the document, where the eyes already are.
             Button { app.selection = nil } label: {
                 Label("Home", systemImage: "chevron.left")
             }
@@ -172,7 +164,7 @@ struct NoteView: View {
                 if let url = app.noteURL(model.noteId) { copy(url.absoluteString) }
             },
             .separator,
-            // The client-facing path (Sprint 19): one link per recipient.
+            // The client-facing path: one link per recipient.
             .item("Share with client…", symbol: "paperplane", disabled: model.busy || !canManage) {
                 shareWithClient = true
             },
@@ -193,8 +185,7 @@ struct NoteView: View {
                     }
                 }
             },
-            // One entry, not two: whether a recipient is a colleague or
-            // an outsider is the server's problem, not the sender's.
+            // One entry: colleague or outsider is the server's problem.
             .item("Send by email…", symbol: "envelope", disabled: model.busy || !canManage) {
                 shareByEmail = true
             },
@@ -260,9 +251,7 @@ struct NoteView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 40)
                 .padding(.top, 28)
-                // Room for the composer floating over the foot of the page,
-                // so the last line of the note is never under it.
-                .padding(.bottom, 96)
+                .padding(.bottom, 24)
             }
             .onChange(of: model.chat.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) }
@@ -270,25 +259,26 @@ struct NoteView: View {
             .onChange(of: model.asking) { _, asking in
                 if asking { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) } }
             }
-            // Sprint 32: a suggestion's quote was clicked — show its turn.
+            // A suggestion's quote was clicked — show its turn.
             .onChange(of: model.revealedTurn) { _, reveal in
                 guard let reveal else { return }
                 withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(reveal.turnId, anchor: .center) }
             }
         }
-        // The composer sits over the document, under a short wash of the
-        // page ground so a line of text never runs into it.
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
-                .frame(height: 96)
-                .allowsHitTesting(false)
-                .overlay(alignment: .bottom) {
-                    if !model.selectedTurnIds.isEmpty {
-                        moveBar
-                    } else if model.viewing == nil {
-                        askBar
-                    }
+        // The composer is a fixed bottom inset: the document scrolls above it, never under it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Group {
+                if !model.selectedTurnIds.isEmpty {
+                    moveBar
+                } else if model.viewing == nil {
+                    askBar
                 }
+            }
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
+            )
         }
         .onChange(of: model.tab) { _, _ in model.endSelection() }
         .onChange(of: model.online) { _, online in
@@ -299,9 +289,7 @@ struct NoteView: View {
     /// Title, meta line, tabs and the section editors — the note itself.
     @ViewBuilder
     private var documentBody: some View {
-        // Vertical, so a long title wraps onto more lines instead of
-        // running off the right edge. A title is still one line of text:
-        // a pasted line break becomes a space.
+        // Vertical, so a long title wraps; a pasted line break becomes a space.
         TextField("Untitled note", text: Binding(
             get: { model.content?.title ?? "" },
             set: { model.setTitle($0.replacingOccurrences(of: "\n", with: " ")) }
@@ -315,10 +303,7 @@ struct NoteView: View {
         .disabled(!model.editableNow)
         .padding(.bottom, 6)
 
-        // The meta line is a row of quiet, unframed items, not a run of
-        // text: when it was taken, what wrote it, where it is filed, what
-        // it is called. Only the space is a control — the rest are the
-        // facts you want at a glance without reading a sentence.
+        // The meta line is a row of quiet, unframed facts; only the space is a control.
         if let note = model.note {
             HStack(spacing: 2) {
                 DSMetaPill(symbol: "calendar", text: formatDateTime(note.createdAt))
@@ -344,9 +329,7 @@ struct NoteView: View {
             .padding(.bottom, 16)
         }
 
-        // Reading an old version: say so, and offer the way back. The
-        // tabs stay — the transcript and the client version are the
-        // note's, not the version's.
+        // Reading an old version: say so, offer the way back. The tabs stay.
         if let viewing = model.viewing {
             HStack(spacing: 10) {
                 DSNotice(tone: .info, symbol: "clock.arrow.circlepath",
@@ -362,8 +345,7 @@ struct NoteView: View {
                 .padding(.bottom, 16)
         }
 
-        // Notes, the transcript when there is one, and what a client would
-        // see (Sprint 36) — the web's tabs, in the web's order.
+        // Notes, the transcript, and what a client would see — the web's tabs, in order.
         DSSegmentedPill(options: tabOptions, selection: $model.tab, height: 36)
             .padding(.bottom, 20)
             .onChange(of: model.hasTranscript) { _, has in
@@ -387,9 +369,7 @@ struct NoteView: View {
         return options
     }
 
-    /// The "filed in" pill. A note already in a space names it; one that
-    /// isn't offers the list, so filing it is one click rather than a trip
-    /// through the ⋯ menu. With no spaces yet there is nothing to offer.
+    /// The "filed in" pill: names the space, or offers the list (one click to file). Nothing with no spaces yet.
     @ViewBuilder
     private var spacePill: some View {
         if !app.spaces.isEmpty {
@@ -418,8 +398,7 @@ struct NoteView: View {
 
     // MARK: - Ask this note
 
-    /// The thread: questions on the right in a quiet bubble, answers as
-    /// plain text under a spark — one conversation about this note.
+    /// The thread: questions on the right in a bubble, answers as plain text under a spark.
     private var askThread: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(model.chat) { message in
@@ -444,8 +423,7 @@ struct NoteView: View {
                             .font(.dsIcon(12, .medium))
                             .foregroundStyle(DS.accentText)
                             .frame(width: 20, height: 20)
-                        // An answer arrives as bullets and headings just as
-                        // the note does, so it is typeset the same way.
+                        // An answer is typeset like the note.
                         RichTextView(text: message.text)
                     }
                 }
@@ -468,10 +446,7 @@ struct NoteView: View {
         }
     }
 
-    /// The composer, floating over the foot of the document — Claude's:
-    /// the field on top, a tool row underneath (what it asks about, and
-    /// send). Return sends. It is centred on the note's column, so it reads
-    /// as part of the document rather than as a strip of window chrome.
+    /// The composer floating over the foot of the document: field on top, tool row under. Return sends. Centred on the note's column.
     private var askBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Ask about this note…", text: $askDraft, axis: .vertical)
@@ -547,13 +522,10 @@ struct NoteView: View {
     private var sections: some View {
         VStack(alignment: .leading, spacing: 20) {
             if !model.items.isEmpty {
-                // Sprint 20: the action items as objects, with what the
-                // recipients did. The section text below stays the source.
+                // The action items as objects, with what recipients did. The section text stays the source.
                 ActionItemsSection(model: model)
             }
-            // Sprint 33: the engine, from the Notes tab. The button lives here
-            // and nowhere else — a draft of ours, made from a recording, that
-            // was never written up.
+            // The engine, from the Notes tab and nowhere else.
             if model.canGenerateSummary {
                 HStack(alignment: .center, spacing: 12) {
                     Text("Create a structured summary from this conversation.")
@@ -604,8 +576,7 @@ struct NoteView: View {
                     if model.generationErrorCode == "processor_unacknowledged" { dataSettingsButton }
                 }
             }
-            // Q5: how much of a generated note to show, and the names the
-            // engine respelled; Sprint 36: what the last meeting left open.
+            // How much of a generated note to show, names the engine respelled, and what the last meeting left open.
             if model.generated {
                 DSSegmentedPill(
                     options: NoteViewModel.DetailLevel.allCases.map { .init($0, label: $0.label) },
@@ -632,19 +603,14 @@ struct NoteView: View {
                     .foregroundStyle(DS.muted)
             }
 
-            // Structure follows content: one block per section the note
-            // HAS, headed only when it has a title. Nothing is drawn for
-            // being in the template.
+            // One block per section the note HAS, headed only when it has a title.
             let shown = model.viewing?.content ?? model.content
             let alsoSaid = model.alsoSaid
             ForEach(model.visibleBlocks) { block in
                 VStack(alignment: .leading, spacing: 6) {
                     if let title = block.title, !title.isEmpty {
-                        // A "#" hangs in the gutter so the document's outline
-                        // is legible at a glance; it sits outside the text
-                        // column, so it never pushes the words in.
-                        // The section names are the document's headings —
-                        // the same serif as the title, a size down.
+                        // A "#" hangs in the gutter, outside the text column.
+                        // Section names are the document's headings: the title's serif, a size down.
                         Text(title)
                             .font(.dsSerif(20))
                             .tracking(-0.2)
@@ -671,8 +637,7 @@ struct NoteView: View {
                             ),
                             lineExtra: lineExtra)
                     } else {
-                        // Structured fields (choice, date, number) are edited in
-                        // the web app; show the value read-only here.
+                        // Structured fields are edited in the web app; read-only here.
                         RichTextView(text: shown?.section(block.key).text ?? "", size: DS.docText)
                     }
                     if let extra = alsoSaid[block.key], !extra.isEmpty {
@@ -700,8 +665,7 @@ struct NoteView: View {
         }
     }
 
-    /// Q5: the chip and the quote behind a generated line, from the line's
-    /// own text — nothing positional, nothing to drift.
+    /// The chip and the quote behind a generated line, from the line's own text — nothing positional.
     private var lineExtra: ((String) -> AnyView?)? {
         guard model.generated else { return nil }
         return { raw in
@@ -710,8 +674,7 @@ struct NoteView: View {
         }
     }
 
-    /// The gate an admin lifts on the Data & AI tab: offered beside the
-    /// sentence that names it, and nowhere else.
+    /// The gate an admin lifts on the Data & AI tab, offered beside the sentence that names it.
     private var dataSettingsButton: some View {
         Button("Open Data & AI settings") {
             app.settingsTab = .dataAI
@@ -722,10 +685,7 @@ struct NoteView: View {
 
     // MARK: - What the engine made of the recording (Q3)
 
-    /// Under the status line, quietly: what the recording was taken to be
-    /// (nothing for a meeting), and the passages left out of the note —
-    /// "Not included: 00:45–00:52 (background speech)". Each range opens
-    /// the transcript at that moment when there is a timed one to open.
+    /// Under the status line: what the recording was taken to be, and the passages left out ("Not included: …"). Each range opens the transcript there.
     @ViewBuilder
     private func generationFacts(_ generation: GenerationView) -> some View {
         let label = generation.recordingTypeLabel
@@ -757,9 +717,7 @@ struct NoteView: View {
         }
     }
 
-    /// Sprint F1, under the transcript's status line: speech that did not
-    /// make it into the transcript, and why. A range inside the recording
-    /// opens the transcript there; audio lost before the file began cannot.
+    /// Under the transcript's status line: speech that did not make it in, and why. A range inside the recording opens the transcript there.
     private func notTranscribed(_ line: CoverageGapsFormatter.Line) -> some View {
         var text = AttributedString("Not transcribed: ")
         for (index, item) in line.items.enumerated() {
@@ -903,7 +861,7 @@ struct NoteView: View {
                     )
                     .padding(-6)
                     .contentShape(Rectangle())
-                    // Sprint 30: ⌘-click picks turns for a move together.
+                    // ⌘-click picks turns for a move together.
                     .simultaneousGesture(TapGesture().modifiers(.command).onEnded {
                         if model.canEditSpeakers { model.toggleSelection(turn) }
                     })
@@ -941,9 +899,7 @@ struct NoteView: View {
             + (model.canMoveTurns ? " · ⌘-click turns to move them" : "")
     }
 
-    /// The turn's avatar: a click offers to move the turn to another
-    /// speaker (Sprint 30). A "?" marks a turn where people talked over
-    /// each other.
+    /// The turn's avatar: a click offers to move the turn. A "?" marks overlapping speech.
     @ViewBuilder
     private func turnAvatar(_ turn: TranscriptTurn) -> some View {
         let avatar = SpeakerAvatar(name: model.displayName(for: turn))
@@ -955,7 +911,7 @@ struct NoteView: View {
                 Section("Move this turn to") {
                     moveButtons(for: [turn])
                 }
-                // Sprint 32: the keyboard's way to what ⌘-click does.
+                // The keyboard's way to what ⌘-click does.
                 Divider()
                 Button(model.selectedTurnIds.contains(turn.id) ? "Deselect this turn" : "Select to move with others") {
                     model.toggleSelection(turn)
@@ -1072,15 +1028,9 @@ struct NoteView: View {
     }
 }
 
-/// One free-text section.
-///
-/// A note is a document first: what the model wrote is typeset — headings,
-/// nested bullets, checklists — rather than shown as the raw `- ` and
-/// `**…**` a plain string used to carry. On a draft the document is also
-/// the way in: click it and the same words come back as their markdown
-/// source in the seamless editor, and leaving the field sets them again.
-/// A section with nothing in it skips straight to the editor — there is
-/// no document to read yet, only a prompt to write one.
+/// One free-text section. The document is typeset (headings, bullets, checklists);
+/// on a draft a click brings the markdown source back in the seamless editor.
+/// An empty section skips straight to the editor.
 private struct SectionField: View {
     @Binding var text: String
     let name: String
@@ -1113,9 +1063,7 @@ private struct SectionField: View {
                 .padding(.horizontal, -6)
                 .contentShape(Rectangle())
                 .onHover { hover = $0 }
-                // The rendered text is selectable, so a click on the words
-                // starts a selection rather than the editor; the whole
-                // block still opens it, and Return does from the keyboard.
+                // The rendered text is selectable, so a single click selects; the block opens on double click, Return from the keyboard.
                 .onTapGesture(count: 2) { editing = true }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel("Edit \(name)")
@@ -1137,8 +1085,7 @@ private struct SectionField: View {
     }
 }
 
-/// A seamless, auto-growing text area (`.textarea.seamless`): no chrome
-/// until it is hovered or focused, then a faint surface behind it.
+/// A seamless, auto-growing text area: no chrome until hovered or focused.
 private struct SectionEditor: View {
     @Binding var text: String
     let placeholder: String
@@ -1152,9 +1099,7 @@ private struct SectionEditor: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // TextEditor's intrinsic height counts newlines, not wrapped
-            // lines; an invisible Text with the same metrics sets the real
-            // height and the editor fills it.
+            // TextEditor's intrinsic height counts newlines, not wrapped lines; an invisible Text with the same metrics sets the real height.
             Text(text.isEmpty ? " " : text + " ")
                 .font(.dsDocBody)
                 .lineSpacing(4)
@@ -1195,8 +1140,7 @@ private struct SectionEditor: View {
         .onHover { hover = $0 }
         .onAppear { if focusNow { focused = true } }
         .onChange(of: focused) { _, isFocused in
-            // Clicking away closes the editor and the section goes back to
-            // being read; the text was already saved on every keystroke.
+            // Clicking away closes the editor; the text was already saved per keystroke.
             if !isFocused, focusNow { onDone() }
         }
         .animation(.easeOut(duration: 0.12), value: focused)
@@ -1205,8 +1149,7 @@ private struct SectionEditor: View {
 }
 
 
-/// A turn's speaker name: a click turns it into a text field; Return (or
-/// clicking away) saves the name to the job, Escape cancels.
+/// A turn's speaker name: click to edit; Return (or clicking away) saves to the job, Escape cancels.
 private struct SpeakerName: View {
     let turn: TranscriptTurn
     @ObservedObject var model: NoteViewModel
@@ -1215,8 +1158,7 @@ private struct SpeakerName: View {
 
     @FocusState private var focused: Bool
     @State private var hover = false
-    /// The pointer is over the completion list: losing focus to a click
-    /// there is a pick, not a commit of what was typed.
+    /// The pointer is over the completion list: losing focus to a click there is a pick, not a commit.
     @State private var overCompletions = false
 
     var body: some View {
@@ -1276,8 +1218,7 @@ private struct SpeakerName: View {
         }
     }
 
-    /// Sprint 30: the calendar's invitees not yet used on another speaker,
-    /// narrowed by what is typed. A click names the speaker.
+    /// The calendar's invitees not yet used on another speaker, narrowed by what is typed.
     @ViewBuilder
     private func completions(_ label: String) -> some View {
         let names = model.nameCompletions(for: label, typed: draft)
@@ -1321,9 +1262,7 @@ private struct SpeakerName: View {
 }
 
 
-/// Initials in a tinted circle; the tint is a stable function of the
-/// name (same palette and hash as the web), so a person keeps their
-/// colour everywhere.
+/// Initials in a tinted circle; the tint is a stable function of the name (same palette and hash as the web).
 struct SpeakerAvatar: View {
     let name: String
 
@@ -1346,9 +1285,7 @@ struct SpeakerAvatar: View {
     }
 }
 
-/// A speaker name in a text-only transcript: a click turns it into a
-/// field; Return (or clicking away) rewrites every turn of that speaker
-/// in the note, which autosaves. Escape cancels.
+/// A speaker name in a text-only transcript: click to edit; Return rewrites every turn of that speaker in the note. Escape cancels.
 private struct TextSpeakerName: View {
     let name: String
     @ObservedObject var model: NoteViewModel
@@ -1400,8 +1337,7 @@ private struct TextSpeakerName: View {
     }
 }
 
-/// Sprint 30: a small "?" on a turn's avatar — the attribution is a guess
-/// because people talked over each other.
+/// A small "?" on a turn's avatar: the attribution is a guess (overlapping speech).
 struct UncertainMarker: View {
     static let explanation = "People talked over each other here."
 
@@ -1418,8 +1354,7 @@ struct UncertainMarker: View {
 }
 
 
-/// Sprint TQ2: "[Musik 00:12–00:41]" — music, silence or noise the worker
-/// marked instead of transcribing. A quiet line of its own, not a turn.
+/// "[Musik 00:12–00:41]": music, silence or noise marked instead of transcribed. A line of its own, not a turn.
 struct NoiseMarkerLine: View {
     let marker: TranscriptNoise
     let language: String?
@@ -1435,8 +1370,7 @@ struct NoiseMarkerLine: View {
 }
 
 
-/// Sprint TQ3: one row per unified spelling — Accept, Reject, Edit, Add to
-/// glossary. Offline it is read-only (corrections live on the server).
+/// One row per unified spelling — Accept, Reject, Edit, Add to glossary. Read-only offline.
 struct EntityReviewSheetView: View {
     @ObservedObject var model: NoteViewModel
     @Environment(\.dismiss) private var dismiss

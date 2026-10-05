@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The workspace switcher, as a list of memberships with the active one
-/// marked. Used in the sidebar's account menu and in Settings › Account.
+/// The workspace switcher: memberships with the active one marked. Sidebar account menu and Settings › Account.
 struct WorkspaceList: View {
     @EnvironmentObject private var app: AppState
     var onSwitch: (() -> Void)? = nil
@@ -61,8 +60,7 @@ struct WorkspaceList: View {
     }
 }
 
-/// The line that appears when a workspace stops being reachable, a switch
-/// fails, or a link arrives that this server cannot honour.
+/// The line shown when a workspace stops being reachable, a switch fails, or a link cannot be honoured.
 struct WorkspaceNoticeBanner: View {
     @EnvironmentObject private var app: AppState
     let text: String
@@ -89,17 +87,11 @@ struct WorkspaceNoticeBanner: View {
 
 // MARK: - Pending uploads
 
-/// The recordings this Mac is still holding, and the four things that can
-/// be done with one: send it, send it somewhere else, save it, forget it.
-///
-/// It is deliberately a section of the home page rather than a corner of
-/// Settings: a meeting that has not been sent is not a setting, it is
-/// work in progress.
+/// The recordings this Mac is still holding: send, send elsewhere, save, forget. A section of the home page, not Settings: an unsent meeting is work in progress.
 struct PendingUploadsSection: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var pending: PendingUploads
-    /// On the sign-in screen there is no session, so only Export and
-    /// Delete are offered.
+    /// On the sign-in screen there is no session, so only Export and Delete are offered.
     var canSend = true
 
     var body: some View {
@@ -261,10 +253,6 @@ private struct PendingUploadRow: View {
 // MARK: - Sessions
 
 /// Where this account is signed in, and how to end one of them.
-///
-/// The list is the answer to a question people only ask when something is
-/// wrong ("is someone else in my account?"), so it is worth being able to
-/// answer it from the Mac rather than only from the web app.
 struct SessionsList: View {
     @EnvironmentObject private var app: AppState
 
@@ -345,9 +333,7 @@ struct SessionsList: View {
             sessions = try await app.api.sessions()
             error = nil
         } catch {
-            // A deployment without the native account surface answers 404;
-            // that is a fact about the server, not a failure to report in
-            // red every time this tab opens.
+            // A deployment without the native account surface answers 404; not an error to report in red.
             if (error as? APIError)?.isNotFound == true {
                 sessions = []
                 self.error = nil
@@ -372,8 +358,7 @@ struct SessionsList: View {
         busy = "others"
         defer { busy = nil }
         do {
-            // Gated on recent proof of identity: the step-up sheet appears
-            // first, and the request is retried once when it is answered.
+            // Gated on recent proof of identity: the step-up sheet appears first, then one retry.
             revokedOthers = try await app.api.revokeOtherSessions()
             await load()
         } catch APIError.reauthRequired {

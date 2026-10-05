@@ -1,7 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-I1 I1-03 — a recording that did not reach the server is kept.
+/// A recording that did not reach the server is kept.
 final class PendingCaptureTests: XCTestCase {
     private var directory: URL!
 
@@ -172,10 +172,8 @@ final class PendingCaptureTests: XCTestCase {
     }
 
     func testKeptFilesAreReadableAfterTheFirstUnlockAndNotBefore() throws {
-        // `.complete` would make an upload that is still running as the
-        // phone locks fail; `.none` would leave the recordings readable on
-        // a stolen handset that was never unlocked. The class in between
-        // is the one this app wants (IDX-I2 F).
+        // `.complete` would fail an upload running while the phone locks; `.none`
+        // would leave recordings readable on a never-unlocked stolen handset.
         let kept = PendingCaptures.keep(try makeRecording(), info: info(), in: directory)!
 
         let audio = try FileManager.default.attributesOfItem(atPath: kept.path)

@@ -1,10 +1,5 @@
-"""In-process TTL cache for templates.
-
-The dictation hot path needs section-prompt lookups in < 10 ms p95;
-re-fetching from Postgres on every Whisper window swap would burn the
-budget. Cache key includes tenant_id so cross-tenant leakage is
-impossible at the cache layer (RLS still gates the DB read, but the
-cache must not blur tenants).
+"""In-process TTL cache for templates (the dictation hot path). The key includes
+tenant_id so the cache can never blur tenants.
 """
 
 from __future__ import annotations

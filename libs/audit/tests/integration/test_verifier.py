@@ -1,13 +1,4 @@
-"""Verifier integration tests — including the three adversarial corruption
-patterns mandated by spec § 1.5.
-
-A clean chain verifies; a tampered chain reports the first divergence and
-its reason. The verifier runs only SELECT queries (read-only transaction).
-
-To simulate tampering we have to bypass the immutability trigger. We do
-that by disabling the trigger as superuser, mutating, re-enabling — the
-exact mechanic an attacker with DBA access could use.
-"""
+"""Verifier integration tests; tampering is simulated by disabling the immutability trigger as superuser."""
 
 from __future__ import annotations
 

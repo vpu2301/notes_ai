@@ -9,17 +9,14 @@ export interface RecordedAudio {
   filename: string;
   /** `mic_system` when the file carries the microphone on L and the tab audio on R; omitted = mono. */
   channelLayout?: ChannelLayout;
-  /** Sprint F1: when Record was clicked (ISO 8601, this browser's clock). */
+  /** When Record was clicked (ISO 8601, this browser's clock). */
   recordPressedAt?: string;
-  /** Sprint F1: ms from the click to the first audio the recorder wrote. */
+  /** ms from the click to the first audio the recorder wrote. */
   firstFrameOffsetMs?: number;
 }
 
 export interface RecorderOptions {
-  /**
-   * Sprint I3 "Me / Them": also capture this tab's (or the screen's) audio
-   * as a second channel, so the author's voice is its own speaker.
-   */
+  /** Also capture tab/screen audio as a second channel ("Me / Them"). */
   systemAudio?: boolean;
   /** The tab audio was wanted but the browser offered none: the recording went on with the microphone only. */
   onSystemAudioUnavailable?: () => void;
@@ -30,10 +27,7 @@ function pickMimeType(): string {
   return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
 }
 
-/**
- * Which layout a recording gets, and whether that is a step down from what
- * was asked for. Pure, so the fallback rule is testable without a browser.
- */
+/** Which layout a recording gets, and whether that is a step down. Pure. */
 export function chooseLayout(
   systemAudioWanted: boolean,
   hasSystemTrack: boolean,
@@ -42,12 +36,7 @@ export function chooseLayout(
   return { layout: "mono", fellBack: systemAudioWanted };
 }
 
-/**
- * The tab/system audio track, or null when the browser cannot offer one
- * (no `getDisplayMedia`, a source without audio, or a dismissed picker).
- * Chrome only lists tab audio when video is requested too, so the video
- * track is asked for and stopped at once.
- */
+/** Tab/system audio track or null. Chrome only offers tab audio with video, so video is asked for and stopped at once. */
 async function acquireSystemAudio(): Promise<MediaStream | null> {
   const devices = navigator.mediaDevices as MediaDevices | undefined;
   if (!devices || typeof devices.getDisplayMedia !== "function") return null;
@@ -69,12 +58,7 @@ async function acquireSystemAudio(): Promise<MediaStream | null> {
 /** The longest offset the server accepts (10 minutes). */
 export const MAX_FIRST_FRAME_OFFSET_MS = 600_000;
 
-/**
- * Sprint F1: the capture-timing fields of a recording — when Record was
- * clicked and how long until the recorder wrote its first audio. The two
- * clocks differ on purpose: the wall clock for the moment, the monotonic
- * one for the distance. No first frame → no offset (the field is omitted).
- */
+/** Capture timing: wall clock for the click, monotonic for the distance. No first frame → no offset. */
 export function captureTiming(
   pressedWallMs: number,
   pressedPerfMs: number,
@@ -97,7 +81,7 @@ export function useRecorder(
 ) {
   const [recording, setRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  // Sprint F1: null until the recorder has written its first audio.
+  // null until the recorder has written its first audio.
   const [firstFrameOffsetMs, setFirstFrameOffsetMs] = useState<number | null>(null);
   const [levels, setLevels] = useState<number[]>(() => Array(LEVEL_BARS).fill(0));
 
@@ -127,9 +111,7 @@ export function useRecorder(
   useEffect(() => cleanup, [cleanup]);
 
   const start = useCallback(async () => {
-    // Sprint F1: the click, before permission prompts, the tab picker and
-    // the audio graph — everything between here and the first frame is
-    // speech the recording cannot hold.
+    // Stamped before permission prompts and the picker: that gap is lost speech.
     const pressedWall = Date.now();
     const pressedPerf = performance.now();
     let firstFramePerf: number | null = null;
@@ -170,9 +152,7 @@ export function useRecorder(
       };
       raf.current = requestAnimationFrame(tick);
 
-      // Mono records the microphone stream as it is. `mic_system` folds each
-      // side to one channel and merges them: mic → L (input 0), tab → R
-      // (input 1), then records the destination's 2-channel stream.
+      // `mic_system`: mic → L (input 0), tab → R (input 1), one 2-channel stream.
       let recorded = media;
       if (system) {
         const mono = () => {
@@ -193,9 +173,7 @@ export function useRecorder(
       const mimeType = pickMimeType();
       const rec = new MediaRecorder(recorded, mimeType ? { mimeType } : undefined);
       const chunks: BlobPart[] = [];
-      // The first frame is when the recorder starts writing: `start` fires
-      // then. The first non-empty chunk only arrives a timeslice later, so
-      // it is the fallback, not the measure.
+      // `start` marks the first frame; the first chunk (a timeslice later) is only the fallback.
       rec.onstart = firstFrame;
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) {

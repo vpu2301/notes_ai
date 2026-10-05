@@ -1,23 +1,9 @@
-"""Per-session streaming diarization (sprint 14, ADR-0034).
+"""Per-session streaming diarization (ADR-0034).
 
-Consumes the same 4 s / 2 s windows as the Whisper windower (ADR-0013)
-and maintains a session-absolute speaker timeline. Each window:
-
-    PCM window → Silero speech regions → frontier-clipped ≤1.2 s chunks
-    → ECAPA embedding → clustering → SpeakerSegments on the timeline
-
-The already-diarized frontier guarantees each millisecond of audio is
-embedded exactly once (the 2 s window overlap only provides VAD
-context), so the timeline is non-overlapping and clustering evidence is
-never double-counted.
-
-While the clusterer is still bootstrapping (no confirmed 2-way split),
-``attribute()`` reports words as *pending* — the FE renders text
-immediately and colours it when labels land ("labels may trail text").
-When the split lands, earlier chunks are retrospectively relabeled, so
-by commit time (≥ one full window later, ADR-0013) finals carry stable
-labels. A session where only one voice ever speaks starts labeling S1
-after ``single_speaker_after_ms`` of audio.
+PCM window → Silero speech regions → frontier-clipped chunks → ECAPA embedding
+→ clustering → SpeakerSegments on a session-absolute timeline. The frontier
+guarantees each millisecond is embedded once. ``attribute()`` reports words as
+pending until the clusterer has bootstrapped; earlier chunks are relabeled then.
 """
 
 from __future__ import annotations
@@ -49,19 +35,16 @@ __all__ = [
 
 @dataclass(frozen=True)
 class DiarizationConfig:
-    # Chunking of VAD speech regions before embedding.
     chunk_target_ms: int = 1200
     chunk_min_ms: int = 250
-    # A single-voice session starts labeling S1 without a 2-way split
-    # once this much audio has been diarized.
+    # Single-voice session starts labeling S1 after this much audio.
     single_speaker_after_ms: int = 15_000
     clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
     attribution: AttributionPolicy = field(default_factory=AttributionPolicy)
 
 
 class DiarizationStream:
-    """One instance per conversation session. NOT thread-safe; called
-    from the session's single window loop only."""
+    """One per conversation session; not thread-safe, called from the window loop only."""
 
     def __init__(
         self,
@@ -88,9 +71,7 @@ class DiarizationStream:
         return self._clusterer.bootstrapped
 
     def process_window(self, pcm: np.ndarray, *, window_start_ms: int) -> list[SpeakerSegment]:
-        """Diarize the not-yet-seen tail of ``pcm`` (whose first sample
-        is session-absolute ``window_start_ms``). Returns the newly
-        appended segments (relabels mutate ``self.segments`` in place)."""
+        """Diarize the not-yet-seen tail of ``pcm``; returns new segments (relabels mutate in place)."""
         t0 = time.perf_counter()
         cfg = self._config
         window_end_ms = window_start_ms + int(pcm.shape[0] * 1000 / SAMPLE_RATE_HZ)
@@ -103,9 +84,7 @@ class DiarizationStream:
             if abs_end <= start:
                 continue
             if abs_end - start < cfg.chunk_min_ms:
-                # Tiny post-frontier tail of a region whose head was
-                # embedded last window: same VAD region ⇒ same continuous
-                # speech, extend the previous segment instead of guessing.
+                # Tiny tail of a region embedded last window: extend it instead of guessing.
                 if self.segments and start - self.segments[-1].end_ms <= 150:
                     prev = self.segments[-1]
                     self.segments[-1] = replace(prev, end_ms=abs_end)
@@ -131,8 +110,7 @@ class DiarizationStream:
                     label=assignment.label,
                     confidence=round(assignment.confidence, 4),
                 )
-                # 1:1 with clusterer chunk indices — required for relabels.
-                self.segments.append(seg)
+                self.segments.append(seg)  # 1:1 with clusterer chunk indices (relabels)
                 new.append(seg)
 
         self.diarized_until_ms = max(self.diarized_until_ms, window_end_ms)
@@ -140,8 +118,7 @@ class DiarizationStream:
         return new
 
     def attribute(self, start_ms: int, end_ms: int) -> tuple[str | None, float | None]:
-        """Speaker for a word timing — see ``attribution.attribute_word``.
-        Pending (``None``) until the speaker inventory is trustworthy."""
+        """Speaker for a word timing; ``None`` until the speaker inventory is trustworthy."""
         if (
             not self._clusterer.bootstrapped
             and self.diarized_until_ms < self._config.single_speaker_after_ms

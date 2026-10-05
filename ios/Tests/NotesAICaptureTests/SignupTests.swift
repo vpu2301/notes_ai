@@ -1,13 +1,8 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IOS-0 — what this app owes an account that was created on the web.
-///
-/// Signup itself is not here and is not meant to be: a BE-0 account is an
-/// ordinary password account by the time it reaches the phone, and the two
-/// things the phone has to know are where to send somebody who has no
-/// account (the web app) and what to do with the one answer `/auth/login`
-/// gives an account that has not confirmed its address yet.
+/// What this app owes an account created on the web: where to send someone
+/// with no account, and what to do with `403 email_not_verified`.
 final class SignupTests: XCTestCase {
 
     // MARK: - `403 email_not_verified`
@@ -35,10 +30,7 @@ final class SignupTests: XCTestCase {
     }
 
     func testADisabledAccountIsNotMistakenForAnUnconfirmedOne() async {
-        // Both are 403s from the same endpoint, and they want opposite
-        // things from the person: one is a link in their inbox, the other
-        // is an administrator. Offering "resend" for a disabled account
-        // would send them round a loop that cannot end.
+        // Both are 403s; "resend" for a disabled account would be a loop that cannot end.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in (403, self.problem("account_disabled", status: 403), [:]) }
@@ -107,10 +99,7 @@ final class SignupTests: XCTestCase {
 
     @MainActor
     func testSignupOpensTheWebApp() {
-        // Asserted on the URL rather than on `UIApplication.open`, which a
-        // unit test cannot observe: what matters is that the path is built
-        // off the configured web app and not off the auth host, because on
-        // a phone those are different machines.
+        // Asserted on the URL: it must be built off the web app, not the auth host.
         let settings = BackendSettings.default
         let url = URL(string: settings.webAppURL)?.appending(path: "signup")
         XCTAssertEqual(url?.absoluteString, "http://localhost:5173/signup")

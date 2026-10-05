@@ -134,5 +134,4 @@ cohort rate. `SpeakerCorrectionRateHigh` (warning) fires above 30 % with
 
 ## Targets
 
-None set yet. The first weeks establish the baseline per engine; the
-decision log (`docs/product/speaker-decisions.md`) records it.
+None set yet. The first weeks establish the baseline per engine.

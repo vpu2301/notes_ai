@@ -1,17 +1,6 @@
 import Foundation
 
-/// A recording that was made but never uploaded.
-///
-/// Before IDX-M1 the pipeline deleted the file on **every** exit — including
-/// the one where the upload failed because the session had ended. The
-/// meeting was over, the audio was gone, and the app's only trace of it was
-/// a red banner. Nothing about a failed request justifies destroying the
-/// one copy of something that cannot be recorded again, so a recording that
-/// did not reach the server is moved here instead and kept.
-///
-/// IDX-M2 adds the screen that retries these; until then they are files on
-/// disk with a sidecar that says what they were, which is the part that
-/// must not wait.
+/// A recording that was made but never uploaded. Nothing about a failed request justifies destroying the one copy, so it is moved here and kept.
 struct PendingCapture: Identifiable, Equatable, Sendable {
     var id: String { audioURL.lastPathComponent }
     let audioURL: URL
@@ -27,9 +16,7 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
     }
 
-    /// The sidecar written beside the audio. Everything the upload would
-    /// have carried, plus who was signed in when it was recorded — a Mac
-    /// two people share should not offer one of them the other's meeting.
+    /// The sidecar beside the audio: everything the upload would have carried, plus who was signed in (a shared Mac must not offer another's meeting).
     struct Info: Codable, Equatable, Sendable {
         var title: String
         var language: String
@@ -37,29 +24,16 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
         var recordedAt: Date
         var identityId: String
         var tenantId: String?
-        /// The "People" hint (Sprint 29), so a capture made offline still
-        /// uploads with it. Absent from sidecars written before, which
-        /// decode with nil — no hint, as they were recorded.
+        /// The "People" hint, so a capture made offline still uploads with it. Nil from older sidecars.
         var speakersExpected: Int? = nil
-        /// Sprint 30 — the capture context (calendar invitees as a cap and
-        /// as names to offer, and where the capture started), so a meeting
-        /// kept for later still uploads with it. All absent from older
-        /// sidecars, which decode with nil. The source is kept as a string:
-        /// a value this build does not know must not make the recording
-        /// unreadable.
+        /// The capture context, so a kept meeting uploads with it. Nil from older sidecars. Source kept as a string so an unknown value never makes the recording unreadable.
         var speakersMax: Int? = nil
         var nameCandidates: [String]? = nil
         var captureSource: String? = nil
-        /// Sprint 31 — `channel_layout` ("mic_system" for a two-channel
-        /// recording) and `local_speaker_name` (the account's display name
-        /// when it was recorded), so a retry uploads what the first attempt
-        /// would have. Absent from older sidecars, which decode with nil.
+        /// `channel_layout` and `local_speaker_name` as recorded, so a retry uploads what the first attempt would have. Nil from older sidecars.
         var channelLayout: String? = nil
         var localSpeakerName: String? = nil
-        /// Sprint F1 — when Record was pressed and how many milliseconds
-        /// passed before audio reached the file, so a later upload still
-        /// says when the recording really began. Absent from older
-        /// sidecars (and imported files), which upload without them.
+        /// When Record was pressed and how late audio reached the file. Nil from older sidecars and imported files.
         var recordPressedAt: Date? = nil
         var firstFrameOffsetMs: Int? = nil
 
@@ -90,9 +64,7 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
             }
         }
 
-        /// The `channel_layout` a retry sends: the recorded one, and only
-        /// while the file on disk really has two channels (a declared
-        /// layout the file does not have is refused with a 422).
+        /// The `channel_layout` a retry sends: only while the file really has two channels (else a 422).
         func uploadChannelLayout(for audioURL: URL) -> String? {
             guard channelLayout != nil else { return nil }
             return ChannelLayout.field(forFileAt: audioURL)
@@ -115,11 +87,7 @@ struct PendingCapture: Identifiable, Equatable, Sendable {
 }
 
 enum PendingCaptures {
-    /// `~/Library/Application Support/Notes AI Capture/pending`.
-    ///
-    /// Application Support rather than the temporary directory the
-    /// recorder writes to: the point of moving the file is that it
-    /// survives, and macOS empties the other one.
+    /// `~/Library/Application Support/Notes AI Capture/pending` — Application Support survives; macOS empties the temporary directory.
     static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? FileManager.default.temporaryDirectory
@@ -128,13 +96,9 @@ enum PendingCaptures {
             .appending(path: "pending", directoryHint: .isDirectory)
     }
 
-    /// Move the recording out of harm's way and write its sidecar.
-    ///
-    /// The audio is moved first: if the sidecar cannot be written, a file
-    /// with no description is still a recoverable meeting, while a
-    /// description with no file is nothing at all. Returns where the audio
-    /// ended up, or nil if even the move failed — in which case the
-    /// original is left exactly where it is, which is still not deleted.
+    /// Move the recording out of harm's way and write its sidecar. Audio moved first: a
+    /// file without a sidecar is still recoverable. Returns where it ended up, or nil
+    /// if the move failed (the original is left where it is).
     @discardableResult
     static func keep(_ fileURL: URL, info: PendingCapture.Info,
                      in directory: URL = PendingCaptures.directory) -> URL? {
@@ -155,8 +119,7 @@ enum PendingCaptures {
         }
     }
 
-    /// Every kept recording, newest first. (IDX-M2's list; used here by
-    /// the tests and by the Advanced tab's "reveal in Finder".)
+    /// Every kept recording, newest first.
     static func all(in directory: URL = PendingCaptures.directory) -> [PendingCapture] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: directory,
@@ -175,19 +138,14 @@ enum PendingCaptures {
             .sorted { $0.info.recordedAt > $1.info.recordedAt }
     }
 
-    /// Delete a kept recording and its sidecar.
-    ///
-    /// Only ever called from an explicit user action (IDX-M2's Delete, or
-    /// removing an account's local data) and after the server has taken
-    /// the audio. Nothing in the app deletes one on its own.
+    /// Delete a kept recording and its sidecar. Only from an explicit user action or after the server took the audio.
     static func remove(_ capture: PendingCapture) {
         let fm = FileManager.default
         try? fm.removeItem(at: capture.audioURL)
         try? fm.removeItem(at: capture.sidecarURL)
     }
 
-    /// Copy the audio somewhere the person chose, keeping the original
-    /// until they say otherwise.
+    /// Copy the audio somewhere the person chose, keeping the original.
     static func export(_ capture: PendingCapture, to destination: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: destination.path) {
@@ -196,12 +154,7 @@ enum PendingCaptures {
         try fm.copyItem(at: capture.audioURL, to: destination)
     }
 
-    /// Point a kept recording at another workspace.
-    ///
-    /// The one repair for "you are no longer a member of the workspace
-    /// this was recorded in": the audio is the person's, the workspace it
-    /// was meant for is not reachable, and the alternative is exporting a
-    /// file no server will ever see.
+    /// Point a kept recording at another workspace — the repair for a lost membership.
     @discardableResult
     static func retarget(_ capture: PendingCapture, to tenantId: String) -> PendingCapture? {
         var info = capture.info

@@ -1,21 +1,8 @@
-"""Keycloak-mode `/auth/login`, `/auth/refresh`, `/auth/logout` — transport.
+"""Keycloak-mode `/auth/login`, `/auth/refresh`, `/auth/logout` transport.
 
-`session_native` has held the transport split since IDX-M1; this router,
-which serves the same three paths while the issuer is still Keycloak, did
-not — and a Mac signing in here was handed an HttpOnly cookie it has no
-jar for. The app read a 200 with nothing to keep and said so ("this
-server cannot keep this Mac signed in"), which is why these tests exist.
-
-The properties under test:
-
-  * a native client's refresh token is in the body and never in a cookie,
-    a browser's is in the cookie and never in the body — on the way in
-    (`/auth/login`), on every rotation, and on the way out;
-  * an *expired* refresh token is an expiry. Keycloak reports it with the
-    same `invalid_grant` as a replay, and charging a shut laptop lid as
-    one would raise a `sec` audit event, end every other session the
-    person has and denylist their account;
-  * a live token Keycloak refuses is still a replay, with all of that.
+A native client's refresh token is in the body and never a cookie, a browser's in the
+cookie and never the body, on login, rotation and logout. An expired refresh token is an
+expiry (Keycloak reports it as `invalid_grant` like a replay), not a `sec` replay event.
 """
 
 from __future__ import annotations
@@ -38,8 +25,7 @@ MAC = {"X-Client-Type": "macos"}
 
 
 def _token(*, exp_offset: int) -> str:
-    """A refresh-token-shaped JWT. Only its payload is ever read, and only
-    to answer "did this expire?" — the signature is Keycloak's business."""
+    """A refresh-token-shaped JWT; only its payload is read, to answer "did this expire?"."""
 
     def seg(obj: dict[str, Any]) -> str:
         return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")

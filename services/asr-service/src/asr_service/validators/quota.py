@@ -1,8 +1,4 @@
-"""Step 8 — per-tenant monthly quota check.
-
-Runs in the same transaction as the row insert so a TOCTOU race between
-``SELECT SUM(...)`` and the subsequent INSERT can't slip past the cap.
-"""
+"""Step 8 — per-tenant monthly quota check, in the same transaction as the row insert."""
 
 from __future__ import annotations
 
@@ -22,16 +18,9 @@ async def validate_quota(
 ) -> ValidationResult:
     """Sum the tenant's current-month uploads and reject on overflow.
 
-    Caller must hold an RLS-scoped transaction (``tenant_connection``)
-    so the SELECT only sees this tenant's rows and the subsequent
-    INSERT is part of the same transaction. The check is advisory, not
-    serialized: locking the SELECTed rows cannot fence concurrent
-    INSERTs anyway (new rows aren't covered by row locks), and the
-    original ``FOR UPDATE`` here was invalid SQL outright — Postgres
-    rejects FOR UPDATE with aggregates, which 500'd every upload. A
-    burst of parallel uploads can therefore overshoot the soft monthly
-    cap by at most the in-flight uploads' sizes; the cap is a billing
-    guard, not a security boundary.
+    Caller holds an RLS-scoped transaction. Advisory, not serialized (Postgres rejects
+    FOR UPDATE with aggregates): parallel uploads may overshoot by their in-flight
+    sizes; the cap is a billing guard, not a security boundary.
     """
     row = await conn.fetchrow(
         """

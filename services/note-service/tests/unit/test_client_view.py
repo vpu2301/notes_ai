@@ -1,10 +1,4 @@
-"""The client version: what may leave the workspace, and what may not.
-
-These are disclosure tests. They exist because the shared page and the
-PDF used to render whatever sections a note had — which, once Sprint 34
-gave every template a `user_notes` section, meant the author's private
-in-meeting scratchpad went to recipients.
-"""
+"""The client version: what may leave the workspace, and what may not (disclosure tests)."""
 
 from __future__ import annotations
 
@@ -169,7 +163,7 @@ def test_marking_a_line_internal_does_not_change_its_identity() -> None:
     assert lines.mark_internal(marked, internal=False) == plain
 
 
-# ── Sprint 36: internal by KIND, not only by the author's mark ──────
+# ── internal by KIND, not only by the author's mark ──────
 
 
 def test_a_line_the_engine_marked_internal_never_reaches_a_client() -> None:

@@ -1,8 +1,5 @@
-"""Rendering is the content boundary — these assert the negative.
-
-The blocking CI gate (`check-notification-pii-free.py`) covers the EMAIL
-templates. It cannot cover `dictation.completed`, which has no template
-by design, so the in-app rendering path needs its own guard here.
+"""Rendering is the content boundary; these assert the negative for the in-app path
+the PII CI gate (email templates only) cannot cover.
 """
 
 from __future__ import annotations
@@ -41,13 +38,7 @@ def _dictation_event(**payload: object) -> NotificationEvent:
 
 
 def test_transcript_text_never_survives_into_a_rendered_row() -> None:
-    """A producer that adds transcript text finds it silently dropped.
-
-    The transcript IS the sensitive content for a dictation. This is the
-    whole reason the boundary is an allow-list rather than a scrubber:
-    no pattern match would recognise a confidential meeting narrative as
-    sensitive.
-    """
+    """A producer that adds transcript text finds it silently dropped (allow-list, not scrubber)."""
     event = _dictation_event(
         duration_ms=42_000,
         segments=7,
@@ -78,11 +69,7 @@ def test_dictation_deep_link_points_at_the_session() -> None:
 
 
 def test_transcription_failure_never_renders_the_error_detail() -> None:
-    """`error_kind` is a closed vocabulary; `error_detail` is free text.
-
-    A worker exception that quotes the audio or the partial transcript it
-    choked on would otherwise put personal data straight into the feed.
-    """
+    """`error_kind` is a closed vocabulary; `error_detail` is free text that may quote the transcript."""
     event = NotificationEvent(
         event_id=uuid4(),
         tenant_id=TENANT,
@@ -131,11 +118,7 @@ def test_transcription_completion_never_renders_a_filename() -> None:
 
 @pytest.mark.parametrize("category", list(Category))
 def test_every_category_renders_without_raising(category: Category) -> None:
-    """`render_title`/`render_body` match on the enum and raise on a miss.
-
-    An enum member added without its two `case` arms would blow up inside
-    the consumer, at which point the event retries into the DLQ.
-    """
+    """`render_title`/`render_body` match on the enum and raise on a miss."""
     event = NotificationEvent(
         event_id=uuid4(),
         tenant_id=TENANT,
@@ -151,7 +134,7 @@ def test_every_category_renders_without_raising(category: Category) -> None:
     assert render_body(event)
 
 
-# ── S21: the MFA reminder ──────────────────────────────────────────────
+# ── the MFA reminder ──
 
 
 def _reminder_event(**payload: object) -> NotificationEvent:
@@ -169,12 +152,7 @@ def _reminder_event(**payload: object) -> NotificationEvent:
 
 
 def test_the_reminder_names_a_role_and_never_a_person() -> None:
-    """Who filed an access-review finding is between them and the log.
-
-    A producer that helpfully adds the reviewer's name finds it dropped:
-    naming them turns a security ask into an interpersonal one, and the
-    row is re-read later by the digest renderer.
-    """
+    """The reviewer's name is dropped: naming them turns a security ask into an interpersonal one."""
     event = _reminder_event(
         requested_by_role="auditor",
         reminder_count=2,
@@ -203,11 +181,7 @@ def test_an_unknown_requester_role_degrades_to_prose_not_to_a_db_value() -> None
 
 
 def test_the_reminder_links_to_enrolment_and_carries_no_subject_id() -> None:
-    """The link must be actionable by the recipient and nobody else.
-
-    A path with the subject's `sub` in it would read as a link that acts
-    on that account; enrolment always acts on whoever is signed in.
-    """
+    """The link carries no subject id: enrolment acts on whoever is signed in."""
     link = deep_link(_reminder_event(requested_by_role="auditor"), base_url="https://app.example/")
     assert link == "https://app.example/mfa"
     assert str(USER) not in link

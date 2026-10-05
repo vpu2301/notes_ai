@@ -1,15 +1,7 @@
-# diar-server — pyannote community-1 behind /v1/audio/diarizations.
-#
-# Shape B of ADR-0052: the same engine the worker can run in-process,
-# moved to a GPU because the staging worker (4 CPU cores, no GPU) misses
-# the turnaround budget. Built from the repo root:
-#
+# diar-server: pyannote community-1 behind /v1/audio/diarizations (ADR-0052).
 #   DOCKER_BUILDKIT=1 docker build -f deploy/diar-server/Dockerfile \
 #     --secret id=hf_token,src=<(printf %s "$HF_TOKEN") -t diar-server:dev .
-#
-# The weights are baked, digest-verified at build AND again at load
-# (diarization.integrity), and the gated-repo token never enters a layer —
-# same contract as the worker image's pyannote-fetch stage.
+# Weights baked and digest-verified at build and at load; the gated-repo token never enters a layer.
 
 # ── Stage 1: fetch + verify the weights ────────────────────────────────
 FROM python:3.12-slim AS pyannote-fetch
@@ -50,8 +42,7 @@ ARG MDX_DIAR_V2_PINS='{"config.yaml":"7790f3cf805252b01622524f53c5eb390fb65ccbfd
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # Enforced again in app.py before pyannote is imported; here so the
-    # settings hold even for a shell in the container.
+    # Also enforced in app.py; here so a shell in the container sees them too.
     PYANNOTE_METRICS_ENABLED=false \
     HF_HUB_OFFLINE=1 \
     MDX_DIAR_V2_MODEL_DIR=/opt/models/pyannote-community-1 \
@@ -75,7 +66,7 @@ ENV MDX_DIAR_V2_MODEL_REPO=${MDX_DIAR_V2_MODEL_REPO} \
     MDX_DIAR_V2_MODEL_REVISION=${MDX_DIAR_V2_MODEL_REVISION} \
     MDX_DIAR_V2_PINS=${MDX_DIAR_V2_PINS}
 
-# Never root: the process only reads model files and answers requests.
+# Never root.
 RUN useradd --system --uid 10001 diar && chown -R diar:diar /srv
 USER 10001
 

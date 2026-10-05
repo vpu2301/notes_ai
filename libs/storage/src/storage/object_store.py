@@ -1,26 +1,7 @@
-"""The single sanctioned write/read path for tenant-bearing object data.
+"""The single sanctioned read/write path for tenant-bearing object data.
 
-Wire format
------------
-
-Each object is laid out as::
-
-    [4-byte big-endian header length][JSON header][raw ciphertext]
-
-The JSON header carries every envelope-metadata field EXCEPT the
-ciphertext itself; the body is the raw ciphertext (no second base64
-hop — bytes are bytes). The 4-byte prefix lets readers locate the
-ciphertext without buffering the whole object.
-
-Why not store all metadata only in Postgres? Two reasons:
-
-1. Defence in depth: a future re-key/migration script can verify that
-   the stored header matches what the DB row claims about the object.
-2. The reverse: the object alone is self-describing enough to attempt a
-   restore if a row is lost.
-
-The header also stores the ``master_key_id`` so when sprint 16 lands the
-KMS migration, the re-wrap script knows which provider to unwrap with.
+Wire format: ``[4-byte big-endian header length][JSON header][raw ciphertext]``. The header repeats the envelope
+metadata (including ``master_key_id``) so the object is self-describing and a DB row can be cross-checked.
 """
 
 from __future__ import annotations
@@ -38,10 +19,7 @@ from .s3_client import S3Client
 
 
 class ObjectStoreDisabledError(Exception):
-    """Sprint-07: raised when MD_OBJECT_STORE_DISABLED is true and a
-    caller tries to write. Lets the dictation-service / asr-service
-    demo paths skip the audio_files row without crashing the request.
-    """
+    """A write was attempted while MD_OBJECT_STORE_DISABLED is true (demo "no audio at rest" posture)."""
 
 
 HEADER_LENGTH_PREFIX_BYTES: Final = 4
@@ -81,11 +59,7 @@ class ObjectHeader:
 
 
 class EncryptedObjectStore:
-    """High-level encrypted blob store.
-
-    The contract is intentionally narrow: ``put`` and ``get`` and nothing
-    that would let a caller round-trip plaintext through an unwrapped path.
-    """
+    """Encrypted blob store: ``put`` and ``get`` only, nothing that bypasses the envelope."""
 
     def __init__(
         self,
@@ -102,10 +76,7 @@ class EncryptedObjectStore:
 
     @property
     def is_disabled(self) -> bool:
-        """Sprint-07 HF Space sets ``MD_OBJECT_STORE_DISABLED=true`` to
-        force a "no audio at rest" posture. The construct-from-env
-        helper in services wires this; tests pass it directly.
-        """
+        """``MD_OBJECT_STORE_DISABLED=true``: the "no audio at rest" posture."""
         return self._disabled
 
     async def put(
@@ -116,13 +87,7 @@ class EncryptedObjectStore:
         tenant_id: UUID,
         aad: bytes | None = None,
     ) -> ObjectHeader:
-        """Encrypt and upload ``plaintext`` under ``key``.
-
-        When ``disabled=True`` (sprint-07 HF Space), this raises
-        :class:`ObjectStoreDisabledError`. Callers that handle the
-        "no audio at rest" posture catch and route to the demo path
-        (sprint-04 finalize without audio_files row).
-        """
+        """Encrypt and upload ``plaintext`` under ``key``; :class:`ObjectStoreDisabledError` when disabled."""
         if self._disabled:
             raise ObjectStoreDisabledError(
                 "EncryptedObjectStore writes are disabled by environment "
@@ -141,12 +106,7 @@ class EncryptedObjectStore:
         tenant_id: UUID,
         aad: bytes | None = None,
     ) -> bytes:
-        """Download and decrypt the object at ``key``.
-
-        Refuses to attempt crypto if the on-disk tenant_id doesn't match
-        the caller-supplied one (see ``Envelope.decrypt`` confused-deputy
-        guard).
-        """
+        """Download and decrypt the object at ``key``; a tenant_id mismatch is refused before any crypto."""
         body = await self._s3.get_object(bucket=self.bucket, key=key)
         if len(body) < HEADER_LENGTH_PREFIX_BYTES:
             raise EnvelopeFormatError("object too short to contain a header")
@@ -161,13 +121,7 @@ class EncryptedObjectStore:
         return await self._envelope.decrypt(blob, tenant_id=tenant_id, aad=aad)
 
     async def presigned_url(self, *, key: str, expires_in: int) -> str:
-        """Generate a short-TTL pre-signed URL.
-
-        The URL serves **encrypted** bytes; the consumer must call
-        ``get()`` (or an authenticated proxy) to obtain plaintext.
-
-        TTL is the caller's responsibility — the orchestrator caps it.
-        """
+        """Short-TTL pre-signed URL serving the **encrypted** bytes; the caller owns the TTL."""
         return await self._s3.generate_presigned_url(
             bucket=self.bucket, key=key, expires_in=expires_in
         )
@@ -229,12 +183,7 @@ def _decode_header(header_bytes: bytes) -> ObjectHeader:
 
 
 def header_metadata_for_row(header: ObjectHeader) -> dict[str, str | int]:
-    """Project ``ObjectHeader`` into a JSON-safe dict for ``audio_files.envelope_metadata``.
-
-    Excludes only the fields that have no value at the row level (none, in
-    practice — everything is wire-safe metadata). Kept as a helper so the
-    persistence layer's contract with the row stays explicit.
-    """
+    """Project ``ObjectHeader`` into a JSON-safe dict for ``audio_files.envelope_metadata``."""
     doc: dict[str, str | int] = {
         "magic": header.magic,
         "version": header.version,

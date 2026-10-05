@@ -1,18 +1,6 @@
-"""``Ask this note`` — one question, answered by the chat provider over the
-note's current content and, when the note came from a recording, its
-transcript.
-
-The provider comes from ``libs/models`` (ADR-0046): ``config/models.yaml``
-decides which backend answers in this environment; nothing here names a
-vendor. The registry is loaded on first use so a dev Mac without a model
-server still serves every other note operation, and the provider is kept
-per backend name (its HTTP client, semaphore and structured-output probe
-are meant to be long-lived).
-
-Text handling: the note's title and sections first, then the transcript,
-clipped to ``max_chars`` (the transcript loses its tail, with a marker),
-then the conversation so far, then the question. The answer is plain text
-in the language of the question.
+"""``Ask this note``: one question, answered by the chat provider (``libs/models``,
+ADR-0046) over the note and its transcript. The registry is loaded on first use;
+providers are kept per backend name. The transcript is what gets clipped.
 """
 
 from __future__ import annotations
@@ -68,12 +56,8 @@ def build_prompt(
     question: str,
     max_chars: int,
 ) -> str:
-    """The user message: note, transcript, conversation so far, question.
-
-    ``sections`` are ``(label, text)`` pairs; empty sections are skipped.
-    The note always survives whole (it is the thing being asked about);
-    the transcript is what gets clipped when the budget runs out.
-    """
+    """The user message: note, transcript, conversation so far, question. The note
+    survives whole; the transcript is clipped."""
     lines: list[str] = [f"# Note: {title.strip() or 'Untitled note'} ({code})"]
     for label, text in sections:
         body = text.strip()
@@ -122,19 +106,15 @@ class NoteAsker:
         self._environ = environ
         self._max_tokens = max_tokens
         self._max_chars = max_chars
-        # Sprint L2: the process's registry when the service built one at
-        # startup (probed, with the dev fallback decided); else lazy as before.
+        # The process's registry when the service built one; else lazy.
         self._registry: Registry | None = registry
         self._providers: dict[str, ChatProvider] = {}
-        # Sprint 37: "Ask" follows the workspace's tier for free — same
-        # registry, same settings table. A workspace that pays for the
-        # premium tier gets it for answers too, without a second switch.
+        # "Ask" follows the workspace's tier: same registry, same settings table.
         self._settings_source = settings_source
 
     def _provider(self, workspace_id: str) -> ChatProvider:
         if self._registry is None:
-            # Only the chat route matters here — validate=False keeps an
-            # unrelated (e.g. ASR) misconfiguration from blocking answers.
+            # validate=False: an unrelated (ASR) misconfiguration must not block answers.
             self._registry = Registry.load(
                 self._config_path,
                 env=self._env,

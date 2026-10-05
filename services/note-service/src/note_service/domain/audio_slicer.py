@@ -1,15 +1,6 @@
-"""PCM slicing + opus encoding for audio-replay clips (sprint 15, ADR-0037).
-
-The envelope is whole-object AES-GCM — there is no range decryption
-(libs/crypto has no chunked mode), so the caller always holds the FULL
-decrypted audio and slicing happens here, in memory:
-
-    decrypt → normalize to s16le/16k/mono PCM → slice by ms (+pad) → opus
-
-The PCM slice step is pure byte math (deterministic, checksummable —
-the VERIFY contract); only decode of non-WAV containers and the final
-opus encode shell out to ffmpeg (argument-array form, never a shell
-string — the asr-worker ``audio_io`` doctrine).
+"""PCM slicing + opus encoding for audio-replay clips (ADR-0037): the caller holds
+the FULL decrypted audio (GCM has no range mode); slicing is pure byte math, only
+container decode and opus encode shell out to ffmpeg (argument-array form, never a shell string).
 """
 
 from __future__ import annotations

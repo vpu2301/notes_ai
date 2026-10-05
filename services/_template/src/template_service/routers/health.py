@@ -1,8 +1,4 @@
-"""Liveness and readiness endpoints.
-
-Naming follows the Kubernetes convention (``/healthz``, ``/readyz``) so the
-manifest can wire ``livenessProbe`` and ``readinessProbe`` without aliasing.
-"""
+"""Liveness and readiness endpoints (Kubernetes ``/healthz``, ``/readyz`` naming)."""
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel

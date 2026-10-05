@@ -1,14 +1,5 @@
-"""Sprint-12 notification emission for note lifecycle transitions.
-
-Sits at the router layer, not in `domain/note_lifecycle.py`. The state
-machine is a pure function of (conn, note_id, status) and has neither
-the acting user nor the note's authors in scope; emitting from there
-would mean re-reading the row and threading Redis through the domain
-layer, inverting `routers → domain`.
-
-Everything here is fire-and-forget: `publish_event` swallows its own
-failures, and the callers do not await fan-out. Finalizing a note must
-not fail because the notification bus is down (ADR-0029).
+"""Notification emission for note lifecycle transitions, at the router layer.
+Fire-and-forget: a note write must not fail because the bus is down (ADR-0029).
 """
 
 from __future__ import annotations
@@ -38,13 +29,8 @@ async def emit_note_event(
     version_id: UUID | None = None,
     extra_payload: dict[str, str | int | float | bool | None] | None = None,
 ) -> None:
-    """Publish one note lifecycle fact.
-
-    `recipient_hints` carries the author set because note-service owns
-    the `notes` row and already knows it. notification-service filters
-    those ids through its own tenant's user table, so a stale or wrong
-    hint can never address someone in another tenant.
-    """
+    """Publish one note lifecycle fact. notification-service filters `recipient_hints`
+    through its own tenant's users, so a wrong hint cannot address another tenant."""
     if not settings.notifications_enabled:
         return
 
@@ -53,9 +39,7 @@ async def emit_note_event(
         hints.append(primary_author_id)
     hints.extend(co_author_ids)
 
-    # `note_code` ONLY — never the note title. A user-authored title
-    # routinely contains sensitive business content, and this payload
-    # reaches an email subject line (ADR-0031).
+    # `note_code` ONLY, never the title: this payload reaches an email subject (ADR-0031).
     payload: dict[str, str | int | float | bool | None] = {"note_code": note_code}
     if extra_payload:
         payload.update(extra_payload)
@@ -83,16 +67,9 @@ async def emit_budget_reached(
     spent_cents: int,
     budget_cents: int,
 ) -> bool:
-    """Tell the workspace's admins that generation has stopped for money.
-
-    Once per workspace per calendar month: the check runs on every
-    enqueue, and a workspace that keeps recording would otherwise get one
-    of these per meeting. The guard is a Redis key rather than a table —
-    losing it costs a duplicate banner, which is the cheap failure.
-
-    Returns whether it published, so callers can log the crossing rather
-    than every attempt after it.
-    """
+    """Tell the workspace's admins that generation has stopped for money, once per
+    workspace per month (Redis guard; losing it costs a duplicate banner). Returns
+    whether it published."""
     if not settings.notifications_enabled:
         return False
 

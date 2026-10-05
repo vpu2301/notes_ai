@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-"""Produce the PRODUCTION Keycloak realm import from the dev export.
+"""Produce the PRODUCTION Keycloak realm import from the dev export: every dev client
+secret replaced (from Vault, or ``--generate``), dev users and dev-only clients removed.
 
-Threat model: every `dev-secret-change-in-prod-*` client secret is
-replaced, every dev user and the dev-only `mdx-dev-cli` client removed.
-The output feeds Keycloak's `--import-realm` (or `kc.sh import`).
+    python scripts/k8s/gen-prod-realm.py --vault > /tmp/realm-prod.json
 
-Client secrets come from Vault (written by gen-prod-secrets.py) so the
-realm and the services can never disagree; --generate mints fresh ones
-instead (then you must write the SAME values to Vault yourself).
-
-    python scripts/k8s/gen-prod-realm.py --vault  > /tmp/realm-prod.json
-    python scripts/k8s/gen-prod-realm.py --generate > /tmp/realm-prod.json
-
-The output is verified by the operator with:
-    grep -c "dev-secret-change-in-prod" /tmp/realm-prod.json   # must be 0
-    grep -c "dev-password" /tmp/realm-prod.json                # must be 0
+Verify: ``grep -c dev-secret-change-in-prod`` and ``grep -c dev-password`` must be 0.
 """
 
 from __future__ import annotations
@@ -82,11 +72,10 @@ def main() -> int:
         clients.append(client)
     realm["clients"] = clients
 
-    # 2. No dev users in production — accounts are provisioned through
-    #    auth-service invites (sprint 02) against the live realm.
+    # 2. No dev users in production.
     realm["users"] = []
 
-    # 3. Belt and braces: the serialized realm must be clean.
+    # 3. The serialized realm must be clean.
     out = json.dumps(realm, indent=2, ensure_ascii=False)
     for needle in ("dev-secret-change-in-prod", "dev-password"):
         if needle in out:

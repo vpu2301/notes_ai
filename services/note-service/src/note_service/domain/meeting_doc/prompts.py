@@ -1,26 +1,8 @@
 """What we ask the model, in the language the meeting was held in.
 
-Prompts live in code, not in a database or a file somewhere, because
-they are part of the program's behaviour: they change what the note says,
-they are versioned with it, and they are tested.
-
-Three things every prompt here does:
-
-* **Frames the transcript as data.** It is wrapped in ⟦ ⟧ and the model is
-  told, in as many words, that the text between them is people talking and
-  is never an instruction. This is a mitigation, not a guarantee — the
-  guarantee is that :mod:`verify` drops anything without real words behind
-  it.
-* **Asks for a quote with every claim.** A model that must cite is a model
-  whose mistakes we can catch.
-* **Shows the negative cases.** The two failures that matter most —
-  writing down a proposal as a decision, and inventing an owner for
-  "we should" — get an explicit example of the RIGHT answer, because
-  telling a small model "don't" works much less well than showing it.
-
-``PROMPT_VERSION`` goes in the generation row and in the eval report: a
-result that cannot be traced to the exact wording that produced it is not
-a result.
+The transcript is framed as data (⟦ ⟧), every claim must cite a quote, and the
+examples show the RIGHT answer for the costliest mistakes. ``PROMPT_VERSION`` is
+stored with every generation and pinned by fingerprint in the tests.
 """
 
 from __future__ import annotations
@@ -28,11 +10,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Final
 
-# A real date from Sprint SQ1 on (the day the wording was fixed). Versions
-# 2026-10-12 … 2026-10-23 were labels set ahead of the calendar; they stay in
-# old rows and reports as they were. Compare versions by their history (the
-# hash table in test_meeting_doc_prompts.py), not by string order: the
-# string order broke there once already.
+# Versions 2026-10-12 … 2026-10-23 were labels set ahead of the calendar; compare
+# versions by the hash table in test_meeting_doc_prompts.py, never by string order.
 PROMPT_VERSION: Final = "2026-10-01.3"
 
 DATA_OPEN: Final = "⟦"
@@ -61,15 +40,9 @@ _GUARD: Final[dict[str, str]] = {
 
 # ── Examples ────────────────────────────────────────────────────────
 #
-# Every example sentence the prompts show lives here, and ONLY here. They
-# are about one deliberately invented subject — Quillhaven, a board game
-# company, its game "Ferrytale" and the game's "Lantern edition" — that
-# no business recording will be about. A small model copies its examples:
-# the 2026-09-22 audit found "Der Start im November bleibt das Ziel", the
-# old summary example, written into a news podcast's note. An example
-# from a domain nobody talks about is harmless when copied, and
-# ``EXAMPLE_PHRASES`` (built from these same strings) lets the pipeline
-# catch the copy and drop it.
+# Every example sentence lives here and ONLY here, about one invented subject
+# (Quillhaven / Ferrytale). A small model copies its examples; an invented
+# domain is harmless when copied and ``EXAMPLE_PHRASES`` catches the copy.
 
 EXAMPLES: Final[dict[str, dict[str, str]]] = {
     "en": {
@@ -91,19 +64,19 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "shot_should": "We should really rewrite the Ferrytale rulebook.",
         "shot_estimate_quote": "I'd guess Ferrytale has sold well over forty thousand copies by now, but nobody really knows.",
         "shot_estimate_wrong": "Ferrytale has sold over forty thousand copies",
-        # F2 — a remark that informs nobody is not a fact.
+        # A remark that informs nobody is not a fact.
         "shot_small_talk": "Honestly, the Quillhaven fair venue is fantastic.",
-        # F3 amendment — a scene is not a fact; a dated event is.
+        # A scene is not a fact; a dated event is.
         "shot_scene": "Smoke rises from the old Quillhaven warehouse.",
         "shot_event_quote": "The old Quillhaven warehouse flooded on the third of March.",
         "shot_event_text": "The Quillhaven warehouse was flooded on 3 March",
-        # A-14 — headings that name a phase of the story.
+        # Headings that name a phase of the story.
         "heading_event": "3 March: the Quillhaven warehouse floods",
         "heading_phase": "Rebuilding the Ferrytale print run",
-        # D2 — a sentence whose subject would be a pronoun names it.
+        # A sentence whose subject would be a pronoun names it.
         "subject_quote": "He is annoyed that the Ferrytale print run slipped again.",
         "subject_text": "Marek Quill is annoyed that the Ferrytale print run slipped again",
-        # F3 — a figure: the quantity, the number as said, the unit, the hedge.
+        # A figure: the quantity, the number as said, the unit, the hedge.
         "figure_quote": "the Lantern edition box weighs just under two kilos",
         "figure_name": "Lantern edition box weight",
         # The summary: an outcome, not the flow of talk.
@@ -172,9 +145,7 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
 # The invented names themselves: a line naming either came from a prompt.
 EXAMPLE_NAMES: Final[tuple[str, ...]] = ("Quillhaven", "Ferrytale", "Marek Quill", "Марек Квілл")
 
-# Conversation types, in an order that does not start with a meeting: the
-# first example in a list is the one a small model picks when unsure, and
-# a podcast called "Teambesprechung" is the audit's wrong-type finding.
+# Not starting with a meeting: a small model picks the first entry when unsure.
 CONVERSATION_TYPES: Final[dict[str, str]] = {
     "en": "podcast, interview, lecture, team meeting, sales call, one-on-one",
     "de": "Podcast, Interview, Vortrag, Teambesprechung, Verkaufsgespräch, Einzelgespräch",
@@ -183,9 +154,7 @@ CONVERSATION_TYPES: Final[dict[str, str]] = {
 
 _EN, _DE, _UK = EXAMPLES["en"], EXAMPLES["de"], EXAMPLES["uk"]
 
-# The extraction rule for the `noise` field — its own table so the small-model
-# profile (Sprint L1 T2) can leave it out together with the field: exclusions
-# then come from I2's language tag and the code-side checks alone.
+# The `noise` field's rule, separate so the small-model profile can leave it out with the field.
 _NOISE_RULE: Final[dict[str, str]] = {
     "en": (
         "- List in `noise` the turns that are clearly not part of this conversation — "
@@ -369,11 +338,7 @@ EXTRACT_SYSTEM: Final[dict[str, str]] = {
     ),
 }
 
-# Four examples, all of them NEGATIVE — the mistakes that cost the most
-# trust: a proposal filed as a decision, an owner invented for "we
-# should", a worry written as a person's feeling, an estimate made a fact.
-# Showing the right answer works far better on a small model than telling
-# it "don't".
+# Four NEGATIVE examples (the costliest mistakes), each showing the right answer.
 _EXTRACT_SHOTS: Final[dict[str, str]] = {
     "en": (
         "Examples of the mistakes to avoid (an invented company — never copy from it):\n"
@@ -601,10 +566,7 @@ REDUCE_CONTEXT_SYSTEM: Final[dict[str, str]] = {
 }
 
 
-# Sprint L1 T2 — the small-model profile shows ONE example: the mistake that
-# costs the most trust (a proposal filed as a decision). Fewer examples for a
-# small model: the 2026-09-22 audit's echo was a copied example, and every
-# example is one more thing a 4B model may copy.
+# The small-model profile shows ONE example: every example is one more thing to copy.
 _EXTRACT_SHOT_ONE: Final[dict[str, str]] = {
     "en": (
         "Example of the mistake to avoid (an invented company — never copy from it):\n"
@@ -638,8 +600,7 @@ def guard(language: str) -> str:
 
 
 def extract_system(language: str, *, noise: bool = True) -> str:
-    """``noise=False`` (the small-model profile) leaves out the rule for a
-    field the schema then does not have."""
+    """``noise=False`` (small-model profile) leaves out the rule for the absent field."""
     text = _pick(EXTRACT_SYSTEM, language)
     if not noise:
         text = text.replace(_pick(_NOISE_RULE, language), "")
@@ -674,8 +635,7 @@ _BUDGET: Final[dict[str, str]] = {
     "uk": "Прагни одного факту на кожну окрему думку; щільний уривок може потребувати до {n}.",
 }
 
-# Appended to the summary system prompt for the one retry (Q2), when
-# more than a third of the first answer said more than its facts.
+# Appended to the summary prompt for the one strict retry.
 STRICT_SUFFIX: Final[dict[str, str]] = {
     "en": "Use the wording of the facts. Add no word that is not in a fact, except connectives.",
     "de": "Verwende den Wortlaut der Fakten. Füge kein Wort hinzu, das in keinem Fakt steht, "
@@ -685,8 +645,7 @@ STRICT_SUFFIX: Final[dict[str, str]] = {
 }
 
 
-# Q3 — what the recording IS, before extraction. One clause per type and
-# no example sentence: nothing here can be copied into a note.
+# What the recording IS, before extraction. No example sentence: nothing to copy.
 CLASSIFY_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "You read the opening of a recording and say what kind of recording it is. "
@@ -733,9 +692,7 @@ def classify_prompt(head: str) -> str:
     return f"{DATA_OPEN}\n{head}\n{DATA_CLOSE}"
 
 
-# Q4, entity tier (b). Names only, and the recording's subject and themes
-# for context — never a window of the transcript. No example names: a
-# model shown one reaches for it.
+# Entity tier: names plus subject/themes for context, never the transcript. No example names.
 ENTITY_SYSTEM: Final = (
     "You receive spellings of names as a speech recogniser wrote them, and what the "
     "recording is about. For each spelling, give the correct spelling of the real "
@@ -754,8 +711,7 @@ def entity_prompt(spellings: list[str], *, subject: str, themes: list[str]) -> s
     return f"{DATA_OPEN}\nAbout: {about}\nSpellings:\n{listing}\n{DATA_CLOSE}"
 
 
-# Q4 — sent once when a window came back with facts but no usable quote
-# (a small model answered "[0]", the line number, where the words belong).
+# Sent once when a window came back with facts but no usable quote.
 QUOTE_REMINDER: Final[dict[str, str]] = {
     "en": "Each `quote` must be the spoken words themselves, 3 to 30 of them, copied from "
     "the line — never the line number.",
@@ -774,8 +730,7 @@ def strict_suffix(language: str) -> str:
     return _pick(STRICT_SUFFIX, language)
 
 
-# F2 — appended to the extraction system prompt for the one restate call a
-# window gets when most of its first answer copied the transcript.
+# Appended to the extraction prompt for a window's one restate call.
 RESTATE_SUFFIX: Final[dict[str, str]] = {
     "en": "Your last answer copied the transcript into `text`. `text` must be one statement "
     "in your own words, third person; the quote is separate.",
@@ -790,9 +745,7 @@ def restate_suffix(language: str) -> str:
     return _pick(RESTATE_SUFFIX, language)
 
 
-# Sprint SQ2 T3 — the coverage variant of extraction: a third of the
-# recording yielded too few facts, so its passage is read again. Adds only
-# the passage's time range and the ids already found there — no example.
+# Coverage variant of extraction (a thin third read again): time range and known ids, no example.
 COVERAGE_SUFFIX: Final[dict[str, str]] = {
     "en": "This passage runs from {start} to {end}. List facts from this passage that are "
     "not yet in the following ids: {ids}.",
@@ -815,8 +768,7 @@ def coverage_suffix(language: str, start_ms: int, end_ms: int, ids: Sequence[str
     )
 
 
-# F3 — the lines code found an introduction in (a self-introduction cue, or
-# the quote of an asr-service name suggestion), pointed out to the extractor.
+# Lines code found an introduction in, pointed out to the extractor.
 _INTRODUCTION_HINT: Final[dict[str, str]] = {
     "en": "Line(s) {lines} contain an introduction; return each as an `introduction`.",
     "de": "Zeile(n) {lines} enthalten eine Vorstellung; gib jede als `introduction` zurück.",
@@ -841,18 +793,10 @@ def extract_prompt(
     contact_lines: list[int] | None = None,
     one_shot: bool = False,
 ) -> str:
-    """The window, and — for a meeting in a series — what is still open
-    from last time, as a NUMBERED list. ``one_shot`` (the small-model
-    profile) shows one example instead of the four.
-
-    Numbered because a number is all the model may point at: `refers_to`
-    is an integer bounded by the schema, so a completion can only ever
-    refer to a task we already had. It cannot invent one, and it cannot
-    name one in free text that we would then have to match.
-    """
+    """The window plus, for a series, the still-open items as a NUMBERED list:
+    `refers_to` is a schema-bounded integer, so a completion cannot invent an item."""
     parts = [_pick(_EXTRACT_SHOT_ONE if one_shot else _EXTRACT_SHOTS, language)]
     if max_facts:
-        # The window's own budget (Q2): a dense passage is allowed more.
         parts.append(_pick(_BUDGET, language).format(n=max_facts))
     if introduction_lines:
         parts.append(
@@ -871,7 +815,7 @@ def extract_prompt(
     return "\n\n".join(parts)
 
 
-# Sprint D2 T2 — one block of the recording at a time.
+# One block of the recording at a time.
 BLOCK_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "These facts are one part of a recording, in time order. Return a `heading` and "
@@ -943,14 +887,14 @@ MERGE_SYSTEM: Final[dict[str, str]] = {
     "частин (i, i+1), що про одне й те саме і мають бути однією частиною. Жодної, якщо "
     "кожна частина має свою тему.",
 }
-# D1's line.subject hook: the window extracted once more.
+# The line.subject hook: the window extracted once more.
 SUBJECT_SUFFIX: Final[dict[str, str]] = {
     "en": "Name every subject: no `text` may open with a pronoun. Put the name in `subject`.",
     "de": "Nenne jedes Subjekt: kein `text` darf mit einem Pronomen beginnen. Den Namen in "
     "`subject`.",
     "uk": "Називай кожен підмет: жоден `text` не починається із займенника. Ім'я — у `subject`.",
 }
-# T5 ladder 1 — the summary follows the blocks.
+# Summary rung 1: the summary follows the blocks.
 SUMMARY_BLOCKS: Final[dict[str, str]] = {
     "en": "The recording's parts, in order: {headings}. Write one sentence per part, in "
     "this order, 3 to 6 sentences, each specific (a name, number or date).",
@@ -966,8 +910,7 @@ def block_system(language: str, bullets: int = 4) -> str:
     return f"{text}\n\n{guard(language)}"
 
 
-# Sprint L1 T2 — the small-model profile asks for a block's heading and its
-# bullets in two calls, each with one job and a flat schema (no children).
+# Small-model profile: heading and bullets in two calls, flat schema.
 BLOCK_HEADING_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "These facts are one part of a recording, in time order. Return a `heading` for "
@@ -1039,8 +982,7 @@ def block_bullets_system(language: str, bullets: int = 4) -> str:
 
 
 def schema_echo(language: str, json_schema: dict[str, Any]) -> str:
-    """Appended to the prompt of the retry after ``SCHEMA_INVALID`` under
-    the small-model profile: the schema the answer has to match."""
+    """Appended to the small-model retry after ``SCHEMA_INVALID``: the schema to match."""
     import json
 
     return f"{_pick(SCHEMA_ECHO, language)}\n{json.dumps(json_schema, ensure_ascii=False)}"
@@ -1063,7 +1005,7 @@ def summary_blocks(headings: list[str], language: str) -> str:
     return _pick(SUMMARY_BLOCKS, language).format(headings=listed)
 
 
-# §2.9 ladder rung 2 — the strict retry names the facts to use, in order.
+# Summary rung 2: the strict retry names the facts to use, in order.
 SKELETON: Final[dict[str, str]] = {
     "en": "Write one sentence for each group, in this order, citing exactly those ids: {groups}.",
     "de": "Schreibe einen Satz pro Gruppe, in dieser Reihenfolge, mit genau diesen ids: {groups}.",
@@ -1084,7 +1026,7 @@ def summary_system(language: str) -> str:
     return f"{_pick(REDUCE_SUMMARY_SYSTEM, language)}\n\n{guard(language)}"
 
 
-# F3 — the one follow-up for figures that came back without their fields.
+# The one follow-up for figures that came back without their fields.
 FIGURE_DETAILS_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "Each numbered item is a line from a recording and the words in it that give a "
@@ -1149,12 +1091,12 @@ def figure_details_prompt(items: list[tuple[str, str]]) -> str:
 
 
 def lines_prompt(lines: list[str]) -> str:
-    """Numbered lines from the recording, from 1 — for the F3 follow-ups."""
+    """Numbered lines from the recording, from 1, for the follow-up calls."""
     listing = "\n".join(f"{n}. {line}" for n, line in enumerate(lines, 1))
     return f"{DATA_OPEN}\n{listing}\n{DATA_CLOSE}"
 
 
-# F3 — a line that asks the listener to act, stated once in the record's voice.
+# A line that asks the listener to act, stated once in the record's voice.
 CONTACT_DETAILS_SYSTEM: Final[dict[str, str]] = {
     "en": (
         "Each numbered item is a line in which the speaker asks the listener to do "
@@ -1201,9 +1143,7 @@ def brief_block(
     key_fact_ids: list[str],
     language: str,
 ) -> str:
-    """What the context pass understood, for the reduce steps that follow
-    it — so topics and summary are written about one conversation rather
-    than about a pile of facts. Empty when there is no brief."""
+    """What the context pass understood, for the reduce steps; empty without a brief."""
     context, themes_label, keys_label = _BRIEF_LABELS.get(language, _BRIEF_LABELS["en"])
     lines: list[str] = []
     head = " — ".join(p for p in (conversation_type.strip(), subject.strip()) if p)
@@ -1217,12 +1157,7 @@ def brief_block(
 
 
 def facts_block(facts: list[tuple[str, str, str, int]]) -> str:
-    """``[(id, kind, text, start_ms)]`` as the reduce steps see it.
-
-    Reduce never receives the transcript — only facts that already
-    survived verification. It cannot therefore introduce anything that
-    was not said, and its output is checked against these ids again.
-    """
+    """``[(id, kind, text, start_ms)]`` as the reduce steps see it: verified facts only, never the transcript."""
     lines = [
         f"{fact_id} ({kind}, {start_ms // 60000:02d}:{start_ms // 1000 % 60:02d}): {text}"
         for fact_id, kind, text, start_ms in facts
@@ -1232,10 +1167,8 @@ def facts_block(facts: list[tuple[str, str, str, int]]) -> str:
 
 # ── The example guard ───────────────────────────────────────────────
 
-# Words that make a 4-gram generic. A phrase is only an example's when at
-# least three of its four words carry content, so "was estimated at well"
-# (a way of speaking) never trips the guard, while "ferrytale sales were
-# estimated" (a thing only our prompt says) always does.
+# Words that make a 4-gram generic: a phrase is an example's only when three of
+# its four words carry content.
 _GRAM_STOP: Final[frozenset[str]] = frozenset(
     # fmt: off
     [
@@ -1344,16 +1277,13 @@ def _example_phrases() -> frozenset[str]:
     return frozenset(out)
 
 
-# Every content 4-gram of every example sentence, in all three languages,
-# plus the invented names — built from the same strings the prompts show,
-# so the guard cannot fall behind the prompts. By construction it holds
-# prompt text only, never anything from a recording.
+# Every content 4-gram of every example plus the invented names, built from the
+# prompt strings themselves: prompt text only, never anything from a recording.
 EXAMPLE_PHRASES: Final[frozenset[str]] = _example_phrases()
 
 
 def echoes_example(text: str) -> bool:
-    """True when ``text`` repeats a prompt example — a line the model
-    copied from its instructions rather than wrote from the recording."""
+    """True when ``text`` repeats a prompt example."""
     from .verify import normalise_quote
 
     padded = f" {normalise_quote(text)} "
@@ -1379,13 +1309,7 @@ def _classify_schema() -> dict:
 
 
 def fingerprint() -> str:
-    """sha256 over every prompt table and every schema the model sees.
-
-    Pinned next to ``PROMPT_VERSION`` in the tests: changing a prompt or a
-    schema without bumping the version fails the build, because a result
-    that cannot be traced to the exact wording that produced it is not a
-    result.
-    """
+    """sha256 over every prompt table and schema; pinned per ``PROMPT_VERSION`` in the tests."""
     import hashlib
     import json
 
@@ -1408,9 +1332,7 @@ def fingerprint() -> str:
         "classify": CLASSIFY_SYSTEM,
         "entity": ENTITY_SYSTEM,
         "brief": _BRIEF_LABELS,
-        # Sprint D2 — blocks, their headings, merges, the subject retry.
         "block": BLOCK_SYSTEM,
-        # Sprint L1 — the small-model profile's variants.
         "noise_rule": _NOISE_RULE,
         "shot_one": _EXTRACT_SHOT_ONE,
         "block_heading": BLOCK_HEADING_SYSTEM,
@@ -1420,10 +1342,8 @@ def fingerprint() -> str:
         "merge": MERGE_SYSTEM,
         "subject_suffix": SUBJECT_SUFFIX,
         "summary_blocks": SUMMARY_BLOCKS,
-        # Sprint SQ2 — the coverage variant of extraction.
         "coverage_suffix": COVERAGE_SUFFIX,
-        # ADR-0059's title call changes what the note says, so it is pinned
-        # with the rest (Q6).
+        # The title call changes what the note says, so it is pinned too.
         "title": _title_prompt(),
         "schemas": {
             "extract": schema.EXTRACT_SCHEMA,

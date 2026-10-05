@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
-# CI gate — no gold content is ever tracked under eval/ (Sprint 28 B-7,
-# extended in Sprint TQ1 T2).
-#
-# 1. Audio, anywhere under eval/. The speaker gold set holds personal data;
-#    only manifests and RTTMs live in git for eval/speakers.
-# 2. Text, under eval/asr/** and eval/notes/**: references, spans, gold
-#    notes, review sheets and RTTMs are content (a human-corrected transcript
-#    is the recording in words). Only manifest.json and README.md may be
-#    tracked there.
-#
-# `--paths FILE...` checks the given paths instead of `git ls-files eval`
-# (used by tests/unit/test_asr_eval.py).
+# CI gate: no gold content is ever tracked under eval/. No audio anywhere;
+# under eval/asr/** and eval/notes/** only manifest.json and README.md
+# (references, spans and RTTMs are content).
+# `--paths FILE...` checks the given paths instead of `git ls-files eval`.
 set -euo pipefail
 
 if [[ "${1:-}" == "--paths" ]]; then

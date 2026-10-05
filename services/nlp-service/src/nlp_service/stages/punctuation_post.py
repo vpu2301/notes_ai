@@ -1,16 +1,10 @@
-"""Rule-based post-edits applied AFTER punctuation (model or fallback).
-
-These are deterministic and always run. They patch the cases the
-transformer model gets wrong frequently enough that piloting will
-notice — most importantly unit casing after numbers (mg/ml/mmHg).
-"""
+"""Deterministic post-edits applied after punctuation (model or fallback)."""
 
 from __future__ import annotations
 
 import re
 
-# Known measurement units frequently dictated after numbers; lowercase
-# canonical form.
+# Units dictated after numbers, lowercase canonical form.
 _UNITS_UK = {
     "мг",
     "мл",
@@ -54,9 +48,7 @@ _UNITS_DE = {
     "mmol",
     "bpm",
 }
-# Deliberately NOT in the German set: "IE" (internationale Einheiten) is
-# written upper-case, so lower-casing it after a number would be a
-# regression, not a fix.
+# "IE" is deliberately absent from the German set: it is written upper-case.
 _UNITS_BY_LANGUAGE = {"uk": _UNITS_UK, "en": _UNITS_EN, "de": _UNITS_DE}
 _COMPOUND_UK = ["мм рт. ст.", "кг/м²", "м²", "г/л", "мг/кг"]
 _COMPOUND_EN = ["mm hg", "mmhg", "kg/m²", "m²", "g/l", "mg/kg"]
@@ -89,8 +81,7 @@ _NUMBER_FOLLOWED_BY_WORD = re.compile(
 
 
 def lowercase_units_after_numbers(text: str, language: str) -> str:
-    """If a known unit follows a number, force the unit to its canonical
-    lowercase form. ``"120 МГ"`` → ``"120 мг"``."""
+    """Force a known unit after a number to its lowercase form (``"120 МГ"`` → ``"120 мг"``)."""
     units = _UNITS_BY_LANGUAGE.get(language, _UNITS_EN)
 
     def _conv(match: re.Match[str]) -> str:
@@ -107,10 +98,5 @@ _DOUBLES = re.compile(r"([.!?,])\s*\1+")
 
 
 def strip_double_punctuation(text: str) -> str:
-    """Collapse `..` → `.`, `,,` → `,`, etc.
-
-    The transformer model occasionally double-punctuates at chunk
-    boundaries; the fallback can add a period at end of a sentence the
-    model already ended.
-    """
+    """Collapse doubled punctuation (chunk boundaries, fallback period)."""
     return _DOUBLES.sub(r"\1", text)

@@ -1,25 +1,8 @@
-"""Sprint D1 — the document linter: no note below the standard is written
-(docs/eval/document-standard.md; codes from docs/eval/error-taxonomy.md;
-ADR-0065).
-
-One linter, two callers. :func:`enforce` runs in the worker between
-``pipeline.run`` and ``writer.apply``, and in the eval harness on every
-output, so production and eval agree on what meets the standard.
-
-* :func:`check` is pure: the rendered sections in, findings out —
-  ``(rule, code, severity, section key, line index, detail)``, never a
-  line's text.
-* :func:`repair` makes the deterministic repairs the work order names:
-  merge, split, reorder, drop, trim, widen, recase, map. A line code cannot
-  make meet the standard is not rendered (its fact stays evidence); a part
-  that cannot be repaired is written in its fallback form (chapters,
-  code-composed orientation, an entity-and-time heading).
-* Hard findings (S1/S2) whose rule a D2 regeneration can fix are sent to
-  the ``regenerate`` hook once, before the fallbacks. D2 is not merged: the
-  worker passes no hook and ``regenerated`` is 0.
-* Whatever is still found after that is ``unresolved`` in the stats.
-
-Rules are data (:data:`RULES`): adding one is a row, a check and a test.
+"""The document linter (codes from docs/eval/error-taxonomy.md; ADR-0065): no
+note below the standard is written. :func:`enforce` runs in the worker and the
+eval harness; :func:`check` is pure (findings never carry a line's text);
+:func:`repair` makes deterministic repairs and fallbacks; hard findings go to
+the ``regenerate`` hook once. Rules are data (:data:`RULES`).
 """
 
 from __future__ import annotations
@@ -51,7 +34,7 @@ SECTIONS_MIN: Final = 3
 SECTIONS_MAX: Final = 8
 MINUTES_PER_SECTION: Final = 4
 SECTIONS_TOLERANCE: Final = 2
-SECTIONS_FROM_MINUTES: Final = 5.0  # below: Q3's "too little to head"
+SECTIONS_FROM_MINUTES: Final = 5.0  # below: too little to head
 COVERAGE_MIN_MINUTES: Final = 3.0  # a third shorter than this is not judged
 COVERAGE_MIN_RATIO: Final = 0.6  # worst ÷ best facts per minute
 POINTS_PER_SECTION: Final = (2, 6)
@@ -69,8 +52,7 @@ VOLUME_FROM_MINUTES: Final = 1.0
 REDUNDANT_JACCARD: Final = 0.6
 LANGUAGE_MIN_WORDS: Final = 6
 
-# Severity of each taxonomy code (docs/eval/error-taxonomy.md): S1 misleads,
-# S2 unusable, S3 worse than it should be. S1/S2 are hard.
+# Severity per taxonomy code: S1 misleads, S2 unusable, S3 worse than it should be.
 SEVERITY: Final[dict[str, str]] = {
     "F-INV": "S1", "F-DIST": "S1", "F-SUBJ": "S1",
     "D-ORIENT": "S2", "D-STRUCT": "S2", "D-SPEC": "S2", "D-VOL": "S2", "D-REF": "S2",
@@ -83,32 +65,30 @@ HARD: Final = frozenset({"S1", "S2"})
 @dataclass(frozen=True, slots=True)
 class Rule:
     code: str
-    hook: bool = False  # a D2 regeneration can fix it
+    hook: bool = False  # a regeneration can fix it
 
 
 RULES: Final[dict[str, Rule]] = {
-    # T1 structure and volume
+    # structure and volume
     "sections.count": Rule("D-STRUCT", hook=True),
-    # SQ2 T3 — a third of the recording barely in the note. The hook is the
-    # pipeline's coverage retry (already run once); left over, the third is
-    # named in the status line (``failed_ranges``), never a silent short note.
+    # A third barely in the note; left over, it is named in ``failed_ranges``.
     "coverage.thirds": Rule("F-COV", hook=True),
     "sections.size": Rule("D-STRUCT"),
     "sections.order": Rule("D-STRUCT"),
     "volume.words": Rule("D-VOL"),
     "redundancy": Rule("D-RED"),
-    # SQ3 T3 — lines that add nothing (SM-09).
+    # lines that add nothing
     "line.subset": Rule("D-RED"),
     "orient.ladder_redundant": Rule("D-RED"),
-    # T2 headings and title
+    # headings and title
     "heading.form": Rule("D-HEAD", hook=True),
     "heading.generic": Rule("D-HEAD", hook=True),
     "heading.nouns": Rule("D-HEAD", hook=True),
     "heading.distinct": Rule("D-HEAD", hook=True),
     "title.form": Rule("D-HEAD"),
-    # SQ3 T4 — a title made only of type words ("Podcast-Folge").
+    # a title made only of type words ("Podcast-Folge")
     "title.generic": Rule("D-HEAD"),
-    # T3 lines (line.subject is F-SUBJ for a pronoun, D-LABEL for a label)
+    # lines (line.subject is F-SUBJ for a pronoun, D-LABEL for a label)
     "line.specific": Rule("D-SPEC"),
     "line.length": Rule("D-FORM", hook=True),
     "line.copy": Rule("F-COPY"),
@@ -117,12 +97,12 @@ RULES: Final[dict[str, Rule]] = {
     "line.person": Rule("D-LANG"),
     "line.certainty": Rule("F-DIST"),
     "line.glyph": Rule("D-FORM"),
-    # SQ3 T1 — a generated paragraph shaped like a transcript turn.
+    # a generated paragraph shaped like a transcript turn
     "form.paragraph_colon_prefix": Rule("D-FORM"),
     "line.language": Rule("D-LANG"),
     "line.cited": Rule("D-REF"),
     "line.child": Rule("D-NEST"),
-    # T4 orientation
+    # orientation
     "orient.present": Rule("D-ORIENT", hook=True),
     "orient.p1": Rule("D-ORIENT", hook=True),
     "orient.p2": Rule("D-ORIENT", hook=True),
@@ -146,8 +126,7 @@ GENERIC_TITLE: Final = re.compile(
     r"gespräch|зустріч|нотатки|запис)\b[\s\-—:,]*(?:\d|$)",
     re.IGNORECASE,
 )
-# A speaker label as a subject or actor. "Labels are never repaired by
-# substitution — that is how 'Speaker 1 ist genervt' happened."
+# A speaker label as a subject or actor; never repaired by substitution.
 _LABEL: Final = re.compile(
     r"\bSPEAKER_\d+\b|\b(?:[Ss]peaker|[Ss]precher(?:in)?|[Сс]пікер)(?:\s\d+)?\b"
     r"|\b[Uu]nknown speaker\b|\bUNKNOWN\b|Erzähler(?:/in)?|\bthe narrator\b|\bоповідач\b"
@@ -184,11 +163,9 @@ _EXPLETIVE_NEXT: Final = frozenset(
     {"gibt", "ist", "war", "sind", "waren", "geht", "wird", "is", "was", "has", "seems"}
 )
 _PROSE: Final = frozenset({"summary", "bullet", "framing"})
-# SQ3 T1 — the kinds rendered as paragraphs, not list items.
+# Kinds rendered as paragraphs, not list items.
 _PARAGRAPH_KINDS: Final = frozenset({"summary", "framing", "presenter"})
-# The web client's SPEAKER rule (web/src/lib/richText.ts), verbatim: a
-# paragraph opening with up to 40 characters and ": " is drawn as a speaker
-# turn with an avatar. Generated paragraphs never match it.
+# The web client's SPEAKER rule (web/src/lib/richText.ts), verbatim; generated paragraphs never match it.
 SPEAKER_TURN: Final = re.compile(r"^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)")
 
 
@@ -241,7 +218,7 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class RegenRequest:
-    """What D2 is asked to write again: a rule, a place, the facts."""
+    """What the regeneration hook is asked to write again: a rule, a place, the facts."""
 
     rule: str
     section_key: str | None
@@ -263,7 +240,7 @@ class LintContext:
     known: frozenset[str] = frozenset()
     brief: dict[str, Any] = field(default_factory=dict)
     title: str | None = None
-    """SQ2 T3 — facts and speech minutes per third, from the engine's stats."""
+    """Facts and speech minutes per third, from the engine's stats."""
     facts_by_third: tuple[int, ...] = ()
     minutes_by_third: tuple[float, ...] = ()
 
@@ -406,12 +383,11 @@ def _evidence(line_ids: Iterable[str], ctx: LintContext) -> str:
     return " ".join(f"{ctx.facts[i].text} {ctx.facts[i].quote}" for i in line_ids if i in ctx.facts)
 
 
-# ── the line rules (T3) — one line, the reason it fails, or None ────
+# ── the line rules — one line, the reason it fails, or None ─────────
 
 
 def line_fault(line: Line, ctx: LintContext) -> tuple[str, str, str | None] | None:
-    """``(rule, detail, code override)`` for the first rule a prose line
-    breaks, in the order the repairs need; None when it meets them."""
+    """``(rule, detail, code override)`` for the first rule a prose line breaks, or None."""
     if line.kind not in _PROSE or not line.text.strip() or _TABLE_ROW.match(line.text):
         return None
     body = _body(line.text)
@@ -452,8 +428,7 @@ def _other_language(text: str, language: str) -> bool:
         return True
     own = support.stop_word_share(text, language)
     others = [support.stop_word_share(text, other) for other in ("en", "de") if other != language]
-    # Languages share a few short words ("in"): another language is one
-    # whose stop words are at least twice as present as the note's.
+    # Another language: its stop words at least twice as present as the note's.
     return bool(others) and max(others) >= 0.2 and own * 2 <= max(others)
 
 
@@ -502,8 +477,7 @@ def _check_coverage(ctx: LintContext) -> list[Finding]:
     return []
 
 
-# SQ3 T4 — what a recording is called without saying what it is about: the
-# reader's type words in every language, the type names, and a few more.
+# Type words that name a recording without saying what it is about.
 _TYPE_TITLE_WORDS: Final = frozenset(
     w.casefold()
     for labels in overview.TYPE_LABELS.values()
@@ -529,8 +503,7 @@ def type_words_only(title: str) -> bool:
 
 
 def title_faults(title: str, ctx: LintContext) -> list[str]:
-    """§1 — ``length``, ``colons``, ``repeat``, ``generic``, ``name``;
-    ``type_words`` (SQ3 T4) — nothing but type words."""
+    """``length``, ``colons``, ``repeat``, ``generic``, ``name``, ``type_words``."""
     text = title.strip()
     faults = []
     low, high = TITLE_CHARS
@@ -593,9 +566,7 @@ def _roles(ctx: LintContext) -> tuple[list[str], list[str]]:
 
 
 def p1_faults(first: Sequence[Line], ctx: LintContext) -> list[str]:
-    """§2 paragraph 1 — ``length``, ``type``, ``speakers``, ``themes``,
-    ``label`` (a narrator with no role entry), ``guest`` (a guest nobody
-    verified), ``name``."""
+    """Paragraph 1: ``length``, ``type``, ``speakers``, ``themes``, ``label``, ``guest``, ``name``."""
     text = " ".join(ln.text for ln in first)
     folded = text.casefold()
     faults = []
@@ -831,7 +802,7 @@ def _check_volume(sections: Sequence[RenderedSection], ctx: LintContext) -> list
     return out
 
 
-# ── SQ3 T3 — lines that add nothing ─────────────────────────────────
+# ── Lines that add nothing ──────────────────────────────────────────
 
 _CONNECTIVE_LEADS: Final = tuple(lead for leads in overview.CONNECTIVES.values() for lead in leads)
 
@@ -1022,7 +993,7 @@ def repair(
     out = _drop_redundant(out, ctx, done)
     out = _repair_volume(out, ctx, done)
     out = _repair_sections(out, ctx, done, count=False)
-    # SQ3 T3 — last: nothing after this adds a line.
+    # Last: nothing after this adds a line.
     out = _drop_filler(out, ctx, done)
     return [s for s in out if s.lines], done
 
@@ -1033,7 +1004,7 @@ def _prefixed(original: str, core: str) -> str:
 
 
 def _fix_text(s: RenderedSection, ctx: LintContext, done: Counter[str]) -> RenderedSection:
-    """line.glyph (strip) and line.certainty (the Q4 patch)."""
+    """line.glyph (strip) and line.certainty (the claim patch)."""
     lines = []
     changed = False
     for ln in s.lines:
@@ -1060,10 +1031,9 @@ def _fix_text(s: RenderedSection, ctx: LintContext, done: Counter[str]) -> Rende
 
 
 def _drop_lines(s: RenderedSection, ctx: LintContext, done: Counter[str]) -> RenderedSection:
-    """A line that breaks a line rule is not rendered (its fact stays
-    evidence); a first-person opener is fixed mechanically first (F2); a
-    sub-point goes with its parent; past three sub-points, or one that
-    restates its parent, is cut."""
+    """A line breaking a line rule is not rendered (its fact stays evidence); a
+    mechanical opener is fixed first; a sub-point goes with its parent; past three
+    sub-points, or one restating its parent, is cut."""
     kept: list[Line] = []
     dropped_parent = False
     children = 0
@@ -1134,10 +1104,9 @@ def _drop_redundant(
 def _repair_orientation(
     sections: list[RenderedSection], ctx: LintContext, done: Counter[str]
 ) -> list[RenderedSection]:
-    """T4: map the type word; rebuild paragraph 1 by code when it fails;
-    take the next ladder rung below three sentences, trim past six or 140
-    words; compose the whole block by code when it is missing. Bullets
-    above the first heading were dropped with the line rules or go now."""
+    """Map the type word; rebuild paragraph 1 by code when it fails; next ladder rung
+    below three sentences, trim past six or 140 words; compose the block by code
+    when missing. Bullets above the first heading go."""
     code = RULES["orient.present"].code
     index = next((n for n, s in enumerate(sections) if s.section_key == roles.OVERVIEW_KEY), None)
     if index is None:
@@ -1256,11 +1225,9 @@ def _recase(heading: str, language: str, evidence: str = "") -> str:
 def _repair_headings(
     sections: list[RenderedSection], ctx: LintContext, done: Counter[str]
 ) -> list[RenderedSection]:
-    """T2: strip punctuation and "?", recase all caps, cut past 60
-    characters to its first 8 words; a generic heading, one naming what
-    its section does not say, or one restating the title takes the
-    fallback heading (the section's entity and first time); a heading
-    saying what the one before it says merges the two sections."""
+    """Strip punctuation, recase all caps, cut past 60 characters; a generic,
+    unsupported or title-restating heading takes the fallback (entity and first
+    time); a heading repeating the previous one merges the two sections."""
     out: list[RenderedSection] = []
     title_tokens = _tokens(ctx.title or "")
     code = RULES["heading.form"].code
@@ -1336,10 +1303,9 @@ def _split(s: RenderedSection, ctx: LintContext, taken: set[str]) -> list[Render
 def _repair_sections(
     sections: list[RenderedSection], ctx: LintContext, done: Counter[str], *, count: bool = True
 ) -> list[RenderedSection]:
-    """T1: order by first cited time; a one-point section joins its
-    neighbour in time; past six points it splits at the largest gap; too
-    many sections merge where headings share ≥ 40 % or both spans fit in
-    90 s; too few (nothing regenerated) fall back to chapters."""
+    """Order by first cited time; a one-point section joins its neighbour; past six
+    points split at the largest gap; too many sections merge (headings share
+    >= 40 % or both spans fit in 90 s); too few fall back to chapters."""
     code = RULES["sections.order"].code
     head = [s for s in sections if not _headed(s)]
     topics = [s for s in sections if _headed(s)]
@@ -1391,7 +1357,7 @@ def _mergeable_pair(topics: list[RenderedSection], ctx: LintContext) -> int | No
 
 
 def _chapters(ctx: LintContext, taken: set[str]) -> list[RenderedSection]:
-    """Amendment §2.6's chapters, their lines held to the line rules."""
+    """Chapters, their lines held to the line rules."""
     out = []
     facts = sorted(ctx.facts.values(), key=lambda f: f.start_ms)
     for title, bullets, _ids in overview.chapters(facts, language=ctx.language, known=ctx.known):
@@ -1519,7 +1485,7 @@ def context_of(
     orientation = (document.brief or {}).get("orientation") or {}
     names = set(known) | set(orientation.get("names") or [])
     names |= {f.person.name for f in document.facts if getattr(f, "person", None)}
-    # Sprint D2 — a verified subject or holder is a name.
+    # A verified subject or holder is a name.
     names |= {
         n for f in document.facts for n in (getattr(f, "subject", None), f.attributed_to) if n
     }
@@ -1546,9 +1512,8 @@ async def enforce(
     known: frozenset[str] = frozenset(),
     title: str | None = None,
 ) -> Any:
-    """The worker's and the harness's call: lint, send hard findings to D2
-    once, repair and fall back, record. Never raises: a linter that fails
-    leaves the document as it was and says so (``stats.lint.error``)."""
+    """Lint, send hard findings to the hook once, repair and fall back, record.
+    Never raises: a failing linter leaves the document as it was (``stats.lint.error``)."""
     try:
         ctx = context_of(document, known=known, title=title)
         sections = list(document.sections)
@@ -1622,7 +1587,7 @@ def as_rendered(
     return out
 
 
-# ── The standard §8: the two rubric questions code can answer ───────
+# ── The two rubric questions code can answer ────────────────────────
 
 
 def rubric_auto(sections: Sequence[RenderedSection], ctx: LintContext) -> dict[str, Any]:

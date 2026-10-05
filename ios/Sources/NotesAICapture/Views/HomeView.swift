@@ -1,11 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// The home page, laid out as the web's (Claude-style, no hero): the serif
-/// greeting and the date, the spaces, then flat lists on a dotted ground —
-/// upcoming calendar events (start a meeting from one), meetings still in
-/// flight on this phone, and every note, grouped by day. The search box
-/// and the space chips narrow the notes.
+/// The home page, laid out as the web's: greeting, spaces, upcoming events,
+/// meetings in flight, notes by day.
 struct HomeView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -53,9 +50,7 @@ struct HomeView: View {
                     renameDraft = space.name
                     renamingSpace = space
                 })
-                // Recordings that never reached the server come before
-                // anything else on the page: they are the only thing here
-                // that exists nowhere but this phone.
+                // Recordings that never reached the server come first: they exist nowhere else.
                 if app.selectedSpaceId == nil, searchQuery.isEmpty, !app.pending.isEmpty {
                     PendingUploadsSection(captures: app.pending)
                 }
@@ -91,8 +86,7 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
-        // `isSearching` only reaches views *inside* the searchable one, so
-        // the answer is fetched by a child and kept here.
+        // `isSearching` only reaches views inside the searchable one; a child reports it.
         .overlay(alignment: .top) { SearchProbe(active: $searching) }
         .scrollDismissesKeyboard(.immediately)
         .navigationBarTitleDisplayMode(.inline)
@@ -101,8 +95,7 @@ struct HomeView: View {
                 DSWordmark(size: 15)
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                // The + menu is the one place a note starts without a
-                // recording: blank, from a template, or from a file.
+                // The + menu: a note without a recording (blank, template, file).
                 DSMenu(items: newItems) {
                     if creatingBlank {
                         ProgressView().controlSize(.small).frame(width: 34, height: 34)
@@ -123,12 +116,8 @@ struct HomeView: View {
         }
         .searchable(text: $app.searchQuery, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search notes")
-        // An active search field must not be see-through. The field's own
-        // fill is opaque from `DSAppearance`; this is the other half — the
-        // bar it sits in, which is transparent by default at the top of a
-        // page, so the notes scrolling under it would show through the
-        // gaps around the box. Only while searching: at rest the dotted
-        // ground is meant to run up behind the toolbar.
+        // Opaque bar behind an active search field (the field's fill comes from
+        // `DSAppearance`); at rest the dotted ground runs up behind the toolbar.
         .toolbarBackground(searching ? .visible : .automatic, for: .navigationBar)
         .toolbarBackground(DS.bg, for: .navigationBar)
         .refreshable {
@@ -145,8 +134,7 @@ struct HomeView: View {
         }
     }
 
-    /// The page's alerts and pickers, kept apart from the page so the
-    /// compiler has two expressions to check instead of one long one.
+    /// The page's alerts and pickers, split out to keep the type-checker fast.
     private func dialogs(_ page: some View) -> some View {
         page
         .fileImporter(isPresented: $pickingFile, allowedContentTypes: [.audio]) { result in
@@ -309,17 +297,14 @@ struct HomeView: View {
 
     // MARK: - Coming up (calendar)
 
-    /// Hidden only when there is nothing to offer: the server has no
-    /// Google client, nothing is connected, and the bundle has no calendar
-    /// usage description.
+    /// Hidden only when there is nothing to offer (no Google client, nothing connected, no EventKit).
     private var showComingUp: Bool {
         google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
     }
 
     // MARK: - Meetings in flight
 
-    /// This phone's captures that are not (yet) a note: in progress,
-    /// failed, or transcribed without a note.
+    /// This phone's captures that are not (yet) a note.
     private var pendingCaptures: [RecentCapture] {
         app.recents
             .filter { $0.noteId == nil }
@@ -341,8 +326,7 @@ struct HomeView: View {
                 }
             }
         } else if notes.isEmpty {
-            // No card behind it: a home page with no notes keeps the same
-            // dotted ground as a home page with notes, only without rows.
+            // No card behind it: same dotted ground, only without rows.
             section("Notes") {
                 VStack(spacing: 6) {
                     Text(emptyTitle)
@@ -420,8 +404,7 @@ struct HomeView: View {
         }
     }
 
-    /// The lists, as the web's: no card around them — rows on the page,
-    /// divided by a hairline.
+    /// The lists, as the web's: rows on the page divided by a hairline.
     private func rows(_ items: [AnyView]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, row in
@@ -436,9 +419,7 @@ struct HomeView: View {
 
 // MARK: - Search
 
-/// Nothing to look at: it exists to read `isSearching`, which SwiftUI only
-/// publishes to the children of the searchable view, and hand it back up
-/// to `HomeView` — where the toolbar's background is decided.
+/// Invisible: reads `isSearching` (only published to the searchable view's children) and hands it up.
 private struct SearchProbe: View {
     @Environment(\.isSearching) private var isSearching
     @Binding var active: Bool
@@ -453,8 +434,7 @@ private struct SearchProbe: View {
 
 // MARK: - Spaces
 
-/// The user's spaces as a row of chips: All notes, each space (hold for
-/// rename / delete), and ＋.
+/// The user's spaces as a row of chips: All notes, each space (hold for rename / delete), ＋.
 private struct SpacesBar: View {
     @EnvironmentObject private var app: AppState
     let add: () -> Void
@@ -514,8 +494,7 @@ private struct SpacesBar: View {
             }
             .padding(.horizontal, 13)
             .frame(height: 34)
-            // Neutral fills, as the web's sidebar rows: the one you are on
-            // is filled, never inked or framed in the accent.
+            // Neutral fills, as the web's sidebar rows.
             .background(Capsule().fill(on ? DS.sidebarActive : DS.surface))
             .overlay(Capsule().strokeBorder(DS.line, lineWidth: on ? 0 : DS.hairline))
             .contentShape(Capsule())
@@ -579,8 +558,7 @@ private struct NoteRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityValue(note.access?.help ?? "")
-            // Beside the row's button, not inside it: a menu nested in a
-            // button's label loses its tap to the row on iOS.
+            // Beside the row's button: a menu nested in a button's label loses its tap on iOS.
             if let access = note.access {
                 DSMenu(items: { accessItems(access) }) {
                     AccessPill(access: access, expanded: hover)
@@ -592,8 +570,7 @@ private struct NoteRow: View {
         .contextMenu { DSMenuContent(items: menuItems()) }
     }
 
-    /// The pill's menu: who can open the note. The server decides whether
-    /// this person may change it; a refusal comes back as an alert.
+    /// The pill's menu: who can open the note; a server refusal comes back as an alert.
     private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
         let id = note.noteId
         var items: [DSMenuItem] = [
@@ -649,9 +626,7 @@ private struct NoteRow: View {
     }
 }
 
-/// Private or public, and the trigger for the access menu. There is no
-/// pointer on a phone, so the glyph always shows; an iPad pointer on the
-/// row spells it out with the chevron, like the Mac.
+/// Private or public, and the trigger for the access menu.
 private struct AccessPill: View {
     let access: NoteAccess
     let expanded: Bool
@@ -742,11 +717,7 @@ private struct CaptureRow: View {
     }
 }
 
-/// "Coming up": today's date, then the next days' events — from the Google
-/// accounts and calendar links connected on the server and from this
-/// phone's own calendars, merged. One button connects Google (or adds a
-/// link when the server has no Google client); the ⋯ menu holds the rest
-/// (choose calendars, another account, disconnect).
+/// "Coming up": the next days' events from server-side calendars and this phone's, merged.
 private struct ComingUpCard: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
@@ -872,8 +843,7 @@ private struct ComingUpCard: View {
         }
     }
 
-    /// A line, not a box: the date above already frames it (Granola's
-    /// "No events today"), so the card stays short.
+    /// A line, not a box: the date above already frames it.
     private func emptyLine(@ViewBuilder _ inner: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             inner()
@@ -945,8 +915,7 @@ private struct ComingUpCard: View {
     }
 }
 
-/// One upcoming event, with Join (when it has a video link) and a Start
-/// button that begins a meeting note with the event's title.
+/// One upcoming event, with Join (video link) and Start (a meeting note with its title).
 private struct ComingUpRow: View {
     @EnvironmentObject private var capture: CaptureViewModel
     let item: ComingUpItem
@@ -1024,8 +993,7 @@ private struct ComingUpRow: View {
     }
 }
 
-/// Sprint 21: the one thing a brand-new workspace should do first.
-/// Shown once per device; `AppState.dismissFirstRun` remembers.
+/// First-run card for a brand-new workspace. Shown once per device.
 struct FirstRunCard: View {
     @EnvironmentObject private var app: AppState
 

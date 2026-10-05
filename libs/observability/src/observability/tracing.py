@@ -1,16 +1,4 @@
-"""OTel tracing setup.
-
-Resource attributes follow OpenTelemetry semantic conventions:
-
-* ``service.name``       — per-service
-* ``service.namespace``  — ``notes-ai`` (the platform)
-* ``service.version``    — read from package metadata when available
-* ``deployment.environment`` — development / staging / production
-
-Auto-instrumentation is wired for FastAPI, asyncpg, and httpx. W3C
-``tracecontext`` and baggage propagators are installed so trace context
-flows across HTTP, gRPC, and Kafka boundaries.
-"""
+"""OTel tracing setup: semantic-convention resource attributes, W3C propagation, asyncpg/httpx auto-instrumentation."""
 
 from __future__ import annotations
 
@@ -61,8 +49,7 @@ def setup_tracing(
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
-    # W3C tracecontext + baggage. Keep the composite even with one propagator
-    # so downstream code can extend it without rewiring.
+    # Composite kept even with one propagator so it can be extended without rewiring.
     set_global_textmap(CompositePropagator([TraceContextTextMapPropagator()]))
 
     _install_auto_instrumentation()
@@ -86,16 +73,8 @@ def _install_auto_instrumentation() -> None:
 
 
 def _patch_fastapi_route_details() -> None:
-    """Work around an upstream crash in opentelemetry-instrumentation-fastapi
-    (through 0.62b1).
-
-    ``_get_route_details`` reads ``route.path`` on a ``Match.PARTIAL`` route
-    without the ``AttributeError`` guard the ``Match.FULL`` branch has. A CORS
-    preflight (``OPTIONS``) or any wrong-method request partial-matches an
-    ``_IncludedRouter`` that has no ``.path``, so the request 500s before it is
-    ever handled. We wrap the function so a missing path falls back to the raw
-    scope path (what the ``FULL`` branch already does on the same error).
-    """
+    """Work around opentelemetry-instrumentation-fastapi (through 0.62b1): ``_get_route_details`` reads
+    ``route.path`` on a ``Match.PARTIAL`` ``_IncludedRouter`` that has none, so CORS preflights 500."""
     try:
         from opentelemetry.instrumentation import fastapi as _fastapi_instr
     except Exception as exc:  # pragma: no cover  — optional at runtime

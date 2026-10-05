@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""CI gate: every user-schema table must have RLS enabled AND forced.
-
-Spec § 8 risk E1: "A migration adds a new table without RLS policies;
-nobody notices." This script is the wire — run after ``migrate-up`` in
-CI; non-zero exit means a table is unprotected.
-
-Detection logic:
-  * Walk every relation in ``public`` and ``audit`` schemas.
-  * Skip explicit exemptions (``schema_migrations`` — bookkeeping table).
-  * Skip system-owned tables (the few created by extensions).
-  * For each remaining table assert ``relrowsecurity = true`` AND
-    ``relforcerowsecurity = true``.
-  * Also count policies — a table with RLS+FORCE but no policy is fail-open
-    for nobody (correct) but is almost certainly a misconfiguration; warn.
-
-Run::
+"""CI gate against a live database: every ``public``/``audit`` table has RLS enabled AND
+forced (explicit exemptions below); a table with no policy is warned about.
 
     DATABASE_URL=postgres://... uv run python scripts/ci/check-rls-policies.py
 """
@@ -30,15 +16,9 @@ import asyncpg
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 
-# Tables that legitimately do not need RLS.
-#
-# Two kinds live here:
-#  1. No tenant dimension at all (global catalogues / system tables) —
-#     there is no cross-tenant data to leak.
-#  2. ADR-documented performance exceptions — these DO carry tenant_id and
-#     rely on application-level filtering. They are accepted risks pending
-#     security sign-off. Listed explicitly so the gate stays loud about
-#     any *new* unprotected table.
+# Exemptions: tables with no tenant dimension, and ADR-documented perf
+# exceptions that carry tenant_id and rely on app-level filtering (accepted
+# risks pending security sign-off).
 EXEMPT: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         ("public", "schema_migrations"),  # migration tracker
@@ -53,14 +33,12 @@ EXEMPT: Final[frozenset[tuple[str, str]]] = frozenset(
     }
 )
 
-# Name-prefix exemptions within a schema — covers range-partition children whose
-# names carry a date suffix (e.g. autocomplete_telemetry_2026_09, _2026_10, …).
+# Name-prefix exemptions: range-partition children with a date suffix.
 EXEMPT_PREFIXES: Final[tuple[tuple[str, str], ...]] = (
     ("public", "autocomplete_telemetry"),  # ADR-0025 perf exception (FLAGGED — see report)
 )
 
-# Schemas where we enforce. Extensions sometimes create their own schemas
-# (pg_catalog, information_schema) that we never check.
+# Schemas where we enforce.
 ENFORCED_SCHEMAS: Final[tuple[str, ...]] = ("public", "audit")
 
 

@@ -1,8 +1,4 @@
-"""OTel metric instruments for the NLP pipeline.
-
-Names match sprint-05 spec §10 verbatim — the Grafana dashboard +
-alerts reference them. Stable contract.
-"""
+"""OTel metric instruments for the NLP pipeline. Names are referenced by Grafana; keep stable."""
 
 from __future__ import annotations
 
@@ -10,8 +6,7 @@ from opentelemetry import metrics
 
 _meter = metrics.get_meter("mdx.nlp")
 
-# Per-stage latency is recorded inside the orchestrator; redeclared here
-# so importers can find every instrument in one place.
+# Recorded inside the orchestrator; declared here so every instrument is in one place.
 stage_duration_ms = _meter.create_histogram(
     "mdx_nlp_request_duration_ms",
     description="Per-stage latency",

@@ -1,13 +1,7 @@
 import AppKit
 import Foundation
 
-/// The bell (notification-service): an unread count while the window is
-/// open, the latest fifteen on demand, and read marks.
-///
-/// Polled rather than pushed — the web app polls the same way every
-/// thirty seconds, and the count is the only thing worth keeping warm.
-/// The feed is fetched when the panel opens. A failed poll is a blip: the
-/// last count stands and nothing is said.
+/// The bell: an unread count while the window is open (polled every thirty seconds, like the web), the latest fifteen on demand, and read marks. A failed poll is a blip.
 @MainActor
 extension AppState {
     static let notificationPollInterval: Duration = .seconds(30)
@@ -48,8 +42,7 @@ extension AppState {
         }
     }
 
-    /// Opening one marks it read and follows its link when it points at a
-    /// note; the web app only marks it read, so this is one step ahead.
+    /// Opening one marks it read and follows its link when it points at a note.
     func open(notification item: NotificationItem) async {
         if item.isUnread {
             if let idx = notificationFeed.firstIndex(where: { $0.id == item.id }) {

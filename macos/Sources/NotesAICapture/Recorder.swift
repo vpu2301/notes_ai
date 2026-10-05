@@ -23,12 +23,8 @@ extension RecorderError {
     static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
 }
 
-/// Audio container the recorder writes. Both are in the ASR service's MIME
-/// allow-list (`audio/mp4`/`.m4a` is not, and the service also verifies the
-/// magic bytes, so the file really has to be one of these).
-///
-/// Sprint 31: plus a channel count — 1 (the microphone) as before, or 2 when
-/// the call audio is recorded too (ch0 = microphone, ch1 = call audio).
+/// Audio container the recorder writes; both are in the ASR service's MIME allow-list
+/// (it also checks magic bytes). Channels: 1 (microphone) or 2 (ch0 = microphone, ch1 = call audio).
 struct RecordingFormat: Equatable, Sendable {
     enum Container: Equatable, Sendable {
         case flac
@@ -59,9 +55,7 @@ struct RecordingFormat: Equatable, Sendable {
         }
     }
 
-    /// 16 kHz mono is what the speech models resample to anyway; it keeps a
-    /// one-hour meeting well under the service's upload limit. Two channels
-    /// only with call audio.
+    /// 16 kHz mono is what the speech models resample to anyway and keeps an hour under the upload limit. Two channels only with call audio.
     var fileSettings: [String: Any] {
         switch container {
         case .flac:
@@ -83,7 +77,7 @@ struct RecordingFormat: Equatable, Sendable {
     }
 }
 
-/// What the current recording captures (Sprint 31).
+/// What the current recording captures.
 enum CaptureMode: Equatable, Sendable {
     /// Microphone on ch0, call audio on ch1.
     case micAndSystem
@@ -94,15 +88,13 @@ enum CaptureMode: Equatable, Sendable {
 
 /// Why a recording is microphone-only.
 enum MicOnlyReason: Equatable, Sendable {
-    /// "Record call audio" is off — today's behaviour.
+    /// "Record call audio" is off.
     case settingOff
-    /// The setting is on but the consent notice changed and was not
-    /// accepted again yet.
+    /// The setting is on but the consent notice changed and was not accepted again yet.
     case consentNeeded
     /// Older than macOS 14.2: no process taps.
     case unsupportedOS
-    /// The tap could not start — most likely the System Audio Recording
-    /// permission is off. The message is for the log/UI, not a code.
+    /// The tap could not start, most likely System Audio Recording permission is off. The message is for log/UI.
     case unavailable(String)
 
     /// Whether the person can fix it in System Settings.
@@ -112,9 +104,7 @@ enum MicOnlyReason: Equatable, Sendable {
     }
 }
 
-/// The fallback rule of `AudioRecorder.start`, as a pure function: try the
-/// call audio only when it is wanted and possible, and fall back to the
-/// microphone with a reason on anything else.
+/// The fallback rule of `AudioRecorder.start`, as a pure function: call audio only when wanted and possible, else microphone with a reason.
 enum CaptureModeSelector {
     struct Selection {
         var mode: CaptureMode
@@ -139,35 +129,27 @@ enum CaptureModeSelector {
 }
 
 /// Records mono 16 kHz FLAC (falling back to WAV) into a temporary file via
-/// `AVAudioEngine`, publishing the elapsed time and a normalized input level
-/// for the live meter.
-///
-/// `AVAudioRecorder` cannot encode FLAC, so the input tap is resampled with an
-/// `AVAudioConverter` and written through `AVAudioFile` instead.
-///
-/// Sprint 31: with "Record call audio" on (and macOS 14.2+), the microphone
-/// and the call audio come from one `SystemAudioSource` instead and the file
-/// has two channels. Anything that stops that from starting falls back to
-/// the mono path above, unchanged, with `captureMode` saying why.
+/// `AVAudioEngine`, publishing elapsed time and a normalized input level.
+/// `AVAudioRecorder` cannot encode FLAC, so the tap is resampled with an
+/// `AVAudioConverter` and written through `AVAudioFile`. With call audio on
+/// (macOS 14.2+) both come from one `SystemAudioSource` and the file has two
+/// channels; anything that stops that falls back to mono, with `captureMode` saying why.
 @MainActor
 final class AudioRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Double = 0
-    /// Sprint 31: the call-audio level (0 while microphone-only).
+    /// The call-audio level (0 while microphone-only).
     @Published private(set) var systemLevel: Double = 0
     /// What this recording captures; `.micOnly(.settingOff)` when idle.
     @Published private(set) var captureMode: CaptureMode = .micOnly(.settingOff)
     /// The call audio stopped mid-recording; the rest of ch1 is silence.
     @Published private(set) var systemAudioLost = false
-    /// Sprint F1: milliseconds from the Record press to the first buffer
-    /// written to the file; nil until that buffer arrives.
+    /// Milliseconds from the Record press to the first buffer written; nil until it arrives.
     @Published private(set) var firstFrameOffsetMs: Int?
-    /// Sprint F1: the wall clock at the Record press (kept after `stop()`
-    /// so the upload can carry it).
+    /// The wall clock at the Record press (kept after `stop()` for the upload).
     private(set) var recordPressedAt: Date?
-    /// The server's cap on one recording. The app reads the real value
-    /// before each recording (`AsrLimits`); this is the fallback.
+    /// The server's cap on one recording; the fallback when `AsrLimits` cannot be read.
     @Published var limitSeconds: TimeInterval = 2 * 3600
     /// Seconds until the cap.
     var remaining: TimeInterval { max(0, limitSeconds - elapsed) }
@@ -186,7 +168,7 @@ final class AudioRecorder: ObservableObject {
     private var meterTimer: Timer?
     private var startedAt: Date?
     private let sink = TapSink()
-    /// Sprint 31: the microphone + call-audio source while it runs.
+    /// The microphone + call-audio source while it runs.
     private var systemSource: SystemAudioSource?
     /// Where call audio comes from; a test can swap it for a fake.
     var makeSystemAudioSource: () -> SystemAudioSource? = AudioRecorder.defaultSystemAudioSource
@@ -196,17 +178,13 @@ final class AudioRecorder: ObservableObject {
         return nil
     }
 
-    /// `captureSystemAudio`: the person's setting; `consentCurrent`: they
-    /// accepted the current call-audio notice. Both false → exactly the
-    /// microphone path of before.
+    /// `captureSystemAudio`: the setting; `consentCurrent`: the current notice was accepted. Both false → microphone only.
     func start(captureSystemAudio: Bool = false, consentCurrent: Bool = false) async throws {
-        // Sprint F1: the press, before any permission or tap setup — that
-        // wait is exactly what the offset measures.
+        // The press, before any permission or tap setup — that wait is what the offset measures.
         recordPressedAt = Date()
         firstFrameOffsetMs = nil
         sink.firstFrame.reset()
-        // A previously denied (or silently dropped — see scripts/make-app.sh)
-        // grant never re-prompts; say so instead of failing quietly.
+        // A previously denied (or silently dropped — see scripts/make-app.sh) grant never re-prompts; say so.
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .denied, .restricted:
             throw RecorderError.permissionDenied
@@ -303,10 +281,7 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
-    /// The call-audio source gave up mid-recording (a device change it
-    /// could not rebuild from, the tap invalidated). The file keeps its two
-    /// channels: the microphone continues through `AVAudioEngine` into ch0
-    /// and ch1 is silence from here on, flagged as lost.
+    /// The call-audio source gave up mid-recording. The microphone continues into ch0; ch1 is silence from here on, flagged as lost.
     private func systemSourceFailed() {
         guard isRecording, systemSource != nil else { return }
         systemSource?.stop()
@@ -329,8 +304,7 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
-    /// Sprint F1: the press and the first frame of the last recording, for
-    /// the upload; nil when no buffer ever reached the file.
+    /// The press and the first frame of the last recording; nil when no buffer reached the file.
     var captureTiming: CaptureTiming? {
         CaptureTiming(pressedAt: recordPressedAt, firstFrameAt: sink.firstFrame.firstFrameAt)
     }
@@ -375,8 +349,7 @@ final class AudioRecorder: ObservableObject {
         }
     }
 
-    /// Prefer FLAC; if CoreAudio refuses to open a FLAC writer on this
-    /// machine, fall back to 16-bit WAV (larger, but universally supported).
+    /// Prefer FLAC; if CoreAudio refuses a FLAC writer, fall back to 16-bit WAV.
     private static func openOutputFile(base: URL, channels: Int = 1) throws -> (AVAudioFile, URL, RecordingFormat) {
         for format in [RecordingFormat.flac, .wav].map({ $0.withChannels(channels) }) {
             let url = base.appendingPathExtension(format.fileExtension)
@@ -389,15 +362,10 @@ final class AudioRecorder: ObservableObject {
     }
 }
 
-/// Receives input buffers on the audio thread, resamples them to the file's
-/// processing format and appends them. Also keeps the latest RMS level for
-/// the meter. Everything is guarded by a lock because the tap callback and
-/// `start`/`stop` run on different threads.
-///
-/// Sprint 31: `beginDual`/`consume(mic:system:)` is the two-channel path —
-/// each stream resampled to 16 kHz mono on its own converter, then
-/// interleaved ch0 = microphone, ch1 = call audio. The mono path
-/// (`begin`/`consume(_:)`) is untouched.
+/// Receives input buffers on the audio thread, resamples and appends them, and
+/// keeps the latest RMS level. Locked: the tap callback and `start`/`stop` run on
+/// different threads. `beginDual`/`consume(mic:system:)` is the two-channel path
+/// (each stream resampled on its own converter, interleaved ch0 = mic, ch1 = call).
 final class TapSink: @unchecked Sendable {
     private let lock = NSLock()
     private var file: AVAudioFile?
@@ -411,7 +379,7 @@ final class TapSink: @unchecked Sendable {
     private var interleaver = ChannelInterleaver()
     private var systemLevel: Double = 0
     private var lost = false
-    /// Sprint F1: when the first buffer was written to the file.
+    /// When the first buffer was written to the file.
     let firstFrame = FirstFrameClock()
 
     func begin(file: AVAudioFile, converter: AVAudioConverter, inputFormat: AVAudioFormat) {
@@ -423,8 +391,7 @@ final class TapSink: @unchecked Sendable {
         self.level = 0
     }
 
-    /// Start the two-channel path into `file` (2 channels, Float32
-    /// processing format).
+    /// Start the two-channel path into `file` (2 channels, Float32).
     func beginDual(file: AVAudioFile) {
         lock.lock()
         defer { lock.unlock() }
@@ -505,9 +472,7 @@ final class TapSink: @unchecked Sendable {
         if (try? file.write(from: output)) != nil { firstFrame.mark() }
     }
 
-    /// One cycle of both streams. `system == nil` means the call audio did
-    /// not deliver: ch1 gets digital silence for the microphone's length
-    /// and the loss is flagged — the file stays valid and aligned.
+    /// One cycle of both streams. `system == nil`: ch1 gets silence for the microphone's length and the loss is flagged.
     func consume(mic: AVAudioPCMBuffer, system: AVAudioPCMBuffer?) {
         lock.lock()
         defer { lock.unlock() }
@@ -564,9 +529,7 @@ final class TapSink: @unchecked Sendable {
     }
 }
 
-/// One stream resampled to mono Float32 at the file's rate. The converter
-/// is rebuilt when the input format changes (a new device after AirPods
-/// connect can run at another rate).
+/// One stream resampled to mono Float32 at the file's rate; the converter is rebuilt when the input format changes (new device).
 struct MonoResampler {
     private(set) var outputRate: Double = 16_000
     private var converter: AVAudioConverter?
@@ -605,12 +568,8 @@ struct MonoResampler {
     }
 }
 
-/// Pairs the two resampled streams frame by frame. Both come from one
-/// clock, so they arrive in step; the resamplers may still hand out a few
-/// frames more on one side in a given cycle, which is held until the other
-/// side catches up. A side that falls more than `maxSkew` frames behind is
-/// padded with silence so the file keeps moving and the channels never
-/// drift further apart than that.
+/// Pairs the two resampled streams frame by frame. Frames one side is ahead by are
+/// held; a side more than `maxSkew` behind is padded with silence so the channels never drift further.
 struct ChannelInterleaver {
     private(set) var pendingMic: [Float] = []
     private(set) var pendingSystem: [Float] = []
@@ -620,8 +579,7 @@ struct ChannelInterleaver {
         self.maxSkew = maxSkew
     }
 
-    /// `system == nil`: the call audio did not deliver — silence covering
-    /// the microphone frames.
+    /// `system == nil`: silence covering the microphone frames.
     mutating func append(mic: [Float], system: [Float]?) {
         pendingMic += mic
         if let system {

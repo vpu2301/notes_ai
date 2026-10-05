@@ -1,12 +1,4 @@
-"""Sequence the 8 validators and short-circuit at the first failure.
-
-The runner is kept thin so each step is independently testable. Callers
-typically invoke ``run_all`` once and switch on the returned result.
-
-Steps 1 + 8 (auth and quota) are NOT executed by ``run_all`` — they
-require a request/DB context that's natural to invoke at the router
-level. The runner runs steps 2–7 which are pure file-shape checks.
-"""
+"""Run validators 2–7 (pure file-shape checks); auth and quota run at the router."""
 
 from __future__ import annotations
 
@@ -30,18 +22,10 @@ async def run_all(
     mime_type: str,
     payload: bytes,
 ) -> tuple[ValidationResult, UploadFacts]:
-    """Run steps 2–7 on the in-memory payload.
-
-    Returns the validation result plus the facts collected up to that
-    point. On failure, the facts struct is partially filled.
-    """
+    """Run steps 2–7; returns the result plus the facts collected so far."""
     r = validate_mime(mime_type)
 
-    # Everything downstream keys off the bare type/subtype: the
-    # magic-byte table, the tempfile suffix, and the row we persist. A
-    # browser recording arrives as ``audio/webm;codecs=opus``; storing
-    # the parameter would mean two spellings of one media type in the
-    # database.
+    # Everything downstream keys off the bare type/subtype.
     mime_type = normalize_mime(mime_type)
     facts = UploadFacts(
         mime_type=mime_type,
@@ -52,10 +36,7 @@ async def run_all(
     if not r.ok:
         return r, facts
 
-    # Size before magic bytes: it is the cheaper check, and it owns the
-    # zero-byte case. Sniffing an empty upload first would report it as a
-    # format mismatch, which sends the user looking for a codec
-    # problem in a file that simply never arrived.
+    # Size before magic bytes: it owns the zero-byte case.
     r = validate_size(len(payload), max_mb=settings.max_upload_mb)
     if not r.ok:
         return r, facts
@@ -64,7 +45,6 @@ async def run_all(
     if not r.ok:
         return r, facts
 
-    # ffprobe wants a path — write to a tempfile in a private dir.
     with tempfile.NamedTemporaryFile(
         prefix="mdx-asr-",
         suffix=_mime_to_suffix(mime_type),

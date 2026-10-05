@@ -2,16 +2,11 @@ groups:
   - name: layer-c-replay-search
     interval: 1m
     rules:
-      # NOTE: no Alertmanager routing exists yet — these fire in the
-      # Prometheus UI only (a deployment concern). `or vector(0)` guards
-      # per the empty-series bug class documented in autocomplete.yml.
+      # `or vector(0)` guards per the empty-series note in autocomplete.yml.
 
       - alert: LayerCInlineLatencyHigh
-        # THE Layer C budget alert (ADR-0036): served completions must sit
-        # under the p95 <= 400 ms budget. Sustained breach means the model
-        # host is degraded or the slot pool is starved — ghost text that
-        # arrives late is ghost text nobody sees (the FE discards it), so
-        # this is "the feature silently died", not "slightly slower".
+        # Layer C budget (ADR-0036): the FE discards late ghost text, so a
+        # p95 breach means the feature silently died.
         expr: |
           histogram_quantile(
             0.95,
@@ -30,10 +25,7 @@ groups:
             Runbook: docs/runbooks/generation.md#inline-latency-high
 
       - alert: LayerCFilterRateHigh
-        # The kill-switch input: the safety filter dropping >10% of
-        # completions means the model is routinely trying to invent
-        # factual values — prompt or model regression. Volume-gated so a
-        # quiet hour with 2 filtered ghosts cannot page anyone.
+        # Safety filter dropping >10 % = the model is inventing factual values; volume-gated.
         expr: |
           (
             (sum(increase(mdx_layer_c_completions_total{outcome="filtered"}[1h])) or vector(0))
@@ -77,8 +69,7 @@ groups:
             Runbook: docs/runbooks/generation.md#backend-errors
 
       - alert: AudioClipFailuresHigh
-        # Replay is the user's trust surface: failed clip pipelines
-        # mean "I tapped a sentence and heard nothing".
+        # A failed clip pipeline is "I tapped a sentence and heard nothing".
         expr: |
           (sum(increase(mdx_audio_clips_created_total{outcome="pipeline_error"}[15m])) or vector(0)) > 3
         for: 5m

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// "New from template…" — the workspace's templates, one tap to start a
-/// note from one. Blank note skips this and takes the meeting template.
+/// "New from template…" — one tap to start a note from a template.
 struct NewNoteSheet: View {
     @EnvironmentObject private var app: AppState
     let onClose: () -> Void

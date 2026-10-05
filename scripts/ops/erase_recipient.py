@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Erase everything held about one recipient address (Sprint 23 DSAR).
+"""Erase everything held about one recipient address (DSAR): link addresses nulled,
+responses cleared, OTPs and leads deleted, suppression hash deleted unless
+``--keep-suppression``. Links keep working until they expire. Prints counts only.
 
-    DB_TENANT_WRITER_DSN=postgresql://tenant_writer:...@host/notes \\
-    MDX_SHARE_MAIL_SUPPRESSION_PEPPER_HEX=<the deployment's pepper> \\
-        uv run python scripts/ops/erase_recipient.py --email tom@client.com [--keep-suppression]
-
-Where a recipient's address can live, and what this does:
-  * note_share_links.recipient_email (every tenant)  → NULL; the label stays
-  * share_link_responses on those links              → cleared_at = now()
-  * share_link_otps on those links                   → deleted
-  * referrals.lead_email                             → rows deleted
-  * share_mail_suppressions (the peppered hash)      → deleted unless --keep-suppression
-The links themselves keep working until they expire (the recipient still
-holds them); revoking is the sender's decision. Prints counts only.
+    DB_TENANT_WRITER_DSN=... MDX_SHARE_MAIL_SUPPRESSION_PEPPER_HEX=... uv run python scripts/ops/erase_recipient.py --email tom@client.com [--keep-suppression]
 """
 
 from __future__ import annotations
@@ -40,9 +31,8 @@ async def main(email: str, keep_suppression: bool) -> int:
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            # tenant_writer is not RLS-scoped on note_share_links; the
-            # policies there are app_role's. Walk tenants explicitly so the
-            # per-tenant setting is honoured where a policy does apply.
+            # tenant_writer is not RLS-scoped on note_share_links; walk tenants
+            # explicitly so the per-tenant setting is honoured where a policy applies.
             tenant_ids = [r["id"] for r in await conn.fetch("SELECT id FROM tenants")]
             links = responses = otps = 0
             for tid in tenant_ids:

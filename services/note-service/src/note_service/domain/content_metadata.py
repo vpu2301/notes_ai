@@ -1,13 +1,6 @@
-"""Sprint-13: write-path validation of ``field_specific_metadata``.
-
-Every content write (create / draft PUT / amend) validates each
-section's metadata dict against the section's template ``field_type``
-(via ``note_models.validate_field_metadata``) and — for
-choice/multi_choice — checks the ``selected`` value(s) against the
-template's option ``value``s. The template is resolved the same way
-finalize validation resolves it (``domain.repository.get_template`` by
-``content.template_id``), and only when at least one section actually
-carries metadata, so pre-S13 autosaves pay no extra query.
+"""Write-path validation of ``field_specific_metadata`` against the template's
+``field_type`` and, for choice/multi_choice, its option values. The template is
+resolved only when some section carries metadata.
 """
 
 from __future__ import annotations

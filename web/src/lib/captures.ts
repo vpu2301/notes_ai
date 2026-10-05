@@ -1,7 +1,5 @@
-// Per-browser bookkeeping for meeting captures. The backend knows jobs and
-// notes; the browser remembers which jobs IT started (so only those get a
-// note made automatically), the title typed before recording, and the
-// job → note links it has already resolved.
+// Per-browser capture bookkeeping: jobs this browser started (only those
+// auto-convert), pre-typed titles, resolved job → note links.
 
 const TITLES = "notesai.capture.titles";
 const MINE = "notesai.capture.mine";

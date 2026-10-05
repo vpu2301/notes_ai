@@ -1,12 +1,9 @@
-"""A calendar file for a date the note names (Summary Engine v2, Q5).
+"""A calendar file for a date the note names.
 
     GET /v1/notes/{id}/dates/{item_key}.ics
 
-The "Key dates" block lists what the recording scheduled or set a
-deadline for; each line offers this download. Same audience as the
-evidence behind the note — the ``DESCRIPTION`` is the quote — so the read
-goes through ``require_view`` and the read-purpose rule, and another
-workspace's note is a 404. Nothing is written anywhere but the audit log.
+The ``DESCRIPTION`` is the quote, so the read goes through ``require_view`` and
+the read-purpose rule. Nothing is written anywhere but the audit log.
 """
 
 from __future__ import annotations

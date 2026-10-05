@@ -1,10 +1,4 @@
-"""Liveness + readiness probes.
-
-``/readyz`` returns 503 until the punctuation model has loaded
-(sprint-05 spec E10). The fallback path is for runtime degradation,
-not for permanent absence — k8s readiness gating during rollout means
-traffic only lands on workers that have the model.
-"""
+"""Liveness + readiness probes; ``/readyz`` is 503 until the punctuation model has loaded."""
 
 from __future__ import annotations
 

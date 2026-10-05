@@ -1,22 +1,14 @@
 import XCTest
 @testable import NotesAICapture
 
-/// The dual-issuer period (ADR-0047), from the phone's side.
-///
-/// During `dual` this app can be holding either kind of refresh token, and
-/// the two are not interchangeable: one idles for thirty days and can be
-/// sealed behind a face, the other idles for thirty minutes and cannot.
-/// Everything here is about the app noticing which one it has — because
-/// the failure it prevents is silent. A Keycloak session with no keepalive
-/// does not look broken; it looks fine for twenty-nine minutes and then
-/// loses a recording.
+/// The dual-issuer period (ADR-0047): the app must notice which kind of
+/// refresh token it holds (30-day gated native vs 30-minute Keycloak).
 final class DualSessionTests: XCTestCase {
 
     // MARK: - Telling the two apart
 
     func testTheTokenPrefixIsWhatDecides() {
-        // The same rule BE-2 routes `/auth/refresh` on, so the phone and
-        // the server cannot disagree about what a token is.
+        // The same rule the server routes `/auth/refresh` on.
         XCTAssertEqual(SessionKind(refreshToken: "nrt_abc"), .native)
         XCTAssertEqual(SessionKind(refreshToken: Fixtures.keycloakToken), .keycloak)
         XCTAssertEqual(SessionKind(refreshToken: ""), .keycloak,
@@ -47,10 +39,7 @@ final class DualSessionTests: XCTestCase {
     }
 
     func testAPasswordSignInStoresAKeycloakSession() async throws {
-        // `routers/login.py` honours `X-Client-Type: ios` and puts the
-        // Keycloak refresh token in the body, exactly as the native login
-        // does — so this phone holds it in the same Keychain item, and
-        // nothing here needs a cookie jar. `kind` is the whole difference.
+        // The Keycloak login also puts the refresh token in the body; `kind` is the whole difference.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -68,9 +57,7 @@ final class DualSessionTests: XCTestCase {
     }
 
     func testTheStoredKindIsReadableWithoutOpeningTheToken() async throws {
-        // The keepalive decision is made at boot, before any face prompt
-        // can be shown — so the field has to be in the clear even when the
-        // token beside it is sealed.
+        // The keepalive decision is made at boot, before any prompt: the field must be in the clear.
         let storage = InMemorySessionStorage()
         let gate = FakeGate()
         let store = SessionStore(storage: storage, gate: gate)
@@ -86,9 +73,7 @@ final class DualSessionTests: XCTestCase {
     // MARK: - The keepalive, for one kind of session only
 
     func testAKeycloakSessionRefreshesBeforeItsTokenIdlesOut() async throws {
-        // Keycloak's refresh token dies after the realm's idle timeout.
-        // Without this the app is signed out mid-meeting and finds out
-        // when it tries to upload — which is the worst possible moment.
+        // Keycloak's refresh token dies after the idle timeout; without this the upload fails.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         let refreshes = Counter()
@@ -115,9 +100,7 @@ final class DualSessionTests: XCTestCase {
     }
 
     func testANativeSessionArmsNoKeepAlive() async throws {
-        // The same 61-second access token, and this time nothing happens:
-        // a native refresh token idles for thirty days, and waking the
-        // phone every minute to prove it would cost battery for nothing.
+        // The same 61-second access token; a native session arms nothing.
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -165,8 +148,7 @@ final class DualSessionTests: XCTestCase {
     }
 
     func testTurningTheGateOffIsNeverRefused() async throws {
-        // De-escalation is honoured whatever kind of session is loaded:
-        // refusing to *remove* protection is the wrong way round.
+        // De-escalation is honoured for every kind of session.
         let storage = InMemorySessionStorage(seed: Fixtures.record(refreshToken: Fixtures.keycloakToken))
         let gate = FakeGate()
         _ = try gate.create()
@@ -178,10 +160,7 @@ final class DualSessionTests: XCTestCase {
     }
 
     func testSigningInWithAPasswordDoesNotDestroyAGateTheOwnerAskedFor() async throws {
-        // A phone that used the gate on a native session, then signed in
-        // with a password: the Keycloak session is ungated (it must be),
-        // but the gate key is left alone so the next native sign-in finds
-        // the preference the owner set.
+        // Keycloak session ungated, but the gate key is left for the next native sign-in.
         let storage = InMemorySessionStorage()
         let gate = FakeGate()
         let store = SessionStore(storage: storage, gate: gate)
@@ -195,23 +174,15 @@ final class DualSessionTests: XCTestCase {
 
     @MainActor
     func testTheGateIsNotOfferedInThisBatch() {
-        // IOS-1: built, tested, and deliberately not on screen until every
-        // session is native (I1-05). Asserted so that turning it back on
-        // is a decision somebody makes, not one that drifts in.
+        // Deliberately off until every session is native; asserted so turning it on is a decision.
         XCTAssertFalse(AppState.gateOffered)
     }
 
     // MARK: - `409 use_password`
 
     func testTheServerCanSendAnAddressToThePasswordForm() async {
-        // BE-3's answer for an address that belongs to a Keycloak account.
-        // A redirection, not a failure: the sign-in screen shows the
-        // password form and keeps the address the person just typed.
-        //
-        // On `verify`, never on `start`: the start endpoint answers 202
-        // for every address by construction, and saying "use a password"
-        // there would tell an unauthenticated caller which addresses
-        // exist. Here the code has already proved the mailbox.
+        // A Keycloak account: a redirection to the password form, keeping the
+        // address. On `verify`, never on `start` (start answers 202 for every address).
         let storage = InMemorySessionStorage()
         let client = makeClient(storage: storage)
         StubServer.install { _ in
@@ -255,9 +226,7 @@ final class DualSessionTests: XCTestCase {
     // MARK: - `409 legacy_session`
 
     func testSwitchingWorkspaceIsNativeOnly() async {
-        // Recorded in ADR-0047 up front: auth-service cannot re-mint a
-        // Keycloak token for another tenant, so this is the one capability
-        // `dual` splits by token origin.
+        // ADR-0047: a Keycloak token cannot be re-minted for another tenant.
         let storage = InMemorySessionStorage(seed: Fixtures.record(refreshToken: Fixtures.keycloakToken))
         let client = makeClient(storage: storage)
         StubServer.install { request in

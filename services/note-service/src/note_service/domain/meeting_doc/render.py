@@ -1,20 +1,7 @@
-"""Facts into the text of a document.
+"""Facts into the text of a document; deterministic, no model.
 
-Deterministic and code-only: no model touches this step. Two consequences
-worth stating, because they are the point of doing it here rather than
-asking a model to "write it up":
-
-* **Actions come out in the grammar the rest of the product reads.**
-  `Owner: task — due` is exactly what `parse_action_lines` parses back,
-  so a task written by the engine appears on the recipient's page, in the
-  carried-over block and in the corrections routes with no extra work
-  and no second parser to keep in step.
-* **Empty means empty.** A section with no verified facts is left blank.
-  Filler ("No decisions were recorded in this meeting.") reads as content,
-  costs the reader attention, and is indistinguishable from a real result
-  when you are skimming.
-
-`user_notes` is never written here. It belongs to the author (Sprint 34).
+Actions use the `Owner: task — due` grammar `parse_action_lines` reads back; an
+empty section is left blank, never filled. `user_notes` belongs to the author.
 """
 
 from __future__ import annotations
@@ -31,16 +18,12 @@ from .verify import DateMention, Figure, Person, VerifiedFact, is_copied
 _ECHOED_FACT: Final = re.compile(
     r"^\s*(?:\[\]\s*)?(?P<id>[0-9a-f]{16})\s*\([a-z_]+,\s*\d{1,2}:\d{2}\):\s*"
 )
-# "(d96df9628cf97a1b)", "(3d92…, 49dc…)" or a bare id, anywhere in a
-# bullet or a summary sentence: a small model told to cite its facts
-# writes the ids into the prose as well as into `fact_ids`.
+# Fact ids a small model writes into the prose as well as into `fact_ids`.
 _INLINE_IDS: Final = re.compile(r"\s*\(?\b(?P<ids>[0-9a-f]{16}(?:\s*,\s*[0-9a-f]{16})*)\b\)?")
 
 
-# "It was noted that …" — the flat openers a model reaches for when told
-# to be neutral. Removed; the point stands on its own. Openers that carry
-# certainty ("It was estimated that", "es wurde geschätzt") are NOT here:
-# stripping one would make an estimate a fact.
+# Flat passive openers ("It was noted that"). Openers that carry certainty
+# ("It was estimated that") are NOT here: stripping one would make an estimate a fact.
 _FLAT_OPENER: Final = re.compile(
     r"^(?:it was (?:stated|noted|mentioned|established|determined|discussed|said|"
     r"explained|pointed out|highlighted|emphasi[sz]ed) that|"
@@ -60,10 +43,8 @@ def editorial(text: str) -> str:
     return stripped
 
 
-# Where an item kind lands when the template has no section for its
-# role: a section of its own, with a heading in the notes' language.
-# `action_items` is literal because the item projection, the recipient
-# page and carry-over all read that key.
+# Section keys for roles the template lacks. `action_items` is literal: the item
+# projection, the recipient page and carry-over all read that key.
 FALLBACK_KEYS: Final[dict[str, str]] = {
     roles.DECISIONS: "decisions",
     roles.ACTION_ITEMS: "action_items",
@@ -108,16 +89,12 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
 }
 
 
-# The schema's field name written into a sentence ("… fifty-eight feet
-# fact_ids:.") — a small model's echo of the answer shape, never words.
-# "fact_ids:", "fact_id:", "(fact ids" — a schema field name echoed into
-# a line, whole or cut off (Gemma 3 4B on r03, 2026-09-27).
+# A schema field name ("fact_ids:", "(fact ids") echoed into a line, whole or cut off.
 _FIELD_LABEL: Final = re.compile(r"\s*[(\[]?\s*\bfact[_ ]?ids?\b\s*[:=]?\s*[)\]]?", re.IGNORECASE)
 
 
 def strip_inline_ids(text: str) -> tuple[str, list[str]]:
-    """The text without any fact ids the model wrote into it, and those
-    ids — they are ours, so they still count as citations."""
+    """The text without the fact ids the model wrote into it, and those ids (still citations)."""
     if _FIELD_LABEL.search(text):
         text = _FIELD_LABEL.sub(" ", text)
         text = " ".join(re.sub(r"\s+([.,;:!?])", r"\1", text).split())
@@ -132,8 +109,7 @@ def strip_inline_ids(text: str) -> tuple[str, list[str]]:
     return " ".join(cleaned.split()), found
 
 
-# Which fact kind belongs in which role. A template that has no section
-# with that role simply does not receive those facts.
+# A template without a section for the role does not receive those facts.
 KIND_TO_ROLE: Final[dict[str, str]] = {
     schema.DECISION: roles.DECISIONS,
     schema.ACTION: roles.ACTION_ITEMS,
@@ -144,15 +120,10 @@ KIND_TO_ROLE: Final[dict[str, str]] = {
     schema.NEXT_MEETING: roles.NEXT_MEETING,
 }
 
-# Agenda items are only believable from the top of the meeting: people
-# say "let's talk about X" at the start, and something that sounds like
-# an agenda item forty minutes in is usually just a topic.
+# Agenda items are only believable from the top of the meeting.
 AGENDA_FROM_FIRST_WINDOWS: Final = 2
 
-# Sprint 36 — a client call's actions read as two lists, because the
-# question a reader has is "what do I have to do". Headings are per
-# language; a side we could not work out gets its own group rather than
-# being guessed into one of the other two.
+# A client call's actions read as two lists; an unknown side gets its own group, never guessed.
 SIDE_HEADINGS: Final[dict[str, dict[str, str]]] = {
     "en": {"ours": "We do", "theirs": "{other} does", "unknown": "Still to assign"},
     "de": {"ours": "Wir übernehmen", "theirs": "{other} übernimmt", "unknown": "Noch zuzuordnen"},
@@ -160,8 +131,7 @@ SIDE_HEADINGS: Final[dict[str, dict[str, str]]] = {
 }
 
 
-# What a written line is. The eval scores lines by kind, and Q5 hangs a
-# citation off every one of them.
+# The eval scores lines by kind; every line carries a citation.
 LINE_KINDS: Final[frozenset[str]] = frozenset(
     {
         "framing",
@@ -176,7 +146,7 @@ LINE_KINDS: Final[frozenset[str]] = frozenset(
         "agenda",
         "note",
         "heading",
-        # Sprint D2 T2 — a quote sub-point, written by code from its fact.
+        # A quote sub-point, written by code from its fact.
         "quote",
     }
 )
@@ -194,11 +164,7 @@ _LINE_KIND_OF_FACT: Final[dict[str, str]] = {
 
 @dataclass(frozen=True, slots=True)
 class Line:
-    """One written line and the facts it rests on.
-
-    ``text`` is exactly a line of the section's text — never a second
-    rendering of it — so what the eval scores is what the reader sees.
-    """
+    """One written line and the facts it rests on; ``text`` is exactly the section's line."""
 
     text: str
     kind: str
@@ -242,12 +208,8 @@ def mmss(ms: int) -> str:
 
 
 def action_line(fact: VerifiedFact) -> str:
-    """``- Anna: send the pricing proposal — by Tuesday``.
-
-    The owner is omitted when we could not place one; an invented name
-    would be worse than a task nobody is holding yet. A diarizer label
-    ("Speaker 3") is nobody's name either (SQ3 T2, D-LABEL): omitted.
-    """
+    """``- Anna: send the pricing proposal — by Tuesday``; the owner is omitted when
+    unplaced or a diarizer label ("Speaker 3"), never invented."""
     from .roles_table import real_name
 
     return "- " + line_rules.render_item(
@@ -269,19 +231,11 @@ def plain_line(fact: VerifiedFact, language: str = "en") -> str:
 def patch_claim(
     text: str, facts: list[VerifiedFact], language: str = "en", *, paragraph: bool = False
 ) -> str:
-    """A record of an opinion, forecast, estimate, proposal or allegation
-    says whose it is and that it is one (Q4) — in code, from the fact's own
-    fields, never in words a model chose.
+    """A claim line names its holder (``… — laut Reinbold``) and its certainty
+    (``Voraussichtlich: …``), by code from the fact's fields.
 
-    * ``… — laut Reinbold`` / ``… (Vorschlag: Söder)`` when the holder is
-      known and the line does not already name them;
-    * ``Voraussichtlich: …`` when the line still carries no marker of its
-      certainty (a holder's "laut" is one).
-
-    ``paragraph`` (SQ3 T1): a summary sentence or the framing is a
-    paragraph, and a paragraph that opens with ``<word>: `` is read as a
-    transcript turn by every client ("VVorwurf"), so it gets the dash form
-    ``Vorwurf — …``. Bullets are list items and keep the colon.
+    ``paragraph``: a paragraph opening with ``<word>: `` reads as a transcript turn
+    on every client, so it gets the dash form; bullets keep the colon.
     """
     unsure = [f for f in facts if f.certainty in support.UNSURE_CERTAINTIES]
     if not unsure:
@@ -322,24 +276,13 @@ def render_sections(
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
-    Structure follows content, not the template. The opening block
-    (``gen:overview``, no heading) carries the framing sentence and the
-    summary — and, when there are no topics, the facts as one list. Each topic the
-    reduce step found is a section of its own, ``gen:<slug>``, headed by
-    the topic's title. Decisions, actions, open questions, risks and the
-    next meeting go to the template's section for that role when it has
-    one, else to a section of their own with a heading in the notes'
-    language — and only when there is something to put there. Nothing is
-    emitted for an empty text, and nobody is listed as an attendee:
-    the roster is the transcript's.
+    ``gen:overview`` (no heading) carries framing and summary; each topic is
+    ``gen:<slug>``; role kinds go to the template's section for the role or one of
+    their own, only when non-empty. Nobody is listed as an attendee.
 
-    ``topics`` is ``[(title, [(bullet text, its fact ids)], fact ids)]``
-    (a bare bullet string is still accepted); ``summary`` its sentences,
-    each ``(sentence, fact ids)`` or a bare string; ``framing`` the context pass's opening sentence;
-    ``key_fact_ids`` the facts a reader must know first; ``counters``
-    receives ``redundant_lines``. A meeting with one coherent subject gets
-    no topic headings at all. What was left out of the notes is not written
-    here: it is ``excluded_ranges`` on the generation, for the client.
+    ``topics`` is ``[(title, [(bullet text, fact ids)], fact ids)]`` (bare bullet
+    strings accepted); ``summary`` is ``[(sentence, fact ids)]`` or bare strings;
+    ``counters`` receives ``redundant_lines``.
     """
     keys_by_role: dict[str, list[str]] = {}
     for key, role in role_by_key.items():
@@ -349,8 +292,7 @@ def render_sections(
     out: list[RenderedSection] = []
 
     def emit(role: str, text: str, used: list[VerifiedFact], lines: list[Line]) -> None:
-        """Into the template's section for the role, or a section of its
-        own when the template has none and the role has a home."""
+        """Into the template's section for the role, else a section of its own."""
         if not text.strip():
             return
         key = (keys_by_role.get(role) or [None])[0]
@@ -371,16 +313,13 @@ def render_sections(
             )
         )
 
-    # F2 — a fact whose text copies the transcript (or speaks in its
-    # voice) is evidence: other lines may cite it, it is never a line.
+    # Evidence-only facts may be cited, never written.
     grouped: dict[str, list[VerifiedFact]] = {}
     for fact in facts:
         if not fact.evidence_only:
             grouped.setdefault(fact.kind, []).append(fact)
 
-    # Sprint 36: the family's extra kinds, each into the role its table
-    # says. Handled before the generic kinds so a family that maps, say,
-    # `risk` somewhere of its own wins.
+    # The family's extra kinds first, so a family's own mapping of a kind wins.
     extra = {
         k: r for k, r in (kind_roles or {}).items() if k not in KIND_TO_ROLE and k not in _F3_KINDS
     }
@@ -457,8 +396,7 @@ def render_sections(
             [fact_line(f, plain_line(f, language)) for f in nexts],
         )
 
-    # ── Contact (F3): what a broadcast or a presentation asks its
-    #    audience to do. Never an action item: its own section key. ─────
+    # ── Contact: what the recording asks its audience to do; never an action item ──
     contact = grouped.get(schema.NEXT_STEP, [])
     if contact:
         emit(
@@ -468,8 +406,7 @@ def render_sections(
             [Line(plain_line(f, language), "next_step", (f.item_key,)) for f in contact],
         )
 
-    # ── Key dates (Q5): what the recording scheduled or set a deadline
-    #    for, from the dates its facts' quotes named. ──────────────────
+    # ── Key dates, from the dates the facts' quotes named ───────────
     dated = key_dates([f for f in facts if not f.evidence_only], meeting_date=meeting_date)
     if dated:
         date_lines = [
@@ -498,9 +435,7 @@ def render_sections(
         if existing is None:
             emit(role, text, owned, owned_lines)
         else:
-            # A generic kind already wrote here (a family that maps an
-            # extra kind onto `risks` alongside `risk`). Append rather
-            # than replace.
+            # A generic kind already wrote here: append, do not replace.
             out[out.index(existing)] = RenderedSection(
                 section_key=existing.section_key,
                 role=role,
@@ -510,13 +445,11 @@ def render_sections(
                 lines=(*existing.lines, *owned_lines),
             )
 
-    # ── Topics: one section each, headed by what the conversation
-    #    was about there. None for a single-subject conversation. ────
+    # ── Topics: one section each; none for a single-subject conversation ──
     key_facts = [by_id[i] for i in dict.fromkeys(key_fact_ids or []) if i in by_id]
     key_facts = [f for f in key_facts if f.kind not in (schema.COMPLETION, schema.JUDGEMENT)]
 
-    # The summary sentences, as written, with what they cite — a bullet
-    # that says what a sentence already says is not written again (Q3).
+    # A bullet that says what a summary sentence already says is not written again.
     sentences: list[tuple[str, list[str]]] = []
     for entry in summary or []:
         sentence, cited_ids = (entry, []) if isinstance(entry, str) else entry
@@ -525,9 +458,7 @@ def render_sections(
         if written.strip():
             sentences.append((written, own))
 
-    # F3 — figures are written by code from their verified fields: in the
-    # topic that cites them (a table from three on), else in a section of
-    # their own. A model bullet that only restates figures is not written.
+    # Figures are written by code from their fields; a bullet that only restates them is dropped.
     figures = _merged_figures([f for f in facts if f.figure is not None])
     figure_ids = {i for group in figures for i in group.ids}
     figure_topic: dict[str, str] = {}
@@ -543,17 +474,14 @@ def render_sections(
             if fact_id in figure_ids:
                 figure_topic.setdefault(fact_id, title.strip())
 
-    # A topic's figures count towards it being a topic: its bullets may all
-    # have been the figures the table now says.
+    # A topic's figures count towards it being a topic.
     figures_by_title: dict[str, int] = {}
     for group in figures:
         home = next((figure_topic[i] for i in group.ids if i in figure_topic), None)
         if home is not None:
             figures_by_title[home] = figures_by_title.get(home, 0) + 1
 
-    # One fact, once (Q3): what a decision, task or question section
-    # already carries, and what an earlier topic already said, is not a
-    # bullet again.
+    # One fact, once: already-rendered facts are not a bullet again.
     rendered: set[str] = {f.item_key for section in out for f in section.facts}
     redundant = 0
     drafts: list[tuple[str, list[Line], list[VerifiedFact], int]] = []
@@ -563,9 +491,8 @@ def render_sections(
         cited = [by_id[i] for i in fact_ids if i in by_id]
         topic_lines: list[Line] = []
         for entry in bullets:
-            # A bullet is ``(text, its fact ids)`` or, with sub-points (F2),
-            # ``(text, ids, [(child text, child ids)])``; a bare string is
-            # the older shape and cites the topic's facts.
+            # ``(text, ids)``, ``(text, ids, [(child text, child ids)])``, or a bare
+            # string citing the topic's facts.
             children: list[tuple[str, list[str]]] = []
             if isinstance(entry, str):
                 bullet, own_ids = entry, list(fact_ids)
@@ -581,8 +508,7 @@ def render_sections(
                 redundant += 1  # the figure lines say it, with the value as spoken
                 continue
             ids = set(_ids(own_facts))
-            # Parent and sub-points are one unit (F2): a parent already said
-            # takes its sub-points with it.
+            # A parent already said takes its sub-points with it.
             if ids and (ids <= rendered or _said_by(bullet, ids, sentences, language)):
                 redundant += 1
                 continue
@@ -596,8 +522,7 @@ def render_sections(
             for entry in children[:MAX_CHILDREN]:
                 child_text, child_ids = entry[0], entry[1]
                 if len(entry) > 2 and entry[2] == "quote":
-                    # Sprint D2 T2 — a quote sub-point, written by code from
-                    # its fact's own quote: rendered as it is, never patched.
+                    # A quote sub-point: rendered from the fact's quote, never patched.
                     quoted = [by_id[i] for i in child_ids if i in by_id]
                     if not quoted:
                         continue
@@ -622,8 +547,7 @@ def render_sections(
         first = min((f.start_ms for f in cited), default=10**12)
         drafts.append((title.strip(), topic_lines, cited, first))
 
-    # A recording is read in its order (Q3), and a topic is two points or
-    # more: a lone bullet joins the topic before it.
+    # Recording order; a topic is two points or more, a lone bullet joins the one before.
     drafts.sort(key=lambda d: d[3])
     kept_topics: list[tuple[str, list[Line], list[VerifiedFact]]] = []
     orphans: list[Line] = []
@@ -637,10 +561,7 @@ def render_sections(
             kept_topics[-1] = (prev_title, [*prev_lines, *topic_lines], [*prev_cited, *cited])
         else:
             orphans.extend(topic_lines)
-    # F3 amendment §2.9 — bullets live only under headings: a single subject
-    # keeps its heading (it no longer dissolves into a list above the
-    # first heading), and a lone bullet with no topic to join is left to the
-    # Detailed view.
+    # Bullets live only under headings; a lone bullet with no topic is left to the Detailed view.
     if kept_topics and orphans:
         title, lines_, cited = kept_topics[-1]
         kept_topics[-1] = (title, [*lines_, *orphans], cited)
@@ -662,7 +583,7 @@ def render_sections(
             )
         )
 
-    # ── Figures (F3) ─────────────────────────────────────────────────
+    # ── Figures ──────────────────────────────────────────────────────
     by_title = {section.title: n for n, section in enumerate(topic_sections)}
     homeless: list[_FigureGroup] = []
     placed: dict[int, list[_FigureGroup]] = {}
@@ -672,17 +593,14 @@ def render_sections(
             placed.setdefault(by_title[home], []).append(group)
         else:
             homeless.append(group)
-    # A topic with too few figures for a table of its own lends them to one
-    # Specifications table when, together, they are enough for one.
+    # Topics with too few figures for a table pool them into one Specifications table.
     small = {i: g for i, g in placed.items() if len(g) < MIN_TABLE_FIGURES}
     pooled = [g for groups in small.values() for g in groups] + homeless
     if len(pooled) >= MIN_TABLE_FIGURES and small:
         for i in small:
             del placed[i]
         homeless = sorted(pooled, key=lambda g: g.facts[0].start_ms)
-    # F3 amendment §2.4 — figures form a block only in a demo or a lecture,
-    # or where three or more give at least two measured quantities. Anywhere
-    # else they stay in the statements that say them (stored as rows).
+    # Figures form a block only in a demo/lecture or when measured; else they stay in statements.
     placed = {i: g for i, g in placed.items() if figure_tables or _measured(g)}
     if not (figure_tables or _measured(homeless)):
         homeless = []
@@ -699,21 +617,14 @@ def render_sections(
         text, figure_lines = _figure_block(homeless, language)
         emit(roles.SPECIFICATIONS, text, [f for g in homeless for f in g.facts], figure_lines)
 
-    # ── The opening block: no heading. It is the note. ──────────────
-    # F3 amendment §2.9: two paragraphs of prose, never a list. Paragraph 1
-    # — what this recording is (``framing``: composed by code, the model's
-    # framing only as its first clause). Paragraph 2 — the summary sentences,
-    # one paragraph, each its own cited line. The facts live under their
-    # headings; what was left out is data for the client (Q3).
+    # ── The opening block: no heading, two paragraphs of prose, never a list ──
     overview: list[tuple[str, list[Line]]] = []
     first_lines: list[Line] = []
     if framing.strip():
         framed = editorial(strip_inline_ids(framing)[0])
         first_lines.append(Line(framed, "framing", _ids(key_facts) or _ids(facts)))
-    # SQ3 T1/T2 — who presented and who was a guest are named once, in the
-    # framing's "Es sprechen …" (compose.speakers_of). The F3 lines
-    # ("Gast: X", "Präsentiert von: …") are no longer written: a paragraph
-    # that opens "<word>: " reads as a transcript turn on every client.
+    # Presenter/guest are named in the framing (compose.speakers_of); a "Gast: X"
+    # paragraph would read as a transcript turn on every client.
     del presenter_lines
     if first_lines:
         overview.append(("\n".join(line.text for line in first_lines), first_lines))
@@ -748,15 +659,11 @@ def render_sections(
 def _bullet_text(
     text: str, own_ids: list[str], by_id: dict[str, VerifiedFact]
 ) -> tuple[str, list[VerifiedFact]] | None:
-    """A model-written bullet, cleaned, with the facts it cites — or None
-    when there is nothing to write: an empty line, an echoed fact that is
-    evidence only, or a line that copies the quote of a fact it cites (F2:
-    a transcript sentence is evidence, not a statement)."""
+    """A model-written bullet, cleaned, with the facts it cites; None for an empty
+    line, an echoed evidence-only fact, or a copy of a cited quote."""
     own = [by_id[i] for i in own_ids if i in by_id]
     bullet = editorial(text)
-    # The reduce prompt lists facts as "id (kind, mm:ss): text" and a small
-    # model may echo the whole line as a bullet. The id is ours: swap in
-    # that fact's text and cite it — unless the fact is evidence only.
+    # A small model may echo the prompt's "id (kind, mm:ss): text" line: swap in the fact.
     echoed = _ECHOED_FACT.match(bullet)
     if echoed is not None:
         fact = by_id.get(echoed.group("id"))
@@ -777,10 +684,10 @@ def _bullet_text(
     return bullet, own
 
 
-# F2 — a bullet may carry up to three sub-points, one level deep.
+# Sub-points per bullet, one level deep.
 MAX_CHILDREN: Final = 3
 
-# ── F3: figures, presenter ─────────────────────────────────────────
+# ── Figures, presenter ─────────────────────────────────────────────
 
 _F3_KINDS: Final = frozenset({schema.FIGURE, schema.INTRODUCTION, schema.NEXT_STEP})
 # From this many figures on, one subject's figures are a table.
@@ -797,8 +704,7 @@ PRESENTER_LABELS: Final[dict[str, tuple[str, str, str]]] = {
     "de": ("Präsentiert von", "Vorgestellt", "bei"),
     "uk": ("Ведучий", "Представлено", "—"),
 }
-# F3 amendment — a speaker with turns of their own who is not the recording's
-# voice.
+# A speaker with turns of their own who is not the recording's voice.
 GUEST_LABELS: Final[dict[str, str]] = {"en": "Guest", "de": "Gast", "uk": "Гість"}
 
 
@@ -894,8 +800,7 @@ _ARTICLE: Final = re.compile(r"^(?:a|an|the|ein|eine|einen|der|die|das)\s+", re.
 
 
 def presenter_text(person: Person, language: str = "en") -> str:
-    """ "Presenter: Mitchell, broker with Springbrook Marine Group (Pardo
-    dealer for the Great Lakes)" — from the verified fields only."""
+    """ "Presenter: Mitchell, broker with Springbrook Marine Group" from the verified fields."""
     label_self, label_other, joiner = PRESENTER_LABELS.get(language, PRESENTER_LABELS["en"])
     role = _ARTICLE.sub("", person.role).strip()
     org = person.organisation.strip()
@@ -952,13 +857,8 @@ def _said_by(
 def key_dates(
     facts: list[VerifiedFact], *, meeting_date: date | None = None
 ) -> list[tuple[date, time | None, VerifiedFact, DateMention | None]]:
-    """``[(date, time, fact, mention)]``, one per distinct date and time, in
-    order — what the recording scheduled or set a deadline for.
-
-    From the dates the facts' QUOTES named (Q3) and from resolved due
-    dates. Not the recording day itself (every "heute" would be a key date)
-    and not a past event ("am Montag … gewesen"): a reader looks here for
-    what is coming. An unparsed phrase ("Ende des Jahres") is not a date."""
+    """``[(date, time, fact, mention)]``, one per distinct date and time, in order,
+    from the quotes' dates and resolved due dates; not the recording day, not past events."""
     seen: dict[tuple[date, time | None], tuple[VerifiedFact, DateMention | None]] = {}
     for fact in sorted(facts, key=lambda f: f.start_ms):
         found: list[tuple[date, time | None, DateMention | None]] = [
@@ -987,8 +887,7 @@ def format_when(when: date, clock: time | None, language: str) -> str:
 
 
 def _with_dates(section: RenderedSection, by_id: dict[str, VerifiedFact]) -> RenderedSection:
-    """Every line carries the dates its facts mention (Q3). The text is
-    not touched: a date is an annotation, never a rewrite."""
+    """Every line carries the dates its facts mention; an annotation, never a rewrite."""
     lines = tuple(
         replace(
             line,
@@ -1002,13 +901,7 @@ def _with_dates(section: RenderedSection, by_id: dict[str, VerifiedFact]) -> Ren
 
 
 def action_text(actions: list[VerifiedFact], *, language: str = "en", counterpart: str = "") -> str:
-    """One list, or two groups when the facts carry a side.
-
-    The reader of a client note is asking "what do I have to do", and a
-    single list of eight tasks does not answer it. A side nobody could
-    work out gets its own group — visible, rather than guessed into
-    somebody's column.
-    """
+    """One list, or two groups when the facts carry a side; an unknown side is its own group."""
     sided = [f for f in actions if f.side]
     if not sided:
         return "\n".join(action_line(f) for f in actions)
@@ -1060,11 +953,7 @@ def action_lines(
 
 
 def attendees_from(facts: list[VerifiedFact]) -> list[str]:
-    """The people we can name, in the order they first spoke.
-
-    Only named speakers: "Speaker 2" in an attendee list is noise, and
-    the roster UI is where a person gets named.
-    """
+    """Named speakers only, in the order they first spoke."""
     seen: dict[str, None] = {}
     for fact in sorted(facts, key=lambda f: f.start_ms):
         if fact.speaker_name and fact.speaker_name not in seen:

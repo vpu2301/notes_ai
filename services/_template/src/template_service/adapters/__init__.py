@@ -1,4 +1,1 @@
-"""Adapter layer — DB, HTTP clients, message bus, etc.
-
-Adapters depend on ``domain``; ``domain`` does not depend on adapters.
-"""
+"""Adapter layer (DB, HTTP, bus); depends on ``domain``, never the reverse."""

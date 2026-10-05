@@ -3,18 +3,9 @@ import CryptoKit
 import Foundation
 import UIKit
 
-/// The OAuth 2.1 dance remote MCP servers expect from a native client
-/// (the MCP authorization spec): discover the authorization server from
-/// the resource's metadata, register this app as a client on the fly
-/// (RFC 7591), send the user to the browser with PKCE, and swap the code
-/// for tokens. The callback comes back on the app's own URL scheme,
-/// `notesai://oauth/callback`, which ASWebAuthenticationSession intercepts.
-///
-/// Unlike the Mac app there is no loopback (`http://localhost:…`) redirect:
-/// a phone app in the background cannot answer Safari's request. Servers
-/// that do not register apps themselves need an app on their side whose
-/// redirect URL is the `notesai://` one (or they cannot be connected from
-/// the phone — connect them from the Mac or the web app instead).
+/// OAuth 2.1 for remote MCP servers: discovery, dynamic registration (RFC 7591),
+/// PKCE in the browser, code exchange. Callback on `notesai://oauth/callback`;
+/// no loopback redirect on a phone, so servers without registration need an app of their own.
 enum MCPOAuth {
     static let redirectScheme = "notesai"
     static let redirectURI = "notesai://oauth/callback"
@@ -31,8 +22,7 @@ enum MCPOAuth {
         }
     }
 
-    /// What the app keeps per server so refreshes and re-logins work
-    /// without rediscovering everything.
+    /// What the app keeps per server so refreshes and re-logins skip discovery.
     struct Registration: Codable, Equatable, Sendable {
         var authorizationEndpoint: URL
         var tokenEndpoint: URL
@@ -66,9 +56,7 @@ enum MCPOAuth {
 
     // MARK: - Discovery
 
-    /// RFC 9728 protected-resource metadata → RFC 8414 / OIDC server
-    /// metadata. Falls back to `<origin>/.well-known/…` when the 401 gave
-    /// no hint, which is how older servers behave.
+    /// RFC 9728 resource metadata → RFC 8414 / OIDC server metadata; falls back to `<origin>/.well-known/…`.
     static func discover(server: URL, resourceMetadataURL: URL?) async throws -> (authorizationServer: URL, metadata: [String: Any]) {
         var origin = URLComponents()
         origin.scheme = server.scheme
@@ -91,8 +79,7 @@ enum MCPOAuth {
             authorizationServers = servers.compactMap(URL.init(string:))
             if !authorizationServers.isEmpty { break }
         }
-        // No resource metadata: the MCP server's own origin may be the
-        // authorization server.
+        // No resource metadata: the server's own origin may be the authorization server.
         if authorizationServers.isEmpty { authorizationServers = [originURL] }
 
         for authServer in authorizationServers {
@@ -126,8 +113,7 @@ enum MCPOAuth {
 
     // MARK: - Dynamic client registration
 
-    /// Register this app with the server, or — when the user brought their
-    /// own client id — use that with the app's URL-scheme redirect.
+    /// Register this app with the server, or use the user's own client id.
     static func register(server: URL, metadata: [String: Any],
                          clientId: String? = nil, clientSecret: String? = nil) async throws -> Registration {
         guard let authorizationEndpoint = (metadata["authorization_endpoint"] as? String).flatMap(URL.init(string:)),
@@ -289,9 +275,7 @@ private extension CharacterSet {
     }()
 }
 
-/// One ASWebAuthenticationSession at a time, presented over the key
-/// window. Shared by the MCP sign-in and the Google Calendar connect flow —
-/// both come back on the `notesai://` scheme.
+/// One ASWebAuthenticationSession at a time; shared by MCP sign-in and Google Calendar connect.
 @MainActor
 final class BrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = BrowserSession()

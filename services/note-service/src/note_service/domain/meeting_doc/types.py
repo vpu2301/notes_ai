@@ -1,20 +1,6 @@
-"""What each kind of meeting needs, as one declarative table.
-
-A sales discovery call, a 1:1 and a client status call are not the same
-document. The engine could grow a branch per type; instead every
-difference between them lives here, as data:
-
-* which **fact kinds** the extractor may return for that family, and which
-  template section each kind lands in;
-* which **judgement fields** may be *suggested* (never set) for it;
-* whether a note of that type may leave the workspace at all.
-
-Adding a type is a row here plus a template seed. Turning a kind off
-because it is not precise enough is deleting one entry — configuration,
-not code (Sprint 36's kind kill-switch).
-
-Everything here is pure data and pure functions; nothing imports the
-engine, so the clients and the routes can read the same table.
+"""What each kind of meeting needs, as one declarative table: fact kinds and
+their roles, judgement fields that may be suggested, whether a client version
+exists. Pure data and functions; nothing imports the engine.
 """
 
 from __future__ import annotations
@@ -22,12 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
-# ── Section roles ───────────────────────────────────────────────────
-#
-# The vocabulary lives in `roles.py` (Sprint 33), which is also what the
-# engine, the shared page, the action-item projection and the PDF decide
-# by. Re-exported here — NOT redefined — so a family table and a renderer
-# can never disagree about what "topics" means.
+# ── Section roles: re-exported from `roles.py`, never redefined ─────
 from .roles import (  # noqa: F401  (re-exported for this module's readers)
     ACTION_ITEMS,
     AGENDA,
@@ -74,13 +55,10 @@ class Family:
     client_version: bool = True
     """Whether a client version and a follow-up draft may be built at all."""
     excluded_kinds: frozenset[str] = frozenset()
-    """Generic kinds this family does NOT offer (Summary Engine v2, Q3). A
-    broadcast has no decisions and no tasks: the enum the model answers
-    with does not contain them, so no prompt can talk it into them."""
+    """Generic kinds this family does NOT offer: the enum the model answers with omits them."""
 
 
-# Kinds every family extracts. The engine (Sprint 33) owns their meaning;
-# the roles they land in are here so one table answers "where does this go".
+# Kinds every family extracts, and where each lands.
 GENERIC_KINDS: Final[dict[str, Role]] = {
     "decision": DECISIONS,
     "action": ACTION_ITEMS,
@@ -89,14 +67,10 @@ GENERIC_KINDS: Final[dict[str, Role]] = {
     "user_point": USER_NOTES,
     "agenda_item": AGENDA,
     "completion": ACTION_ITEMS,
-    # F3 — every family: a meeting's budget numbers deserve the same
-    # verification as a walkthrough's specifications.
     "figure": SPECIFICATIONS,
 }
 
-# Internal by nature, in every family: what the author thinks about the
-# other side, what the model is unsure of, and anything the author typed
-# for themselves. A client version drops these before anyone asks.
+# Internal in every family; a client version drops these.
 ALWAYS_INTERNAL: Final[frozenset[str]] = frozenset({"user_point", "judgement"})
 
 FAMILIES: Final[tuple[Family, ...]] = (
@@ -139,8 +113,6 @@ FAMILIES: Final[tuple[Family, ...]] = (
             "competitor_mention": TOPICS,
         },
         judgement_fields=("deal_stage",),
-        # What the buyer objected to, and what we know about their budget
-        # and their other vendors, is ours — not theirs.
         internal_kinds=frozenset({"objection", "competitor_mention", "budget_timeline"}),
     ),
     Family(
@@ -166,14 +138,10 @@ FAMILIES: Final[tuple[Family, ...]] = (
         default_visibility="private",
         client_version=False,
     ),
-    # Q3 — recordings that are not meetings. No template of their own: the
-    # note keeps the one it was made with; only the kinds offered change.
+    # Recordings that are not meetings: no template of their own, only the kinds change.
     Family(
         meeting_type="broadcast",
         template_prefix="broadcast",
-        # F3 — who presents, and what the audience is asked to do. A
-        # presenter is a line under the framing sentence (render), not a
-        # section; a call to action is the Contact section.
         extra_kinds={"introduction": ATTENDEES, "next_step": CONTACT},
         excluded_kinds=frozenset({"decision", "action", "agenda_item", "completion"}),
         client_version=False,
@@ -187,8 +155,7 @@ FAMILIES: Final[tuple[Family, ...]] = (
     ),
 )
 
-# What a recording IS (Q3): decided before extraction, by the author's
-# choice or by `classify`, and mapped onto the family that extracts it.
+# Decided before extraction (author's choice or `classify`), mapped onto a family.
 RECORDING_TYPES: Final[tuple[str, ...]] = (
     "meeting",
     "client_call",
@@ -198,7 +165,6 @@ RECORDING_TYPES: Final[tuple[str, ...]] = (
     "podcast_broadcast",
     "lecture_webinar",
     "voice_memo",
-    # F3 — one person demonstrating a product, a place or an object.
     "presentation_demo",
 )
 _FAMILY_OF_RECORDING: Final[dict[str, str]] = {
@@ -230,11 +196,7 @@ def family_for_type(meeting_type: str | None) -> Family:
 
 
 def family_for_template(template_code: str | None) -> Family:
-    """The family a template belongs to, by code prefix.
-
-    Longest prefix first, so `client_call_uk` does not match a shorter
-    family that happens to be a prefix of it.
-    """
+    """The family a template belongs to, by code prefix (longest first)."""
     code = (template_code or "").lower()
     for fam in sorted(FAMILIES, key=lambda f: -len(f.template_prefix)):
         if code.startswith(fam.template_prefix):
@@ -260,10 +222,8 @@ def recording_type_for_meeting_type(meeting_type: str | None) -> str:
 
 
 def detected_value(recording_type: str) -> str:
-    """What `note_meetings.meeting_type_detected` stores for a recording
-    type: the meeting-type word for the six meeting kinds (the column's
-    vocabulary since 0051), the recording type itself for the three 0058
-    added."""
+    """What `note_meetings.meeting_type_detected` stores: the meeting-type word for
+    meeting kinds, the recording type itself otherwise."""
     family = _FAMILY_OF_RECORDING.get(recording_type, "auto")
     if family in ("broadcast", "memo"):
         return recording_type
@@ -276,7 +236,5 @@ def is_internal_kind(family: Family, kind: str) -> bool:
 
 
 def supports_client_version(family: Family) -> bool:
-    """A 1:1 and an interview debrief have no client. Building one would
-    be building a way to send a colleague's performance conversation, or a
-    candidate's assessment, outside the workspace."""
+    """A 1:1 and an interview debrief have no client version: nothing of them leaves the workspace."""
     return family.client_version

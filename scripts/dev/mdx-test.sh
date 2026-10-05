@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
-# mdx-test.sh — a structured CLI for exercising the Notes AI backend
-# end to end from the terminal.
-#
-# Every subcommand prints what it runs, the HTTP status / response it got, and
-# a coloured PASS/FAIL line. Nothing here mutates production: it targets the
-# local dev stack (`make dev-up`) only.
-#
-#   bash scripts/dev/mdx-test.sh <command> [args]
-#   bash scripts/dev/mdx-test.sh help
-#
-# Most commands honour env overrides so you can point at non-default ports:
-#   KEYCLOAK_URL  AUTH_URL  ASR_URL  DICTATION_URL  NLP_URL  NOTE_URL
-#   AUTOCOMPLETE_URL  NOTIFICATION_URL  GENERATION_URL
-#   USERNAME  PASSWORD  REALM  CLIENT_ID
+# mdx-test.sh: exercise the backend end to end against the local dev stack.
+#   bash scripts/dev/mdx-test.sh <command> [args] | help
+# Env overrides: KEYCLOAK_URL AUTH_URL ASR_URL DICTATION_URL NLP_URL NOTE_URL
+#   AUTOCOMPLETE_URL NOTIFICATION_URL GENERATION_URL USERNAME PASSWORD REALM CLIENT_ID
 set -uo pipefail
 
 # ── Config (override via env) ─────────────────────────────────────────────

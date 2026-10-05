@@ -1,9 +1,5 @@
-"""Per-user hourly clip-creation limiter (Redis fixed window, fail-open).
-
-Replay is review, not export: 30 clips/user/hour keeps the endpoint
-useless for bulk content extraction while never getting in the way of
-an author spot-checking a note. Same INCR+EXPIRE shape as the sprint-10
-phrase-write limiter.
+"""Per-user hourly clip-creation limiter (Redis fixed window, fail-open): keeps
+the endpoint useless for bulk extraction.
 """
 
 from __future__ import annotations

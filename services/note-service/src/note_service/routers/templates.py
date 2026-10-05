@@ -178,10 +178,7 @@ async def get_template(
     state = get_state()
     cached = state.template_cache.get(tenant_id=claims.tid, template_id=template_id)
     if cached is not None:
-        # Read row metadata from cached object; for created_at / updated_at
-        # we still need a small read. To keep it fast for the hot path we
-        # cache the metadata, not just schema_jsonb, in a future revision.
-        # Sprint 06: cache holds schema_jsonb only; do a cheap row read here.
+        # The cache holds schema_jsonb only; created_at / updated_at need a cheap row read.
         pass
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
@@ -439,7 +436,7 @@ async def deprecate_template(
     return {"status": "deprecated"}
 
 
-# ── Bound notes + re-bind (sprint-17 admin console) ───────────────
+# ── Bound notes + re-bind (admin console) ─────────────────────────
 
 
 @router.get(

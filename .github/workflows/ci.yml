@@ -15,12 +15,13 @@ env:
   UV_VERSION: "0.4.29"
 
 jobs:
-  # ──────────────────────────────────────────────────────────────
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v5
         with:
@@ -50,12 +51,13 @@ jobs:
             libs/audit/src/ \
             libs/messaging/src/
 
-  # ──────────────────────────────────────────────────────────────
   import-linter:
     name: Architectural contracts (import-linter)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -70,19 +72,19 @@ jobs:
       - name: lint-imports
         run: make lint-imports   # single definition lives in the Makefile
 
-  # ──────────────────────────────────────────────────────────────
   gates:
     name: Architectural gates (custom scanners)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
-      # Same gate targets `make ci` runs locally — invoked via make so the
-      # gate definitions have ONE source of truth and CI cannot drift from it.
+      # Via make so the gate definitions have one source of truth.
       - name: Custom architectural gates
         run: |
           make check-no-os-environ
@@ -99,15 +101,14 @@ jobs:
           make check-no-eval-audio
           make check-routing-report
 
-  # ──────────────────────────────────────────────────────────────
-  # S16 deployment: the Helm chart must render (staging + prod), the
-  # prod render must be secret-clean, and the chart's vendored ops
-  # files must match their repo source of truth.
+  # Chart renders, prod render is secret-clean, vendored ops files match source.
   k8s-render:
     name: K8s chart render & gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -119,12 +120,13 @@ jobs:
       - name: Render + gate
         run: make check-k8s-rendered
 
-  # ──────────────────────────────────────────────────────────────
   test:
     name: Tests (coverage ≥ 80%)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v5
         with:
@@ -157,19 +159,9 @@ jobs:
           files: services/_template/coverage.xml
           flags: template-service
 
-  # ──────────────────────────────────────────────────────────────
-  # Web (IDX-W1): nothing ran `web/` in CI before, so its type errors and
-  # its auth-flow tests only failed on somebody's laptop. The error-copy
-  # test reads docs/api/error-codes.md from the repo, so this job needs the
-  # whole checkout, not just web/.
-  #
-  # The type-check covers `web/e2e/` as well, so a browser spec that does
-  # not compile fails here rather than after a stack comes up. Running
-  # those specs is NOT part of this job and is not an oversight: the
-  # first-use test waits on a real transcription, and the asr-worker image
-  # bakes whisper-large-v3 (2.7 GiB) — not something to build on every
-  # push. `make web-e2e` runs them against the dev stack; see web/README.md.
-  # ──────────────────────────────────────────────────────────────
+  # Needs the whole checkout (error-copy test reads docs/api/error-codes.md).
+  # Type-checks web/e2e/ but does not run it: those specs need a live stack
+  # (`make web-e2e`).
   web:
     name: Web — type-check, tests, build
     runs-on: ubuntu-latest
@@ -188,29 +180,21 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
-      # Sprint 20: recipient comments are text. The only raw-HTML sink is
-      # the locally generated QR code; anything else is a red build.
+      # The only raw-HTML sink allowed is the locally generated QR code.
       - name: No raw HTML from data
         run: npm run check:no-danger
       - name: Production build
         run: npm run build
 
-  # ──────────────────────────────────────────────────────────────
-  # Summary Engine v2 (Q6 T4): the document engine without a model. The
-  # engine tests against the scripted provider, the gold-format validator
-  # on the committed fixtures, and the regression checklists for m06/m09/
-  # m10 with the scripted provider — only the checks the engine guarantees
-  # whatever a model says (named speakers, the audit's strings, every line
-  # cited). Deterministic and offline; the model-quality numbers are the
-  # self-hosted `nightly-notes` workflow's job. Scoped to PRs touching the
-  # engine, the eval scripts or the fixtures.
-  # ──────────────────────────────────────────────────────────────
+  # Document engine with the scripted provider: deterministic and offline.
+  # Model-quality numbers are the self-hosted `nightly-notes` workflow's job.
   notes-engine:
     name: Notes engine — scripted
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: true
           fetch-depth: 0
 
       - name: Touches the engine?
@@ -263,13 +247,6 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py --backend scripted
 
-  # ──────────────────────────────────────────────────────────────
-  # macOS capture app (IDX-M1). The Swift half of the estate had never
-  # been built by CI: its type errors only ever failed on somebody's
-  # laptop, and the session tests added in M1 are exactly the kind that
-  # must not rot. A macOS runner is the only way to compile SwiftUI, so
-  # the job is scoped to changes under `macos/` and runs nothing else.
-  # ──────────────────────────────────────────────────────────────
   macos-app:
     name: macOS app — build & tests
     runs-on: macos-15
@@ -285,21 +262,8 @@ jobs:
       - name: Tests
         run: swift test
 
-  # ──────────────────────────────────────────────────────────────
-  # MAC-0 item 2 — the signup smoke: an account created through the API,
-  # signed in with the app's own client, one second of audio uploaded, and
-  # the note asserted in Recents. The only test in the macOS target that
-  # answers a real server rather than a stub.
-  #
-  # It cannot bring its own stack: GitHub's macOS runners have no Docker,
-  # and the app under test only builds on macOS. So it points at a running
-  # deployment supplied as secrets. With no `MAC_SMOKE_AUTH_URL` secret the
-  # job is skipped outright — a repository without a staging stack must not
-  # go red for the absence of one.
-  #
-  # `if:` also lists the paths BE-0 touches, so a change to the signup
-  # endpoints re-runs this without waiting for someone to remember.
-  # ──────────────────────────────────────────────────────────────
+  # Signup smoke against a live stack supplied as secrets (macOS runners
+  # have no Docker); skipped unless MAC_SMOKE_ENABLED.
   macos-signup-smoke:
     name: macOS app — signup smoke (live stack)
     runs-on: macos-15
@@ -315,8 +279,7 @@ jobs:
       MAC_SMOKE_FIXTURE: ${{ secrets.MAC_SMOKE_FIXTURE }}
     steps:
       - uses: actions/checkout@v4
-      # A missing secret would otherwise show up as a silent `XCTSkip`
-      # inside a green job, which is the one outcome worse than red.
+      # A missing secret would otherwise be a silent XCTSkip in a green job.
       - name: Stack is configured
         run: |
           for name in MAC_SMOKE_AUTH_URL MAC_SMOKE_ASR_URL MAC_SMOKE_NOTE_URL MAC_SMOKE_FIXTURE; do
@@ -338,31 +301,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Xcode version
         run: xcodebuild -version
-      # Compiles every source against the iOS SDK without an Xcode build;
-      # the fastest way to fail on a syntax or type error.
       - name: Type-check
         run: scripts/check.sh
       - name: Tests
         run: scripts/test.sh "iPhone 16"
-      # IDX-I1 L: a shipped build must not allow arbitrary loads. Asserted
-      # on the built product, because the ATS policy is produced by the
-      # Info.plist preprocessor and not written literally anywhere.
+      # ATS is asserted on the built product (the policy comes from the Info.plist preprocessor).
       - name: Release build
         run: scripts/build-sim.sh Release
       - name: App Transport Security
         run: scripts/check-ats.sh
-      # IOS-0's smoke — sign in as a web-created account, capture a second,
-      # see the note in Recents. It needs a whole stack (auth, note, asr and
-      # an asr-worker that bakes whisper-large-v3, 2.7 GiB) and this runner
-      # is macOS with no Docker, so the job cannot bring one up: the same
-      # decision, for the same reason, as the web job's Playwright suite.
-      # Set the repository variable NOTES_STACK_HOST to a reachable stack
-      # and both halves run; leave it unset and this is a visible skip
-      # rather than a green tick that means nothing.
-      #
-      # `scripts/test.sh` above already compiles and links `LiveStackTests`
-      # on every push, so the smoke cannot rot silently while it waits for
-      # a stack — which is the failure mode a disabled test usually has.
+      # Needs a live stack (no Docker on macOS runners); visible skip without
+      # NOTES_STACK_HOST. LiveStackTests are still compiled on every push.
       - name: End-to-end smoke (needs a stack)
         if: vars.NOTES_STACK_HOST != ''
         env:
@@ -372,10 +321,7 @@ jobs:
           cd .. && make smoke-ios ARGS="--auth http://$NOTES_STACK_HOST:8000 \
             --asr http://$NOTES_STACK_HOST:8001 --note http://$NOTES_STACK_HOST:8006"
 
-  # ──────────────────────────────────────────────────────────────
-  # Secret scan (DEP-S1-05): a token in any commit fails the push. Same
-  # config as `make secret-scan`; full history so a squashed leak is found.
-  # ──────────────────────────────────────────────────────────────
+  # Same config as `make secret-scan`; full history so a squashed leak is found.
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -388,12 +334,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
 
-  # ──────────────────────────────────────────────────────────────
-  # HF endpoint drift (DEP-S1-01): specs are schema-checked on every PR;
-  # when the staging token is available the live endpoints are diffed and
-  # drift fails the job. `apply` is never run from CI on a PR — see
-  # .github/workflows/hf-endpoints-apply.yml (manual, environment-protected).
-  # ──────────────────────────────────────────────────────────────
+  # `apply` is never run from a PR; see hf-endpoints-apply.yml (manual).
   hf-endpoints-plan:
     name: HF endpoints — validate + plan
     runs-on: ubuntu-latest
@@ -412,12 +353,13 @@ jobs:
           HF_NAMESPACE: ${{ vars.HF_NAMESPACE }}
         run: uv run python scripts/models/hf_endpoints.py plan --env staging
 
-  # ──────────────────────────────────────────────────────────────
   security:
     name: Security scans (bandit + semgrep)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v5
         with:
@@ -447,12 +389,13 @@ jobs:
             p/owasp-top-ten
             p/secrets
 
-  # ──────────────────────────────────────────────────────────────
   container-scan:
     name: Build & scan container (trivy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Build Docker image
         run: |
@@ -478,7 +421,6 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-  # ──────────────────────────────────────────────────────────────
   publish:
     name: Build & push to GHCR
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -489,6 +431,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

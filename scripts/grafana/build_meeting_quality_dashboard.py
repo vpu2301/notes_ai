@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
-"""Build infra/grafana/dashboards/meeting-quality.json (the admin view).
+"""Build infra/grafana/dashboards/meeting-quality.json (admin view, numbers only).
+Every query runs as ``funnel_reader``, whose column grants stop at metadata.
 
-    uv run python scripts/grafana/build_meeting_quality_dashboard.py          # write
-    uv run python scripts/grafana/build_meeting_quality_dashboard.py --check  # CI: in sync?
-
-One row per real recording: how the transcript went (duration, language,
-confidence, coverage, guards, speakers, spellings) and how the note went
-(writer, model, prompt version, facts, unsupported lines, open lint
-findings). Every query runs as ``funnel_reader`` (migrations 0046/0060/0067),
-whose column grants stop at metadata: no transcript text, no note text, no
-title, no name or spelling can be selected. The SQL lives here, not inline
-in the JSON, so it can be read and reviewed.
+    uv run python scripts/grafana/build_meeting_quality_dashboard.py [--check]
 """
 
 from __future__ import annotations
@@ -25,7 +17,6 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "infra" / "grafana" / "dashboards" / "meeting-quality.json"
 DS = {"type": "postgres", "uid": "funnel"}
 
-# The writer's latest attempt per note, and spelling decisions per job.
 _GEN = """gen AS (
     SELECT DISTINCT ON (g.note_id)
            g.note_id, g.status, g.backend, g.model_id, g.prompt_version, g.stats,

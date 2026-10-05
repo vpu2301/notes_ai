@@ -59,8 +59,7 @@ function MfaCard() {
     setError(null);
     setBusy(true);
     try {
-      // Step-up gated: a 403 here is handled by http.ts and this call is
-      // replayed once the dialog is satisfied.
+      // Step-up 403 is handled by http.ts (dialog + replay).
       const enrolment = await account.startTotpEnrolment();
       setStage({ name: "enrolling", enrolment });
     } catch (err) {
@@ -322,8 +321,7 @@ function SessionsCard() {
   }, [load]);
 
   const revoke = async (sid: string) => {
-    // Optimistic: the row is the thing being removed, so leaving it in
-    // place while the request flies reads as "the button did nothing".
+    // Optimistic removal.
     const before = sessions;
     setSessions((list) => (list ?? []).filter((s) => s.sid !== sid));
     try {

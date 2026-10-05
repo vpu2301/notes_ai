@@ -9,14 +9,7 @@ import { ToasterProvider } from "../src/components/Toaster";
 import { PasswordLoginPage } from "../src/pages/auth/PasswordLoginPage";
 import { SignupPage } from "../src/pages/auth/SignupPage";
 
-/**
- * BE-0's web half: `/signup`.
- *
- * The branches worth pinning here are the ones a browser test cannot see
- * cheaply — what the screen *says* when the server deliberately tells it
- * nothing (the uniform 202), and that verification is followed by a
- * sign-in rather than by a second password prompt.
- */
+/** `/signup`: what the screen says on the uniform 202, and that verification leads to a sign-in, not a second password prompt. */
 
 const IDENTITY = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -115,8 +108,7 @@ describe("/signup", () => {
     // Confirming an address is not a reason to ask for the password again.
     const login = calls.find((c) => c.path === "/auth/login")!;
     expect(login.body).toMatchObject({ email: "alex.kim@example.test" });
-    // The name was asked for on step 1, so `/welcome` has nothing to ask —
-    // but the time zone it would have sent is still sent.
+    // Name already given on step 1; `/welcome` still sends the time zone.
     const patch = calls.find((c) => c.method === "PATCH" && c.path === "/auth/me");
     expect(patch?.body).toMatchObject({
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -131,8 +123,7 @@ describe("/signup", () => {
 
     const card = await screen.findByText(/check your email/i);
     const text = card.closest("form, div")!.parentElement!.textContent ?? "";
-    // The one honest shape: conditional, and with a way out for somebody
-    // who is waiting for a code that is never coming.
+    // Conditional wording, with a way out when no code comes.
     expect(text).toMatch(/if .*alex\.kim@example\.test.* is new here/i);
     expect(screen.getByRole("link", { name: /sign in instead/i })).toBeInTheDocument();
   });
@@ -155,8 +146,7 @@ describe("/signup", () => {
     await fillForm("password");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/stronger password/i);
-    // Scoped to the list: the standing hint under the field says "at least
-    // 12 characters" too, and matching that would pass with no reasons.
+    // Scoped to the list: the standing hint says "at least 12 characters" too.
     const reasons = within(screen.getByRole("list"));
     expect(reasons.getByText(/at least 12 characters/i)).toBeInTheDocument();
     expect(reasons.getByText(/every attacker's list/i)).toBeInTheDocument();
@@ -195,8 +185,7 @@ describe("/signup", () => {
     await fillForm();
     await pasteCode("482913");
 
-    // `verify_retry` does not consume the challenge, so the copy must not
-    // send somebody off to ask for a code they already have.
+    // `verify_retry` does not consume the challenge: do not send them for a new code.
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/code still works/i);
     expect(alert).not.toHaveTextContent(/new code|ask for/i);
@@ -232,8 +221,7 @@ describe("/signup", () => {
     server({ ...ANONYMOUS, "POST /auth/signup": ACCEPTED });
     app("/signup", { email: "alex.kim@example.test", verifyOnly: true });
     await screen.findAllByRole("textbox");
-    // The screen reached from `/login/password` asks for a code and nothing
-    // else — a password would have to come through history state to be here.
+    // Reached from `/login/password`: a code and nothing else.
     expect(document.querySelector('input[type="password"]')).toBeNull();
   });
 });

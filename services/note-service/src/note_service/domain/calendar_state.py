@@ -1,15 +1,6 @@
-"""Signed OAuth ``state`` for the calendar connect flow (0019).
-
-Google sends the user back to ``/v1/calendar/google/callback`` with the
-``state`` we gave it. That request carries no bearer token — it is a
-plain browser navigation — so the state itself has to say who started
-the flow and where to send them afterwards. It is an HMAC-signed,
-short-lived record of (tenant, user, return_to, nonce): the callback
-trusts nothing about the caller that the signature does not vouch for.
-
-Stateless on purpose: no Redis row to expire, no session to look up,
-and the same handler works whether the flow began in the web app or
-the Mac app (they differ only in ``return_to``).
+"""Signed OAuth ``state`` for the calendar connect flow: the callback carries no
+bearer, so the state is an HMAC-signed, short-lived record of (tenant, user,
+return_to, nonce) and the callback trusts nothing the signature does not vouch for.
 """
 
 from __future__ import annotations

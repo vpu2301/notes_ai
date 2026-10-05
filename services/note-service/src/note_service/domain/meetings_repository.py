@@ -1,8 +1,5 @@
-"""``note_meetings`` + ``note_user_line_times`` (migration 0049).
-
-The capture's lifecycle sidecar. Every function takes an RLS-scoped
-connection from ``tenant_connection`` — the tenant predicate is the
-policy's, not a WHERE clause here.
+"""``note_meetings`` + ``note_user_line_times``: the capture's lifecycle sidecar.
+Every function takes an RLS-scoped connection; the tenant predicate is the policy's.
 """
 
 from __future__ import annotations
@@ -15,9 +12,7 @@ from uuid import UUID
 
 import asyncpg
 
-# The states a capture passes through. `recording` → `uploading` →
-# `transcribing` → `generating` → `ready`, with `no_audio` (discarded or
-# never recorded) and `failed` as the two ways out.
+# `recording` → `uploading` → `transcribing` → `generating` → `ready`; `no_audio` and `failed` are the ways out.
 STATES: Final = (
     "recording",
     "uploading",
@@ -27,8 +22,7 @@ STATES: Final = (
     "no_audio",
     "failed",
 )
-# States the sweeper may reclaim: the client stopped talking to us before
-# there was anything to transcribe.
+# States the sweeper may reclaim.
 STALE_STATES: Final = ("recording", "uploading")
 
 MEETING_TYPES: Final = ("auto", "client", "team", "sales", "one_on_one", "interview")
@@ -45,13 +39,11 @@ class MeetingRow:
     meeting_type: str
     started_at: datetime
     calendar_context: dict[str, Any]
-    # Sprint 36 — which series this meeting belongs to, and what the note
-    # before it was. None for a one-off.
+    # None for a one-off.
     series_key: str | None = None
     series_source: str | None = None
     previous_note_id: UUID | None = None
-    # What detection thought, and how. The template is never switched on
-    # the strength of it without a user action.
+    # The template is never switched on the strength of detection without a user action.
     meeting_type_detected: str | None = None
     detected_by: str | None = None
 
@@ -122,8 +114,7 @@ async def fetch(conn: asyncpg.Connection, *, note_id: UUID) -> MeetingRow | None
 async def find_by_capture(
     conn: asyncpg.Connection, *, client_capture_id: UUID
 ) -> MeetingRow | None:
-    """The idempotency lookup: the same capture retried, or a second
-    device that started from the same event."""
+    """The idempotency lookup: the same capture retried, or a second device."""
     record = await conn.fetchrow(
         f"SELECT {_COLUMNS} FROM note_meetings WHERE client_capture_id = $1",
         client_capture_id,
@@ -136,9 +127,8 @@ async def set_state(conn: asyncpg.Connection, *, note_id: UUID, state: str) -> N
 
 
 async def bind_job(conn: asyncpg.Connection, *, note_id: UUID, asr_job_id: UUID) -> None:
-    """Point the capture at its transcription job and move to
-    ``transcribing``. ``notes.source_asr_job_id`` is set in the same
-    statement pair by the caller, inside one transaction."""
+    """Bind the transcription job and move to ``transcribing``; the caller sets
+    ``notes.source_asr_job_id`` in the same transaction."""
     await conn.execute(
         """
         UPDATE note_meetings
@@ -160,11 +150,8 @@ async def put_line_times(
     note_id: UUID,
     lines: list[tuple[str, int]],
 ) -> int:
-    """Upsert-if-absent: the FIRST keystroke of a line is what anchors it,
-    so a later report of the same key is ignored. Returns rows written.
-
-    One round trip — the clients flush a whole batch with each autosave.
-    """
+    """Upsert-if-absent: the FIRST keystroke anchors a line, later reports are ignored.
+    Returns rows written; one round trip per batch."""
     if not lines:
         return 0
     keys = [key for key, _ in lines]
@@ -200,12 +187,7 @@ async def line_times(conn: asyncpg.Connection, *, note_id: UUID) -> dict[str, in
 
 
 async def sweep_stale(conn: asyncpg.Connection, *, older_than_hours: int) -> list[UUID]:
-    """``recording``/``uploading`` older than the cutoff → ``no_audio``.
-
-    A crashed client, a tab closed mid-meeting, a phone that never came
-    back. Nothing is deleted: the note keeps whatever the author typed and
-    becomes an ordinary note.
-    """
+    """``recording``/``uploading`` older than the cutoff → ``no_audio``. Nothing is deleted."""
     rows = await conn.fetch(
         """
         UPDATE note_meetings
@@ -220,7 +202,7 @@ async def sweep_stale(conn: asyncpg.Connection, *, older_than_hours: int) -> lis
     return [r["note_id"] for r in rows]
 
 
-# ── Series and carry-over (Sprint 36, migration 0051) ───────────────
+# ── Series and carry-over ───────────────────────────────────────────
 
 
 async def set_series(
@@ -247,12 +229,8 @@ async def set_series(
 async def previous_in_series(
     conn: asyncpg.Connection, *, series_key: str, before: datetime, exclude: UUID
 ) -> list[UUID]:
-    """Notes in this series that started earlier, newest first.
-
-    A LIST rather than one row on purpose: the caller checks each against
-    the author's own visibility and takes the newest it may read, so a
-    colleague's private note does not blank out the carry-over (ADR-0057).
-    """
+    """Notes in this series that started earlier, newest first: a LIST, so the caller
+    can take the newest the author may read (ADR-0057)."""
     rows = await conn.fetch(
         """
         SELECT note_id FROM note_meetings
@@ -292,9 +270,7 @@ async def put_carried_items(
     from_note_id: UUID,
     items: list[tuple[str, int]],
 ) -> int:
-    """Insert the carried items once. Re-running is a no-op: the author
-    may have ticked or dropped some since, and re-opening them would
-    undo their decision."""
+    """Insert the carried items once; re-running is a no-op (the author may have ticked some since)."""
     if not items:
         return 0
     written: int = await conn.fetchval(

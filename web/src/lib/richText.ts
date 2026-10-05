@@ -1,18 +1,6 @@
 /**
- * Markdown-lite → blocks, for the note body on screen.
- *
- * A generated note is not flat prose: it arrives as headings, nested
- * bullets, numbered decisions, checkbox action items and bold run-in
- * leads. The PDF has always typeset that (note-service's
- * `domain/pdf_richtext.py`); on screen it was dumped into a `pre-wrap`
- * box, so the reader saw the raw `- ` and `**…**` instead of a document.
- *
- * This parser recognises the same grammar as the PDF one, plus nesting:
- * indentation puts a bullet at a depth, and the renderer draws a
- * different glyph per level.
- *
- * Pure function of the input string — no time, no locale, no DOM. The
- * output carries text only (never markup), so React escapes it for us.
+ * Markdown-lite → blocks, same grammar as note-service's `pdf_richtext.py` plus nesting.
+ * Pure; output is text only (never markup), so React escapes it.
  */
 
 /** One run of inline text with at most one emphasis on it. */
@@ -32,8 +20,7 @@ export interface ListItem {
   done?: boolean;
   /** The number the author wrote, for ordered items. */
   num?: number;
-  /** The source line, marker included — what a generated line's evidence
-   *  row is keyed by (Summary Engine v2, Q5). */
+  /** The source line, marker included — the evidence row key. */
   raw?: string;
 }
 
@@ -55,18 +42,10 @@ const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const RULE = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$/;
 
-/**
- * "Anna: we ship Friday" — a transcript turn, or a run-in label. At most
- * four words, no markup, not a URL scheme; the paragraph keeps the rest.
- */
+/** "Anna: we ship Friday" — a turn label: ≤4 words, no markup, not a URL scheme. */
 const SPEAKER = /^(?!https?:)([^\s*_`:][^*_`:]{0,39}?):\s+(?=\S)/;
 
-/**
- * A section whose paragraphs are mostly speaker turns is the transcript,
- * whatever template slot it landed in — the same rule note-service uses
- * for the shared page. It goes behind the Transcript tab, never into the
- * notes.
- */
+/** Mostly speaker turns = the transcript (same rule as note-service's shared page). */
 export function isTranscript(text: string): boolean {
   const paragraphs = text
     .replace(/\r\n?/g, "\n")
@@ -125,20 +104,12 @@ function isTable(lines: string[]): boolean {
   return lines.length >= 2 && (lines[0] ?? "").includes("|") && TABLE_SEP.test(lines[1] ?? "");
 }
 
-/**
- * Parse one section body into blocks. Single newlines are soft wraps
- * inside a paragraph; a blank line starts a new block — which is how the
- * note editor's plain-text fields behave.
- */
 export interface ParseOptions {
-  /**
-   * Read a paragraph that opens "Name: …" as a transcript turn (default).
-   * Off for sections the engine wrote (SQ3 T1): a generated paragraph is
-   * never a turn, whatever its first word.
-   */
+  /** Read "Name: …" paragraphs as turns (default). Off for engine-written sections. */
   speakerTurns?: boolean;
 }
 
+/** Single newlines are soft wraps; a blank line starts a new block. */
 export function parseRichText(text: string, opts: ParseOptions = {}): Block[] {
   const speakerTurns = opts.speakerTurns ?? true;
   if (!text || !text.trim()) return [];
@@ -176,8 +147,7 @@ export function parseRichText(text: string, opts: ParseOptions = {}): Block[] {
     flushList();
   };
 
-  /** Where an indent sits in the open list — capped so one stray space
-      cannot push a bullet three levels deep. */
+  /** Depth of an indent in the open list, capped at 4. */
   const depthFor = (indent: number): number => {
     while (columns.length > 0 && indent < (columns[columns.length - 1] as number)) columns.pop();
     if (columns.length === 0 || indent > (columns[columns.length - 1] as number)) columns.push(indent);
@@ -285,10 +255,7 @@ export function parseRichText(text: string, opts: ParseOptions = {}): Block[] {
   return blocks;
 }
 
-/**
- * A one-line preview of a body — the first real sentence, with the
- * markup stripped. Used where a note is summarised rather than read.
- */
+/** First real line of a body, markup stripped. */
 export function richTextPreview(text: string, limit = 160): string {
   for (const block of parseRichText(text)) {
     if (block.kind === "rule" || block.kind === "table") continue;

@@ -1,10 +1,4 @@
-"""Rendering and MIME assembly for the two account-security mails.
-
-The parametrised render test is the important one: it proves every
-kind × language combination produces a mail with no unsubstituted
-variables and no leftover sample text, which is the failure that only
-ever shows up in somebody's inbox.
-"""
+"""Rendering and MIME assembly for account-security mails: every kind × language renders with no leftover placeholders."""
 
 from __future__ import annotations
 
@@ -25,9 +19,7 @@ TOKEN = "tok-ABCDEF0123456789"
 
 
 def _fields(kind: str, lang: str) -> tuple[dict, dict]:
-    # IDX-A5 notices. Each is listed explicitly rather than defaulted, so
-    # adding a kind without teaching this helper fails the render gate
-    # instead of quietly rendering somebody else's variables.
+    # Each kind listed explicitly so an unknown kind fails the render gate.
     if kind == copy_mod.KIND_MFA_ENABLED:
         return compose.mfa_enabled_fields(lang=lang, changed_at=WHEN), {}
     if kind == copy_mod.KIND_MFA_DISABLED:
@@ -145,20 +137,11 @@ def test_every_kind_and_language_renders(kind: str, lang: str) -> None:
 
 
 def _expected_link(kind: str) -> str:
-    """What THIS kind's link must contain.
-
-    Most link mails carry a one-shot token, and the token is the thing
-    the mail exists to deliver. `signup_exists` is the exception: its
-    link is the plain sign-in page, because there is nothing to confirm —
-    the account already exists, and handing an unauthenticated caller a
-    token for somebody else's account is precisely what that mail must
-    not do.
-    """
+    """What this kind's link must contain; `signup_exists` links the plain sign-in page, never a token."""
     if kind == copy_mod.KIND_SIGNUP_EXISTS:
         return f"{APP}/login"
     if kind == copy_mod.KIND_CONCIERGE_WELCOME:
-        # The link is what this mail is for: the first thing to do with a
-        # mailed password is replace it.
+        # The first thing to do with a mailed password is replace it.
         return f"{APP}/settings/password"
     return TOKEN
 
@@ -175,14 +158,7 @@ def test_action_link_is_present_in_both_parts(kind: str, lang: str) -> None:
 
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
 def test_the_signup_confirmation_mail_carries_no_link(lang: str) -> None:
-    """BE-0: a code, never a link.
-
-    Corporate mail filters and some mobile clients open every URL in an
-    inbound message. A confirmation link would be spent by a machine that
-    merely read the mail, and the person would arrive to find their
-    confirmation already used. A six-digit code cannot be consumed by a
-    scanner.
-    """
+    """A code, never a link: mail scanners open every URL and would spend a confirmation link."""
     rendered = _render(copy_mod.KIND_SIGNUP_VERIFY, lang)
     assert "http" not in rendered.text_body
     assert "482 913" in rendered.text_body
@@ -191,13 +167,7 @@ def test_the_signup_confirmation_mail_carries_no_link(lang: str) -> None:
 
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
 def test_neither_signup_mail_says_whether_the_address_was_registered(lang: str) -> None:
-    """The uniform 202 is only honest if the mails keep the secret too.
-
-    `/auth/signup` answers identically for a new address and a known one,
-    so the sole place the difference exists is a mailbox. Neither body may
-    quote the address back, which is what would turn a forwarded screenshot
-    into a disclosure.
-    """
+    """Neither signup body may quote the address back; the mailbox is the only place the 202 differs."""
     for kind in (copy_mod.KIND_SIGNUP_VERIFY, copy_mod.KIND_SIGNUP_EXISTS):
         rendered = _render(kind, lang)
         assert "olena@acme.example" not in rendered.text_body
@@ -206,12 +176,7 @@ def test_neither_signup_mail_says_whether_the_address_was_registered(lang: str) 
 
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
 def test_email_change_notice_masks_the_new_address(lang: str) -> None:
-    """It goes to the address that just lost the account.
-
-    The reader is not necessarily the person who made the change, so the
-    full destination is withheld — enough is shown to recognise your own
-    other address, not enough to hand a stranger's mailbox to an attacker.
-    """
+    """The destination is partially withheld: the reader may not be who made the change."""
     rendered = _render(copy_mod.KIND_EMAIL_CHANGED, lang)
     assert "new-address@acme.example" not in rendered.html_body
     assert "new-address@acme.example" not in rendered.text_body
@@ -220,11 +185,7 @@ def test_email_change_notice_masks_the_new_address(lang: str) -> None:
 
 @pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
 def test_a5_notices_carry_no_link_except_the_revert(lang: str) -> None:
-    """A security notice that trains people to click is a lure.
-
-    Only the email-change notice has anything to undo, and that is the
-    one place a link earns its place.
-    """
+    """Only the email-change notice has anything to undo, so only it carries a link."""
     for kind in (
         copy_mod.KIND_MFA_ENABLED,
         copy_mod.KIND_MFA_DISABLED,
@@ -298,8 +259,7 @@ def test_language_falls_back_to_english() -> None:
 
 
 def test_ukrainian_minutes_pluralisation_handles_the_teens() -> None:
-    """11 takes the plural, 1 and 21 take the singular. The teens are
-    the case a naive `n == 1` check gets wrong."""
+    """11 takes the plural, 1 and 21 the singular; the teens trip a naive `n == 1`."""
     assert copy_mod.minutes_label(60, "uk") == "1 хвилина"
     assert copy_mod.minutes_label(11 * 60, "uk") == "11 хвилин"
     assert copy_mod.minutes_label(21 * 60, "uk") == "21 хвилина"
@@ -320,8 +280,7 @@ def test_client_label_is_coarse_not_a_fingerprint() -> None:
 
 
 def test_client_line_collapses_when_the_device_is_unknown() -> None:
-    """An 'Unrecognised device' line in the text part reads as missing
-    data; better to omit the line entirely."""
+    """Omit the device line entirely rather than print 'Unrecognised device'."""
     fields, secrets = _fields(copy_mod.KIND_PASSWORD_RESET, "en")
     fields["client_label"] = "Unrecognised device"
     values = compose.text_values(copy_mod.KIND_PASSWORD_RESET, "en", fields, secrets)
@@ -360,9 +319,7 @@ def test_mime_has_both_parts_and_the_headers_deliverability_needs() -> None:
 
 
 def test_security_mail_is_not_unsubscribable() -> None:
-    """RFC 8058 is for bulk mail. An unsubscribe path on a security
-    notification would let whoever already holds the mailbox silence the
-    one warning that would expose them."""
+    """No List-Unsubscribe (RFC 8058) on a security notification: it would let a mailbox thief silence the warning."""
     mime = email_mod.build_mime(
         email_mod.OutboundEmail(
             to_address="a@b.example", subject="s", text_body="t", html_body="<p>h</p>"
@@ -375,8 +332,7 @@ def test_security_mail_is_not_unsubscribable() -> None:
 
 
 def test_ehlo_hostname_never_resolves_the_local_fqdn() -> None:
-    """socket.getfqdn() blocks for 30s on a network with no PTR record,
-    inside the send, inside the transaction holding the outbox row."""
+    """socket.getfqdn() blocks for 30s without a PTR record, inside the transaction holding the outbox row."""
     assert email_mod.ehlo_hostname("sales@notes-ai.local") == "notes-ai.local"
     assert email_mod.ehlo_hostname("") == "localhost"
 

@@ -17,6 +17,5 @@ make eval-notes BACKEND=<backend> ARM=pipeline CORPUS=eval/notes/v2
 ```
 
 **Status (2026-10-01): empty.** The owner decided not to label a gold set for now
-and to judge notes on real recordings instead. The routing decision is in
-`docs/adr/0068-summary-model-routing.md`. The CI waiver is in
+and to judge notes on real recordings instead. The routing decision is ADR-0068. The CI waiver is in
 `docs/eval/routing-waivers.yaml`.

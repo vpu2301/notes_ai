@@ -1,8 +1,4 @@
-"""Sprint-16 MFA: TOTP math, envelope packing, enrolment surface, grace flow.
-
-The envelope round-trips use REAL libs/crypto (file master key in tmp,
-in-memory KEK repo) — only Keycloak and the DB are doubled.
-"""
+"""MFA: TOTP math, envelope packing (real libs/crypto), enrolment surface, grace flow."""
 
 from __future__ import annotations
 
@@ -202,9 +198,7 @@ def make_client(monkeypatch: pytest.MonkeyPatch, envelope: Envelope):
     )
     deps.install_state(state)  # type: ignore[arg-type]
 
-    # Statements the router ran against the doubled DB, so a test can
-    # assert the S21 reminder-resolving UPDATE actually fires rather than
-    # being swallowed by the best-effort try/except around it.
+    # Statements run against the doubled DB, so a test can assert the reminder-resolving UPDATE fires.
     executed: list[str] = []
 
     @contextlib.asynccontextmanager
@@ -272,12 +266,7 @@ def test_enrol_verify_flow(make_client: Any) -> None:
 
 
 def test_enrolment_closes_a_standing_reminder(make_client: Any) -> None:
-    """S21: enrolling is the ONLY way an access-review reminder closes.
-
-    There is no dismiss button anywhere in the product, so if this UPDATE
-    stops firing the banner never goes away for anyone who was reminded —
-    a failure that looks like a UI bug and is a backend one.
-    """
+    """Enrolling is the ONLY way an access-review reminder closes; if this UPDATE stops firing the banner never goes away."""
     from auth_service import totp
 
     client = make_client(_claims(roles=["member"]))

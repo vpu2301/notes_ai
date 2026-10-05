@@ -1,4 +1,4 @@
-"""Google Calendar client: event normalisation and the HTTP calls (0019).
+"""Google Calendar client: event normalisation and the HTTP calls.
 
 The transport is ``httpx.MockTransport``; nothing leaves the process.
 """

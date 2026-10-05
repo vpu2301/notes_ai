@@ -1,21 +1,5 @@
-"""One fact per thing that happened.
-
-Windows overlap by a turn, and people restate what they just agreed, so
-the same commitment arrives two or three times: once from each window
-that saw it, and again because Anna repeated it at the end. Without this
-pass a meeting note lists the same task three times, which reads as
-carelessness and makes every count meaningless.
-
-The rules, in order of what matters:
-
-* **Keep the earliest quote.** Where a decision was first made is more
-  useful than where it was repeated, and it puts the evidence chip at
-  the moment the reader is looking for.
-* **Prefer the explicit one.** If one copy has someone taking the task
-  on by name and another does not, the first is the truth about it.
-* **Union the flags**, so a doubt raised about any copy survives.
-
-Pure.
+"""One fact per thing that happened (windows overlap and people restate):
+keep the earliest quote, prefer the explicit owner, union the flags. Pure.
 """
 
 from __future__ import annotations
@@ -26,14 +10,10 @@ from typing import Final
 from . import support
 from .verify import CONF_EXPLICIT, VerifiedFact
 
-# Above this, two texts are the same statement in different words.
-# Deliberately high: merging two DIFFERENT tasks loses one of them, which
-# is worse than listing a near-duplicate.
+# Deliberately high: merging two DIFFERENT tasks loses one of them.
 SAME_FACT_JACCARD: Final = 0.8
 
-# The tokeniser and stop list live in :mod:`support` (Q2), the one place
-# the engine and the eval define words. Unchanged: which facts count as
-# the same fact depends on them.
+# Which facts count as the same fact depends on this list; do not change it lightly.
 _STOP: Final[frozenset[str]] = support.MERGE_STOP
 _tokens = support.merge_tokens
 
@@ -67,9 +47,7 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
         for index, (other_tokens, other) in enumerate(kept):
             if other.kind != fact.kind:
                 continue
-            # F3 — two figures are one only when they say the same number
-            # about the same thing; "300 gallons" and "200 gallons" read
-            # alike and are a conflict to show, not a duplicate to fold.
+            # Two figures are one only with the same number: "300" vs "200 gallons" is a conflict to show.
             if (
                 fact.figure is not None or other.figure is not None
             ) and fact.figure != other.figure:
@@ -86,13 +64,9 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
             continue
 
         _, existing = kept[match_at]
-        # The earliest quote always wins, because `ordered` is by time and
-        # `existing` came first. What the later copy can contribute is a
-        # better owner, a real date, and its doubts.
+        # The earliest quote wins; the later copy may contribute an owner, a date and its doubts.
         merged = existing
         if _better(fact, existing):
-            # Every field of the earlier copy, including the ones added since
-            # (F2's `copied`, F3's payloads), with what the later copy adds.
             merged = dataclasses.replace(
                 existing,
                 owner_label=fact.owner_label or existing.owner_label,

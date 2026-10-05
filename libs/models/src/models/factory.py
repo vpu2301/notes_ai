@@ -1,9 +1,4 @@
-"""Build a provider instance from a ``ResolvedBackend``.
-
-The only place that maps ``kind`` → class. Workers call
-``build_chat_provider(registry.resolve(ws, "understand"))`` and never see
-a class name.
-"""
+"""Build a provider from a ``ResolvedBackend``: the only place that maps ``kind`` → class."""
 
 from __future__ import annotations
 

@@ -32,11 +32,7 @@ export function Menu({
   trigger?: ReactNode;
   triggerClassName?: string;
   disabled?: boolean;
-  /**
-   * Position the panel `fixed` off the trigger instead of absolutely inside
-   * it — needed wherever an ancestor clips overflow (a list panel, the
-   * sidebar rail).
-   */
+  /** `fixed` off the trigger, for ancestors that clip overflow. */
   anchored?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -49,8 +45,7 @@ export function Menu({
   const enabledItems = () =>
     Array.from(panel.current?.querySelectorAll<HTMLButtonElement>(".anchored-menu-item:not([disabled])") ?? []);
 
-  // A menu opens with its first choice focused, so it is usable from the
-  // keyboard alone (WAI-ARIA menu button); arrows move, Escape goes back.
+  // WAI-ARIA menu button: opens with the first item focused; arrows move, Escape closes.
   const shown = open && (!anchored || pos !== null);
   useEffect(() => {
     if (shown) enabledItems()[0]?.focus();
@@ -84,8 +79,7 @@ export function Menu({
       const r = btn.current.getBoundingClientRect();
       const height = items.length * ITEM_H + 10;
       const below = r.bottom + 6;
-      // A select opens under its own left edge; an overflow menu hangs
-      // off the right of the ⋯.
+      // A select aligns left; an overflow menu hangs off the right.
       const left = triggerClassName.startsWith("select-btn") ? r.left : r.right - MENU_W;
       setPos({
         left: Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8)),

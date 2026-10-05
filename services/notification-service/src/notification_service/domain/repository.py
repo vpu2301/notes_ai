@@ -1,9 +1,7 @@
 """SQL for the notification tables.
 
-Every function takes an already-tenant-scoped connection (from
-``db.tenant_connection``). Nothing here re-checks the tenant in a WHERE
-clause: RLS is the enforcement, and duplicating it in app code invites
-the two to drift apart (ADR-0004/0007).
+Every function takes a tenant-scoped connection; RLS is the enforcement, nothing
+here re-checks the tenant (ADR-0004/0007).
 """
 
 from __future__ import annotations
@@ -24,20 +22,10 @@ from .preferences import UserPreference, UserSettings
 async def filter_to_tenant_members(
     conn: asyncpg.Connection, user_ids: tuple[UUID, ...]
 ) -> list[UUID]:
-    """Keep only the ids that are active users OF THIS TENANT.
-
-    This is the cross-tenant guard for producer-supplied recipient
-    hints. Because the connection is tenant-scoped, RLS makes a hint
-    naming a user in another tenant simply fail to match — a malicious
-    or buggy producer cannot address someone else's user, and the fact
-    materialises to nobody rather than leaking.
-    """
+    """Cross-tenant guard for producer hints: a foreign user matches nothing under RLS."""
     if not user_ids:
         return []
-    # IDX-B2: `profile_of_subs` replaces the per-tenant `users` table and
-    # keeps the same boundary — it returns a row only for a sub with an
-    # active membership in the connection's tenant, so a producer naming
-    # somebody else's user still matches nothing.
+    # `profile_of_subs` only returns subs with an active membership in this tenant.
     rows = await conn.fetch(
         "SELECT sub FROM profile_of_subs($1::uuid[]) WHERE status = 'active'",
         list(user_ids),
@@ -46,15 +34,7 @@ async def filter_to_tenant_members(
 
 
 async def tenant_admin_ids(conn: asyncpg.Connection) -> list[UUID]:
-    """Active tenant admins — the audience for operational alerts.
-
-    Reads the membership roster rather than `users.role` (IDX-B2). A role
-    describes a person's standing IN A WORKSPACE, and `users.role` could
-    only ever hold the one for their home tenant — so an admin of this
-    workspace whose home was elsewhere never received these alerts.
-    `tenant_memberships` is tenant-scoped by RLS and already readable by
-    `app_role`, so no helper is needed.
-    """
+    """Active tenant admins, read from the membership roster (not `users.role`)."""
     rows = await conn.fetch(
         """
         SELECT user_sub AS sub FROM tenant_memberships
@@ -65,15 +45,7 @@ async def tenant_admin_ids(conn: asyncpg.Connection) -> list[UUID]:
 
 
 async def user_email(conn: asyncpg.Connection, user_id: UUID) -> str | None:
-    """The address to actually send to.
-
-    This is the caller the pack's "the helper returns no emails" rule did
-    not account for: a digest with no address is not a privacy win, it is
-    an undelivered digest. `profile_of_subs` carries the column, and its
-    membership predicate is a tighter bound than the `users` RLS this
-    replaces — a sub outside the connection's tenant now returns nothing
-    at all rather than relying on the row simply not existing.
-    """
+    """Address to send to; a sub outside the connection's tenant returns None."""
     row = await conn.fetchrow("SELECT email FROM profile_of_subs(ARRAY[$1]::uuid[])", user_id)
     if row is None:
         return None
@@ -210,13 +182,7 @@ async def insert_notification(
     severity: str,
     render_fields: dict[str, str] | None = None,
 ) -> UUID | None:
-    """Insert one row, idempotently.
-
-    Returns the new id, or None if this (tenant, dedupe_key) already
-    exists — i.e. the event is a redelivery. ON CONFLICT DO NOTHING makes
-    that determination atomic; a SELECT-then-INSERT would let two
-    consumers both miss and both insert.
-    """
+    """Insert one row; None when (tenant, dedupe_key) exists (redelivery). Atomic via ON CONFLICT."""
     row = await conn.fetchrow(
         """
         INSERT INTO notifications
@@ -276,12 +242,7 @@ async def list_feed(
     before_id: UUID | None,
     unread_only: bool,
 ) -> list[asyncpg.Record]:
-    """Unread-first, then newest-first, with a keyset cursor.
-
-    The cursor is (created_at, id) rather than an OFFSET: a feed that
-    gains rows while a client pages would otherwise duplicate or skip
-    entries. `id` breaks ties when two rows share a timestamp.
-    """
+    """Newest-first with a (created_at, id) keyset cursor; OFFSET would skip/duplicate while paging."""
     clauses = ["recipient_user_id = $1"]
     params: list[object] = [user_id]
 
@@ -363,12 +324,7 @@ async def insert_outbox(
 
 
 async def claim_due_outbox(conn: asyncpg.Connection, *, limit: int) -> list[asyncpg.Record]:
-    """Claim due rows for this worker.
-
-    FOR UPDATE SKIP LOCKED is what makes two delivery workers safe to run
-    at once: each takes a disjoint set, and neither blocks on the other
-    (E3). The lock is held for the enclosing transaction.
-    """
+    """Claim due rows; SKIP LOCKED gives concurrent workers disjoint sets for the enclosing transaction."""
     return await conn.fetch(
         """
         SELECT o.id, o.notification_id, o.channel, o.attempt_count,

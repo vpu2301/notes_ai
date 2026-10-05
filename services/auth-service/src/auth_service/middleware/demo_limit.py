@@ -1,9 +1,4 @@
-"""Sprint-07: HTTP middleware that enforces the demo rate-limit on
-session-creation endpoints.
-
-Only loads when ``MDX_DEMO_MODE=true``. Production deployments have
-this middleware absent from the FastAPI app stack.
-"""
+"""Demo rate-limit middleware for session-creation endpoints (``MDX_DEMO_MODE=true`` only)."""
 
 from __future__ import annotations
 

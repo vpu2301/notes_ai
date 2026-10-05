@@ -1,26 +1,8 @@
 """Redis-backed trie cache with per-key lock + version-tag invalidation.
 
-Key shape:
-    autocomplete:trie:{tenant_id}:{language}:{user_id}
-
-A per-tenant ``version_tag`` is also stored:
-    autocomplete:tenant_phrase_version:{tenant_id}
-
-On every phrase write or roll-up, the writer increments the
-version_tag. Readers compare the tag stored alongside the cached blob
-and rebuild if mismatched. This avoids explicit DELs (no cache
-stampede when the tag flips).
-
-Per-key lock (``SET NX EX 10``) prevents thundering herd when 100
-parallel readers all see a cold cache. Loser-of-lock waits up to
-200 ms (polled), then falls back to a direct build WITHOUT writing the
-cache.
-
-Failure doctrine: Redis being down must never take suggest down. Every
-Redis interaction is guarded; any Redis error routes to the degraded
-path (direct DB build, no caching) with a throttled warning and the
-``mdx_autocomplete_degraded_total`` counter — the endpoint always
-answers.
+Writers INCR the per-tenant version tag; readers rebuild on mismatch (no DELs, no stampede).
+Lock losers poll up to 200 ms then build directly without writing. Any Redis error
+routes to the degraded path (direct build, no caching): Redis down never takes suggest down.
 """
 
 from __future__ import annotations
@@ -109,13 +91,7 @@ class TrieCache:
         user_id: UUID,
         build_fn: Callable[[], Awaitable[TenantTrie]],
     ) -> tuple[TenantTrie, str]:
-        """Returns (trie, status) — status ∈ {"hit", "miss", "degraded"}.
-
-        On miss: tries to acquire the per-key lock; on win, builds and
-        stores; on loss, polls the cache briefly then falls back to
-        ``build_fn()`` directly (degraded mode). On ANY Redis error:
-        degraded mode — suggest answers with Redis down.
-        """
+        """Returns (trie, status) — status ∈ {"hit", "miss", "degraded"}."""
         key = _TRIE_KEY.format(tid=tenant_id, lang=language, uid=user_id)
         tag_key = _TAG_KEY.format(tid=tenant_id)
 
@@ -127,11 +103,7 @@ class TrieCache:
                 build_fn, tenant_id=tenant_id, reason="redis_unavailable_degraded"
             )
 
-        # A tenant whose vtag key does not exist yet (nothing ever INCR'd it)
-        # is at implicit version "0" — the same value the build stores below.
-        # Without this, such tenants NEVER hit the cache and every keystroke
-        # rebuilds the trie (found by the step-08 load run: 20k misses where
-        # ~6 were expected; hit-path p95 227 ms).
+        # A missing vtag is implicit "0" (what the build stores); otherwise such tenants never hit.
         if current_tag is None:
             current_tag = b"0"
 
@@ -144,7 +116,6 @@ class TrieCache:
                 if stored_tag == current_tag:
                     return trie, "hit"
             except SerializerVersionMismatchError:
-                # Stale format / corrupt blob → fall through to rebuild.
                 pass
             except Exception:  # noqa: BLE001 — Redis died mid-read
                 return await self._degraded(
@@ -199,9 +170,7 @@ class TrieCache:
                 except SerializerVersionMismatchError:
                     pass
 
-        # Degraded: build directly without populating the cache (the lock
-        # winner owns the write; next call reads it). Never block a
-        # keystroke on another request's build beyond the 200 ms poll.
+        # Lock winner owns the write; never block a keystroke beyond the poll.
         return await self._degraded(
             build_fn, tenant_id=tenant_id, reason="lock_lost_degraded_fallback"
         )

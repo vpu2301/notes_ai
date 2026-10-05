@@ -1,15 +1,6 @@
-"""The notices that go out when access to an account changes (IDX-A5).
+"""Notices sent when access to an account changes, to the address that would want to know.
 
-Every mail here is sent to the address that would want to know, which is
-not always the address that made the change: the email-change notice goes
-to the address being *replaced*, because the person who still has that
-mailbox is the one who can tell us it was not them.
-
-Failure to send is never allowed to fail the operation. By the time these
-are sent, the second factor is already gone or the address is already
-changed; refusing the request at that point would leave the account in
-the state the user asked to leave, and tell them it failed. The caller
-records ``notify_failed`` on the audit row instead.
+A failed send never fails the operation; the caller records ``notify_failed``.
 """
 
 from __future__ import annotations
@@ -79,13 +70,7 @@ class SecurityMailer:
     # ── account (the account_service.AccountNotifier Protocol) ───────
 
     def revert_url(self, token: str) -> str:
-        """Where the "this wasn't me" button points.
-
-        At auth-service, not the SPA: the page it lands on has to act
-        (restore the address, end every session) before it can show
-        anything, and routing that through the app would mean the SPA
-        holding a one-shot credential it has no other use for.
-        """
+        """Where the "this wasn't me" button points: auth-service, not the SPA (one-shot credential)."""
         return f"{self._public_base_url}/auth/email/revert/{token}"
 
     async def email_changed(

@@ -1,10 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint F1 — the capture timing sent with an upload, and the
-/// "Not transcribed" line read from a result. Mirrors the macOS suite; the
-/// recorder's sink is private here, so the first-frame clock is tested on
-/// its own.
+/// Capture timing sent with an upload, and the "Not transcribed" line. Mirrors the macOS suite.
 final class CaptureCoverageTests: XCTestCase {
     private var scratch: URL!
 

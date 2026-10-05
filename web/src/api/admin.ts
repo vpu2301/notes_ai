@@ -1,4 +1,4 @@
-// Workspace-admin reads (Sprint 22). Counts only — nothing here names a recipient.
+// Workspace-admin reads. Counts only — nothing here names a recipient.
 import { api } from "./http";
 import type { SharingPolicy, SharingStats } from "./types";
 
@@ -6,7 +6,7 @@ export function sharingStats(days: 30 | 90 = 30): Promise<SharingStats> {
   return api<SharingStats>("note", "/v1/admin/sharing/stats", { query: { days } });
 }
 
-// ── Sprint 23: the workspace's sharing policy ─────────────────────
+// ── the workspace's sharing policy ────────────────────────────────
 
 export function getSharingPolicy(): Promise<SharingPolicy> {
   return api<SharingPolicy>("note", "/v1/admin/sharing/policy");

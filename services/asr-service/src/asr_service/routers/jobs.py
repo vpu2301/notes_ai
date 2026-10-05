@@ -1,16 +1,7 @@
 """``/asr/jobs`` — submit, list, fetch, cancel batch ASR jobs.
 
-Notes:
-
-- The POST handler streams the file body into a bounded in-memory buffer
-  (``Settings.max_upload_mb``); FastAPI's underlying Starlette respects
-  the size cap and fails the request early when the cap is exceeded.
-- All 8 validators run synchronously before any DB or queue work; the
-  pipeline short-circuits on first failure and returns RFC 9457.
-- Audio is encrypted via ``EncryptedObjectStore`` before the row is
-  inserted, so a crash between upload and DB insert leaves an
-  orphaned ciphertext (not plaintext) which is reaped by a cleanup
-  cron (sprint 16 lifecycle policy on the bucket).
+Validators run before any DB or queue work; audio is encrypted and uploaded before
+the row is inserted (an orphan ciphertext is reaped by the bucket lifecycle policy).
 """
 
 from __future__ import annotations
@@ -146,21 +137,10 @@ def _reject(
     type_uri: str | None = None,
     **extra: object,
 ) -> HTTPException:
-    """Build one submit-time rejection.
+    """Build and count one submit-time rejection.
 
-    Every reject on this endpoint — file shape or budget — leaves
-    through here, so ``type``/``code``/``detail`` are assembled once and a
-    client can switch on ``code`` alone. Counting happens here too: a
-    rejection that is raised but never counted is a rejection nobody sees
-    on the dashboard.
-
-    ``problem_extras`` rather than a dict ``detail``: the shared handler
-    renders ``str(exc.detail)``, so a dict arrives at the client as a
-    stringified Python repr — single quotes and all — with the real
-    document left at ``type: about:blank``. Extension members put ``code``
-    and ``type`` where RFC 9457 says they go, and where a client can parse
-    them. ``title`` is set by the handler from the status code and cannot
-    be passed here, so it lands as ``reason``.
+    ``problem_extras``, not a dict ``detail``: the shared handler renders
+    ``str(exc.detail)``. ``title`` is set by the handler, so it lands as ``reason``.
     """
     _validation_rejects_counter.add(1, {"code": str(code)})
     _uploads_counter.add(1, {"status": "rejected"})
@@ -182,33 +162,20 @@ def _reject(
 )
 async def submit_job(
     audio: Annotated[UploadFile, File(description="Audio file to transcribe.")],
-    # ``auto`` (the clients' default) lets the recording decide: the worker
-    # identifies the spoken language and transcribes in it. ``uk``/``en``/
-    # ``de`` pin the decoder for callers that know better. The pattern is the
-    # shared one: a literal here once refused the ``de`` every client offers.
+    # ``auto`` lets the worker identify the language; the shared pattern, never a literal.
     language: Annotated[str, Form(pattern=LANGUAGE_REQUEST_PATTERN)],
     vocabulary_hint: Annotated[str | None, Form(max_length=2000)] = None,
-    # Ambient Capture v1: run offline speaker diarization after
-    # transcription. Rides the queue payload only — the stored result's
-    # `speaker`/`speakers` fields are the durable record.
     diarize: Annotated[bool, Form()] = False,
-    # Sprint 29: what a person knows about the recording. An exact count
-    # ("People: 2") or a cap. Only meaningful with diarize=true.
+    # An exact count or a cap; only meaningful with diarize=true.
     speakers_expected: Annotated[int | None, Form(ge=1, le=8)] = None,
     speakers_max: Annotated[int | None, Form(ge=1, le=8)] = None,
-    # Sprint 30 capture context: invitee names offered as a rename picklist
-    # (JSON array; content — stored on the row, never audited or logged)
-    # and where the capture came from.
+    # Invitee names (JSON array; content, never audited or logged) and capture origin.
     name_candidates: Annotated[str | None, Form(max_length=4000)] = None,
     capture_source: Annotated[str | None, Form(pattern="^(calendar_event|manual|upload)$")] = None,
-    # Sprint 31: a macOS capture with ch0 = microphone, ch1 = call audio,
-    # and the account owner's name for the one local speaker (content —
-    # never logged or audited).
+    # ch0 = microphone, ch1 = call audio; owner's name is content, never logged.
     channel_layout: Annotated[str, Form(pattern="^(mono|mic_system)$")] = "mono",
     local_speaker_name: Annotated[str | None, Form(max_length=400)] = None,
-    # Sprint F1: when the person pressed Record (client wall clock, ISO 8601
-    # with an offset) and how long until the first frame was written. Parsed
-    # by hand: an out-of-range value is a 400 `validation_error`.
+    # Record press time (ISO 8601 with offset) and first-frame latency; parsed by hand.
     record_pressed_at: Annotated[str | None, Form(max_length=64)] = None,
     first_frame_offset_ms: Annotated[str | None, Form(max_length=16)] = None,
     x_client_type: Annotated[str | None, Header(alias="X-Client-Type", max_length=32)] = None,
@@ -229,9 +196,7 @@ async def submit_job(
     # Forwarded only to a job that will diarize; reported either way.
     hints_applied = diarize if hint_sent else None
     num_speakers = speakers_expected if diarize else None
-    # Hint policy (Sprint 30, binding): a count a person set always wins
-    # over a calendar-derived cap — the cap is dropped, never checked
-    # against it (invitees regularly outnumber the people who speak).
+    # A count a person set always wins over a calendar-derived cap.
     max_speakers = speakers_max if diarize and num_speakers is None else None
     capture_context = {
         k: v
@@ -246,13 +211,11 @@ async def submit_job(
     payload = await audio.read()
     mime_type = audio.content_type or "application/octet-stream"
 
-    # Steps 2–7: synchronous file-shape validation.
     result, facts = await run_all(mime_type=mime_type, payload=payload)
     if not result.ok:
         raise _reject(result.code, result.detail, title="audio rejected by validation")
     if channel_layout == "mic_system" and facts.channels != 2:
-        # A stereo file WITHOUT the field is an ordinary upload (downmixed as
-        # always); declaring the layout is a promise about the channels.
+        # Declaring the layout is a promise about the channels.
         raise _reject(
             "channel_layout_mismatch",
             f"channel_layout=mic_system needs a 2-channel file, got {facts.channels}",
@@ -260,8 +223,7 @@ async def submit_job(
             status_code=422,
         )
 
-    # Per-tenant concurrency cap, checked before the ciphertext is
-    # even uploaded.
+    # Per-tenant concurrency cap, before the upload.
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         active = await repository.count_active_jobs(conn, tenant_id=claims.tid)
         if active >= settings.per_tenant_concurrent_jobs:
@@ -280,13 +242,11 @@ async def submit_job(
                 limit=settings.per_tenant_concurrent_jobs,
             )
 
-    # Step 8: quota check, inside the same transaction as the row inserts.
     audio_id = uuid4()
     job_id = uuid4()
     storage_key = f"{claims.tid}/{audio_id}.enc"
 
-    # Encrypt + upload BEFORE row insert. Orphan ciphertext on a crash
-    # is preferable to an orphan row referencing nothing.
+    # Upload before row insert: an orphan ciphertext beats an orphan row.
     header = await state.audio_store.put(
         key=storage_key,
         plaintext=payload,
@@ -302,8 +262,7 @@ async def submit_job(
             monthly_quota_bytes=settings.monthly_quota_bytes,
         )
         if not qr.ok:
-            # Best-effort: delete the orphan ciphertext; cleanup cron
-            # picks up any leftover.
+            # Best-effort orphan cleanup.
             await state.audio_store.delete(key=storage_key)
             await _audit_quota_exceeded(state, claims, audio_id)
             raise _reject(
@@ -335,13 +294,11 @@ async def submit_job(
             model="large-v3",
             name_candidates=candidates,
             capture_context=capture_context,
-            # Sprint I2 T2: the exact string the transcriber is told.
             vocabulary_hint=vocabulary_hint or None,
             record_pressed_at=pressed_at,
             first_frame_offset_ms=frame_offset,
         )
 
-    # Audit the upload + job creation.
     await state.audit_writer.write_event(
         tenant_id=claims.tid,
         kind=audit_kinds.AUDIO_UPLOADED,
@@ -384,11 +341,7 @@ async def submit_job(
             },
         )
     except Exception as exc:  # noqa: BLE001 — every publish failure is the same failure
-        # The row exists and the audio is stored, but nothing will ever
-        # transcribe it. Left as-is the job sits in `queued` forever, holds
-        # a slot in the tenant's concurrency budget, and shows the
-        # user a spinner for work that was never handed to anyone.
-        # Fail it here, where we still know why.
+        # Nothing will pick the job up: fail it here rather than leave it `queued` forever.
         logger.error(
             "asr.enqueue_failed",
             extra={
@@ -432,12 +385,12 @@ async def submit_job(
             "audio_id": str(audio_id),
             "language": language,
             "diarize": diarize,
-            # The vocabulary, not the numbers (Sprint 29).
+            # The kind, not the numbers.
             "speakers_hint": _hint_kind(num_speakers, max_speakers),
-            # How many names were offered — never the names (Sprint 30).
+            # Count only, never the names.
             "name_candidates": len(candidates),
             "channel_layout": channel_layout,
-            # How many vocabulary terms — never the terms (Sprint I2).
+            # Count only, never the terms.
             "hint_terms": _hint_terms(vocabulary_hint),
         },
         severity=Severity.INFO,
@@ -469,8 +422,7 @@ MAX_FIRST_FRAME_OFFSET_MS = 600_000
 def _capture_timing(
     pressed_raw: str | None, offset_raw: str | None
 ) -> tuple[datetime | None, int | None]:
-    """Sprint F1's two optional fields, validated. Empty strings are
-    "not sent" (a form library that always posts every field)."""
+    """Capture timing fields, validated; empty strings mean "not sent"."""
     pressed: datetime | None = None
     offset: int | None = None
     if pressed_raw and pressed_raw.strip():
@@ -503,11 +455,10 @@ def _hint_terms(hint: str | None) -> int:
     return sum(1 for part in (hint or "").split(",") if part.strip())
 
 
-# A service reading a result on a person's behalf (not the person opening
-# it) names its purpose here; note-service sends `note_build`.
+# A service reading on a person's behalf names its purpose here (note-service: `note_build`).
 READ_PURPOSE_HEADER = "X-MDX-Read-Purpose"
 
-# Name-candidate limits (Sprint 30 B-3).
+# Name-candidate limits.
 MAX_NAME_CANDIDATES = 12
 MAX_NAME_CHARS = 80
 _CLIENT_KINDS = frozenset({"web", "ios", "macos", "android"})
@@ -520,10 +471,7 @@ def _client_kind(header: str | None) -> str | None:
 
 
 def _parse_name_candidates(raw: str | None) -> list[str]:
-    """Validate the picklist: a JSON array of ≤ 12 names, each 1..80 chars
-    after collapsing whitespace, no control characters, de-duplicated
-    case-insensitively. Anything else is a 422 — this text is rendered in
-    three clients."""
+    """Validate the picklist (≤ 12 names, 1..80 chars, no control chars, de-duplicated); else 422."""
     if raw is None or not raw.strip():
         return []
 
@@ -599,8 +547,7 @@ async def get_job(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     view, uri = found
     if view.status == JobStatus.COMPLETE:
-        # Pre-signed URL with the configured TTL — deliberately short.
-        # Follows the current revision (a re-run writes a new object).
+        # Short TTL; follows the current revision.
         url = await state.transcript_store.presigned_url(
             key=_result_key(claims.tid, job_id, uri),
             expires_in=settings.s3_presigned_ttl_seconds,
@@ -630,7 +577,7 @@ async def get_job_result(
     is returned with ``nlp_applied=false``."""
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # Rev, names and artifact from ONE row read — a re-run swaps all three.
+        # One row read: a re-run swaps rev, names and artifact together.
         found = await repository.get_job_and_result_uri(conn, job_id=job_id)
         view, uri = found if found is not None else (None, None)
         edits = (
@@ -656,17 +603,12 @@ async def get_job_result(
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     if view.status != JobStatus.COMPLETE:
-        # RFC 9457 problem detail — the result isn't ready (still queued/running)
-        # or never will be (failed/cancelled). The client polls status and
-        # retries; see spec §2.5 + retro E10 (FE retry-on-403-then-refetch).
+        # RFC 9457: not ready (queued/running) or never will be (failed/cancelled).
         exc = HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"job {job_id} is in status {view.status.value!r}, not 'complete'",
         )
-        # For a terminal status the failure vocabulary travels with the
-        # 409, so a client polling for a transcript learns in one response
-        # that it is not coming and whether resubmitting would help —
-        # rather than polling a `failed` job until it gives up.
+        # The failure kind travels with the 409 so a poller knows whether to resubmit.
         exc.problem_extras = {  # type: ignore[attr-defined]
             "type_uri": "urn:mdx:asr:result:not-ready",
             "reason": "Transcription result is not ready",
@@ -679,19 +621,14 @@ async def get_job_result(
         raise exc
     raw = await _load_transcript(state, claims.tid, job_id, uri)
     output = TranscriptionOutput.model_validate_json(raw)
-    # Sprint TQ3: one name, one spelling — a read-time overlay on the
-    # artefact (planned once, on the first read; applied on every read).
+    # Spelling overlay: planned once on first read, applied on every read.
     overlay_rows, corrections_rev, unify_note = await _spelling_overlay(
         state, claims, job_id=job_id, output=output, attendees=candidates
     )
     output = entity_unify.apply(
         output, [r.applied() for r in overlay_rows if r.status == "accepted"]
     )
-    # The "opened" fact the weekly speaker report counts from (Sprint 30);
-    # set once. A service reading on the user's behalf (note-service builds
-    # the note right after every capture) says so and is not an opening —
-    # counting it would inflate the correction-rate denominator.
-    # The audit row below stays the audit record either way.
+    # "Opened" is set once; a service read on the user's behalf is not an opening.
     first_read = False
     if request.headers.get(READ_PURPOSE_HEADER, "").strip().lower() != "note_build":
         async with tenant_connection(state.app_pool, claims.tid) as conn:
@@ -725,8 +662,6 @@ async def get_job_result(
         "corrections_rev": corrections_rev,
         "entity_unify": unify_note,
         "relabel_available": await _relabel_available(state, claims.tid, job_id, output),
-        # Sprint F1: how much of the speech is transcribed, and the capture
-        # timing the client reported.
         "coverage": (
             CoverageView.of(output.diagnostics.coverage)
             if output.diagnostics.coverage is not None
@@ -769,8 +704,7 @@ async def get_job_result(
 async def _count_offered(
     state: object, tenant_id: UUID, job_id: UUID, rev: int, offered: list[NameSuggestionView]
 ) -> None:
-    """Count each (job, revision, label, name) once — not every page load —
-    so accepted/offered is a real rate. Redis down → not counted."""
+    """Count each (job, revision, label, name) once; Redis down → not counted."""
     for s in offered:
         key = f"workspace:{tenant_id}:asr:suggestion_offered:{job_id}:{rev}:{s.label}:{s.name.casefold()}"
         try:
@@ -781,17 +715,14 @@ async def _count_offered(
             _name_suggestions_counter.add(1, {"outcome": "offered"})
 
 
-# How long "the audio of this job still exists" is believed (Sprint 32).
+# How long "the audio of this job still exists" is believed.
 AUDIO_EXISTS_TTL_S = 600
 
 
 async def _relabel_available(
     state: object, tenant_id: UUID, job_id: UUID, output: TranscriptionOutput
 ) -> bool:
-    """Offer "Re-label with the current engine" only when it can work: the
-    job was diarized, by another engine than today's, and its audio is
-    still stored. Anything uncertain (Redis down, storage error) → False:
-    never promise a re-run we cannot do."""
+    """True when a re-label can work (diarized by another engine, audio still stored); uncertain → False."""
     stats = output.metadata.diarization
     if stats is None and not output.speakers:
         return False  # never diarized
@@ -823,8 +754,7 @@ async def _relabel_available(
 
 
 def _result_key(tenant_id: UUID, job_id: UUID, uri: str | None) -> str:
-    """The current artifact's key: the row's ``result_storage_uri`` (a
-    re-run points it at ``….r{rev}.json.enc``), else the original key."""
+    """The current artifact's key: ``result_storage_uri`` if set, else the original key."""
     return repository.key_from_uri(uri) if uri else f"{tenant_id}/{job_id}.json.enc"
 
 
@@ -836,9 +766,7 @@ async def _spelling_overlay(
     output: TranscriptionOutput,
     attendees: list[str],
 ) -> tuple[list[corrections.Row], int, str | None]:
-    """``(rows, corrections_rev, note)`` for the result view. Runs the
-    unifier when this job has never been unified; a failure or an overrun
-    leaves the transcript as the artefact and says why in ``note``."""
+    """``(rows, corrections_rev, note)``; a failure leaves the artefact as is and says why."""
     if not settings.entity_unify_enabled:
         return [], 0, "disabled"
     async with tenant_connection(state.app_pool, claims.tid) as conn:
@@ -882,8 +810,7 @@ async def _load_transcript(
             aad=job_id.bytes,
         )
     except ObjectNotFoundError:
-        # Job says complete but the ciphertext is gone — retention TTL or
-        # the S11 erasure engine removed it after the row was written.
+        # Complete, but the ciphertext was removed by retention or erasure.
         gone = HTTPException(
             status_code=status.HTTP_410_GONE,
             detail=(
@@ -906,13 +833,8 @@ NLP_LANGUAGES = frozenset({"uk", "en", "de"})
 _PUNCT_ONLY = frozenset(".,:;!?…—–-()[]{}«»“”‘’'\"/\\*#№%&@+−=_|")
 
 
-# A recording of a conversation is kept VERBATIM (Sprint G0, Summary
-# Engine v2 Q3): the rewriting stages exist for dictation, where "Punkt"
-# is punctuation and "heute" in a note should be a date. In a conversation
-# "heute" is what someone said — rewriting it to a date anchored on the
-# server's clock put 22.09.2026 into quotes that say "heute", and "am Montag
-# … gewesen" became the NEXT Monday. The engine resolves dates itself, as an
-# annotation, never as a rewrite. Only confidence spans still run.
+# Conversations stay verbatim: the rewriting stages are for dictation ("heute" in a
+# quote must not become a date). Only confidence spans still run.
 CONVERSATION_STAGES_DISABLED: Final[tuple[str, ...]] = (
     "voice_commands",
     "punctuation",
@@ -941,13 +863,7 @@ async def _enriched_result_view(
     name_candidates: list[str] | None = None,
     name_sources: dict[str, str] | None = None,
 ) -> TranscriptResultView:
-    """Run the raw transcript through nlp-service; fall back to raw on failure.
-
-    Whatever happens to the text, the speaker structure survives: every
-    segment keeps its diarization label, the roster rides along, and the
-    view is finished with the display names and the turn structure
-    (``_structured``) — the clients render turns, not segments.
-    """
+    """Run the transcript through nlp-service (raw on failure); speaker structure survives."""
     raw_segments = _served_segments(output)
     view = TranscriptResultView(
         job_id=job_id,
@@ -967,20 +883,14 @@ async def _enriched_result_view(
         name_candidates=list(name_candidates or []),
         speaker_sides=dict(output.speaker_sides),
         speaker_name_sources=dict(name_sources or {}),
-        # Per-segment decoder numbers (TQ1 T5) stay in the stored artifact
-        # for the eval and the TQ2 gates; no client reads them, and on an
-        # hour-long recording they would add ~1000 rows to every fetch.
+        # Per-segment decoder numbers stay in the artifact; no client reads them.
         diagnostics=output.diagnostics.model_copy(update={"segments": []}),
-        # Sprint TQ2 T4: music / silence / noise markers for the clients.
         noise=list(output.noise),
     )
     overlap = list(output.overlap_ms)
     if not settings.nlp_enrich_enabled or not output.segments:
         return _raw(view, speaker_names, edits, overlap)
-    # The post-processor has per-language rules (dictated punctuation,
-    # number words). A language it has no rules for gets the raw Whisper
-    # text — which is already punctuated — rather than a 422 from
-    # nlp-service that we would then swallow.
+    # A language the post-processor has no rules for gets the raw text, not a 422.
     if output.language not in NLP_LANGUAGES:
         return _raw(view, speaker_names, edits, overlap)
 
@@ -1004,16 +914,14 @@ async def _enriched_result_view(
         segments=payload,
         language=output.language,
         authorization=authorization,
-        # Relative words resolve against the day it was recorded, never
-        # the day somebody happens to read it.
+        # Relative dates resolve against the recording day.
         reference_date=reference_date,
         stages_disabled=sorted(CONVERSATION_STAGES_DISABLED) if _is_conversation(output) else None,
         conversation=_is_conversation(output),
     )
     if resp is None or len(resp.get("segments", [])) != len(output.segments):
         return _raw(view, speaker_names, edits, overlap)  # NLP down/mismatched — raw transcript
-    # Sprint I3 T2: a segment whose stage failed shows its raw text; the
-    # view says so instead of looking half-punctuated for no reason.
+    # A segment whose stage failed shows raw text; the view says so.
     failed = sum(1 for seg in resp["segments"] if _stage_failed(seg))
     enrichment = "partial" if failed else "full"
     _enrichment_counter.add(1, {"state": enrichment})
@@ -1022,8 +930,7 @@ async def _enriched_result_view(
     for index, (raw_seg, nlp_seg) in enumerate(zip(output.segments, resp["segments"], strict=True)):
         text = str(nlp_seg.get("text", "")).strip()
         if raw_seg.language and raw_seg.language != output.language:
-            # Sprint I2 T4: the post-processor has the RECORDING's rules; a
-            # passage in another language keeps its raw decoding.
+            # Another language keeps its raw decoding.
             enriched.append(_served_segment(raw_seg, index))
             continue
         if _stage_failed(nlp_seg):
@@ -1037,23 +944,16 @@ async def _enriched_result_view(
             )
             for sp in nlp_seg.get("confidence_spans", [])
         ]
-        # A segment that was PURELY a voice command («новий абзац» alone)
-        # comes back empty — it has no textual rendering; drop it.
+        # A pure voice-command segment comes back empty; drop it.
         if not text:
             continue
-        # A segment that is ONLY punctuation (Whisper split a dictated
-        # «Крапка» into its own segment) merges into the previous one.
-        # No-op when the previous segment already ends with that mark —
-        # the punctuation stage adds trailing periods on its own. The
-        # merged segment keeps the previous speaker: a lone period has
-        # no voice of its own.
+        # A punctuation-only segment merges into the previous one (keeping its speaker).
         if enriched and all(ch in _PUNCT_ONLY for ch in text):
             prev = enriched[-1]
             merged = prev.text.rstrip()
             if not merged.endswith(text):
                 merged += text
-            # The absorbed artifact segment travels with its host, so a
-            # reassign of this turn also moves the punctuation (Sprint 30).
+            # The absorbed segment travels with its host on reassign.
             enriched[-1] = prev.model_copy(
                 update={
                     "text": merged,
@@ -1136,19 +1036,14 @@ def _structured(
     edits: list[SpeakerEdit] | None = None,
     overlap_ms: list[tuple[int, int]] | None = None,
 ) -> TranscriptResultView:
-    """Finish a result view: fold the speaker edits, roster from what is
-    actually on the segments, display names for every roster label, talk
-    time, and the turn structure (adjacent turns that became one speaker
-    join)."""
+    """Finish a result view: fold edits, live roster, display names, talk time, turns."""
     live = edits or []
     segments = apply_edits(view.segments, live)
-    # Labels every segment was moved away from drop out; labels a reassign
-    # created join (Sprint 30).
+    # Emptied labels drop out; labels a reassign created join.
     roster = roster_after(apply_to_roster(view.speakers, live), segments)
     custom = names or {}
     speaker_names = {label: custom.get(label) or default_speaker_name(label) for label in roster}
-    # Sides follow merges (a label merged into another takes the target's
-    # side); a label a reassign created has none.
+    # Sides follow merges; a created label has none.
     sides = {label: view.speaker_sides[label] for label in roster if label in view.speaker_sides}
     sources = {
         label: source for label, source in view.speaker_name_sources.items() if label in roster
@@ -1189,8 +1084,7 @@ class SpeakerNamesUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     names: dict[str, str] = Field(default_factory=dict, max_length=64)
-    # How each name was chosen (Sprint 30): feeds mdx_asr_speaker_named_total
-    # only; never stored.
+    # Feeds mdx_asr_speaker_named_total only; never stored.
     sources: dict[str, Literal["picklist", "typed", "suggestion"]] = Field(
         default_factory=dict, max_length=64
     )
@@ -1237,9 +1131,7 @@ async def set_speaker_names(
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         stored = await repository.set_speaker_names(conn, job_id=job_id, names=body.names)
         if stored is not None:
-            # Sprint 31: provenance is persisted; removing a name the
-            # platform set from the channel records "cleared" so a re-run
-            # never puts it back.
+            # Removing a platform-set name records "cleared" so a re-run never restores it.
             await repository.update_name_sources(
                 conn, job_id=job_id, names=stored, sources=dict(body.sources)
             )
@@ -1267,15 +1159,14 @@ async def set_speaker_names(
         actor_role=(claims.roles[0] if claims.roles else None),
         target_kind="asr_job",
         target_id=str(job_id),
-        # Labels only: who a speaker IS is content, and audit payloads
-        # carry pointers, not content (ADR-0031).
+        # Labels only; names are content (ADR-0031).
         payload={"labels": sorted(stored)},
         severity=Severity.INFO,
     )
     return SpeakerNamesView(job_id=job_id, speaker_names=stored)
 
 
-# ── Speaker edits (Sprint 28) ─────────────────────────────────────────
+# ── Speaker edits ─────────────────────────────────────────────────────
 
 
 class SpeakerMergeRequest(BaseModel):
@@ -1296,10 +1187,7 @@ class SpeakerEditResult(BaseModel):
 
 
 def _names_after_revert(names: dict[str, str], edit: SpeakerEdit) -> dict[str, str]:
-    """The naming once ``edit`` is reverted: a merge takes back the name it
-    copied onto its target; a move to a new speaker takes the created
-    label's name with it (the label may be allocated again later, to
-    someone else)."""
+    """Names once ``edit`` is reverted: a merge takes back its copied name, a move its label's."""
     out = dict(names)
     if (
         edit.kind == "merge"
@@ -1388,9 +1276,7 @@ async def merge_speakers(
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         rev = int(row["diarization_rev"])
-        # Re-checked under the lock: a re-run (or undo) that swapped the
-        # labelling after the transcript above was read would otherwise get
-        # an edit validated against the old roster but stored on the new one.
+        # Re-checked under the lock: the labelling may have swapped since the read.
         if (
             row.get("diarization_status") in ("queued", "running")
             or rev != job.diarization_rev
@@ -1430,7 +1316,7 @@ async def merge_speakers(
             )
             edits = [*edits, edit]
             if names.get(body.from_label) and not names.get(body.into):
-                # Copied, not moved: an undo then restores both sides.
+                # Copied, not moved, so undo restores both sides.
                 names[body.into] = names[body.from_label]
                 names = await repository.set_speaker_names(conn, job_id=job_id, names=names) or {}
         else:
@@ -1460,10 +1346,9 @@ async def merge_speakers(
     )
 
 
-# ── Turn-level correction (Sprint 30) ─────────────────────────────────
+# ── Turn-level correction ─────────────────────────────────────────────
 
-# One reassign moves at most this many artifact segments; the table's CHECK
-# holds the same bound. A live roster never exceeds the engines' cap.
+# The table's CHECK holds the same bounds.
 MAX_REASSIGN_SEGMENTS = 500
 MAX_LIVE_SPEAKERS = 8
 
@@ -1542,7 +1427,6 @@ async def reassign_turns(
         if row.get("diarization_status") in ("queued", "running"):
             raise _problem(409, "rediarize_in_progress", "speakers are being re-labelled")
         if body.result_rev != rev or rev != rev_seen or row.get("result_storage_uri") != uri:
-            # Indices mean something only within one revision.
             exc = _problem(
                 409, "stale_result_rev", "the speakers changed since this view was loaded"
             )
@@ -1566,7 +1450,7 @@ async def reassign_turns(
                 )
             )
         ):
-            # The same move again (a double click, a retry): same answer.
+            # Idempotent: the same move again gives the same answer.
             view = _edit_view(job_id, output, names, edits)
             return SpeakerEditResult(
                 job_id=job_id,
@@ -1579,9 +1463,7 @@ async def reassign_turns(
 
         creates = body.to == "new"
         if creates:
-            # Every label the job has EVER used — reverted edits and older
-            # revisions included — so a new speaker never inherits a name
-            # someone gave an earlier, undone one.
+            # Every label ever used, so a new speaker never inherits an undone name.
             known = [*output.speakers, *(s.speaker for s in output.segments)]
             known += await repository.all_edit_labels(conn, job_id=job_id)
             target: str | None = next_free_label(known)
@@ -1629,7 +1511,7 @@ async def reassign_turns(
         actor_role=(claims.roles[0] if claims.roles else None),
         target_kind="asr_job",
         target_id=str(job_id),
-        # Counts and the kind of target — never text, never names.
+        # Counts only, never text or names.
         payload={
             "segments": len(indices),
             "to": "new" if creates else ("none" if target is None else "existing"),
@@ -1734,7 +1616,7 @@ async def undo_speaker_edit(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ── Name suggestions (Sprint 32) ─────────────────────────────────────
+# ── Name suggestions ─────────────────────────────────────────────────
 
 
 class DismissSuggestionRequest(BaseModel):
@@ -1776,7 +1658,7 @@ async def dismiss_name_suggestion(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ── Speaker re-labelling (Sprint 29) ──────────────────────────────────
+# ── Speaker re-labelling ──────────────────────────────────────────────
 
 
 class RediarizeRequest(BaseModel):
@@ -1819,8 +1701,7 @@ async def rediarize(
         str(claims.sub),
         limit=settings.rediarize_user_hourly_limit,
         window_seconds=3600,
-        # The per-job run cap in the database bounds the damage if Redis
-        # is down; refusing every re-run for that is the worse outcome.
+        # The per-job cap in the DB bounds the damage when Redis is down.
         fail_open=True,
     )
     if not decision.allowed:
@@ -1845,7 +1726,7 @@ async def rediarize(
         job_id=job_id,
         tenant_id=claims.tid,
         audio_id=claim.audio_id,  # type: ignore[arg-type]
-        # Not used by a re-run (no ASR pass); the field is required.
+        # Required field, unused by a re-run.
         language="auto",
         diarize=True,
         num_speakers=body.speakers_expected,
@@ -1865,8 +1746,7 @@ async def rediarize(
             },
         )
     except Exception as exc:  # noqa: BLE001 — every publish failure is the same failure
-        # Nothing will pick the run up: put the row back as it was and do
-        # not count the run, so "try again" is honest advice.
+        # Nothing will pick the run up: restore the row and do not count it.
         logger.error(
             "asr.rediarize_enqueue_failed",
             extra={"job_id": str(job_id), "error_class": type(exc).__name__},
@@ -1887,8 +1767,6 @@ async def rediarize(
         target_id=str(job_id),
         payload={
             "hint": "exact" if body.speakers_expected is not None else "none",
-            # Sprint 32: a re-run without a count is "re-label with the
-            # current engine"; with one, a person correcting the count.
             "reason": "user_count" if body.speakers_expected is not None else "engine_upgrade",
         },
         severity=Severity.INFO,
@@ -1928,8 +1806,7 @@ async def undo_rediarize(
         _rediarize_requests_counter.add(1, {"outcome": outcome.refused})
         raise _problem(409, outcome.refused, _REDIARIZE_REFUSALS[outcome.refused])
     if outcome.undone_uri:
-        # One step only: the undone labelling is not kept for a redo.
-        # Best effort — an orphan costs storage, not correctness.
+        # No redo; best effort (an orphan costs storage, not correctness).
         try:
             await state.transcript_store.delete(key=repository.key_from_uri(outcome.undone_uri))
         except Exception as exc:  # noqa: BLE001
@@ -2010,8 +1887,7 @@ async def cancel_job(
 
 
 async def _audit_quota_exceeded(state: object, claims: Claims, audio_id: UUID) -> None:
-    # ``state`` typed as object so the import-linter doesn't see this fn
-    # as creating a cycle with main_deps.
+    # ``state`` is ``object`` to keep the import-linter from seeing a cycle with main_deps.
     try:
         await state.audit_writer.write_event(  # type: ignore[attr-defined]
             tenant_id=claims.tid,

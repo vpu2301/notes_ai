@@ -1,22 +1,6 @@
-"""Per-process legacy diarization engine (hoisted from dictation-service, ADR-0034).
+"""Legacy per-process engine (ADR-0034): one shared ECAPA embedder + Silero segmenter pair, loaded lazily under a lock.
 
-Sprint 29: the batch half of this class is the ``legacy-ecapa-ahc``
-implementation of the :class:`~diarization.protocol.Diarizer` seam
-(:class:`LegacyEcapaDiarizer`). ``DiarizationEngine`` stays as an alias:
-dictation-service builds its streaming path on the same loaded pair and
-imports it by that name.
-
-One shared ECAPA embedder + Silero segmenter pair per process (the
-models are stateless between calls; ~90 MB resident once). Consumers
-build their own pipelines on top of the loaded pair: dictation-service
-hands out per-session streaming instances, asr-worker runs the offline
-diarizer over a whole recording.
-
-Loading is lazy + locked: deployments that never diarize (and macOS dev
-without the model dir) never pay for torch imports or weights. The first
-diarization request triggers ``ensure_loaded()``; failure raises
-:class:`DiarizationUnavailableError` and the request is refused —
-fail-loud, never a silent stub producing garbage labels.
+Load failure raises :class:`DiarizationUnavailableError`: fail-loud, never a silent stub.
 """
 
 from __future__ import annotations
@@ -77,8 +61,6 @@ class LegacyEcapaDiarizer:
         self._embedder: EcapaEmbedder | None = None
         self._segmenter: SileroSegmenter | None = None
         self._lock = asyncio.Lock()
-        # Set once a load attempt has failed, so readiness can report WHY a
-        # worker is not advertising diarization capacity.
         self._last_error: str | None = None
 
     @property
@@ -103,12 +85,7 @@ class LegacyEcapaDiarizer:
 
     @property
     def ready(self) -> bool:
-        """True iff this process can diarize RIGHT NOW.
-
-        Readiness gates on this: a worker advertising diarization capacity
-        with a cold diarizer would pay weight-loading on the first window
-        and blow the latency budget (sprint-14 deployment finding).
-        """
+        """True iff this process can diarize RIGHT NOW (readiness gates on it; a cold load blows the latency budget)."""
         return self._enabled and self.loaded
 
     @property
@@ -136,9 +113,7 @@ class LegacyEcapaDiarizer:
             embedder = EcapaEmbedder(model_dir=self._model_dir, device=self._device)
             segmenter = SileroSegmenter()
             try:
-                # Assert the BUILD-time digests again before the weights are
-                # ever loaded (docs/models/PINS.md). Hashing 83 MB is I/O
-                # bound — off-thread like the load itself.
+                # Re-assert the build-time digests before the weights are loaded (docs/models/PINS.md).
                 await asyncio.to_thread(
                     verify_model_dir,
                     self._model_dir,
@@ -146,8 +121,6 @@ class LegacyEcapaDiarizer:
                     repo=self._model_repo,
                     revision=self._model_revision,
                 )
-                # Weight loading + first forward are CPU/GPU-bound; keep
-                # the event loop responsive for concurrent work.
                 await asyncio.to_thread(embedder.warm_up)
                 await asyncio.to_thread(segmenter.speech_regions, np.zeros(1600, dtype=np.float32))
             except Exception as exc:  # torch/model errors are varied; fail loud, typed
@@ -182,14 +155,7 @@ class LegacyEcapaDiarizer:
         )
 
     async def warm_up(self) -> bool:
-        """Startup warmup: load both models, but never block service start.
-
-        A deployment that never diarizes (or a dev box with no model dir)
-        must still serve its other traffic. The failure is recorded and
-        surfaced via ``last_error`` as *no diarization capacity*, and any
-        diarization request is refused with a typed error — never a silent
-        stub producing garbage labels.
-        """
+        """Startup warmup that never blocks service start; a failure is recorded in ``last_error``."""
         if not self._enabled:
             logger.info("diarization.warmup_skipped", extra={"reason": "disabled"})
             return False
@@ -217,5 +183,5 @@ class LegacyEcapaDiarizer:
         return True
 
 
-# dictation-service (streaming) imports the loaded pair under this name.
+# dictation-service imports it under this name.
 DiarizationEngine = LegacyEcapaDiarizer

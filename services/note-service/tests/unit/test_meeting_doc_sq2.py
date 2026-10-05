@@ -1,9 +1,6 @@
-"""Sprint SQ2 — the whole recording is in the note.
-
-T1 the diagnosis numbers (per window, per third; numbers only), T2 even
-fact budgets, T3 the coverage guard, T4 sections from the transcript, T5
-reduce over every fact. Scripted provider throughout: what is tested is
-what the engine sends and keeps, not what a model writes."""
+"""The whole recording is in the note: diagnosis numbers, even fact budgets, the
+coverage guard, sections from the transcript, reduce over every fact. Scripted
+provider throughout."""
 
 from __future__ import annotations
 
@@ -116,7 +113,7 @@ class Wide(ScriptedProvider):
     context_window = 131_072
 
 
-# ── T1 the diagnosis numbers ────────────────────────────────────────
+# ── the diagnosis numbers ────────────────────────────────────────
 
 
 def test_per_window_and_reduce_numbers_are_recorded_and_are_numbers_only() -> None:
@@ -162,7 +159,7 @@ def test_per_window_and_reduce_numbers_are_recorded_and_are_numbers_only() -> No
         f"{compose.SOURCE_LEXICAL}+{compose.SOURCE_UNIFORM}",
         f"{compose.SOURCE_CUES}+{compose.SOURCE_UNIFORM}",
     }
-    # No word of the recording in any SQ2 number.
+    # No word of the recording in any diagnosis number.
     sq2 = {
         k: stats[k]
         for k in (
@@ -186,7 +183,7 @@ def test_thirds_are_by_time_not_by_window() -> None:
     assert first and last, document.stats["facts_by_third"]
 
 
-# ── T2 even budgets ─────────────────────────────────────────────────
+# ── even budgets ─────────────────────────────────────────────────
 
 
 def test_48k_characters_give_8_small_windows_or_6_wide_ones() -> None:
@@ -216,7 +213,7 @@ def test_facts_by_third_are_even_on_the_scripted_provider() -> None:
     assert all(abs(n - mean) <= 0.2 * mean for n in by_third), by_third
 
 
-# ── T3 the coverage guard ───────────────────────────────────────────
+# ── the coverage guard ───────────────────────────────────────────
 
 
 _LINE = re.compile(r"^\[(?P<n>\d+)\] [^()\n]*\((?P<m>\d{2}):(?P<s>\d{2})\)", re.MULTILINE)
@@ -297,7 +294,7 @@ def test_the_coverage_variant_adds_only_the_range_and_ids() -> None:
         assert not prompts.echoes_example(prompts.COVERAGE_SUFFIX[language])
 
 
-# ── T4 sections follow the recording ────────────────────────────────
+# ── sections follow the recording ────────────────────────────────
 
 
 def _turns(texts: list[str], ms: int = 30_000) -> list[Turn]:
@@ -372,7 +369,7 @@ def test_bullets_inside_a_block_are_in_recording_order() -> None:
         assert starts == sorted(starts)
 
 
-# ── T5 reduce sees every block's facts ──────────────────────────────
+# ── reduce sees every block's facts ──────────────────────────────
 
 
 def test_facts_from_the_last_window_are_cited_in_the_last_section() -> None:

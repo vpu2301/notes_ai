@@ -1,30 +1,9 @@
 #!/usr/bin/env python3
-"""One-time KMS migration — re-wrap every tenant KEK under Vault Transit.
+"""Re-wrap every tenant KEK from the file master to Vault Transit (ADR-0011); DEKs and
+objects are untouched. Per-row transactions under ``FOR UPDATE``, resumable, verified
+by round-trip before commit, audited (``kms.rewrap.completed``).
 
-ADR-0011's promised re-wrap procedure (sprint 16). Moves each
-``tenant_keks`` row from the file master (``file-v1``) to the Vault
-Transit master (``vault:{mount}:{key}``). The envelope hierarchy below
-the tenant KEK is untouched: no DEK, no object, no blob changes — which
-is exactly why existing encrypted objects keep decrypting afterwards.
-
-Properties:
-
-- **Transactional per row** — each KEK re-wraps in its own transaction
-  under ``SELECT … FOR UPDATE``; a crash mid-migration leaves a mixed
-  but fully consistent table.
-- **Resumable** — rows already wrapped under the target Vault key are
-  skipped; re-running converges.
-- **Verified before commit** — the new wrapping is round-tripped through
-  Vault and byte-compared against the plaintext before UPDATE.
-- **Dry-run** — ``--dry-run`` unwraps and reports, writes nothing.
-- **Audited** — one ``kms.rewrap.completed`` (sec) event per migrated
-  tenant, written through libs/audit (rule 5).
-
-Usage (see docs/runbooks/kms.md):
-
-    MDX_VAULT_ADDR=http://localhost:8200 MDX_VAULT_TOKEN=… \\
-    uv run --project libs/crypto python scripts/kms/rewrap-tenant-keks.py \\
-        --dry-run
+    MDX_VAULT_ADDR=... MDX_VAULT_TOKEN=... uv run --project libs/crypto python scripts/kms/rewrap-tenant-keks.py [--dry-run]
 """
 
 from __future__ import annotations
@@ -117,7 +96,7 @@ async def _run(args: argparse.Namespace) -> int:
                 continue
 
             if args.dry_run:
-                # Prove the source row unwraps — the strongest no-write check.
+                # Prove the source row unwraps.
                 r = await pool.fetchrow(
                     "SELECT wrapped_kek, kek_master_id FROM tenant_keks WHERE tenant_id = $1",
                     tenant_id,

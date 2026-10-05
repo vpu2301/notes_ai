@@ -6,15 +6,7 @@ import { setSessionListener } from "../src/api/http";
 import { ShareDialog } from "../src/components/ShareDialog";
 import { ToasterProvider } from "../src/components/Toaster";
 
-/**
- * The share sheet's compose box.
- *
- * What is worth pinning here is that pressing Send actually calls the
- * server, with everyone the sender named. The behaviour it replaced —
- * `window.location.href = "mailto:…"` — could not be tested at all in a
- * browser, which is a good part of why nobody noticed it was handing the
- * job to whatever draft Mail.app had lying around.
- */
+/** The share sheet's compose box: Send calls the server with everyone named, never a mailto: hand-off. */
 
 const NOTE = "note-1";
 
@@ -79,8 +71,7 @@ describe("share sheet — send by e-mail", () => {
 
     sheet();
     const box = await screen.findByLabelText(/e-mail address/i);
-    // Comma commits the first address; the second is still half-typed
-    // when Send is pressed, which is exactly how people use these boxes.
+    // Comma commits the first address; the second is still half-typed at Send.
     await userEvent.type(box, "a@example.com,b@example.com");
     await userEvent.type(screen.getByLabelText(/message/i), "Recap inside.");
     await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
@@ -101,8 +92,7 @@ describe("share sheet — send by e-mail", () => {
 
     sheet();
     await userEvent.type(await screen.findByLabelText(/e-mail address/i), "not an address");
-    // A space is a chip separator, so what is left in the box is the
-    // tail — either way nothing is sent and the sender is told why.
+    // Space is a chip separator; either way nothing is sent and the sender is told why.
     await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
     expect(await screen.findByText(/doesn’t look like an e-mail address/i)).toBeInTheDocument();

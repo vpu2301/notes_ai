@@ -1,11 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// "Share with client…" — one link per recipient (Sprint 19).
-///
-/// Same rules as on iOS: a label, an optional address and an expiry. On
-/// create the URL is copied to the pasteboard and an "Email…" button
-/// offers a mail draft with it.
+/// "Share with client…" — one link per recipient: a label, an optional address and an expiry. On create the URL is copied and an "Email…" button offers a draft.
 struct ShareWithClientSheet: View {
     @ObservedObject var model: NoteViewModel
     let webAppURL: String
@@ -21,7 +17,7 @@ struct ShareWithClientSheet: View {
     @State private var created: URL?
 
     private static let allExpiryOptions = [30, 90, 180]
-    /// Clipped to what the workspace allows (Sprint 23).
+    /// Clipped to what the workspace allows.
     private var expiryOptions: [Int] {
         let allowed = Self.allExpiryOptions.filter { $0 <= model.rules.maxLinkDays }
         return allowed.isEmpty ? [min(model.rules.maxLinkDays, 30)] : allowed
@@ -119,7 +115,7 @@ struct ShareWithClientSheet: View {
                 if model.busy {
                     ProgressView().controlSize(.small).frame(width: 34)
                 } else {
-                    // Sprint 22: with an address, the product sends the mail.
+                    // With an address, the product sends the mail.
                     Label(hasEmail ? "Send e-mail" : "Create link", systemImage: hasEmail ? "envelope" : "link")
                 }
             }
@@ -238,8 +234,7 @@ struct ShareWithClientSheet: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    /// A mail draft with the link — the sender's own mail client, since
-    /// the product does not send recipient links itself until Sprint 22.
+    /// A mail draft with the link, in the sender's own mail client.
     private func emailLink(url: URL, to address: String) {
         var parts = URLComponents()
         parts.scheme = "mailto"

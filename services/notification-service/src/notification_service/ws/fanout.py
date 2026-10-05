@@ -1,15 +1,7 @@
 """Cross-worker WebSocket fan-out over Redis pub/sub (ADR-0030).
 
-A notification materialised on worker A must reach a user whose socket
-is pinned to worker B. Rather than track which worker owns which socket
-— state that is wrong the moment a worker dies — every worker subscribes
-to one pattern and forwards to whatever sockets it happens to hold. A
-worker with no socket for that user simply does nothing.
-
-Pub/sub is deliberately fire-and-forget: it is an OPTIMISATION, never
-the source of truth. A dropped frame costs a client a live update, and
-the client recovers on its next REST poll or on reconnect, because the
-unread count always comes from the database (E5).
+Every worker subscribes to one pattern and forwards to the sockets it holds.
+Fire-and-forget: an optimisation, never the source of truth (unread count comes from the DB).
 """
 
 from __future__ import annotations
@@ -26,22 +18,14 @@ from notification_events import user_channel
 
 logger = logging.getLogger(__name__)
 
-# Every worker subscribes to this ONE pattern rather than to a channel
-# per connected user. Per-user subscribe/unsubscribe on every socket
-# open and close would make connection churn into Redis command churn.
+# One pattern per worker, not a channel per user: avoids Redis command churn.
 _PATTERN = "mdx:notify:user:*"
 
 
 async def publish_new_notification(
     redis: Any, *, tenant_id: UUID, notification_id: UUID, recipient_user_id: UUID
 ) -> None:
-    """Announce a new notification to whichever worker holds the socket.
-
-    The frame carries IDS ONLY. The receiving worker re-reads the row
-    under that user's tenant scope before sending anything, so pub/sub —
-    which has no tenant isolation of its own — never carries content and
-    cannot become a cross-tenant leak.
-    """
+    """Announce a new notification. IDs only: pub/sub has no tenant isolation, so it never carries content."""
     await _publish(
         redis,
         notification_id=notification_id,
@@ -68,10 +52,7 @@ async def _publish(
     recipient_user_id: UUID,
     notification_id: UUID | None = None,
 ) -> None:
-    # The channel is ALWAYS keyed by recipient — that is what a
-    # subscribing worker can match against the sockets it holds. Keying
-    # by anything else (a notification id) would publish to a channel
-    # nobody is listening on, and the frame would silently vanish.
+    # Channel is always keyed by recipient: that is what a worker matches sockets against.
     payload = {
         "kind": kind,
         "tenant_id": str(tenant_id),
@@ -81,8 +62,7 @@ async def _publish(
     try:
         await redis.publish(user_channel(recipient_user_id), json.dumps(payload))
     except Exception as exc:  # noqa: BLE001
-        # Never let a fan-out failure break materialisation. The row is
-        # already committed; the client will see it on next poll.
+        # A fan-out failure must not break materialisation; the row is committed.
         logger.warning("fanout.publish_failed", extra={"error": str(exc)})
 
 

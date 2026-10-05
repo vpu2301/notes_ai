@@ -1,12 +1,4 @@
-"""Conversation mode: voice-commands stage disabled end-to-end (sprint 14).
-
-A conversation-mode transcript carries OTHER PARTICIPANTS' speech —
-«новий абзац» said by a meeting participant must stay verbatim prose,
-never become an editing
-operation. The orchestrator is driven with the REAL ``VoiceCommandStage``
-once normally (operation fires) and once with
-``stages_disabled=("voice_commands",)`` (text verbatim, no operations).
-"""
+"""Conversation mode: with ``stages_disabled=("voice_commands",)`` another participant's «новий абзац» stays prose."""
 
 from __future__ import annotations
 

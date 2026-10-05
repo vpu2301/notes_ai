@@ -1,21 +1,7 @@
-"""Session state machine.
+"""Session state machine; ``can_transition`` gates every status mutation.
 
-State graph (canonical, see docs/api/dictation-ws-v1.md § lifecycle):
-
-    creating ──► active ──► finalized
-                  │ ▲
-                  ▼ │
-                paused
-                  │
-                  ▼
-              reconnecting ──► finalized | abandoned | failed
-                  │
-                  ▼
-                 failed
-
-Transitions are explicit. ``can_transition`` is the gate every code path
-uses before mutating ``dictation_sessions.status`` so an invalid
-transition fails fast instead of corrupting state.
+creating → active ⇄ paused; active → finalized;
+active/paused → reconnecting → finalized | abandoned | failed.
 """
 
 from __future__ import annotations
@@ -77,11 +63,7 @@ def can_transition(from_state: SessionState, to_state: SessionState) -> bool:
 
 
 def assert_transition(from_state: SessionState, to_state: SessionState) -> None:
-    """Raise :class:`StateTransitionError` if the transition is invalid.
-
-    Used at every mutation site so an invalid transition surfaces at the
-    earliest possible point and is loud in the logs.
-    """
+    """Raise :class:`StateTransitionError` if the transition is invalid."""
     if not can_transition(from_state, to_state):
         raise StateTransitionError(f"invalid transition {from_state.value!r} → {to_state.value!r}")
 

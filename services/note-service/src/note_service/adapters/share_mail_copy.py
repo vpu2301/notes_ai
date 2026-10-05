@@ -1,23 +1,7 @@
-"""Every word the share mail says, in every language it says it.
-
-Split from the template so the prose can be proofread by somebody who
-does not read Jinja, and so the two body parts (HTML and text/plain) are
-built from the SAME strings and cannot drift into saying different
-things to the same recipient.
-
-It lives beside the renderer in ``adapters`` rather than in ``domain``
-because the layering runs routers → domain → adapters: the renderer is
-an adapter, and an adapter reaching back up into the domain for its own
-strings is the inversion the contract exists to prevent.
-
-The plain-text alternate uses ``str.format`` rather than Jinja, and that
-is deliberate: Jinja's autoescaping would turn the ``&`` in a link's
-query string into ``&amp;`` inside a text/plain part, where it is not
-markup and the link would arrive broken.
-
-Dates are formatted by hand rather than through ``locale``: the C locale
-is process-global and not thread-safe, so one request formatting a
-Ukrainian date would change what every concurrent request produced.
+"""Every word the share mail says, in every language; HTML and text/plain are
+built from the SAME strings. The text/plain part uses ``str.format``, not Jinja
+(autoescaping would break ``&`` in links); dates are formatted by hand, not via
+``locale`` (process-global, not thread-safe).
 """
 
 from __future__ import annotations
@@ -278,7 +262,7 @@ def text_body(
     )
 
 
-# ── Sprint 22: the recipient-link mail's extra facts ─────────────────
+# ── The recipient-link mail's extra facts ────────────────────────────
 
 _RECIPIENT: Final[dict[str, dict[str, str]]] = {
     "en": {

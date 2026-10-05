@@ -1,11 +1,4 @@
-"""KmsMasterKeyProvider (Vault Transit) + CompositeMasterKeyProvider tests.
-
-A minimal in-memory Vault Transit fake behind ``httpx.MockTransport``
-exercises the real HTTP contract (paths, token header, base64 framing,
-``vault:vN:`` ciphertext) without a Vault binary. The live acid test —
-re-wrap against a real Vault dev server — is the sprint-16 VERIFY step,
-run separately (docs/runbooks/kms.md).
-"""
+"""KmsMasterKeyProvider + CompositeMasterKeyProvider against an in-memory Vault Transit fake (real HTTP contract)."""
 
 from __future__ import annotations
 

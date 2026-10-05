@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// IDX-M2 — local state belongs to an identity and a workspace, and a
-/// workspace is something the server decides you may be in.
+/// Local state belongs to an identity and a workspace, and a workspace is something the server decides you may be in.
 final class LocalStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
@@ -49,7 +48,7 @@ final class LocalStoreTests: XCTestCase {
     }
 
     func testTheLegacyListMovesUnderTheFirstIdentityOnce() throws {
-        // What a pre-IDX-M2 Mac has on disk: one unscoped key.
+        // What an older Mac has on disk: one unscoped key.
         let legacy = try JSONEncoder().encode([recent("old-1"), recent("old-2")])
         defaults.set(legacy, forKey: AppState.Keys.recents)
         let ada = scope("ada", "tenant-a")
@@ -150,7 +149,7 @@ final class AppURLTests: XCTestCase {
 
 // MARK: - Workspace-scoped tokens
 
-/// IDX-M2 — `POST /auth/token`, from the client's side.
+/// `POST /auth/token`, from the client's side.
 final class WorkspaceTokenTests: XCTestCase {
 
     private func makeClient() -> APIClient {

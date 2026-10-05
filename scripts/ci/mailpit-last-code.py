@@ -1,34 +1,11 @@
 #!/usr/bin/env python3
-"""Read the newest sign-in code Mailpit holds for one address.
+"""Print the newest sign-in code Mailpit holds for one address (the mailbox is the only
+place a code is observable). Stdlib only; run straight from Playwright.
 
-The end-to-end tests cannot see a code any other way. `/auth/email/start`
-answers 202 for every syntactically valid address by construction — known,
-unknown, locked and undeliverable are indistinguishable — so there is no
-response field, no header and no log line to scrape. The only honest place
-to look is the mailbox, and in dev and CI that mailbox is Mailpit.
+    scripts/ci/mailpit-last-code.py someone@example.test [--wait 20] [--purge]
 
-    scripts/ci/mailpit-last-code.py someone@example.test
-    scripts/ci/mailpit-last-code.py someone@example.test --wait 20
-    scripts/ci/mailpit-last-code.py someone@example.test --purge
-
-Prints the six digits and nothing else, so a caller can use it directly:
-
-    CODE="$(scripts/ci/mailpit-last-code.py "$EMAIL" --wait 20)"
-
-Exit 0 = a code was printed. Exit 1 = no matching mail inside the wait, or
-mail that carried no code. Exit 2 = Mailpit itself is unreachable, which is
-a broken fixture rather than a failed assertion and deserves a different
-signal.
-
-Stdlib only, and `python3` in the shebang rather than the `python` the rest
-of `scripts/ci/` uses: those run under `uv run`, which supplies the name.
-This one is executed straight from a Playwright process, where a stock
-macOS box has only `python3` on PATH — and `uv run` for a URL fetch would
-put a project resolve in the middle of a browser test.
-
-**Never point this at a real mail host.** It is a fixture for a sink that
-holds other people's one-time credentials in plaintext; `--purge` exists so
-a test can guarantee the code it reads is the one its own step caused.
+Exit 0 code printed, 1 no code inside the wait, 2 Mailpit unreachable.
+Never point this at a real mail host.
 """
 
 from __future__ import annotations
@@ -44,14 +21,12 @@ import urllib.request
 
 DEFAULT_BASE = "http://localhost:8025"
 
-# The mail shows the code grouped ("482 913" — `domain/compose.format_code`),
-# and a client may show it either way, so both forms are accepted. Anchored
-# on non-digits so a longer number in the body cannot be mistaken for one.
+# Grouped ("482 913", `domain/compose.format_code`) or plain; anchored on
+# non-digits so a longer number cannot be mistaken for a code.
 CODE_RE = re.compile(r"(?<!\d)(\d{3})[  -]?(\d{3})(?!\d)")
 
-# The subject line of the sign-in-code mail, in every language `copy.py`
-# renders. Matching the subject rather than the body keeps a security
-# notice that happens to quote a number from being read as a code.
+# Sign-in-code subjects in every language `copy.py` renders; matching the
+# subject keeps a security notice quoting a number from reading as a code.
 SUBJECTS = (
     "sign-in code",  # en — "Your Notes AI sign-in code"
     "anmeldecode",  # de — "Ihr Notes AI-Anmeldecode"
@@ -92,8 +67,7 @@ def _messages_for(base: str, email: str) -> list[dict]:
     cannot be read by another running beside it."""
     query = _get(base, "/api/v1/search", query=f"to:{email}", limit="20")
     messages = query.get("messages") or []
-    # Mailpit returns newest first already; sorting on `Created` makes that
-    # a property of this script rather than of the version installed.
+    # Sort on `Created` rather than rely on Mailpit's order.
     return sorted(messages, key=lambda m: str(m.get("Created", "")), reverse=True)
 
 
@@ -105,12 +79,7 @@ def _code_in(base: str, message_id: str) -> str | None:
 
 
 def last_code(base: str, email: str, *, wait_seconds: float) -> str | None:
-    """Poll until a sign-in code for `email` arrives, or the wait runs out.
-
-    Polling rather than a single read because SMTP delivery races the HTTP
-    response that triggered it: `/auth/email/start` returns as soon as the
-    provider accepted the message, which is before Mailpit has indexed it.
-    """
+    """Poll until a sign-in code for `email` arrives: SMTP delivery races the HTTP response."""
     deadline = time.monotonic() + wait_seconds
     while True:
         for message in _messages_for(base, email):

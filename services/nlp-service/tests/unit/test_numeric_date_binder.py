@@ -1,9 +1,4 @@
-"""numeric/date binders (sprint 13, step 05).
-
-The headline contract: these BIND from the normalizer's artifacts and
-never parse. The no-re-parse guards at the bottom are what stop a
-future edit from quietly reintroducing numeral logic here.
-"""
+"""numeric/date binders bind from the normalizer's artifacts and never parse (guards at the bottom)."""
 
 from __future__ import annotations
 
@@ -152,13 +147,7 @@ def test_threshold_above_sole_confidence_empties_the_field() -> None:
 
 
 def test_blood_pressure_is_not_bound_as_one_value() -> None:
-    """BP normalizes to "140/90", which is not a single numeric value.
-
-    Honest limitation: compound measurements need two numeric sections
-    or a future compound field type. We do NOT special-case BP — a
-    silently-invented single value would corrupt the note. See the
-    authoring doc + sign-off.
-    """
+    """BP normalizes to "140/90", not a single value; never special-cased."""
     artifacts = numeric_artifacts_from_output(
         "тиск 140/90 мм рт. ст.", decimal_separator=",", canonical_units=_UK_UNITS
     )

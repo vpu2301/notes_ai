@@ -4,11 +4,7 @@ import { AuthProvider, useAuth } from "../src/auth/AuthContext";
 import { setSessionListener } from "../src/api/http";
 import type { AuthResult, MeResponse } from "../src/api/types";
 
-/**
- * §M: "AppShell no longer reads db_user" — which really means the context
- * exposes one `identity` shape regardless of which of the two the server
- * happens to send, so IDX-B2 deleting `db_user` breaks nothing.
- */
+/** The context exposes one `identity` shape whether the server sends `identity` or only `db_user`. */
 
 const CLAIMS = {
   sub: "11111111-1111-4111-8111-111111111111",
@@ -83,7 +79,7 @@ describe("identity hydration", () => {
   });
 
   it("derives one from db_user while /auth/me is still the old shape", async () => {
-    // This is today's server. The shell must render identically.
+    // The shell must render identically.
     const me: MeResponse = {
       claims: CLAIMS,
       db_user: {
@@ -104,8 +100,7 @@ describe("identity hydration", () => {
     expect(screen.getByTestId("name")).toHaveTextContent("Sam Rivera");
     expect(screen.getByTestId("email")).toHaveTextContent("sam@example.com");
     expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid);
-    // No `memberships` on this shape — the role has to come from the
-    // `users` row, or an owner looks like a stranger in their own workspace.
+    // No `memberships` here: the role must come from the `users` row.
     expect(screen.getByTestId("role")).toHaveTextContent("member");
   });
 
@@ -154,8 +149,7 @@ describe("AuthResult handling", () => {
   };
 
   it("does not sign anyone in on an mfa_required result", async () => {
-    // A real 200 with an empty access_token. Treating it as a session would
-    // let an MFA account past the second factor with only the first.
+    // A 200 with an empty access_token is not a session (MFA second factor).
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
 
     let adopt!: (r: AuthResult) => Promise<unknown>;
@@ -199,8 +193,7 @@ describe("step-up gate", () => {
         <Grab />
       </AuthProvider>,
     );
-    // Let the boot refresh settle before poking the gate, so its state
-    // update is not mistaken for one of ours.
+    // Let the boot refresh settle first.
     await waitFor(() => expect(screen.getByTestId("pending")).toHaveTextContent("false"));
 
     let accepted!: Promise<void>;

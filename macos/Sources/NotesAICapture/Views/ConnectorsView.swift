@@ -1,9 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Connectors tab of Settings: the Mac's calendars (which accounts
-/// feed the home page's Upcoming list) and the remote MCP servers the
-/// user has connected — HubSpot, Notion, a custom one.
+/// The Connectors tab of Settings: the Mac's calendars and the remote MCP servers the user has connected.
 struct ConnectorsView: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
@@ -128,8 +126,7 @@ struct ConnectorsView: View {
         }
     }
 
-    /// One connected account or link: its address, a Sign-in-again nudge
-    /// when Google dropped the token, and the calendars to include.
+    /// One connected account or link: its address, a Sign-in-again nudge when Google dropped the token, and the calendars to include.
     private func googleAccount(_ connection: CalendarConnection) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -505,9 +502,7 @@ private struct ConnectorGlyph: View {
 
 // MARK: - Calendar link sheet (0020)
 
-/// Paste a calendar's private iCal address. The server fetches it before
-/// answering, so a wrong link fails right here with a readable message.
-/// Shared by the Connectors tab and the home page's Coming up card.
+/// Paste a calendar's private iCal address; the server fetches it first, so a wrong link fails here. Shared by Connectors and Coming up.
 struct CalendarLinkSheet: View {
     @ObservedObject var google: GoogleCalendarService
     let onClose: () -> Void
@@ -592,8 +587,7 @@ struct CalendarLinkSheet: View {
 
 // MARK: - Editor
 
-/// Name, server URL, how to authenticate. A pasted token goes straight
-/// to the Keychain and is never shown again.
+/// Name, server URL, how to authenticate. A pasted token goes straight to the Keychain and is never shown again.
 private struct ConnectorEditor: View {
     let connector: Connector
     @ObservedObject var store: ConnectorStore

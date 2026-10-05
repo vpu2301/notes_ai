@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
-"""Pre-commit / CI gate: reject ``os.environ`` reads outside ``config.py``.
-
-Why: every envvar must flow through ``pydantic-settings`` in a service's
-``config.py``. Direct reads scatter the trust boundary, make it impossible
-to audit which secrets a service consumes, and bypass ``Secret[T]`` wrapping.
-
-The gate is self-contained: it applies its own path exclusions
-(``**/config.py``, ``tests/``, ``libs/secret/``, ``scripts/``) so it behaves
-identically whether pre-commit feeds it a staged file list or ``make`` feeds it
-``git ls-files``. The pre-commit ``exclude:`` regex mirrors these for speed.
-
-Override (rare): inline ``# noqa: ENV001`` on the offending line.
+"""Gate: no ``os.environ`` reads outside a service's ``config.py`` (pydantic-settings is
+the trust boundary). Skips config.py, tests/, libs/secret/, scripts/; override with ``# noqa: ENV001``.
 """
 
 from __future__ import annotations
@@ -23,12 +13,8 @@ PATTERN = re.compile(r"\bos\.environ\b|\bos\.getenv\b")
 
 
 def is_excluded(path: Path) -> bool:
-    """True if ``path`` is a sanctioned env surface and must not be scanned.
-
-    Mirrors the pre-commit ``exclude:`` regex but works on absolute paths too
-    (so the unit tests can point it at tmp files). ``config.py`` is the typed
-    env boundary; ``tests/`` set env to exercise it; ``libs/secret/`` is the
-    ``Secret[T]`` wrapper itself; ``scripts/`` are operational tooling.
+    """True if ``path`` is a sanctioned env surface (config.py, tests/, libs/secret/, scripts/);
+    works on absolute paths too.
     """
     parts = path.parts
     if path.name == "config.py":

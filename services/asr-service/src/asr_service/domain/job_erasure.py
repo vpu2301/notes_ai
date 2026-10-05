@@ -1,29 +1,8 @@
-"""Erase one ASR job completely (Sprint 32 B-6, DSAR / tenant request).
+"""Erase one ASR job completely (DSAR / tenant request): objects, then rows.
 
-Everything the speaker-labeling work (Sprints 28–32) added lives in one of
-three places, and this removes all of them:
-
-* **Objects**: the transcript `{tenant}/{job}.json.enc`, every re-labelled
-  revision `{tenant}/{job}.r{n}.json.enc` for n = 2 … the job's current
-  `diarization_rev` (keys are deterministic, so no bucket listing is
-  needed; deleting a key that is already gone is a no-op), and the audio
-  `{tenant}/{audio}.enc`.
-* **Rows**: the `transcription_jobs` row — `speaker_names`,
-  `speaker_name_sources`, `speaker_name_candidates`,
-  `dismissed_name_suggestions`, `capture_context` go with it — and
-  `transcription_speaker_edits` via `ON DELETE CASCADE`; then the
-  `audio_files` row.
-* **Cache**: `workspace:{tenant}:asr:audio_exists:{audio}` expires in 10 min.
-
-Objects first, rows last: a failure half-way leaves a row that still
-points at what remains, so the erase can simply be run again. Every object
-delete is VERIFIED (the storage client swallows delete errors); a delete
-that did not take aborts before any row is touched.
-
-Privileged operator flow (migration 0004: app_role never deletes): the
-connection is an operator role, so every statement here filters by
-``tenant_id`` explicitly. A job that is still transcribing or re-labelling
-is refused — its worker would write objects back after the erase.
+Objects first (every delete VERIFIED; the storage client swallows errors), rows last,
+so a half-done erase can simply be run again. Operator role: every statement filters
+by ``tenant_id`` explicitly. A job still transcribing or re-labelling is refused.
 """
 
 from __future__ import annotations
@@ -53,12 +32,8 @@ class ErasePlan:
 
 
 def transcript_keys(tenant_id: UUID, job_id: UUID, diarization_rev: int) -> list[str]:
-    """Every transcript object a job can have: original + r2…r{rev+1}.
-
-    ``rev + 1``: a re-run writes its artifact BEFORE the row moves, so a run
-    that failed or was reaped after the write leaves one revision beyond
-    the row's ``diarization_rev``.
-    """
+    """Every transcript object a job can have: original + r2…r{rev+1} (a re-run writes
+    its artifact before the row moves)."""
     keys = [f"{tenant_id}/{job_id}.json.enc"]
     keys += [f"{tenant_id}/{job_id}.r{n}.json.enc" for n in range(2, max(1, diarization_rev) + 2)]
     return keys

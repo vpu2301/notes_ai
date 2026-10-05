@@ -1,10 +1,5 @@
-"""The gold-set scoring (Sprint 33 B-2 / Sprint 37 B-1).
-
-A benchmark decides which model ships, so its arithmetic has to be worth
-trusting on its own. These are the rules the numbers rest on: wording is
-free, content is not, an owner is only scored on a line that matched, and
-a quote that is not verbatim in the transcript fails the run rather than
-scoring lower.
+"""The gold-set scoring rules: wording is free, content is not, an owner is scored only
+on a matched line, and a non-verbatim quote fails the run.
 """
 
 from __future__ import annotations
@@ -178,7 +173,7 @@ def test_the_committed_corpus_is_the_shape_the_harness_reads() -> None:
         assert turns and all(t["paragraphs"] and t["end_ms"] > 0 for t in turns), name
 
 
-# ── Q1 T1: the harness feeds the engine what the worker feeds it ────
+# ── The harness feeds the engine what the worker feeds it ────
 
 
 def _engine() -> Any:

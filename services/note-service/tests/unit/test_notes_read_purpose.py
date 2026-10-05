@@ -1,14 +1,6 @@
-"""GET /v1/notes/{id}: who must declare a read purpose, and what they get.
-
-The author team and people the note was shared with read without a
-purpose. An oversight reader — a tenant_admin on a colleague's private
-note here — must send ``?purpose=``; without it the answer is a flat RFC
-9457 problem the clients branch on, and with it the envelope names the
-author so the client can say whose note it is showing.
-
-Exercises the real ``notes.get_note`` handler with the auth dependency
-overridden and the DB/audit boundary stubbed (mirrors
-``test_notes_section_labels``).
+"""GET /v1/notes/{id}: who must declare a read purpose, and what they get. The
+author team and sharees read without one; an oversight reader must send
+``?purpose=`` and then gets the author's name. Real handler, auth overridden, DB stubbed.
 """
 
 from __future__ import annotations

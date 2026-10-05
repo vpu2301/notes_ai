@@ -1,17 +1,6 @@
-"""Search query construction + cursor pagination + snippet generation.
-
-Postgres ``simple`` FTS config (ADR-0021). Composes filter clauses
-with AND. Joins to ``note_versions`` so the search hits the current
-version's rendered text. Snippet via ``ts_headline`` is run inside the
-same query for one DB round-trip.
-
-Results are ordered most-recent-first by ``created_at`` (a monotonic,
-never-NULL column) with ``id`` as a stable tie-break, so a
-freshly-created draft always lands on the first page.
-
-Cursor encoding (opaque to clients): base64 url-safe of the tuple
-``(created_at_iso, note_id_hex)``. Tie-break by id so the cursor is
-stable.
+"""Search query construction + cursor pagination + snippets (``simple`` FTS,
+ADR-0021). Ordered by ``created_at`` desc with ``id`` as tie-break; the cursor
+is url-safe base64 of ``(created_at_iso, note_id_hex)``.
 """
 
 from __future__ import annotations
@@ -33,7 +22,7 @@ class SearchFilters:
     statuses: list[str] | None = None
     created_from: date | None = None
     created_to: date | None = None
-    # Sprint 15 (ADR-0038): pre-assembled tsquery string from
+    # ADR-0038: pre-assembled tsquery string from
     # domain/query_expansion — when set (and q is set) the FTS tier uses
     # to_tsquery('simple', ts_query) instead of plainto over q. The SAME
     # bind arg feeds the predicate, ts_headline AND exact_total; unset →
@@ -92,7 +81,7 @@ class SearchHit:
     visibility: str = "private"
     shared_with_count: int = 0
     has_public_link: bool = False
-    # Sprint 20 — live recipient disputes, for the "1 disputed" dot.
+    # Live recipient disputes, for the "1 disputed" dot.
     open_disputes: int = 0
 
 

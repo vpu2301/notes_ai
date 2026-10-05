@@ -1,36 +1,8 @@
-"""BE-0 — self-serve signup on the current stack.
+"""Self-serve password signup against Keycloak.
 
-Keycloak stays the identity provider. The account is created through the
-admin client with a password already set and ``enabled=false``; a six-digit
-code proves the address is reachable; verification enables the account and
-flips ``users.status`` to ``active``. From then on the person signs in with
-``POST /auth/login`` like every existing user, on web, macOS and iOS, with
-no client change at all.
-
-Nothing here is permanent. BE-3's email-code path replaces password signup
-once ``MDX_IDP_MODE=dual`` is switched on fleet-wide (ADR-0047), and this
-module retires with it. What survives is the workspace self-heal and the
-web page. That is written down because the shape of the code should not
-pretend otherwise: it is deliberately a thin orchestration over machinery
-that already exists, not a new subsystem.
-
-── The two hard parts ───────────────────────────────────────────────────
-
-**One: an account must never exist half-way.** Signup writes to two
-stores that cannot share a transaction — Keycloak over HTTP, then Postgres.
-The order is Keycloak first, because a Keycloak user with no database rows
-can be *deleted*, while database rows referencing a Keycloak user that was
-never created cannot be repaired without knowing a sub nobody has. If the
-database half fails, the Keycloak user is deleted and the caller gets 503
-with nothing created on either side. That compensation is the only reason
-the order is what it is.
-
-**Two: the response must not say whether the address is known.** Both
-branches answer ``202`` with the same body and the same shape of work —
-one challenge row and one mail, queued the same way — so latency does not
-discriminate either. The only place the difference exists is in a mailbox
-(``signup_verify`` vs ``signup_exists``), which a prober would have to
-already control.
+Keycloak user first (disabled), then Postgres; a DB failure deletes the Keycloak
+user so nothing exists half-way. Every branch answers the same 202 with the same
+amount of work, so the response never says whether the address is known.
 """
 
 from __future__ import annotations
@@ -69,7 +41,7 @@ _signup_verify_counter = _meter.create_counter(
     description="Signup confirmation submissions by outcome",
     unit="1",
 )
-# Sprint 21: the loop's conversion step. `stage` = requested | verified.
+# `stage` = requested | verified.
 _signup_referred_counter = _meter.create_counter(
     "mdx_auth_signup_referred_total",
     description="Signups that arrived through a shared note's CTA, by stage",
@@ -83,16 +55,10 @@ SCOPE_SIGNUP_EMAIL = "signup_email"
 SCOPE_SIGNUP_VERIFY_EMAIL = "signup_verify_email"
 SCOPE_SIGNUP_RESEND_EMAIL = "signup_resend_email"
 
-# The `users.role` for the founding owner of a personal workspace. They
-# are alone in it, so they administer it.
+# `users.role` for the founding owner of a personal workspace.
 _OWNER_USER_ROLE = "tenant_admin"
 
-# Realm roles for a self-serve account. BOTH, and the second one is not
-# optional: S14's admin/content separation gives `tenant_admin` no
-# content permission at all — not `note.write`, not `asr.write` — so an
-# account holding it alone cannot use the product it just signed up for.
-# `docs/auth/roles.md` states the rule; BE-3's first-use test is what
-# caught the same mistake on the native path.
+# Both roles: `tenant_admin` alone has no content permission.
 SIGNUP_REALM_ROLES = ("tenant_admin", "member")
 
 _PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*-_=+"
@@ -108,7 +74,6 @@ class SignupConfig:
     max_attempts: int = 5
     resend_seconds: int = 60
     min_password_length: int = 12
-    # Per the brief: 5/h per IP, 3/day per email, 10/h verify, 3/h resend.
     signup_ip_limit: int = 5
     signup_ip_window_seconds: int = 3600
     signup_email_limit: int = 3
@@ -117,7 +82,7 @@ class SignupConfig:
     verify_email_window_seconds: int = 3600
     resend_email_limit: int = 3
     resend_email_window_seconds: int = 3600
-    # Sprint 21: the free plan, recorded on the tenant (not enforced).
+    # Recorded on the tenant, not enforced.
     free_limits: dict[str, int] = field(
         default_factory=lambda: {"notes_per_month": 50, "members": 3}
     )
@@ -151,19 +116,12 @@ class SignupMailer(Protocol):
 
 
 def generate_password(length: int = 20) -> str:
-    """A concierge account's first password. Mailed once, never logged.
-
-    Rejection sampling until the realm policy would accept it, rather than
-    forcing one of each class at fixed positions — a fixed layout is a
-    pattern, and the operator is not the one who has to type it anyway.
-    """
+    """A concierge account's first password (mailed once, never logged); rejection-sampled against the policy."""
     for _ in range(50):
         candidate = "".join(_secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
         if check_password(candidate, min_length=12).ok:
             return candidate
-    # 50 rejections at 20 characters is not a thing that happens; if the
-    # policy ever becomes that strict, failing loudly beats mailing a
-    # password Keycloak will refuse.
+    # Failing loudly beats mailing a password Keycloak will refuse.
     raise RuntimeError("could not generate a policy-compliant password")
 
 
@@ -191,15 +149,7 @@ class OnboardingService:
 
     @property
     def mailer(self) -> SignupMailer:
-        """The concierge CLI sends its own mail through this.
-
-        Exposed rather than wrapped in a `send_welcome` method because the
-        password it carries never enters this class: `create_account`
-        takes one and hands it to Keycloak, and the CLI is the only place
-        that both generates it and mails it. Keeping those two facts in
-        one function is what makes "the password exists in exactly two
-        places" checkable by reading that function.
-        """
+        """Exposed for the concierge CLI; the password it mails never enters this class."""
         return self._mailer
 
     # ── signup ───────────────────────────────────────────────────────────
@@ -216,13 +166,7 @@ class OnboardingService:
         lang: str = "en",
         ref_code: str | None = None,
     ) -> None:
-        """The public path. Answers nothing: every outcome is the same 202.
-
-        Raises only for refusals a caller *should* see — a malformed
-        address, a password the realm would reject, a rate limit, or an
-        outage. Never for "that address is taken": that branch mails and
-        returns, indistinguishable from success.
-        """
+        """The public path: every outcome is the same 202; raises only for refusals a caller should see."""
         address = ec.normalise_email(email)
         if not compose.looks_like_email(address):
             _signup_counter.add(1, {"result": "invalid_email"})
@@ -238,15 +182,11 @@ class OnboardingService:
         verdict = check_password(
             password,
             min_length=self._cfg.min_password_length,
-            # The policy refuses a password built out of the person's own
-            # address or name — the two strings an attacker always has.
             email=address,
             display_name=display_name,
         )
         if not verdict.ok:
-            # Checked here, not left to Keycloak, so the person sees a
-            # field-level message instead of a 500 wrapping a realm error
-            # in a language nobody chose.
+            # Checked here for a field-level message instead of a wrapped realm error.
             _signup_counter.add(1, {"result": "policy"})
             raise SignupError(
                 "password_policy",
@@ -261,14 +201,12 @@ class OnboardingService:
         await self._check_signup_limits(address=address, ip=ip)
 
         if is_disposable(address, self._cfg.disposable_domains):
-            # Sprint 21: a throwaway address gets the same 202 and nothing
-            # else — no user, no tenant, no mail it would never read.
+            # A throwaway address gets the same 202 and nothing else.
             _signup_counter.add(1, {"result": "disposable"})
             return
 
         if await self._address_is_taken(address):
-            # The uniform branch. One mail, no user, no challenge — and
-            # crucially the same 202 the new-address path returns.
+            # Taken: one mail, no user, no challenge, same 202.
             _signup_counter.add(1, {"result": "existing"})
             await self._mailer.send_exists(to=address, lang=lang, user_agent=user_agent)
             return
@@ -299,12 +237,7 @@ class OnboardingService:
         verified: bool = False,
         ref_code: str | None = None,
     ) -> Account:
-        """Keycloak user + tenant + membership + `users` row, or nothing at all.
-
-        ``verified=True`` is the concierge path: an operator vouched for
-        the address, so the account is enabled immediately and no code is
-        ever sent. The public path leaves it False and lets the code do it.
-        """
+        """Keycloak user + tenant + membership + `users` row, or nothing at all; ``verified=True`` is the concierge path."""
         tenant_id = uuid4()
         names = ec.personal_workspace_names(email)
 
@@ -319,9 +252,7 @@ class OnboardingService:
             )
         except KeycloakError as exc:
             if exc.status == 409:
-                # Keycloak knows the address even though our own lookup
-                # did not — a user created outside this flow, or a race.
-                # Same outward behaviour as the taken branch.
+                # Keycloak knows the address though our lookup did not; same outward behaviour.
                 raise SignupError(
                     "email_taken", 409, detail="that address is already registered"
                 ) from exc
@@ -332,8 +263,7 @@ class OnboardingService:
             ) from exc
 
         if verified:
-            # The concierge account is enabled at creation; mark the
-            # address confirmed too so the two never disagree.
+            # Enabled at creation, so mark the address confirmed too.
             try:
                 await self._kc.set_email_verified(sub, verified=True)
             except KeycloakError:
@@ -352,9 +282,7 @@ class OnboardingService:
                 ref_code=ref_code,
             )
         except Exception as exc:  # noqa: BLE001 — every failure compensates
-            # The compensation the whole ordering exists for. A Keycloak
-            # user with no rows is invisible to the product and, worse,
-            # occupies the address so the person cannot retry.
+            # Compensation: a Keycloak user with no rows would occupy the address.
             _signup_counter.add(1, {"result": "compensated"})
             logger.error(
                 "auth.signup.db_failed_compensating",
@@ -363,9 +291,7 @@ class OnboardingService:
             try:
                 await self._kc.delete_user(sub)
             except Exception:  # noqa: BLE001
-                # Now there IS an orphan, and it is worth a distinct line:
-                # BE-4's reconciliation query counts these, and a non-zero
-                # count is a bug rather than a state.
+                # Now there IS an orphan; the reconciliation query counts these.
                 logger.error("auth.signup.compensation_failed", extra={"sub": str(sub)})
             raise SignupError(
                 "signup_unavailable", 503, detail="signup is temporarily unavailable"
@@ -375,9 +301,7 @@ class OnboardingService:
             tenant_id=tenant_id,
             kind="auth.signup",
             actor_sub=sub,
-            # Sprint 21: the plan and whether a shared note brought them.
-            # Never the ref code itself: it is the join key to a sender's
-            # tenant, and the audit log of the NEW tenant must not hold it.
+            # Never the ref code itself: it joins to a sender's tenant.
             payload={"source": source, "plan": "free", "ref_present": ref_code is not None},
         )
         return Account(
@@ -402,25 +326,10 @@ class OnboardingService:
         source: str = "self_serve",
         ref_code: str | None = None,
     ) -> None:
-        """Tenant + membership + `users` + identity, in ONE transaction.
-
-        The identity row is not in the brief's list, and is written anyway.
-        Everything downstream of signup reads `identities`: `/auth/me`
-        returns it, `check-identity-bridge` asserts the pair, and BE-3's
-        email-code login resolves an account by it. An account created here
-        without one would be a second-class account — invisible on
-        `/auth/me`, unable to use the code login when `dual` is switched
-        on — for no saving at all, since it is the same transaction.
-
-        `id = <Keycloak sub>` is the convention migration 0027 established
-        when it backfilled identities from `users`, so a BE-0 account is
-        shaped exactly like a migrated one. `legacy_idp = true` for the
-        same reason: its password lives in Keycloak.
-        """
+        """Tenant + membership + `users` + identity in ONE transaction (identity id = Keycloak sub, legacy_idp = true)."""
         last_exc: asyncpg.UniqueViolationError | None = None
         for attempt in range(attempts):
-            # The collision is on the workspace NAME (every `ada@` on every
-            # domain wants "ada"), so only the name is re-drawn.
+            # Collisions are on the workspace name, so only the name is re-drawn.
             name = names.name if attempt == 0 else f"{names.name}-{_secrets.token_hex(2)}"
             try:
                 async with self._pool.acquire() as conn, conn.transaction():
@@ -462,9 +371,7 @@ class OnboardingService:
                         locale,
                         tenant_id,
                     )
-                    # `users` is RLS-scoped even for tenant_writer, so the
-                    # connection needs a tenant before the insert. Local to
-                    # this transaction, cleared at COMMIT.
+                    # `users` is RLS-scoped even for tenant_writer; transaction-local setting.
                     await conn.execute(
                         "SELECT set_config('app.tenant_id', $1, true)", str(tenant_id)
                     )
@@ -481,9 +388,7 @@ class OnboardingService:
                         status,
                     )
                     if ref_code:
-                        # Attribution, half of it: the person. The workspace
-                        # id lands on this row at verify, when it is real.
-                        # No FK and no sender tenant id — by design (0036).
+                        # The workspace id lands on this row at verify; no FK, no sender tenant id.
                         await conn.execute(
                             """
                             INSERT INTO referrals (ref_code, referred_sub, source)
@@ -496,8 +401,7 @@ class OnboardingService:
             except asyncpg.UniqueViolationError as exc:
                 constraint = str(getattr(exc, "constraint_name", "") or exc)
                 if "tenants" not in constraint:
-                    # An identity- or users-level collision is not a naming
-                    # problem and retrying will not help.
+                    # Not a naming collision; retrying will not help.
                     raise
                 last_exc = exc
                 logger.info("auth.signup.workspace_name_taken", extra={"attempt": attempt + 1})
@@ -508,14 +412,7 @@ class OnboardingService:
     # ── verify ───────────────────────────────────────────────────────────
 
     async def verify(self, *, email: str, code: str, ip: str = "") -> None:
-        """Spend the code: `users.status` → active, Keycloak enabled.
-
-        The Keycloak call is made BEFORE the challenge is consumed, and the
-        database update after. That order is what makes the documented
-        ``409 verify_retry`` honest: if Keycloak is down the person keeps
-        their code and can try again in a minute, rather than losing it to
-        an outage that was not theirs.
-        """
+        """Spend the code: Keycloak enabled BEFORE the challenge is consumed (an outage keeps the code usable)."""
         address = ec.normalise_email(email)
         await self._check_verify_limits(address=address)
 
@@ -523,10 +420,7 @@ class OnboardingService:
             kind=KIND_SIGNUP_VERIFY, email=address
         )
         if challenge is None:
-            # Same body as an expired challenge: "no pending signup" and
-            # "your code ran out" must not be distinguishable, or the
-            # endpoint becomes the enumeration oracle `/auth/signup`
-            # refuses to be.
+            # Same body as an expired challenge: no enumeration oracle.
             _signup_verify_counter.add(1, {"result": "unknown"})
             raise SignupError(
                 "challenge_expired", 400, detail="that code has expired; request a new one"
@@ -546,7 +440,7 @@ class OnboardingService:
         try:
             await self._kc.set_email_verified(sub, verified=True)
         except KeycloakError as exc:
-            # Deliberately BEFORE consuming: the code survives.
+            # Before consuming: the code survives an outage.
             _signup_verify_counter.add(1, {"result": "verify_retry"})
             logger.error("auth.signup.enable_failed", extra={"status": exc.status})
             raise SignupError(
@@ -570,9 +464,7 @@ class OnboardingService:
             )
 
     async def _attribute_referral(self, sub: UUID, tenant_id: UUID) -> bool:
-        """Sprint 21: the workspace is now real, so the referral row that
-        signup opened for this person gets the tenant id. True when a row
-        was stamped — i.e. the person came through a shared note."""
+        """Stamp the tenant id on the referral row; True when the person came through a shared note."""
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 """
@@ -585,15 +477,10 @@ class OnboardingService:
         return bool(result) and result.split()[-1] != "0"
 
     async def _activate_user(self, sub: UUID) -> UUID | None:
-        """`users.status` → active, and stamp the identity as verified.
+        """`users.status` → active and stamp the identity verified.
 
-        The order is forced by row-level security. `users` is scoped per
-        tenant, and its policy casts ``current_setting('app.tenant_id')``
-        to a UUID — with nothing set that cast raises rather than matching
-        no rows, so touching `users` before a tenant is in scope fails
-        outright. There is no token here to take a tenant from (the caller
-        is confirming an address, not signed in), so the tenant is read
-        from `identities`, which is person-level and not tenant-scoped.
+        The tenant comes from `identities` (no token here) and must be in scope
+        before touching `users`: its RLS policy casts an unset setting and raises.
         """
         async with self._pool.acquire() as conn, conn.transaction():
             tenant_id = await conn.fetchval(
@@ -605,8 +492,7 @@ class OnboardingService:
                 sub,
             )
             if tenant_id is None:
-                # An identity with no home workspace: nothing to activate,
-                # and the audit line has no tenant to land on.
+                # No home workspace: nothing to activate.
                 return None
             await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
             await conn.execute(
@@ -655,22 +541,14 @@ class OnboardingService:
 
         sub = await self._pending_signup_sub(address)
         if sub is None:
-            # No pending signup: an unknown address, or one already
-            # verified. Silence is the answer, and it costs the same as
-            # the other branch from outside.
+            # No pending signup: silence, same cost as the other branch.
             return
         await self._open_challenge_and_mail(
             email=address, lang=lang, user_agent=user_agent, identity_sub=sub
         )
 
     async def _pending_signup_sub(self, email: str) -> UUID | None:
-        """The identity of a signup that never confirmed, or None.
-
-        Read from `identities` rather than `users.status = 'invited'` for
-        the RLS reason in :meth:`_activate_user`, and it is the better
-        source anyway: `email_verified_at IS NULL` is a fact about the
-        person, while `users.status` is a fact about one membership.
-        """
+        """The identity of a signup that never confirmed, or None (read from `identities`, not RLS-scoped `users`)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchval(
                 "SELECT id FROM identities"
@@ -689,10 +567,7 @@ class OnboardingService:
         try:
             return await self._kc.find_user_by_email(email) is not None
         except KeycloakError:
-            # A lookup that cannot answer must not be read as "free": the
-            # create would then 409 and the caller would learn, from a
-            # different status code, exactly what the uniform 202 exists
-            # to hide.
+            # A lookup that cannot answer must not be read as "free" (the 409 would leak).
             raise SignupError(
                 "signup_unavailable", 503, detail="signup is temporarily unavailable"
             ) from None
@@ -771,8 +646,7 @@ class OnboardingService:
         )
 
     async def _check_verify_limits(self, *, address: str) -> None:
-        """Fail OPEN: the 5-attempt budget on the challenge row is the real
-        bound on guessing, and it does not need Redis."""
+        """Fail OPEN: the attempt budget on the challenge row is the real bound."""
         await self._limit(
             SCOPE_SIGNUP_VERIFY_EMAIL,
             ec.email_subject_hash(address),

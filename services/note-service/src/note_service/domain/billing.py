@@ -1,23 +1,7 @@
-"""Billing: which plan a workspace is on, what it used this month, and how
-its plan changes.
-
-The plan is a fact on the tenant (0038: ``tenants.plan`` and
-``plan_limits``); this module adds the catalogue the clients show, the
-month's usage against it, and the provider seam (0068).
-
-Providers (``MDX_BILLING_PROVIDER``):
-
-* ``none`` — no payments connected. Plans are shown, nothing changes;
-  a change answers ``billing_not_connected``. The default, so no
-  environment hands out a paid plan for free by accident.
-* ``manual`` — the plan changes at once, no payment taken. For dev and
-  for a workspace an operator moves by hand.
-* ``stripe`` — later: a change answers with a Checkout URL and the
-  webhook writes the plan. Nothing in the clients changes for it: they
-  already follow ``redirect_url``.
-
-Limits are shown, not enforced (0038) — except the AI allowance, which
-``generation_service.check_allowed`` has enforced since Sprint 37.
+"""Billing: the workspace's plan (``tenants.plan`` / ``plan_limits``), this month's
+usage, and the provider seam (``MDX_BILLING_PROVIDER``: ``none`` shows plans and
+changes nothing, ``manual`` changes the plan at once, ``stripe`` later). Limits
+are shown, not enforced, except the AI allowance.
 """
 
 from __future__ import annotations
@@ -37,7 +21,7 @@ from . import ai_settings
 NONE: Final = "none"
 MANUAL: Final = "manual"
 STRIPE: Final = "stripe"
-# The plan came from a redeem code (0069), not from a payment.
+# The plan came from a redeem code, not from a payment.
 CODE: Final = "code"
 
 MONTHLY: Final = "monthly"
@@ -56,15 +40,14 @@ class Plan:
     # Whole cents per member per YEAR when paid yearly (two months free);
     # None = no yearly price (free, talk to us).
     yearly_price_cents: int | None = None
-    # None = no limit. Keys match tenants.plan_limits (0038).
+    # None = no limit. Keys match tenants.plan_limits.
     limits: dict[str, int | None] = field(default_factory=dict)
     features: tuple[str, ...] = ()
     # Offered in the picker. `legacy` is shown only to a workspace on it.
     offered: bool = True
 
 
-# The catalogue. Prices and limits are placeholders until pricing is
-# decided; Stripe's price ids will sit next to them.
+# Prices and limits are placeholders until pricing is decided.
 PLANS: Final[dict[str, Plan]] = {
     p.code: p
     for p in (
@@ -258,7 +241,7 @@ async def apply_plan(
     )
 
 
-# ── Redeem codes (0069) ─────────────────────────────────────────────
+# ── Redeem codes ────────────────────────────────────────────────────
 
 # What a person types is forgiving: case, spaces and dashes do not count.
 _CODE_NOISE = re.compile(r"[\s\-_]+")

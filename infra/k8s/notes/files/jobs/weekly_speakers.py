@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""Weekly speaker-quality report (Sprint 30).
+"""Weekly speaker-quality CSV (counts only) from scripts/ops/speaker_quality.sql as
+``funnel_reader``; definitions in docs/product/speaker-metrics.md.
 
-    DATABASE_URL=postgresql://funnel_reader:...@host/notes \\
-        uv run python scripts/jobs/weekly_speakers.py [--out DIR]
-
-Runs scripts/ops/speaker_quality.sql as the read-only `funnel_reader` role
-(column-level grant, migration 0046) and writes `speakers-YYYY-WW.csv`
-(ISO week of the run) to --out (default `MDX_SPEAKER_REPORT_DIR`, then
-`MDX_FUNNEL_REPORT_DIR`, then ./reports). Counts only — one row per
-(week of completion, dimension, bucket); definitions in
-docs/product/speaker-metrics.md. Idempotent: a rerun overwrites the same file.
+    DATABASE_URL=postgresql://funnel_reader:...@host/notes uv run python scripts/jobs/weekly_speakers.py [--out DIR]
 """
 
 from __future__ import annotations
@@ -28,7 +21,6 @@ import asyncpg
 
 SQL = Path(__file__).resolve().parent.parent / "ops" / "speaker_quality.sql"
 if not SQL.exists():
-    # In the chart the SQL ships next to the job.
     SQL = Path(__file__).resolve().parent / "speaker_quality.sql"
 
 

@@ -37,14 +37,8 @@ function formatDate(iso: string): string {
 }
 
 /**
- * The "Shared Outcome Page" (Sprint 19): what a client or partner sees
- * when a sender hands them a link. Read-only, no sign-in, no shell.
- *
- * The hierarchy is fixed on purpose — who sent it, what was agreed, who
- * does what, everything else folded away — because the recipient's job
- * is to check the outcome in a minute, not to read a transcript. The
- * product line under the sender bar is the loop: the CTA is a plain
- * link to a server redirect, so the click counts even without JS.
+ * The shared outcome page: read-only, no sign-in, no shell. Fixed hierarchy;
+ * the CTA is a plain link to a server redirect so the click counts without JS.
  */
 export function SharedNotePage() {
   const { token = "" } = useParams<{ token: string }>();
@@ -52,7 +46,6 @@ export function SharedNotePage() {
   const [error, setError] = useState<{ message: string; gone: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
-  // Sprint 23
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -143,8 +136,7 @@ export function SharedNotePage() {
   const byRole = (role: SharedSection["role"]) => note?.sections.filter((s) => s.role === role) ?? [];
   const decisions = byRole("decisions");
   const actions = byRole("action_items");
-  // "Anna, Tom" reads as a line under the title; anything longer (a
-  // transcript that landed there, a roster with roles) is a section.
+  // A short roster is a line under the title; anything longer is a section.
   const isRoster = (s: SharedSection) => !s.text.includes("\n") && s.text.length <= 160;
   const attendees = byRole("attendees").filter(isRoster);
   const prose = byRole("attendees").filter((s) => !isRoster(s));

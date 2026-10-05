@@ -1,8 +1,5 @@
-"""Sprint F3 — figures, presenter, contact.
-
-T1 number words and the `figure` kind, T2 the specifications table, T3 the
-presenter line, T4 the Contact section, the recording type and the family
-wiring.
+"""Figures, presenter, contact: number words and the `figure` kind, the
+specifications table, the presenter line, the Contact section, the family wiring.
 """
 
 from __future__ import annotations
@@ -106,7 +103,7 @@ def _pardo_figures() -> list[VerifiedFact]:
     )
 
 
-# ── T1: number words and the figure kind ────────────────────────────
+# ── number words and the figure kind ────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -185,7 +182,7 @@ def test_the_schema_offers_figure_fields_only_to_families_with_figures() -> None
     assert "value" not in plain and "role" not in plain
 
 
-# ── T2: the specifications table ────────────────────────────────────
+# ── the specifications table ────────────────────────────────────
 
 
 def test_eight_figures_are_one_table_with_a_source_per_row() -> None:
@@ -309,7 +306,7 @@ def test_the_client_version_keeps_the_specifications() -> None:
     assert types.SPECIFICATIONS in client_view.CLIENT_ROLES
 
 
-# ── T3: the presenter ───────────────────────────────────────────────
+# ── the presenter ───────────────────────────────────────────────
 
 INTRO = (
     "my name is Mitchell. I am a broker with Springbrook Marine Group, the Pardo dealer for "
@@ -322,7 +319,7 @@ def _intro(quote: str, **fields: Any) -> schema.Fact:
 
 
 def test_the_walkthrough_introduction_is_described_from_its_fields() -> None:
-    """SQ3 T1/T2: the presenter is named in paragraph 1's "With …" (see
+    """The presenter is named in paragraph 1's "With …" (see
     test_the_walkthrough_end_to_end); no "Presenter: …" paragraph is
     written, because a paragraph opening "<word>: " reads as a turn."""
     [fact] = _verify(
@@ -368,7 +365,7 @@ def test_the_extractor_is_told_which_lines_introduce_somebody() -> None:
     assert "[2] contain an introduction" in prompt
 
 
-# ── T4: contact, recording type, family ─────────────────────────────
+# ── contact, recording type, family ─────────────────────────────
 
 
 def test_a_call_to_action_is_the_contact_section() -> None:
@@ -470,7 +467,7 @@ def test_the_walkthrough_end_to_end() -> None:
     first_extract = next(p for step, p, _s in provider.calls if step == "extract")
     assert "[0] contain an introduction" in first_extract
     text = "\n".join(s.text for s in document.sections)
-    # SQ3 T2: named once, in paragraph 1, from the same verified fields.
+    # Named once, in paragraph 1, from the same verified fields.
     assert (
         "Mitchell (broker with Springbrook Marine Group, Pardo dealer for the Great Lakes)" in text
     )
@@ -484,7 +481,7 @@ def test_the_walkthrough_end_to_end() -> None:
                 assert line.fact_ids, line.text
 
 
-# ── F3 follow-ups from the first stack-model run ────────────────────
+# ── Follow-ups from the first stack-model run ───────────────────────
 
 
 def test_a_figure_quoted_by_its_number_words_is_checked_against_its_line() -> None:
@@ -707,7 +704,7 @@ def test_i_am_mid_sentence_is_the_speakers_voice() -> None:
     assert not support.first_person("The broker is with Springbrook Marine Group.")
 
 
-# ── F3 amendment (r03) ──────────────────────────────────────────────
+# ── Amendment ───────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -877,7 +874,7 @@ def test_a_name_the_recording_says_often_corrects_a_near_miss_and_nothing_else()
     )
 
 
-# ── r03 on the stack model (2026-09-27): a window filed as introductions ──
+# ── A window filed as introductions ─────────────────────────────────
 
 
 def test_an_introduction_that_introduces_nobody_is_a_key_point() -> None:

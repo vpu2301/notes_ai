@@ -1,15 +1,6 @@
-"""Confirm/override audit signals for typed fields (sprint 13, step 06).
-
-These two events are the extractor's quality feedback loop: how often
-authors accept a proposal versus replace it. Step 08's dashboard
-reads them; a rising override rate means alias coverage or the
-threshold needs work — data, not intuition.
-
-**The content line.** Payloads carry the section key, the field type,
-and — only for CLOSED vocabularies — the option slug. Free-text values
-are never included. The audit chain is append-only and hash-linked: a
-"changed it to <prose>" payload would put unerasable personal data in
-it. Enforced by tests.
+"""Confirm/override audit signals for typed fields: the extractor's quality loop.
+Payloads carry section key, field type and, for CLOSED vocabularies only, the
+option slug; never free text (the audit chain is unerasable). Enforced by tests.
 """
 
 from __future__ import annotations
@@ -19,8 +10,7 @@ from typing import Any, Literal
 
 from note_models import NoteContent
 
-# Field types whose values are closed vocabularies and therefore safe to
-# record. Anything else contributes its type only.
+# Field types whose values are closed vocabularies and therefore safe to record.
 _CLOSED_VOCABULARY: frozenset[str] = frozenset({"choice", "multi_choice"})
 
 
@@ -49,16 +39,8 @@ def diff_field_events(
     after: NoteContent,
     field_types: dict[str, str],
 ) -> list[FieldAuditEvent]:
-    """Compare two draft versions and describe what the author did.
-
-    ``field_types`` maps section_key → field_type (from the template).
-
-    - **confirmed**: an ``extracted`` value became ``manual`` with the
-      same content.
-    - **overridden**: a ``manual`` write replaced an extracted value
-      with a DIFFERENT one. This is the signal that matters — it says
-      the extractor was wrong.
-    """
+    """Compare two draft versions: **confirmed** (extracted → manual, same content)
+    or **overridden** (a DIFFERENT manual value). ``field_types`` maps section_key → field_type."""
     events: list[FieldAuditEvent] = []
     old_by_key = {s.section_key: s for s in (before.sections if before else [])}
 

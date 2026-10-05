@@ -1,11 +1,5 @@
-"""GET /v1/search/tips — what search does and does not do (sprint 15).
-
-ADR-0021 accepted `simple` FTS with no stemming and promised the honest
-user-facing explanation this sprint. The FE renders this content
-verbatim so its copy can never drift from backend behaviour (the
-core-service /note-structures motivation — but typed models, not bare
-dicts). Static, versioned with the code: when search behaviour changes,
-the tips change in the same PR.
+"""GET /v1/search/tips — what search does and does not do (ADR-0021). The FE
+renders this verbatim; when search behaviour changes, the tips change in the same PR.
 """
 
 from __future__ import annotations

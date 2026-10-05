@@ -1,17 +1,9 @@
 import CryptoKit
 import Foundation
 
-/// A generated line's key — the server's rule, ported (Summary Engine v2, Q5).
-///
-/// The note shows lines; the evidence behind each lives in a row keyed by
-/// `lines.key_of(lines.strip_marker(line))` in note-service: the marker
-/// off, an "Owner:" prefix and a "— due" tail stripped (so fixing an owner
-/// or a date keeps the line's evidence), the rest normalised and hashed —
-/// sha256, first 16 hex characters. The phone hashes the line it displays
-/// the same way to find its row: no positional mapping, nothing to drift.
-///
-/// The web twin is `web/src/lib/itemKey.ts`; both are checked against
-/// `web/tests/fixtures/item-keys.json`, generated from the Python side.
+/// A generated line's key — note-service's `lines.key_of(lines.strip_marker(line))`
+/// ported: marker, "Owner:" prefix and "— due" tail off, normalised, sha256[:16].
+/// Web twin `web/src/lib/itemKey.ts`; both checked against `web/tests/fixtures/item-keys.json`.
 enum GeneratedLineKey {
     // lines.py _MARKER
     private static let marker = regex(#"^([\s>]*(?:[-–—•*·▪◦●○]+|\(?(?:\d{1,2}|[a-zA-Z])[.)])\s*)"#)
@@ -107,8 +99,7 @@ enum GeneratedLineKey {
         do {
             return try NSRegularExpression(pattern: pattern, options: caseInsensitive ? [.caseInsensitive] : [])
         } catch {
-            // The patterns are literals in this file; one that does not
-            // compile is a bug to fix here, not a condition to handle.
+            // Literal patterns; a non-compiling one is a bug here.
             preconditionFailure("invalid pattern in GeneratedLineKey: \(pattern)")
         }
     }

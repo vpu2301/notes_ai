@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
-"""CI gate (IDX-A2): the dev-only signing key never reaches a non-dev config.
-
-``infra/dev/auth-signing-dev.json`` is a checked-in RSA private key so the
-compose stack can run the native issuer without a secret store. Its ``kid``
-must not appear anywhere a staging or production deployment reads from:
-Helm values, deploy/ specs, workflows, env examples. The dev compose file
-and this script are the only places allowed to name it outside infra/dev.
-
-Also fails if any *other* private key PEM shows up under infra/ or deploy/
-outside infra/dev — a second "temporary" key is how dev keys go to prod.
+"""CI gate: the dev-only signing key (infra/dev/auth-signing-dev.json) never reaches a
+non-dev config, and no other private key PEM appears under infra/ or deploy/.
 """
 
 from __future__ import annotations

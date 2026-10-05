@@ -1,17 +1,5 @@
-"""Shape B (ADR-0052 / Sprint 29 B-9): what a remote diarizer outage costs.
-
-The rule this file holds: **a diarizer on another host must never cost a
-user their transcript.** With the engine in-process, a diarizer that
-cannot run means the deployment is broken and the job fails loudly so an
-operator sees it. With the engine behind HTTP, the same outage is a
-dependency having a bad afternoon — the transcript is already made, so
-the job completes without speakers and the row remembers why, which is
-what the clients turn into "try telling speakers apart again".
-
-The whole transcribe path runs here against fakes: a one-row database
-that records its statements, in-memory stores and an ASR engine that
-answers with two segments.
-"""
+"""Shape B (ADR-0052): a diarizer on another host must never cost a user their transcript;
+an in-process one failing is a broken deployment and fails loudly. Whole path on fakes."""
 
 from __future__ import annotations
 
@@ -47,8 +35,7 @@ AUDIO = uuid4()
 
 @pytest.fixture(autouse=True)
 def _speech_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The stand-in audio is zeros but stands for speech: VAD says so, so
-    the TQ2 gates (which protect speech VAD heard) leave the text alone."""
+    """Zeros that stand for speech: VAD says so, so the gates leave the text alone."""
     from asr_worker import vad as _vad
 
     def runs(pcm: np.ndarray, **_kw: Any) -> _vad.SpeechRuns:
@@ -162,9 +149,7 @@ class _RemoteDiarizer:
         self.diarize_calls += 1
         if self._fail_on == "call":
             raise DiarizationUnavailableError("failed after 3 attempts: ReadTimeout")
-        # Through the REAL payload, so the worker sees exactly what an
-        # endpoint's answer turns into — including an unattributed span,
-        # which must not become a speaker.
+        # Through the REAL payload; an unattributed span must not become a speaker.
         segments = [
             SpeakerSegment(start_ms=0, end_ms=1_100, label="A", confidence=1.0),
             SpeakerSegment(start_ms=1_100, end_ms=1_200, label=UNKNOWN, confidence=0.0),
@@ -223,8 +208,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 "engine": _Asr(),
                 "diarizer": diarizer,
                 "shadow_diarizer": None,
-                # The completion notification is fire-and-forget; a fake
-                # Redis keeps it out of the way of what is under test.
+                # A fake Redis keeps the fire-and-forget notification out of the way.
                 "redis": _Redis(),
             },
         )()
@@ -259,9 +243,7 @@ async def test_a_dead_endpoint_still_delivers_the_transcript(world: Any, fail_on
 
 @pytest.mark.parametrize("fail_on", ["load", "call"])
 async def test_the_same_outage_in_process_fails_the_job(world: Any, fail_on: str) -> None:
-    """An in-process engine that cannot load, or that crashes on the
-    samples, is a broken deployment or a broken recording: the job must
-    fail so someone sees it, rather than quietly losing its speakers."""
+    """An in-process engine that cannot load or crashes fails the job loudly."""
     state = world.build(_LocalDiarizer(fail_on=fail_on))
 
     with pytest.raises((_RetryableError, _NonRetryableError)):
@@ -298,9 +280,7 @@ def _message() -> Any:
 async def test_a_dead_endpoint_is_not_retried_through_the_mono_fallback(
     world: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The mono fallback exists for channel-analysis bugs. Using it when
-    the ENDPOINT is down means uploading the whole recording again to the
-    same dead host — three attempts each, twice over, for one job."""
+    """The mono fallback is for channel-analysis bugs, not for a dead endpoint."""
     diarizer = _RemoteDiarizer(fail_on="call")
     state = world.build(diarizer)
     stereo = np.zeros((16_000 * 2, 2), dtype=np.int16)

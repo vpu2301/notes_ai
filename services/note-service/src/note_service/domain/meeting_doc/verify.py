@@ -1,42 +1,9 @@
-"""Where a claim becomes a fact, or is dropped.
+"""Where a claim becomes a fact, or is dropped: pure code, no model.
 
-The model proposes; this module disposes, in code, with no model
-involved. That is the whole architecture: a small model asked to
-summarise an hour of talk will invent an owner, shift a number and turn a
-proposal into a decision, and no amount of prompting reliably stops it.
-So every claim must survive four checks against the transcript itself:
-
-1. **The quote must be real.** Normalised, it has to be a substring of
-   the turn it cites — or, failing that, of the window. No match, no
-   fact. This is the check that makes every other feature honest: the
-   evidence chip, the client version, the eval's citation precision.
-2. **The owner must be somebody who was there** — a speaker, a name
-   candidate, or a capitalised token in the window. A first-person
-   commitment takes the quote's own speaker. "We should…" takes nobody.
-   An owner we cannot place is cleared, never guessed.
-3. **The date must have been said.** `due_text` has to occur in the turn.
-   It is then parsed with the same date logic the action-item projection
-   uses, anchored on the meeting's date. Unparsed text is KEPT as text —
-   "by end of quarter" is useful even though it is not a date — but a
-   date nobody said is never written.
-4. **The numbers must match.** Every number in the fact's text has to
-   occur in its quote or turn. A number that does not is removed from the
-   text and the fact is flagged, because a wrong figure in a meeting note
-   is worse than a missing one.
-5. **The text must mean what the quote says** (Summary Engine v2, Q2).
-   The restatement has to share enough content with the words behind it
-   (:mod:`support`) and may not introduce a name they do not have. An
-   action, a decision or a fact with a number that fails is dropped;
-   anything else is kept and flagged.
-
-And one check on what the model set aside: a line it calls noise is
-excluded only when code agrees (:func:`confirm_noise`). The model's flag
-alone is advisory.
-
-Plus one judgement call, also in code: a decision nobody agreed to is a
-proposal, and is downgraded to a key point.
-
-Pure. Facts and windows in, verified facts out.
+Every claim must pass: the quote is a real substring of the turn/window; the owner
+was present (never guessed); the due date was said; every number was said (else
+removed and flagged); the text means what the quote says. Noise flags are advisory
+until code confirms them; a decision nobody agreed to becomes a key point.
 """
 
 from __future__ import annotations
@@ -71,23 +38,19 @@ NO_OWNER: Final = "no_owner"
 DUE_UNPARSED: Final = "due_unparsed"
 SPEAKER_UNNAMED: Final = "speaker_unnamed"
 LOW_ASR_CONFIDENCE: Final = "low_asr_confidence"
-# Sprint 36 — a commitment we could not attribute to either side.
+# A commitment we could not attribute to either side.
 SIDE_UNKNOWN: Final = "side_unknown"
-# Q2 — the text says more than, or other than, its quote.
+# The text says more than, or other than, its quote.
 PARAPHRASE_UNSUPPORTED: Final = "paraphrase_unsupported"
-# Q4 — a name in the line was respelled (the quote keeps what was heard);
-# an opinion or forecast whose holder is not among the participants.
+# A name was respelled (the quote keeps what was heard); a holder not among the participants.
 ENTITY_CORRECTED: Final = "entity_corrected"
 ATTRIBUTION_MISSING: Final = "attribution_missing"
-# F2 — the text is the quote (or nearly all of it); the line speaks as
-# I / we / you. Either fact is evidence behind other lines, never a line.
+# The text is the quote, or speaks as I / we / you: evidence behind other lines, never a line.
 COPIED: Final = "copied"
 FIRST_PERSON: Final = "first_person"
-# F3 amendment §2.5 — a scene (a perception verb, a generic subject, nothing
-# named or counted): evidence behind other lines, never a line.
+# A scene (perception verb, generic subject, nothing named or counted): evidence only.
 DESCRIPTIVE: Final = "descriptive"
-# Sprint D2 — the text opens with a pronoun: whose sentence it is was not
-# written, so it is evidence and never a line ("Er ist genervt …").
+# The text opens with a pronoun: evidence, never a line.
 SUBJECT_UNRESOLVED: Final = "subject_unresolved"
 
 # Why a fact was dropped — counted in metrics and in the eval, never shown.
@@ -98,8 +61,6 @@ KEPT: Final = "kept"
 # How far either side of a decision's quote to look for somebody agreeing.
 AGREEMENT_WINDOW_TURNS: Final = 3
 
-# Confidence, per the concept: an explicit commitment with a verified
-# owner and date is not the same thing as a flagged guess.
 CONF_EXPLICIT: Final = 1.0
 CONF_INFERRED: Final = 0.7
 CONF_FLAGGED: Final = 0.5
@@ -107,7 +68,7 @@ CONF_FLAGGED: Final = 0.5
 
 @dataclass(frozen=True, slots=True)
 class Figure:
-    """F3 — a number a speaker attached to a named quantity, verified."""
+    """A number a speaker attached to a named quantity, verified."""
 
     name: str
     value: Decimal
@@ -131,7 +92,7 @@ class Figure:
 
 @dataclass(frozen=True, slots=True)
 class Person:
-    """F3 — somebody introduced in the recording, every word verified."""
+    """Somebody introduced in the recording, every word verified."""
 
     name: str
     role: str = ""
@@ -140,10 +101,7 @@ class Person:
     """The speaker introduced themselves ("my name is…"), as opposed to
     introducing somebody else ("this is Anna from sales")."""
     self_introduction: bool = False
-    """F3 amendment — who this is to the recording, decided by code from
-    the speakers' share (``pipeline.standing_of``): ``presenter`` (the
-    recording's own voice), ``guest`` (a speaker with turns of their own)
-    or ``clip`` (a trailer, a sound bite — never written)."""
+    """``presenter``, ``guest`` or ``clip`` (never written), decided by code (``pipeline.standing_of``)."""
     standing: str = "presenter"
     """The words said between role and organisation ("beim", "with")."""
     joiner: str = ""
@@ -166,8 +124,7 @@ class VerifiedFact:
     confidence: float = CONF_INFERRED
     flags: list[str] = field(default_factory=list)
     window_index: int = 0
-    """Sprint 36 — for `completion`: the carried item's key this finishes.
-    Resolved from the model's 1-based list position, never from text."""
+    """For `completion`: the carried item's key, resolved from the model's list position, never from text."""
     refers_to_key: str | None = None
     """For `judgement`: which typed field this is a suggestion for. The
     value is in `text`. Only ever OFFERED to a person."""
@@ -178,33 +135,25 @@ class VerifiedFact:
     read it. Carried so a forecast can be labelled as one; nothing
     renders it yet."""
     certainty: str | None = None
-    """The line (piece) the quote was found on; ``turn`` stays the
-    original turn's index. Q2."""
+    """The line (piece) the quote was found on; ``turn`` stays the original turn's index."""
     line: int | None = None
-    """Q3 — the date expressions in the QUOTE, resolved against the
-    recording day with the tense they were said in. An annotation: text
-    and quote keep the spoken words."""
+    """The date expressions in the QUOTE, resolved against the recording day; an annotation only."""
     mentions: tuple[DateMention, ...] = ()
-    """Q4 — who holds the position (verified like an owner; the speaker for
-    their own opinion), and the names respelled in ``text`` — never in
-    ``quote``."""
+    """Who holds the position (verified like an owner), and the names respelled in ``text``, never in ``quote``."""
     attributed_to: str | None = None
-    """Sprint D2 — who the sentence is about, verified like an owner."""
+    """Who the sentence is about, verified like an owner."""
     subject: str | None = None
     corrections: tuple[Correction, ...] = ()
-    """F2 — ``text`` is its quote copied: a real quote, kept to be cited,
-    never rendered as a line of its own."""
+    """``text`` is its quote copied: kept to be cited, never rendered as a line."""
     copied: bool = False
-    """F3 — the verified payload of a `figure` or an `introduction`."""
+    """The verified payload of a `figure` or an `introduction`."""
     figure: Figure | None = None
     person: Person | None = None
 
     @property
     def evidence_only(self) -> bool:
-        """F2 — kept as evidence behind other lines, never a line itself:
-        the text copies the transcript or speaks in its voice. A figure or
-        an introduction is written from its verified fields, never from
-        its text, so a copied text does not matter there."""
+        """Evidence behind other lines, never a line itself (copied or first-person text);
+        figures and introductions are written from their fields, so they are exempt."""
         if self.figure is not None or self.person is not None:
             return False
         return (
@@ -216,17 +165,14 @@ class VerifiedFact:
 
     @property
     def salient(self) -> bool:
-        """Q4 — carries something a reader looks for: a number, a date, or a
-        person holding it. Such a fact is kept in the document whatever the
-        reduce step chose to write about."""
+        """Carries a number, a date, or a person holding it: kept whatever reduce wrote."""
         return bool(
             _NUMBER.search(self.text) or self.mentions or self.attributed_to or self.owner_label
         )
 
     @property
     def item_key(self) -> str:
-        """The same hash the recipient loop, the corrections routes and
-        the carried items use — one identity for a line, everywhere."""
+        """The one line identity shared with recipient links, corrections and carried items."""
         return item_key(normalise_text(self.text))
 
 
@@ -236,9 +182,8 @@ _PUNCT = re.compile(r"[^\w\s']", re.UNICODE)
 _SPACE = re.compile(r"\s+")
 
 
-# Sprint I3 T3: the fillers nlp-service hides from a conversation's displayed
-# text (tests/fixtures/nlp/fillers.json). Dropped here too, so a quote taken
-# from the displayed text still matches the raw one and vice versa.
+# The fillers nlp-service hides from displayed text (tests/fixtures/nlp/fillers.json),
+# dropped here too so displayed and raw quotes match either way.
 FILLERS: Final[frozenset[str]] = frozenset(
     {
         "uh",
@@ -270,13 +215,8 @@ _QUOTE_EDGE = "'\"“”„«».,;:!?"
 
 
 def normalise_quote(text: str) -> str:
-    """The comparison form: NFKC, case-folded, punctuation dropped
-    (apostrophes kept — "I'll" is not "Ill"), fillers dropped, whitespace
-    collapsed.
-
-    Mirrors ``scripts/eval/smoke_eval._quote`` so the harness and the
-    pipeline agree about what counts as a match.
-    """
+    """Comparison form: NFKC, case-folded, punctuation dropped (apostrophes kept),
+    fillers dropped, whitespace collapsed. Mirrors ``scripts/eval/smoke_eval._quote``."""
     folded = unicodedata.normalize("NFKC", text).casefold()
     folded = folded.replace("’", "'").replace("‘", "'")
     # Hyphenated fillers ("uh-huh") are matched before punctuation goes.
@@ -286,17 +226,9 @@ def normalise_quote(text: str) -> str:
 
 
 def locate_quote(quote: str, window: Window, cited_line: int) -> Turn | None:
-    """The line (piece) a quote actually came from, or None.
-
-    The cited line is tried first — the model usually gets it right, and
-    trusting it keeps the timestamp precise. Failing that, any line in
-    the window: a model that cites line 7 for words said on line 8 is
-    wrong about the number, not lying about the words — and the fact
-    takes the timestamps of the piece that holds them.
-    """
-    # A small model copies the turn header — "[0] Speaker 1 (00:00): " —
-    # into the quote as readily as into the text. The words after it are
-    # what was said; the header is ours.
+    """The line a quote came from, or None: the cited line first, then any line in
+    the window (the fact takes the timestamps of the piece that holds the words)."""
+    # Small models copy the "[0] Speaker 1 (00:00): " header into the quote.
     needle = normalise_quote(strip_turn_header(quote))
     if len(needle.split()) < schema.MIN_QUOTE_WORDS:
         return None
@@ -311,9 +243,7 @@ def locate_quote(quote: str, window: Window, cited_line: int) -> Turn | None:
 
 # ── Owners ──────────────────────────────────────────────────────────
 
-# "I'll send it", "I will", "ich schicke", "я надішлю" — the speaker
-# taking it on. Deliberately narrow: a false positive here puts a task on
-# the wrong person's name.
+# The speaker taking it on. Deliberately narrow: a false positive misassigns a task.
 _FIRST_PERSON = re.compile(
     r"\b(?:i'?ll|i will|i'?m going to|i can|i'?ve got|let me|"
     r"ich werde|ich mache|ich schicke|ich kümmere|"
@@ -338,18 +268,13 @@ def resolve_owner(
     window: Window,
     name_candidates: frozenset[str] = frozenset(),
 ) -> tuple[str | None, bool, list[str]]:
-    """``(owner, explicit, flags)``.
-
-    Order matters. A first-person commitment is the strongest signal
-    there is and beats whatever the model proposed; "we should" is the
-    strongest signal that there is NO owner, and also beats it.
-    """
+    """``(owner, explicit, flags)``. Order matters: a first-person commitment, then
+    "we should" (no owner), both beat whatever the model proposed."""
     if _FIRST_PERSON.search(quote):
         speaker = turn.speaker_name or turn.speaker_label
         if turn.speaker_name:
             return turn.speaker_name, True, []
-        # Someone took it on, but we do not know their name yet. Keep the
-        # commitment, flag it, and let the author name the speaker.
+        # Taken on by an unnamed speaker: keep, flag, let the author name them.
         return speaker, True, [SPEAKER_UNNAMED]
 
     if _NO_TAKER.search(quote):
@@ -366,8 +291,7 @@ def resolve_owner(
     if folded in known:
         return candidate, False, [OWNER_INFERRED]
 
-    # A capitalised token actually present in the window: people are
-    # named in the third person all the time ("Tom will send it").
+    # A capitalised token present in the window ("Tom will send it").
     present = {m.group(1).casefold() for m in _CAPITALISED.finditer(window.text)}
     if folded in present or all(part.casefold() in present for part in candidate.split()):
         return candidate, False, [OWNER_INFERRED]
@@ -384,8 +308,8 @@ _NUMBER = re.compile(r"\d[\d.,]*")
 def resolve_due(
     due_text: str | None, *, turn: Turn, meeting_date: date, quote: str = "", language: str = "en"
 ) -> tuple[str | None, date | None, list[str]]:
-    """``(due_text, due_date, flags)`` — a date nobody said is never written.
-    Resolved in the direction the quote was said in (Q3)."""
+    """``(due_text, due_date, flags)``: a date nobody said is never written;
+    resolved in the direction the quote was said in."""
     if not due_text or not due_text.strip():
         return None, None, []
     text = " ".join(due_text.split())[:120]
@@ -397,11 +321,9 @@ def resolve_due(
     return text, parsed, [] if parsed else [DUE_UNPARSED]
 
 
-# ── Date mentions (Q3) ──────────────────────────────────────────────
+# ── Date mentions ───────────────────────────────────────────────────
 
-# Words that put a date in the past when they stand near it. Within
-# PAST_CUE_TOKENS of the date expression, not anywhere in the quote: "we
-# had agreed to ship on Friday" is ambiguous, "am Montag gewesen" is not.
+# Past-tense cues, counted only within PAST_CUE_TOKENS of the date expression.
 _PAST_CUES: Final[frozenset[str]] = frozenset(
     [
         "gewesen",
@@ -547,16 +469,8 @@ def date_mentions(quote: str, *, meeting_date: date, language: str = "en") -> li
 def check_numbers(
     text: str, *, quote: str, turn: Turn, language: str = "en"
 ) -> tuple[str, list[str]]:
-    """Every number in the text must have been said.
-
-    A number that was not is REMOVED from the text rather than the whole
-    fact being dropped: "they want it by the twentieth" is still worth
-    having when the model hallucinated a price alongside it.
-
-    Said means said in digits OR in words (F3): a conversation's
-    transcript keeps "eighteen and a half" as words since G0, and the
-    model writing 18.5 has not invented anything.
-    """
+    """Every number in the text must have been said, in digits or in words;
+    an unsaid number is REMOVED from the text rather than dropping the fact."""
     raw = f"{quote} {turn.text}"
     said = normalise_quote(raw)
     said_numbers = {n.replace(",", "").replace(".", "") for n in _NUMBER.findall(said)}
@@ -577,10 +491,8 @@ def check_numbers(
 
 # ── Decision vs proposal ────────────────────────────────────────────
 
-# Words that commit, not words that keep a conversation going. "Yes",
-# "okay", "passt" and "добре" used to be here; in an interview or a
-# lively meeting they open half the turns ("Ja, aber…", "Okay, but…"),
-# and every proposal near one became a decision.
+# Words that commit, not conversational fillers: "yes"/"okay" open half the
+# turns of a lively meeting and turned every proposal into a decision.
 _AGREEMENT = re.compile(
     r"\b(?:agreed|agree|deal|sounds good|let'?s do|let'?s go with|we'?ll go with|"
     r"fine by me|works for me|"
@@ -597,18 +509,11 @@ _DECIDED = re.compile(
 
 
 def is_copied(text: str, quote: str) -> bool:
-    """The model put the quote (or nearly all of it) into `text`.
-
-    A verbatim sentence is evidence, not a statement; under "Decisions"
-    it reads as somebody's aside ("Man war sehr zögerlich…") filed as an
-    outcome.
-    """
+    """The model put the quote (or nearly all of it) into `text`: evidence, not a statement."""
     claim = normalise_quote(text)
     if not claim:
         return False
-    # The whole quote, and each of its sentences (F2): a quote often spans
-    # two sentences, and a line that is one of them word for word is as
-    # much a copy as a line that is all of it.
+    # The whole quote and each of its sentences: one sentence verbatim is a copy too.
     quote = strip_turn_header(quote)
     for part in (quote, *_SENTENCE.split(quote)):
         said = normalise_quote(part)
@@ -621,13 +526,8 @@ _SENTENCE: Final = re.compile(r"(?<=[.!?…])\s+")
 
 
 def is_decision(quote: str, *, turn: Turn, window: Window) -> bool:
-    """A decision is something the room agreed to.
-
-    Either the words say so outright ("we decided"), or a DIFFERENT
-    speaker agrees within a few turns. A proposal one person made and
-    nobody answered is a key point — writing it under "Decisions" is how
-    a meeting note becomes something the reader stops trusting.
-    """
+    """A decision is something the room agreed to: the words say so outright, or a
+    DIFFERENT speaker agrees within a few turns. An unanswered proposal is a key point."""
     if _DECIDED.search(quote):
         return True
     turns = list(window.turns)
@@ -636,11 +536,7 @@ def is_decision(quote: str, *, turn: Turn, window: Window) -> bool:
     except StopIteration:
         return False
 
-    # The commonest shape by far: Anna proposes, Tom says "agreed, let's
-    # go with that". The agreement marker is in the QUOTE itself, and the
-    # second speaker is the one being quoted. Looking only at other
-    # turns would call this a proposal and file a real decision under
-    # "Topics".
+    # Commonest shape: the agreement marker is in the QUOTE itself, said by the second speaker.
     if _AGREEMENT.search(quote):
         earlier = turns[max(0, position - AGREEMENT_WINDOW_TURNS) : position]
         if any(t.speaker_label != turn.speaker_label for t in earlier):
@@ -670,30 +566,24 @@ class VerifyStats:
     downgraded: int = 0
     numbers_removed: int = 0
     invented_due: int = 0
-    """Q2 — facts whose text did not mean what their quote said: dropped
-    (an action, a decision, a number) or kept and flagged."""
+    """Facts whose text did not mean what their quote said: dropped or kept and flagged."""
     dropped_paraphrase: int = 0
     flagged_paraphrase: int = 0
-    """Q4 — names respelled by source, marked "(?)", and attributions."""
+    """Names respelled by source, marked "(?)", and attributions."""
     corrected: dict[str, int] = field(default_factory=dict)
     marked: int = 0
     attribution_model: int = 0
     attribution_speaker: int = 0
     attribution_missing: int = 0
-    """Facts whose text repeats a prompt example (Q1): the model copied
-    its instructions, not the recording."""
+    """Facts whose text repeats a prompt example."""
     dropped_example: int = 0
-    """F2 — facts whose text is their quote (kept as evidence only); facts
-    that inform nobody (dropped, not stored); facts in the transcript's
-    voice (evidence only) and the openers code dropped to fix one."""
+    """Copies (evidence only), uninformative facts (dropped), first-person facts, openers fixed."""
     copied: int = 0
     dropped_no_information: int = 0
     dropped_first_person: int = 0
     third_person_fixed: int = 0
     descriptive: int = 0
-    """F3 — figures kept, and dropped because the value or the unit was
-    not said; qualifiers and introduction fields cleared because the
-    words were not in the quote; next steps addressed to the audience."""
+    """Figures kept and dropped, qualifiers and introduction fields cleared, next steps to the audience."""
     figures_kept: int = 0
     figures_dropped_value: int = 0
     figures_dropped_unit: int = 0
@@ -701,23 +591,16 @@ class VerifyStats:
     figures_dropped_name: int = 0
     qualifiers_cleared: int = 0
     introductions_kept: int = 0
-    # F3 amendment (r03): an "introduction" that introduces nobody, with
-    # real words behind it, is kept as a key point.
+    # An "introduction" that introduces nobody is kept as a key point.
     introductions_demoted: int = 0
-    # Sprint D2 — texts left opening with a pronoun (evidence only).
     subject_unresolved: int = 0
     introduction_fields_cleared: int = 0
     contact_steps: int = 0
 
 
-# The window shows each turn as "[3] Anna (00:12): …". A small model
-# sometimes copies that header — often with the numbers left blank,
-# "[] Anna (:): …" — into `text`, which is meant to be the claim alone.
-# Or without the bracket — "Speaker 1 (06:47): …" (Gemma 3 4B on r03); that
-# form needs a real mm:ss, so "Budget (2026): …" is left alone.
-# "[4] Wren (03:10):" as the window renders it; also "[4]: Wren (03:10):" —
-# a small model under the one-example profile (L1) puts a colon after the
-# bracket. The words after the header are verified exactly as before.
+# Echoed turn headers a small model copies into `text`: "[3] Anna (00:12):",
+# "[] Anna (:):", "[4]: Wren (03:10):", or bracket-less "Speaker 1 (06:47):"
+# (that form needs a real mm:ss, so "Budget (2026):" is left alone).
 _TURN_HEADER: Final = re.compile(
     r"^\s*(?:\[\d*\]:?\s*[^\[\]():\n]{0,80}?\s*\(\d{0,2}:?\d{0,2}\)"
     r"|[^\[\]():\n]{1,40}?\s*\(\d{1,2}:\d{2}\)):\s*"
@@ -745,18 +628,12 @@ def verify_facts(
     glossary: tuple[Term, ...] = (),
     recording_names: frozenset[str] = frozenset(),
 ) -> list[VerifiedFact]:
-    """One window's claims, checked. Anything that fails is dropped.
+    """One window's claims, checked; anything that fails is dropped.
 
-    ``allowed_kinds`` is the family's set (Sprint 36): a model that
-    answers with a kind this family does not have is answering about a
-    different document, and the fact is dropped rather than filed
-    somewhere arbitrary.
-
-    ``noise_lines`` are the CONFIRMED exclusions (:func:`confirm_noise`),
-    never the model's raw flags.
+    A kind outside ``allowed_kinds`` is dropped, never filed elsewhere.
+    ``noise_lines`` are the CONFIRMED exclusions, never the model's raw flags.
     """
-    # Imported here: prompts builds its phrase set with this module's
-    # normaliser, so a top-level import would be circular.
+    # Local import: prompts imports this module's normaliser (circular otherwise).
     from .prompts import echoes_example
 
     stats = stats or VerifyStats()
@@ -774,17 +651,13 @@ def verify_facts(
             stats.dropped_quote += 1
             continue
         if turn.number in noise_lines:
-            # Code confirmed this line is not the conversation, and the
-            # model quoted it anyway. A fact from background speech is
-            # worse than no fact.
+            # Confirmed noise quoted anyway: a fact from background speech is worse than none.
             stats.dropped_noise += 1
             continue
 
         kind = fact.kind
 
-        # A judgement suggestion is only ever a suggestion, and only for
-        # a field this family actually has. It is never written to the
-        # field: a person accepts it, or it stays a row nobody acted on.
+        # A judgement is only a suggestion for a field this family has; never written to it.
         judgement_field: str | None = None
         if kind == schema.JUDGEMENT:
             if not fact.field or fact.field not in judgement_fields:
@@ -792,8 +665,7 @@ def verify_facts(
                 continue
             judgement_field = fact.field
 
-        # A completion may only point at an item we already had, by its
-        # position in the list the prompt was given.
+        # A completion may only point at a carried item, by its position in the prompt's list.
         refers_to_key: str | None = None
         if kind == schema.COMPLETION:
             index = (fact.refers_to or 0) - 1
@@ -802,18 +674,13 @@ def verify_facts(
                 continue
             refers_to_key = carried_keys[index]
 
-        # F3 — a figure or an introduction is its payload, checked word by
-        # word against the quote. A figure whose value or unit was not said
-        # is dropped, never softened.
+        # A figure or introduction is its payload, checked word by word against the
+        # quote (never the line header, which would vouch for any introduction).
         figure: Figure | None = None
         person: Person | None = None
-        # The payload is checked against the words, never the line header
-        # the window shows ("[1] Corvin Aldmere (00:07): …" names the
-        # speaker on every line and would vouch for any introduction).
         spoken = fact.model_copy(update={"quote": strip_turn_header(fact.quote)})
         if kind == schema.FIGURE:
-            # The quantity is often named in the sentence before its number
-            # ("… the water tank holds / just under 300 gallons").
+            # The quantity is often named in the sentence before its number.
             before = _previous_line_same_speaker(window, turn)
             figure, why = verify_figure(
                 spoken, language=language, context=f"{before} {turn.text}".strip()
@@ -837,27 +704,20 @@ def verify_facts(
                 spoken, language=language, context=f"{turn.text} {following}"
             )
             if person is None:
-                # The words were said; only the kind is wrong. A small
-                # model told one line holds an introduction files a whole
-                # window under it (r03, 2026-09-27).
+                # The words were said; only the kind is wrong.
                 kind = schema.KEY_POINT
                 stats.introductions_demoted += 1
             else:
                 stats.introduction_fields_cleared += cleared
                 stats.introductions_kept += 1
         elif kind == schema.NEXT_STEP:
-            # Addressed to the listener ("email me", "leave a comment") it is
-            # the recording's call to action; otherwise a plain point.
+            # Addressed to the listener it is the call to action; otherwise a plain point.
             if addresses_audience(fact.quote, language):
                 stats.contact_steps += 1
             else:
                 kind = schema.KEY_POINT
 
-        # F2 — a copy is evidence, not a statement, whatever its kind. A
-        # copied decision is not a decision (it is somebody's words filed
-        # as an outcome) and is also not rendered.
-        # Without an echoed line header: "Speaker 1 (07:37): <the line>" is
-        # still the line.
+        # A copy is evidence whatever its kind (a copied decision is not rendered).
         copied = is_copied(strip_turn_header(fact.text), fact.quote)
         if kind == schema.DECISION and (
             not is_decision(fact.quote, turn=turn, window=window) or copied
@@ -874,13 +734,10 @@ def verify_facts(
         if number_flags:
             stats.numbers_removed += 1
 
-        # A figure or an introduction is written from its payload, every word
-        # of which was checked against the quote above; its `text` is never a
-        # line, so the text rules below do not decide whether it is kept.
+        # Payload facts are written from their verified fields; the text rules below do not decide them.
         by_payload = figure is not None or person is not None
 
-        # F2 — information is checked in code. A remark that informs nobody
-        # ("This boat is incredible.") is not a fact and not evidence of one.
+        # A remark that informs nobody ("This boat is incredible.") is not a fact.
         if not by_payload and not support.carries_information(
             text,
             language,
@@ -910,8 +767,7 @@ def verify_facts(
             voice_flags = [*voice_flags, DESCRIPTIVE]
             stats.descriptive += 1
 
-        # Q4, tier (a): names the workspace knows, spelled its way — in the
-        # text only. The quote keeps what the transcriber heard.
+        # Names the workspace knows, spelled its way in the text only; the quote keeps what was heard.
         people = frozenset(
             {t.speaker_name for t in window.turns if t.speaker_name}
             | set(name_candidates)
@@ -919,9 +775,7 @@ def verify_facts(
         )
         text, corrections, marked = _correct(text, glossary, people, stats, recording_names)
 
-        # Sprint D2 — the subject the model named for a sentence that would
-        # open with a pronoun, accepted by the owner rule over the window
-        # (whose overlap turn usually holds the antecedent).
+        # The model's subject for a pronoun-opening sentence, accepted by the owner rule.
         subject = resolve_subject(fact.subject, window=window, known=people)
 
         # The restatement must mean what was said: enough shared content,
@@ -935,9 +789,7 @@ def verify_facts(
             support.support_ratio(text, said, language) < MIN_TEXT_SUPPORT
             or support.new_names(text, said, known)
         ):
-            # A number the model gave and nobody said was removed above; the
-            # rest of such a line is as unsupported as the number was
-            # ("Fast Menschen sterben" from a line about the second plane).
+            # After an unsaid number was removed, the rest of the line is as unsupported.
             if kind in _STRICT_KINDS or _NUMBER.search(text) or number_flags:
                 stats.dropped_paraphrase += 1
                 continue
@@ -1035,7 +887,7 @@ def verify_facts(
     return out
 
 
-# ── F3: figures, introductions, calls to action ────────────────────
+# ── Figures, introductions, calls to action ────────────────────────
 
 # The speaker's own hedge on a number. Closed: a qualifier outside this list,
 # or one the quote does not have, is cleared — the value stays.
@@ -1090,13 +942,11 @@ def _has_phrase(text: str, phrase: str) -> bool:
 
 
 def _word_said(word: str, said: list[str]) -> bool:
-    """``word`` is in ``said`` — exactly, or by a shared stem for inflected
-    forms ("gallon" / "gallons", "Liter" / "Litern")."""
+    """``word`` is in ``said``, exactly or by a shared stem ("gallon" / "gallons")."""
     if word in said:
         return True
     if len(word) < _STEM_MIN:
         return False
-    # The engine's five-letter stem (support.STEM): "cruising" / "cruises".
     stem = word[: support.STEM]
     return any(w[: support.STEM] == stem for w in said if len(w) >= _STEM_MIN)
 
@@ -1132,10 +982,7 @@ def _lead_in(quote: str, context: str, words: int = 6) -> str:
 
 
 def _qualifier_before(value: str, said: str, language: str) -> str:
-    """The closed-list qualifier said directly before ``value`` in ``said``,
-    longest first — "a little over sixteen and a half" gives "a little
-    over". Empty when the value's words cannot be found or nothing is
-    there."""
+    """The closed-list qualifier said directly before ``value``, longest first; else ""."""
     tokens = _norm_words(said)
     value_tokens = _norm_words(value)
     if not value_tokens:
@@ -1154,10 +1001,8 @@ def _qualifier_before(value: str, said: str, language: str) -> str:
 
 
 def _adjacent_qualifier(qualifier: str, value: str, said: str) -> str:
-    """The qualifier only when it is said right before THIS value: in "twenty
-    six knots and up to thirty two" the "up to" belongs to thirty two. A
-    value written in digits for words said cannot be located; then the
-    phrase test alone stands."""
+    """The qualifier only when said right before THIS value; a value in digits for
+    spoken words cannot be located, then the phrase test alone stands."""
     if not qualifier:
         return ""
     tokens = _norm_words(said)
@@ -1172,8 +1017,7 @@ def _adjacent_qualifier(qualifier: str, value: str, said: str) -> str:
     return qualifier if any(tokens[max(0, i - len(q)) : i] == q for i in starts) else ""
 
 
-# Words that measure or count when said right after a number: the units
-# above, and time, distance, share and head counts (§2.3's `unit_lost`).
+# Words that measure or count when said right after a number (`unit_lost`).
 _UNIT_SPOKEN: Final[frozenset[str]] = frozenset(
     {w for forms in UNIT_WORDS.values() for w in forms}
     | {
@@ -1235,9 +1079,7 @@ def _unit_after(value: str, said: str) -> str:
 
 
 def _not_a_quantity(raw_value: str, unit: str, said: str, value: Decimal) -> bool:
-    """A number that names rather than measures: part of a product name
-    ("Pardo 65 GT", "Boeing 737") or a year said without a unit. Dates are
-    the key-dates section's; names are not figures."""
+    """A number that names rather than measures ("Pardo 65 GT", a bare year)."""
     if not unit.strip() and value == value.to_integral_value() and 1900 <= value <= 2100:
         return True
     digits = numbers.display(value).replace(",", "")
@@ -1260,13 +1102,9 @@ def _not_a_quantity(raw_value: str, unit: str, said: str, value: Decimal) -> boo
 def verify_figure(
     fact: schema.Fact, *, language: str = "en", context: str = ""
 ) -> tuple[Figure | None, str]:
-    """F3, decision 1: ``(figure, "")`` or ``(None, reason)`` where reason
-    is ``value`` (not said, not one number) or ``unit`` / ``name``.
-
-    ``context`` is the line the quote sits in: a model that quotes only the
-    number words ("sixteen and a half feet") still said which quantity in
-    the line ("The beam is a little over…"), so the name is checked against
-    the line, and the qualifier against the words just before the quote."""
+    """``(figure, "")`` or ``(None, reason)`` with reason ``value`` / ``unit`` / ``name``.
+    ``context`` is the quote's line: the name is checked against it, the qualifier
+    against the words just before the quote."""
     quote = fact.quote
     value = numbers.parse_value(fact.value or "", language)
     if value is None or not numbers.said(value, quote, language):
@@ -1279,15 +1117,14 @@ def verify_figure(
     name = " ".join((fact.name or "").split())[: schema.MAX_FIGURE_NAME_CHARS]
     if _is_unit_word(name) or (unit and name.casefold() == unit.casefold()):
         return None, "name"  # "Gallons: just under 300" names the unit, not the quantity
-    # F3 amendment §2.3 — a name is words, not a number ("Zwanzig Jahre").
+    # A name is words, not a number ("Zwanzig Jahre").
     if _DIGITS_RE.search(name) or numbers.number_words(name, language):
         return None, "name"
     # An indefinite article is not a count: "eine Software" is not 1.
     if value == 1 and not _EXPLICIT_ONE.search(f"{quote} {context}"):
         return None, "value"
     if not unit:
-        # A unit said right after the value that the figure did not take
-        # ("über zwei Stunden" → "über 2") is a figure that lost its meaning.
+        # A unit said right after the value that the figure did not take lost its meaning.
         if _unit_after(fact.value or "", f"{quote} {context}"):
             return None, "unit_lost"
         # Without a unit the name must say what is counted or measured.
@@ -1340,8 +1177,7 @@ def _previous_line_same_speaker(window: Window, turn: Turn) -> str:
 
 
 def _next_line_same_speaker(window: Window, turn: Turn) -> str:
-    """The line after ``turn`` when the same voice says it — "My name is
-    Mitchell, broker with …" is often followed by "We are the … dealer"."""
+    """The line after ``turn`` when the same voice says it."""
     turns = list(window.turns)
     for i, t in enumerate(turns):
         if t.index == turn.index and getattr(t, "number", None) == getattr(turn, "number", None):
@@ -1352,8 +1188,7 @@ def _next_line_same_speaker(window: Window, turn: Turn) -> str:
 
 
 def _as_said(value: str, said: str) -> str:
-    """``value`` with each word in the casing the transcript has it
-    ("Broker" → "broker" when the speaker's line says "a broker")."""
+    """``value`` with each word in the casing the transcript has it."""
     out = []
     for word in value.split():
         # As written when the transcript has it that way; else as said.
@@ -1378,19 +1213,13 @@ def _field_said(value: str | None, quote: str) -> str:
 def verify_introduction(
     fact: schema.Fact, *, language: str = "en", context: str = ""
 ) -> tuple[Person | None, int]:
-    """F3, decision 3: ``(person, fields cleared)``. The name must be in the
-    quote (or its line), whole; a role, organisation or qualifier word that
-    is not clears that field — nothing about a person is inferred.
-    ``context`` is the line the quote sits in: "Corvin Aldmere" quoted from
-    "My name is Corvin Aldmere. I am a broker with Harbourline Yachts" still
-    said the role and who introduced whom."""
+    """``(person, fields cleared)``: the name must be whole in the quote or its line
+    (``context``); an unsaid role/organisation/qualifier word clears that field."""
     said = f"{fact.quote} {context}"
     name = _field_said(fact.name, said)
     if not name or not any(w[:1].isupper() for w in name.split()):
         return None, 0
-    # Somebody must be introduced in the line: "my name is…", "this is…",
-    # "meet…". A product named in a welcome ("the first showing of the
-    # Tessaline 58") is not a person being introduced.
+    # Somebody must be introduced in the line; a product named in a welcome is not.
     if not (_SELF_INTRO.search(said) or _OTHER_INTRO.search(said)) or _DIGITS_RE.search(name):
         return None, 0
     fields = {
@@ -1414,8 +1243,7 @@ def verify_introduction(
 
 
 def _joiner(role: str, organisation: str, said: str) -> str:
-    """The one or two words the speaker put between role and organisation
-    ("Büroleiter beim Handelsblatt", "a broker with Springbrook")."""
+    """The one or two words between role and organisation ("a broker with Springbrook")."""
     if not role or not organisation:
         return ""
     match = re.search(
@@ -1426,8 +1254,7 @@ def _joiner(role: str, organisation: str, said: str) -> str:
     return ""
 
 
-# The recording speaking to its listener: "email me", "leave a comment",
-# "schreiben Sie mir", "підпишіться".
+# The recording speaking to its listener.
 _AUDIENCE: Final[dict[str, re.Pattern[str]]] = {
     "en": re.compile(
         r"\b(?:you|your|email me|e-mail me|shoot me|reach out|contact me|contact us|"
@@ -1447,8 +1274,7 @@ _AUDIENCE: Final[dict[str, re.Pattern[str]]] = {
 }
 
 
-# The recording asking its listener to act — narrower than "addresses the
-# audience": "you" alone is description ("you can see the saloon").
+# Narrower than _AUDIENCE: "you" alone is description ("you can see the saloon").
 _CALL_TO_ACTION: Final[dict[str, re.Pattern[str]]] = {
     "en": re.compile(
         r"\b(?:email me|e-mail me|shoot me|reach out|contact me|contact us|leave a comment|"
@@ -1485,7 +1311,7 @@ def _correct(
     stats: VerifyStats,
     recording_names: frozenset[str] = frozenset(),
 ) -> tuple[str | None, list[Correction], set[str]]:
-    """Tier (a) on one string, counted."""
+    """Known-name correction on one string, counted."""
     fixed, applied, marked = entities.correct(
         text, glossary=glossary, known_people=people, recording_names=recording_names
     )
@@ -1511,8 +1337,7 @@ def accept_name(proposed: str | None, *, window: Window, known: frozenset[str]) 
 
 
 def resolve_subject(proposed: str | None, *, window: Window, known: frozenset[str]) -> str | None:
-    """Sprint D2 — a subject is a person or thing somebody named: the
-    owner rule, and never a speaker label."""
+    """A subject is a person or thing somebody named: the owner rule, never a speaker label."""
     name = accept_name(proposed, window=window, known=known)
     return support.real_name(name)
 
@@ -1528,8 +1353,7 @@ def _attribute(
     if fact.certainty not in support.UNSURE_CERTAINTIES:
         return None, []
     if turn.clip or not support.real_name(turn.speaker_name):
-        # Quoted, not present — or not named yet ("Speaker 1" is a label,
-        # not a person). No actor is invented.
+        # Quoted, not present, or still a label ("Speaker 1"): no actor is invented.
         stats.attribution_missing += 1
         return None, [ATTRIBUTION_MISSING]
     stats.attribution_speaker += 1
@@ -1540,10 +1364,8 @@ def _attribute(
 _OWNED_KINDS: Final[frozenset[str]] = frozenset(
     {schema.ACTION, "commitment_ours", "commitment_theirs"}
 )
-# Below this share of its content in the quote and turn, a fact's text is
-# saying something else (Q2). Set so a real paraphrase passes — "The current
-# timeline may not support the launch" from "worried we won't be ready by
-# the launch" is 0.4 — and a line about something else does not.
+# Below this share of its content in the quote and turn, a fact's text says
+# something else (a real paraphrase scores ~0.4).
 MIN_TEXT_SUPPORT: Final = 0.34
 # Kinds a reader acts on: a paraphrase of one that its words do not carry
 # is dropped, not flagged.
@@ -1551,8 +1373,7 @@ _STRICT_KINDS: Final[frozenset[str]] = frozenset(
     {schema.DECISION, schema.ACTION, "commitment_ours", "commitment_theirs"}
 )
 
-# F2 — short by nature: a task or a decision needs no four content words,
-# nor does a completion tick or a judgement value.
+# Short by nature: exempt from the four-content-word rule.
 _SHORT_KINDS: Final[frozenset[str]] = _STRICT_KINDS | {schema.COMPLETION, schema.JUDGEMENT}
 # Phrased in the speaker's voice by nature ("We should update the deck"):
 # a task keeps its wording; the first-person rule is for statements.
@@ -1570,20 +1391,13 @@ THEIRS: Final = "theirs"
 def resolve_side(
     kind: str, owner: str | None, *, our_side: frozenset[str]
 ) -> tuple[str | None, list[str]]:
-    """Which side of the table owns a commitment.
-
-    The owner's name decides it, not the kind the model chose: a model
-    that labels a task `commitment_ours` when the client took it on has
-    guessed, and the names are evidence. When the name is not one we
-    know, the side is UNKNOWN and flagged — a task filed under the wrong
-    side of a client note is worse than one filed under neither.
-    """
+    """Which side of the table owns a commitment: the owner's name decides, not the
+    model's kind; an unknown name is UNKNOWN and flagged."""
     if owner and our_side and owner.casefold() in our_side:
         return OURS, []
     if owner and our_side:
         return THEIRS, []
-    # No roster to compare against: fall back to what the model said,
-    # and say that we are not sure.
+    # No roster: fall back to the model's kind, flagged as unsure.
     if kind == "commitment_ours":
         return OURS, [SIDE_UNKNOWN] if not our_side else []
     if kind == "commitment_theirs":
@@ -1599,7 +1413,7 @@ def _confidence(explicit: bool, flags: list[str]) -> float:
     return CONF_INFERRED
 
 
-# ── Noise, confirmed by code (Q2) ───────────────────────────────────
+# ── Noise, confirmed by code ────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -1662,14 +1476,9 @@ def confirm_noise(
     language: str,
     seen_pieces: tuple[str, ...] = (),
 ) -> tuple[list[Exclusion], list[str]]:
-    """``(confirmed exclusions, advisory reasons)`` for one window's flags.
-
-    The model may say "this line is not the conversation"; code checks the
-    claim against what it can see, and excludes only what passes. A flag
-    that does not pass its reason's rule is advisory: counted, never acted
-    on. ``seen_pieces`` are texts from before this window (the previous
-    window's lines), for the duplicate rule. Pure.
-    """
+    """``(confirmed exclusions, advisory reasons)`` for one window's flags: a flag
+    that fails its reason's rule is counted, never acted on. ``seen_pieces`` are
+    the previous window's texts, for the duplicate rule. Pure."""
     confirmed: list[Exclusion] = []
     advisory: list[str] = []
     order = [t.number for t in window.turns]
@@ -1681,13 +1490,10 @@ def confirm_noise(
             continue
         done.add(number)
         if len(piece.text.split()) > total_words * schema.MAX_NOISE_SHARE:
-            # Noise is marginal by definition (ADR-0059's rule, Q6). A line
-            # that is most of the window IS the recording — an advertisement
-            # someone recorded is still what they recorded.
+            # Noise is marginal by definition: a line that is most of the window IS the recording.
             ok = False
         elif reason == "other_language":
-            # Sprint I2: the ASR's own per-segment language is the rule; the
-            # script/stop-word heuristic stays for older artifacts without it.
+            # The ASR's per-segment language rules; the heuristic covers older artifacts.
             ok = (
                 piece.language != language
                 if piece.language
@@ -1710,10 +1516,8 @@ def confirm_noise(
 
 
 def cap_exclusions(exclusions: list[Exclusion], *, speech_ms: int) -> tuple[list[Exclusion], int]:
-    """``(what stands, how many were overridden)``. When the confirmed
-    exclusions add up to more than ``MAX_EXCLUDED_SHARE`` of the speech, a
-    bad run is silencing the recording: only what code can prove — another
-    language, a duplicate — stays out."""
+    """``(what stands, how many were overridden)``: above ``MAX_EXCLUDED_SHARE`` of
+    the speech only provable exclusions (another language, a duplicate) stay out."""
     total = sum(max(0, e.end_ms - e.start_ms) for e in exclusions)
     if speech_ms <= 0 or total <= MAX_EXCLUDED_SHARE * speech_ms:
         return exclusions, 0

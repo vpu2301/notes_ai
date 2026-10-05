@@ -1,23 +1,6 @@
-"""8-step upload validation pipeline.
+"""8-step upload validation: auth, mime, magic_bytes, size, duration, codec, hash, quota.
 
-Each step is a function returning :class:`ValidationResult`. The
-orchestrator (``run_all``) short-circuits at the first failure and
-returns the failing result; on success, returns the accumulated
-``UploadFacts`` (mime, codec, duration_ms, …).
-
-Order matters:
-
-1. ``auth``         — bearer + ``asr:write`` scope.
-2. ``mime``         — MIME header is in our allow-list.
-3. ``magic_bytes``  — file's magic bytes match its claimed MIME.
-4. ``size``         — total bytes ≤ MD_ASR_MAX_UPLOAD_MB.
-5. ``duration``     — ffprobe duration ≤ MD_ASR_MAX_DURATION_SECONDS.
-6. ``codec``        — codec/sample-rate/channels in allow-list.
-7. ``hash``         — streaming SHA-256 computed and persisted.
-8. ``quota``        — tenant monthly quota not exceeded.
-
-Failures emit RFC 9457 problem-details responses (libs/observability
-handler) with a stable ``type`` URI per code.
+``run_all`` short-circuits at the first failure; failures are RFC 9457 problems.
 """
 
 from .codec import validate_codec

@@ -1,10 +1,4 @@
-"""Stage-1 inline op application (batch path, ``apply_operations_inline``).
-
-Streaming keeps ops editor-side; the batch path has no editor, so
-text-shaped ops (dictated punctuation, line breaks) are applied straight
-into ``text`` at the command's position. Non-inline behaviour (strip
-only) must stay unchanged.
-"""
+"""Stage-1 inline op application on the batch path; non-inline (strip only) stays unchanged."""
 
 from __future__ import annotations
 

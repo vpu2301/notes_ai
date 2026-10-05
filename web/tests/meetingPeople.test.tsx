@@ -30,8 +30,7 @@ function memoryStorage(): Storage {
   };
 }
 
-/** The "People" segment. Sprint 34 put a meeting-type "Auto" chip on the
- *  same page, so these queries are scoped to the group. */
+/** The "People" segment; scoped to the group because the page also has a meeting-type "Auto" chip. */
 function people() {
   return within(screen.getByRole("group", { name: "People in the meeting" }));
 }

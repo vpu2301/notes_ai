@@ -1,7 +1,4 @@
-"""Wire protocol for `dictation.v1` and `dictation.v2`.
-
-See docs/api/dictation-ws-v1.md and docs/api/dictation-ws-v2.md.
-"""
+"""Wire protocol for `dictation.v1` and `dictation.v2`."""
 
 from .codec import (
     PROTOCOL_VERSION,

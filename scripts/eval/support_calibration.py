@@ -1,20 +1,9 @@
-"""Support-gate calibration per language (F3 amendment after r03, §2.10).
+"""Support-gate threshold per language from the judge column: the value at which the
+deterministic gate agrees with the judge most often.
 
-The line gate keeps a composed line when enough of its content words are in
-the facts it cites (``meeting_doc.support.support_ratio``) and its numbers
-and names are too. This script sets the threshold per language from the
-judge column: the value at which the deterministic gate agrees with the
-judge most often, reported with its disagreement rate.
-
-    # 1. judge every composed line, keeping one record per line (local only)
-    python scripts/eval/notes_eval.py --backend dev_mac --judge <strong judge> \\
-        --corpus <eval/notes/v2> --judge-lines scripts/eval/local/judge/lines.jsonl
-    # 2. calibrate
     python scripts/eval/support_calibration.py scripts/eval/local/judge/lines.jsonl
 
-The report carries numbers only — never a line's text. A language with
-fewer than ``MIN_LINES`` judged lines is reported, not calibrated: its
-provisional threshold stays. Target: agreement ≥ 95 % per language.
+Numbers only; a language under ``MIN_LINES`` keeps its provisional threshold.
 """
 
 from __future__ import annotations

@@ -1,16 +1,8 @@
-"""``python -m note_service.worker`` — the process that writes notes.
+"""``python -m note_service.worker``: the process that writes notes.
 
-Same code and same image as note-service, different container. It is not
-a new service (CTO rules §5): it shares the domain, the repositories and
-the config. What it does not share is the API's failure and compute
-profile — a generation is minutes of model calls and a lot of memory,
-and running that on the request loop would tie a browser to it and let
-one slow meeting starve every other note operation.
-
-Everything it needs is already in the stack: `libs/jobs` for the queue
-(leases, heartbeats, `waiting_on_model` for a backend that scales from
-zero, and the usage ledger) and `libs/models` for the provider. This is
-the queue's first consumer.
+Same code and image as note-service, different container: a generation is
+minutes of model calls and must not run on the request loop. Queue from
+`libs/jobs`, provider from `libs/models`.
 """
 
 from __future__ import annotations
@@ -32,56 +24,37 @@ from .jobs.generate_note import GenerationDeps, handle_generate, mark_dead
 logger = logging.getLogger(__name__)
 
 JOB_KIND = "note.generate"
-# A generation is minutes of model calls; the lease has to outlive a
-# window that is merely slow, or the job is re-delivered while it runs.
+# The lease must outlive a merely slow window, or the job is re-delivered while it runs.
 LEASE_SECONDS = 120
-# What "cold" costs on a backend that scales from zero — the runner uses
-# it to decide between waiting and failing.
+# Cold start on a backend that scales from zero; the runner decides between waiting and failing.
 COLD_START_SECONDS = 180
-# Two concurrent generations per replica: a generation is mostly waiting
-# on the model, and the provider's own `max_concurrency` is the real cap.
+# Mostly waiting on the model; the provider's `max_concurrency` is the real cap.
 BATCH = 2
 
 
 class _Providers:
-    """One chat provider per resolved backend, built on first use.
-
-    Mirrors `domain/ask.py`: a dev Mac with no model server must still
-    start the worker, and only a job that actually needs the model pays
-    for finding out that it is missing.
-    """
+    """One chat provider per resolved backend, built on first use (a Mac without a
+    model server must still start the worker)."""
 
     def __init__(self, settings_source: Any = None, registry: Registry | None = None) -> None:
-        # Sprint L2: the process's one registry — built and probed by
-        # `build_state()`, so the fallback chosen at startup is the one
-        # every job here routes through.
+        # The process's one registry, built and probed by `build_state()`.
         self._registry: Registry | None = registry
         self._cache: dict[str, Any] = {}
         self._shadow_cache: dict[str, Any] = {}
-        # Sprint 37: what the workspace's admin chose, and acknowledged.
-        # The registry calls it synchronously once per resolve, so it
-        # answers from a cache that `warm()` fills before each job.
+        # Called synchronously by the registry, so it answers from a cache `warm()` fills per job.
         self._settings = settings_source
 
     def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
         if self._registry is None:
             from .domain.model_routing import load_registry
 
-            # `validate=False` for the same reason `ask.py` uses it: an
-            # unrelated (ASR) misconfiguration must not stop notes being
-            # written.
+            # `validate=False`: an unrelated (ASR) misconfiguration must not stop notes.
             self._registry = load_registry(self._settings)
         return self._registry.resolve(workspace_id, operation)
 
     async def shadow(self, workspace_id: str) -> Any:
-        """The candidate backend for this workspace, or None.
-
-        Two gates, and the second is the important one: a shadow run
-        processes a real meeting on a second company's hardware, so a
-        workspace only shadows onto a processor its admin has already
-        acknowledged. A candidate nobody agreed to is simply not
-        rehearsed there — the flip waits for the acknowledgement.
-        """
+        """The candidate backend for this workspace, or None: a workspace only shadows
+        onto a processor its admin has acknowledged (real meetings on other hardware)."""
         name = settings.note_generation_shadow_backend
         if not name:
             return None
@@ -105,8 +78,7 @@ class _Providers:
         provider = self._shadow_cache.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)
-            # The metric labels the run by backend; the provider is the
-            # only thing that knows which one it is.
+            # The metric labels the run by backend.
             with contextlib.suppress(AttributeError):
                 provider.backend_name = resolved.name
             self._shadow_cache[resolved.name] = provider
@@ -114,19 +86,12 @@ class _Providers:
         return provider
 
     async def warm(self, tenant_id: UUID) -> None:
-        """Read this workspace's settings before anything resolves.
-
-        Called from the probe hook, which the runner awaits before the
-        handler — so a tier chosen a second ago is the tier this job
-        runs on, not the one cached from the previous job.
-        """
+        """Read this workspace's settings before anything resolves (probe hook, before the handler)."""
         if self._settings is not None:
             await self._settings.refresh(tenant_id)
 
     async def get(self, workspace_id: str, operation: str = "summarize") -> Any:
-        """The provider for one operation; one instance per backend name,
-        so the large and the small model are two providers and two
-        operations on the same backend share one."""
+        """The provider for one operation; one instance per backend name."""
         resolved = self._resolve(workspace_id, operation)
         provider = self._cache.get(resolved.name)
         if provider is None:
@@ -163,8 +128,7 @@ async def run() -> None:
         package_name="note-service",
         disable_otel=settings.testing or settings.otel_sdk_disabled,
     )
-    # The worker shares the API's state builder rather than keeping a
-    # second copy of the pool, envelope and object-store wiring in step.
+    # Shares the API's state builder rather than a second copy of the wiring.
     from .main_deps import build_state, teardown_state
 
     state = await build_state()
@@ -179,7 +143,7 @@ async def run() -> None:
         app_pool=app_pool,
         transcripts_store=transcripts,
         provider_for=providers.get,
-        # Sprint L2: classify/title/entities resolve on their own routing row.
+        # classify/title/entities resolve on their own routing row.
         operation_provider_for=providers.get,
         shadow_provider_for=providers.shadow,
         entity_model_tier=settings.note_entity_model_tier,
@@ -204,8 +168,7 @@ async def run() -> None:
         await providers.probe(str(ctx.job.tenant_id))
 
     async def _on_dead(ctx: JobContext, error_kind: str) -> None:
-        # The probe above fails before `_run` starts, so without this a
-        # dead job leaves its generation `queued` forever.
+        # The probe fails before `_run` starts; without this a dead job stays `queued` forever.
         await mark_dead(
             deps,
             tenant_id=UUID(str(ctx.job.tenant_id)),
@@ -220,10 +183,7 @@ async def run() -> None:
         worker_id=settings.registry_environ().get("HOSTNAME") or "note-worker",
         ledger=UsageLedger(CostTable.load(settings.models_config)),
         lease_seconds=LEASE_SECONDS,
-        # Two at a time, and never two from the same workspace when
-        # somebody else is waiting (migration 0055). A workspace that
-        # uploads fifty recordings gets them written — interleaved with
-        # everyone else's, not in front of them.
+        # Never two from the same workspace when somebody else is waiting (fair claim).
         batch=BATCH,
         per_tenant=settings.note_generation_per_tenant,
     )

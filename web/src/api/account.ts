@@ -1,15 +1,6 @@
-// Account, second factor, sessions and room devices (IDX-A5 + IDX-B1b).
-//
-// Everything here is native-mode only: `routers/account.py`,
-// `routers/mfa_native.py` and `routers/credentials.py` are mounted under
-// `MDX_IDP_MODE=native` and answer 404 otherwise — deliberately, so a
-// prober cannot tell a switched-off deployment from an absent feature.
-// `isUnavailableHere` (in `./auth`) is how a screen tells the difference.
-//
-// Several of these carry `Depends(recent_auth)` on the server. Nothing
-// here handles that 403: `http.ts` owns it, opens the one reauth dialog,
-// and retries. A call site that caught it itself would be a second,
-// weaker step-up.
+// Account, second factor, sessions and room devices. All native-mode only
+// (404 otherwise; see `isUnavailableHere`). Step-up 403s are handled solely
+// by `http.ts` — never catch `reauth_required` here.
 
 import { api } from "./http";
 import type {
@@ -44,19 +35,12 @@ export function revokeOtherSessions(): Promise<RevokedCount> {
 
 // ── second factor ─────────────────────────────────────────────────────
 
-/**
- * Step-up gated. The secret and `otpauth_uri` come back exactly once and
- * only until a code confirms them; after that the secret exists solely as
- * ciphertext on the server. Nothing may persist either.
- */
+/** Step-up gated. The secret and `otpauth_uri` come back exactly once; nothing may persist them. */
 export function startTotpEnrolment(): Promise<TotpEnrolment> {
   return api<TotpEnrolment>("auth", "/auth/mfa/totp/enroll", { method: "POST" });
 }
 
-/**
- * Finishing enrolment ends every other session — turning MFA on is a
- * remedy for "somebody may be in my account", not just a new lock.
- */
+/** Finishing enrolment ends every other session. */
 export function confirmTotpEnrolment(enrollmentId: string, code: string): Promise<RecoveryCodes> {
   return api<RecoveryCodes>("auth", "/auth/mfa/totp/confirm", {
     method: "POST",
@@ -94,10 +78,7 @@ export function confirmEmailChange(challengeId: string, code: string): Promise<I
 
 // ── deletion ──────────────────────────────────────────────────────────
 
-/**
- * Step-up gated. 202 with a 30-day grace period; signing in again cancels
- * it. `409 sole_owner_with_members` lists the workspaces in the extras.
- */
+/** Step-up gated. 202 with a 30-day grace period; `409 sole_owner_with_members` lists the workspaces in the extras. */
 export function deleteAccount(): Promise<AccountDeletion> {
   return api<AccountDeletion>("auth", "/auth/account/delete", {
     method: "POST",
@@ -105,18 +86,13 @@ export function deleteAccount(): Promise<AccountDeletion> {
   });
 }
 
-// ── workspaces (read-only here; B1 owns the rest) ─────────────────────
+// ── workspaces (read-only here) ───────────────────────────────────────
 
 export function listTenants(): Promise<{ items: TenantSummary[] }> {
   return api<{ items: TenantSummary[] }>("auth", "/tenants");
 }
 
-/**
- * Re-scope this session to `tenantId` (the switcher). The new access token
- * comes back in the body and nothing rotates: the refresh cookie the
- * browser holds is still the session's one credential. Native sessions
- * only — a Keycloak-issued session answers `409 legacy_session`.
- */
+/** Re-scope this session to `tenantId`; nothing rotates. Native sessions only (`409 legacy_session`). */
 export function activateWorkspace(tenantId: string): Promise<WorkspaceToken> {
   return api<WorkspaceToken>("auth", "/auth/token", {
     method: "POST",
@@ -125,7 +101,7 @@ export function activateWorkspace(tenantId: string): Promise<WorkspaceToken> {
   });
 }
 
-// ── room devices (IDX-B1b) ────────────────────────────────────────────
+// ── room devices ──────────────────────────────────────────────────────
 
 export function listDevices(tenantId: string): Promise<Credential[]> {
   return api<Credential[]>("auth", `/tenants/${tenantId}/devices`);

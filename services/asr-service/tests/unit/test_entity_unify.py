@@ -1,7 +1,4 @@
-"""Sprint TQ3 T1 — one name, one spelling: the unifier's rules.
-
-Fixtures are spellings between neutral common words — no transcript text.
-"""
+"""The unifier's rules. Fixtures are spellings between neutral common words."""
 
 from __future__ import annotations
 
@@ -36,7 +33,7 @@ def _out(lines: list[str], language: str = "de") -> TranscriptionOutput:
     )
 
 
-# The r04 subject heard five ways (TQ1 reference), each between common words.
+# One subject heard five ways, each between common words.
 R04 = [
     "und dann Handala und",
     "und dann Handala und",

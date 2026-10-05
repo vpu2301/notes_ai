@@ -58,8 +58,7 @@ def test_absolute_uk() -> None:
 
 
 def test_spelled_ordinal_day_uk() -> None:
-    # The sprint-05 headline example: "третього травня" → "03.05.2026"
-    # (year supplied by reference_date).
+    # "третього травня" → "03.05.2026" (year from reference_date).
     stage = DateNormStage()
     out = asyncio.run(_run(stage, _ctx("uk", date(2026, 6, 15)), "оглянуто третього травня"))
     assert "03.05.2026" in out

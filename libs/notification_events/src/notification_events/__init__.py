@@ -1,16 +1,6 @@
-"""Notification event contract.
+"""Notification event contract shared by producers and the consumer (leaf package).
 
-Shared by producers (note-service, auth-service, background jobs) and
-the notification-service consumer so there is exactly one definition
-of the envelope on the wire — the ``libs/asr_models`` pattern from
-sprint 04.
-
-This is a LEAF package: pure Pydantic types, no other internal lib.
-
-Reordering or renaming a field is a BREAKING change. Bump to a
-``notification_events`` v2 module and run both for a deprecation window
-rather than editing in place — the same discipline the WebSocket
-protocol version carries.
+Renaming or reordering a field is BREAKING: add a v2 module and run both through a deprecation window.
 """
 
 from .enums import (

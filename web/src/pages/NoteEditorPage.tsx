@@ -12,16 +12,21 @@ import {
 } from "../api/asr";
 import { ApiError } from "../api/http";
 import {
+  createPublicLink,
   deleteNote,
   downloadPdf,
   getItems,
   getNote,
   getResponses,
+  getSharing,
   getTemplate,
   getVersion,
   listVersions,
   needsReadPurpose,
   notesBySourceJob,
+  revokePublicLink,
+  setItemStatus,
+  setVisibility,
   updateDraft,
 } from "../api/notes";
 import type {
@@ -36,6 +41,7 @@ import type {
   NoteVersionDetail,
   NoteVersionSummary,
   ReadPurpose,
+  SharingView,
   SpeakerNameSource,
   TemplateSection,
   TranscriptResult,
@@ -66,10 +72,15 @@ import {
   FileDownIcon,
   FolderIcon,
   FolderPlusIcon,
+  GlobeIcon,
   HistoryIcon,
+  LinkOffIcon,
+  MailIcon,
   ShareIcon,
+  SparkleIcon,
   TrashIcon,
   UserIcon,
+  UsersIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { RichText, type LineExtra } from "../components/RichText";
@@ -94,7 +105,7 @@ import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from ".
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
 import { NameSuggestionChip } from "../components/NameSuggestionChip";
 import { copyText, movedAnnouncement } from "../i18n/speakers";
-import { ShareDialog } from "../components/ShareDialog";
+import { ShareDialog, publicLinkUrl } from "../components/ShareDialog";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
@@ -125,10 +136,7 @@ function withSection(content: NoteContent, next: NoteSection): NoteContent {
   return { ...content, sections };
 }
 
-/**
- * Manual-entry metadata per the note_models contract: user-entered values
- * carry source:"manual" and no confidence; an empty dict means "no value".
- */
+/** Manual values carry source:"manual" and no confidence; empty dict = no value. */
 function manualMeta(values: Record<string, unknown> | null): FieldMetadata {
   if (values === null || Object.keys(values).length === 0) return {};
   return { ...values, source: "manual" };
@@ -146,30 +154,19 @@ interface FieldProps {
   section: NoteSection;
   readOnly: boolean;
   onChange: (next: NoteSection) => void;
-  /** Q5: the evidence of a generated line, drawn at its end. */
+  /** Evidence of a generated line, drawn at its end. */
   lineExtra?: LineExtra;
-  /** SQ3 T1: the engine wrote this section — its paragraphs are never speaker turns. */
+  /** Engine-written section: paragraphs are never speaker turns. */
   generated?: boolean;
 }
 
-/**
- * One free-text section.
- *
- * A note is a document first: what the model wrote is typeset — headings,
- * nested bullets, checklists — rather than dumped as the raw `- ` and
- * `**…**` a plain box used to show. On a draft the document is also the
- * way in: click it and the same words come back as their markdown source
- * in a seamless editor, and leaving the field sets them again. A section
- * with nothing in it skips straight to the editor — there is no document
- * to read yet, only a prompt to write one.
- */
+/** One free-text section: typeset when read, markdown source when clicked; empty = editor straight away. */
 function FreeTextField({ def, section, readOnly, onChange, lineExtra, generated }: FieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const text = section.text ?? "";
   const placeholder = def.min_chars ? `At least ${def.min_chars} characters…` : "Start writing…";
 
-  // Auto-grow to fit content.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -376,22 +373,13 @@ function customNames(names: Record<string, string>): Record<string, string> {
   return out;
 }
 
-/**
- * Rewrite a speaker's name at the start of turns in note text:
- * "Speaker 2: …" → "Olena: …". The from-transcript note puts the name at
- * the start of a turn's first line, so only line-leading matches change.
- */
+/** "Speaker 2: …" → "Olena: …"; only line-leading matches change. */
 export function renameSpeakerInText(text: string, from: string, to: string): string {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return text.replace(new RegExp(`(^|\\n)${escaped}: `, "g"), `$1${to}: `);
 }
 
-/**
- * The transcript as the from-transcript note writes it (note-service
- * `_turns_text`): a turn per block, the name at the start of its first
- * line. Used to tell whether the note's transcript section still says what
- * the job said — i.e. nobody has edited it.
- */
+/** The transcript as note-service `_turns_text` writes it; used to detect an unedited section. */
 export function turnsToNoteText(turns: TranscriptTurn[], names: Record<string, string>): string {
   const diarized = turns.some((t) => t.speaker);
   return turns
@@ -423,17 +411,12 @@ interface TranscriptViewProps {
   onSpeakersRelabelled?: (change: SpeakersRelabelled) => void;
   /** Shown instead of the error when the job cannot be read (the note's own text). */
   fallback?: ReactNode;
-  /** Q3: open at this moment (ms) — a "Not included" range was clicked.
-   *  `seekKey` changes on every click, so the same range can be opened twice. */
+  /** Open at this moment (ms); `seekKey` changes per click so the same range can reopen. */
   seekMs?: number | null;
   seekKey?: number;
 }
 
-/**
- * The transcript as it stands in the note text, for a note without a
- * readable recording job. Speaker names are still editable: a rename
- * rewrites every turn of that speaker in the note, which autosaves.
- */
+/** Transcript from the note text (no readable job); a rename rewrites the note's turns. */
 function TextTranscriptView({
   texts,
   editable,
@@ -555,11 +538,7 @@ export function turnOfSuggestion(turns: TranscriptTurn[], s: NameSuggestion): nu
   return turns.findIndex((t) => t.segment_indices?.includes(first) ?? false);
 }
 
-/**
- * A polite live region for what just happened to the speakers ("Merged",
- * "Moved 3 turns", "Re-labelling finished"). Each message is a fresh node,
- * so saying the same thing twice is still announced.
- */
+/** Polite live region; each message is a fresh node so repeats are still announced. */
 function useAnnouncer() {
   const [message, setMessage] = useState<{ text: string; n: number } | null>(null);
   const announce = useCallback((text: string) => setMessage((m) => ({ text, n: (m?.n ?? 0) + 1 })), []);
@@ -571,10 +550,7 @@ function useAnnouncer() {
   return { announce, region };
 }
 
-/**
- * The rename field for a speaker, with the meeting's invitees under it —
- * picking one saves straight away; typing still works.
- */
+/** Rename field with the meeting's invitees under it; a pick saves straight away. */
 function SpeakerNameInput({
   value,
   options,
@@ -674,11 +650,11 @@ export function TranscriptView({
   const [editing, setEditing] = useState<{ label: string; value: string; initial: string; turn: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [undo, setUndo] = useState<UndoableEdit | null>(null);
-  // Sprint 32: suggestions turned down in this view (the server forgets them too).
+  // Suggestions turned down in this view (the server forgets them too).
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   const [highlight, setHighlight] = useState<number | null>(null);
   const { announce, region } = useAnnouncer();
-  // Sprint 30: turns picked for one "Move N turns to" action, by position.
+  // Turns picked for one "Move N turns to" action, by position.
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [focusTurn, setFocusTurn] = useState(0);
   const [relabelRunning, setRelabelRunning] = useState(false);
@@ -707,8 +683,7 @@ export function TranscriptView({
     load(await getResult(jobId));
   };
 
-  // A re-run replaces the labelling (and the merges on it): reload, and
-  // hand the note both versions of the text so it can offer to follow.
+  // A re-run replaces the labelling: reload and hand the note both texts.
   const relabelled = async (kind: "rerun" | "undo") => {
     const before = result ? turnsToNoteText(result.turns ?? [], names) : null;
     const r = await getResult(jobId);
@@ -739,12 +714,7 @@ export function TranscriptView({
     }
   };
 
-  /**
-   * Move turns to another speaker — one call however many turns, their
-   * segment indices concatenated. The turns change on screen first; the
-   * reload after the call is the truth (a "new" speaker's label only
-   * exists once the server made it).
-   */
+  /** One call for all turns; optimistic on screen, the reload after is the truth. */
   const move = async (positions: number[], to: MoveTarget) => {
     if (!result || saving || typeof result.result_rev !== "number") return;
     const all = result.turns ?? [];
@@ -784,8 +754,7 @@ export function TranscriptView({
       }
     } catch (err) {
       if (err instanceof ApiError && err.code === "stale_result_rev") {
-        // Someone (or another device) edited the speakers since this
-        // view loaded: show theirs, and say so, rather than guess.
+        // Speakers edited elsewhere since load: show theirs, say so.
         try {
           await reload();
         } catch {
@@ -860,14 +829,13 @@ export function TranscriptView({
   }, [jobId]);
 
   const turns = result?.turns ?? [];
-  // Sprint I2: a copy leaves out turns in another language than the
-  // recording unless asked; the choice lives with this view only.
+  // A copy leaves out other-language turns unless asked.
   const [includeOtherLanguages, setIncludeOtherLanguages] = useState(false);
   const hasOtherLanguages = useMemo(() => turns.some(isOtherLanguage), [turns]);
-  // Sprint TQ2: music / silence / noise markers stay out of a copy unless asked.
+  // Noise markers stay out of a copy unless asked.
   const markers = result?.noise ?? [];
   const [includeMarkers, setIncludeMarkers] = useState(false);
-  // Sprint TQ3: the spelling overlay — banner, review sheet, underlines.
+  // Spelling overlay: banner, review sheet, underlines.
   const [reviewOpen, setReviewOpen] = useState(false);
   const [hoverSpelling, setHoverSpelling] = useState<string | null>(null);
   const spellingBanner = correctionsBanner(result?.entity_corrections, result?.language);
@@ -875,8 +843,7 @@ export function TranscriptView({
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
   const roster = result?.speakers ?? [];
-  // Moving turns needs the server's revision to guard against a stale
-  // view, a connection, and no re-label in flight (it replaces the labels).
+  // Moving turns needs the server revision (stale guard), a connection, and no re-label in flight.
   const canMove =
     diarized && roster.length > 0 && online && !relabelRunning && typeof result?.result_rev === "number";
   const moveLocked = !canMove || saving;
@@ -933,7 +900,7 @@ export function TranscriptView({
     }
   };
 
-  /** A microphone-given name was removed from its roster chip (Sprint 31). */
+  /** A microphone-given name was removed from its roster chip. */
   const nameCleared = (label: string, speakerNames: Record<string, string>) => {
     const from = names[label] ?? defaultSpeakerName(label);
     const merged: Record<string, string> = {};
@@ -945,7 +912,7 @@ export function TranscriptView({
     onSpeakerRenamed?.(from, merged[label] ?? defaultSpeakerName(label));
   };
 
-  // ── Sprint 32: name suggestions ──
+  // ── name suggestions ──
   /** Suggestions still worth asking about: a live label nobody has named, not turned down. */
   const openSuggestions = (result?.name_suggestions ?? []).filter((sg) => {
     if (!roster.includes(sg.label) || dismissed.has(suggestionKey(sg))) return false;
@@ -1002,8 +969,6 @@ export function TranscriptView({
     }
   };
 
-  // Q3: a "Not included" range was clicked on the Notes tab — scroll to
-  // the turn that holds that moment and light it up, as for a suggestion.
   /** Scroll to the turn that holds `ms` and light it up. */
   const showMoment = (ms: number) => {
     if (turns.length === 0) return;
@@ -1355,10 +1320,7 @@ export function TranscriptView({
   );
 }
 
-/**
- * Sprint TQ2: "[Musik 00:12–00:41]" — music, silence or noise the worker
- * marked instead of transcribing. A line of its own, never a speaker's.
- */
+/** "[Musik 00:12–00:41]" — a noise marker line, never a speaker's. */
 function NoiseMarker({ noise, language }: { noise: TranscriptNoise; language: string }) {
   return (
     <p className={`transcript-marker transcript-marker-${markerKind(noise.kind)}`} data-testid="transcript-marker">
@@ -1367,12 +1329,7 @@ function NoiseMarker({ noise, language }: { noise: TranscriptNoise; language: st
   );
 }
 
-/**
- * The note's title. A textarea rather than an input, so a meeting's real
- * name — which is a sentence, not a label — wraps onto a second line
- * instead of scrolling out of sight. Return is not a line break here: a
- * title is one line of text however many rows it takes to show.
- */
+/** Title: a textarea so long names wrap; Return never inserts a line break. */
 function TitleField({
   value,
   disabled,
@@ -1410,12 +1367,7 @@ function TitleField({
 
 // ── meta row ──────────────────────────────────────────────────────────
 
-/**
- * The "filed in" pill. A note already in a space links to it; one that
- * isn't opens the list of spaces so filing it is one click, not a trip
- * through the ⋯ menu. With no spaces yet there is nothing to offer, so
- * the pill stays out of the row entirely.
- */
+/** "Filed in" pill: links to the space, or offers the list; hidden when there are no spaces. */
 function SpacePill({ noteId }: { noteId: string }) {
   const { spaces, spaceOf, file } = useSpaces();
   const [open, setOpen] = useState(false);
@@ -1470,7 +1422,7 @@ function SpacePill({ noteId }: { noteId: string }) {
 
 // ── the page ──────────────────────────────────────────────────────────
 
-// Sprint 36: "client" is what someone outside the workspace sees.
+// "client" is what someone outside the workspace sees.
 type Tab = "notes" | "transcript" | "responses" | "client";
 
 export function NoteEditorPage() {
@@ -1486,28 +1438,24 @@ export function NoteEditorPage() {
   useDocumentTitle(content?.title || (note ? "Untitled note" : "Note"));
   /** The template's display name, for the meta row; null when it could not be read. */
   const [templateName, setTemplateName] = useState<string | null>(null);
-  /** Q3: what the latest generation took the recording to be. */
+  /** What the latest generation took the recording to be. */
   const [recordingType, setRecordingType] = useState<string | null>(null);
-  /** Q3: a moment to open the transcript at ("Not included" link). */
+  /** A moment to open the transcript at ("Not included" link). */
   const [seek, setSeek] = useState<{ ms: number; key: number } | null>(null);
 
   const [version, setVersion] = useState(0);
-  /** Q5: the evidence rows behind the generated lines, by line key. */
+  /** Evidence rows behind the generated lines, by line key. */
   const { rows: genRows, byKey: genByKey } = useGeneratedLines(noteId, version);
-  /** Q5: how much of a generated note to show. A view, never an edit. */
+  /** How much of a generated note to show. A view, never an edit. */
   const [detail, setDetail] = useState<DetailLevel>(() => readDetail(noteId));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  /**
-   * Set when this is not our note and nobody shared it with us — a
-   * workspace admin opening a colleague's note. Every read is then sent
-   * with this purpose (the server records it) and the page says so.
-   */
+  /** Oversight read (admin on a colleague's note): every read carries this purpose, recorded server-side. */
   const [readPurpose, setReadPurpose] = useState<ReadPurpose | null>(null);
 
   const [params] = useSearchParams();
-  // `?tab=responses` is the notification's deep link (Sprint 20).
+  // `?tab=responses` is the notification's deep link.
   const [tab, setTab] = useState<Tab>(params.get("tab") === "responses" ? "responses" : "notes");
   const [items, setItems] = useState<ItemView[]>([]);
   const [responses, setResponses] = useState<ResponseView[]>([]);
@@ -1518,15 +1466,33 @@ export function NoteEditorPage() {
   const [viewing, setViewing] = useState<NoteVersionDetail | null>(null);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [showShare, setShowShare] = useState(false);
+  const [confirmMarkDone, setConfirmMarkDone] = useState(false);
+  const [showShare, setShowShare] = useState<false | "people" | "client" | "any">(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Who may manage/delete and whether a public link exists; null until read (then everything is offered). */
+  const [sharing, setSharing] = useState<SharingView | null>(null);
+  const [askReset, setAskReset] = useState(0);
+  const [chatCount, setChatCount] = useState(0);
 
   const saveTimer = useRef<number | null>(null);
   const latest = useRef<{ content: NoteContent; version: number } | null>(null);
 
-  // Sprint 20: items are derived from the "Action items" section on
-  // read; the tab shows whenever there is something to act on.
+  useEffect(() => {
+    if (!note || note.status === "cancelled") {
+      setSharing(null);
+      return;
+    }
+    let live = true;
+    getSharing(noteId)
+      .then((v) => live && setSharing(v))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [noteId, note, showShare]);
+
+  // Items derive from the "Action items" section on read; tab shows when there is something to act on.
   const responseCount = responses.length;
   const hasResponsesTab = items.length > 0 || responses.length > 0;
   useEffect(() => {
@@ -1561,7 +1527,7 @@ export function NoteEditorPage() {
         setReadPurpose(null);
       } catch (err) {
         if (!needsReadPurpose(err)) throw err;
-        // Not our note: read it as a reviewer, on the record.
+        // Not our note: read as a reviewer, on the record.
         env = await getNote(noteId, "review");
         setReadPurpose("review");
       }
@@ -1578,8 +1544,7 @@ export function NoteEditorPage() {
           setTemplateName(tpl.name);
           setSections([...tpl.schema_jsonb.sections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
         } catch {
-          // Template unavailable (deprecated/permissions): fall back to the
-          // envelope's section labels as plain free-text sections.
+          // Template unavailable: fall back to the envelope's section labels.
           setTemplateName(null);
           setSections(
             (env.section_labels ?? []).map((l) => ({
@@ -1601,9 +1566,7 @@ export function NoteEditorPage() {
     void load();
   }, [load]);
 
-  // Which transcription (if any) this note came from — for the Transcript
-  // tab. The envelope doesn't say, so ask the note service about the
-  // recent jobs; the answer is cached per browser.
+  // Source transcription for the Transcript tab; the envelope doesn't say, so ask (cached per browser).
   useEffect(() => {
     if (sourceJobId) return;
     let cancelled = false;
@@ -1663,7 +1626,7 @@ export function NoteEditorPage() {
     [],
   );
 
-  // A note is a living document (ADR-0051): editable until cancelled.
+  // Editable until cancelled (ADR-0051).
   const isDraft = note !== null && note.status !== "cancelled";
   const editable = isDraft && !viewing;
 
@@ -1672,11 +1635,8 @@ export function NoteEditorPage() {
     if (isDraft) scheduleSave(next, version);
   };
 
-  // A speaker renamed in the transcript is renamed in the note too — the
-  // note's turn lines start with the name. A cancelled note is a record;
-  // its text stays, and only the transcript shows the new name.
-  // Sprint 35: a name the author fixed is worth remembering — offered,
-  // never taken. One term, one question.
+  // A transcript rename rewrites the note's turn lines (not on a cancelled note);
+  // a fixed name is offered to the glossary, never taken.
   const [pendingTerm, setPendingTerm] = useState<PendingTerm | null>(null);
   const offerToRemember = (from: string, to: string) => {
     if (isWorthRemembering(from, to)) {
@@ -1700,8 +1660,7 @@ export function NoteEditorPage() {
     toast.success("Speaker renamed");
   };
 
-  // A merge rewrites the note's turn lines like a rename. Undo puts the
-  // text back only if nobody touched the note in between.
+  // A merge rewrites turn lines like a rename; undo restores only if untouched since.
   const mergeRewrite = useRef<{ before: NoteContent; after: NoteContent } | null>(null);
   const onSpeakersMerged = (from: string, to: string) => {
     mergeRewrite.current = null;
@@ -1724,11 +1683,7 @@ export function NoteEditorPage() {
     else toast.info("Note text was edited; speaker names in the note were not reverted.");
   };
 
-  // A speaker re-run is bigger than a merge — turns can move between
-  // people — so the note is not rewritten on its own. It is offered, and
-  // done only while the transcript section still reads exactly as the old
-  // labelling did (nobody edited it); undoing the re-run puts the section
-  // back the way a merge undo does.
+  // A re-run is only offered, and applied only while the section still matches the old labelling.
   const [relabelOffer, setRelabelOffer] = useState<{ before: string; after: string } | null>(null);
   const relabelRewrite = useRef<{ before: NoteContent; after: NoteContent } | null>(null);
   const onSpeakersRelabelled = ({ kind, before, after }: SpeakersRelabelled) => {
@@ -1806,6 +1761,62 @@ export function NoteEditorPage() {
     }
   };
 
+  const copyToClipboard = async (text: string, done: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(done);
+    } catch {
+      toast.error("Couldn't copy — your browser blocked clipboard access.");
+    }
+  };
+
+  /** A sharing change from the menu; the sheet does the same calls with its own feedback. */
+  const sharingAction = async (run: () => Promise<SharingView>, done?: string) => {
+    setBusy(true);
+    try {
+      setSharing(await run());
+      if (done) toast.success(done);
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onPublicLink = async () => {
+    if (sharing?.public_link) {
+      await copyToClipboard(publicLinkUrl(sharing.public_link.path), "Public link copied");
+      return;
+    }
+    setBusy(true);
+    try {
+      const view = await createPublicLink(noteId);
+      setSharing(view);
+      if (view.public_link) await copyToClipboard(publicLinkUrl(view.public_link.path), "Public link created and copied");
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmedOpen = items.filter((i) => i.status === "open" && i.counts.confirms > 0 && i.counts.disputes === 0);
+  const onMarkAllDone = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const done = new Map<string, ItemView>();
+      for (const item of confirmedOpen) done.set(item.id, await setItemStatus(noteId, item.id, "done"));
+      setItems((current) => current.map((i) => done.get(i.id) ?? i));
+      setConfirmMarkDone(false);
+      toast.success(done.size === 1 ? "1 item marked done" : `${done.size} items marked done`);
+    } catch (err) {
+      setActionError(messageFor(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleVersions = async () => {
     const opening = !showVersions;
     setShowVersions(opening);
@@ -1832,17 +1843,14 @@ export function NoteEditorPage() {
   // ── render ──────────────────────────────────────────────────────────
 
   const shownContent = viewing ? viewing.content : content;
-  // A dialogue-shaped section is the raw transcript: it lives behind the
-  // Transcript tab (read-only, speaker turns typeset), never in the notes.
+  // A dialogue-shaped section is the raw transcript: Transcript tab only.
   const transcriptDefs = (sections ?? []).filter(
     (def) => shownContent !== null && isTranscript(sectionOf(shownContent, def.id).text ?? ""),
   );
   const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
-  // What the content has, in its order. Structure follows content: no
-  // template section is drawn for being in the template.
+  // Structure follows content: no section is drawn just for being in the template.
   const allBlocks = noteBlocks(shownContent, sections ?? [], { editable });
-  // Q5: evidence and the detail toggle only for the note as it stands,
-  // and only when the engine wrote it (it has rows).
+  // Evidence and the detail toggle only for the current, engine-written note.
   const generated = !viewing && genRows.length > 0;
   const genSectionKeys = useMemo(() => generatedSectionKeys(genRows), [genRows]);
   const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
@@ -1896,12 +1904,57 @@ export function NoteEditorPage() {
     );
   }
 
+  const canManage = sharing?.can_manage ?? true;
+  const canDelete = sharing?.can_delete ?? true;
+  const hasLink = sharing?.public_link != null;
   const menu: MenuItem[] = [
-    { label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare(true) },
-    { label: "Download PDF", icon: <DownloadIcon size={14} />, sep: true, onClick: () => void onPdf() },
-    { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
-    { label: showVersions ? "Hide history" : "History", icon: <HistoryIcon size={14} />, onClick: () => void toggleVersions() },
+    { label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare("any") },
+    {
+      label: "Copy link",
+      icon: <CopyIcon size={14} />,
+      onClick: () => void copyToClipboard(`${window.location.origin}/notes/${noteId}`, "Link copied"),
+    },
   ];
+  if (!viewing && note.status !== "cancelled") {
+    menu.push(
+      { label: "Share with client…", icon: <UsersIcon size={14} />, sep: true, disabled: busy || !canManage, onClick: () => setShowShare("client") },
+      {
+        label: "Mark all confirmed items done",
+        icon: <CheckIcon size={14} />,
+        disabled: busy || !canManage || confirmedOpen.length === 0,
+        onClick: () => {
+          setActionError(null);
+          setConfirmMarkDone(true);
+        },
+      },
+      {
+        label: "Visible to everyone in the workspace",
+        icon: <UsersIcon size={14} />,
+        checked: sharing?.visibility === "workspace",
+        disabled: busy || !canManage || !sharing,
+        onClick: () =>
+          void sharingAction(
+            () => setVisibility(noteId, sharing?.visibility === "workspace" ? "private" : "workspace"),
+            sharing?.visibility === "workspace" ? "Only people it is shared with can open it" : "Everyone in the workspace can open it",
+          ),
+      },
+      { label: hasLink ? "Copy public link" : "Create public link", icon: <GlobeIcon size={14} />, disabled: busy || !canManage, onClick: () => void onPublicLink() },
+      { label: "Send by email…", icon: <MailIcon size={14} />, disabled: busy || !canManage, onClick: () => setShowShare("people") },
+    );
+    if (hasLink && canManage) {
+      menu.push({
+        label: "Turn off public link",
+        icon: <LinkOffIcon size={14} />,
+        disabled: busy,
+        onClick: () => void sharingAction(() => revokePublicLink(noteId), "Public link turned off"),
+      });
+    }
+  }
+  menu.push(
+    { label: showVersions ? "Hide history" : "History", icon: <HistoryIcon size={14} />, sep: true, onClick: () => void toggleVersions() },
+    { label: "Download PDF", icon: <DownloadIcon size={14} />, onClick: () => void onPdf() },
+    { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
+  );
   if (!viewing && spaces.length > 0) {
     const current = spaceOf[noteId];
     spaces.forEach((sp, i) => {
@@ -1913,11 +1966,17 @@ export function NoteEditorPage() {
       });
     });
   }
-  if (!viewing) {
+  if (!viewing && chatCount > 0) {
+    menu.push({ label: "Clear chat", icon: <SparkleIcon size={14} />, sep: true, onClick: () => setAskReset((k) => k + 1) });
+  }
+  if (sourceJobId) {
+    menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(sourceJobId, "Job ID copied") });
+  }
+  if (!viewing && canDelete) {
     menu.push({
       label: "Delete note",
       icon: <TrashIcon size={14} />,
-      sep: true,
+      sep: !sourceJobId,
       danger: true,
       disabled: busy,
       onClick: () => {
@@ -1970,10 +2029,6 @@ export function NoteEditorPage() {
           disabled={!editable}
           onChange={(title) => onContentChange({ ...shownContent, title })}
         />
-        {/* The meta line is a row of pills, not a run of text: when it
-            was taken, whose it is, what wrote it, where it is filed, what
-            it is called. Only the space is a control — the rest are the
-            facts you want at a glance without reading a sentence. */}
         <div className="doc-meta">
           <span className="doc-pill" title={`Created ${formatDateTime(note.created_at)}`}>
             <CalendarIcon size={13} />
@@ -2096,11 +2151,7 @@ export function NoteEditorPage() {
           })()
         ) : (
           <div className="doc-body">
-            {/* Sprint 36: unfinished business from the last meeting in
-                this series, above what was agreed in this one. */}
-            {/* Sprint 33/37: what the engine is doing with this note, or
-                why it is not. Never blocks the page — the note is the
-                author's the whole time. */}
+            {/* Never blocks the page. */}
             <GenerationStatus
               noteId={noteId}
               canGenerate={editable && sourceJobId !== null}
@@ -2180,11 +2231,8 @@ export function NoteEditorPage() {
           </div>
         )}
 
-        {/* Ask this note. It hangs off the foot of the document, so the
-            answer arrives under the text it is about — and it is offered
-            for the note as it stands, never for an old version you are
-            only looking at. */}
-        {!viewing && <AskNote noteId={noteId} />}
+        {/* Offered for the current note only, never for a viewed version. */}
+        {!viewing && <AskNote noteId={noteId} resetKey={askReset} onThreadChange={setChatCount} />}
       </div>
 
       {showVersions && (
@@ -2232,10 +2280,24 @@ export function NoteEditorPage() {
         </ConfirmDialog>
       )}
 
+      {confirmMarkDone && (
+        <ConfirmDialog
+          title="Mark all confirmed items done?"
+          confirmLabel="Mark done"
+          busy={busy}
+          error={actionError}
+          onConfirm={() => void onMarkAllDone()}
+          onCancel={() => setConfirmMarkDone(false)}
+        >
+          Every open item that at least one recipient confirmed, and nobody disputed, is marked done.
+        </ConfirmDialog>
+      )}
+
       {showShare && (
         <ShareDialog
           noteId={noteId}
           noteTitle={shownContent.title ?? ""}
+          initialFocus={showShare === "any" ? undefined : showShare}
           owner={
             identity && note.primary_author_id === identity.id
               ? { name: identity.display_name, email: identity.email, isMe: true }
@@ -2251,7 +2313,7 @@ export function NoteEditorPage() {
 }
 
 
-// ── Q5: Short / Standard / Detailed ─────────────────────────────────
+// ── Short / Standard / Detailed ─────────────────────────────────────
 
 export type DetailLevel = "short" | "standard" | "detailed";
 const DETAIL_KEY = "note-detail:";
@@ -2269,13 +2331,10 @@ function writeDetail(noteId: string, value: DetailLevel): void {
   try {
     window.localStorage.setItem(DETAIL_KEY + noteId, value);
   } catch {
-    // A convenience; a browser that will not store it shows Standard next time.
   }
 }
 
-/** Short: the overview. Standard: the note as written. Detailed: plus the
- *  verified facts no line used, under their topic. A view — never an edit,
- *  never a model call. */
+/** Short: overview. Standard: as written. Detailed: plus unused verified facts. A view, never a model call. */
 export function DetailToggle({ value, onChange }: { value: DetailLevel; onChange: (v: DetailLevel) => void }) {
   const options: [DetailLevel, string][] = [
     ["short", "Short"],
@@ -2300,8 +2359,7 @@ export function DetailToggle({ value, onChange }: { value: DetailLevel; onChange
   );
 }
 
-/** The fact rows no displayed line is, grouped by the section they belong
- *  under — what "Detailed" adds. */
+/** Fact rows no displayed line uses, grouped by section — what "Detailed" adds. */
 export function uncitedBySection(
   rows: GeneratedItem[],
   content: { sections?: { section_key: string; text?: string | null }[] } | null,

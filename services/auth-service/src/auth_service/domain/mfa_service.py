@@ -1,26 +1,8 @@
 """Second factors: enrolment, the login challenge, disable, recovery codes.
 
-Three things here are load-bearing and easy to get subtly wrong, so each
-is stated once:
-
-**A second factor gates every first factor.** ``challenge_if_required`` is
-called by whatever proved the first factor — an email code today, a
-password once IDX-A4 lands, anything later — and returns a challenge
-instead of a session. No login path can forget it, because none of them
-starts a session themselves: they hand the identity to this gate and it
-decides. The pack calls this ``AuthOutcome.after_first_factor``.
-
-**A TOTP code is spendable once.** RFC 6238's drift window makes the same
-six digits valid across three steps, i.e. for up to 90 seconds. The step
-that matched is claimed in the database with a strictly-greater-than
-guard, so the second use of a still-valid code is refused.
-
-**The enrolment secret lives in one place.** The pack parks it in the
-challenge's ``metadata``; here it goes straight into ``identity_totp``
-with ``confirmed_at IS NULL``. One encrypted home instead of two, and an
-unconfirmed row gates nothing — so an abandoned enrolment cannot lock
-anyone out, which is the property that made the pack keep it out of the
-main table in the first place.
+``challenge_if_required`` gates every first factor. A TOTP step is claimed in
+the DB (strictly greater than), so a code is spendable once. The enrolment
+secret lives only in ``identity_totp`` with ``confirmed_at IS NULL``, gating nothing.
 """
 
 from __future__ import annotations
@@ -76,8 +58,8 @@ KIND_TOTP_ENROLL = "totp_enroll"
 KIND_MFA_LOGIN = "mfa_login"
 KIND_REAUTH = "reauth"
 
-ENROLMENT_TTL_SECONDS = 900  # 15 minutes: long enough to install an app.
-MFA_LOGIN_TTL_SECONDS = 300  # 5 minutes: the gap between factors.
+ENROLMENT_TTL_SECONDS = 900
+MFA_LOGIN_TTL_SECONDS = 300
 MFA_LOGIN_MAX_ATTEMPTS = 5
 
 
@@ -158,7 +140,7 @@ class MfaService:
         self._lockout = lockout
         self._now = clock or (lambda: datetime.now(UTC))
 
-    # ── the first-factor gate (F3) ───────────────────────────────────
+    # ── the first-factor gate ────────────────────────────────────────
 
     async def challenge_if_required(
         self,
@@ -169,13 +151,7 @@ class MfaService:
         ip: str,
         user_agent: str,
     ) -> MfaChallengeIssued | None:
-        """None ⇒ the caller may start a session. Otherwise, finish here first.
-
-        The challenge carries the *first factor's* context, not the second
-        factor's. A code typed on a phone must not silently move the
-        session to that phone, or land it in a different workspace than
-        the one the sign-in asked for.
-        """
+        """None ⇒ the caller may start a session; the challenge carries the FIRST factor's context."""
         if not identity.mfa_enabled:
             return None
         record = await self._totp.get(identity.id)
@@ -183,9 +159,7 @@ class MfaService:
         if await self._recovery.count_unused(identity.id) > 0:
             methods.append("recovery_code")
         if not methods:
-            # `mfa_enabled` with nothing to verify against would be an
-            # account nobody — including its owner — can ever enter.
-            # Treat it as not enrolled and let the sign-in through, loudly.
+            # `mfa_enabled` with no secret would lock everyone out; treat as not enrolled, loudly.
             logger.error(
                 "auth.mfa.enabled_without_factors", extra={"identity_id": str(identity.id)}
             )
@@ -198,10 +172,7 @@ class MfaService:
             kind=KIND_MFA_LOGIN,
             email=identity.email,
             identity_id=identity.id,
-            # Nothing can match this: an mfa_login challenge is answered by
-            # a TOTP or recovery code, never by an emailed one. A random
-            # hash keeps the NOT NULL column honest without inventing a
-            # second code path that could be brute-forced.
+            # Unmatchable: an mfa_login challenge is never answered by an emailed code.
             code_hash=ec.code_hash(secrets.token_hex(32), challenge_id),
             expires_at=self._now() + timedelta(seconds=MFA_LOGIN_TTL_SECONDS),
             max_attempts=MFA_LOGIN_MAX_ATTEMPTS,
@@ -254,9 +225,7 @@ class MfaService:
             left = challenge.max_attempts - attempts
             if left <= 0:
                 await self._challenges.consume(challenge.id)
-                # An exhausted second factor is a failed sign-in for the
-                # A3 lockout counter — otherwise MFA would be a way to
-                # guess at an account without ever tripping the lock.
+                # An exhausted second factor counts towards the lockout.
                 await self._identities.register_failure(identity.id, policy=self._lockout, now=now)
                 _mfa_verify_counter.add(1, {"method": method, "result": "exhausted"})
                 raise MfaError("too_many_attempts", 429, detail="too many attempts; start again")
@@ -324,8 +293,7 @@ class MfaService:
                         "auth.mfa.code_replayed", extra={"identity_id": str(identity.id)}
                     )
                 return False, None
-            # The claim is the real check: two requests with the same code
-            # race here, and only one UPDATE finds a smaller stored step.
+            # The claim is the real check: only one racing UPDATE finds a smaller step.
             if not await self._totp.spend_step(identity.id, step=decision.step):
                 logger.warning("auth.mfa.step_race_lost", extra={"identity_id": str(identity.id)})
                 return False, None
@@ -464,12 +432,7 @@ class MfaService:
         return codes
 
     async def _safe_notify(self, coro: Any) -> bool:
-        """Security mail is best-effort. The operation it describes already happened.
-
-        Failing the disable because the notice could not be sent would
-        leave the account in the state the user was trying to leave, which
-        is the worse of the two outcomes.
-        """
+        """Security mail is best-effort: the operation it describes already happened."""
         try:
             await coro
             return True

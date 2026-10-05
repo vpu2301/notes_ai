@@ -1,11 +1,6 @@
 """Speaker embeddings are biometric data: none may leave ``diarize()``.
 
-Sprint 29 B-8 / acceptance 5. Both engines see embeddings (legacy: one
-per chunk; v2: one centroid per speaker) and both feed them to the roster
-guard. This drives a real labelling of each engine through the worker's
-own attribution and stats, then scans everything that is stored or
-emitted for anything vector-shaped: no list of more than 32 floats,
-anywhere, at any depth.
+Scans everything stored or emitted for anything vector-shaped (> 32 floats).
 """
 
 from __future__ import annotations

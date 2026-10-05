@@ -1,4 +1,4 @@
--- Recipient viral loop — the funnel cohort (Sprints 19–22).
+-- Recipient viral loop: the funnel cohort.
 --
 -- One row per ISO week of link creation, counts only:
 --   finalized notes → notes with a recipient link → links created → sent
@@ -6,10 +6,8 @@
 --   leads → referred signups → verified workspaces → workspaces with a
 --   finalized note within 7 days of verifying.
 --
--- Run as `funnel_reader` (migration 0040) — Grafana's Postgres datasource
--- and scripts/jobs/weekly_funnel.py both do. The join from referrals to
--- the sender's link happens HERE and nowhere in the product: no table
--- stores the referring tenant next to the referred one.
+-- Run as `funnel_reader`. The join from referrals to the sender's link
+-- happens HERE and nowhere in the product.
 
 WITH weeks AS (
     SELECT date_trunc('week', created_at)::date AS week, id AS note_id

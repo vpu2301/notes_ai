@@ -1,25 +1,8 @@
-"""Names spelled the way the workspace knows them (Summary Engine v2, Q4).
-
-The transcriber hears "Friedrich Schmerz" and "Schlesing"; the workspace
-knows Friedrich Merz from the calendar and Schwesig from its glossary.
-This module turns what was heard into what is meant — in the LINE only.
-The quote keeps what the transcriber heard, the fact records the
-correction (``Correction``), and the reader can always see both.
-
-Knowledge comes in tiers, each bounded:
-
-* **(a)** the workspace glossary (``heard_as`` spellings, exact), and the
-  people this recording is known to involve — speakers, calendar
-  attendees, the ASR's name candidates, glossary persons — by similarity
-  ≥ ``THRESHOLD``, and only when no second name is nearly as close
-  (ambiguity is not a correction).
-* **(b)** the model's own knowledge, one bounded call per generation
-  (:mod:`pipeline`), accepted at a lower similarity and never onto a
-  person already in the recording.
-* **(c)** a proposal too far from what was heard is not applied; the
-  surface stays and is marked ``(?)``.
-
-Pure. Names are person data: nothing here logs.
+"""Names spelled the way the workspace knows them, in the LINE only (the quote
+keeps what was heard; the fact records the ``Correction``). Tiers: (a) glossary
+and known people by similarity >= ``THRESHOLD`` with no close second; (b) the
+model, once per generation, never onto a person already present; (c) too far:
+marked ``(?)``. Pure; names are person data, nothing here logs.
 """
 
 from __future__ import annotations
@@ -42,7 +25,7 @@ UNSURE_MARK: Final = " (?)"
 SOURCE_GLOSSARY: Final = "glossary"
 SOURCE_CANDIDATE: Final = "candidate"
 SOURCE_MODEL: Final = "model"
-# F3 amendment §2.8 — a name the recording itself says three times or more.
+# A name the recording itself says three times or more.
 SOURCE_RECORDING: Final = "recording"
 
 

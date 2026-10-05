@@ -1,6 +1,5 @@
-"""Sprint SQ3 — reads like a note: nothing renders that was not written,
-every participant with a role, no line that adds nothing, a title from the
-whole recording. Tests follow the work order's table."""
+"""Reads like a note: nothing renders that was not written, every participant
+with a role, no line that adds nothing, a title from the whole recording."""
 
 from __future__ import annotations
 
@@ -53,7 +52,7 @@ def _ctx(facts: list[VerifiedFact], minutes: float = 10) -> LintContext:
     )
 
 
-# ── T1 nothing renders that was not written ─────────────────────────
+# ── nothing renders that was not written ─────────────────────────
 
 
 @pytest.mark.parametrize("language", ["de", "en", "uk"])
@@ -112,7 +111,7 @@ def test_render_writes_no_presenter_paragraph() -> None:
                for s in sections for ln in s.lines)  # fmt: skip
 
 
-# ── T2 every participant, one line, with a role ─────────────────────
+# ── every participant, one line, with a role ─────────────────────
 
 
 def _speaker(label: str, share: float, role: str, name: str | None = None,
@@ -179,7 +178,7 @@ def test_an_introduction_with_an_expert_word_is_an_expert() -> None:
     assert roles_table.standing(intro, table) == "guest"
 
 
-# ── T3 no line that adds nothing; introduce before describe ─────────
+# ── no line that adds nothing; introduce before describe ─────────
 
 
 def _topic(title: str, lines: list[tuple[str, VerifiedFact]]) -> RenderedSection:
@@ -248,7 +247,7 @@ def test_the_introduction_comes_before_the_description() -> None:
     assert ordered[0][1] == [intro.item_key]
 
 
-# ── T4 title from the whole recording ───────────────────────────────
+# ── title from the whole recording ───────────────────────────────
 
 
 def test_a_type_word_title_is_rejected() -> None:

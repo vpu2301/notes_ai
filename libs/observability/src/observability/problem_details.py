@@ -1,10 +1,4 @@
-"""RFC 9457 Problem Details — single source of truth for HTTP error envelopes.
-
-Every service uses ``register_exception_handlers(app)`` to install global
-handlers for ``HTTPException``, ``RequestValidationError``, and unhandled
-exceptions. The ``instance`` field carries a fresh ``urn:uuid:`` token that
-is also logged so support can correlate a user-visible error to the trace.
-"""
+"""RFC 9457 Problem Details handlers; ``instance`` is a fresh ``urn:uuid:`` that is also logged for correlation."""
 
 from __future__ import annotations
 
@@ -84,27 +78,15 @@ def _json_response(p: ProblemDetails, headers: dict[str, str] | None = None) -> 
 async def http_exception_handler(
     request: Request, exc: HTTPException | StarletteHTTPException
 ) -> JSONResponse:
-    # A raiser may attach `problem_extras` (a dict) to surface RFC 9457 extension
-    # members — e.g. a machine-readable `code` the SPA can branch on. Set it on
-    # the exception instance before raising:
-    #     e = HTTPException(401, detail="…"); e.problem_extras = {"code": "…"}; raise e
+    # A raiser may set `exc.problem_extras` (a dict) to add RFC 9457 extension members.
     extras = dict(getattr(exc, "problem_extras", None) or {})
-    # The extras may also name the problem ``type`` (asr-service's job
-    # endpoints send ``{"type_uri": …}``). Take it out here: passed on as
-    # ``**extras`` it collided with the ``type_uri=`` keyword below, so
-    # every such 409/410 died in this handler and reached the client as a
-    # 500 "An unexpected error occurred."
+    # Popped so it cannot collide with the ``type_uri=`` keyword below (that collision 500'd every such 409/410).
     extra_type = extras.pop("type_uri", None)
     detail = exc.detail
     type_uri: str | None = extra_type if isinstance(extra_type, str) else None
     title: str | None = None
     if isinstance(detail, dict):
-        # A raiser that built a problem document inline —
-        # ``HTTPException(422, detail={"type": …, "title": …, "detail": …,
-        # "allowed": […]})`` — means its members, not a Python repr of the
-        # dict. Lift the RFC 9457 members to the top level and keep every
-        # other key as an extension member, so clients branch on ``type``
-        # and show ``detail`` exactly as they do for a plain string.
+        # An inline problem document: lift the RFC 9457 members, keep the rest as extensions.
         body = dict(detail)
         if isinstance(body.get("type"), str):
             type_uri = body.pop("type")
@@ -130,7 +112,7 @@ async def http_exception_handler(
             "method": request.method,
         },
     )
-    # Preserve headers the raiser set (notably WWW-Authenticate on 401).
+    # Keeps WWW-Authenticate on 401.
     extra_headers = getattr(exc, "headers", None)
     return _json_response(p, headers=extra_headers)
 
@@ -138,10 +120,7 @@ async def http_exception_handler(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    # Pydantic v2 puts the raw exception object into ctx["error"] for
-    # value_error entries (model_validator raising ValueError) — that is
-    # not JSON-serializable and turned every such 422 into a 500. Coerce
-    # ctx values to strings before embedding.
+    # Pydantic v2 puts a raw exception into ctx["error"], which is not JSON-serializable.
     errors = []
     for e in exc.errors():
         if isinstance(e.get("ctx"), dict):

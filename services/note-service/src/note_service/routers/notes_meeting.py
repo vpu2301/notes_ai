@@ -1,22 +1,12 @@
-"""The note exists from the first second (Sprint 34, ADR-0055).
-
-``POST /v1/notes/meeting`` creates the note when the author presses
-Record, not when a transcript finally arrives. From then on the author
-types into it — on the laptop, the Mac or the phone, online or not — and
-the recording catches up:
+"""The note exists from the first second (ADR-0055): created when Record is pressed.
 
     record start → POST /v1/notes/meeting          state=recording
-    typing       → PUT  /v1/notes/{id}/draft       (the existing autosave)
-                 + PUT  /v1/notes/{id}/my-notes/timing
+    typing       → PUT  /v1/notes/{id}/draft + PUT /v1/notes/{id}/my-notes/timing
     record stop  → POST /v1/notes/{id}/meeting/job state=transcribing
-    asr complete → POST /v1/notes/{id}/transcript  state=ready
-                 + the engine is queued (Sprint 33) — progress on
-                   GET /v1/notes/{id}/generation, never on the state
+    asr complete → POST /v1/notes/{id}/transcript  state=ready (engine queued)
 
-``POST /from-transcript`` is untouched: uploads and older clients still
-make a note out of a finished job, and one note per job stays enforced by
-the partial unique index on ``notes.source_asr_job_id`` — whichever route
-gets there first wins, the other gets 409 ``already_assigned``.
+One note per job is enforced by the partial unique index on
+``notes.source_asr_job_id``; the loser gets 409 ``already_assigned``.
 """
 
 from __future__ import annotations
@@ -60,15 +50,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
-# The author's scratchpad. Every meeting template carries it; the engine
-# never writes it, and nothing here ever rewrites what was typed.
+# The author's scratchpad: the engine never writes it, nothing here rewrites it.
 USER_NOTES_SECTION: Final = "user_notes"
 ATTENDEES_SECTION: Final = "attendees"
 AGENDA_SECTION: Final = "agenda"
 
-# Meeting type → the seed template family that fits it. "client" has no
-# family of its own; general meeting notes are the honest default rather
-# than a sales script imposed on a customer call.
+# Meeting type → seed template family; "client" deliberately falls back to general notes.
 _TEMPLATE_FAMILY: Final[dict[str, str]] = {
     "auto": "meeting_notes",
     "client": "meeting_notes",
@@ -167,8 +154,7 @@ class AttachTranscriptResponse(BaseModel):
 
 
 def _clean_names(names: list[str]) -> list[str]:
-    """Attendee names as the note will show them: whitespace collapsed,
-    control characters out, 1–80 characters, de-duplicated, ≤ 12."""
+    """Attendee names as shown: whitespace collapsed, control characters out, 1–80 chars, deduplicated, <= 12."""
     seen: set[str] = set()
     out: list[str] = []
     for raw in names:
@@ -186,13 +172,8 @@ def _clean_names(names: list[str]) -> list[str]:
 
 
 def calendar_context(calendar: CalendarContextIn | None) -> dict[str, Any]:
-    """The stored shape: names and agenda lines only.
-
-    The client may send either a parsed ``agenda_lines`` list (the web and
-    native Google paths, which already have it from ``/v1/calendar/events``)
-    or a raw ``description`` (EventKit, which only has the note field). The
-    description is run through the same deterministic rules and discarded.
-    """
+    """The stored shape: names and agenda lines only. A raw ``description``
+    (EventKit) is parsed by the same rules and discarded."""
     if calendar is None:
         return {}
     lines = [" ".join(line.split()) for line in calendar.agenda_lines]
@@ -220,12 +201,8 @@ def initial_content(
     title: str,
     context: dict[str, Any],
 ) -> NoteContent:
-    """v1 of a meeting note: every template section, empty, except the two
-    the invite can already answer.
-
-    ``user_notes`` is deliberately empty — it is the author's to fill, and
-    a placeholder in it would be text they did not write.
-    """
+    """v1 of a meeting note: every template section empty except the two the invite
+    can answer; ``user_notes`` is never pre-filled."""
     attendees = context.get("attendee_names") or []
     agenda = context.get("agenda_lines") or []
     prefilled = {
@@ -257,13 +234,8 @@ async def _pick_template(
     meeting_type: str,
     language: str,
 ) -> tuple[UUID, TemplateDefinition, int, str]:
-    """Explicit id, else the family for this meeting type in this
-    language, else general meeting notes, else anything active.
-
-    ``language='auto'`` is not yet a language: the recording has not been
-    heard. The catalogue's lingua franca carries the headings until it is,
-    and the transcript itself is never translated.
-    """
+    """Explicit id, else the family for this type and language, else general
+    meeting notes, else anything active. ``language='auto'`` uses the fallback language."""
     if template_id is not None:
         row = await get_template(conn, template_id=template_id)
         if row is None:
@@ -284,8 +256,7 @@ async def _pick_template(
         )
 
     family = _TEMPLATE_FAMILY.get(meeting_type, _FALLBACK_FAMILY)
-    # Per-language copies share the family's code prefix
-    # ("sales_call", "sales_call_uk", …).
+    # Per-language copies share the family's code prefix ("sales_call_uk").
     for prefix in (family, _FALLBACK_FAMILY):
         for candidate in candidates:
             if candidate.code.startswith(prefix):
@@ -358,8 +329,7 @@ async def start_meeting(
             template_schema_version=schema_version,
             source_session_id=None,
             content=content,
-            # A title the author typed or their invite carried is theirs;
-            # only the placeholder is for the generation job to replace.
+            # Only the placeholder is for the generation job to replace.
             title_source="user" if chosen_title else "default",
         )
         try:
@@ -374,16 +344,13 @@ async def start_meeting(
                 calendar_context=context,
             )
         except asyncpg.UniqueViolationError:
-            # Two devices pressed Record on the same capture at once; the
-            # loser's note is rolled back with the transaction.
+            # Two devices pressed Record on the same capture at once.
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 detail={"code": "capture_in_progress", "detail": "created concurrently"},
             ) from None
 
-        # Sprint 36: a meeting in a series opens with what is still open
-        # from last time. Deterministic, visibility-checked, and never
-        # able to stop the meeting starting (see `link_and_carry`).
+        # Carry over still-open items; never able to stop the meeting starting.
         carried = await series_service.link_and_carry(
             conn,
             claims=claims,
@@ -530,8 +497,7 @@ async def attach_transcript(
                 detail={"code": "no_job", "detail": "no recording is attached yet"},
             )
         if meeting.state == "ready":
-            # A second device got there first. The note is written; saying
-            # so is more useful than a conflict the client must decode.
+            # A second device got there first: the note is written, say so.
             return AttachTranscriptResponse(
                 id=note_id, version_number=note.current_version_number, state=meeting.state
             )
@@ -541,8 +507,7 @@ async def attach_transcript(
                 detail={"code": "note_cancelled", "detail": "the note is no longer a draft"},
             )
 
-    # Outside the transaction: the ASR fetch is a network call, and
-    # holding a tenant connection across it would pin the pool.
+    # Outside the transaction: a network call must not pin a tenant connection.
     result = await _fetch_transcript(job_id, auth_header=auth_header)
     transcript = _transcript_text(result)
     budget_crossed: tuple[int, int] | None = None
@@ -563,9 +528,7 @@ async def attach_transcript(
         content = _with_transcript(version.content, transcript)
         version_number = note.current_version_number
         if content != version.content:
-            # An empty transcript (silence, a discarded take) writes no
-            # version: the note is what the author typed, and a duplicate
-            # version in the hash chain says nothing happened twice.
+            # An empty transcript writes no version (no duplicate in the hash chain).
             try:
                 _, version_number = await repo.append_version(
                     conn,
@@ -584,13 +547,8 @@ async def attach_transcript(
                         "current_version": exc.current_version,
                     },
                 ) from None
-        # Sprint 33: the note writes itself, exactly as it does for a
-        # note made with `from-transcript`. Same transaction as the
-        # transcript version, so the snapshot, the generation row and the
-        # job exist together or not at all — and never able to cost the
-        # capture: a stack with no object store or no model still ends
-        # with the transcript in the note, as before. Silence starts no
-        # run: there is nothing to write from.
+        # Same transaction as the transcript version (all or nothing); never able to
+        # cost the capture. Silence starts no run.
         if transcript and settings.note_generation_enabled:
             try:
                 await generation_service.start(
@@ -609,8 +567,7 @@ async def attach_transcript(
                 # The workspace turned it off. Not an error.
                 pass
             except generation_service.ProcessorUnacknowledgedError:
-                # Sprint L2: nobody agreed to a processor in the data path;
-                # the generation view says so, the capture is still ready.
+                # Nobody agreed to a processor; the generation view says so.
                 logger.info(
                     "meeting.generation_blocked", extra={"reason": "processor_unacknowledged"}
                 )
@@ -622,10 +579,7 @@ async def attach_transcript(
                     extra={"note_id": str(note_id)},
                     exc_info=True,
                 )
-        # The capture is done the moment the transcript is in the note.
-        # The engine's own progress lives on the generation row
-        # (`GET /{note_id}/generation`); the meeting state does not
-        # follow it, so a stalled run never leaves a capture "generating".
+        # The meeting state never follows the engine, so a stalled run cannot leave a capture "generating".
         await meetings.set_state(conn, note_id=note_id, state="ready")
 
     if budget_crossed is not None:
@@ -639,8 +593,7 @@ async def attach_transcript(
 
     same_device = request.headers.get("x-mdx-client-capture") == str(meeting.client_capture_id)
     meeting_metrics.transcripts_attached.add(1, {"device_same": str(same_device).lower()})
-    # U1: did the author type at all? Counted once per capture, at the one
-    # moment the whole scratchpad is known. A bucket, never the lines.
+    # Did the author type at all? A bucket, never the lines.
     typed = user_notes_rules.split_lines(
         next((s.text for s in content.sections if s.section_key == USER_NOTES_SECTION), "")
     )
@@ -659,13 +612,8 @@ async def attach_transcript(
 
 
 def _with_transcript(content: NoteContent, transcript: str) -> NoteContent:
-    """Put the transcript in its section, leaving every other one — above
-    all ``user_notes`` — byte-identical.
-
-    An existing body in the target section is kept and the transcript
-    appended: the author may have typed there before the recording landed,
-    and nothing in this sprint overwrites their characters.
-    """
+    """Put the transcript in its section (appended to any existing body); every
+    other section, above all ``user_notes``, stays byte-identical."""
     if not transcript:
         return content
     sections = list(content.sections)
@@ -683,11 +631,8 @@ def _with_transcript(content: NoteContent, transcript: str) -> NoteContent:
 
 
 def _transcript_section_key(sections: list[NoteSection]) -> str | None:
-    """Which section the transcript lands in: a prose home if the template
-    has one, else the first section that is neither the author's scratchpad
-    nor the attendee list. Same order as ``from-transcript``'s
-    ``_transcript_home`` — one rule, two entry points.
-    """
+    """A prose home, else the first section that is neither the scratchpad nor the
+    attendee list; same rule as ``from-transcript``."""
     keys = [s.section_key for s in sections]
     for candidate in _PROSE_HOMES:
         if candidate in keys:
@@ -726,8 +671,7 @@ async def get_meeting(
 
 
 async def _require_meeting(conn: asyncpg.Connection, *, note_id: UUID) -> meetings.MeetingRow:
-    """The sidecar, or 404. A note made by ``from-transcript`` or by hand
-    has none, and is not a capture."""
+    """The sidecar, or 404 (a note without one is not a capture)."""
     meeting = await meetings.fetch(conn, note_id=note_id)
     if meeting is None:
         raise HTTPException(

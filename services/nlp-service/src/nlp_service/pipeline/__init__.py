@@ -1,4 +1,4 @@
-"""Sprint-05 NLP pipeline: orchestrator + stage interface."""
+"""NLP pipeline: orchestrator + stage interface."""
 
 from .base import (
     AbbreviationSnapshot,

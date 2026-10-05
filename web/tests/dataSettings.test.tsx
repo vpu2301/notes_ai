@@ -110,8 +110,7 @@ describe("Settings › Data & AI", () => {
   it("says plainly when the month's budget is spent", async () => {
     server({ ...SETTINGS, month_to_date_cents: 2100 });
     page("spend");
-    // (the toaster mounts its own empty role="status" region, so this
-    // asks for the sentence rather than the role)
+    // The toaster mounts its own empty role="status" region, so match the sentence.
     expect(await screen.findByText(/used its AI budget for the month/i)).toBeInTheDocument();
   });
 

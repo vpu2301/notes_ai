@@ -3,14 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SecretOnce } from "../src/components/SecretOnce";
 
-/**
- * §F/§H: "No secret (recovery codes, TOTP key, device secret) is
- * retrievable after its screen is closed."
- *
- * The component cannot prove the whole property on its own, but it can
- * prove the half that is its job: it writes to no store, and unmounting
- * takes the value with it.
- */
+/** No secret is retrievable after its screen is closed: the component writes to no store and unmounting takes the value. */
 describe("SecretOnce", () => {
   const CODES = ["aaaa-bbbb-cccc", "dddd-eeee-ffff"];
 
@@ -34,9 +27,7 @@ describe("SecretOnce", () => {
 
   it("copies the values as plain lines", async () => {
     const writeText = vi.fn(async () => undefined);
-    // Order matters: `userEvent.setup()` installs its own clipboard stub,
-    // so ours has to go on afterwards. (`navigator.clipboard` is
-    // getter-only in jsdom, hence defineProperty rather than assignment.)
+    // After `userEvent.setup()` (it installs its own clipboard stub); getter-only in jsdom, hence defineProperty.
     const user = userEvent.setup();
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText },

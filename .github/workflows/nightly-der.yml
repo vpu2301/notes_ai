@@ -1,13 +1,6 @@
-# Nightly speaker-count / DER regression on the full gold set (Sprint 29 B-10).
-#
-# Runs both diarization engines over eval/speakers/v1 (dev + test) with the
-# production code path and fails when count_exact on 2-speaker recordings
-# drops more than 5 points against the committed baseline report.
-#
-# Self-hosted on purpose: the gold-set audio is consent-gated and never
-# committed (check-no-eval-audio), and the pyannote model is gated — both
-# live on the eval Mac, fetched once by `fetch_speaker_corpus.py` and
-# `make prepare-pyannote`. The runner needs the label `mdx-eval`.
+# Nightly DER / speaker-count regression over eval/speakers/v1 with both
+# engines. Self-hosted (`mdx-eval`): the audio is consent-gated and the
+# pyannote model is gated, both live only on the eval Mac.
 name: nightly-der
 
 on:
@@ -23,10 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Committed reports the nightly compares against. Update them (in a PR,
-  # with the report) when an engine change is MEANT to move the numbers.
-  # Production configuration: roster guard at the worker defaults
-  # (MDX_DIAR_MIN_SPEAKER_SPEECH_MS / _SHARE).
+  # Committed baselines; update in a PR only when a change is MEANT to move the numbers.
   BASELINE_LEGACY: docs/eval/der-baseline-legacy-test.json
   BASELINE_V2: docs/eval/der-baseline-pyannote_c1-test.json
   MAX_DROP: "0.05"
@@ -37,6 +27,8 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -45,7 +37,6 @@ jobs:
         run: uv sync --all-packages
 
       - name: Gold set present
-        # Idempotent: downloads only what is missing, verifies checksums.
         run: uv run python scripts/eval/fetch_speaker_corpus.py
 
       - name: Clusterer regression without audio

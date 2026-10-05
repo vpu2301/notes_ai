@@ -1,35 +1,12 @@
 #!/usr/bin/env python3
-"""The notes gold-set harness (Sprint 33 B-2, run for Sprint 37's bake-off).
+"""The notes gold-set harness: the ``pipeline`` arm (the document engine as it ships)
+and the ``single_pass`` arm (one long-context prompt) on the same corpus and metrics.
 
-    make eval-notes BACKEND=dev_mac                      # the real pipeline
-    make eval-notes BACKEND=cand_qwen_32b ARM=single_pass  # the baseline arm
-    ENV=staging make eval-notes BACKEND=hf_eu CORPUS=eval/notes/v1
+    make eval-notes BACKEND=dev_mac
+    make eval-notes BACKEND=cand_qwen_32b ARM=single_pass
 
-Two arms, same corpus, same metrics:
-
-* **pipeline** — the document engine as it actually runs: windowed
-  extraction, verification in code, merge, render. This is what ships.
-* **single_pass** — one long-context prompt asking for the whole
-  document. The architecture of the category on a frontier model, and the
-  bar our extra machinery has to clear (Sprint 37 B-4, arm C).
-
-Metrics are the ones the GA gates are written in: key-fact recall,
-action/decision precision and recall, owner accuracy, citation precision
-and the faithfulness invariant (a quote that is not in the transcript).
-Cost and seconds are per meeting-hour, because that is the unit a
-capacity line and a price are written in.
-
-Summary Engine v2 (Q1) adds every metric of the 2026-09-22 audit
-(``notes_scoring.py``), an optional model-judge column (``--judge``,
-eval only) and a loud failure when the engine sees no transcript: until
-Q1 the harness emitted ``turns[].text`` while the engine reads
-``turns[].paragraphs``, so the pipeline arm only ever scored an empty
-transcript.
-
-The corpus is data, never code: `--corpus` points at a directory of JSON
-files. The committed one is synthetic (no real people); the real gold set
-lives in the eval bucket under the consent register and is never in git.
-Nothing here prints a transcript, a quote or a name.
+The corpus is data (``--corpus``); the committed one is synthetic, the real gold set is
+never in git. Nothing here prints a transcript, a quote or a name.
 """
 
 from __future__ import annotations
@@ -72,16 +49,14 @@ from taxonomy import METRIC_CODES  # noqa: E402
 DEFAULT_CORPUS = REPO / "tests" / "fixtures" / "eval" / "notes"
 ENGINE_SRC = REPO / "services" / "note-service" / "src"
 TEMPLATES = REPO / "infra" / "seeds" / "templates"
-# A fixture without `recorded_on` is anchored here, so relative dates in
-# the synthetic set resolve the same way on every machine and every day.
+# Anchor for fixtures without `recorded_on`, so relative dates resolve the same everywhere.
 DEFAULT_RECORDED_ON = "2026-01-15"
 
 # Exit codes the nightly job reads.
 EXIT_FAILED = 1  # a hallucinated quote, or a meeting the model could not finish
 EXIT_BLIND = 2  # the engine saw no transcript — the bug that hid every number
 EXIT_NO_CORPUS = 3
-# Q4 entity tier (b): off, as in production, unless measured on purpose
-# (`--entity-model-tier`); its precision is its own column either way.
+# Entity model tier: off as in production unless `--entity-model-tier`.
 ENTITY_MODEL_TIER = False
 
 
@@ -119,12 +94,7 @@ class Totals:
 
 
 class _TokenTally:
-    """Sums the provider's usage records for one meeting (Sprint L2).
-
-    The pipeline arm makes dozens of calls per meeting through the shared
-    provider; the only place their token counts meet is the usage sink the
-    ledger listens to. Installed per meeting, uninstalled after — the log
-    sink comes back between meetings."""
+    """Sums the provider's usage records for one meeting (installed per meeting, uninstalled after)."""
 
     def __init__(self) -> None:
         self.input_tokens = 0
@@ -236,7 +206,7 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "owner": fact.owner_label,
         "due_text": fact.due_text,
         "attributed_to": getattr(fact, "attributed_to", None),
-        # Sprint D2 — whose sentence it is, and who said it.
+        # Whose sentence it is, and who said it.
         "subject": getattr(fact, "subject", None),
         "speaker_label": getattr(fact, "speaker_label", None),
         "corrections": [
@@ -245,7 +215,7 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "start_ms": fact.start_ms,
         "end_ms": fact.end_ms,
         "window_index": fact.window_index,
-        # F3 — the verified payloads.
+        # The verified payloads.
         "figure": fact.figure.payload() if getattr(fact, "figure", None) else None,
         "person": (
             {
@@ -283,15 +253,13 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     template_family = types.family_for_type(meeting_type)
     result = as_asr_result(meeting)
     started = time.monotonic()
-    # L2 — every model call of this meeting, counted through the provider's
-    # usage records (the ledger's own source), so the cost column is real.
+    # Every model call of this meeting, from the provider's usage records.
     tokens = _TokenTally.install()
-    # Q3: the worker's own decision — the author's type, a specific
-    # template, or the classifier on the opening windows (a model call).
+    # The worker's own type decision (author's type, template, or the classifier).
     turns = windows.turns_from_result(result)
-    # F3 amendment: classify what the pipeline will read — adverts cut.
+    # Classify what the pipeline will read (adverts cut).
     turns = windows.prepare_turns(turns).turns
-    # L2 T5: the window size follows the backend's context, as in the worker.
+    # The window size follows the backend's context, as in the worker.
     built = windows.build_windows(
         turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
     )
@@ -309,8 +277,7 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         role_by_key=role_map(template_code(template_family, language)),
         language=language,
         meeting_date=date.fromisoformat(meeting.get("recorded_on") or DEFAULT_RECORDED_ON),
-        # Q4: the people the worker knows (_known_names) — candidates, the
-        # roster's names and the glossary's persons — and the glossary.
+        # The people the worker knows (_known_names) and the glossary.
         name_candidates=frozenset(
             {*(result.get("name_candidates") or ()), *(gold.get("speakers") or {}).values()}
             | {t.term for t in glossary if t.kind == "person"}
@@ -322,15 +289,13 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         recording_type=recording_type,
         recording_type_source=source,
     )
-    # Sprint D1 — the worker's linter, on every eval output: the eval scores
-    # the document the writer would receive.
+    # The worker's linter on every output: the eval scores what the writer receives.
     document = await doclint.enforce(
         document,
         regenerate=document.regenerator,
         known=frozenset({*(gold.get("speakers") or {}).values()}),
     )
-    # SQ3 T4 — the worker's title step, on the whole recording plus what the
-    # note found (jobs.generate_note._title_context).
+    # The worker's title step (jobs.generate_note._title_context).
     from note_service.domain import note_title
     from note_service.jobs.generate_note import _title_context
 
@@ -350,8 +315,7 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         "lines": [
             {
                 "section_key": key,
-                # F2 — which topic a line sits under, and whether it is a
-                # sub-point, for the r02 checklist.
+                # Topic and sub-point flag, for the r02 checklist.
                 "section_title": titles.get(key),
                 "parent": bool(getattr(line, "parent", None)),
                 "kind": line.kind,
@@ -361,7 +325,7 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
             }
             for key, line in document.lines
         ],
-        # Q3: what the engine resolved each spoken date to.
+        # What the engine resolved each spoken date to.
         "dates": list(
             {
                 (m.text, m.iso()): {"text": m.text, "resolved": m.iso()}
@@ -383,8 +347,7 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         "brief": dict(document.brief),
         "noise_ranges": [list(r) for r in document.noise_ranges],
         "evidence": "facts",
-        # F3 amendment — the sections as written, for the overview checks
-        # of notes_assert (content: never copied into a report).
+        # The sections as written, for notes_assert (content: never in a report).
         "sections": [
             {"section_key": s.section_key, "title": s.title, "role": s.role, "text": s.text}
             for s in document.sections
@@ -547,11 +510,9 @@ def score(meeting: dict[str, Any], produced: dict[str, Any], totals: Totals) -> 
             prec.add(best >= MATCH_THRESHOLD)
         row[f"{kind}s"] = len(produced_items)
 
-    # The invariant: every quote is verbatim, and from the turn claimed —
-    # compared the way the engine compares (`verify.normalise_quote`, an
-    # echoed "[3] Anna (00:12): " header removed). Comparing raw lowercase
-    # text called every quote with a comma the ASR placed differently a
-    # hallucination, and failed runs whose quotes were all real.
+    # Every quote is verbatim and from the turn claimed, compared the way the
+    # engine compares (`verify.normalise_quote`); raw text comparison flagged
+    # ASR punctuation differences as hallucinations.
     from note_service.domain.meeting_doc.verify import normalise_quote, strip_turn_header
 
     norm_text = normalise_quote(text)
@@ -653,8 +614,7 @@ class JudgeTotals:
     unsupported: int = 0
     disagree: int = 0
     problems: Counter = field(default_factory=Counter)
-    # F3 amendment §2.10 — one record per judged line, for
-    # support_calibration.py. Carries the line's text: local disk only.
+    # One record per judged line for support_calibration.py; carries text, local disk only.
     records: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -732,7 +692,7 @@ _STAT_KEYS = (
     "facts_downgraded",
     "numbers_removed",
     "facts_after_merge",
-    # Q2
+    # Form
     "facts_dropped_paraphrase",
     "facts_flagged_paraphrase",
     "lines_kept",
@@ -744,19 +704,19 @@ _STAT_KEYS = (
     "speech_ms",
     "summary_retries",
     "summary_fallback",
-    # Q3
+    # Context
     "redundant_lines",
     "lines_total",
     "recording_type",
     "recording_type_source",
-    # Sprint D2 / L1 — the funnel and the profile, per meeting.
+    # The funnel and the profile, per meeting.
     "blocks",
     "block_chapters",
     "block_calls",
     "windows_restated",
     "summary_ladder",
     "small_model_profile",
-    # Sprint SQ2 T1 — the coverage diagnosis, per window and per third.
+    # The coverage diagnosis, per window and per third.
     "windows",
     "facts_by_third",
     "lines_by_third",
@@ -877,7 +837,7 @@ async def main(
             row.update(audit)
             row["windows"] = produced["windows"]
             row["lines"] = len(produced["lines"])
-            # L1 — what a reader gets: sections written, bullets rendered.
+            # What a reader gets: sections written, bullets rendered.
             row["sections"] = len(produced.get("sections") or [])
             row["bullets"] = sum(1 for ln in produced["lines"] if ln.get("kind") == "bullet")
             stats = produced.get("stats") or {}
@@ -912,11 +872,10 @@ async def main(
             )
         hours = totals.audio_seconds / 3600.0
         summary = summarise(totals, hours)
-        # L2 — what this run would have cost at config/model_costs.yaml's
-        # rates (the ledger's own arithmetic), per meeting-hour.
+        # Cost at config/model_costs.yaml's rates, per meeting-hour.
         summary.update(cost_summary(resolved.name, totals, hours))
         summary.update(aggregate(audit_rows, types=types))
-        # SQ2 T6 — time per meeting-hour, per meeting, at the 95th percentile.
+        # Time per meeting-hour, p95.
         per_hour = sorted(
             r["seconds"] / (audio_seconds(m) / 3600)
             for r, m in zip(rows, meetings, strict=False)
@@ -954,8 +913,7 @@ async def main(
         "processor": resolved.processor.model_dump() if resolved.processor else None,
         "judge_model_id": judge_model,
         "corpus": str(corpus.relative_to(REPO)) if corpus.is_relative_to(REPO) else corpus.name,
-        # Sprint L1 — the profile and context the engine ran under, so a
-        # bake-off row can be traced to its configuration.
+        # The profile and context the engine ran under.
         "small_model_profile": bool(resolved.caps.small_model),
         "context_window": resolved.caps.context_window,
         "label": label,
@@ -968,8 +926,7 @@ async def main(
         from note_service.domain.meeting_doc.prompts import PROMPT_VERSION
 
         report["prompt_version"] = PROMPT_VERSION
-        # F2 acceptance: no copied, chatter or first-person line, and recall
-        # within a point of the pre-F2 report.
+        # No copied, chatter or first-person line; recall within a point of the reference report.
         baseline_recall = None
         if f2_baseline is not None and f2_baseline.is_file():
             baseline = json.loads(f2_baseline.read_text("utf-8"))
@@ -978,7 +935,7 @@ async def main(
         gates.update(f3_gates(all_runs[-1]["summary"]))
         gates.update(d1_gates(all_runs[-1]["summary"]))
         gates.update(d2_gates(all_runs[-1]["summary"]))
-        # Sprint SQ2 — unsupported is compared with the SQ1 report of the same arm.
+        # Unsupported is compared with the baseline report of the same arm.
         baseline_unsupported = None
         if sq1_baseline is not None and sq1_baseline.is_file():
             sq1 = json.loads(sq1_baseline.read_text("utf-8"))
@@ -996,8 +953,7 @@ async def main(
             print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")
     path = write_report(f"notes-{arm}", resolved.name, report, suffix=f"-{label}" if label else "")
     print(f"wrote {path}")
-    # A hallucinated quote is a failed run, not a lower score: the whole
-    # design says a fact without verbatim words does not reach the page.
+    # A hallucinated quote is a failed run, not a lower score.
     hallucinated = any(m.get("hallucinated_quote") for r in all_runs for m in r["meetings"])
     return EXIT_FAILED if (hallucinated or failed) else 0
 

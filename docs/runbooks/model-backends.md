@@ -14,7 +14,7 @@ Endpoint specs: `deploy/hf/endpoints/`. Design: ADR-0046.
 | Usage ledger | `model_usage`, `model_usage_daily` (0023), rates `config/model_costs.yaml` |
 | Secrets | `HF_TOKEN`, `HF_CHAT_ENDPOINT_URL`, `HF_ASR_ENDPOINT_URL`, `HF_DIAR_ENDPOINT_URL`, `MDX_DIAR_SERVER_TOKEN`, `HF_*_MODEL_PIN` — k8s secret `mdx-hf-endpoints` (staging: `scripts/k8s/staging-up.sh`; prod: External Secrets ← Vault) |
 | Egress | `scripts/k8s/egress-allowlist.sh`, `workers-egress-allowlist` NetworkPolicy |
-| Dev Mac | `docs/dev/models-on-mac.md`, `make dev-model` |
+| Dev Mac | `make dev-model` (README § Local models on a dev Mac) |
 | Mistral AI (EU) | `mistral_eu` / `mistral_eu_small` in `config/models.yaml`; `MISTRAL_API_KEY` (dev: `.env.local`; staging/prod: the `mdx-model-api` secret, M2) — §mistral-account |
 
 ## mistral-account

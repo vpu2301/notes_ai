@@ -1,6 +1,5 @@
-# Manual, environment-protected apply of deploy/hf/endpoints/*.yaml (DEP-S1-01).
-# Creating or resizing an endpoint spends money; this workflow requires a
-# reviewer approval on the `staging` / `prod` GitHub environment.
+# Manual apply of deploy/hf/endpoints/*.yaml; spends money, so it needs
+# reviewer approval on the `staging` / `prod` environment.
 name: HF endpoints — apply
 
 on:

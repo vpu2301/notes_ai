@@ -1,12 +1,5 @@
-"""Notes + note_versions repository (sprint-08).
-
-All queries run on a tenant-scoped connection (``app.tenant_id`` set
-by ``db.tenant_connection``). RLS does the rest.
-
-The repository is deliberately a thin SQL wrapper — domain rules
-(state machine, finalize validation, optimistic check) live in
-sibling modules. This makes the property test in
-``tests/property/test_amendment_chain.py`` straightforward.
+"""Notes + note_versions repository: a thin SQL wrapper on a tenant-scoped
+connection (RLS does the rest); domain rules live in sibling modules.
 """
 
 from __future__ import annotations
@@ -55,8 +48,7 @@ class NoteRow:
     source_session_id: UUID | None = None
     # The transcription job this note was made from, when it was.
     source_asr_job_id: UUID | None = None
-    # 0016 — who may read it beyond the author team, and whether it is
-    # in the bin. Defaults keep older call sites and fixtures valid.
+    # Defaults keep older call sites and fixtures valid.
     visibility: str = "workspace"
     shared_with_ids: list[UUID] = field(default_factory=list)
     deleted_at: datetime | None = None
@@ -84,14 +76,8 @@ class VersionRow:
 async def fetch_note(
     conn: asyncpg.Connection, *, note_id: UUID, include_deleted: bool = False
 ) -> NoteRow | None:
-    """The note, or ``None`` when it does not exist — or has been deleted.
-
-    Every reader and writer goes through here (directly or via
-    :func:`lock_note_for_update`), so excluding the bin at this one
-    point is what makes a deleted note vanish from every endpoint at
-    once. ``include_deleted`` is for the few callers that need to see
-    it (an admin restore, an audit read).
-    """
+    """The note, or ``None`` when missing or deleted. Every reader goes through here,
+    so excluding the bin at this one point hides a deleted note everywhere."""
     row = await conn.fetchrow(
         """
         SELECT n.id, n.tenant_id, n.code, n.status,
@@ -132,7 +118,7 @@ async def fetch_note(
     )
 
 
-# ── 0016: visibility, sharing, delete ────────────────────────────────
+# ── Visibility, sharing, delete ──────────────────────────────────────
 
 
 async def set_visibility(conn: asyncpg.Connection, *, note_id: UUID, visibility: str) -> None:
@@ -187,8 +173,7 @@ async def soft_delete_note(conn: asyncpg.Connection, *, note_id: UUID, actor_sub
         note_id,
         actor_sub,
     )
-    # Sprint 20: recipient responses go unreachable with the note. The
-    # rows stay for audit; every read path filters on cleared_at.
+    # Recipient responses are cleared with the note; rows stay for audit.
     await conn.execute(
         """
         UPDATE share_link_responses SET cleared_at = now(), cleared_by = $2
@@ -217,19 +202,10 @@ class MemberRow:
 
 
 async def find_member_by_email(conn: asyncpg.Connection, *, email: str) -> MemberRow | None:
-    """A workspace member by e-mail, scoped to the caller's tenant.
-
-    Reads `identities` through `profile_of_subs` (IDX-B2) rather than the
-    per-tenant `users` table. The difference that matters: `users` has one
-    row per principal in its HOME tenant, so a colleague invited into this
-    workspace from another one was simply not found here — sharing a note
-    with them failed with "no such member". The helper resolves anyone
-    with an active membership in this tenant, wherever they came from.
-
-    The candidate subs come from `tenant_memberships`, which `app_role`
-    can already read within its own tenant, so the address comparison
-    happens over this workspace's members and nobody else's.
-    """
+    """A workspace member by e-mail, scoped to the caller's tenant. Reads
+    `identities` via `profile_of_subs`, not the per-tenant `users` table (which
+    misses members whose home tenant is elsewhere); candidates come from
+    `tenant_memberships`, so only this workspace's members are compared."""
     rows = await conn.fetch(
         """
         SELECT p.sub, p.display_name, p.email
@@ -248,12 +224,7 @@ async def find_member_by_email(conn: asyncpg.Connection, *, email: str) -> Membe
 
 
 async def fetch_members(conn: asyncpg.Connection, *, subs: list[UUID]) -> list[MemberRow]:
-    """Profiles for a page of subs — one query, no N+1 (IDX-B2 F2).
-
-    Same change as `find_member_by_email`: a co-author who lives in
-    another workspace used to render blank here, because the LEFT JOIN
-    onto per-tenant `users` found nothing for them.
-    """
+    """Profiles for a page of subs in one query; via `identities`, like `find_member_by_email`."""
     if not subs:
         return []
     rows = await conn.fetch(
@@ -272,7 +243,7 @@ class ShareLinkRow:
     expires_at: datetime | None
     last_viewed_at: datetime | None
     view_count: int
-    # 0035 — per-recipient links. Defaults keep older fixtures valid.
+    # Defaults keep older fixtures valid.
     kind: str = "public"
     label: str = ""
     recipient_email: str | None = None
@@ -280,13 +251,11 @@ class ShareLinkRow:
     first_viewed_at: datetime | None = None
     cta_clicked_at: datetime | None = None
     ref_code: str | None = None
-    # 0039 — the product mailed the link.
     delivery_status: str = "not_sent"
     sent_at: datetime | None = None
     send_count: int = 0
     last_send_error: str = ""
     revoked_at: datetime | None = None
-    # 0041 — verified recipient, and the version they last looked at.
     verified_at: datetime | None = None
     last_seen_version_id: UUID | None = None
 
@@ -421,9 +390,7 @@ async def create_share_link(
 
 
 async def revoke_share_links(conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID) -> int:
-    """Revoke every live link on the note. The recipient address is
-    dropped with the link: once nobody can open it, there is nothing
-    left to label."""
+    """Revoke every live link on the note; the recipient address is dropped with it."""
     result = await conn.execute(
         """
         UPDATE note_share_links
@@ -440,8 +407,7 @@ async def revoke_share_links(conn: asyncpg.Connection, *, note_id: UUID, actor_s
 async def revoke_share_link(
     conn: asyncpg.Connection, *, note_id: UUID, link_id: UUID, actor_sub: UUID
 ) -> bool:
-    """Revoke one link. Queried with both ids so a link id from another
-    note (or another tenant, which RLS already hides) is a no-op."""
+    """Revoke one link; queried with both ids so a link id from another note is a no-op."""
     result = await conn.execute(
         """
         UPDATE note_share_links
@@ -458,8 +424,7 @@ async def revoke_share_link(
 async def resolve_share_link(
     conn: asyncpg.Connection, *, token_hash: str
 ) -> tuple[UUID, UUID, UUID] | None:
-    """(tenant_id, note_id, link_id) for a live token, without a tenant
-    context — the SECURITY DEFINER function from migration 0016."""
+    """(tenant_id, note_id, link_id) for a live token, without a tenant context (SECURITY DEFINER)."""
     row = await conn.fetchrow("SELECT * FROM public.resolve_note_share_link($1)", token_hash)
     if row is None:
         return None
@@ -467,8 +432,7 @@ async def resolve_share_link(
 
 
 async def record_share_link_view(conn: asyncpg.Connection, *, link_id: UUID) -> bool:
-    """Count a read. Returns True on the FIRST open of the link — the
-    "reached the recipient" signal the loop funnel starts from."""
+    """Count a read. Returns True on the FIRST open of the link."""
     row = await conn.fetchrow(
         """
         UPDATE note_share_links
@@ -496,9 +460,8 @@ async def record_cta_click(conn: asyncpg.Connection, *, link_id: UUID) -> bool:
 async def record_send_outcome(
     conn: asyncpg.Connection, *, link_id: UUID, status: str, error_class: str = ""
 ) -> ShareLinkRow | None:
-    """Sprint 22: the product tried to mail the link. `status` is
-    ``sent`` | ``failed``; the error class (never the message) is kept
-    for the sender's "Retry" chip."""
+    """The product tried to mail the link: `status` ``sent`` | ``failed``; the error
+    class (never the message) is kept."""
     row = await conn.fetchrow(
         f"""
         UPDATE note_share_links
@@ -542,16 +505,13 @@ async def suppress_links_for_email(conn: asyncpg.Connection, *, tenant_id: UUID,
 
 
 async def tenant_of_share_link(conn: asyncpg.Connection, *, link_id: UUID) -> UUID | None:
-    """SECURITY DEFINER lookup for the unsubscribe route, which arrives
-    with a link id and no tenant context (0039)."""
+    """SECURITY DEFINER lookup for the unsubscribe route (link id, no tenant context)."""
     value = await conn.fetchval("SELECT public.tenant_of_share_link($1)", link_id)
     return UUID(str(value)) if value else None
 
 
 async def sharing_stats(conn: asyncpg.Connection, *, days: int) -> dict[str, object]:
-    """PII-free aggregates over the tenant's recipient links (Sprint 22).
-    Counts only; the sender leaderboard carries subs for the router to
-    resolve to display names."""
+    """PII-free aggregates over the tenant's recipient links; the sender leaderboard carries subs."""
     row = await conn.fetchrow(
         """
         WITH links AS (
@@ -809,9 +769,7 @@ async def create_note_with_v1(
     source_session_id: UUID | None,
     content: NoteContent,
     source_asr_job_id: UUID | None = None,
-    # 0057 — "default" when the server made the title up and the
-    # generation job may name the note; None for a note that is never
-    # titled automatically.
+    # "default" when the generation job may name the note; None when never titled automatically.
     title_source: str | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
@@ -876,10 +834,7 @@ async def create_note_with_v1(
 async def fetch_notes_by_source_jobs(
     conn: asyncpg.Connection, *, asr_job_ids: list[UUID]
 ) -> list[asyncpg.Record]:
-    """Notes created from the given transcription jobs (RLS-scoped).
-
-    Powers the jobs-list "already assigned" badge — bulk, one round trip.
-    """
+    """Notes created from the given transcription jobs, in one round trip."""
     return await conn.fetch(
         """
         SELECT source_asr_job_id, id, code, status
@@ -906,25 +861,13 @@ async def append_version(
     amendment_reason: str | None = None,
     parent_version_id_override: UUID | None = None,
     body_hash_override: str | None = None,
-    # Sprint 33 — merged into `note_versions.metadata` beside the body
-    # hash, so History can say a version was written by the engine and
-    # which run produced it. Never content.
+    # Merged into `note_versions.metadata`; never content.
     extra_metadata: dict[str, Any] | None = None,
-    # 0057 — set by the one writer that names a note on the user's
-    # behalf (`note_title`). Everyone else leaves it None, and a title
-    # that changes under None is a person renaming the note.
+    # Set only by `note_title`; a title that changes under None is a person renaming.
     title_source: str | None = None,
 ) -> tuple[UUID, int]:
-    """Append a new version row to ``note_id``.
-
-    Concurrency:
-    - Caller obtains a row lock via ``SELECT ... FOR UPDATE`` on the
-      notes row before calling this. We re-check ``version_number``
-      here (defence-in-depth) so two callers cannot both think they
-      hold the lock.
-
-    Returns (new_version_id, new_version_number).
-    """
+    """Append a new version row. The caller holds the row lock; ``version_number`` is
+    re-checked here as defence-in-depth. Returns (new_version_id, new_version_number)."""
     head = await conn.fetchrow(
         """
         SELECT v.id, v.version_number
@@ -1001,11 +944,7 @@ async def append_version(
 
 
 async def lock_note_for_update(conn: asyncpg.Connection, *, note_id: UUID) -> NoteRow | None:
-    """Acquire a row lock on the note (used by autosave / amend).
-
-    Combined with the optimistic ``expected_version`` check, this
-    serialises concurrent writers; one wins, the other gets 409.
-    """
+    """Row lock on the note; with the ``expected_version`` check, concurrent writers serialise (loser gets 409)."""
     await conn.fetchrow(
         "SELECT id FROM notes WHERE id = $1 FOR UPDATE",
         note_id,
@@ -1014,13 +953,8 @@ async def lock_note_for_update(conn: asyncpg.Connection, *, note_id: UUID) -> No
 
 
 async def template_code_for(conn: asyncpg.Connection, *, note_id: UUID) -> str | None:
-    """The seed code of the note's template ("sales_call_uk", …).
-
-    Sprint 36 picks the meeting FAMILY from this, and the family decides
-    what may leave the workspace. A note whose template has been deleted
-    answers None, and the caller falls back to the generic family — which
-    is the conservative direction: fewer kinds, nothing extra shared.
-    """
+    """The seed code of the note's template ("sales_call_uk"); None when deleted,
+    and the caller falls back to the generic family (fewer kinds, nothing extra shared)."""
     code: str | None = await conn.fetchval(
         """
         SELECT t.code FROM notes n JOIN templates t ON t.id = n.template_id
@@ -1034,14 +968,8 @@ async def template_code_for(conn: asyncpg.Connection, *, note_id: UUID) -> str |
 async def replace_v1_content(
     conn: asyncpg.Connection, *, note_id: UUID, content: NoteContent
 ) -> None:
-    """Rewrite the note's FIRST version in place.
-
-    Only legal while v1 is the only version and the note has just been
-    created in this same transaction — Sprint 36 uses it to fold the
-    carry-over block into v1 rather than appending a second version that
-    the author did not make. Anything later goes through
-    :func:`append_version`, which keeps the hash chain honest.
-    """
+    """Rewrite the note's FIRST version in place; only legal while v1 is the only
+    version, in the creating transaction. Anything later goes through :func:`append_version`."""
     rendered = rendered_text_from_content(content)
     await conn.execute(
         """

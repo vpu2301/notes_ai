@@ -1,8 +1,4 @@
-"""Phrase/snippet write surface — PII rejection, rate limit, audit kinds.
-
-Handlers exercised directly with a fake state (repo/limiter/DB faked):
-the §8 unit matrix. RLS authority mapping is integration-tested.
-"""
+"""Phrase/snippet write surface with a fake state: PII rejection, rate limit, audit kinds."""
 
 from __future__ import annotations
 
@@ -141,7 +137,7 @@ async def test_rate_limited_write_gets_429_before_anything_else():
     assert state.audit_writer.events == []  # nothing audited, nothing stored
 
 
-# ── audit-kind registration (grep-style, prior sprints' pattern) ─────────
+# ── audit-kind registration ──────────────────────────────────────────────
 
 
 def test_every_kind_in_code_is_registered_in_constants_and_docs():

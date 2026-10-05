@@ -4,11 +4,7 @@ import { submitJob, type SubmitJobParams } from "../src/api/asr";
 import { captureTiming, useRecorder, type RecordedAudio } from "../src/lib/useRecorder";
 import { formatOffset } from "../src/lib/time";
 
-/**
- * Sprint F1 T1 (web): when Record was clicked and how long until the
- * recorder wrote its first audio, measured in the browser and sent with
- * the upload.
- */
+/** When Record was clicked and how long until the first audio, measured in the browser and sent with the upload. */
 
 const http = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("../src/api/http", async (orig) => ({

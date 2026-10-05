@@ -1,5 +1,4 @@
-"""Sprint TQ4 T1 — deploy/asr-server: the Parakeet reply format and the
-server's contract, with a stand-in engine (no model, no GPU)."""
+"""deploy/asr-server: the Parakeet reply format and the server's contract, with a stand-in engine."""
 
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ import parakeet_format as pf  # noqa: E402
 
 
 def test_tokens_join_into_words_at_their_leading_space() -> None:
-    # The real shape onnx-asr returns for "Heute … Handala." (recorded 2026-10-01).
+    # The real shape onnx-asr returns for "Heute … Handala.".
     tokens = [" He", "ute", " spre", "chen", " wir", " über", " H", "and", "ala", "."]
     starts = [0.0, 0.16, 0.4, 0.64, 0.8, 0.96, 1.12, 1.36, 1.6, 1.76]
     logprobs = [-0.01, -0.02, -0.01, -0.01, -0.3, -0.01, -0.7, -0.05, -0.1, -0.01]

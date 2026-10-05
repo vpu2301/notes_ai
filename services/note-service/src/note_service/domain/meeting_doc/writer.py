@@ -1,26 +1,10 @@
-"""Putting a generated document into a note somebody may be typing in.
+"""Putting a generated document into a note somebody may be typing in: the
+engine never overwrites what a person wrote.
 
-This is the module where the product's promise lives: **the engine never
-overwrites what a person wrote.** Everything else is recoverable — a bad
-summary is regenerated, a wrong owner is corrected — but text a person
-typed and the machine replaced is gone, and they will not trust it again.
-
-The rule is per SECTION, and it is decidable without guessing:
-
-* the section is **empty** → write;
-* its text is byte-identical to what the LAST generation put there
-  (compared against `stats.section_hashes`) → nobody has touched it since,
-  so write;
-* the section holds a **transcript** and no generation has written it
-  yet → that is the recording the from-transcript flow parked there as a
-  placeholder, not a person's notes: write over it (the recording itself
-  stays on the ASR job and in History);
-* anything else → the author has been in there. Leave it exactly as it
-  is, and keep this run's facts for that section as `suggested`, so
-  Sprint 35's drawer can offer them without taking anything away.
-
-A generation that changes no section writes no version at all: an
-identical re-run after a crash must not fill History with noise.
+Per section: empty → write; byte-identical to the last generation's text
+(`stats.section_hashes`) → write; a parked transcript no generation has written
+yet → write over it; anything else is the author's, and this run's facts for it
+become `suggested`. A generation that changes nothing writes no version.
 """
 
 from __future__ import annotations
@@ -41,14 +25,13 @@ from .render import RenderedSection
 
 logger = logging.getLogger(__name__)
 
-# The head moving under us means somebody is typing right now. Retrying
-# immediately would just lose the next race too.
+# The head moving under us means somebody is typing right now.
 MAX_WRITE_ATTEMPTS = 5
 BACKOFF_SECONDS = (0.5, 1.0, 2.0, 4.0)
 
 WRITTEN = "written"
 SUGGESTED = "suggested"
-# F2 — a fact kept only as evidence behind other lines (migration 0064).
+# A fact kept only as evidence behind other lines.
 EVIDENCE = "evidence"
 
 
@@ -73,11 +56,8 @@ class WriteOutcome:
 
 
 def _is_parked_transcript(section_key: str, existing: str, previous: dict[str, str]) -> bool:
-    """The from-transcript flow drops the whole recording into the first
-    prose section so a note is never blank. That text is the machine's,
-    and the engine exists to replace it — but only while no generation
-    has written the section: once one has, a dialogue there is something
-    a person put back on purpose."""
+    """The recording the from-transcript flow parked in the first prose section:
+    the machine's, writable, but only while no generation has written the section."""
     if section_key in previous:
         return False
     from ..client_view import looks_like_transcript  # one rule for "is a transcript"
@@ -91,11 +71,7 @@ def plan(
     *,
     previous_hashes: dict[str, str] | None = None,
 ) -> tuple[NoteContent, WriteOutcome]:
-    """Decide, purely, what this generation may write.
-
-    Separated from the transaction so the decision can be tested on its
-    own — it is the part that has to be right.
-    """
+    """Decide, purely, what this generation may write."""
     previous = previous_hashes or {}
     outcome = WriteOutcome()
     by_key = {s.section_key: s for s in content.sections}
@@ -103,12 +79,9 @@ def plan(
     order = [s.section_key for s in content.sections]
 
     rendered_keys = {r.section_key for r in sections}
-    # What the last run wrote and this run did not write again — the
-    # topics came out differently, or nothing is written there any more
-    # — goes, but only while it is still exactly what the last run
-    # wrote. Edited, it is the author's. A generated section is removed;
-    # a template section is emptied (its carried-over block, if any,
-    # stays), so no stale heading survives beside the new blocks.
+    # Sections the last run wrote and this run did not go, only while still exactly
+    # the last run's text: generated sections removed, template sections emptied
+    # (the carried-over block stays).
     for key in list(order):
         current = by_key[key]
         if key in rendered_keys or key not in previous:
@@ -126,11 +99,7 @@ def plan(
     for rendered in sections:
         current = by_key.get(rendered.section_key)
         if current is None:
-            # The note's content has no such section: a topic the
-            # conversation had, or a template section an older note
-            # lacks. The clients draw what the content has, so adding
-            # one changes nothing the author wrote. An empty rendering
-            # still adds nothing.
+            # No such section in the content: adding one changes nothing the author wrote.
             if not rendered.text.strip():
                 continue
             updated[rendered.section_key] = NoteSection(
@@ -140,11 +109,8 @@ def plan(
             outcome.written_sections.append(rendered.section_key)
             outcome.section_hashes[rendered.section_key] = section_hash(rendered.text)
             continue
-        # A "Still open from…" block belongs to the previous meeting, not
-        # to the author and not to this run. It is preserved, and the rule
-        # below applies to what follows it — otherwise the block would
-        # make every series meeting's action section look author-written,
-        # and the engine would never write a task into one again.
+        # The "Still open from…" block is neither the author's nor this run's: preserved,
+        # and the rule applies to what follows it.
         carried_block, existing = carry_over.split_block(current.text or "")
         mine = (
             not existing.strip()
@@ -181,20 +147,14 @@ async def apply(
     step: str,
     previous_hashes: dict[str, str] | None = None,
 ) -> WriteOutcome:
-    """Write one step of a generation into the note.
-
-    The caller holds a tenant connection; this takes the note's row lock,
-    re-reads the head, plans against it and appends a version. On a lost
-    race it re-reads and re-plans — the plan is cheap and the merge rule
-    is what makes the retry correct rather than destructive.
-    """
+    """Write one step of a generation into the note: row lock, re-read the head,
+    plan, append a version; on a lost race, re-read and re-plan."""
     import asyncio
 
     for attempt in range(MAX_WRITE_ATTEMPTS):
         note = await repo.lock_note_for_update(conn, note_id=note_id)
         if note is None or note.status != NoteStatus.DRAFT:
-            # Cancelled or deleted while we were working. Nothing to do,
-            # and nothing to complain about.
+            # Cancelled or deleted while we were working.
             return WriteOutcome()
         version = await repo.fetch_version(conn, version_id=note.current_version_id)
         if version is None:

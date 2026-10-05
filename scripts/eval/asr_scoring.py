@@ -1,20 +1,8 @@
-"""Sprint TQ1 T3 — the transcript metrics of ``01-quality-criteria.md`` §2.
+"""Transcript metrics over a reference (``asr_gold``) and a duck-typed
+``TranscriptionOutput``. Pure functions; ``asr_eval.py`` runs the backend.
 
-Pure functions over a reference (``asr_gold``) and a hypothesis (the
-worker's ``TranscriptionOutput``, duck-typed: ``segments[].text/start_ms/
-end_ms/words/language``, ``language``, ``diagnostics``). No audio, no model,
-no I/O — ``asr_eval.py`` runs the backend and calls these.
-
-Output rule: every value returned here is a number, a count or an id.
-Transcript text never leaves this module; the one exception is
-``heard_forms`` (the spellings an entity was heard as), which the harness
-writes only to the gitignored ``scripts/eval/local/`` folder.
-
-Normalisation (``normalise``) is the per-language rule set named in T3:
-NFKC, casefold, one apostrophe, punctuation stripped, number words to
-digits, fillers removed per the verbatim-lite policy
-(``docs/eval/asr-labelling.md``). German compounds stay one token (a hyphen
-joins, never splits); Ukrainian apostrophes (’ ʼ ` ′) become ``'``.
+Every value returned is a number, count or id; transcript text never leaves this
+module except ``heard_forms``, which the harness writes only under ``scripts/eval/local/``.
 """
 
 from __future__ import annotations
@@ -31,9 +19,7 @@ from typing import Any
 
 LANGUAGES = ("de", "uk", "en")
 
-# Verbatim-lite (docs/eval/asr-labelling.md §2): hesitation sounds are not
-# words. Dropped on both sides so a reference that forgot one and a decoder
-# that wrote one do not disagree about nothing.
+# Verbatim-lite: hesitation sounds are not words; dropped on both sides.
 FILLERS: dict[str, frozenset[str]] = {
     "de": frozenset({"äh", "ähm", "öh", "öhm", "ehm", "hm", "hmm", "mhm", "äääh", "ääh", "em"}),
     "en": frozenset({"uh", "um", "uhm", "umm", "er", "erm", "hmm", "hm", "mm", "mhm"}),
@@ -98,9 +84,7 @@ def normalise(text: str, language: str | None) -> str:
 
 
 # ── Number words → digits ────────────────────────────────────────────
-# Enough for how people say amounts, dates and years in meetings; not a
-# full grammar. Both sides pass through the same code, so a form this does
-# not know stays a word on both sides and costs nothing.
+# Not a full grammar; both sides pass through it, so an unknown form costs nothing.
 
 _EN_UNITS = {
     "zero": 0, "oh": None, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -588,11 +572,9 @@ def _heard_as(window: list[str], canonical: list[str]) -> str | None:
 
 
 def entity_consistency(spans: dict[str, Any], hyp: Any, language: str) -> dict[str, Any]:
-    """Per gold entity with ≥ 2 mentions: the share of mentions heard as the
-    majority hypothesis spelling, and how many distinct spellings.
-
-    ``heard_forms`` carries the spellings (text) and is for the local folder
-    only; the report takes the numbers."""
+    """Per gold entity with >= 2 mentions: share heard as the majority spelling, and distinct
+    spellings. ``heard_forms`` carries text and is for the local folder only.
+    """
     mentions: dict[str, list[dict[str, Any]]] = {}
     for ent in spans.get("entities", []):
         mentions.setdefault(ent["text"], []).append(ent)
@@ -720,11 +702,7 @@ NONSPEECH_MARK_MIN_MS = 5000
 
 
 def nonspeech_marked(non_speech: Sequence[dict[str, Any]], hyp: Any) -> dict[str, int]:
-    """Gold non-speech regions ≥ 5 s that carry a transcript marker.
-
-    The markers are ``TranscriptionOutput.noise`` (Sprint TQ2 T4); a
-    transcript stored before TQ2 has none and reads 0. A region counts as
-    marked when markers of any kind cover half of it."""
+    """Gold non-speech regions >= 5 s half-covered by ``TranscriptionOutput.noise`` markers."""
     regions = [r for r in non_speech if r["end_ms"] - r["start_ms"] >= NONSPEECH_MARK_MIN_MS]
     markers = list(getattr(hyp, "noise", None) or [])
     marked = 0
@@ -796,11 +774,9 @@ def punctuation(hyp: Any) -> dict[str, int]:
 
 
 def merge_quality(plan: Any, spans: dict[str, Any]) -> dict[str, int]:
-    """Sprint TQ3: how the spelling overlay's clusters line up with gold.
-    A cluster is a wrong merge when one of the occurrences it rewrote falls
-    on a gold entity (±2 s) whose name does not contain the canonical
-    spelling — "Müller" rewritten to "Miller", not "Welchering" inside
-    "Peter Welchering"."""
+    """How the spelling overlay's clusters line up with gold: a cluster is a wrong merge when a
+    rewritten occurrence falls on a gold entity whose name lacks the canonical spelling.
+    """
     entities = spans.get("entities", [])
     applied = [p for p in plan.proposals if p.status == "accepted"]
     wrong = 0
@@ -897,11 +873,9 @@ NOT_MEASURED_BELOW = 3
 
 
 def aggregate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """The TR metrics over a set of recordings, micro-averaged from counts.
-
-    Every key here maps to a taxonomy code in ``scripts/eval/taxonomy.py``
-    (``METRIC_CODES``) or is listed there in ``UNCODED_METRICS`` with its
-    reason — ``tests/unit/test_notes_gates.py`` enforces it."""
+    """The TR metrics over a set of recordings, micro-averaged from counts; every key maps to
+    a taxonomy code (``tests/unit/test_notes_gates.py`` enforces it).
+    """
 
     def total(key: str) -> float:
         return sum(r.get(key) or 0 for r in rows)

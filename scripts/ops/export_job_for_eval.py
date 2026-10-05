@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""Copy ONE consented product recording into the speaker eval set (Sprint 30).
+"""Copy ONE consented product recording into the speaker eval set. Refuses without a
+non-withdrawn consent-register row naming ``job:<job-id>``; writes only under the eval
+prefix; emits ``asr.audio_exported_for_eval`` (ids only) or removes the object.
 
-    uv run python scripts/ops/export_job_for_eval.py \\
-        --consent-id C-2026-001 --tenant-id <uuid> --job-id <uuid>          # dry run
-    uv run python scripts/ops/export_job_for_eval.py ... --apply           # export
-
-Opt-in eval growth (runbook: docs/runbooks/speakers-eval.md). Refuses unless
-the consent register (docs/eval/speakers-consent.md) has a row for
---consent-id that is not withdrawn and whose "recording ids" cell names
-`job:<job-id>` — consent is given for a recording, before it is exported.
-
-With --apply it decrypts the job's audio through libs/storage + libs/crypto
-(the worker's read path: key `<tenant>/<audio>.enc`, AAD = audio id), writes
-it ONLY under the eval prefix (`MDX_EVAL_SPEAKERS_URI`, default
-`s3://notes-eval/speakers/v2/`; anything that is not a `…eval…/speakers/v2/`
-prefix is refused) with `aws s3 cp` under the eval role — the same access as
-scripts/eval/fetch_speaker_corpus.py and scripts/ops/erase_eval_recording.py —
-appends an entry to eval/speakers/v2/manifest.json, and emits the audit event
-`asr.audio_exported_for_eval` (payload: consent_id, job_id, export_id — no
-names, no text). If the audit write fails the uploaded object is removed.
-
-The plaintext exists only in a 0600 temp file for the duration of the copy.
-Transcript text and speaker names are never read.
+    uv run python scripts/ops/export_job_for_eval.py --consent-id C-2026-001 --tenant-id <uuid> --job-id <uuid> [--apply]
 """
 
 from __future__ import annotations

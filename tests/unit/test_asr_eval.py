@@ -1,8 +1,5 @@
-"""Sprint TQ1 T3 — the ASR gold-set harness: normaliser, metrics, gold
-format, regression checklists, the nightly comparison and the CI content
-gate. Synthetic text only; no audio, no model.
-
-    uv run --project services/asr-worker pytest tests/unit/test_asr_eval.py -v
+"""The ASR gold-set harness: normaliser, metrics, gold format, checklists, nightly
+comparison and CI content gate. Synthetic text only.
 """
 
 from __future__ import annotations
@@ -429,9 +426,9 @@ def test_r04_checklist_marks_what_later_sprints_fix() -> None:
         _seg(90_000, "Handala ist eine Figur"),
     )
     statuses = dict(coverage_assert.statuses(checklist["assertions"], today))
-    # TQ2 owns the artefact: a ZDF credit in the transcript now fails the run.
+    # A ZDF credit in the transcript fails the run.
     assert statuses["must_not_contain[0]"] == "FAIL"
-    # TQ3 owns the spelling: five variants in the view now fail the run.
+    # Five spelling variants in the view fail the run.
     assert statuses["entity_variants_max[Handala]"] == "FAIL"
     assert statuses["must_contain_before_ms[0]"] == "PENDING"
     fixed = _out(_seg(0, "Heute über Handala"), _seg(90_000, "Handala ist eine Figur"))

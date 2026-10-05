@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# Sprint-10 step-08 load proof: warmup → sustained+burst → cold-storm →
-# (optional) Redis-down chaos → Prometheus scrape. Every threshold is
-# machine-enforced in k6; a red run exits non-zero here.
+# Autocomplete load proof: warmup → sustained+burst → cold-storm →
+# (optional) Redis-down chaos → Prometheus scrape. Thresholds are enforced in k6.
 #
 #   ./scripts/loadtest/run-autocomplete-loadtest.sh [outdir]
 #   RUN_AUTOCOMPLETE_CHAOS=1 ./scripts/loadtest/run-autocomplete-loadtest.sh   # + chaos stage
 #
-# k6 runs from the grafana/k6 image (host.docker.internal → local compose).
-# The cold-storm flush is PATTERN-SCOPED (autocomplete:trie:*) — the Redis is
-# shared with rate-limit and signing keys; never FLUSHALL.
+# The cold-storm flush is PATTERN-SCOPED (autocomplete:trie:*): Redis is shared; never FLUSHALL.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

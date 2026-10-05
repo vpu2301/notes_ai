@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// A meeting that has no note yet: its progress while the capture is in
-/// flight, its failure, or a Create note button when the transcript
-/// finished without a note.
+/// A meeting with no note yet: progress, failure, or a Create note button.
 struct MeetingStatusView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var live: CaptureViewModel
@@ -37,8 +35,7 @@ struct MeetingStatusView: View {
         }
     }
 
-    /// The capture in flight is this row: the bar below shows it live, so
-    /// the page only says what is happening.
+    /// The capture in flight is this row; the bar below shows it live.
     private var isLive: Bool {
         if case .idle = live.phase { return false }
         return live.activeJobId == row.jobId

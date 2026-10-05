@@ -1,26 +1,6 @@
-"""Which side of a call is speaking, from a two-channel capture (Sprint 31).
-
-The macOS app records channel 0 = this Mac's microphone and channel 1 =
-system (call) audio, sample-aligned on one clock. The side a voice comes
-from is then a strong prior: a remote participant can never be the local
-one. The complication is the loudspeaker: without headphones the remote
-voice also reaches the microphone — delayed, quieter, reverberant. This
-module decides, per 20 ms frame, whether the microphone holds a LOCAL
-talker or only that leak:
-
-* **VAD per channel** (Silero, the existing segmenter).
-* **Leak model**, per 5-minute window (a call can move from headphones to
-  loudspeakers): the delay ``d`` (0–300 ms) maximising the normalised
-  cross-correlation of the two RMS envelopes over frames where the system
-  channel speaks; with a peak ≥ ``LEAK_MIN_CORRELATION`` the leak is real and
-  its gain ``g`` is the median of ``mic_dB(t) − system_dB(t−d)`` there.
-  Otherwise ``g`` is ``None`` (headphones).
-* **Local** on frame *t* ⇔ mic VAD ∧ (no leak ∨ ``mic_dB(t) > system_dB(t−d) + g
-  + LOCAL_MARGIN_DB``). **Remote** ⇔ system VAD. 100 ms hangover each.
-
-No echo cancellation: an attribution rule robust to echo instead (ADR-0053).
-The margin and correlation floor are starting values, to be tuned on the
-``dual_channel`` gold recordings. Pure numpy; the segmenter is injected.
+"""Per 20 ms frame, which side of a mic/system capture is speaking, with the loudspeaker leak modelled
+per 5-minute window (delay by envelope cross-correlation, gain by median dB difference). No echo cancellation
+(ADR-0053): local ⇔ mic VAD ∧ (no leak ∨ mic above the leak + LOCAL_MARGIN_DB); remote ⇔ system VAD.
 """
 
 from __future__ import annotations
@@ -134,9 +114,6 @@ def side_for_span(activity: ChannelActivity, start_ms: int, end_ms: int) -> Side
     return "local" if local > remote else "remote"
 
 
-# ── internals ─────────────────────────────────────────────────────────
-
-
 def _as_float(pcm: np.ndarray) -> np.ndarray:
     if pcm.dtype == np.int16:
         return pcm.astype(np.float32) / 32768.0
@@ -194,7 +171,6 @@ def _estimate_leak(
     active = sys_vad[start:end]
     best_corr, best_lag = -1.0, 0
     for lag in range(max_lag + 1):
-        # mic at t against system at t − lag, over frames where the system spoke.
         m = mic_env[lag:]
         s = sys_env[: len(sys_env) - lag]
         mask = active[: len(active) - lag]

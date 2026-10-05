@@ -1,18 +1,8 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
-/**
- * A QR code, rendered in the page.
- *
- * `qrcode` (MIT) is bundled at build time and encodes locally — the value
- * never leaves the browser, which for a TOTP provisioning URI is the whole
- * point. A hosted image service would mean mailing the shared secret to a
- * third party, and the CDN restriction in `web/README.md` rules that out
- * anyway.
- *
- * SVG rather than canvas so it stays sharp on a phone camera at any zoom
- * and inherits the page's colours.
- */
+/** QR code encoded locally by the bundled `qrcode` — the TOTP secret never leaves the browser.
+ *  SVG so it stays sharp at any zoom. */
 export function QrCode({ value, size = 180, label }: { value: string; size?: number; label: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -49,8 +39,7 @@ export function QrCode({ value, size = 180, label }: { value: string; size?: num
       style={{ width: size, height: size }}
       role="img"
       aria-label={label}
-      // The SVG is produced by the bundled encoder from a value this app
-      // built; there is no user or server HTML in it.
+      // SVG from the bundled encoder over an app-built value: no user or server HTML in it.
       dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
     />
   );

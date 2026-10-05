@@ -4,9 +4,7 @@ import XCTest
 
 // MARK: - A session store that is not the Keychain
 
-/// The Keychain is the app's storage; a test binary has no app identity to
-/// key items to and would leave real items behind if it did. The store's
-/// own behaviour (cache, rotate, clear) is what these tests are about.
+/// A test binary has no app identity to key Keychain items to; the store's own behaviour (cache, rotate, clear) is what matters.
 final class InMemorySessionStorage: SessionStorage, @unchecked Sendable {
     private let lock = NSLock()
     private var data: Data?
@@ -45,9 +43,7 @@ final class InMemorySessionStorage: SessionStorage, @unchecked Sendable {
 
 // MARK: - A server that answers from a script
 
-/// One `URLProtocol` for every test: it records what the app sent (which
-/// is where the transport assertions live — headers, bodies, the absence
-/// of a cookie) and answers from a handler the test installs.
+/// One `URLProtocol` for every test: records what the app sent (headers, bodies, no cookie) and answers from a handler the test installs.
 final class StubServer: URLProtocol {
     struct Recorded: Sendable {
         let url: URL

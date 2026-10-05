@@ -1,16 +1,7 @@
-"""Sprint-14 deployment: readiness must advertise conversation capacity honestly.
+"""Readiness advertises conversation capacity honestly.
 
-Two independent facts about a worker:
-
-* Can it serve **dictation**? Needs Whisper. If not, ``/readyz`` is 503 and
-  the worker should be pulled from the pool.
-* Can it serve **conversation**? Needs a WARM diarizer as well. A worker
-  that advertises conversation capacity with a cold diarizer pays weight
-  loading inside its first window and blows the latency budget — so this
-  is reported separately and a dictation-only worker stays 200/ready.
-
-``conversation_slots_free`` is the number the scheduler acts on: it must be
-0 whenever the diarizer is cold, regardless of how much raw weight is free.
+Whisper missing ⇒ 503; a cold diarizer keeps the worker ready for dictation
+but ``conversation_slots_free`` must be 0.
 """
 
 from __future__ import annotations

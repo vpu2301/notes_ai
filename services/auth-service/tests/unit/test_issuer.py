@@ -247,15 +247,7 @@ def test_jwks_route_serves_public_keys_with_cache_header(
 def test_jwks_is_empty_but_valid_without_a_configured_issuer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """FND-1: the URL exists before the key does.
-
-    The fleet is configured to trust this issuer BEFORE auth-service can
-    sign (compose/Helm `AUTH_ISSUERS_JSON`), so during that rollout the
-    honest answer is an empty key set — a valid JWKS every cache accepts.
-    A 404 or 503 would make the rollout unverifiable: an operator could
-    not tell "not deployed yet" from "wrong URL" without reading logs on
-    eight services.
-    """
+    """The JWKS URL exists before the key does: the fleet trusts this issuer before it can sign, so an empty key set is the honest answer, not a 404/503."""
     from auth_service import deps
 
     deps.install_state(SimpleNamespace(signing_keys=None, token_service=None))  # type: ignore[arg-type]
@@ -330,9 +322,7 @@ def test_keycloak_mode_mounts_no_native_session_routes_and_no_origin_check(
 
     monkeypatch.setattr(settings, "idp_mode", "keycloak")
     app = create_app()
-    # FND-1: the JWKS route is mounted in every mode (it answers
-    # `{"keys": []}` here). What keycloak mode does NOT get is the native
-    # session surface or the origin check.
+    # The JWKS route is mounted in every mode; keycloak mode gets no native session surface or origin check.
     assert "/.well-known/jwks.json" in _route_paths(app)
     assert "/auth/login" in _route_paths(app)
     assert all(m.cls is not OriginCheckMiddleware for m in app.user_middleware)
@@ -349,9 +339,7 @@ def test_native_mode_mounts_issuer_routes_and_origin_check(monkeypatch: pytest.M
     app = create_app()
     paths = _route_paths(app)
     assert {"/.well-known/jwks.json", "/.well-known/openid-configuration"} <= paths
-    # IDX-M1: the session routes are native now. `login.router` proxies all
-    # three to Keycloak, so in this mode it is not mounted at all — and
-    # `/auth/login` is what native mode still owes (IDX-A4's password grant).
+    # Session routes are native; `login.router` proxies to Keycloak so it is not mounted here.
     assert {"/auth/refresh", "/auth/logout"} <= paths
     assert "/auth/login" not in paths
     assert any(m.cls is OriginCheckMiddleware for m in app.user_middleware)

@@ -1,32 +1,7 @@
-"""How we decide a chosen password is good enough.
+"""Password strength per NIST SP 800-63B §5.1.1.2: length + blocklist, no composition rules, no expiry.
 
-Follows NIST SP 800-63B §5.1.1.2 rather than the composition rules most
-people expect, and the difference is deliberate:
-
-  * **Length is the control.** 12 characters minimum, and a generous
-    upper bound (128) so passphrases and password-manager output are not
-    truncated. No "must contain an uppercase and a symbol" rule —
-    800-63B §5.1.1.2 explicitly says verifiers SHOULD NOT impose them,
-    because they push users towards `Passw0rd!` and nothing else.
-  * **Blocklist instead.** The rule that does earn its place is refusing
-    passwords already known to attackers, plus anything derived from the
-    user's own identifiers. That is what actually fails in a credential
-    stuffing attack.
-  * **No expiry, no reuse history.** 800-63B §5.1.1.2 recommends against
-    forced rotation, and keeping prior password hashes would mean this
-    system storing more verifiers than Keycloak already does.
-
-The blocklist here is small and self-contained on purpose. A real
-deployment should point ``MDX_PASSWORD_BLOCKLIST_PATH`` at a Pwned
-Passwords k-anonymity range file or run the k-anonymity API; that is a
-deployment concern with an ongoing data dependency, and shipping a
-30-million-line file in the image is not the answer. What is in the
-module is the top of the list every automated attack starts with, plus
-the structural checks (identifier reuse, single repeated character,
-sequential runs) that a blocklist cannot express.
-
-Returned as a list of machine-readable codes rather than prose: the SPA
-renders them in the user's language, and the strings live there.
+The bundled blocklist is deliberately small. Results are machine-readable codes;
+the SPA renders the strings.
 """
 
 from __future__ import annotations
@@ -39,8 +14,7 @@ from typing import Final
 MIN_LENGTH_FLOOR: Final = 8
 MAX_LENGTH: Final = 128
 
-# Reason codes. Mirrored by the SPA's message table — a code added here
-# without a matching entry there renders as a generic failure.
+# Reason codes, mirrored by the SPA's message table.
 TOO_SHORT: Final = "too_short"
 TOO_LONG: Final = "too_long"
 COMMON: Final = "common"
@@ -49,9 +23,7 @@ REPEATED: Final = "repeated"
 SEQUENTIAL: Final = "sequential"
 WHITESPACE_ONLY: Final = "whitespace_only"
 
-# The head of every credential-stuffing wordlist. Stored casefolded and
-# with digits intact; the check also strips trivial leet substitutions so
-# `P@ssw0rd` does not sail past a list containing `password`.
+# Head of every credential-stuffing wordlist, casefolded; the check also de-leets.
 _COMMON_PASSWORDS: Final[frozenset[str]] = frozenset(
     {
         "123456",
@@ -155,13 +127,7 @@ _SEQUENCE_RUN: Final = 5
 
 @dataclass(frozen=True, slots=True)
 class PolicyResult:
-    """Outcome of a strength check.
-
-    ``score`` is 0–4 for the SPA's meter. It is a *display* value derived
-    from length and character variety — never the thing that decides
-    acceptance, which is ``ok``. Keeping the two apart means the meter
-    can be tuned for encouragement without quietly loosening the gate.
-    """
+    """Outcome of a strength check; ``score`` (0–4) is for the meter only, ``ok`` decides."""
 
     ok: bool
     reasons: tuple[str, ...]
@@ -169,12 +135,7 @@ class PolicyResult:
 
 
 def _normalise(value: str) -> str:
-    """NFKC + casefold, so visually identical strings compare equal.
-
-    Without NFKC a full-width `ｐａｓｓｗｏｒｄ` would miss the blocklist
-    while logging in exactly like the ASCII one, because Keycloak
-    normalises on its side.
-    """
+    """NFKC + casefold (Keycloak normalises on its side, so full-width lookalikes must match)."""
     return unicodedata.normalize("NFKC", value).casefold()
 
 
@@ -183,17 +144,7 @@ def _deleet(value: str) -> str:
 
 
 def _is_blocklisted(normalised: str) -> bool:
-    """Is this a known-bad password, possibly lightly disguised?
-
-    Four candidates, because the two disguises compose and the ORDER
-    they are undone in matters. Stripping the padding must happen on the
-    ORIGINAL string, not on the de-leeted one: de-leeting maps digits to
-    letters, so `password1234` becomes `passwordl2ea` and the trailing
-    junk is no longer trailing junk — it is now letters, and the strip
-    finds nothing to remove. Getting that backwards silently let the
-    single most common password shape in the world through the gate,
-    which is what the test suite caught.
-    """
+    """Known-bad password, possibly disguised? Padding is stripped from the ORIGINAL string, never the de-leeted one."""
     stripped = re.sub(r"^[\W\d_]+|[\W\d_]+$", "", normalised)
     candidates = {
         normalised,
@@ -205,14 +156,7 @@ def _is_blocklisted(normalised: str) -> bool:
 
 
 def _identifier_fragments(*identifiers: str) -> list[str]:
-    """Meaningful pieces of the user's own identifiers.
-
-    An email yields its local part and each dotted/hyphenated word, so
-    `olena.kovalenko@acme.example` blocks `olena`, `kovalenko` and
-    `acme` — the three things people actually reach for. Fragments
-    under 4 characters are dropped: banning `de` would make a large slice
-    of German passphrases unusable for no security gain.
-    """
+    """Pieces of the user's identifiers (local part, dotted/hyphenated words, domain label); fragments under 4 chars dropped."""
     out: list[str] = []
     for raw in identifiers:
         if not raw:
@@ -259,8 +203,7 @@ def strength_score(password: str) -> int:
         score += 1
     if variety >= 3:
         score += 1
-    # A long single-class passphrase is genuinely strong; a short mixed
-    # one is not. Cap rather than reward the mixture on its own.
+    # Cap rather than reward character mixture on its own.
     if length < 12:
         return 0
     return min(score, 4)
@@ -273,25 +216,18 @@ def check_password(
     email: str = "",
     display_name: str = "",
 ) -> PolicyResult:
-    """Evaluate a candidate password.
-
-    ``min_length`` comes from settings but is floored at
-    :data:`MIN_LENGTH_FLOOR` — a deployment can raise the bar, never drop
-    it below what 800-63B calls the minimum for a memorised secret.
-    """
+    """Evaluate a candidate password; ``min_length`` is floored at :data:`MIN_LENGTH_FLOOR`."""
     floor = max(int(min_length), MIN_LENGTH_FLOOR)
     reasons: list[str] = []
 
     if not password.strip():
-        # Checked before length so an all-spaces string gets the specific
-        # message rather than "too short" when it is in fact long.
+        # Before the length check so an all-spaces string gets the specific message.
         return PolicyResult(ok=False, reasons=(WHITESPACE_ONLY,), score=0)
 
     if len(password) < floor:
         reasons.append(TOO_SHORT)
     if len(password) > MAX_LENGTH:
-        # An upper bound exists only to stop a megabyte of input reaching
-        # the KDF as a denial-of-service; it is not a security control.
+        # DoS guard for the KDF, not a security control.
         reasons.append(TOO_LONG)
 
     normalised = _normalise(password)

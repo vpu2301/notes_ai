@@ -1,4 +1,4 @@
-"""GET /notes/{id}/versions[/{v}] — version history (M1·A1/A2).
+"""GET /notes/{id}/versions[/{v}] — version history.
 
 Read-only. Mirrors ``notes_diff.py``: 404-first on the note, the same
 non-author ``?purpose=`` enforcement ``get_note`` applies, and a
@@ -54,10 +54,7 @@ class NoteVersionDetail(NoteVersionSummary):
 
 def _enforce_read_purpose(note: repo.NoteRow, claims: Claims, purpose: ReadPurpose | None) -> bool:
     """Returns ``is_author``; raises 422 when a non-author omits ``?purpose=``.
-
-    The rule lives in :mod:`note_service.domain.access` with the rest of the
-    who-may-read rules; this is the name the audio routers import.
-    """
+    The rule lives in :mod:`note_service.domain.access`; this is the name the audio routers import."""
     return access.require_read_purpose(note, claims, purpose)
 
 
@@ -71,7 +68,7 @@ async def list_versions(
 ) -> list[NoteVersionSummary]:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404 (0016).
+        # A private note the caller was not given is a 404.
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
         summaries = await repo.list_version_summaries(conn, note_id=note_id)
@@ -102,7 +99,7 @@ async def get_version(
 ) -> NoteVersionDetail:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404 (0016).
+        # A private note the caller was not given is a 404.
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         is_author = _enforce_read_purpose(note, claims, purpose)
         version = await repo.fetch_version_by_number(

@@ -1,14 +1,4 @@
-"""One refusal type for the native auth surface.
-
-Every service in this package needs to say "no, and here is the machine
-code the client should branch on". Three near-identical exception classes
-would mean three ``except`` arms in every router and three chances for
-one of them to forget the ``Retry-After`` header, so there is one.
-
-The HTTP status travels with the error because the status *is* part of
-the contract in ``docs/api/error-codes.md`` — deciding it in the router
-would put half the decision table in a second place.
-"""
+"""One refusal type for the native auth surface; the HTTP status travels with the error (docs/api/error-codes.md)."""
 
 from __future__ import annotations
 

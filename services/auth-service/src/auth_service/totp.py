@@ -1,19 +1,4 @@
-"""TOTP (RFC 6238) + envelope packing for the Keycloak-attribute store.
-
-Sprint 16 MFA. Design note (recorded in ADR-0039): Keycloak's admin REST
-API cannot register an OTP credential for an existing user, and this
-architecture has no Keycloak browser flow (the SPA logs in through
-auth-service's direct-grant proxy, sprint A3). So auth-service generates
-the secret, stores it **envelope-encrypted in the user's Keycloak
-attributes** (Keycloak remains the credential store; no plaintext at
-rest anywhere), and validates codes in the login proxy. Keycloak is not
-publicly exposed in the production topology — auth-service is the only
-token path — so the proxy-side check is enforcement, not decoration.
-
-TOTP itself is pure stdlib ``hmac``/``hashlib`` (RFC 6238 over RFC 4226)
-— deliberately NOT ``cryptography.hazmat`` (rule 4 keeps hazmat inside
-libs/crypto; an HMAC-based OTP needs no AEAD machinery).
-"""
+"""TOTP (RFC 6238, stdlib hmac only — hazmat stays in libs/crypto) + envelope packing for the Keycloak-attribute store (ADR-0039)."""
 
 from __future__ import annotations
 
@@ -31,12 +16,11 @@ from crypto import Envelope, EnvelopeBlob
 
 TOTP_DIGITS = 6
 TOTP_PERIOD_SECONDS = 30
-TOTP_SECRET_BYTES = 20  # 160-bit, RFC 4226 recommended minimum
-# Accept the previous/next step to absorb clock drift; RFC 6238 §5.2.
+TOTP_SECRET_BYTES = 20  # RFC 4226 minimum
+# Drift window, RFC 6238 §5.2.
 TOTP_DRIFT_STEPS = 1
 
-# AAD context label — binds the ciphertext to its purpose so a blob
-# lifted from the attribute can't be replayed as some other envelope.
+# AAD context label: binds the ciphertext to its purpose.
 _TOTP_AAD_PREFIX = b"mdx-totp-secret-v1:"
 
 
@@ -80,19 +64,7 @@ def verify_code(secret: str, code: str, *, at_unix: float | None = None) -> bool
 
 
 def matching_step(secret: str, code: str, *, at_unix: float | None = None) -> int | None:
-    """The time step this code is valid for, or None (IDX-A5 F3).
-
-    ``verify_code`` answers "is this code good"; the native login flow also
-    needs "good *for when*". The drift window means one code stays valid
-    for up to 90 seconds, so without recording the step, the same six
-    digits work three times — long enough for somebody reading over a
-    shoulder, or replaying a code from a phished page. The caller stores
-    the returned step and refuses anything not strictly greater.
-
-    Steps are scanned oldest-first so a code that matches more than one
-    step (only possible on a secret with a degenerate period) is charged
-    at the earliest, never letting a later step be re-spent.
-    """
+    """The time step this code is valid for, or None; scanned oldest-first so the caller can refuse replays."""
     code = code.strip().replace(" ", "")
     if len(code) != TOTP_DIGITS or not code.isdigit():
         return None
@@ -107,10 +79,7 @@ def matching_step(secret: str, code: str, *, at_unix: float | None = None) -> in
 
 
 # ── Envelope <-> Keycloak attribute packing ─────────────────────────────
-#
-# Keycloak attributes are lists of strings; we store one compact JSON
-# document with base64url fields. The envelope's AAD binds tenant + sub +
-# purpose, so a copied attribute value fails decryption elsewhere.
+# One compact JSON document with base64url fields; AAD binds tenant + sub + purpose.
 
 
 def _b64e(raw: bytes) -> str:

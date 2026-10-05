@@ -15,15 +15,7 @@ interface MfaState {
   from?: string;
 }
 
-/**
- * `/login/mfa` — the second factor.
- *
- * Reached only by navigation carrying a `challengeId`, which is what makes
- * this a real route guard rather than a screen: an MFA account whose first
- * factor passed has no session and no token, so `/` is unreachable until
- * this page trades the challenge for one. Arriving here directly (a
- * bookmark, a reload) has no challenge to complete and bounces to `/login`.
- */
+/** `/login/mfa` — needs a `challengeId` in navigation state; a direct load bounces to `/login`. */
 export function MfaPage() {
   useDocumentTitle("Sign in");
   const { status, completeMfa } = useAuth();
@@ -49,8 +41,7 @@ export function MfaPage() {
     setError(null);
     setBusy(true);
     try {
-      // Recovery codes are shown and mailed as xxxx-xxxx-xxxx; people type
-      // them with, without, or halfway through the dashes.
+      // Recovery codes are xxxx-xxxx-xxxx; people type them with or without dashes.
       const cleaned = useRecovery ? code.trim().replace(/[\s-]/g, "") : code.trim();
       const outcome = await completeMfa(
         state.challengeId!,

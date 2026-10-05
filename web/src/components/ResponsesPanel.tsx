@@ -4,12 +4,7 @@ import { clearResponse, setItemStatus } from "../api/notes";
 import type { ItemView, ResponseView, TemplateSection } from "../api/types";
 import { useToast } from "./Toaster";
 
-/**
- * The author's view of what recipients did (Sprint 20). Counts per item,
- * every dispute with its comment and who sent it, "Mark done" and "Clear".
- * Comments are recipient-authored: they go through React text nodes and
- * nothing else — never markup.
- */
+/** The author's view of recipient responses. Comments are recipient-authored: text nodes only, never markup. */
 export function ResponsesPanel({
   noteId,
   items,

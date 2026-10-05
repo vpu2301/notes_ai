@@ -27,14 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def auth_issuers() -> list[IssuerConfig]:
-    """The issuers this service trusts (FND-1 / ADR-0047).
-
-    Built from ``AUTH_ISSUERS_JSON`` when it is set, otherwise from the
-    single ``AUTH_ISSUER`` / ``AUTH_JWKS_URL`` / ``AUTH_AUDIENCE`` trio.
-    Both the JWKS cache and ``build_current_user`` are built from THIS
-    list, so the keys a token can be verified with and the issuers a
-    token may claim can never drift apart.
-    """
+    """The issuers this service trusts (ADR-0047); the JWKS cache and current_user share this list."""
     return issuers_from_env(
         settings.auth_issuers_json,
         issuer=settings.auth_issuer,
@@ -57,25 +50,16 @@ class ServiceState:
     engine: WhisperEngine
     inference_queue: InferenceQueue
     session_manager: SessionManager
-    # Sprint 14: conversation mode. The diarization engine is warmed at
-    # startup when MDX_DIAR_WARM_AT_STARTUP (the default) — readiness gates
-    # conversation capacity on it. Dictation-only deployments set
-    # MDX_CONVERSATION_ENABLED=false and never touch torch.
+    # Dictation-only deployments set MDX_CONVERSATION_ENABLED=false and never touch torch.
     diarization_engine: DiarizationEngine
     nlp_client: NlpClient
     note_client: NoteClient
-    # Sprint-06 client, actually wired in sprint 14 (was dead code: no
-    # instance and no bearer existed before the upgrade began retaining
-    # the caller's token).
     template_client: TemplateClient
 
 
 async def build_state() -> ServiceState:
     issuers = auth_issuers()
-    # FND-1: log what this process will actually accept. During the
-    # fleet-wide rollout of AUTH_ISSUERS_JSON "did this pod get the second
-    # issuer?" has to be answerable from one log line, not from a token
-    # that mysteriously 401s an hour later.
+    # Log the accepted issuers so a rollout is checkable from one line.
     logger.info("auth.issuers", extra={"trusted_issuers": [c.issuer for c in issuers]})
     jwks_cache = JwksCache(issuer_to_url=issuer_url_map(issuers))
 
@@ -128,7 +112,6 @@ async def build_state() -> ServiceState:
 
     engine = WhisperEngine()
     if not settings.warm_in_background:
-        # Pre-sprint-16 behaviour (dev default): block startup on the load.
         engine.load()
 
     inference_queue = InferenceQueue(
@@ -150,19 +133,9 @@ async def build_state() -> ServiceState:
         model_repo=settings.diar_model_repo,
         model_revision=settings.diar_model_revision,
     )
-    # BOTH models warm before the worker is ready. Whisper is warmed
-    # eagerly above (engine.load()); the diarizer used to load lazily on
-    # the first conversation session, which meant that session paid weight
-    # loading inside its first window. Warmup failure is non-fatal — the
-    # worker still serves dictation — but /readyz then advertises no
-    # conversation capacity (sprint-14 deployment).
-    #
-    # Sprint 16 (MDX_WARM_IN_BACKGROUND): with large-v3 the combined
-    # warmup can exceed the 60 s a probing orchestrator tolerates — the
-    # sprint-03 retro's cold-start finding. The background path moves BOTH
-    # loads to a lifespan task so /healthz answers immediately while
-    # /readyz stays 503 until `engine.is_loaded` — the LB sends no traffic
-    # before ready, and liveness never kills a merely-cold pod.
+    # Diarizer warmup failure is non-fatal: the worker still serves dictation
+    # but /readyz advertises no conversation capacity. Background mode moves
+    # both loads to a lifespan task so a long warmup cannot fail liveness.
     if settings.diar_warm_at_startup and not settings.warm_in_background:
         await diarization_engine.warm_up()
     nlp_client = NlpClient(

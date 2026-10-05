@@ -1,23 +1,7 @@
-"""Sprint F1 T5: the assertion vocabulary of ``tests/fixtures/eval/asr/``.
+"""The assertion vocabulary of ``tests/fixtures/eval/asr/`` checklists, shared by the
+CI regression test, ``coverage_eval.py`` and ``asr_eval.py``.
 
-Shared by the CI regression test (``m12``, scripted engine),
-``coverage_eval.py`` (``r02``, the real recording) and, from Sprint TQ1,
-``asr_eval.py`` (``r03``/``r04`` on the gold set). Output is check names and
-PASS/FAIL, never the text a check looks for beyond its own name.
-
-Sprint TQ1 adds:
-
-- ``must_not_contain`` — none of these strings (case-folded) anywhere in the
-  transcript (T-INJ).
-- ``entity_variants_max`` — ``{canonical: {"max": n, "heard_as": [...]}}``:
-  at most ``n`` of the listed spellings occur (T-ENT). ``heard_as`` lists the
-  spellings the audit saw, the canonical one included; without a reference
-  this is how a raw transcript's variants are counted.
-- ``expected_fail_until`` on any item — the sprint that is meant to fix it.
-  A failure there is ``XFAIL`` and does not fail the run; a pass is
-  ``XPASS`` and is reported, so the marker is removed.
-- ``pending`` on a ``must_contain_before_ms`` item — its text and time come
-  from the reference labelling (T2) and are not known yet: ``PENDING``.
+Output is check names and PASS/FAIL/XFAIL/XPASS/PENDING, never the text a check looks for.
 """
 
 from __future__ import annotations

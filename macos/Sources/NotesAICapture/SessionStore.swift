@@ -1,13 +1,7 @@
 import Foundation
 import Security
 
-/// The signed-in session, as this Mac keeps it.
-///
-/// Everything here is a credential or names one, which is why it lives in
-/// the Keychain and not in UserDefaults beside the backend URLs. The
-/// access token is deliberately absent: it lives fifteen minutes, it is
-/// re-mintable from the refresh token, and writing it to disk would be
-/// storing a secret with none of the benefits of storing it.
+/// The signed-in session, as this Mac keeps it: credentials, so Keychain not UserDefaults. The access token is deliberately absent (fifteen-minute life, re-mintable).
 struct StoredSession: Codable, Equatable, Sendable {
     var refreshToken: String
     var refreshExpiresAt: Date
@@ -39,9 +33,7 @@ enum SessionStoreError: LocalizedError {
     }
 }
 
-/// Where the session bytes actually go. One implementation in the app
-/// (the Keychain), another in the tests — the session logic is worth
-/// exercising without a login keychain to depend on.
+/// Where the session bytes go: the Keychain in the app, memory in the tests.
 protocol SessionStorage: Sendable {
     func read() -> Data?
     func write(_ data: Data) -> OSStatus
@@ -65,19 +57,12 @@ struct KeychainSessionStorage: SessionStorage {
     }
 }
 
-/// The session's one home, serialised.
-///
-/// An actor because the refresh path both reads and writes it while other
-/// requests are in flight, and the ordering there is the whole point:
-/// `APIClient` persists a rotated refresh token **before** it publishes
-/// the new access token, so a crash in between leaves the newest token on
-/// disk rather than a token the server has already retired — which, after
-/// the grace window, the server would treat as a replay and sign the
-/// person out for security.
+/// The session's one home. An actor because the refresh path reads and writes it
+/// while requests are in flight: a rotated refresh token is persisted BEFORE the
+/// new access token is published, so a crash never leaves a retired token on disk (= replay).
 actor SessionStore {
     private let storage: SessionStorage
-    /// Read once, then kept: every authorised request that needs a refresh
-    /// would otherwise go to the Keychain first.
+    /// Read once, then kept, so a refresh does not go to the Keychain first.
     private var cached: StoredSession?
     private var loaded = false
 
@@ -91,8 +76,7 @@ actor SessionStore {
         guard let data = storage.read() else { return nil }
         cached = try? JSONDecoder.session.decode(StoredSession.self, from: data)
         if cached == nil {
-            // Unreadable (an older shape, a truncated write): treat it as no
-            // session rather than leaving a value nothing can use.
+            // Unreadable (older shape, truncated write): treat as no session.
             storage.delete()
         }
         return cached
@@ -115,8 +99,7 @@ actor SessionStore {
         try save(session)
     }
 
-    /// Remember the workspace the person switched to, so the next launch
-    /// opens where they left off rather than where they signed in.
+    /// Remember the workspace the person switched to, so the next launch opens there.
     func setTenant(_ tenantId: String) throws {
         guard var session = load(), session.lastTenantId != tenantId else { return }
         session.lastTenantId = tenantId
@@ -131,8 +114,7 @@ actor SessionStore {
 }
 
 extension JSONEncoder {
-    /// ISO-8601 dates so the item stays readable by eye when something
-    /// goes wrong (`security find-generic-password -s ai.notes.capture.session -w`).
+    /// ISO-8601 dates so the item stays readable by eye (`security find-generic-password -s ai.notes.capture.session -w`).
     static let session: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -154,14 +136,8 @@ enum LegacyCookies {
     /// The Keycloak-era refresh cookie.
     static let name = "mdx_rt"
 
-    /// Delete any `mdx_rt` cookie left in the shared store.
-    ///
-    /// Before IDX-M1 the refresh token lived here — on disk, protected by
-    /// nothing but FileVault, and attached automatically to every request
-    /// to the auth host. The app no longer uses cookie storage at all
-    /// (`URLSession` is built with none), so a cookie left behind would
-    /// be a credential nothing reads and nobody rotates. Returns how many
-    /// were removed, which is what the test asserts on.
+    /// Delete any `mdx_rt` cookie left in the shared store: the app no longer uses
+    /// cookie storage, so a leftover would be a credential nobody rotates. Returns how many were removed.
     @discardableResult
     static func purge(from storage: HTTPCookieStorage = .shared) -> Int {
         let stale = (storage.cookies ?? []).filter { $0.name == name }

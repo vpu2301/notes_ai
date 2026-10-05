@@ -1,6 +1,4 @@
-"""Sprint TQ3 — the spelling overlay against the real schema (migration 0066)
-and RLS: plan stored once, decisions with the rev check, recompute keeping
-people's decisions, the glossary read, and another tenant seeing nothing.
+"""The spelling overlay against the real schema and RLS.
 
 Skipped unless RUN_DB_INTEGRATION=1 (needs `make dev-up && make migrate-up`).
 """

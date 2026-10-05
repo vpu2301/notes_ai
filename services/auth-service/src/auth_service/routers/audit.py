@@ -1,10 +1,4 @@
-"""GET /audit/events (paginated read) + GET /audit/verify (chain verifier).
-
-Both routes are tenant-scoped via ``Claims.tid``. Role gate: ``auditor``
-*or* ``tenant_admin`` — anyone else gets 403. Day 7 replaces the inline
-role check in ``deps.require_audit_role`` with the formal
-``requires(action, target_kind)`` permission matrix.
-"""
+"""GET /audit/events (paginated read) + GET /audit/verify (chain verifier); tenant-scoped, auditor or tenant_admin."""
 
 from __future__ import annotations
 

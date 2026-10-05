@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""Provision a meeting-room capture device (IDX-B1b F5).
+"""Provision a meeting-room capture device: prints the client id, the secret ONCE and
+the token URL. Nothing is written or logged; rotate if the scrollback is lost.
 
-    export MDX_OPERATOR_TOKEN=...           # a platform-operator access token
-    uv run python scripts/ops/idx-provision-device.py \
-        --auth-url https://auth.example.com \
-        --tenant 00000000-0000-0000-0000-00000000000a \
-        --name "Room 4.02"
-
-Prints the client id, the secret **once**, and the token URL to configure
-on the device. Nothing is written to disk and nothing is logged: if the
-terminal scrollback is lost before the device is configured, rotate.
-
-Replaces the seven `kcadm` invocations the old runbook needed to create
-one room (client, service-account user, three protocol mappers, a role
-mapping, a secret read-back). That procedure was long enough that rooms
-were provisioned by copying an existing client, which is how two rooms
-end up sharing a secret.
+    MDX_OPERATOR_TOKEN=... uv run python scripts/ops/idx-provision-device.py --auth-url <url> --tenant <uuid> --name "Room 4.02"
 """
 
 from __future__ import annotations

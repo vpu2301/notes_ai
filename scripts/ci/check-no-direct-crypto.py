@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""CI gate — primitives from ``cryptography`` must live in libs/crypto.
+"""CI gate: ``cryptography.hazmat`` primitives live only in libs/crypto (plus libs/kep for
+X.509/CMS signing, tests for adversarial ciphertext).
 
-Sprint 03 introduces ``libs/crypto`` as the only sanctioned envelope
-path. Direct use of ``cryptography.hazmat.primitives`` elsewhere in the
-codebase is a red flag — it usually means an engineer has reinvented
-encryption or bypassed the envelope.
-
-Allow-listed paths: libs/crypto/, tests/ (so adversarial tests can
-construct deliberately-bad ciphertext to verify the envelope rejects it),
-and libs/kep/ — the KEP digital-signature library (sprint 09). KEP signing
-operates on X.509 certificate chains and CMS/PAdES structures, a domain the
-``libs/crypto`` AEAD envelope abstraction does not (and should not) cover, so
-libs/kep is a second sanctioned home for ``cryptography`` primitives.
-
-Exit codes:
-    0 — no violations
-    1 — violations printed to stderr
+Exit 0 clean, 1 violations on stderr.
 """
 
 from __future__ import annotations
@@ -35,12 +22,8 @@ ALLOWED_PREFIXES = (
     "libs/storage/tests/",  # tampering tests
     "libs/crypto/tests/",  # adversarial tests
     "libs/auth/tests/",  # JWT signing-key fixtures (RS256 test keys)
-    # IDX-A2's native issuer. An RS256 signer has to parse a PKCS#8 private
-    # key, serialise the public half into a JWK, and derive a `kid` from the
-    # SPKI — none of which is envelope encryption, and none of which
-    # libs/crypto has an API for. The rule this gate enforces is "no
-    # hand-rolled data-at-rest crypto"; asymmetric token signing is a
-    # different job with a different library surface.
+    # The native issuer's RS256 signer (PKCS#8, JWK, kid from SPKI) is token
+    # signing, not data-at-rest crypto; libs/crypto has no API for it.
     "services/auth-service/src/auth_service/domain/signing_keys.py",
     "services/auth-service/tests/unit/test_issuer.py",
     "libs/auth/src/auth/testing.py",  # in-memory issuer for contract tests

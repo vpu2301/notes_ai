@@ -1,10 +1,4 @@
-/**
- * Browser-storage keys, all under one prefix.
- *
- * Three were written under the product's earlier name; `migrateStorageKeys`
- * carries their values over once so a remembered first-run flag or a
- * referral code is not lost by the rename.
- */
+/** Browser-storage keys under one prefix; `migrateStorageKeys` carries over pre-rename values once. */
 export const REF_KEY = "notesai.ref";
 export const FIRST_RUN_KEY = "notesai.first_run_seen";
 

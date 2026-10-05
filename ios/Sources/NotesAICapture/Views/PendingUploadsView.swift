@@ -1,14 +1,6 @@
 import SwiftUI
 
-/// Recordings that were made but never reached the server.
-///
-/// IDX-I1 started keeping them; this is where the person finally gets to
-/// do something about them. Three actions, and the reason there are
-/// exactly three: **Retry** is what they want, **Export** is what they
-/// want when retrying cannot work (no workspace left, a server that will
-/// not take it), and **Delete** is the only path in this app that destroys
-/// a recording — behind a confirmation, because it cannot be undone and
-/// the meeting cannot be held again.
+/// Recordings that never reached the server: Retry, Export, Delete (confirmed; the only path that destroys one).
 struct PendingUploadsSection: View {
     @EnvironmentObject private var app: AppState
     let captures: [PendingCapture]
@@ -46,8 +38,7 @@ struct PendingUploadsSection: View {
             .dsCard(padding: 0)
         }
         .sheet(item: $exporting) { capture in
-            // Keyed on the recording, so exporting a second one builds a
-            // new controller rather than re-offering the first file.
+            // Keyed on the recording so a second export builds a new controller.
             ShareSheet(items: [capture.audioURL])
                 .id(capture.id)
         }
@@ -140,9 +131,7 @@ private struct PendingUploadRow: View {
         var items: [DSMenuItem] = [
             .item("Export…", symbol: "square.and.arrow.up", action: export),
         ]
-        // Re-targeting is offered whenever there is somewhere else to send
-        // it — the usual reason is a lost membership, but a recording made
-        // in the wrong workspace is just as real a mistake.
+        // Re-targeting is offered whenever there is somewhere else to send it.
         let elsewhere = app.availableWorkspaces.filter { $0.id != capture.info.tenantId }
         if !stale, !elsewhere.isEmpty {
             items.append(.separator)
@@ -161,12 +150,7 @@ private struct PendingUploadRow: View {
 
 // MARK: - When the workspace is gone
 
-/// The membership behind the open workspace was removed.
-///
-/// Nothing local is deleted: the notes list empties because the server
-/// stops answering for that tenant, but the recordings this phone kept are
-/// still the person's, and the way out is to move to a workspace they are
-/// still in.
+/// The membership behind the open workspace was removed. Nothing local is deleted.
 struct WorkspaceLostBanner: View {
     @EnvironmentObject private var app: AppState
     @State private var picking = false

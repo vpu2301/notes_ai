@@ -1,13 +1,5 @@
-"""Outbox delivery worker: drains due rows, retries, dead-letters.
-
-Claiming uses ``FOR UPDATE SKIP LOCKED`` inside a tenant-scoped
-transaction, so N replicas take disjoint work without coordinating and
-without blocking each other (E3).
-
-Backoff is exponential on ``attempt_count``. After
-``delivery_max_attempts`` the row goes `dead` and a forensic row is
-written — the alert fires on that table being non-empty (E10), because
-a silent dead-letter is indistinguishable from "nothing went wrong".
+"""Outbox delivery worker: drains due rows (SKIP LOCKED, tenant-scoped), retries with
+exponential backoff, dead-letters after ``delivery_max_attempts`` (alert fires on that table).
 """
 
 from __future__ import annotations
@@ -43,12 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 def backoff_delay(attempt_count: int, *, base_s: float) -> timedelta:
-    """Exponential, capped at an hour.
-
-    Capped because an uncapped doubling reaches days by attempt 10, and
-    a notification that arrives days late is worse than one that fails
-    loudly.
-    """
+    """Exponential, capped at an hour."""
     seconds = min(base_s * (2**attempt_count), 3600.0)
     return timedelta(seconds=seconds)
 
@@ -76,8 +63,7 @@ async def deliver_once(
 
             if channel == "in_app":
                 metrics.delivery_attempts.add(1, {"channel": "in_app"})
-                # In-app has nothing to dispatch: the notification row IS
-                # the delivery. Mark it sent and nudge any live socket.
+                # The notification row is the delivery.
                 await repo.mark_outbox_sent(conn, outbox_id=row["id"], provider_message_id="")
                 continue
 
@@ -91,8 +77,7 @@ async def deliver_once(
                 at=at,
             )
 
-    # Fan-out AFTER the transaction commits — pushing a badge for a row
-    # that then rolls back would show a count the DB disagrees with.
+    # Fan-out only after the transaction commits.
     if redis is not None:
         for row in rows:
             if row["channel"] == "in_app":
@@ -120,7 +105,7 @@ async def _deliver_email(
 
     address = await repo.user_email(conn, row["recipient_user_id"])
     if not address:
-        # Nothing to retry towards. Suppress rather than burn attempts.
+        # Nothing to retry towards.
         await repo.mark_outbox_dead(
             conn, outbox_id=outbox_id, error="recipient has no email address"
         )
@@ -134,9 +119,7 @@ async def _deliver_email(
         )
         return
 
-    # Re-render from the fields persisted at materialisation. These are
-    # exactly the allow-listed projection, so the email cannot contain
-    # anything the in-app notification did not already show.
+    # Re-render from the persisted allow-listed fields only.
     rendered = render_email(
         category,
         template_stem=spec.email_template,
@@ -277,8 +260,7 @@ async def _audit(
             severity=severity,
         )
     except Exception as exc:  # noqa: BLE001
-        # Audit is best-effort here, as it is on the authz-denied path:
-        # failing to record a send must not also prevent the send.
+        # Best-effort: an audit failure must not prevent the send.
         logger.warning("delivery.audit_failed", extra={"error": str(exc)})
 
 
@@ -287,9 +269,7 @@ async def run_forever(*, state: Any) -> None:  # pragma: no cover — I/O loop
     while True:
         try:
             async with state.app_pool.acquire() as conn:
-                # SECURITY DEFINER (migration 0051). A direct SELECT here
-                # runs unscoped, so the RLS predicate casts '' to uuid and
-                # raises — this loop crashed every cycle before the fn.
+                # SECURITY DEFINER fn: an unscoped direct SELECT makes the RLS predicate cast '' to uuid and raise.
                 tenants = await conn.fetch(
                     "SELECT tenant_id FROM notification_tenants_with_due_outbox()"
                 )

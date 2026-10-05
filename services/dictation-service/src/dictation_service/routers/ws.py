@@ -1,10 +1,4 @@
-"""``/ws/dictate`` route registration.
-
-Starlette dispatches WebSocket handlers via async function endpoints
-registered with ``@router.websocket(...)``. The upgrade-time auth +
-subprotocol negotiation happens before ``accept()`` so a rejected
-upgrade returns plain HTTP.
-"""
+"""``/ws/dictate`` route; auth + subprotocol negotiation happen before ``accept()``."""
 
 from __future__ import annotations
 
@@ -32,10 +26,7 @@ async def dictate(websocket: WebSocket) -> None:
             audit_writer=state.audit_writer,
         )
     except UpgradeRejected as rej:
-        # Starlette won't send an HTTP error after `websocket.accept()`,
-        # so we explicitly close without accepting. For the 101 handshake
-        # to fail with a meaningful HTTP status, Starlette translates
-        # ``websocket.close(code=...)`` BEFORE accept into an HTTP error.
+        # Closing before accept makes Starlette fail the handshake with an HTTP error.
         await websocket.close(code=_ws_code_for_http(rej.status_code))
         return
 
@@ -45,7 +36,7 @@ async def dictate(websocket: WebSocket) -> None:
 def _ws_code_for_http(http_code: int) -> int:
     """Map HTTP rejection codes to WS close codes (RFC 6455 reserved codes)."""
     if http_code == 401:
-        return 4401  # custom range — frontend interprets
+        return 4401  # custom range, frontend interprets
     if http_code == 403:
         return 4403
     if http_code == 400:

@@ -7,8 +7,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
     var asrBaseURL: String
     var noteBaseURL: String
     var webAppURL: String
-    /// notification-service (the bell). Settings saved before it existed
-    /// decode without it and get the address derived from the others.
+    /// notification-service; older saved settings decode without it (derived).
     var notificationBaseURL: String
 
     init(authBaseURL: String, asrBaseURL: String, noteBaseURL: String, webAppURL: String,
@@ -35,8 +34,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
                   notificationBaseURL: try c.decodeIfPresent(String.self, forKey: .notificationBaseURL))
     }
 
-    /// The notification service on the same host as note-service, on its
-    /// usual dev port — for settings written before the bell existed.
+    /// Notification service on note-service's host, usual dev port.
     static func derivedNotificationURL(from noteBaseURL: String) -> String {
         guard let (scheme, host) = parseHost(noteBaseURL) else { return "http://localhost:8004" }
         return "\(scheme)://\(host):8004"
@@ -50,9 +48,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
         notificationBaseURL: "http://localhost:8004"
     )
 
-    /// The dev stack on one machine: every service on its usual port of
-    /// `host` (a name or address, optionally with a scheme). Returns nil
-    /// for an empty or unusable host — see `hostProblem` for the reason.
+    /// Dev stack on one machine; nil for an unusable host (see `hostProblem`).
     static func forHost(_ raw: String) -> BackendSettings? {
         guard hostProblem(raw) == nil, let (scheme, host) = parseHost(raw) else { return nil }
         return BackendSettings(
@@ -68,8 +64,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
     static func hostProblem(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
-        // Six hex pairs: the Wi‑Fi hardware (MAC) address, which sits right
-        // next to the IP address in the phone's and the Mac's Wi‑Fi details.
+        // Six hex pairs: a MAC address pasted instead of the IP.
         let hexPairs = trimmed.split(whereSeparator: { $0 == ":" || $0 == "-" })
         if hexPairs.count == 6, hexPairs.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isHexDigit) }) {
             return "That is the Wi‑Fi hardware (MAC) address. Enter the IP address instead — it looks like 192.168.x.x and is listed as “IP address” in the Mac's Wi‑Fi details."
@@ -113,8 +108,7 @@ struct BackendSettings: Codable, Equatable, Sendable {
         return first
     }
 
-    /// True when the addresses point at this device itself — right on the
-    /// simulator, useless on a phone.
+    /// Addresses point at this device itself (fine on the simulator, useless on a phone).
     var pointsAtLocalhost: Bool {
         let host = (URL(string: authBaseURL.trimmingCharacters(in: .whitespaces))?.host() ?? "").lowercased()
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
@@ -141,7 +135,7 @@ struct IdentitySummary: Codable, Equatable, Sendable {
     var hasPassword: Bool = false
     var status: String = "active"
 
-    /// Sprint 21: when the account came to exist; absent on an older server.
+    /// When the account came to exist; absent on an older server.
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -153,8 +147,7 @@ struct IdentitySummary: Codable, Equatable, Sendable {
     }
 }
 
-/// One workspace this identity can reach. Read but not yet acted on: the
-/// switcher is IDX-I2's, and `POST /auth/token` does not exist yet.
+/// One workspace this identity can reach.
 struct MembershipSummary: Codable, Equatable, Sendable {
     let tenantId: String
     let name: String
@@ -168,12 +161,8 @@ struct MembershipSummary: Codable, Equatable, Sendable {
     }
 }
 
-/// A started session, as the server hands it over.
-///
-/// `refreshToken` is nil when the server put it in a cookie instead —
-/// which means it thinks it is talking to a browser, and this app has no
-/// cookie store to keep it in. The sign-in path treats that as an error
-/// rather than pretending to be signed in for fifteen minutes.
+/// A started session. `refreshToken` nil = server put it in a cookie (browser
+/// path); sign-in treats that as an error since this app has no cookie store.
 struct AuthSession: Equatable, Sendable {
     let accessToken: String
     let expiresIn: Int
@@ -187,18 +176,14 @@ struct AuthSession: Equatable, Sendable {
 }
 
 /// What a sign-in attempt answers: a session, or a second factor owed.
-///
-/// The server discriminates on `status`, and an `mfa_required` result is a
-/// real 200 whose token fields are empty on purpose (IDX-A5: nothing about
-/// the account is disclosed on the near side of the second factor).
+/// `mfa_required` is a 200 with empty token fields on purpose.
 enum AuthResult: Sendable {
     case authenticated(AuthSession)
     case mfaRequired(challengeId: String, methods: [String], expiresIn: Int)
 }
 
-/// The wire shape of `AuthResult`, and the Keycloak-era login response
-/// before it — `/auth/login` answers the three token fields and nothing
-/// else, and every field below is optional so one decoder reads both.
+/// Wire shape of `AuthResult` and the Keycloak-era login response; every
+/// field optional so one decoder reads both.
 struct AuthResultDTO: Decodable, Sendable {
     var status: String = "authenticated"
     var accessToken: String = ""
@@ -281,8 +266,7 @@ struct EmailChallenge: Decodable, Sendable {
     }
 }
 
-/// `POST /auth/reauth/start` — the server decides how you may prove it is
-/// you (an authenticator if you have one, a mailed code otherwise).
+/// `POST /auth/reauth/start` — the server picks the proof method.
 struct ReauthOptions: Decodable, Sendable {
     let methods: [String]
     let challengeId: String?
@@ -295,11 +279,8 @@ struct ReauthOptions: Decodable, Sendable {
     }
 }
 
-/// One workspace this identity belongs to (`GET /tenants`).
-///
-/// The switcher's row. `myRole` is the membership role, re-read by the
-/// server on every listing — a role is worth what it is worth now, not
-/// what it was worth when the session opened.
+/// One workspace this identity belongs to (`GET /tenants`); `myRole` is
+/// re-read by the server on every listing.
 struct Workspace: Codable, Equatable, Identifiable, Sendable {
     let id: String
     let name: String
@@ -334,11 +315,8 @@ struct WorkspaceList: Decodable, Sendable {
     let items: [Workspace]
 }
 
-/// `POST /auth/token` — an access token for another of my workspaces.
-///
-/// No refresh token and no rotation: the session's one credential is the
-/// one the app already holds. With `activate` the session moves too, so
-/// the next launch comes back to the same workspace.
+/// `POST /auth/token` — an access token for another of my workspaces. No
+/// refresh token or rotation; `activate` moves the session too.
 struct SwitchedToken: Decodable, Sendable {
     let accessToken: String
     let expiresIn: Int
@@ -376,8 +354,7 @@ struct DeviceSession: Decodable, Equatable, Identifiable, Sendable {
         case lastUsedAt = "last_used_at"
     }
 
-    /// "This iPhone", "A Mac", "A browser" — what the person will
-    /// recognise. The server's `device_name` wins when it has one.
+    /// "This iPhone", "A Mac", "A browser"; the server's `device_name` wins.
     var title: String {
         if !deviceName.isEmpty { return deviceName }
         switch clientType {
@@ -401,17 +378,14 @@ struct RevokedOthers: Decodable, Sendable {
     let revoked: Int
 }
 
-/// `GET /auth/me`. `identity` arrives once `routers/me.py` grows it
-/// (IDX-B2 debt); until then the app keeps the summary from sign-in.
+/// `GET /auth/me`. `identity` may be absent; the app then keeps the sign-in summary.
 struct MeResponse: Decodable, Sendable {
     let identity: IdentitySummary?
     let memberships: [MembershipSummary]?
 }
 
-/// A step-up the app is waiting on: which methods the server will accept,
-/// the challenge id when it mailed a code, and the way back to whatever
-/// asked. Not `Sendable` — it is a piece of main-actor UI state, and the
-/// continuation it closes over belongs to exactly one request.
+/// A step-up the app is waiting on. Not `Sendable`: main-actor UI state whose
+/// continuation belongs to exactly one request.
 @MainActor
 struct ReauthPrompt: Identifiable {
     let id = UUID()
@@ -425,10 +399,8 @@ struct ReauthPrompt: Identifiable {
 }
 
 extension Locale {
-    /// The language the server should write its mail in, when this phone's
-    /// is one it has copy for. Anything else is left to the server's own
-    /// default — sending `fr` would be refused outright (the field is a
-    /// closed enum), which is a poor reason to fail a sign-in.
+    /// Mail language, only when the server has copy for it (the field is a
+    /// closed enum; an unknown code would fail the sign-in).
     static var preferredLanguageCode: String? {
         let supported: Set<String> = ["en", "de", "uk"]
         for identifier in Locale.preferredLanguages {
@@ -439,18 +411,13 @@ extension Locale {
     }
 }
 
-/// Why the app dropped to the sign-in screen. The wording differs, and
-/// so does what the person should do about it.
+/// Why the app dropped to the sign-in screen.
 enum SessionLostReason: Equatable, Sendable {
-    /// The session ended: idle timeout, an explicit revoke, a server that
-    /// no longer knows the token.
+    /// The session ended: idle timeout, revoke, or token unknown to the server.
     case expired
-    /// A rotated refresh token was presented twice. The server revoked
-    /// every session and denylisted the account's access tokens.
+    /// A rotated refresh token was presented twice; the server revoked every session.
     case securityRevoked
-    /// The gate key is gone: Face ID or Touch ID was re-enrolled, or the
-    /// passcode was removed. Nothing on this phone can read the session
-    /// again, and that is the point of `.biometryCurrentSet`.
+    /// Gate key gone (biometry re-enrolled or passcode removed): `.biometryCurrentSet` by design.
     case biometryChanged
     /// The identity is disabled, or has no workspace left.
     case accountUnavailable(String)
@@ -496,18 +463,15 @@ enum JobStatus: String, Codable, Sendable {
 struct TranscriptionJob: Decodable, Sendable {
     let id: String
     let status: JobStatus
-    /// ISO 639-1 code of the language the recording turned out to be in.
-    /// Set once the job completes; nil while it is still running.
+    /// ISO 639-1 code of the detected language; nil while running.
     let detectedLanguage: String?
     let errorMessage: String?
     let errorKind: String?
-    /// Sprint 29 — speaker re-labelling. All optional: an older server
-    /// sends none of them and the job still decodes.
+    /// Speaker re-labelling fields, all optional (older servers send none).
     /// Bumped by every re-label and undo.
     var diarizationRev: Int? = nil
-    /// nil (never re-labelled) | "queued" | "running" | "complete" | "failed".
-    /// The job's `status` stays `complete` meanwhile: the transcript is
-    /// readable the whole time.
+    /// nil (never re-labelled) | "queued" | "running" | "complete" | "failed";
+    /// the job's `status` stays `complete` meanwhile.
     var diarizationStatus: String? = nil
     var diarizationError: String? = nil
     var diarizationRuns: Int? = nil
@@ -553,8 +517,7 @@ struct TemplateSummary: Decodable, Sendable, Identifiable {
     var status: String?
     var category: String?
 
-    /// The template a bare "new note" starts from: meeting notes, in the
-    /// asked-for language first (`web/src/lib/createBlankNote.ts`).
+    /// The template a bare "new note" starts from: meeting notes, asked-for language first.
     static func defaultTemplate(_ list: [TemplateSummary], language: String = "en") -> TemplateSummary? {
         let live = list.filter { $0.status != "archived" }
         return live.first { $0.code.hasPrefix("meeting_notes") && $0.language == language }
@@ -596,13 +559,8 @@ struct FromTranscriptResponse: Decodable, Sendable {
 
 // MARK: - RFC 9457 problem body
 
-/// RFC 9457 problem body, plus the two things that arrive beside it.
-///
-/// `code` is the member clients branch on (`docs/api/error-codes.md`);
-/// `detail` is for people and may change. `requestId` and `retryAfter`
-/// come from headers rather than the body — they are here because
-/// everything that has to say something useful about a failure needs all
-/// three in one place.
+/// RFC 9457 problem body. `code` is what clients branch on (docs/api/error-codes.md),
+/// `detail` is for people; `requestId`/`retryAfter` come from headers.
 struct Problem: Decodable, Sendable {
     /// The RFC 9457 `type` URI — how a client tells one 422 from another.
     var type: String? = nil
@@ -612,8 +570,7 @@ struct Problem: Decodable, Sendable {
     let code: String?
     /// Extras the auth service attaches: how many tries are left on a code.
     var attemptsLeft: Int?
-    /// Filled from `X-Request-Id`, so an unrecognised failure still gives
-    /// the person something to quote and the logs something to match.
+    /// Filled from `X-Request-Id`.
     var requestId: String?
     /// Filled from `Retry-After`, in seconds.
     var retryAfter: Int?
@@ -628,20 +585,15 @@ enum APIError: LocalizedError {
     case badURL
     case http(status: Int, problem: Problem?)
     case notAuthenticated
-    /// A rotated refresh token was replayed: the server revoked the
-    /// session and every access token behind it.
+    /// A rotated refresh token was replayed; the server revoked the session.
     case sessionRevoked
-    /// The refresh token is on this phone but behind the biometric gate,
-    /// and the gate has not been opened in this launch.
+    /// Refresh token is behind the biometric gate, not yet opened this launch.
     case sessionLocked
-    /// A step-up endpoint wants proof of identity inside the reauth
-    /// window. `AppState` presents the sheet; the caller retries once.
+    /// Step-up wanted: `AppState` presents the sheet; the caller retries once.
     case reauthRequired
     /// The server answered 200 with something this app cannot read.
     case malformedResponse
-    /// The sign-in worked, but the server kept the refresh token itself
-    /// (it answered as if to a browser). There is nothing for this phone
-    /// to store, and a session that cannot be renewed is not one to claim.
+    /// Sign-in worked but the server kept the refresh token (browser-style answer).
     case noNativeSession
 
     var errorDescription: String? {
@@ -681,24 +633,14 @@ enum APIError: LocalizedError {
         return code
     }
 
-    /// `403 email_not_verified` — the account exists but the address has
-    /// not been confirmed yet (BE-0 signs people up through the web app
-    /// and mails them a link). Not a wrong password and not a disabled
-    /// account: the way forward is the mail, so the sign-in screen offers
-    /// to send it again rather than showing "wrong sign-in details".
+    /// `403 email_not_verified` — address not confirmed yet; the sign-in
+    /// screen offers to resend the mail.
     var isEmailNotVerified: Bool { status == 403 && code == "email_not_verified" }
 
-    /// `409 use_password` — the address belongs to a Keycloak account, so
-    /// the emailed code is not that person's way in during the dual-issuer
-    /// period (ADR-0047, BE-3). The sign-in screen shows the password form
-    /// instead; it is a redirection, not a failure, and it discloses only
-    /// what the person just proved they know — their own address.
+    /// `409 use_password` — a Keycloak account; show the password form instead (ADR-0047).
     var isUsePassword: Bool { status == 409 && code == "use_password" }
 
-    /// `409 legacy_session` — switching workspace re-mints an access token
-    /// for another `tid`, and auth-service cannot re-mint a Keycloak token
-    /// without Keycloak's key. Recorded up front in ADR-0047 as the one
-    /// capability `dual` splits by token origin.
+    /// `409 legacy_session` — a Keycloak token cannot be re-minted for another workspace (ADR-0047).
     var isLegacySession: Bool { status == 409 && code == "legacy_session" }
 
     /// `PUT /draft` answers 409 when someone saved a newer version first.
@@ -707,36 +649,23 @@ enum APIError: LocalizedError {
         return false
     }
 
-    /// A read of somebody else's note came without `?purpose=`. The note
-    /// is readable — the caller retries once with a `ReadPurpose` and says
-    /// whose note it is showing.
+    /// A non-author read without `?purpose=`; retry once with a `ReadPurpose`.
     var needsReadPurpose: Bool {
         guard case .http(let status, let problem) = self, status == 422 else { return false }
         return problem?.type == "https://errors.notes-ai/missing-read-purpose"
     }
 
-    /// A permission denial from `libs/auth`'s role gate — `403 deny:
-    /// roles=[…] cannot 'note.read' on 'note'`. It carries no machine
-    /// code, so the prefix of `detail` is the only marker there is.
-    ///
-    /// Worth telling apart from every other 403 because the roles a token
-    /// carries are re-read from the workspace membership on every refresh:
-    /// a token minted before a role was granted keeps denying until it
-    /// rotates, and one refresh is the whole fix.
+    /// Role-gate denial (`403 deny: roles=[…] …`); no machine code, the `detail`
+    /// prefix is the marker. Roles are re-read on refresh, so one refresh fixes it.
     var isRoleDenial: Bool {
         guard case .http(let status, let problem) = self, status == 403 else { return false }
         return problem?.detail?.hasPrefix("deny:") ?? false
     }
 
-    /// The endpoint does not exist on this server — a deployment still
-    /// running the old identity provider, or one that has not been given
-    /// the native password grant (IDX-A4).
+    /// Endpoint missing on this server (old identity provider, no native grant).
     var isNotFound: Bool { status == 404 }
 
-    /// The Keycloak-era login answers 401 with a problem hinting a
-    /// one-time code is needed. Native sign-in says so in the body
-    /// (`status: "mfa_required"`) instead, so this is only reached
-    /// against a deployment that has not cut over yet.
+    /// Keycloak-era 401 hinting a one-time code (native sign-in says `mfa_required` in the body).
     var isMFARequired: Bool {
         guard case .http(let status, let problem) = self, status == 401 else { return false }
         let haystack = [problem?.code, problem?.title, problem?.detail]
@@ -762,8 +691,7 @@ struct RecentCapture: Codable, Identifiable, Equatable, Sendable {
 // MARK: - Notes (note-service) — the document the app opens natively
 
 enum NoteStatus: String, Codable, Sendable {
-    /// `finalized` / `amended` are legacy values a note no longer takes
-    /// (finalize retired, ADR-0051); kept so old rows decode.
+    /// `finalized` / `amended` are legacy (ADR-0051); kept so old rows decode.
     case draft, finalized, amended, cancelled
 
     var label: String {
@@ -818,9 +746,7 @@ struct NoteSection: Codable, Equatable, Sendable {
     var text: String?
     var fieldSpecificMetadata: [String: JSONValue]?
     var transcriptSegmentIds: [String]?
-    /// The heading of a section the template does not name (one the
-    /// engine made from the conversation). nil: no heading — the block
-    /// is read as the note itself. Round-tripped, never set here.
+    /// Heading of an engine-made section; nil = the block is the note itself. Round-tripped only.
     var title: String?
 
     enum CodingKeys: String, CodingKey {
@@ -869,8 +795,7 @@ struct SectionLabel: Decodable, Sendable {
     }
 }
 
-/// The document engine's status for one note (Sprint 33): the Notes
-/// tab's status line, and whether *Generate Summary* is offered.
+/// The document engine's status for one note.
 struct GenerationView: Decodable, Sendable {
     let id: String
     /// queued | running | partial | complete | failed | superseded
@@ -879,19 +804,14 @@ struct GenerationView: Decodable, Sendable {
     let windowsDone: Int?
     /// Why it ended without a document, from a closed vocabulary.
     let errorKind: String?
-    /// How many sections the run wrote; 0 on a finished run means the
-    /// recording yielded nothing the verifier let through.
+    /// Sections the run wrote; 0 on a finished run = nothing passed the verifier.
     let sectionsWritten: Int?
-    /// Q3 — what the recording was taken to be (`meeting`, `interview`,
-    /// `podcast_broadcast`, …) and who decided (`user`, `classifier`,
-    /// `rule`, `template`). Nil before Q3.
+    /// What the recording was taken to be (`meeting`, `interview`, …) and who decided.
     let recordingType: String?
     let recordingTypeSource: String?
-    /// Q2 — the passages the engine left out of the note. Nil or empty
-    /// when nothing was, and on runs made before Q2.
+    /// Passages the engine left out of the note.
     let excludedRanges: [ExcludedRange]?
-    /// The spoken language the run wrote in (`en`/`de`/`uk`), so the
-    /// exclusions are named in it. Nil before Q3.
+    /// The spoken language the run wrote in (`en`/`de`/`uk`).
     let language: String?
 
     var isLive: Bool { status == "queued" || status == "running" }
@@ -918,8 +838,7 @@ struct GenerationView: Decodable, Sendable {
         }
     }
 
-    /// The run ended because nobody agreed to a processor: the note view
-    /// offers the way to Settings › Data & AI beside the sentence.
+    /// Nobody agreed to a processor: the note view links to Settings › Data & AI.
     var needsProcessorAcknowledgement: Bool { errorKind == "processor_unacknowledged" }
 
     static let nothingWrittenText =
@@ -938,10 +857,8 @@ struct GenerationView: Decodable, Sendable {
     }
 }
 
-/// One passage the engine left out of a note (Summary Engine v2, Q2):
-/// background speech, another language, a duplicate. `reason` comes from a
-/// closed vocabulary, but is kept a string so a reason this build does not
-/// know yet still decodes — it is then called "a passage".
+/// One passage the engine left out. `reason` stays a string so an unknown
+/// value still decodes (shown as "a passage").
 struct ExcludedRange: Decodable, Equatable, Sendable {
     let startMs: Int
     let endMs: Int
@@ -954,12 +871,9 @@ struct ExcludedRange: Decodable, Equatable, Sendable {
     }
 }
 
-/// The words for what the engine did with a recording (Q3), as the web
-/// client says them (`web/src/lib/generation.ts`). Pure, so the tests can
-/// pin the wording.
+/// The words for what the engine did with a recording, matching the web client. Pure.
 extension GenerationView {
-    /// What the recording was taken to be. `meeting` (and anything this
-    /// build does not know) has no label: the template name says enough.
+    /// Label for the recording kind; `meeting` and unknown kinds have none.
     static let recordingTypeLabels: [String: String] = [
         "client_call": "Client call",
         "sales_call": "Sales call",
@@ -978,9 +892,7 @@ extension GenerationView {
 
     var recordingTypeLabel: String? { Self.recordingTypeLabel(recordingType) }
 
-    /// Why a passage was left out, in the language that was spoken. The
-    /// API never sends prose; `passage` is the word for a reason this
-    /// build does not know.
+    /// Why a passage was left out, in the spoken language; unknown reason = "passage".
     static let noiseLabels: [String: [String: String]] = [
         "en": [
             "background": "background speech",
@@ -1073,8 +985,7 @@ struct NoteEnvelope: Decodable, Sendable {
     /// "private" or "workspace" (0016).
     let visibility: String?
     let primaryAuthorId: String?
-    /// Only sent on an oversight read (not our note, not shared with us):
-    /// whose note this is, so the screen can say so.
+    /// Only sent on an oversight read: whose note this is.
     let primaryAuthorName: String?
     let content: NoteContent?
     let sectionLabels: [SectionLabel]?
@@ -1093,8 +1004,7 @@ struct NoteEnvelope: Decodable, Sendable {
     }
 }
 
-/// Why someone who is not the note's author is reading it. The server
-/// refuses a non-author read without one and records the value.
+/// Why a non-author is reading a note; the server refuses a read without one.
 enum ReadPurpose: String, Sendable {
     case review, audit, legal, export, collaboration
 }
@@ -1132,9 +1042,9 @@ struct SharingView: Decodable, Sendable {
     let canDelete: Bool
     let sharedWith: [SharedMember]
     let publicLink: PublicLink?
-    /// Every live link, newest first (Sprint 19). Absent on an older server.
+    /// Every live link, newest first. Absent on an older server.
     let links: [LinkView]
-    /// Sprint 23: the workspace's effective sharing rules. Absent on an older server.
+    /// The workspace's effective sharing rules. Absent on an older server.
     let constraints: SharingConstraints?
 
     enum CodingKeys: String, CodingKey {
@@ -1168,9 +1078,7 @@ enum ShareLinkKind: String, Decodable, Sendable {
     case `public`, recipient
 }
 
-/// One share link: the public one or a per-recipient one. Decoded from
-/// `LinkView`; the token is only ever returned to people who may manage
-/// the note.
+/// One share link (public or per-recipient); the token only reaches note managers.
 struct LinkView: Decodable, Sendable, Identifiable {
     let id: String
     let kind: ShareLinkKind
@@ -1186,10 +1094,9 @@ struct LinkView: Decodable, Sendable, Identifiable {
     let firstViewedAt: Date?
     let lastViewedAt: Date?
     let ctaClickedAt: Date?
-    /// Sprint 20: live responses from this link. Absent on an older server.
+    /// Live responses from this link. Absent on an older server.
     let responseCount: Int?
-    /// Sprint 22: the product mailed the link. Raw so an unknown value
-    /// from a newer server decodes rather than failing the whole sheet.
+    /// The product mailed the link. Raw so an unknown value still decodes.
     let deliveryStatusRaw: String?
     let sentAt: Date?
     let sendCount: Int?
@@ -1332,8 +1239,7 @@ struct TemplateDetail: Decodable, Sendable {
         case schemaVersion = "schema_version"
     }
 
-    /// The content a blank note starts with: every section in order, with
-    /// the template's default text (`createBlankNote.ts`).
+    /// Blank-note content: every section in order with the template's default text.
     func blankContent() -> NoteContent {
         let sections = schemaJsonb.sections.sorted { ($0.order ?? 0) < ($1.order ?? 0) }
             .map { NoteSection(sectionKey: $0.id, text: $0.defaultContent ?? "", fieldSpecificMetadata: [:]) }
@@ -1348,8 +1254,7 @@ struct TranscriptSegment: Decodable, Sendable {
     let startMs: Int
     let endMs: Int
     let speaker: String?
-    /// Sprint 30: where this segment sits in the stored artifact — the
-    /// space `TranscriptTurn.segmentIndices` is in. Nil from older servers.
+    /// Index in the stored artifact (the space `TranscriptTurn.segmentIndices` uses). Nil from older servers.
     var artifactIndex: Int? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -1360,23 +1265,17 @@ struct TranscriptSegment: Decodable, Sendable {
     }
 }
 
-/// One speaker turn as structured by asr-service: consecutive segments by
-/// one speaker, broken into paragraphs at pauses and sentence ends.
-/// `speaker` is the neutral label ("SPEAKER_2"); `name` is what to show
-/// for it (a person's naming, else "Speaker 2"). Both nil for speech the
-/// diarizer could not attribute.
+/// One speaker turn. `speaker` is the neutral label ("SPEAKER_2"), `name` what
+/// to show; both nil for unattributed speech.
 struct TranscriptTurn: Decodable, Identifiable, Equatable, Sendable {
     let speaker: String?
     let name: String?
     let startMs: Int
     let endMs: Int
     let paragraphs: [String]
-    /// Sprint 30: the turn's segments in ARTIFACT index space. Opaque —
-    /// sent back as-is to move the turn, never used to index `segments`.
-    /// Nil from servers that cannot move turns.
+    /// Segments in ARTIFACT index space: opaque, sent back as-is, never used to index `segments`.
     var segmentIndices: [Int]? = nil
-    /// Sprint 30: people talked over each other here, or the label was
-    /// smoothed — the attribution is a guess.
+    /// Overlap or smoothed label: the attribution is a guess.
     var uncertain: Bool? = nil
 
     /// Turns are chronological and non-overlapping, so the start is unique.
@@ -1409,39 +1308,29 @@ struct TranscriptResult: Decodable, Sendable {
     let resultRev: Int?
     /// Live speaker edits, application order (latest last).
     let edits: [SpeakerEdit]?
-    /// "high" | "low" | nil (not diarized, or a pre-Sprint-29 result).
+    /// "high" | "low" | nil (not diarized, or an older result).
     var countConfidence: String? = nil
     /// The exact speaker count a person asked for on this labelling.
     var speakersHint: Int? = nil
-    /// Sprint 30: names offered when renaming a speaker (calendar invitees).
+    /// Names offered when renaming a speaker (calendar invitees).
     var nameCandidates: [String]? = nil
-    /// Sprint 31: label → "local" (heard on the recording Mac's microphone)
-    /// or "remote" (came through the call audio). Empty for mono jobs;
-    /// absent from older servers.
+    /// Label → "local" (microphone) or "remote" (call audio). Empty for mono jobs.
     var speakerSides: [String: String]? = nil
-    /// Sprint 31: label → how the name was given ("typed", "picklist",
-    /// "channel", "suggestion", "cleared"). "channel" = the server named
-    /// the only speaker on the microphone after the account owner.
+    /// Label → how the name was given ("typed", "picklist", "channel", "suggestion", "cleared").
     var speakerNameSources: [String: String]? = nil
-    /// Sprint 32: names the server heard people give themselves ("Hi, this
-    /// is Anna"), offered with their evidence. Only sent while the server's
-    /// suggestion switch is on — absent is the normal case.
+    /// Names the server heard people give themselves, with evidence. Usually absent.
     var nameSuggestions: [NameSuggestion]? = nil
-    /// Sprint 32: labelled by an older engine and the audio is still there,
-    /// so a re-label is worth offering. Absent from older servers.
+    /// Labelled by an older engine with audio still there: a re-label is worth offering.
     var relabelAvailable: Bool? = nil
-    /// Sprint F1: how much of the speech made it into the transcript, and
-    /// the stretches that did not. Absent from older servers and results.
+    /// How much speech made it into the transcript, and the stretches that did not.
     var coverage: TranscriptCoverage? = nil
-    /// Sprint F1: the capture timing the recording app sent.
+    /// The capture timing the recording app sent.
     var capture: CaptureInfo? = nil
-    /// Sprint TQ2: music / silence / noise stretches (≥ 5 s) the worker
-    /// marked instead of transcribing. Absent from older servers.
+    /// Music / silence / noise stretches (≥ 5 s) marked instead of transcribed.
     var noise: [TranscriptNoise]? = nil
     /// The language the transcript is in; names the markers.
     var language: String? = nil
-    /// Sprint TQ3: spellings the server unified (applied in the turns) or
-    /// offers for review. Absent from older servers.
+    /// Spellings the server unified (applied in the turns) or offers for review.
     var entityCorrections: [EntityCorrection]? = nil
     var correctionsRev: Int? = nil
 
@@ -1492,10 +1381,7 @@ struct SpeakerEdit: Decodable, Sendable, Equatable {
     }
 }
 
-/// Sprint 32 — one name suggestion: the name (calendar spelling) the
-/// server heard for `label`, and the words it heard it in, shown before
-/// anything is accepted. Everything but the pair is optional so a server
-/// that trims a field never costs the whole transcript.
+/// One name suggestion for `label` with its evidence; all but the pair optional.
 struct NameSuggestion: Decodable, Equatable, Hashable, Identifiable, Sendable {
     let label: String
     let name: String
@@ -1547,8 +1433,7 @@ struct SpeakerEditResult: Decodable, Sendable {
 /// Why a speaker merge or undo was refused, in words a person can act on.
 enum SpeakerEditError: LocalizedError {
     case notComplete, unknownLabel, notLatest
-    /// Sprint 30: the result changed since it was read (another device,
-    /// the web app). The caller reloads and says so.
+    /// The result changed since it was read; the caller reloads and says so.
     case staleResultRev
     case badSegmentIndex, tooManySegments, tooManySpeakers
     case relabelInProgress
@@ -1636,15 +1521,14 @@ struct SpeakerReassignResult: Decodable, Sendable {
     }
 }
 
-/// Sprint 30 — how a speaker's new name was chosen (a metric only; the
-/// server does not store it).
+/// How a speaker's new name was chosen (a metric only).
 enum SpeakerNameSource: String, Encodable, Sendable {
     case picklist, typed
-    /// Sprint 32: an accepted name suggestion.
+    /// An accepted name suggestion.
     case suggestion
 }
 
-/// Sprint 31: which side of a call a speaker was heard on.
+/// Which side of a call a speaker was heard on.
 enum SpeakerSide: String, Sendable {
     case local, remote
 
@@ -1652,25 +1536,21 @@ enum SpeakerSide: String, Sendable {
     var accessibilityLabel: String { self == .local ? "On your microphone" : "On the call audio" }
 }
 
-/// Sprint 31 roster markers: the side glyph, and the "from your
-/// microphone" marker on a name the server gave from the channel split.
+/// Roster markers: the side glyph, and the "from your microphone" marker.
 enum SpeakerChannelMarkers {
     static let channelSource = "channel"
     static let fromMicrophone = "· from your microphone"
     static let removeLabel = "Remove this name"
-    /// Sprint 32: the marker on a name that came from an accepted
-    /// suggestion, until the person edits it.
+    /// Marker on a name from an accepted suggestion, until edited.
     static let suggestionSource = "suggestion"
     static let suggested = "suggested"
 
-    /// The side glyph for `label`; nil for mono jobs, unknown labels, or a
-    /// value this build does not know.
+    /// The side glyph for `label`; nil for mono jobs or unknown values.
     static func side(of label: String, in sides: [String: String]) -> SpeakerSide? {
         sides[label].flatMap(SpeakerSide.init(rawValue:))
     }
 
-    /// Whether `label`'s name came from the channel split (and so gets the
-    /// marker and the ✕ that clears it).
+    /// Whether `label`'s name came from the channel split.
     static func isChannelNamed(_ label: String, sources: [String: String]) -> Bool {
         sources[label] == channelSource
     }
@@ -1680,9 +1560,7 @@ enum SpeakerChannelMarkers {
         sources[label] == suggestionSource
     }
 
-    /// `speaker_name_sources` after a successful rename of `label`: the
-    /// source sent, or "cleared" when the name was removed — so the marker
-    /// never outlives the name it described.
+    /// `speaker_name_sources` after a rename of `label` ("cleared" when removed).
     static func sources(_ sources: [String: String], afterRenaming label: String,
                         sent: SpeakerNameSource?) -> [String: String] {
         var updated = sources
@@ -1763,8 +1641,7 @@ let unknownSpeakerName = "Unknown speaker"
 
 // MARK: - Ask this note (POST /v1/notes/{id}/ask)
 
-/// One line of the conversation under a note. The client keeps the thread;
-/// the server gets it back as context with every question.
+/// One line of the conversation under a note; the client keeps the thread.
 struct AskTurn: Codable, Equatable, Sendable {
     enum Role: String, Codable, Sendable { case user, assistant }
     let role: Role
@@ -1813,10 +1690,9 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     let status: NoteStatus?
     let snippet: String
     let updatedAt: Date
-    /// Who can open it (0016). Nil from a server that predates the badge.
-    /// Mutable so a change made from the list shows without a reload.
+    /// Who can open it. Nil from an older server; mutable so list changes show without reload.
     var access: NoteAccess?
-    /// Sprint 20 — live recipient disputes, for the "1 disputed" marker.
+    /// Live recipient disputes, for the "1 disputed" marker.
     var openDisputes: Int = 0
 
     var id: String { noteId }
@@ -1849,8 +1725,7 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     }
 }
 
-/// Who can open a note — what the list's pill says, and what its menu
-/// changes.
+/// Who can open a note — the list's pill and its menu.
 struct NoteAccess: Equatable, Sendable {
     /// "private" or "workspace".
     var visibility: String
@@ -1870,9 +1745,7 @@ struct NoteAccess: Equatable, Sendable {
 
     var isWorkspace: Bool { visibility == "workspace" }
 
-    /// A live public link: the pill is tinted and carries a globe, but the
-    /// word stays the workspace visibility — the two are separate facts,
-    /// and "Public" next to a checked "Private" read as a contradiction.
+    /// A live public link tints the pill; the word stays the workspace visibility.
     var isPublic: Bool { hasPublicLink }
 
     var label: String {
@@ -1916,9 +1789,7 @@ struct SearchResponse: Decodable, Sendable {
 
 // MARK: - Spaces (note-service, 0021)
 
-/// A folder for notes — the user's own, the same on every device. The
-/// server keeps the list and which note is filed where; `noteIds` are
-/// the notes this user put in it.
+/// A folder for notes, kept server-side; `noteIds` are this user's filings.
 struct Space: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     var name: String
@@ -1936,8 +1807,7 @@ struct SpacesResponse: Decodable, Sendable {
     let spaces: [Space]
 }
 
-/// The pre-0021 shape, as this device kept it in UserDefaults; read once
-/// to move those spaces to the server, then forgotten.
+/// The pre-0021 UserDefaults shape; read once to migrate spaces to the server.
 struct LegacySpace: Codable, Sendable {
     var id: String
     var name: String
@@ -1956,9 +1826,7 @@ enum Selection: Hashable {
 
 // MARK: - Calendar connections (note-service, 0019)
 
-/// One calendar connected on the server — a Google account (`google`) or
-/// a calendar link (`ics`, a private iCal address; 0020). Shared by every
-/// client: connect once in the web app or here, the events show up in both.
+/// One calendar connected on the server: `google` account or `ics` link. Shared by every client.
 struct CalendarConnection: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let provider: String
@@ -2041,9 +1909,7 @@ struct UpcomingEvent: Decodable, Identifiable, Equatable, Sendable {
     let attendees: [String]
     let organizer: String?
     let responseStatus: String?
-    /// Sprint 34 — stable across the copies an invite makes in several
-    /// calendars, and the agenda the server read out of its description
-    /// (the description itself never leaves the server).
+    /// Stable across an invite's copies; the agenda the server read from the description.
     let icalUid: String
     let agendaLines: [String]
 
@@ -2095,8 +1961,7 @@ enum ResponseKind: String, Decodable, Sendable {
     case confirm, done, dispute, flag
 }
 
-/// What a recipient did on the shared page. `comment` is theirs and is
-/// only ever shown as text.
+/// What a recipient did on the shared page; `comment` is only ever shown as text.
 struct ItemResponse: Decodable, Sendable, Identifiable {
     let id: String
     let linkId: String
@@ -2162,9 +2027,7 @@ struct ActionItem: Decodable, Sendable, Identifiable {
 
 // MARK: - Sharing constraints (Sprint 23)
 
-/// What the workspace admin allows. Read from `GET /v1/notes/sharing/constraints`
-/// and carried on every `SharingView`; the clients hide what the server
-/// would refuse.
+/// What the workspace admin allows (`GET /v1/notes/sharing/constraints`); clients hide what the server would refuse.
 struct SharingConstraints: Decodable, Sendable, Equatable {
     let externalLinksEnabled: Bool
     let publicLinksEnabled: Bool
@@ -2188,9 +2051,7 @@ struct SharingConstraints: Decodable, Sendable, Equatable {
 
 // MARK: - Transcript-shaped text
 
-/// "Anna: we ship Friday" — a paragraph that opens with a short speaker
-/// label. The same rule note-service and the web use, so a section reads
-/// as the transcript on every surface or on none.
+/// "Anna: we ship Friday" — a paragraph opening with a speaker label; same rule as note-service and the web.
 enum TranscriptText {
     struct Turn: Identifiable, Equatable {
         let id: Int
@@ -2236,8 +2097,7 @@ enum TranscriptText {
     }
 }
 
-/// What one upload may be (`GET /asr/limits`), read before a recording
-/// starts so the app can warn before the cap rather than fail after it.
+/// What one upload may be (`GET /asr/limits`), read before a recording starts.
 struct AsrLimits: Decodable, Sendable {
     let maxDurationSeconds: Int
     let maxUploadMb: Int
@@ -2250,21 +2110,17 @@ struct AsrLimits: Decodable, Sendable {
 
 // MARK: - The note that exists from the first second (Sprint 34, ADR-0055)
 
-/// What a capture is doing right now. It lives on `note_meetings`, not on
-/// the note's status — a note is a draft until it is cancelled (ADR-0051).
+/// What a capture is doing right now (on `note_meetings`, not the note's status; ADR-0051).
 enum MeetingState: String, Codable, Sendable {
     case recording, uploading, transcribing, generating, ready
     case noAudio = "no_audio"
     case failed
 
-    /// Whether the recording still has to reach the server. The sweeper
-    /// reclaims these after 12 hours; a client that is still alive should
-    /// not leave one behind.
+    /// Recording still has to reach the server; the sweeper reclaims these after 12 h.
     var isPreUpload: Bool { self == .recording || self == .uploading }
 }
 
-/// What kind of meeting this is — picks the template family the note is
-/// written into. `auto` is the default and is always right enough.
+/// Meeting kind — picks the template family. `auto` is the default.
 enum MeetingType: String, Codable, CaseIterable, Sendable {
     case auto, client, team, sales
     case oneOnOne = "one_on_one"
@@ -2282,12 +2138,8 @@ enum MeetingType: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// What the invite knew, as `POST /v1/notes/meeting` takes it.
-///
-/// `description` is only ever sent for an EventKit event, whose notes field
-/// the client has but the server has never seen; the server reads the
-/// agenda out of it and discards the rest. For a server-owned calendar the
-/// agenda arrives already extracted on `/v1/calendar/events`.
+/// What the invite knew, as `POST /v1/notes/meeting` takes it. `description`
+/// is only sent for an EventKit event (the server extracts the agenda).
 struct MeetingCalendarContext: Codable, Equatable, Sendable {
     var source: String
     var title: String?
@@ -2310,8 +2162,7 @@ struct MeetingCalendarContext: Codable, Equatable, Sendable {
 struct StartMeetingRequest: Encodable, Sendable {
     let clientCaptureId: String
     let title: String?
-    /// ISO-8601, explicitly: the shared `JSONEncoder` has no date strategy
-    /// and a Unix timestamp on the wire is a contract nobody can read.
+    /// ISO-8601 explicitly: the shared `JSONEncoder` has no date strategy.
     let startedAt: String
     let language: String?
     let meetingType: String
@@ -2339,8 +2190,7 @@ struct StartMeetingResponse: Decodable, Sendable {
     }
 }
 
-/// `GET /v1/notes/{id}/meeting` — what a second device needs to show the
-/// right status and to finish what the first one started.
+/// `GET /v1/notes/{id}/meeting` — what a second device needs to continue a capture.
 struct MeetingInfo: Decodable, Sendable {
     let state: MeetingState
     let asrJobId: String?
@@ -2379,12 +2229,8 @@ struct UserLineTime: Codable, Equatable, Sendable {
 
 // MARK: - The workspace glossary (Sprint 35)
 
-/// A name, company, product or term this workspace spells a particular way.
-///
-/// The point of the table is that a correction is made once. You fix "Jon
-/// Meyer" to "John Mayer", the workspace remembers it, and the transcriber
-/// is told the spelling before the next recording instead of guessing the
-/// same way again.
+/// A name, company, product or term this workspace spells a particular way;
+/// the transcriber is told it before the next recording.
 struct GlossaryTerm: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let term: String
@@ -2394,9 +2240,7 @@ struct GlossaryTerm: Decodable, Identifiable, Equatable, Sendable {
     let createdAt: Date
     /// Whether this person may remove it: its creator, or an admin.
     let canDelete: Bool
-    /// Sprint I2 — whether the server still sends it to the transcriber.
-    /// False for a role label ("Moderator II") that got in before the
-    /// rule existed: kept so it can be seen and removed, never sent.
+    /// Whether the server still sends it to the transcriber (false for a legacy role label).
     let inHint: Bool
     /// The note it was remembered from, when it came from a correction.
     let sourceNoteId: String?
@@ -2437,8 +2281,7 @@ enum GlossaryKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// `GET /v1/glossary/hint` — the terms as the capture form's
-/// `vocabulary_hint`, ready to send with the next upload.
+/// `GET /v1/glossary/hint` — the terms as the capture form's `vocabulary_hint`.
 struct GlossaryHint: Decodable, Equatable, Sendable {
     let hint: String
     let terms: Int
@@ -2448,7 +2291,7 @@ struct RememberTermRequest: Encodable, Sendable {
     let term: String
     let kind: String
     let heardAs: [String]
-    /// The note the correction was made in, when there is one (Sprint I2).
+    /// The note the correction was made in, when there is one.
     var noteId: String? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -2458,20 +2301,11 @@ struct RememberTermRequest: Encodable, Sendable {
     }
 }
 
-/// Whether a rename is worth offering to remember, and what the old
-/// spelling should be recorded as.
-///
-/// Only a real correction counts: a name typed over a placeholder or over
-/// a different name. A name cleared back to "Speaker 2", or one that only
-/// changed case or spacing, teaches nothing — and an offer that appears
-/// when nothing was learned trains people to dismiss it.
+/// Whether a rename is worth offering to remember, and the old spelling to
+/// record. Only a real correction counts (not a clear, case or spacing change).
 enum RememberableName {
-    /// Characters a term may not contain — the same set the server
-    /// refuses. Written as code-point RANGES rather than as a literal
-    /// character class: half of them are invisible, and source that
-    /// contains a bidi override in order to reject bidi overrides is
-    /// source nobody can review.
-    ///
+    /// Characters a term may not contain (same set the server refuses), as
+    /// code-point ranges because half of them are invisible:
     ///   0000–001F, 007F–009F  C0 / C1 controls
     ///   200B–200F             zero-width space, joiners, LRM/RLM
     ///   2028–202E             line/paragraph separators, bidi embedding
@@ -2480,8 +2314,7 @@ enum RememberableName {
         0x0000...0x001F, 0x007F...0x009F, 0x200B...0x200F, 0x2028...0x202E, 0x2066...0x2069,
     ]
 
-    /// Whitespace collapsed, exactly as the server stores it — so a
-    /// rename that only changes the spacing compares as no change.
+    /// Whitespace collapsed, exactly as the server stores it.
     static func normalised(_ name: String) -> String {
         name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
@@ -2495,13 +2328,9 @@ enum RememberableName {
 
     // MARK: Role labels are not vocabulary (Sprint I2)
 
-    /// Words a person uses to label a voice rather than name it, in the
-    /// three languages the apps speak. The one list every client and the
-    /// server share: `tests/fixtures/glossary/role_words.json`, and the
-    /// test asserts this set equals it. A term made only of these (and
-    /// ordinals) is "Moderator II", not a name — and once it reached the
-    /// glossary it was read to the transcriber before every recording,
-    /// which echoed it into a transcript (the 2026-09-25 incident).
+    /// Role words (not names) in the three app languages. Must equal
+    /// `tests/fixtures/glossary/role_words.json` (a test asserts it); a role
+    /// label in the glossary gets echoed into transcripts.
     static let roleWords: Set<String> = [
         // en
         "speaker", "moderator", "host", "narrator", "guest", "interviewer", "interviewee",
@@ -2520,12 +2349,8 @@ enum RememberableName {
         "drei", "один", "два", "три", "first", "second", "erste", "zweite", "перший", "другий",
     ]
 
-    /// Whether a term belongs in the transcriber's vocabulary — the same
-    /// rule as the server's `is_vocabulary`.
-    ///
-    /// No: every token is a role word or an ordinal; a person with no
-    /// capital letter anywhere ("moderatorin"). Yes: anything else — the
-    /// rule only has to keep labels out, not judge names.
+    /// Same rule as the server's `is_vocabulary`: no when every token is a
+    /// role word or ordinal, or a person with no capital letter; yes otherwise.
     static func isVocabulary(_ term: String, kind: GlossaryKind) -> Bool {
         let tokens = term.split { !($0.isLetter || $0.isNumber) }.map { $0.lowercased() }
         guard !tokens.isEmpty else { return false }
@@ -2571,9 +2396,7 @@ struct AIProcessor: Decodable, Identifiable, Equatable, Sendable {
     var id: String { "\(name)/\(region)" }
 }
 
-/// `GET /v1/ai/settings`. Read-only here on purpose: changing who
-/// processes a workspace's meetings is an admin decision with an
-/// acknowledgement dialog, and it belongs on one surface — the web page.
+/// `GET /v1/ai/settings`. Read-only here on purpose: changing it is a web-only admin action.
 struct AISettings: Decodable, Equatable, Sendable {
     let provider: String
     let tier: String
@@ -2602,8 +2425,7 @@ struct AISettings: Decodable, Equatable, Sendable {
 
 // MARK: - Workspace membership (auth-service /tenants)
 
-/// The workspace the session is signed into (`GET /tenants/current`).
-/// Only the fields the invite sheet needs are decoded.
+/// The workspace the session is signed into (`GET /tenants/current`); invite-sheet fields only.
 struct Tenant: Decodable, Sendable {
     let id: String
     let name: String
@@ -2664,8 +2486,7 @@ struct ClientSection: Decodable, Sendable, Identifiable {
     }
 }
 
-/// Exactly what an external surface renders — the preview, the shared
-/// page and the client PDF call the same builder, so they cannot differ.
+/// Exactly what an external surface renders; preview, shared page and PDF share this builder.
 struct ClientVersion: Decodable, Sendable {
     let available: Bool
     let reason: String?
@@ -2709,9 +2530,7 @@ struct CarriedItem: Decodable, Sendable, Identifiable, Equatable {
     let text: String
     let ownerLabel: String?
     let dueText: String?
-    /// `done_mentioned` is the recording saying so, with a quote;
-    /// `done_marked` is the author ticking it. Only the engine may claim
-    /// the first.
+    /// `done_mentioned` (engine, with a quote) vs `done_marked` (the author).
     var state: String
     let doneQuote: String?
     let doneSpeaker: String?
@@ -2747,8 +2566,7 @@ struct CarriedView: Decodable, Sendable, Equatable {
         items = try c.decodeIfPresent([CarriedItem].self, forKey: .items) ?? []
         fromNoteId = try c.decodeIfPresent(String.self, forKey: .fromNoteId)
         fromNoteCode = try c.decodeIfPresent(String.self, forKey: .fromNoteCode)
-        // The date arrives as a day ("2026-09-12") or a full timestamp;
-        // either way it only labels the heading.
+        // A day ("2026-09-12") or a full timestamp; only labels the heading.
         if let day = try? c.decodeIfPresent(Date.self, forKey: .fromDate) {
             fromDate = day
         } else if let raw = try? c.decodeIfPresent(String.self, forKey: .fromDate) {
@@ -2768,9 +2586,7 @@ struct CarriedStateRequest: Encodable, Sendable {
 
 // MARK: - The rows behind a generated note (Summary Engine v2, Q5)
 
-/// One line the engine wrote, with the words that prove it. Every field
-/// the older rows lack decodes as nil, so a note written before Q5 still
-/// opens — its lines simply have no evidence to show.
+/// One line the engine wrote, with its evidence; older rows decode with nil evidence.
 struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
     struct Correction: Decodable, Sendable, Equatable {
         let surface: String
@@ -2790,7 +2606,7 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
     let speakerLabel: String?
     let speakerName: String?
     let placement: String
-    /// Q5: the facts this line rests on (their item keys).
+    /// The facts this line rests on (their item keys).
     let cites: [String]?
     /// fact | estimate | prediction | opinion | proposal | allegation
     let certainty: String?
@@ -2835,8 +2651,7 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
         corrections = try c.decodeIfPresent([Correction].self, forKey: .corrections)
     }
 
-    /// What a line's certainty is called on its chip. A plain fact has
-    /// no chip (`EvidencePopover.tsx` CERTAINTY_LABELS).
+    /// What a line's certainty is called on its chip; a plain fact has none.
     static let certaintyLabels: [String: String] = [
         "prediction": "Forecast",
         "estimate": "Estimate",
@@ -2858,8 +2673,7 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
     }
 }
 
-/// `PATCH /v1/notes/{id}/items/by-key/{key}` — accept or reject a name
-/// the engine respelled (Q5).
+/// `PATCH /v1/notes/{id}/items/by-key/{key}` — accept or reject a respelled name.
 struct NameCorrectionRequest: Encodable, Sendable {
     let expectedVersion: Int
     let action: String
@@ -2975,7 +2789,7 @@ struct NotificationItem: Decodable, Sendable, Identifiable, Equatable {
     /// The note this is about, when it is about one.
     var noteId: String? {
         if resourceType == "note", let resourceId { return resourceId }
-        // "/notes/<id>" — the web's route, which the app can open too.
+        // "/notes/<id>" — the web's route.
         if let range = deepLink.range(of: "/notes/") {
             let rest = deepLink[range.upperBound...]
             let id = rest.split(whereSeparator: { "/?#".contains($0) }).first.map(String.init) ?? ""
@@ -3011,9 +2825,7 @@ enum ProductLinks {
 }
 
 
-/// Sprint TQ2: a stretch with no speech, marked instead of transcribed —
-/// shown as its own line ("[Musik 00:12–00:41]"), never as a turn. A kind
-/// this build does not know is shown as noise (the field is additive).
+/// A no-speech stretch shown as its own line ("[Musik 00:12–00:41]"); an unknown kind shows as noise.
 struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
     let startMs: Int
     let endMs: Int
@@ -3048,8 +2860,7 @@ struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    /// The markers shown before `index` in `turns` (index == count: after
-    /// the last turn). Turns keep their positions.
+    /// Markers shown before `index` in `turns` (index == count: after the last turn).
     static func before(_ index: Int, turns: [TranscriptTurn], noise: [TranscriptNoise]) -> [TranscriptNoise] {
         guard !noise.isEmpty else { return [] }
         let lo = index == 0 ? Int.min : turns[index - 1].startMs
@@ -3059,8 +2870,7 @@ struct TranscriptNoise: Decodable, Sendable, Equatable, Identifiable {
 }
 
 
-/// Sprint TQ3: one name, one spelling — a correction the server's overlay
-/// applied (`accepted`) or offers (`proposed`). The recording never changes.
+/// One spelling correction the server's overlay applied (`accepted`) or offers (`proposed`).
 struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
     let id: String
     let fromForms: [String]
@@ -3080,8 +2890,7 @@ struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
     }
 
     var isApplied: Bool { status == "accepted" }
-    /// Still asks for a look: not rejected, and nobody has decided it yet.
-    /// A spelling the user accepted leaves the sheet and the banner.
+    /// Not rejected and not yet decided.
     var needsReview: Bool { status != "rejected" && decided != true }
 
     var sourceLabel: String {
@@ -3104,8 +2913,7 @@ struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
         words[language ?? ""] ?? words["en"]!
     }
 
-    /// "3 Schreibweisen vereinheitlicht · 1 Schreibweisen zu prüfen" and the
-    /// action, or nil when there is nothing to say. Counts variant spellings.
+    /// "3 Schreibweisen vereinheitlicht · 1 Schreibweisen zu prüfen", or nil. Counts variant spellings.
     static func banner(_ corrections: [EntityCorrection], language: String?) -> (text: String, action: String)? {
         let live = corrections.filter(\.needsReview)
         guard !live.isEmpty else { return nil }

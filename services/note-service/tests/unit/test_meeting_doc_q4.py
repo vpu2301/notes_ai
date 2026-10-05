@@ -1,4 +1,4 @@
-"""Names, attribution, coverage (Summary Engine v2, Q4).
+"""Names, attribution, coverage.
 
 Names the workspace knows come out right — in the line, never in the
 quote; every opinion or forecast says whose it is; salient facts are kept
@@ -46,7 +46,7 @@ def _verify(facts: list[schema.Fact], window: windows.Window, **kw: Any) -> list
     return verify.verify_facts(facts, window=window, meeting_date=DAY, **kw)
 
 
-# ── T1/T2: names the workspace knows ────────────────────────────────
+# ── names the workspace knows ───────────────────────────────────────
 
 
 def test_a_calendar_attendee_is_accepted_as_owner() -> None:
@@ -125,7 +125,7 @@ def test_similarity_is_pinned() -> None:
     assert entities.similarity("Uschmanow", "Usmanow") == 0.875
 
 
-# ── T3: the model tier ──────────────────────────────────────────────
+# ── the model tier ──────────────────────────────────────────────
 
 
 def _named_facts() -> list[VerifiedFact]:
@@ -199,7 +199,7 @@ def test_a_failed_call_corrects_nothing_and_a_switched_off_tier_calls_nothing() 
     assert provider.calls == []
 
 
-# ── T4: attribution ─────────────────────────────────────────────────
+# ── attribution ─────────────────────────────────────────────────
 
 
 def test_a_speakers_own_forecast_is_theirs_and_says_so() -> None:
@@ -319,7 +319,7 @@ def test_a_summary_sentence_that_drops_the_hedge_is_dropped() -> None:
     assert gate.reason("Die Kosten steigen auf geschätzt 3.000 Euro.", [fact], claims=True) is None
 
 
-# ── T5: salience and topics ─────────────────────────────────────────
+# ── salience and topics ─────────────────────────────────────────
 
 
 def _kp(text: str, start: int, **kw: Any) -> VerifiedFact:
@@ -343,7 +343,7 @@ def test_an_uncited_salient_fact_joins_the_nearest_topic() -> None:
     ]
     gate = pipeline._Gate()
     pipeline._append_salient(topics, [*facts, salient], gate)
-    # F2: no sub-points. SQ2: placed in recording order (05:05 is between 05:00 and 05:10).
+    # No sub-points; placed in recording order (05:05 is between 05:00 and 05:10).
     assert topics[1][1][1] == (salient.text, [salient.item_key], [])
     assert gate.salient_appended == 1
     assert salient.salient and not facts[0].salient
@@ -356,7 +356,7 @@ def test_a_plain_fact_is_never_patched() -> None:
     )
 
 
-# ── T1: the worker's names, per tenant ──────────────────────────────
+# ── the worker's names, per tenant ──────────────────────────────
 
 
 def test_the_glossary_is_read_inside_the_generations_own_tenant(
@@ -419,7 +419,7 @@ def test_a_glossary_that_cannot_be_read_costs_only_the_glossary(
 
 
 def test_a_window_answered_with_line_numbers_is_asked_again() -> None:
-    """Found on the Q4 eval: the 4B model answered quote="[0]" for every
+    """Found on the eval: the 4B model answered quote="[0]" for every
     fact of a voice memo, and the note came out empty."""
     from note_service.domain.meeting_doc import prompts
 

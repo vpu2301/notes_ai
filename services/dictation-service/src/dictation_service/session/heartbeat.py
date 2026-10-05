@@ -1,13 +1,6 @@
-"""Application-level heartbeat + token-expiry watchdog.
+"""Application-level heartbeat + idle/token-expiry watchdogs.
 
-Both run as background tasks attached to each session. They emit server
-messages (heartbeat, token_expiring) and tear the session down when the
-client goes silent for ``ws_idle_timeout_s`` or when the JWT expires
-without a refresh.
-
-WS protocol-level ping/pong is intentionally NOT relied upon: corporate
-proxies buffer pong frames in ways that mask real TCP failures. The
-app-level heartbeat sees the latency the user sees.
+WS ping/pong is deliberately not relied upon: proxies buffer pong frames and mask TCP failures.
 """
 
 from __future__ import annotations
@@ -25,10 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 async def heartbeat_loop(ctx: SessionContext) -> None:
-    """Emit a server heartbeat every ``ws_heartbeat_interval_s``.
-
-    Exits when the WS is gone (reconnect path takes over).
-    """
+    """Emit a server heartbeat every ``ws_heartbeat_interval_s``; exits when the WS is gone."""
     interval = settings.ws_heartbeat_interval_s
     while ctx.ws is not None:
         try:
@@ -57,11 +47,7 @@ async def idle_watchdog(
     *,
     on_idle: Callable[[SessionContext], Awaitable[None]],
 ) -> None:
-    """Close the WS if no client traffic for ``ws_idle_timeout_s``.
-
-    ``on_idle`` is an async callable invoked when the watchdog fires;
-    typically it transitions the session to ``reconnecting``.
-    """
+    """Call ``on_idle`` and stop if no client traffic for ``ws_idle_timeout_s``."""
     timeout = settings.ws_idle_timeout_s
     while ctx.ws is not None:
         elapsed = time.monotonic() - ctx.last_active_at
@@ -89,26 +75,19 @@ async def idle_watchdog(
 
 
 async def token_expiry_watchdog(ctx: SessionContext) -> None:
-    """Emit `token_expiring` at T-60s, terminate session on expiry.
-
-    The session loop catches the `refresh_token` message and replaces
-    ``ctx.token_exp_ts``; the watchdog re-reads it on each pass.
-    """
+    """Emit `token_expiring` in the warn window; ``ctx.token_exp_ts`` is re-read each pass."""
     warn_before = settings.session_token_expiry_warn_seconds
     while ctx.ws is not None and ctx.token_exp_ts is not None:
         now = time.time()
         remaining = ctx.token_exp_ts - now
         if remaining <= 0:
-            # Token already expired — caller transitions to failed.
             return
         if remaining <= warn_before:
             try:
                 await ctx.ws.send_text(encode_server(TokenExpiring(expires_in_s=int(remaining))))
             except Exception:
                 return
-            # Re-emit cadence: every 15 s while in the warn window so a
-            # client that missed the first notice gets a second chance.
-            sleep_for = 15.0
+            sleep_for = 15.0  # re-emit while in the warn window
         else:
             sleep_for = remaining - warn_before
         try:

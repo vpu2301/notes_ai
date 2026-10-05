@@ -6,9 +6,7 @@ model:
   repository: openai/whisper-large-v3-turbo
   revision: 41f01f3fe87f28c78e2fbf8b568835947dd65ed9   # docs/models/PINS.md (fetched 2026-09-05)
   framework: pytorch
-  # Served behind an OpenAI-compatible /v1/audio/transcriptions handler that
-  # returns verbose_json with words[] (the asr_http probe rejects anything
-  # else at startup — ADR-0037 word timings are a contract).
+  # OpenAI-compatible /v1/audio/transcriptions with words[] (ADR-0037 contract).
   image:
     custom:
       url: ghcr.io/speaches-ai/speaches:0.8.2-cuda   # faster-whisper server, OpenAI route, word timestamps

@@ -1,4 +1,4 @@
-"""Gold format v2 and its validator (Summary Engine v2, Q1 T2)."""
+"""Gold format v2 and its validator."""
 
 from __future__ import annotations
 

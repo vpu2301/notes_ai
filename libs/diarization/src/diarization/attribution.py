@@ -1,13 +1,4 @@
-"""Speaker attribution by majority overlap (hoisted from dictation-service).
-
-Pure functions: given the diarized speaker timeline and a word's (or
-transcript segment's) start/end, decide which speaker uttered it. UNKNOWN
-when the overlap evidence is ambiguous; ``None`` when the audio has not
-been diarized yet (streaming: labels may trail text by one window — the
-FE renders text immediately and colours it when the label lands; offline
-callers pass a frontier past the end of the recording so this never
-happens).
-"""
+"""Speaker attribution by majority overlap: UNKNOWN when ambiguous, ``None`` when not yet diarized (streaming only)."""
 
 from __future__ import annotations
 
@@ -28,12 +19,9 @@ class SpeakerSegment:
 
 @dataclass(frozen=True)
 class AttributionPolicy:
-    # A word must be covered by diarized speech for at least this share
-    # of its duration to be attributed at all (else: UNKNOWN — spoken
-    # where the diarizer heard no confident speech).
+    # Minimum diarized coverage of a word's duration to attribute it at all.
     min_coverage: float = 0.30
-    # The winning speaker must own at least this share of the covered
-    # overlap; a 50/50 straddle across a turn boundary yields UNKNOWN.
+    # Minimum share of the covered overlap the winner must own (a 50/50 straddle → UNKNOWN).
     majority_share: float = 0.65
 
 
@@ -48,14 +36,8 @@ def attribute_word(
     diarized_until_ms: int,
     policy: AttributionPolicy = DEFAULT_POLICY,
 ) -> tuple[str | None, float | None]:
-    """Return ``(speaker, confidence)``.
-
-    ``(None, None)``      — word extends past the diarized frontier: not yet.
-    ``("UNKNOWN", 0.0)``  — diarized but ambiguous: never a guess.
-    ``("S1"|"S2", conf)`` — majority-overlap winner; conf is the
-                            overlap-weighted mean segment confidence
-                            scaled by the winner's overlap share.
-    """
+    """``(None, None)`` past the diarized frontier; ``("UNKNOWN", 0.0)`` when ambiguous; else the majority winner
+    with overlap-weighted mean confidence scaled by its share."""
     if end_ms > diarized_until_ms:
         return None, None
     duration = max(1, end_ms - start_ms)

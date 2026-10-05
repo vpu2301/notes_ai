@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 29 — the speaker-count hint on capture, "Wrong number of
-/// speakers?" and the low-confidence banner.
+/// The speaker-count hint on capture, "Wrong number of speakers?" and the low-confidence banner.
 final class SpeakerCountTests: XCTestCase {
     private var directory: URL!
 

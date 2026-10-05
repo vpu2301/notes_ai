@@ -1,20 +1,10 @@
-"""Speaker-count accuracy + DER/JER of the batch diarizer on the speaker gold set.
+"""Speaker-count accuracy + DER/JER of the batch diarizer on the speaker gold set,
+through the production code path (not HTTP).
 
     make der-eval ENGINE=legacy SPLIT=test
-    uv run --with 'pyannote.metrics>=3.2,<4' python scripts/eval/run_der.py \
-        --engine 'legacy:{"centroid_merge_threshold": 0.5}' --split dev
 
-Runs the production code path (``diarization.embed_chunks`` +
-``diarize_embeddings`` with the real ECAPA/Silero models), not HTTP.
-Audio is decoded with the worker's ffmpeg arguments. Audio lives outside
-git (``fetch_speaker_corpus.py`` puts it in ``eval/speakers/v1/audio/``).
-
-Engines: ``legacy`` (defaults), ``legacy:<json overrides>`` (fields of
-``OfflineClusteringConfig`` / ``OfflineDiarizationConfig`` plus
-``vad_threshold``), ``pyannote_c1`` (community-1 through the production
-adapter). Sprint 29 keys for any engine: ``guard_speech_ms`` /
-``guard_share`` (roster guard) and ``"hint": "oracle"`` (the gold count as
-a person-stated count).
+Engines: ``legacy``, ``legacy:<json overrides>``, ``pyannote_c1``; any engine takes
+``guard_speech_ms`` / ``guard_share`` and ``"hint": "oracle"``.
 """
 
 from __future__ import annotations
@@ -39,7 +29,7 @@ from _common import REPO, write_report  # noqa: E402
 MANIFEST = REPO / "eval" / "speakers" / "v1" / "manifest.json"
 AUDIO_DIR = REPO / "eval" / "speakers" / "v1" / "audio"
 SAMPLE_RATE = 16_000
-# 2 under --dual (Sprint 31): items carry int16 (n, 2) PCM.
+# 2 under --dual: items carry int16 (n, 2) PCM.
 DECODE_CHANNELS = 1
 
 
@@ -62,7 +52,7 @@ Engine = Callable[[Any], Hypothesis]
 # ── Legacy engine ─────────────────────────────────────────────────────
 
 
-# Sprint 29 knobs every engine understands (the production seam):
+# Knobs every engine understands (the production seam):
 #   guard_speech_ms / guard_share — roster guard floor (MDX_DIAR_MIN_SPEAKER_*)
 #   hint: "oracle" — pass the gold speaker count as a person-stated count (E2)
 HARNESS_KEYS = ("guard_speech_ms", "guard_share", "hint")
@@ -188,11 +178,9 @@ def legacy_engine(overrides: dict[str, Any], models: LegacyModels | None = None)
 
 
 def dual_engine(overrides: dict[str, Any]) -> Engine:
-    """Sprint 31 ``--dual``: 2-channel files (ch0 mic, ch1 call audio) through
-    ``diarize_dual`` with the legacy engine as the per-side diarizer, and —
-    for the A/B the sprint review reads — the same file downmixed to mono
-    through the ordinary path. Side accuracy needs a sidecar
-    ``rttm/<id>.sides.json`` (reference speaker → "local" | "remote")."""
+    """``--dual``: 2-channel files through ``diarize_dual`` plus the mono downmix through the
+    ordinary path. Side accuracy needs ``rttm/<id>.sides.json``.
+    """
     import asyncio
 
     import numpy as np
@@ -338,10 +326,7 @@ def load_entries(manifest: Path, split: str) -> list[dict[str, Any]]:
 
 
 def load_asr_corpus(corpus: Path, split: str) -> list[dict[str, Any]]:
-    """Sprint TQ1 T4: the ASR gold set's recordings as DER entries — its
-    ``reference.rttm`` and audio live in ``<corpus>/<id>/`` (fetched from
-    the eval bucket), and the language is kept so de/uk DER can be read
-    per language."""
+    """The ASR gold set's recordings as DER entries (``<corpus>/<id>/reference.rttm``), language kept."""
     data = json.loads((corpus / "manifest.json").read_text())
     out: list[dict[str, Any]] = []
     for row in data["recordings"]:

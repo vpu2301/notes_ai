@@ -1,8 +1,7 @@
 import XCTest
 @testable import NotesAICapture
 
-/// Sprint 35 — nothing is remembered without being asked, and what IS
-/// remembered is worth remembering.
+/// Nothing is remembered without being asked, and what IS remembered is worth remembering.
 final class GlossaryTests: XCTestCase {
 
     // MARK: - What counts as a correction
@@ -31,8 +30,7 @@ final class GlossaryTests: XCTestCase {
                                                          to: String(repeating: "x", count: 81)))
     }
 
-    /// The server refuses these; not offering them at all is friendlier
-    /// than a banner explaining why.
+    /// The server refuses these; not offering them is friendlier than a banner.
     func testInvisibleCharactersThatMakeOneNameRenderAsAnotherAreRefused() {
         XCTAssertFalse(RememberableName.worthRemembering(from: "Speaker 2", to: "John\u{202e}Mayer"))
         XCTAssertFalse(RememberableName.worthRemembering(from: "Speaker 2", to: "Jo\u{200b}hn"))
@@ -47,9 +45,7 @@ final class GlossaryTests: XCTestCase {
 
     // MARK: - Role labels are not vocabulary (Sprint I2)
 
-    /// The fixture every client and the server read. Found by walking up
-    /// from this file to the repository root, so the test runs against
-    /// the checked-out copy and not a snapshot that could drift.
+    /// The fixture every client and the server read, found by walking up to the repository root.
     private struct RoleWordsFixture: Decodable {
         let roleWords: [String: [String]]
         let ordinals: [String]
@@ -84,9 +80,7 @@ final class GlossaryTests: XCTestCase {
         XCTAssertEqual(RememberableName.ordinals, Set(fixture.ordinals))
     }
 
-    /// What a person calls a voice is not a name, and the transcriber
-    /// must never be told it — "Moderator II" read into every recording
-    /// was the 2026-09-25 incident.
+    /// A role label is not a name and the transcriber must never be told it ("Moderator II" echoed into every recording once).
     func testARoleLabelIsNotVocabularyAndIsNeverOffered() {
         for label in ["Moderator II", "moderatorin", "Narrator", "speaker background",
                       "Sprecher 2", "Ведучий"] {
@@ -105,8 +99,7 @@ final class GlossaryTests: XCTestCase {
     }
 
     func testAPersonNeedsACapitalLetterButAProductDoesNot() {
-        // "gregor gysi" is what a role label typed in lower case looks
-        // like; a product code is spelled however the maker spells it.
+        // A role label typed in lower case; a product code is spelled however the maker spells it.
         XCTAssertFalse(RememberableName.isVocabulary("gregor gysi", kind: .person))
         XCTAssertTrue(RememberableName.isVocabulary("iphone", kind: .product))
         XCTAssertFalse(RememberableName.isVocabulary("  ", kind: .term))
@@ -120,8 +113,7 @@ final class GlossaryTests: XCTestCase {
     }
 
     func testAPlaceholderIsNotAMishearing() {
-        // "Speaker 2" was never a guess at the name; teaching it would
-        // make the transcriber worse, not better.
+        // "Speaker 2" was never a guess at the name; teaching it would make the transcriber worse.
         XCTAssertEqual(RememberableName.heardAs("Speaker 2"), "")
         XCTAssertEqual(RememberableName.heardAs(""), "")
     }
@@ -160,8 +152,7 @@ final class GlossaryTests: XCTestCase {
 
     // MARK: - Wire shapes
 
-    /// The app's own decoder is private; this mirrors its date strategy
-    /// so the test proves the SHAPE, not the decoder.
+    /// Mirrors the app's private decoder's date strategy, so the test proves the SHAPE.
     private func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in

@@ -1,4 +1,4 @@
-"""Draft-assembly consumer of the sprint-13 extractor (ADR-0032).
+"""Draft-assembly consumer of the field extractor (ADR-0032).
 
 Contract: proposals reach ``field_specific_metadata``; failures never
 cost the draft.

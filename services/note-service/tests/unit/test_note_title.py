@@ -1,8 +1,5 @@
-"""0057 — a meeting note names itself, and never over a person's title.
-
-The generation job's title step against an in-memory note row. The row
-mirrors the one SQL rule that matters (`append_version`): a title change
-that does not say where it came from is a person renaming the note.
+"""A meeting note names itself, and never over a person's title; the in-memory
+row mirrors `append_version`'s rule that an unsourced title change is a person renaming.
 """
 
 from __future__ import annotations
@@ -193,7 +190,7 @@ async def test_the_model_saying_there_is_no_topic_keeps_the_placeholder(store: _
 async def test_a_short_recording_is_named_from_what_there_is(store: _Store) -> None:
     short = "We should move the Pincer telephony platform to the new SIP provider before March."
     # Words the recording says: a title naming what was never said is not
-    # written (Q6), so "Migration" over "move" would keep the placeholder.
+    # written, so "Migration" over "move" would keep the placeholder.
     provider = _Provider('{"title": "Pincer Telephony Platform Move"}')
     await _name(provider, _result(short))
     assert len(provider.calls) == 1
@@ -331,7 +328,7 @@ def test_filler_does_not_count_as_content() -> None:
     assert note_title.meaningful_word_count(_result(ROADMAP)) >= note_title.MIN_MEANINGFUL_WORDS
 
 
-# ── Summary Engine v2 guards (Q6): same rules as the document's lines ──
+# ── same rules as the document's lines ──
 
 
 @pytest.mark.anyio
@@ -367,7 +364,7 @@ async def test_a_good_title_still_lands_as_ai(store: _Store) -> None:
         ("HubSpot Integration in the Fourth Quarter", None),
         ("Walzmann Interview", "unsupported"),  # first word checked too
         ("Lantern edition won't be ready", "example"),
-        # Sprint D1 T2 — the document standard §1.
+        # The title form rules.
         ("Q4 Product Roadmap", "lint"),  # under 30 characters
         ("Roadmap: HubSpot: pricing: the mobile redesign", "lint"),  # colons
         ("HubSpot integration and HubSpot integration again", "lint"),  # repeated phrase

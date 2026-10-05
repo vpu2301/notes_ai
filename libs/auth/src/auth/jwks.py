@@ -1,18 +1,4 @@
-"""Async JWKS cache with TTL, refresh-on-miss, and storm prevention.
-
-Contract:
-- Multiple issuers are supported; each ``(issuer → JWKS URL)`` pair is
-  registered at construction.
-- ``get_key(issuer, kid)`` returns the matching JWK or raises
-  :class:`auth.exceptions.KidNotFoundError`.
-- On a cache miss the document is fetched synchronously on the first call
-  to encounter the miss (no background task — behaviour is deterministic).
-- A per-issuer ``asyncio.Lock`` serialises refresh attempts so that 100
-  concurrent verifies with the same unknown ``kid`` produce exactly one
-  HTTP fetch.
-- A rate-limit (default 5 s) prevents a forged token with a random ``kid``
-  from causing a JWKS-fetch storm against the IdP.
-"""
+"""Async JWKS cache with TTL, refresh-on-miss (synchronous, per-issuer lock) and a miss rate-limit against fetch storms."""
 
 from __future__ import annotations
 
@@ -29,18 +15,8 @@ from .exceptions import JwksFetchError, KidNotFoundError
 
 @dataclass(slots=True)
 class _IssuerState:
-    """In-memory snapshot of a single issuer's JWKS document.
-
-    ``fetched_at`` drives the TTL: when the document is older than
-    ``ttl_seconds`` the next access refreshes it.
-
-    ``last_miss_refresh_at`` drives the storm-prevention rate-limit: it is
-    set ONLY when we refresh because a queried kid was missing. The initial
-    cache-fill and TTL-driven refreshes do not bump it, so a legitimate
-    rotation (new kid arrives, cache is fresh but doesn't have it) is
-    allowed one refresh; subsequent misses within ``refresh_rate_limit_seconds``
-    are rejected without an HTTP call.
-    """
+    """One issuer's JWKS snapshot. ``last_miss_refresh_at`` is bumped only by a refresh that still missed the kid,
+    so a legitimate rotation gets one refresh and later misses within the rate limit make no HTTP call."""
 
     jwks: dict[str, Any]
     fetched_at: float
@@ -49,7 +25,7 @@ class _IssuerState:
 
 @dataclass(slots=True)
 class JwksMetrics:
-    """Counters exposed for observability (wired in Day 9)."""
+    """Counters exposed for observability."""
 
     cache_hits: int = 0
     cache_misses: int = 0
@@ -59,26 +35,7 @@ class JwksMetrics:
 
 
 class JwksCache:
-    """Async JWKS document cache, keyed by issuer.
-
-    Parameters
-    ----------
-    issuer_to_url
-        Mapping ``{issuer: jwks_url}``. Issuers not in this mapping are
-        rejected before any HTTP call — defence in depth against typo-ed
-        or attacker-supplied ``iss`` claims.
-    ttl_seconds
-        How long a JWKS document is considered fresh before a refresh is
-        triggered on the next access. Default 300 s.
-    refresh_rate_limit_seconds
-        Minimum interval between refresh attempts per issuer. Default 5 s.
-    http_client
-        Optional pre-configured ``httpx.AsyncClient``. Useful for tests
-        that wire a custom ``MockTransport``. If omitted, a client with a
-        5 s timeout is created internally.
-    clock
-        Monotonic clock callable. Tests override to simulate time passing.
-    """
+    """Async JWKS document cache keyed by issuer; unknown issuers are rejected before any HTTP call."""
 
     def __init__(
         self,
@@ -106,19 +63,10 @@ class JwksCache:
             await self._client.aclose()
 
     async def get_key(self, issuer: str, kid: str) -> dict[str, Any]:
-        """Return the JWK matching ``kid`` for ``issuer``, refreshing if needed.
-
-        Raises:
-            KidNotFoundError: ``issuer`` is unknown, or after refresh the
-                JWKS still does not contain ``kid``, or a refresh was
-                suppressed by the rate-limit and the cache miss persists.
-            JwksFetchError: the JWKS endpoint returned an error or could
-                not be parsed as JSON.
-        """
+        """Return the JWK for ``kid``, refreshing if needed; KidNotFoundError / JwksFetchError otherwise."""
         if issuer not in self._issuer_to_url:
             raise KidNotFoundError(f"unknown issuer: {issuer!r}")
 
-        # Fast path: cached and fresh and contains the kid.
         state = self._state.get(issuer)
         now = self._clock()
         if state is not None and (now - state.fetched_at) <= self._ttl:
@@ -127,7 +75,6 @@ class JwksCache:
                 self.metrics.cache_hits += 1
                 return key
 
-        # Slow path: take the per-issuer lock, re-check, then maybe fetch.
         async with self._locks[issuer]:
             state = self._state.get(issuer)
             now = self._clock()
@@ -137,23 +84,16 @@ class JwksCache:
                 assert state is not None
                 key = _find_key(state.jwks, kid)
                 if key is not None:
-                    # Another waiter refreshed while we were queued.
                     self.metrics.cache_hits += 1
                     return key
 
-                # Fresh cache, kid missing → apply the rate-limit so a
-                # forged token with a random kid cannot induce a JWKS-fetch
-                # storm. The rate-limit clock starts at the previous *failed*
-                # lookup, so a legitimate first miss is always allowed.
+                # Fresh cache, kid missing: rate-limit so a random kid cannot induce a fetch storm.
                 if (now - state.last_miss_refresh_at) < self._rate_limit:
                     self.metrics.rate_limited_refreshes += 1
                     raise KidNotFoundError(
                         f"kid {kid!r} not in JWKS for issuer {issuer!r}; "
                         f"refresh suppressed by rate limit"
                     )
-            # else: state is None or stale → always fetch (TTL refresh / first fill).
-
-            # Fetch (this is the only place an HTTP call happens).
             self.metrics.cache_misses += 1
             self.metrics.refresh_attempts += 1
             url = self._issuer_to_url[issuer]
@@ -166,17 +106,13 @@ class JwksCache:
                 self.metrics.refresh_failures += 1
                 raise JwksFetchError(f"failed to fetch JWKS from {url}: {exc}") from exc
 
-            # Build new state. Preserve any previous miss timestamp so a
-            # successful TTL refresh doesn't unblock rate-limited misses.
+            # Keep the previous miss timestamp so a TTL refresh doesn't unblock rate-limited misses.
             new_state = _IssuerState(jwks=jwks_doc, fetched_at=attempt_at)
             if state is not None:
                 new_state.last_miss_refresh_at = state.last_miss_refresh_at
 
             key = _find_key(jwks_doc, kid)
             if key is None:
-                # The fetch happened but the requested kid still isn't there.
-                # Stamp the miss-refresh time so the next caller within the
-                # rate-limit window is rejected without re-fetching.
                 new_state.last_miss_refresh_at = attempt_at
                 self._state[issuer] = new_state
                 raise KidNotFoundError(

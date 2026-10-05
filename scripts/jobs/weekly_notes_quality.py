@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""Weekly notes-quality report (Summary Engine v2, Q6 T8).
+"""Weekly notes-quality CSV (counts only) from scripts/ops/notes_quality.sql as
+``funnel_reader``, plus the latest week's headline numbers against the kill thresholds.
 
-    DATABASE_URL=postgresql://funnel_reader:...@host/notes \\
-        uv run python scripts/jobs/weekly_notes_quality.py [--out DIR]
-
-Runs scripts/ops/notes_quality.sql as the read-only `funnel_reader` role
-(migrations 0040, 0046, 0060) and writes `notes-quality-YYYY-WW.csv` (ISO
-week of the run) to --out (default `MDX_NOTES_REPORT_DIR`, then
-`MDX_FUNNEL_REPORT_DIR`, then ./reports). Counts only — one row per (week,
-dimension, bucket, metric), aggregated across workspaces.
-
-It also prints the latest complete week's headline numbers next to the kill
-thresholds of the meeting-document concept (§10): after four pilot weeks a
-kept-line rate under 50 % or a regenerate rate over 40 % means the document
-is not trusted, and a share-without-edit rate that is not above the
-pre-launch baseline means it is not send-ready. The first run's week IS the
-baseline. Idempotent: a rerun overwrites the same file.
+    DATABASE_URL=postgresql://funnel_reader:...@host/notes uv run python scripts/jobs/weekly_notes_quality.py [--out DIR]
 """
 
 from __future__ import annotations
@@ -34,7 +21,6 @@ import asyncpg
 
 SQL = Path(__file__).resolve().parent.parent / "ops" / "notes_quality.sql"
 if not SQL.exists():
-    # In the chart the SQL ships next to the job.
     SQL = Path(__file__).resolve().parent / "notes_quality.sql"
 
 # metric → (direction, threshold %, what crossing it means)

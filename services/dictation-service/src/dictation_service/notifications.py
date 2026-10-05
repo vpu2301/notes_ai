@@ -1,16 +1,7 @@
-"""Sprint-12 notification emission for streaming dictation sessions.
+"""Completion notification for streaming dictation sessions.
 
-Sits beside the WS handler rather than inside `session/finalize.py`.
-`finalize_session` is the shared end-of-life routine for every terminal
-reason — including `worker_failure` and the abandon timer — and a
-session that died is not a session the user wants congratulated on
-completing. The handler knows which of those it is; the finalizer does
-not.
-
-Fire-and-forget, exactly like note-service's equivalent:
-`publish_event` swallows its own failures and the caller does not wait
-on fan-out. A dictation must not fail to finalize because the
-notification bus is down (ADR-0029).
+Called from the handler, not the finalizer, so failed/abandoned sessions
+never emit it. Fire-and-forget (ADR-0029): a bus outage never fails finalize.
 """
 
 from __future__ import annotations
@@ -35,18 +26,10 @@ async def emit_dictation_completed(
     duration_ms: int,
     segments: int,
 ) -> None:
-    """Tell the dictating user their session finished processing.
+    """Tell the dictating user their session finished.
 
-    The recipient hint is the dictating user and nobody else — this is a
-    completion receipt for work they started, not a broadcast. It is
-    still only a *hint*: notification-service filters it through its own
-    tenant's user table, so a wrong id resolves to nothing rather than
-    addressing a stranger.
-
-    The payload carries a duration and a segment count. It carries NO
-    transcript, not even a leading fragment: the transcript is sensitive
-    content, and this payload is persisted on the notification row and
-    re-read by the digest renderer (ADR-0031).
+    Payload carries duration + segment count and no transcript: it is
+    persisted on the notification row (ADR-0031).
     """
     if not settings.notifications_enabled:
         return
@@ -55,9 +38,7 @@ async def emit_dictation_completed(
         event_id=uuid4(),
         tenant_id=tenant_id,
         category=Category.DICTATION_COMPLETED,
-        # The dictating user is both actor and audience. The category's
-        # catalog entry sets `exclude_actor=False` for exactly this
-        # reason — with the default, this event would notify nobody.
+        # Actor is the audience; the category sets exclude_actor=False.
         actor_user_id=user_id,
         resource_type="dictation_session",
         resource_id=session_id,

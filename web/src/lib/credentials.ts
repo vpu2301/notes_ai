@@ -1,15 +1,7 @@
-// Handing the sign-in to the browser's password manager, so it is typed
-// once and autofilled after that.
-//
-// Safari and Firefox learn a password by watching the form itself, which
-// is why the login inputs carry real `name` and `autocomplete`
-// attributes. Chromium does that too, but its heuristic ("the password
-// field vanished, so that was probably a login") is easy for a SPA to
-// defeat: we sign in with fetch and then route away. So on Chromium we
-// also ask outright through the Credential Management API.
-//
-// Everything here is best-effort — the API needs a secure context
-// (https, or localhost in dev) and the user may say no.
+// Password-manager hand-off. Safari/Firefox learn from the form (hence real
+// `name`/`autocomplete` on the inputs); Chromium's heuristic misses a fetch +
+// route-away SPA login, so the Credential Management API is asked outright.
+// Best-effort: needs a secure context and the user may say no.
 
 interface PasswordCredentialCtor {
   new (data: { id: string; password: string; name?: string }): Credential;
@@ -31,11 +23,7 @@ export async function offerToSavePassword(email: string, password: string): Prom
   }
 }
 
-/**
- * After a deliberate sign-out, stop the manager from handing the
- * credential back without asking — otherwise "sign out" can look like it
- * did nothing on the next visit.
- */
+/** After sign-out, stop the manager from silently handing the credential back. */
 export async function preventSilentSignIn(): Promise<void> {
   try {
     await navigator.credentials?.preventSilentAccess();

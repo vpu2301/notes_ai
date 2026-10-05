@@ -1,24 +1,11 @@
 #!/usr/bin/env python3
-"""Sprint TQ1 T2/T3 — the ASR gold set ``eval/asr/v1``: format and checks.
+"""The ASR gold set ``eval/asr/v1``: format, validation and fetch.
 
-    python scripts/eval/asr_gold.py validate eval/asr/v1            # manifest + composition
-    python scripts/eval/asr_gold.py validate eval/asr/v1 --content  # + local reference files
-    python scripts/eval/asr_gold.py fetch eval/asr/v1               # bucket → local (eval role)
+    python scripts/eval/asr_gold.py validate eval/asr/v1 [--content]
+    python scripts/eval/asr_gold.py fetch eval/asr/v1
 
-What lives where:
-
-- **git**: ``manifest.json`` and ``README.md`` only. The manifest carries ids,
-  languages, minutes, kinds, consent references — never a name or a title.
-- **bucket** (``s3://notes-eval/asr/v1/<id>/``, private, SSE-KMS, eval role):
-  ``audio.<ext>``, ``reference.json``, ``spans.json``, ``reference.rttm`` and
-  the cached ``alignment.json``. Fetched to ``eval/asr/v1/<id>/`` locally,
-  which ``.gitignore`` and ``scripts/ci/check-no-eval-audio.sh`` keep out of
-  git.
-
-``validate`` prints problems (one per line, ids and field names only) and
-exits 1 when there are any. A composition shortfall is a problem: the
-sprint's gold set is 14 recordings in a stated mix, and until it exists the
-tool says so rather than passing.
+Git holds only ``manifest.json`` (ids, never names); audio and references live in the
+private eval bucket and are fetched to ``eval/asr/v1/<id>/`` (kept out of git).
 """
 
 from __future__ import annotations
@@ -45,7 +32,7 @@ Kind = Literal["client_call", "internal_meeting", "interview", "podcast", "lectu
 NonSpeechKind = Literal["music", "jingle", "silence", "ad", "noise"]
 EntityType = Literal["person", "company", "product", "place", "other"]
 
-# Sprint TQ1 T2: the minimum the first gold set must hold.
+# The minimum the first gold set must hold.
 COMPOSITION: dict[str, int] = {
     "recordings": 14,
     "de": 5,
@@ -60,8 +47,7 @@ COMPOSITION: dict[str, int] = {
 REQUIRED_KINDS = ("client_call", "internal_meeting", "interview", "podcast")
 # The two podcast regression cases the audits are about; their ids are fixed.
 REGRESSION_IDS = ("r03", "r04")
-# The labelling policy's fillers: a reference that still carries one was not
-# labelled to verbatim-lite (docs/eval/asr-labelling.md §2).
+# Fillers a verbatim-lite reference must not carry.
 POLICY_FILLERS = re.compile(r"(?<!\w)(äh|ähm|öhm|uh|um|uhm|erm|ем|еее)(?!\w)", re.IGNORECASE)
 # An id is a label, not a description: lowercase, digits, dashes, short.
 ID_PATTERN = r"^[a-z0-9][a-z0-9-]{1,23}$"
@@ -93,8 +79,7 @@ class ManifestRow(_Strict):
     def _provenance(self) -> ManifestRow:
         if self.public and not self.licence:
             raise ValueError("a public recording states its licence")
-        # Third-party broadcasts kept for internal eval (r03, r04) state the
-        # basis in `licence`; recordings of people state their consent.
+        # Third-party broadcasts state the basis in `licence`; recordings of people state consent.
         if not self.public and not (self.consent_ref or self.licence):
             raise ValueError("a non-public recording names its consent_ref or licence")
         if self.has_code_switch and not self.code_switch_languages:

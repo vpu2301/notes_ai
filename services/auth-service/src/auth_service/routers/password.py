@@ -1,42 +1,8 @@
-"""Password recovery: forgot, reset, change, and the "that wasn't me" door.
+"""Password recovery: forgot, reset, change, and the "that wasn't me" lockdown.
 
-Four public-facing acts, three of which run with no session at all.
-
-    SPA ──{email}──▶ /auth/password/forgot ──▶ 202 (always)
-                              └─ mint token, enqueue mail
-
-    inbox ──{token}──▶ /auth/password/reset ──▶ set password in Keycloak,
-                              kill sessions, enqueue security notification
-
-    SPA ──{current, new}──▶ /auth/password/change  (authenticated)
-                              └─ same tail: kill other sessions, notify
-
-    inbox ──{token}──▶ /auth/security/lockdown ──▶ kill everything,
-                              hand back a fresh reset token
-
-── The three rules that shape every handler here ─────────────────────
-
-**1. Never confirm whether an account exists.** ``/forgot`` returns the
-same 202 and the same body for a real address, an unknown one, a
-deactivated one, and one that tripped the rate limiter. Anything else
-turns the endpoint into a membership oracle for a business system,
-where "is this doctor a Notes AI user" is itself worth knowing. The
-uniform response costs nothing; the timing difference between a real
-and unknown address is not eliminated, and is noted as accepted
-residual risk (evening it out would mean an artificial delay on every
-request, which is a self-inflicted DoS lever).
-
-**2. A password change ends every other session.** Changing a password
-because you fear it was stolen, and leaving the thief's session live, is
-the failure mode users least expect. Both reset and change push the
-account onto the sprint-16 revocation denylist and call Keycloak's
-logout — belt and braces, because the denylist is fail-open by design
-and a Redis outage must not silently downgrade this.
-
-**3. The token is never stored in plaintext.** Only ``sha256`` reaches
-the tokens table. The mailed URL exists in ``auth_mail_outbox.secret_fields``
-for the seconds between enqueue and send, and migration 0076's CHECK
-constraint makes clearing it a database invariant rather than a habit.
+Rules: ``/forgot`` never confirms whether an account exists (same 202 always;
+timing is accepted residual risk); a password change ends every other session
+(denylist + Keycloak logout); only the token's sha256 is stored.
 """
 
 from __future__ import annotations
@@ -77,9 +43,7 @@ _password_counter = _meter.create_counter(
 PURPOSE_RESET = "password_reset"
 PURPOSE_LOCKDOWN = "account_lockdown"
 
-# Tokens are 32 bytes of CSPRNG output, URL-safe. 256 bits is far past
-# what a 30-minute single-use credential needs, and the cost of the
-# extra characters in a mailed URL is nil.
+# 32 bytes of CSPRNG, URL-safe.
 _TOKEN_BYTES = 32
 
 
@@ -92,13 +56,12 @@ class _Strict(BaseModel):
 
 class ForgotRequest(_Strict):
     email: EmailStr
-    # Preferred language for the mail. The SPA knows what the user is
-    # reading the interface in; there is no session to infer it from.
+    # Mail language (no session to infer it from).
     lang: Literal["en", "de", "uk"] | None = None
 
 
 class ForgotResponse(_Strict):
-    # Intentionally content-free. See rule 1.
+    # Intentionally content-free (no enumeration).
     status: Literal["accepted"] = "accepted"
 
 
@@ -158,14 +121,7 @@ def _hash_token(token: str) -> bytes:
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort client address.
-
-    Trusts ``X-Forwarded-For``'s first hop because the deployment always
-    sits behind our own edge proxy. That is only sound as long as the
-    edge overwrites the header rather than appending to a
-    client-supplied one — if this ever runs without that proxy, the
-    per-IP rate limit becomes trivially evadable by spoofing the header.
-    """
+    """Best-effort client address; trusts ``X-Forwarded-For`` only because our edge proxy overwrites it."""
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -173,12 +129,7 @@ def _client_ip(request: Request) -> str:
 
 
 def _enabled_or_404() -> None:
-    """A disabled feature must not be discoverable.
-
-    404, not 403: a deployment that has not configured mail should look
-    like one that has no such endpoint, so a prober learns nothing about
-    what is switched off.
-    """
+    """404 (not 403) when the feature is off: a disabled feature must not be discoverable."""
     if not settings.password_reset_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
@@ -196,8 +147,7 @@ def _reject_weak(password: str, *, email: str = "", display_name: str = "") -> N
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail="the chosen password does not meet the policy",
     )
-    # Machine-readable so the SPA can render each reason in the user's
-    # language and point at the field, instead of echoing English prose.
+    # Machine-readable so the SPA can render each reason in the user's language.
     exc.problem_extras = {  # type: ignore[attr-defined]
         "code": "weak_password",
         "reasons": list(result.reasons),
@@ -215,12 +165,7 @@ async def _audit(
     payload: dict[str, Any],
     severity: Severity = Severity.SEC,
 ) -> None:
-    """Best-effort audit — house rule on security paths.
-
-    A password reset must not fail because the hash chain is
-    unavailable, but the warning is the operator's signal that a
-    security-relevant event went unrecorded.
-    """
+    """Best-effort audit: a reset must not fail because the hash chain is unavailable."""
     try:
         await state.audit_writer.write_event(
             tenant_id=tenant_id,
@@ -239,13 +184,7 @@ async def _audit(
 
 
 async def _revoke_all_sessions(state: Any, sub: UUID) -> bool:
-    """End every live session for a user. True if fully successful.
-
-    Two mechanisms because they fail differently. Keycloak's logout
-    invalidates the refresh tokens, which stops new access tokens being
-    minted; the denylist stops the access tokens already issued, which
-    Keycloak cannot reach. Neither alone closes the window.
-    """
+    """End every live session for a user (Keycloak logout + denylist; neither alone closes the window)."""
     ok = True
     try:
         await state.keycloak.logout_user(sub)
@@ -300,12 +239,7 @@ async def _enqueue_security_notification(
     user_agent: str,
     ip_hash: str,
 ) -> None:
-    """Mint a lockdown token and queue the "your password changed" mail.
-
-    Runs inside the caller's transaction, so the token and the mail that
-    carries it are committed together — a token with no mail is a dead
-    row, a mail with no token is a broken button.
-    """
+    """Mint a lockdown token and queue the "password changed" mail, inside the caller's transaction."""
     lockdown_token = await _issue_token(
         conn,
         tenant_id=tenant_id,
@@ -374,24 +308,20 @@ async def forgot_password(body: ForgotRequest, request: Request) -> ForgotRespon
     user_agent = request.headers.get("user-agent", "")
     ip_hash = compose.hash_ip(ip, salt=settings.password_reset_ip_hash_salt.value())
 
-    # Rate limit BEFORE the account lookup, so a refused request costs no
-    # database work and reveals nothing through timing.
+    # Rate limit BEFORE the account lookup (no DB work, no timing signal).
     if state.password_rate_limiter is not None:
         allowed = await state.password_rate_limiter.check(ip=ip, email=email)
         if not allowed:
             _password_counter.add(1, {"act": "forgot", "result": "rate_limited"})
             logger.warning("auth.password.reset_rate_limited", extra={"ip_hash": ip_hash})
-            # Same 202 as every other outcome. A 429 here would confirm
-            # nothing about the account, but it WOULD tell an attacker
-            # their sweep is being counted, which is free intelligence.
+            # Same 202: a 429 would tell an attacker their sweep is being counted.
             return ForgotResponse()
 
     async with state.app_pool.acquire() as conn:
         account = await repo.resolve_account_by_email(conn, email=email)
 
     if account is None or str(account["status"]) != "active":
-        # Unknown or deactivated. No token, no mail, no audit row — see
-        # the note in audit_kinds about enumeration.
+        # Unknown or deactivated: no token, no mail, no audit row.
         _password_counter.add(1, {"act": "forgot", "result": "no_account"})
         logger.info("auth.password.reset_requested_unknown", extra={"ip_hash": ip_hash})
         return ForgotResponse()
@@ -478,17 +408,7 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
         exc.problem_extras = {"code": "invalid_reset_token"}  # type: ignore[attr-defined]
         return exc
 
-    # PEEK, judge, and only then consume.
-    #
-    # The obvious order — consume first, validate second — means a user
-    # who fat-fingers a weak password has burned their single-use link
-    # and has to go back to their inbox for another. That is a real cost
-    # to a legitimate, locked-out person and it buys nothing: an
-    # attacker holding a stolen link does not fail the strength check,
-    # they submit a strong password and win on the first attempt.
-    #
-    # (Found by running the flow rather than by a test: the 422 came
-    # back, and the very next request with a good password was refused.)
+    # PEEK, judge, then consume: a weak password must not burn the single-use link.
     async with state.app_pool.acquire() as conn:
         peeked = await repo.peek_token(conn, token_hash=token_hash, purpose=PURPOSE_RESET)
     if peeked is None:
@@ -505,12 +425,9 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
     email = str(row["email"]) if row else ""
     display_name = str(row["display_name"]) if row else ""
 
-    # Raises 422 without having spent anything.
     _reject_weak(body.new_password, email=email, display_name=display_name)
 
-    # Now commit the single use. Still an atomic compare-and-swap, so
-    # two concurrent redemptions of one link produce exactly one winner
-    # and the loser gets the same 400 as an expired link.
+    # Atomic compare-and-swap: one winner, the loser gets the same 400 as an expired link.
     async with state.app_pool.acquire() as conn:
         claimed = await repo.consume_token(conn, token_hash=token_hash, purpose=PURPOSE_RESET)
     if claimed is None:
@@ -533,8 +450,7 @@ async def reset_password(body: ResetRequest, request: Request) -> Response:
 
     lang = copy_mod.normalise_lang(request.headers.get("accept-language", ""))
     async with tenant_connection(state.app_pool, tenant_id) as conn:
-        # Any other live reset link is now a spare key to an account the
-        # user believes they have just secured.
+        # Any other live reset link is now a spare key.
         await repo.spend_all_tokens(conn, subject_sub=sub)
         await repo.record_password_event(
             conn,
@@ -600,9 +516,7 @@ async def change_password(
             detail="cannot resolve the account identifier",
         )
 
-    # Proof of presence. A live session is not proof that the account
-    # holder is the one at the keyboard, and this is the one act that
-    # locks everyone else out — including the real owner.
+    # Proof of presence: a live session is not proof of who is at the keyboard.
     try:
         await state.keycloak.password_grant(username=username, password=body.current_password)
     except KeycloakError as exc:
@@ -809,8 +723,7 @@ async def list_sessions(
             ip_address=str(r.get("ipAddress", "")),
             started_at=_ms(r.get("start")),
             last_access_at=_ms(r.get("lastAccess")),
-            # Lets the SPA label one row "this device" so a user does not
-            # have to guess which session they are about to end.
+            # Lets the SPA label one row "this device".
             current=str(r.get("id", "")) == (claims.sid or ""),
         )
         for r in rows

@@ -4,8 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ORDINALS, ROLE_WORDS, ROLE_WORDS_ALL, isVocabulary } from "../src/lib/glossaryRule";
 
-// The fixture lives at the REPO root — the one list every client and the
-// server read — so it is read from disk rather than imported.
+// The repo-root fixture is shared with the server and every client.
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
   readFileSync(resolve(here, "../../tests/fixtures/glossary/role_words.json"), "utf8"),

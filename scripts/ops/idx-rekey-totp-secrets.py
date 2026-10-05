@@ -1,26 +1,9 @@
 #!/usr/bin/env python3
-"""Re-wrap stored TOTP secrets under the current keys (IDX-A5 F1).
+"""Re-wrap stored TOTP secrets through the libs/crypto envelope after a master-key or
+platform-tenant change. One transaction per row, idempotent; an undecryptable row is
+reported and skipped, never deleted.
 
-    uv run python scripts/ops/idx-rekey-totp-secrets.py --dry-run
-    uv run python scripts/ops/idx-rekey-totp-secrets.py --apply
-
-The pack calls this "KEK rotation" against an ``AUTH_SECRETS_KEKS_JSON``
-key list. This deployment keeps identity secrets in the existing
-``libs/crypto`` envelope instead (see
-``auth_service.domain.identity_secrets`` for why), so rotation here means
-decrypt-and-re-encrypt through the envelope: the new blob picks up
-whatever master key and tenant KEK are current, and the old one stops
-being able to open it.
-
-Run it after rotating the master key, or after re-pointing
-``AUTH_PLATFORM_TENANT_ID`` — both leave rows wrapped under material the
-service can still read but should no longer be writing.
-
-Every row is its own transaction and the operation is idempotent: a row
-re-wrapped under keys that have not changed is simply written back
-identical. A row that cannot be decrypted is reported and skipped, never
-deleted — a secret we cannot read is a user who needs an admin MFA reset,
-not a row to throw away.
+    uv run python scripts/ops/idx-rekey-totp-secrets.py --dry-run | --apply
 """
 
 from __future__ import annotations
@@ -116,7 +99,7 @@ async def run(*, dsn: str, apply: bool) -> int:
             f"\n--dry-run: {skipped} row(s) decrypt cleanly and would be re-wrapped, "
             f"{failed} cannot be decrypted. Re-run with --apply."
         )
-    # A row we cannot read is an operator problem, so say so in the exit code.
+    # An unreadable row is an operator problem: say so in the exit code.
     return 1 if failed else 0
 
 

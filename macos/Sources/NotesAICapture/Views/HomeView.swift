@@ -1,12 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The home page, as the web's (Granola-style, no hero): one compact
-/// header row — the serif greeting and the date, a search that opens from
-/// a magnifier, New meeting with a ⋯ for the other ways to start — then
-/// the lists on a dotted ground: upcoming calendar events, meetings still
-/// in flight on this Mac, and every note, grouped by day. The search and
-/// the sidebar's space filter narrow the notes.
+/// The home page, as the web's: one compact header row (greeting, date, search, New meeting with a ⋯), then upcoming events, captures in flight, and every note grouped by day.
 struct HomeView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
@@ -57,8 +52,7 @@ struct HomeView: View {
                         }
                     }
                 }
-                // Recordings the server never got. Above the notes on
-                // purpose: unfinished work outranks finished work.
+                // Recordings the server never got, above the notes: unfinished work outranks finished work.
                 if app.selectedSpaceId == nil, !app.pending.isEmpty {
                     PendingUploadsSection(pending: app.pending)
                 }
@@ -103,9 +97,7 @@ struct HomeView: View {
 
     // MARK: - Header
 
-    /// One row: the title, then search and the ways to start — kept apart
-    /// (finding a note is not starting one) but on one line, so the notes
-    /// themselves start right under it.
+    /// One row: the title, then search and the ways to start, so the notes begin right under it.
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -157,8 +149,7 @@ struct HomeView: View {
 
     private var searchShown: Bool { searchOpen || !app.searchQuery.isEmpty }
 
-    /// The magnifier opens a search capsule that takes the row; Escape or
-    /// an empty field closing it hands the room back to the title.
+    /// The magnifier opens a search capsule that takes the row; Escape or an empty field closing hands the room back.
     @ViewBuilder
     private var search: some View {
         if searchShown {
@@ -210,8 +201,7 @@ struct HomeView: View {
         withAnimation(.easeOut(duration: 0.18)) { searchOpen = false }
     }
 
-    /// The ⋯ beside New meeting: the other ways to start (as the sidebar's
-    /// caret), then what kind of meeting the next one is (Sprint 34).
+    /// The ⋯ beside New meeting: the other ways to start, then what kind of meeting the next one is.
     private func startItems() -> [DSMenuItem] {
         var items = NewNoteMenu.items(app: app, capture: capture)
         items.append(.separator)
@@ -235,17 +225,14 @@ struct HomeView: View {
 
     // MARK: - Coming up (calendar)
 
-    /// Hidden only when there is nothing to offer: the server has no
-    /// Google client, nothing is connected, and this is a dev binary
-    /// without calendar access.
+    /// Hidden only when there is nothing to offer: no Google client, nothing connected, and no calendar access.
     private var showComingUp: Bool {
         google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
     }
 
     // MARK: - Meetings in flight
 
-    /// This Mac's captures that are not (yet) a note: in progress, failed,
-    /// or transcribed without a note.
+    /// This Mac's captures that are not (yet) a note.
     private var pendingCaptures: [RecentCapture] {
         app.recents
             .filter { $0.noteId == nil }
@@ -267,8 +254,7 @@ struct HomeView: View {
                 }
             }
         } else if notes.isEmpty {
-            // No card behind it: a home page with no notes keeps the same
-            // dotted ground as a home page with notes, only without rows.
+            // No card behind it: the same dotted ground with or without rows.
             section("Notes") {
                 VStack(spacing: 6) {
                     Text(emptyTitle)
@@ -346,8 +332,7 @@ struct HomeView: View {
         }
     }
 
-    /// The lists, as Claude's: no card around them — rows on the page,
-    /// divided by a hairline, a soft fill under the one you point at.
+    /// The lists, as Claude's: no card, rows divided by a hairline, a soft fill under the one you point at.
     private func rows(_ items: [AnyView]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, row in
@@ -434,8 +419,7 @@ private struct NoteRow: View {
         }
     }
 
-    /// The pill's menu: who can open the note. The server decides whether
-    /// this person may change it; a refusal comes back as an alert.
+    /// The pill's menu: who can open the note. The server decides whether this person may change it.
     private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
         let id = note.noteId
         var items: [DSMenuItem] = [
@@ -496,8 +480,7 @@ private struct NoteRow: View {
     }
 }
 
-/// Private or public, shown while the pointer is on the row: the lock (or
-/// globe), the word, and a chevron that opens the access menu.
+/// Private or public, shown on hover: the lock (or globe), the word, and a chevron that opens the access menu.
 private struct AccessPill: View {
     let access: NoteAccess
     @State private var hover = false
@@ -598,11 +581,7 @@ private struct CaptureRow: View {
     }
 }
 
-/// "Coming up": today's date on the left, the next days' events on the
-/// right — from the Google accounts and calendar links connected on the
-/// server and from this Mac's own calendars, merged. One button connects
-/// Google (or adds a link when the server has no Google client); the ⋯
-/// menu holds the rest (choose calendars, another account, disconnect).
+/// "Coming up": today's date on the left, the next days' events on the right, from the server's connections and this Mac's calendars merged. One button connects; the ⋯ menu holds the rest.
 private struct ComingUpCard: View {
     @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
@@ -733,8 +712,7 @@ private struct ComingUpCard: View {
         }
     }
 
-    /// A line, not a box: the day column already frames it (Granola's
-    /// "No events today"), so the card stays one row tall.
+    /// A line, not a box: the day column already frames it, so the card stays one row tall.
     private func emptyLine(@ViewBuilder _ inner: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             inner()
@@ -804,8 +782,7 @@ private struct ComingUpCard: View {
     }
 }
 
-/// One upcoming event; hover shows Join (when it has a video link) and a
-/// Start button that begins a meeting note with the event's title.
+/// One upcoming event; hover shows Join (with a video link) and a Start button.
 private struct ComingUpRow: View {
     @EnvironmentObject private var capture: CaptureViewModel
     let item: ComingUpItem
@@ -927,8 +904,7 @@ private struct HomeIconLabel: View {
     }
 }
 
-/// Sprint 21: the one thing a brand-new workspace should do first.
-/// Shown once per device; `AppState.dismissFirstRun` remembers.
+/// The one thing a brand-new workspace should do first. Shown once per device; `AppState.dismissFirstRun` remembers.
 struct FirstRunCard: View {
     @EnvironmentObject private var app: AppState
 

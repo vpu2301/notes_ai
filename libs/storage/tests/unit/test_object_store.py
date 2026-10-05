@@ -1,9 +1,4 @@
-"""EncryptedObjectStore round-trip + tamper tests, with an in-memory S3.
-
-The S3-client surface is small; we substitute an in-memory dict so tests
-run with no external dependencies. Integration tests against the real
-Compose object storage lives under tests/integration/.
-"""
+"""EncryptedObjectStore round-trip + tamper tests with an in-memory S3 substitute."""
 
 from __future__ import annotations
 

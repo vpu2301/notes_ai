@@ -1,24 +1,8 @@
-"""Name suggestions from self-introductions (Sprint 32 B-1). Pure.
+"""Name suggestions from self-introductions. Pure; nothing is applied automatically.
 
-"Hi, this is Anna from Acme" on an unnamed speaker whose meeting invited
-"Anna Keller" → suggest "Anna Keller" for that speaker, with the quote as
-evidence. A person accepts; nothing is ever applied automatically.
-
-Precision first, by construction:
-
-* **Candidate match is mandatory.** The introduced name must match
-  exactly one calendar invitee (casefolded, whole name — or first name
-  when that first name is unique among the invitees). No invitee list →
-  no suggestions. ASR misspells names; the list is what makes this safe,
-  and the suggestion uses the CALENDAR spelling.
-* **Ambiguity suggests nothing.** A speaker matching two invitees, or two
-  speakers claiming one invitee, gets no suggestion.
-* **Only unnamed speakers**, only invitees not already used as a name,
-  never a dismissed (label, name) pair.
-
-Where to look: a speaker's first two turns and any of its turns in the
-first three minutes, first 400 characters of each — introductions happen
-at the start. No model call, no stored state.
+An introduced name must match exactly one calendar invitee (calendar spelling wins);
+ambiguity suggests nothing; only unnamed speakers, unused invitees, never a dismissed
+pair. Looks at a speaker's first two turns and any turn in the first three minutes.
 """
 
 from __future__ import annotations
@@ -43,7 +27,7 @@ class NameSuggestion:
     end_ms: int
     segment_indices: list[int]
     source: str = "self_introduction"
-    # Sprint F3: what the person said they do, verbatim, or None.
+    # What the person said they do, verbatim, or None.
     role_text: str | None = None
 
 
@@ -76,9 +60,7 @@ def suggest(
             continue
         text = " ".join(getattr(turn, "paragraphs", []) or [])[:SCAN_CHARS]
         for intro in find_introductions(text, lang):
-            # Uniqueness is judged against ALL invitees: with "Anna Keller"
-            # already named and "Anna Schmidt" left, "I'm Anna" is still
-            # ambiguous (an over-split Anna Keller says it too).
+            # Uniqueness is judged against ALL invitees, named ones included.
             candidate = _match(intro.name, candidates)
             if candidate is not None and candidate not in pool:
                 continue
@@ -97,8 +79,7 @@ def suggest(
                 ),
             )
 
-    # Every label that matched an invitee claims it — also a label that
-    # matched several (and so gets nothing itself).
+    # Every matching label claims its invitee, even one that matched several.
     claims: dict[str, int] = {}
     for per_label in found.values():
         for candidate in per_label:

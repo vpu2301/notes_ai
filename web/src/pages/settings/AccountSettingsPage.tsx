@@ -89,11 +89,7 @@ function ProfileCard() {
 
 // ── email ───────────────────────────────────────────────────────────────
 
-/**
- * Changing the login address is a two-step: a code proves the new mailbox,
- * and the old one is then sent a revert link. Both halves are the server's;
- * this only drives them.
- */
+/** Two-step: a code proves the new mailbox, then the old one gets a revert link. */
 function EmailCard() {
   const { identity, refreshIdentity } = useAuth();
   const toast = useToast();
@@ -118,8 +114,7 @@ function EmailCard() {
     setError(null);
     setBusy(true);
     try {
-      // A 403 `reauth_required` here is caught by http.ts, which opens the
-      // dialog and replays this call — nothing to handle locally.
+      // 403 `reauth_required` is handled by http.ts (dialog + replay).
       const challenge = await account.startEmailChange(newEmail.trim());
       setChallengeId(challenge.challenge_id);
       setStep("code");
@@ -140,7 +135,7 @@ function EmailCard() {
     try {
       await account.confirmEmailChange(challengeId, digits);
       toast.success("Email changed. A revert link was sent to your previous address.");
-      // The sidebar shows the address; re-read rather than leave it stale.
+      // The sidebar shows the address; re-read it.
       await refreshIdentity();
       reset();
     } catch (err) {
@@ -235,15 +230,7 @@ function EmailCard() {
 
 // ── password ────────────────────────────────────────────────────────────
 
-/**
- * There is no password surface on a native deployment yet.
- *
- * IDX-A4 — "Passwords: set/change/forgot/reset, step-up, legacy hash
- * import" — has not been run, so `PUT /auth/password` and
- * `DELETE /auth/password` (which W2 §E lists) do not exist, and
- * `/auth/password/*` is mounted only in Keycloak mode against Keycloak's
- * own store. Rather than a form that 404s, the card says what is true.
- */
+/** No password surface on a native deployment: `/auth/password/*` is Keycloak-mode only, so the card says so. */
 function PasswordCard() {
   const { identity } = useAuth();
   return (

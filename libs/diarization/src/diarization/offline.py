@@ -1,29 +1,7 @@
-"""Offline diarization of a full decoded recording (Ambient Capture v1).
+"""Offline diarization: PCM → Silero regions → ≤1.2 s chunks → ECAPA embeddings → average-linkage
+agglomeration over the whole recording (ADR-0034/0045) → neutral ``SPEAKER_N`` turns.
 
-Batch counterpart of dictation-service's streaming diarizer, built from
-the same front-end primitives so the two paths cannot drift:
-
-    full PCM → Silero speech regions → ≤1.2 s chunks → ECAPA embeddings
-    → agglomerative clustering over the WHOLE recording
-    → contiguous speaker turns + a majority-overlap ``attribute()`` helper
-
-Chunking (1200/250 ms) mirrors the streaming ``DiarizationConfig``; it
-was calibrated once (ADR-0034) and a recording diarized live and
-re-diarized in batch should agree on where the chunks fall.
-
-Clustering differs from the streaming path on purpose (ADR-0045). A live
-session must decide speaker-by-speaker as audio arrives, so it runs an
-online 2-slot clusterer; a batch job holds every embedding of the
-recording up front and can afford a global answer: average-linkage
-agglomerative clustering on cosine similarity, cut at the same
-same-voice/cross-voice boundary the streaming thresholds encode. That
-lifts the 2-speaker pilot cap — a podcast with a host and three guests
-comes out as four speakers, not two speakers plus a lot of UNKNOWN.
-
-Labels are neutral ``SPEAKER_1..N`` in first-appearance order (AMBIENT
-spec §5). ``UNKNOWN`` evidence stays on the internal timeline (it still
-counts as coverage for attribution) but is never surfaced as a turn —
-ambiguous audio yields ``None``, never a guess.
+``UNKNOWN`` evidence counts for attribution coverage but is never a turn: ambiguous audio yields ``None``.
 """
 
 from __future__ import annotations
@@ -43,78 +21,45 @@ from .vad import SileroSegmenter
 
 SAMPLE_RATE_HZ = 16_000
 
-# Recorded on every diarized job (``DiarizationStats``) so a result can
-# always be traced to the engine that produced it.
 ENGINE_ID = "legacy-ecapa-ahc"
 ENGINE_VERSION = "spkrec-ecapa-voxceleb@0f99f2d"
 
 
 @dataclass(frozen=True)
 class OfflineClusteringConfig:
-    """Agglomerative clustering knobs for the batch path.
-
-    ``link_threshold`` is the average-linkage cosine at which two clusters
-    stop being merged — the same boundary ADR-0034 measured between
-    same-voice chunk similarities (≥ ~0.5) and cross-voice ones (≤ ~0.45).
-    Chunk-to-chunk similarity is noisy (1.2 s of speech), so a speaker's
-    outliers can end up in small side clusters; ``centroid_merge_threshold``
-    folds those back — centroids average the noise out, so two clusters
-    of one voice sit far above it while two voices stay well below.
-    Everything else guards the roster: a "speaker" made of a few stray
-    chunks is dissolved into the nearest real speaker (or left UNKNOWN),
-    and the roster is capped so a recording full of crosstalk cannot
-    explode into dozens of labels.
-    """
+    """Agglomerative clustering knobs: ``link_threshold`` is the same-voice/cross-voice cosine boundary (ADR-0034);
+    ``centroid_merge_threshold`` folds a voice's outlier side clusters back; the rest floors and caps the roster."""
 
     link_threshold: float = 0.45
     centroid_merge_threshold: float = 0.60
     max_speakers: int = 8
-    # A cluster needs at least this many chunks (≈ seconds of speech) to
-    # count as a speaker of its own (mirrors the streaming ``min_split_mass``)…
+    # Minimum chunks (≈ seconds) and share of all chunks for a cluster to count as a speaker.
     min_speaker_chunks: int = 2
-    # …and at least this share of all chunks: in a 40-minute recording a
-    # voice heard for six seconds is a bystander, not a participant.
     min_speaker_share: float = 0.01
-    # Floor in seconds of speech (sum of the cluster's chunk durations);
-    # 0 disables it. A participant, not a cough (Sprint 28 B-4).
+    # Floor in ms of speech; 0 disables it.
     min_speaker_speech_ms: int = 0
-    # Chunks shorter than this are scored against the centroids but do
-    # not take part in forming clusters; 0 = every chunk forms clusters.
+    # Chunks shorter than this are scored but do not form clusters; 0 = all do.
     cluster_chunk_min_ms: int = 0
-    # Per-chunk scoring against the final centroids (streaming vocabulary,
-    # ADR-0034): below the floor vs every centroid → UNKNOWN; nearer than
-    # the margin to the runner-up → UNKNOWN.
+    # Per-chunk scoring: below the floor or within the margin of the runner-up → UNKNOWN.
     assign_floor: float = 0.45
     ambiguity_margin: float = 0.08
     margin_scale: float = 0.30
-    # Agglomeration holds an n×n similarity matrix. Above this many chunks
-    # the clusters are learnt on an evenly spaced sample and every chunk
-    # is then scored against the learnt centroids — a 3-hour recording
-    # still finishes in seconds, deterministically.
+    # Above this many chunks (n×n matrix) clusters are learnt on an evenly spaced sample.
     max_cluster_chunks: int = 1500
-    # With an exact count from a person, still join clusters whose centroids
-    # are the same voice (so an overstated count cannot invent speakers).
-    # Off = the stated count is taken literally.
+    # With an exact count, still join same-voice centroids so an overstated count cannot invent speakers.
     hint_same_voice_merge: bool = True
 
 
 @dataclass(frozen=True)
 class OfflineDiarizationConfig:
-    # Chunking of VAD speech regions before embedding — mirrors the
-    # streaming DiarizationConfig (ADR-0034 calibration).
+    # Mirrors the streaming DiarizationConfig (ADR-0034 calibration).
     chunk_target_ms: int = 1200
     chunk_min_ms: int = 250
-    # Adjacent same-speaker chunks separated by at most this much silence
-    # merge into one turn; a longer gap starts a new turn even for the
-    # same speaker (a turn is "kept talking", not "spoke again later").
+    # Same-speaker chunks within this gap merge into one turn.
     turn_merge_gap_ms: int = 1000
-    # ``attribute()`` floor: below this overlap-weighted confidence the
-    # answer is None — an uncertain label on a meeting transcript is
-    # worse than no label.
+    # ``attribute()`` floor: below it the answer is None.
     min_confidence: float = 0.20
-    # Kept for callers that read the streaming calibration off this
-    # config (chunk thresholds, split boundary); the batch clusterer
-    # itself is configured by ``offline_clustering``.
+    # Streaming calibration for callers that read it here; the batch clusterer uses ``offline_clustering``.
     clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
     offline_clustering: OfflineClusteringConfig = field(default_factory=OfflineClusteringConfig)
     attribution: AttributionPolicy = field(default_factory=AttributionPolicy)
@@ -140,19 +85,8 @@ class SpeakerTurn:
 
 
 class OfflineDiarization:
-    """Result of :func:`diarize_offline`: the turn list plus attribution.
-
-    ``turns``     — contiguous, non-overlapping, chronological.
-    ``speakers``  — distinct labels in first-appearance order.
-    ``attribute`` — majority-overlap speaker for a transcript span.
-
-    Every engine behind the :class:`~diarization.protocol.Diarizer` seam
-    returns this shape (Sprint 29): ``engine``/``engine_version`` say who
-    made it, ``hints`` what a person asked for, ``roster`` what the guard
-    did, ``overlap_ms`` where two people spoke at once (empty for the
-    legacy engine, which cannot tell). Numbers and labels only — never an
-    embedding.
-    """
+    """What every :class:`~diarization.protocol.Diarizer` returns: chronological ``turns``, ``speakers`` in
+    first-appearance order, ``attribute`` by majority overlap. Numbers and labels only, never an embedding."""
 
     def __init__(
         self,
@@ -174,8 +108,7 @@ class OfflineDiarization:
         self.hints = hints
         self.roster = roster
         self.overlap_ms: list[tuple[int, int]] = list(overlap_ms or [])
-        # Sprint 31, dual-channel captures only: display label → "local" |
-        # "remote", and the channel analysis summary for the stats.
+        # Dual-channel captures only: display label → "local" | "remote", plus the channel summary.
         self.sides: dict[str, str] = {}
         self.channel: Any = None
         self._segments = segments
@@ -188,19 +121,12 @@ class OfflineDiarization:
         self.speakers: list[str] = _first_appearance([t.speaker for t in self.turns])
 
     def attribute(self, start_ms: int, end_ms: int) -> str | None:
-        """Speaker for a transcript span, or ``None``.
-
-        Majority overlap against the diarized timeline (same policy as
-        streaming word attribution): ``None`` when coverage is below the
-        floor, when no speaker owns a clear majority, or when the
-        overlap-weighted confidence is under ``min_confidence``.
-        """
+        """Majority-overlap speaker for a span; ``None`` below coverage, majority or ``min_confidence``."""
         label, confidence = attribute_word(
             start_ms,
             end_ms,
             self._segments,
-            # Everything is diarized offline; a span past the nominal end
-            # (decoder rounding) must not read as "pending".
+            # A span past the nominal end (decoder rounding) must not read as "pending".
             diarized_until_ms=max(self._duration_ms, end_ms),
             policy=self._config.attribution,
         )
@@ -243,16 +169,7 @@ def diarize_offline(
     hints: DiarizationHints = NO_HINTS,
     roster: RosterGuardConfig | None = None,
 ) -> OfflineDiarization:
-    """Diarize a whole recording of float32 mono PCM.
-
-    The models are 16 kHz-only; callers own resampling (the batch worker
-    already decodes to 16 kHz for Whisper), so any other rate raises
-    rather than silently mislabeling time.
-
-    ``hints`` steer the clusterer (exact count / cap); ``roster`` switches
-    on the Sprint 29 roster guard — ``None`` keeps the Sprint 28 roster
-    exactly (the eval baselines depend on that).
-    """
+    """Diarize a whole 16 kHz float32 mono recording (other rates raise); ``roster=None`` = guard floor off."""
     if sample_rate_hz != SAMPLE_RATE_HZ:
         raise ValueError(
             f"diarize_offline requires {SAMPLE_RATE_HZ} Hz mono PCM, got {sample_rate_hz} Hz"
@@ -272,8 +189,7 @@ def embed_chunks(
     segmenter: SileroSegmenter,
     config: OfflineDiarizationConfig,
 ) -> tuple[list[tuple[int, int]], list[np.ndarray]]:
-    """VAD → chunking → one embedding per chunk. Split from clustering so
-    the eval grid can re-cluster cached embeddings without re-embedding."""
+    """VAD → chunking → one embedding per chunk (split from clustering so the eval grid can re-cluster)."""
     spans: list[tuple[int, int]] = []
     embeddings: list[np.ndarray] = []
     for region_start, region_end in segmenter.speech_regions(pcm):
@@ -312,8 +228,7 @@ def diarize_embeddings(
         SpeakerSegment(start_ms=s, end_ms=e, label=label, confidence=round(conf, 4))
         for (s, e), label, conf in zip(spans, labels, confidences, strict=True)
     ]
-    # Centroids live for this call only: the guard folds a dissolved
-    # speaker into the voice it sounds like, then they are gone.
+    # Centroids live for this call only.
     outcome = guard_roster(
         segments,
         config=roster or _NO_FLOOR,
@@ -332,7 +247,7 @@ def diarize_embeddings(
     )
 
 
-# The guard with its floor off: grades the count, dissolves nothing.
+# Floor off: grades the count, dissolves nothing.
 _NO_FLOOR = RosterGuardConfig(min_speaker_speech_ms=0, min_speaker_share=0.0)
 
 
@@ -350,23 +265,10 @@ def _label_centroids(labels: list[str], embeddings: list[np.ndarray]) -> dict[st
 def cluster_embeddings(
     embeddings: list[np.ndarray], cfg: OfflineClusteringConfig
 ) -> tuple[list[str], list[float]]:
-    """Label every chunk embedding ``S1..Sk`` (or ``UNKNOWN``) with a confidence.
+    """Label every chunk ``S1..Sk`` (or ``UNKNOWN``) with a confidence.
 
-    1. Average-linkage agglomerative clustering on cosine similarity,
-       cut at ``link_threshold`` (learnt on an evenly spaced sample when
-       the recording is long).
-    2. Clusters whose centroids are still near-identical are merged
-       (one voice that agglomeration split on chunk noise).
-    3. Clusters too small to be a speaker are dissolved; the roster is
-       capped at ``max_speakers`` (largest clusters win).
-    4. Every chunk is scored against the surviving centroids with the
-       streaming assignment rule (floor + ambiguity margin → UNKNOWN),
-       which is also what folds dissolved-cluster chunks into their
-       nearest real speaker.
-
-    Deterministic: ties break on the lowest index (stream order), and
-    speaker numbering follows first appearance. Returns internal ``S<n>``
-    labels; the caller renders ``SPEAKER_<n>`` by first appearance.
+    Agglomerate at ``link_threshold`` → merge near-identical centroids → dissolve dust, cap the roster →
+    score every chunk against the survivors (floor + margin → UNKNOWN). Deterministic; numbered by first appearance.
     """
     labels, confidences, _ = cluster_embeddings_with_stats(embeddings, cfg)
     return labels, confidences
@@ -380,18 +282,10 @@ def cluster_embeddings_with_stats(
     num_speakers: int | None = None,
     max_speakers: int | None = None,
 ) -> tuple[list[str], list[float], ClusterStats]:
-    """:func:`cluster_embeddings` plus the :class:`ClusterStats` behind it.
+    """:func:`cluster_embeddings` plus its :class:`ClusterStats`.
 
-    ``durations_ms`` (one per chunk) enables the duration-based knobs
-    (``min_speaker_speech_ms``, ``cluster_chunk_min_ms``); without it
-    they are ignored.
-
-    Hints (Sprint 29), so both engines answer the same question:
-    ``num_speakers=k`` agglomerates until exactly ``k`` clusters remain,
-    whatever the threshold says, and keeps them all — no speaker floor (a
-    person's count wins). The same-voice centroid merge still runs. ``max_speakers`` keeps
-    merging past the threshold until the roster fits under the cap. Fewer
-    chunks than ``k`` yields fewer speakers: nothing is invented.
+    ``durations_ms`` enables the duration knobs. ``num_speakers=k`` merges to exactly k with no floor (a
+    person's count wins); ``max_speakers`` merges until under the cap. Nothing is ever invented.
     """
     n = len(embeddings)
     if n == 0:
@@ -399,10 +293,7 @@ def cluster_embeddings_with_stats(
     if durations_ms is not None and len(durations_ms) != n:
         raise ValueError("durations_ms must have one entry per embedding")
     if num_speakers is None and max_speakers is not None:
-        # A cap is a ceiling, by construction: when the uncapped answer
-        # already fits under it, that answer is returned unchanged. A
-        # calendar cap can then never under-count what the engine got right
-        # (Sprint 30 C2 — measured on the gold replay).
+        # A cap is a ceiling: an uncapped answer that already fits is returned unchanged.
         plain = cluster_embeddings_with_stats(embeddings, cfg, durations_ms=durations_ms)
         if len({label for label in plain[0] if label != UNKNOWN}) <= max_speakers:
             return plain
@@ -417,15 +308,8 @@ def cluster_embeddings_with_stats(
     cap = min(cfg.max_speakers, max_speakers) if max_speakers is not None else None
     floor = max(cfg.min_speaker_chunks, int(np.ceil(cfg.min_speaker_share * len(sample))))
     if num_speakers is not None or cap is not None:
-        # A count is a count of PEOPLE. Stray chunks (a cough, a door) are
-        # dissimilar to everyone and would survive a merge-until-k run while
-        # two real voices got merged instead. So find them first with the
-        # ordinary threshold run, and let only the rest form the k clusters;
-        # the stray chunks are still scored against the final centroids
-        # below (nearest speaker, or UNKNOWN).
-        # Dust is judged AFTER the same-voice merge: far-field audio splits
-        # one real speaker into many small fragments that the merge joins
-        # again, and judging before it threw real speech away (gold replay).
+        # Drop dust (coughs, doors) before merging to k, or it survives while two real voices merge;
+        # dust is judged AFTER the same-voice merge, since far-field audio fragments one speaker.
         natural = _merge_close_centroids(
             learn, _average_linkage(learn, cfg.link_threshold), cfg.centroid_merge_threshold
         )
@@ -436,21 +320,15 @@ def cluster_embeddings_with_stats(
         if clean.any():
             sample, learn = sample[clean], learn[clean]
     if num_speakers is None and cap is not None:
-        # Only reached when the uncapped roster was over the cap: merge it
-        # down among real speakers (the dust is out).
         assignments = _average_linkage(learn, cfg.link_threshold, target=cap)
     else:
         assignments = _average_linkage(learn, cfg.link_threshold, target=num_speakers)
     clusters_raw = len(set(assignments))
-    # Runs with a count too: agglomerating down to k can leave one voice
-    # split across clusters when the recording holds fewer than k people,
-    # and this merge is what keeps an impossible count from inventing
-    # speakers (it only joins clusters that are the same voice).
+    # Also with a count: joining same-voice clusters keeps an overstated count from inventing speakers.
     if num_speakers is None or cfg.hint_same_voice_merge:
         assignments = _merge_close_centroids(learn, assignments, cfg.centroid_merge_threshold)
     clusters_after_merge = len(set(assignments))
 
-    # Cluster sizes on the sample → drop dust, cap the roster.
     sizes: dict[int, int] = {}
     speech: dict[int, float] = {}
     for row, c in enumerate(assignments):
@@ -473,8 +351,7 @@ def cluster_embeddings_with_stats(
         )
     ]
     if not kept:
-        # Nothing reached the speaker floor (a tiny recording). Keep the
-        # biggest cluster so a 2-second voice memo still has a speaker.
+        # Nothing reached the floor (a tiny recording): keep the biggest cluster.
         kept = [max(sizes, key=lambda c: (sizes[c], -c))]
     kept.sort(key=lambda c: (-sizes[c], c))
     kept = kept[: num_speakers or cap or cfg.max_speakers]
@@ -494,7 +371,7 @@ def cluster_embeddings_with_stats(
     sims = matrix @ centroids.T  # (n, k) cosine similarities
     labels: list[str] = []
     confidences: list[float] = []
-    # Speaker numbers follow first appearance in time, not cluster size.
+    # Numbered by first appearance in time, not cluster size.
     numbering: dict[int, str] = {}
     for row in sims:
         order = np.argsort(-row, kind="stable")
@@ -531,18 +408,10 @@ def _average_linkage(
     target: int | None = None,
     cap: int | None = None,
 ) -> list[int]:
-    """Agglomerate rows of ``unit`` (L2-normalised) by average linkage on
-    cosine similarity until the closest pair falls below ``threshold``.
+    """Average-linkage agglomeration of L2-normalised rows until the closest pair is below ``threshold``
+    (``target`` = merge to exactly that many; ``cap`` = keep merging while over it). Returns a cluster id per row.
 
-    ``target`` replaces the threshold with a count: merge until exactly
-    that many clusters remain. ``cap`` keeps merging below the threshold
-    while more than ``cap`` clusters remain.
-
-    Returns a cluster id per row. Lance–Williams update keeps the
-    linkage exact without recomputing pair sums: the similarity between a
-    merged cluster and any other is the size-weighted mean of its parts.
-    Each row remembers its best partner, so an iteration costs O(n) plus
-    the rows whose best partner was touched — O(n²) overall, not O(n³).
+    Lance–Williams update (size-weighted mean) plus a best-partner cache: O(n²), not O(n³).
     """
     n = unit.shape[0]
     if n == 1:
@@ -567,7 +436,6 @@ def _average_linkage(
         j = int(best_idx[i])
         if i > j:
             i, j = j, i  # keep the lower index as the survivor (determinism)
-        # Weighted average of the two rows against everyone else.
         merged = (sim[i] * sizes[i] + sim[j] * sizes[j]) / (sizes[i] + sizes[j])
         sim[i, :] = merged
         sim[:, i] = merged
@@ -579,9 +447,7 @@ def _average_linkage(
         members[i].extend(members.pop(j))
         for row in members[i]:
             parent[row] = i
-        # Refresh best partners: the survivor, the dead row, every row
-        # whose best partner was one of them, and any row for which the
-        # survivor's new similarity now beats its old best.
+        # Refresh best partners for the survivor, the dead row, their dependants, and rows the survivor now beats.
         stale = (best_idx == i) | (best_idx == j)
         stale[i] = True
         stale[j] = True
@@ -604,10 +470,7 @@ def _average_linkage(
 
 
 def _merge_close_centroids(unit: np.ndarray, assignments: list[int], threshold: float) -> list[int]:
-    """Merge clusters whose centroids are at least ``threshold`` alike,
-    closest pair first, until none are. Chunk-level agglomeration can
-    leave one voice in a main cluster plus outlier side clusters; their
-    centroids agree far more than two different voices ever do."""
+    """Merge clusters whose centroids are at least ``threshold`` alike, closest pair first, until none are."""
     labels = list(assignments)
     while True:
         ids = sorted(set(labels))
@@ -629,12 +492,7 @@ def _merge_close_centroids(unit: np.ndarray, assignments: list[int], threshold: 
 
 
 def _assign_display_names(segments: list[SpeakerSegment]) -> dict[str, str]:
-    """Raw label → ``SPEAKER_N``, numbered by first appearance in time.
-
-    The clusterer already numbers by first appearance, but this keeps the
-    promise in the wire contract independent of how the labels were made:
-    SPEAKER_1 is whoever spoke first.
-    """
+    """Raw label → ``SPEAKER_N`` by first appearance in time, whatever the engine's own numbering."""
     names: dict[str, str] = {}
     for seg in segments:
         if seg.label == UNKNOWN or seg.label in names:

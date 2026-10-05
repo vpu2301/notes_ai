@@ -1,8 +1,4 @@
-"""One hand-built case per audit metric (Summary Engine v2, Q1 T5).
-
-The scorers decide whether Q2–Q5 passed their gates, so each rule is
-pinned here on inputs small enough to check by eye.
-"""
+"""One hand-built case per audit metric, small enough to check by eye."""
 
 from __future__ import annotations
 
@@ -287,7 +283,7 @@ def test_an_action_line_with_its_verified_owner_and_deadline_invents_nothing() -
     assert _score(_meeting(), [line], [fact])["invented_claims"] == 0
 
 
-# ── Q4: entities by source, model tier precision ────────────────────
+# ── Entities by source, model tier precision ────────────────────
 
 
 def test_entities_are_credited_to_the_tier_that_got_them_right() -> None:
@@ -317,7 +313,7 @@ def test_the_framing_is_not_an_opinion_to_attribute() -> None:
     assert row["attribution"] == [0, 0]
 
 
-# ── Q5: every line cited; the key-dates block ───────────────────────
+# ── Every line cited; the key-dates block ───────────────────────
 
 
 def test_lines_cited_and_key_dates_recall() -> None:

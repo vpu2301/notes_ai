@@ -1,10 +1,6 @@
 import type { CoverageGap, CoverageGapCause, TranscriptCoverage } from "../api/types";
 
-/**
- * Sprint F1: "Not transcribed: 00:00–00:44 (audio started late), …" — the
- * speech the transcript is missing, and why, as the worker measured it.
- * Pure, so the wording is testable without a page.
- */
+/** "Not transcribed: 00:00–00:44 (audio started late), …" from the worker's gaps. Pure. */
 
 export const MAX_SHOWN_GAPS = 4;
 

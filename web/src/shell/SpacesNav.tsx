@@ -1,5 +1,4 @@
-// The sidebar's "Spaces" section — the same personal folders the Mac app
-// shows: click one to narrow the notes list, ⋯ to rename or delete it.
+// The sidebar's "Spaces" section: the same personal folders the Mac app shows.
 
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";

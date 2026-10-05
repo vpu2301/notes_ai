@@ -1,8 +1,4 @@
-"""Sprint 29 seam: hints, roster guard, legacy hint support, v2 adapter.
-
-No torch, no pyannote: the legacy engine runs on synthetic embeddings and
-the v2 adapter on a faked ``DiarizeOutput``.
-"""
+"""The diarizer seam: hints, roster guard, legacy hints, v2 adapter (synthetic embeddings, faked ``DiarizeOutput``)."""
 
 from __future__ import annotations
 

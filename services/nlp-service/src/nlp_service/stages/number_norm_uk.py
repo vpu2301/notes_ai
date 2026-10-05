@@ -1,21 +1,6 @@
-"""Ukrainian number normalization.
+"""Ukrainian number normalization: tokenize, tag, apply pattern rules in priority order.
 
-Strategy:
-1. Tokenize on whitespace (preserving punctuation as separate tokens
-   where reasonable).
-2. Tag each token as NUM / UNIT / SEP / OTHER.
-3. Walk the stream applying pattern rules in PRIORITY order:
-   - BP-like ``NUM на NUM`` (with or without trailing unit)
-   - HR ``пульс NUM`` (with various trailing forms)
-   - ``NUM раз(ів) на (добу|день)``
-   - decimal ``NUM цілих NUM``
-   - half-time ``пів на NUM``
-   - range ``від NUM до NUM``
-   - generic ``NUM UNIT``
-4. Untagged numbers (no surrounding semantic markers) pass through.
-
-The output preserves all non-recognized tokens verbatim. Determinism:
-no random fallback, no float ops, ordered iteration.
+Unrecognized tokens pass through verbatim; deterministic (no float ops).
 """
 
 from __future__ import annotations
@@ -69,8 +54,7 @@ _CILIH = {"цілих", "цілі", "ціла"}
 _FROM = {"від"}
 _TO = {"до"}
 
-# Spelled-out cardinals → digit string. We accept compositions like
-# "сто двадцять" → "120" via a recursive parser.
+# Spelled-out cardinals; compositions ("сто двадцять") are parsed recursively.
 _DIGITS_UK: Final[dict[str, int]] = {
     "нуль": 0,
     "один": 1,
@@ -186,12 +170,7 @@ class Tag(StrEnum):
 
 
 def _tokenize(text: str) -> list[str]:
-    """Whitespace + punctuation-aware tokenisation.
-
-    Keeps trailing punctuation on its own token so pattern matching sees
-    clean word boundaries.
-    """
-    # Pull punctuation off word boundaries.
+    """Tokenise; trailing punctuation gets its own token."""
     spaced = re.sub(r"([.,;:!?])", r" \1 ", text)
     return [t for t in spaced.split() if t]
 
@@ -203,14 +182,7 @@ def _digit_value(token: str) -> int | None:
 
 
 def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int]:
-    """Greedy multi-word cardinal parser.
-
-    Returns ``(value, words_consumed)``. ``value`` is None if the
-    current position isn't a number.
-
-    Handles: 'сто двадцять' = 120; 'тисяча двісті' = 1200; pure-digit
-    strings ('120') pass through.
-    """
+    """Greedy multi-word cardinal parser; returns ``(value, words_consumed)``, value None if not a number."""
     if i >= len(tokens):
         return None, 0
     first = _digit_value(tokens[i])
@@ -222,13 +194,11 @@ def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int]:
     total = first
     consumed = 1
     cursor = i + 1
-    # Append additional summable terms while consecutive UK words map
-    # to smaller-magnitude digits.
     while cursor < len(tokens):
         v = _digit_value(tokens[cursor])
         if v is None:
             break
-        # Allow only descending magnitudes after the head.
+        # Only descending magnitudes after the head.
         if v >= total and total < 100:
             break
         total += v
@@ -238,13 +208,7 @@ def _parse_number_run(tokens: list[str], i: int) -> tuple[int | None, int]:
 
 
 def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
-    """Parse a spoken decimal fraction as a literal digit string.
-
-    "нуль п'ять" → "05", "п'ять" → "5". The summing run-parser collapses
-    "нуль п'ять" to 0 and drops the trailing digit (2.05 → 2.0) — a dropped
-    digit silently corrupts a dictated figure — so the fractional part is
-    rendered digit-by-digit, preserving leading zeros.
-    """
+    """Spoken decimal fraction as a literal digit string ("нуль п'ять" → "05"; summing would drop the zero)."""
     digits: list[str] = []
     cursor = i
     while cursor < len(tokens):
@@ -258,8 +222,7 @@ def _parse_fraction_digits(tokens: list[str], i: int) -> tuple[str | None, int]:
     return "".join(digits), cursor - i
 
 
-# Plausible BP ranges — gate the "NUM на NUM" → slash rewrite so the common
-# preposition "на" (dimensions, "for N days") is not turned into a slash.
+# Plausible BP ranges gate the "NUM на NUM" → slash rewrite.
 _BP_SYSTOLIC = range(60, 301)
 _BP_DIASTOLIC = range(30, 161)
 _BP_CUES_UK: Final[frozenset[str]] = frozenset(
@@ -290,8 +253,7 @@ def normalize_uk(text: str, *, decimal_separator: str, bp_separator: str) -> str
             v2, c2 = _parse_number_run(raw, i + c1 + 1)
             if v2 is not None:
                 consumed = c1 + 1 + c2
-                # Optional trailing BP unit phrase: "міліметрів ртутного
-                # стовпчика" — an explicit unit is the strongest BP signal.
+                # An explicit unit is the strongest BP signal.
                 if (
                     i + consumed + len(_BP_UNIT_SEQ) <= n
                     and tuple(
@@ -302,9 +264,7 @@ def normalize_uk(text: str, *, decimal_separator: str, bp_separator: str) -> str
                     out.append(f"{v1}{bp_separator}{v2} мм рт. ст.")
                     i += consumed + len(_BP_UNIT_SEQ)
                     continue
-                # No unit: emit the slash only when a BP cue precedes or both
-                # values are physiologically plausible — otherwise "три на
-                # чотири" must pass through unchanged (ADR-0015).
+                # No unit: slash only with a BP cue or plausible values (ADR-0015).
                 if _has_bp_cue_uk(raw, i) or _looks_like_bp(v1, v2):
                     out.append(f"{v1}{bp_separator}{v2}")
                     i += consumed
@@ -394,9 +354,7 @@ def normalize_uk(text: str, *, decimal_separator: str, bp_separator: str) -> str
 
         # ── Pure digit / spelled cardinal with no surrounding markers ──
         if v1 is not None and c1 > 1:
-            # Multi-word spelled cardinal with no unit nearby → fold to digit
-            # ONLY if it's "long enough" to be unambiguous (avoids touching
-            # 'один' as a determiner).
+            # Fold only a multi-word cardinal ('один' may be a determiner).
             out.append(str(v1))
             i += c1
             continue

@@ -1,8 +1,4 @@
-/**
- * A stable colour and initials for a speaker, so the same person reads
- * the same across the editor, the shared page and the native apps (they
- * use the same palette and the same hash).
- */
+/** Stable colour and initials for a speaker; same palette and hash as the native apps. */
 const TINT_COUNT = 6;
 
 /** A CSS colour for `--tint`: one of the `--speaker-N` tokens (tokens.css), which carry their own dark-mode values. */
@@ -23,11 +19,7 @@ function nameKey(name: string): string {
   return name.trim().toLocaleLowerCase();
 }
 
-/**
- * The names a rename can offer for `label`: the job's `name_candidates`
- * (calendar invitees) minus any already given to another speaker, in the
- * server's order, without repeats.
- */
+/** `name_candidates` minus names already given to another speaker, server order, no repeats. */
 export function pickableNames(
   candidates: readonly string[] | undefined,
   names: Record<string, string>,
@@ -49,11 +41,7 @@ export function pickableNames(
   return out;
 }
 
-/**
- * The segment indices of some turns, concatenated in transcript order —
- * one reassign call per action however many turns are selected. They are
- * opaque (artifact index space): sent back exactly as the result gave them.
- */
+/** Segment indices of the turns, transcript order. Opaque: sent back exactly as received. */
 export function segmentIndicesOf(turns: ReadonlyArray<{ segment_indices?: number[] }>): number[] {
   return turns.flatMap((t) => t.segment_indices ?? []);
 }

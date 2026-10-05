@@ -1,8 +1,6 @@
 # ── GPU build for dictation-service ───────────────────────────────────
-# Shares the CUDA base with asr-worker. The WhisperEngine is imported
-# in-process (ADR-0009 + sprint-04 day-1), so this image bakes the SAME
-# pinned + checksum-verified Whisper weights and runs fully offline
-# (ADR-0021, Sprint B1 Day 2).
+# Shares the CUDA base with asr-worker; bakes the same pinned, checksum-verified
+# Whisper weights and runs fully offline (ADR-0021, docs/models/PINS.md).
 
 # ── Stage 1: fetch + verify weights (build-time only) ──────────────────
 FROM python:3.12-slim AS model-fetch
@@ -13,8 +11,7 @@ ARG MD_ASR_MODEL_SHA256=69f74147e3334731bc3a76048724833325d2ec74642fb52620eda873
 
 RUN pip install --no-cache-dir "huggingface_hub[cli]==0.25.2"
 
-# Retry on a broken stream: hf_hub resumes from the .incomplete file in this
-# same layer. If every attempt fails, sha256sum -c below still fails closed.
+# Retry on a broken stream (hf_hub resumes); sha256sum -c below still fails closed.
 ENV HF_HUB_DOWNLOAD_TIMEOUT=60
 RUN --mount=type=secret,id=hf_token \
     set -eu; \
@@ -32,11 +29,8 @@ RUN --mount=type=secret,id=hf_token \
     echo "model.bin checksum verified against pinned digest"
 
 # ── Stage 1b: fetch + verify the ECAPA diarization weights ─────────────
-# Sprint 14 (ADR-0034): conversation mode runs a SECOND model on the same
-# GPU. Same bake contract as Whisper — immutable revision, sha256
-# fail-closed, offline at runtime. The assembly script is the single source
-# of truth for the pins (docs/models/PINS.md), shared with the dev path
-# (`make prepare-ecapa`) so the image and a laptop load identical weights.
+# Same bake contract as Whisper; the assembly script owns the pins
+# (docs/models/PINS.md) and is shared with `make prepare-ecapa`.
 FROM python:3.12-slim AS ecapa-fetch
 
 ARG MDX_DIAR_MODEL_REPO=speechbrain/spkrec-ecapa-voxceleb
@@ -49,11 +43,8 @@ RUN pip install --no-cache-dir "huggingface_hub[cli]==0.25.2"
 COPY scripts/models/prepare_ecapa.py /build/scripts/models/prepare_ecapa.py
 COPY infra/models/ecapa/ /build/infra/models/ecapa/
 
-# ECAPA is ungated (Apache-2.0) so the token is not needed for the public
-# repo; the mount is kept for a private in-perimeter mirror. BuildKit
-# secrets never land in a layer — verified in docs/runbooks/dictation.md.
-# Retried like the Whisper fetch above; the script verifies both digests
-# itself, so a run that completes has already failed closed on a mismatch.
+# ECAPA is ungated; the token mount is for a private mirror only. Retried like
+# the Whisper fetch; the script verifies both digests itself.
 ENV HF_HUB_DOWNLOAD_TIMEOUT=60
 RUN --mount=type=secret,id=hf_token \
     set -eu; \
@@ -122,7 +113,6 @@ RUN python3.12 -m uv pip install --system --no-cache \
     /build/libs/secret \
     /build/libs/notification_events
 
-# Bake the verified weights from the fetch stages.
 COPY --from=model-fetch /opt/models/whisper /opt/models/whisper-large-v3
 COPY --from=ecapa-fetch /opt/models/ecapa /opt/models/ecapa
 
@@ -133,10 +123,8 @@ LABEL mdx.model.repo="${MD_ASR_MODEL_REPO}" \
       mdx.diar.model.revision="${MDX_DIAR_MODEL_REVISION}" \
       mdx.diar.model.sha256="${MDX_DIAR_MODEL_SHA256}"
 
-# Editable workspace libs install as .pth files, which Python only honors
-# in a site dir — not via PYTHONPATH. sitecustomize is auto-imported because
-# /deps is on PYTHONPATH; it re-registers /deps as a site dir so the editable
-# .pth files (asr_models, audit, observability, …) actually activate.
+# Editable libs install as .pth files, honoured only in a site dir; sitecustomize
+# re-registers /deps as one so they activate.
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
 ENV PYTHONPATH=/deps \

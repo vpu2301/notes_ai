@@ -1,9 +1,4 @@
-// The workspace glossary (Sprint 35).
-//
-// Names, companies, products and terms this workspace spells a particular
-// way. Nothing is learned silently: a correction offers to remember one
-// term, the list is visible under Workspace settings, and every entry can
-// be deleted by whoever added it (or an admin).
+// The workspace glossary. Nothing is learned silently; every entry is visible and deletable.
 
 import { api } from "./http";
 import type { GlossaryKind, GlossaryTerm, GlossaryHint } from "./types";
@@ -12,16 +7,12 @@ export function listGlossary(): Promise<GlossaryTerm[]> {
   return api<GlossaryTerm[]>("note", "/v1/glossary");
 }
 
-/**
- * Remember one term. Sending a term the workspace already has merges the
- * new mishearing into it and answers 200 — saying "remember John Mayer"
- * after two different mistakes should teach the second one.
- */
+/** An existing term merges the new mishearing in and answers 200. */
 export function rememberTerm(params: {
   term: string;
   kind?: GlossaryKind;
   heard_as?: string[];
-  /** The note the rename happened in, so the entry can say where it came from. */
+  /** The note the rename happened in. */
   note_id?: string;
 }): Promise<GlossaryTerm> {
   return api<GlossaryTerm>("note", "/v1/glossary", { method: "POST", json: params });

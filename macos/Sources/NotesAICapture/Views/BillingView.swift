@@ -1,13 +1,8 @@
 import SwiftUI
 
-/// Settings › Billing (0068) — the workspace's plan, this month's usage,
-/// and the plans it can move to. Mirrors the web's `/settings/billing`.
-///
-/// Admins only: the server answers 403 to everyone else, and the sidebar
-/// row is hidden for them. Payments are not connected yet — a switch
-/// applies at once where the server allows it and is refused with a
-/// reason where it does not. When Stripe arrives the server answers
-/// `redirect` and this view opens the URL in the browser.
+/// Settings › Billing — the plan, this month's usage, and the plans it can move to.
+/// Admins only (403 otherwise). Without payments a switch applies at once where
+/// allowed; with Stripe the server answers `redirect` and this opens the URL.
 struct BillingView: View {
     @EnvironmentObject private var app: AppState
     @State private var billing: Billing?
@@ -167,7 +162,7 @@ struct BillingView: View {
         )
     }
 
-    /// "Have a code?" — a link that opens one field (0069).
+    /// "Have a code?" — a link that opens one field.
     @ViewBuilder
     private var redeemRow: some View {
         if !redeeming {

@@ -1,13 +1,6 @@
 """The diarize=true batch step: attribution merge + failure classification.
 
-The heavy pipeline (VAD → embeddings → clustering) is covered in
-libs/diarization; here the worker-side promises are held:
-
-* every segment gets the diarizer's answer for its span — including
-  ``None`` when the diarizer declines — and the roster rides along;
-* an unavailable speaker model is retryable (another worker may have the
-  weights), a diarizer crash on decoded samples is terminal (determinism:
-  a redelivery redoes a full Whisper pass to reach the same crash).
+An unavailable speaker model is retryable; a diarizer crash on decoded samples is terminal.
 """
 
 from __future__ import annotations
@@ -102,7 +95,7 @@ def test_diarization_failure_classification(kind: JobErrorKind, expected: type) 
 class _TimelineDiarization:
     """Answers attribute() from a speaker timeline (ms ranges)."""
 
-    # What every engine behind the Sprint 29 seam reports about itself.
+    # What every engine behind the seam reports about itself.
     engine = "legacy-ecapa-ahc"
     engine_version = "test"
     hints = DiarizationHints()
@@ -225,7 +218,7 @@ def test_roster_lists_only_speakers_that_reached_the_transcript() -> None:
     assert got.speakers == ["SPEAKER_1"]
 
 
-# ── Sprint 28: DiarizationStats ─────────────────────────────────────────
+# ── DiarizationStats ────────────────────────────────────────────────────
 
 
 def test_diarization_stats_describe_the_roster_without_content() -> None:
@@ -262,7 +255,7 @@ def test_stored_transcripts_without_diarization_stats_still_decode() -> None:
     assert TranscriptionOutput.model_validate(raw).metadata.diarization is None
 
 
-# ── Sprint 30: uncertainty marks and overlaps persist ──────────────────
+# ── Uncertainty marks and overlaps persist ─────────────────────────────
 
 
 def test_smoothed_words_mark_their_piece_uncertain_and_overlap_is_kept() -> None:

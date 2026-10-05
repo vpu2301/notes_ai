@@ -1,19 +1,5 @@
-"""Inference backend seam (ADR-0036).
-
-Same swap-seam doctrine as note-service ``domain/synthesis.py``: the
-engine is a Protocol; changing backends is one env var, not a refactor.
-Two real backends ship:
-
-* ``LlamaCppClient`` — llama-server native ``/completion``. The default:
-  no per-request scheduler overhead (measured ~420 ms/request in Ollama
-  0.32.5 with gemma3). llama-server serves a raw completion endpoint, so
-  the Gemma chat-turn wrapper is applied HERE — without it greedy gemma3
-  degenerates into repetition loops.
-* ``OllamaClient`` — Ollama ``/api/generate`` (applies the model's chat
-  template itself). Kept as the operationally simpler alternative.
-
-The deterministic mock used by tests lives in ``tests/``, not here — no
-mock logic ships in the service (sprint-15 delivery mandate).
+"""Inference backend seam: llama-server ``/completion`` (default, raw prompt so the
+Gemma turn wrapper is applied here) or Ollama ``/api/generate`` (applies its own template).
 """
 
 from __future__ import annotations
@@ -25,10 +11,9 @@ import httpx
 
 from .. import config
 
-# Gemma 3 instruct turn format (llama.cpp raw-completion path only).
+# Gemma 3 turn format; without it greedy gemma3 loops (llama.cpp path only).
 _GEMMA_TURN = "<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
-# `\n\n` stops multi-paragraph rambles: an inline completion finishes the
-# current sentence, it never starts a new paragraph.
+# `\n\n` keeps a completion inside the current paragraph.
 _STOP = ["<end_of_turn>", "\n\n"]
 
 

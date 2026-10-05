@@ -1,8 +1,4 @@
-"""Corrections and the glossary, at the route level (Sprint 35).
-
-Real handlers, auth overridden, the DB stubbed — the rig shape the other
-note-service router tests use.
-"""
+"""Corrections and the glossary, at the route level: real handlers, auth overridden, the DB stubbed."""
 
 from __future__ import annotations
 
@@ -365,8 +361,7 @@ def test_restore_cancels_the_dismissal(rig: SimpleNamespace) -> None:
 
 
 def test_changing_the_owner_keeps_the_key(rig: SimpleNamespace) -> None:
-    """The point of the whole design: a recipient's confirmation and (once
-    Sprint 33 lands) the evidence chip hang off this key."""
+    """A recipient's confirmation and the evidence chip hang off this key."""
     key = _key("send the pricing proposal")
     resp = rig.client.patch(
         f"/v1/notes/{NOTE_ID}/items/by-key/{key}",
@@ -481,7 +476,7 @@ def test_remembering_the_same_term_again_teaches_the_new_mishearing(
     rig: SimpleNamespace,
 ) -> None:
     rig.client.post("/v1/glossary", json={"term": "John Mayer", "heard_as": ["Jon Meyer"]})
-    # A case variant (a person still needs a capital somewhere — Sprint I2).
+    # A case variant (a person still needs a capital somewhere).
     resp = rig.client.post("/v1/glossary", json={"term": "John mayer", "heard_as": ["John Meyer"]})
     assert resp.status_code == 200  # merged, not a duplicate error
     assert resp.json()["heard_as"] == ["Jon Meyer", "John Meyer"]
@@ -526,7 +521,7 @@ def test_forgetting_a_term_that_is_not_there_is_a_404(rig: SimpleNamespace) -> N
     assert rig.client.delete(f"/v1/glossary/{uuid4()}").status_code == 404
 
 
-# ── Summary Engine v2, Q5: a respelled name, accepted or rejected ────
+# ── a respelled name, accepted or rejected ────
 
 NAMED = "- Laut Fabian Reinbold wird die Mehrheit knapp\n- Tom: book the room"
 
@@ -612,7 +607,7 @@ def test_rejecting_a_name_the_line_does_not_have_is_refused(rig: SimpleNamespace
     assert resp.json()["code"] == "correction_not_in_line"
 
 
-# ── Sprint I2: only names and terms become vocabulary ──────────────
+# ── only names and terms become vocabulary ──────────────
 
 
 def test_a_role_label_is_refused_with_its_own_code(rig: SimpleNamespace) -> None:

@@ -1,14 +1,4 @@
-"""libs/models — model hosting is configuration (Foundation plan, decision 11).
-
-Public surface::
-
-    from models import Registry, build_chat_provider, build_asr_provider
-    registry = Registry.load("config/models.yaml", env=settings.env,
-                             environ=settings.registry_environ())
-    chat = build_chat_provider(registry.resolve(workspace_id, "understand"))
-    result = await chat.complete(prompt, schema, max_tokens=2048)
-    # result.backend / result.model_id are stored on every run for provenance.
-"""
+"""Model hosting is configuration: ``Registry.load(...)`` → ``resolve(workspace, operation)`` → ``build_*_provider``."""
 
 from __future__ import annotations
 

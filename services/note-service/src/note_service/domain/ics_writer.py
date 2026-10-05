@@ -1,11 +1,5 @@
-"""A calendar file for one date a meeting named (Summary Engine v2, Q5).
-
-RFC 5545, one ``VEVENT``, written by hand: the note's "Key dates" block
-offers a download per date, and nothing here talks to a calendar — no
-OAuth, no connector. ``ics_calendar`` READS feeds; this only writes one.
-
-Text values are escaped per RFC 5545 §3.3.11 and lines are folded at 75
-octets (§3.1).
+"""A calendar file for one date a meeting named: RFC 5545, one ``VEVENT``, written
+by hand (escaped per §3.3.11, folded at 75 octets per §3.1).
 """
 
 from __future__ import annotations

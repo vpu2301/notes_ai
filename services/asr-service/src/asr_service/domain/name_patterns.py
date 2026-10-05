@@ -1,15 +1,7 @@
-"""Self-introduction patterns per transcript language (Sprint 32 B-1).
+"""Self-introduction patterns per transcript language; they only PROPOSE a name.
 
-Rule-based and precision-first: a phrase like "this is Anna" only
-PROPOSES a name; `name_suggestions` requires it to match a calendar
-candidate before anything is shown. So these patterns may be generous —
-"ich bin Arzt" extracts "Arzt" (German capitalises nouns) and the
-candidate list throws it away.
-
-Safety: every quantifier is bounded (a name is at most 3 tokens of at
-most 40 characters), so a 10 kB adversarial turn cannot backtrack
-catastrophically. Names are checked for capitalisation in code, not in
-the regex, so the prefixes can be case-insensitive and Unicode-aware.
+Every quantifier is bounded (≤ 3 tokens of ≤ 40 chars) against catastrophic
+backtracking; capitalisation is checked in code, not in the regex.
 """
 
 from __future__ import annotations
@@ -24,14 +16,10 @@ _NAME = rf"(?P<name>{_TOKEN}(?:[ \t]+{_TOKEN}){{0,2}})"
 _PREFIXES: dict[str, tuple[str, ...]] = {
     "en": (r"\b(?:this is|i am|i'm|i’m|my name is|it's|it’s)[ \t]+",),
     "de": (r"\b(?:hier ist|ich bin|mein name ist|ich heiße|ich heisse)[ \t]+",),
-    # Not after an apostrophe either: "ім'я Олена" ("the name is Olena", said
-    # ABOUT someone) must not read as "я Олена".
+    # Not after an apostrophe: "ім'я Олена" must not read as "я Олена".
     "uk": (r"(?<![\w'’ʼ])(?:це|мене звати|я)[ \t]+",),
 }
-# "Anna here." is an introduction only as a clause of its own: it must
-# START a clause (text start or after . ! ? , ; :) and END one (. ! , ; : —
-# or end of text). "Is Anna here?", "wait, Anna speaking next" and
-# "ob Anna hier ist" mention someone else and are rejected.
+# "Anna here." counts only as a clause of its own ("Is Anna here?" is rejected).
 _CLAUSE_START = r"(?:^|(?<=[.!?,;:—–]))[ \t]*"
 _CLAUSE_END = r"(?=[ \t]*(?:[.!,;:—–]|$))"
 _SUFFIXES: dict[str, tuple[str, ...]] = {
@@ -174,15 +162,11 @@ class Introduction:
     name: str  # as the transcript spells it
     start: int  # character offsets of the match in the scanned text
     end: int
-    # Sprint F3: the clause after the name that says what the person does
-    # ("I am a broker with Springbrook Marine Group"), verbatim, or None.
-    # Nothing is inferred: it is a substring of the scanned text.
+    # The role clause after the name, verbatim (a substring of the scanned text), or None.
     role_text: str | None = None
 
 
-# Where a role clause may start right after the name ("Mitchell, broker…",
-# "Anna from sales", "Tom with Acme"), or as the next sentence ("I am a
-# broker…"). Bounded: a clause is at most ROLE_CHARS long.
+# Where a role clause may start after the name; bounded to ROLE_CHARS.
 ROLE_CHARS = 120
 _ROLE_AFTER_NAME: dict[str, re.Pattern[str]] = {
     "en": re.compile(

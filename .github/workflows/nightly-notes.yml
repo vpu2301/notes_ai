@@ -1,16 +1,6 @@
-# Nightly notes-engine eval (Summary Engine v2, Q1 T8).
-#
-# Runs the document engine (pipeline arm) and the one-prompt baseline
-# (single_pass arm) over the notes gold set with the stack model, runs
-# the regression checklists (r01 = the 2026-09-22 audit, m06 = its
-# synthetic twin), and fails when the pipeline regressed against the
-# committed baseline: unsupported_rate up by more than 0.01, any invented
-# claim, any prompt-example echo, or key_fact_recall down by more than 0.02.
-#
-# Self-hosted on purpose: the real gold set (eval/notes/v2) is consent-
-# gated or third-party content that is never committed, and the stack
-# model runs on the eval Mac. The runner needs the label `mdx-eval` and
-# the corpus at $NOTES_CORPUS (default: the committed synthetic set).
+# Nightly notes-engine eval (pipeline vs single_pass arms) against the
+# committed baseline. Self-hosted (`mdx-eval`): the real gold set is never
+# committed and the stack model runs on the eval Mac.
 name: nightly-notes
 
 on:
@@ -31,8 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Committed report the nightly compares against. Update it (in a PR,
-  # with the report) when an engine change is MEANT to move the numbers.
+  # Committed baseline; update in a PR only when a change is MEANT to move the numbers.
   BASELINE_PIPELINE: docs/eval/notes-baseline-pipeline.json
   MAX_UNSUPPORTED_RISE: "0.01"
   MAX_RECALL_DROP: "0.02"
@@ -44,6 +33,8 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -74,9 +65,7 @@ jobs:
         run: make eval-notes BACKEND=dev_mac ARM=single_pass CORPUS="${{ steps.corpus.outputs.path }}"
 
       - name: Regression checklists
-        # r01 and later regression cases are EXPECTED to fail until the
-        # sprint that owns each check lands; the output says which one.
-        # Reported, not gating — the comparison below is the gate.
+        # Reported, not gating; the comparison below is the gate.
         continue-on-error: true
         run: make eval-notes-assert BACKEND=dev_mac CORPUS="${{ steps.corpus.outputs.path }}"
 

@@ -7,30 +7,15 @@
     DELETE /v1/notes/{id}/share/{sub}    take it back
     POST   /v1/notes/{id}/public-link    "anyone with the link" (idempotent)
     DELETE /v1/notes/{id}/public-link    revoke it
-    POST   /v1/notes/{id}/links          a per-recipient link (Sprint 19)
+    POST   /v1/notes/{id}/links          a per-recipient link
     GET    /v1/notes/{id}/links          every live link on the note
     DELETE /v1/notes/{id}/links/{link}   revoke one
     DELETE /v1/notes/{id}/links          revoke them all
     DELETE /v1/notes/{id}                soft delete
 
-Recipient links (0035) are the client-facing half: one per recipient,
-labelled, expiring by default, and only for a finalized note unless the
-sender says in so many words that they have reviewed the draft. The
-sender's teammates see per-link "opened" / "clicked the CTA" state.
-
-Sharing with a member goes out as a ``note.shared_with_you`` notification
-(in-app and e-mail per their preferences) carrying the note code and the
-sharer's name — never the title or content (ADR-0031). Someone who is not
-a member cannot be granted access; the client offers the public link
-instead.
-
-``/share/email`` is the one place a note's title and the sharer's own
-words leave the system in an e-mail, and it is deliberate: a person
-typed the addresses and the message and pressed Send. It replaces the
-``mailto:`` hand-off the clients used to do, which produced an unstyled
-draft the sender still had to send — and, on macOS, surfaced whatever
-Mail.app already had open. Members are granted access and get an app
-link; everyone else gets the public link, minted if the note has none.
+Sharing with a member sends a content-free ``note.shared_with_you`` notification
+(ADR-0031); non-members cannot be granted access. ``/share/email`` is the one
+place a note's title and the sharer's words leave the system in an e-mail.
 """
 
 from __future__ import annotations
@@ -68,8 +53,7 @@ router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
 Visibility = Literal["private", "workspace"]
 
-# Public links do not expire by default; an author who wants a
-# deadline sets one when creating the link.
+# Public links do not expire by default.
 _MAX_LINK_DAYS = 365
 
 
@@ -100,8 +84,7 @@ class LinkView(BaseModel):
     label: str
     recipient_email: str | None
     token: str
-    # The SPA path an anonymous reader opens; the client prefixes its
-    # own origin so links point at whichever host served the page.
+    # SPA path; the client prefixes its own origin.
     path: str
     # Opaque referral code carried into /join?ref= (recipient links only).
     ref_code: str | None
@@ -111,9 +94,8 @@ class LinkView(BaseModel):
     first_viewed_at: str | None
     last_viewed_at: str | None
     cta_clicked_at: str | None
-    # Sprint 20: live responses (confirm/done/dispute/flag) from this link.
+    # Live responses (confirm/done/dispute/flag) from this link.
     response_count: int = 0
-    # Sprint 22: the product mailed the link.
     delivery_status: Literal["not_sent", "sent", "failed", "suppressed"] = "not_sent"
     sent_at: str | None = None
     send_count: int = 0
@@ -132,8 +114,7 @@ class SharingView(BaseModel):
     public_link: LinkView | None
     # Every live link, newest first — public and recipient.
     links: list[LinkView]
-    # Sprint 23: the workspace's effective rules, so clients can hide what
-    # the server would refuse.
+    # The workspace's effective rules, so clients can hide what the server would refuse.
     constraints: sharing_policy.Constraints
 
 
@@ -150,9 +131,7 @@ class ShareRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-# Same loose shape check as ShareRequest — the real test is whether a
-# relay accepts it, and this only has to keep obvious nonsense (and a
-# header-injection newline) out of an SMTP envelope.
+# Loose shape check: keeps nonsense and a header-injection newline out of the SMTP envelope.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -160,16 +139,11 @@ class ShareEmailRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     recipients: list[str] = Field(min_length=1)
-    # The sharer's own words. Optional: "here is the note" is a complete
-    # thought, and forcing a message would get "fyi" typed into every one.
+    # The sharer's own words, optional.
     message: str = Field(default="")
-    # The UI language of whoever pressed Send. The recipient's own
-    # language is unknowable — half of them have no account here — so the
-    # sender's is the best available guess, and it is usually right
-    # because people share within a team.
+    # The sender's UI language: the recipient's is unknowable, this is the best guess.
     lang: str = Field(default=share_mail_copy.DEFAULT_LANG, max_length=16)
-    # How long an outsider's link lives. None → the deployment default,
-    # always clipped to the workspace ceiling.
+    # None → the deployment default, always clipped to the workspace ceiling.
     expires_in_days: int | None = Field(default=None, ge=1, le=365)
 
     @field_validator("recipients")
@@ -181,8 +155,7 @@ class ShareEmailRequest(BaseModel):
             address = raw.strip()
             if not _EMAIL_RE.match(address) or len(address) > 254:
                 raise ValueError(f"{raw!r} is not an e-mail address")
-            # Case-insensitive dedupe: mailing the same person twice
-            # because they typed one address two ways is a bug they see.
+            # Case-insensitive dedupe.
             key = address.lower()
             if key not in seen:
                 seen.add(key)
@@ -194,11 +167,9 @@ class ShareEmailOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str
-    # ``member`` — granted access, mailed an app link; ``link`` — mailed
-    # their own recipient link, no account needed.
+    # ``member``: granted access, mailed an app link; ``link``: mailed their own recipient link.
     access: Literal["member", "link"]
-    # ``rejected`` is a relay saying the mailbox does not exist; the
-    # sender can fix a typo. ``failed`` is worth trying again.
+    # ``rejected``: the mailbox does not exist; ``failed``: worth trying again.
     status: Literal["sent", "rejected", "failed"]
 
 
@@ -207,8 +178,7 @@ class ShareEmailResponse(BaseModel):
 
     sharing: SharingView
     results: list[ShareEmailOutcome]
-    # Kept for older clients. Outsiders now get their own recipient link
-    # (never the public one), so this is always False.
+    # Kept for older clients; always False now that outsiders get recipient links.
     public_link_created: bool = False
 
 
@@ -228,7 +198,7 @@ class CreateLinkRequest(BaseModel):
     )
     # None → the deployment default (90 days).
     expires_in_days: int | None = Field(default=None, ge=1, le=_MAX_LINK_DAYS)
-    # Sprint 22: create and mail in one call ("Create and send").
+    # Create and mail in one call.
     send: bool = False
     personal_message: str = Field(default="", max_length=recipient_mail.MAX_PERSONAL_MESSAGE)
     lang: str = Field(default=share_mail_copy.DEFAULT_LANG, max_length=16)
@@ -286,8 +256,7 @@ async def _sharing_view(conn: object, note: repo.NoteRow, claims: Claims) -> Sha
     links = await repo.list_live_share_links(conn, note_id=note.id)  # type: ignore[arg-type]
     manage = access.can_manage(note, claims)
     policy, _plan = await sharing_policy.load_policy(conn, tenant_id=claims.tid)  # type: ignore[arg-type]
-    # Tokens are credentials: a member who may read the note but not
-    # manage it sees that links exist, not what they are.
+    # Tokens are credentials: a reader who cannot manage sees that links exist, not what they are.
     views: list[LinkView] = []
     if manage and links:
         counts = await items_repo.live_response_counts_by_link(conn, note_id=note.id)  # type: ignore[arg-type]
@@ -369,12 +338,7 @@ async def _audit(claims: Claims, kind: str, note_id: UUID, payload: dict[str, ob
 async def _grant_member(
     conn: object, note: repo.NoteRow, member_sub: UUID
 ) -> tuple[repo.NoteRow, bool]:
-    """Give one member read access. Returns (note, newly_granted).
-
-    Idempotent, and silent about it: re-sharing with somebody who
-    already has the note is a no-op, not an error, because from the
-    sharer's side it is the same intention either way.
-    """
+    """Give one member read access. Returns (note, newly_granted). Idempotent: re-sharing is a no-op."""
     if member_sub in note.shared_with_ids or access.is_author_team(note, member_sub):
         return note, False
     await repo.add_shared_with(conn, note_id=note.id, user_sub=member_sub)  # type: ignore[arg-type]
@@ -406,12 +370,7 @@ async def _notify_shared(
 async def _ensure_public_link(
     conn: object, claims: Claims, note_id: UUID
 ) -> tuple[repo.ShareLinkRow, bool]:
-    """The live link for a note, minting one if there is none.
-
-    Returns (link, created). A note has at most one live link, so this
-    is idempotent — asking again hands back the same token rather than
-    minting a second one nobody can revoke from the sheet.
-    """
+    """The live link for a note, minting one if there is none. Returns (link, created); idempotent."""
     link = await repo.fetch_live_share_link(conn, note_id=note_id)  # type: ignore[arg-type]
     if link is not None:
         return link, False
@@ -593,8 +552,7 @@ async def share_by_email(
     sharer_email = me.email if me else ""
     shared_at = datetime.now(UTC)
 
-    # Outside the connection block on purpose: a slow relay must not hold
-    # a pooled DB connection for the length of a send.
+    # Outside the connection block: a slow relay must not hold a pooled DB connection.
     outcomes = await share_email.send_many(
         state.email_provider,
         recipients,
@@ -608,8 +566,7 @@ async def share_by_email(
     )
 
     if outsider_links:
-        # The outcome lands on each link, so the sheet's chips say Sent /
-        # Failed and "Resend" knows its count; then the view is re-read.
+        # Record the outcome on each link, then re-read the view.
         async with tenant_connection(state.app_pool, claims.tid) as conn:
             for o in outcomes:
                 link = outsider_links.get(o.email.lower())
@@ -632,10 +589,7 @@ async def share_by_email(
         audit_kinds.NOTE_LINK_EMAILED,
         note_id,
         {
-            # Counts and outcomes, never the addresses: who a note went
-            # to is in the sharer's own sent mail, and an audit log that
-            # accumulates third-party e-mail addresses is a liability
-            # nobody asked for.
+            # Counts and outcomes, never the addresses.
             "recipients": len(recipients),
             "members": sum(1 for r in recipients if r.access == share_mail_copy.ACCESS_MEMBER),
             "sent": sum(1 for o in outcomes if o.status == "sent"),
@@ -722,7 +676,7 @@ async def revoke_public_link(
     return view
 
 
-# ── Sprint 19: per-recipient links ──────────────────────────────────
+# ── Per-recipient links ─────────────────────────────────────────────
 
 
 @router.post(
@@ -750,7 +704,7 @@ async def create_recipient_link(
         request = share_links.RecipientLinkRequest(
             label=body.label,
             recipient_email=body.recipient_email,
-            # Sprint 23: the workspace's ceiling clips, never refuses.
+            # The workspace's ceiling clips, never refuses.
             expires_in_days=min(
                 body.expires_in_days or settings.recipient_link_default_days, policy.max_link_days
             ),
@@ -786,12 +740,8 @@ async def _send_recipient_link(
     personal_message: str,
     lang: str,
 ) -> repo.ShareLinkRow:
-    """Mail one recipient link from the product, inline (Sprint 22).
-
-    Refuses what cannot be mailed (422), what asked not to be (409) and
-    what would be too much (429); records the outcome on the link either
-    way so the sender's chip says "Sent" or "Failed — retry".
-    """
+    """Mail one recipient link inline: 422 unmailable, 409 opted out, 429 over the
+    cap; the outcome is recorded on the link either way."""
     state = get_state()
     if link.kind != "recipient" or not link.recipient_email:
         raise HTTPException(

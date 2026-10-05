@@ -1,4 +1,4 @@
-"""DEP-S1-01: endpoint spec schema + plan diff (offline; no HF token)."""
+"""Endpoint spec schema + plan diff (offline; no HF token)."""
 
 from __future__ import annotations
 
@@ -52,12 +52,9 @@ def test_committed_specs_validate_and_are_pinned() -> None:
     assert {s["name"] for s in specs} == {
         "notes-chat-staging",
         "notes-asr-staging",
-        # Diarization on a GPU endpoint (ADR-0052 shape B). Its weights
-        # are baked into our own image rather than served from the repo,
-        # but the revision is still pinned and the rules below still hold.
+        # Diarization endpoint (ADR-0052): weights baked, revision still pinned.
         "notes-diar-staging",
-        # Sprint TQ4 bake-off candidates (ADR-0067): raised for the run,
-        # never named in routing until the rule adopts one.
+        # Bake-off candidates (ADR-0067): never named in routing until adopted.
         "notes-asr-parakeet-staging",
         "notes-asr-whisper-v3-staging",
     }

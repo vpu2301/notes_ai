@@ -36,46 +36,35 @@ final class CaptureViewModel: ObservableObject {
     @Published var diarize: Bool {
         didSet { UserDefaults.standard.set(diarize, forKey: "captureDiarize") }
     }
-    /// Sprint 31: "Record call audio (other participants)". Stored next to
-    /// `captureDiarize`; off until the call-audio notice is accepted — only
-    /// `acceptCallAudioConsent()` turns it on the first time.
+    /// "Record call audio (other participants)". Off until the call-audio notice is accepted; only `acceptCallAudioConsent()` turns it on the first time.
     @Published private(set) var captureSystemAudio: Bool {
         didSet { UserDefaults.standard.set(captureSystemAudio, forKey: Self.captureSystemAudioKey) }
     }
     static let captureSystemAudioKey = "captureSystemAudio"
     /// Show the (blocking) call-audio notice.
     @Published var callAudioConsentPresented = false
-    /// True when the call audio will actually be recorded: the setting is
-    /// on and the current version of the notice was accepted.
+    /// True when call audio will actually be recorded: setting on and the current notice accepted.
     var recordsCallAudio: Bool { captureSystemAudio && CallAudioConsent().isCurrent }
     /// "People": how many speakers the person says are in the meeting.
     @Published var people: PeopleCount {
         didSet { UserDefaults.standard.set(people.rawValue, forKey: "capturePeople") }
     }
-    /// The hint the upload carries: an exact number, and only when speakers
-    /// are being told apart at all.
+    /// The hint the upload carries: an exact number, only when speakers are told apart at all.
     var speakersExpected: Int? { diarize ? people.speakersExpected : nil }
-    /// Sprint 30: where the current capture started and what its calendar
-    /// event knew (invitee cap, names to offer). Manual unless a capture
-    /// was started from an upcoming event.
+    /// Where the current capture started and what its calendar event knew. Manual unless started from an upcoming event.
     @Published private(set) var context: CaptureContext = .manual
-    /// Sprint 34 — "My notes": what the author types WHILE the meeting runs.
-    /// The highest-value signal there is about what mattered in the room, so
-    /// it is the note itself from the first second: autosaved, on every
-    /// device, and kept verbatim by everything downstream.
+    /// "My notes": what the author types WHILE the meeting runs. It is the note itself from the first second: autosaved, on every device, kept verbatim.
     @Published var myNotes = "" {
         didSet { if myNotes != oldValue { notesChanged() } }
     }
-    /// Picks the template family the note is written into. Per meeting, not
-    /// a preference: the next one is probably a different kind.
+    /// Picks the template family. Per meeting, not a preference.
     @Published var meetingType: MeetingType = .auto
     /// The note this capture is typing into, once the server has opened one.
     @Published private(set) var noteId: String?
     /// True while typed text has not reached the server.
     @Published private(set) var notesUnsaved = false
 
-    /// Idempotency key: the same capture retried, resumed offline or picked
-    /// up on a second device is ONE note.
+    /// Idempotency key: the same capture retried, resumed offline or picked up on a second device is ONE note.
     private var clientCaptureId = UUID().uuidString
     /// Recording t=0, the origin for every line's offset.
     private var recordingStartedAt = Date()
@@ -86,16 +75,12 @@ final class CaptureViewModel: ObservableObject {
     private var noteVersion = 0
     private var saveTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
-    /// The invite's people and agenda for this capture, kept so a note
-    /// created later (offline at Record) still opens with them.
+    /// The invite's people and agenda, kept so a note created later (offline at Record) still opens with them.
     private var meetingCalendar: MeetingCalendarContext?
-    /// Sprint 35 — the workspace's names and terms, fetched when the
-    /// recording starts and sent with the upload so the transcriber has
-    /// the spellings before it guesses. A capture never waits for it.
+    /// The workspace's names and terms, fetched at start and sent with the upload. A capture never waits for it.
     private var vocabularyHint: String?
     @Published private(set) var phase: Phase = .idle
-    /// The ASR job of the capture being processed (or just finished), so the
-    /// window can show the live card for that meeting and nothing else.
+    /// The ASR job of the capture being processed (or just finished), for the live card.
     @Published private(set) var activeJobId: String?
     /// Set five minutes before the recording cap; cleared on the next start.
     @Published private(set) var limitWarning: String?
@@ -114,13 +99,11 @@ final class CaptureViewModel: ObservableObject {
         self.diarize = defaults.object(forKey: "captureDiarize") as? Bool ?? true
         self.people = defaults.string(forKey: "capturePeople").flatMap(PeopleCount.init(rawValue:)) ?? .auto
         self.captureSystemAudio = defaults.object(forKey: Self.captureSystemAudioKey) as? Bool ?? false
-        // The notice changed since it was accepted: ask again before the
-        // next recording picks up anyone else's voice.
+        // The notice changed since it was accepted: ask again before recording anyone else's voice.
         if captureSystemAudio && !CallAudioConsent().isCurrent {
             callAudioConsentPresented = true
         }
-        // Re-publish the recorder's changes (level, elapsed) through this
-        // object so views and the menu-bar label stay in sync.
+        // Re-publish the recorder's changes through this object so views and the menu-bar label stay in sync.
         recorderSubscription = recorder.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -130,9 +113,7 @@ final class CaptureViewModel: ObservableObject {
 
     var isRecording: Bool { recorder.isRecording }
 
-    /// Sign-out (Sprint 32): a calendar event picked for the next capture —
-    /// its invitees' names — does not outlive the session. A recording in
-    /// progress keeps the context it was started with.
+    /// Sign-out: a calendar event picked for the next capture does not outlive the session. A recording in progress keeps its context.
     func forgetContext() {
         guard !isRecording else { return }
         context = .manual
@@ -140,9 +121,7 @@ final class CaptureViewModel: ObservableObject {
 
     // MARK: - Call audio (Sprint 31)
 
-    /// The Settings toggle. Turning it on the first time (or after the
-    /// notice changed) shows the notice instead; it goes on only when the
-    /// notice is accepted.
+    /// The Settings toggle. Turning it on the first time (or after the notice changed) shows the notice instead.
     func setCallAudio(_ on: Bool) {
         if !on {
             captureSystemAudio = false
@@ -186,8 +165,7 @@ final class CaptureViewModel: ObservableObject {
         limitWarning = nil
         stoppedAtLimit = false
         context = .manual
-        // A finished capture's notes are the server's now; the next one
-        // starts with a clean pad and a fresh idempotency key.
+        // A finished capture's notes are the server's now; the next starts with a clean pad and a fresh idempotency key.
         myNotes = ""
         noteId = nil
         noteContent = nil
@@ -198,22 +176,12 @@ final class CaptureViewModel: ObservableObject {
         meetingCalendar = nil
         vocabularyHint = nil
         clientCaptureId = UUID().uuidString
-        // `meetingType` is deliberately NOT cleared: it is chosen before
-        // the next meeting starts, and most people's meetings come in
-        // runs of the same kind.
+        // `meetingType` is deliberately NOT cleared: meetings come in runs of the same kind.
     }
 
     /// The one-click path: clear any finished state and start recording now.
-    /// A title (say, from a calendar event) can be handed in.
-    ///
-    /// Sprint 30: a capture started from a calendar event hands in its
-    /// `context` (the invitees as a cap and as names to offer); everything
-    /// else is `.manual`.
-    ///
-    /// Sprint 34: it also OPENS THE NOTE, so there is somewhere to type the
-    /// moment the meeting starts. The recorder goes first and the note is
-    /// opened beside it — a note we failed to create is recoverable at
-    /// stop, a meeting we failed to record is not.
+    /// A calendar-started capture hands in its `context`. It also OPENS THE NOTE,
+    /// recorder first: a lost note is recoverable at stop, a lost meeting is not.
     func startNew(title: String = "", context: CaptureContext = .manual,
                   calendar: MeetingCalendarContext? = nil,
                   meetingType: MeetingType? = nil) {
@@ -255,9 +223,7 @@ final class CaptureViewModel: ObservableObject {
                body: "The note is being drafted. Start a new meeting to keep recording.")
     }
 
-    /// A system notification, when this process can post one: a bare
-    /// `swift build` binary has no bundle and UNUserNotificationCenter
-    /// would abort, so the in-app banner and the Dock bounce carry it then.
+    /// A system notification, when this process can post one: a bare `swift build` binary has no bundle and UNUserNotificationCenter would abort.
     private func notify(title: String, body: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
@@ -277,8 +243,7 @@ final class CaptureViewModel: ObservableObject {
         guard !phase.isBusy else { return }
         limitWarning = nil
         stoppedAtLimit = false
-        // The cap as the server has it today; the fallback stands if the
-        // call fails, and the server's own check still applies.
+        // The cap as the server has it today; the fallback stands if the call fails.
         if let limits = try? await app.api.asrLimits() {
             recorder.limitSeconds = TimeInterval(limits.maxDurationSeconds)
         }
@@ -293,10 +258,7 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    /// A file from disk, through the same pipeline as a recording made
-    /// here: upload, transcribe, draft the note. The file is copied into
-    /// this app's own space first — the pipeline deletes what it uploads
-    /// and keeps what it could not, and neither may happen to the original.
+    /// A file from disk, through the same pipeline. Copied into this app's space first: the pipeline deletes what it uploads, never the original.
     func upload(fileURL: URL) {
         guard !recorder.isRecording, !phase.isBusy else { return }
         reset()
@@ -323,8 +285,7 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    /// What the server is told the file is. Anything unknown goes as a
-    /// generic audio stream; the server sniffs the container itself.
+    /// What the server is told the file is; anything unknown goes as a generic audio stream (the server sniffs the container).
     nonisolated static func contentType(forExtension ext: String) -> String {
         switch ext.lowercased() {
         case "m4a", "mp4", "aac": return "audio/mp4"
@@ -344,7 +305,7 @@ final class CaptureViewModel: ObservableObject {
             phase = .idle
             return
         }
-        // Sprint F1: read now — the next recording resets it.
+        // Read now — the next recording resets it.
         let timing = recorder.captureTiming
         // Whatever was typed in the last second goes with the meeting.
         Task { await saveNotesNow() }
@@ -362,14 +323,10 @@ final class CaptureViewModel: ObservableObject {
 
     private func process(fileURL: URL, meetingTitle: String, context: CaptureContext,
                          timing: CaptureTiming? = nil, contentType: String? = nil) async {
-        // The recording is deleted only once the server has it. Every other
-        // exit from this function — a failed upload, a lost session, the
-        // app being quit mid-pipeline — moves it to `pending/` with a
-        // sidecar instead. A meeting cannot be recorded twice (IDX-M1 F).
+        // The recording is deleted only once the server has it; every other exit moves it to `pending/` with a sidecar. A meeting cannot be recorded twice.
         var uploaded = false
         let recordedAt = Date()
-        // Sprint 31: the layout is read from the file itself — one it does
-        // not have would be refused. The name is the account's now.
+        // The layout is read from the file itself; one it does not have would be refused.
         let channelLayout = ChannelLayout.field(forFileAt: fileURL)
         let speakerName = localSpeakerName
         defer {
@@ -395,8 +352,7 @@ final class CaptureViewModel: ObservableObject {
             uploaded = true
             jobId = job.id
             activeJobId = job.id
-            // The recording and the note the author typed in are one
-            // meeting from here on.
+            // The recording and the typed note are one meeting from here on.
             await attachRecording(jobId: job.id)
             app.addRecent(jobId: job.id, title: meetingTitle, meetingNoteId: noteId)
             if app.selection == nil { app.selection = .capture(jobId: job.id) }
@@ -406,8 +362,7 @@ final class CaptureViewModel: ObservableObject {
             var misses = 0
             while !current.status.isTerminal {
                 try await Task.sleep(for: .seconds(3))
-                // A long transcript outlives a Wi-Fi blip or a sleeping
-                // Mac; one failed poll must not abandon the meeting.
+                // A long transcript outlives a Wi-Fi blip; one failed poll must not abandon the meeting.
                 do {
                     current = try await app.api.jobStatus(id: job.id)
                     misses = 0
@@ -428,22 +383,17 @@ final class CaptureViewModel: ObservableObject {
             }
 
             phase = .creatingNote
-            // Sprint 34: when the note already exists — the author has been
-            // typing in it since Record — the transcript goes INTO it. A
-            // second note would split the meeting in two.
+            // When the note already exists (typed in since Record) the transcript goes INTO it.
             var finishedNoteId: String?
             if let live = noteId {
-                // Idempotent for the same pair: this only matters when the
-                // bind after upload failed, and it beats a `no_job` refusal.
+                // Idempotent for the same pair; only matters when the bind after upload failed.
                 _ = try? await app.api.attachMeetingJob(noteId: live, asrJobId: job.id)
                 do {
                     _ = try await app.api.attachTranscript(noteId: live)
                     PendingMeetingNotes.remove(clientCaptureId)
                     finishedNoteId = live
                 } catch APIError.http(status: 404, problem: _) {
-                    // The live note was moved to the bin while the meeting
-                    // ran (it looked empty). The recording is not in the
-                    // bin: it gets a fresh note, like an upload would.
+                    // The live note was binned while the meeting ran: the recording gets a fresh note.
                     forgetNote(live)
                 }
             }
@@ -458,8 +408,7 @@ final class CaptureViewModel: ObservableObject {
             app.updateRecent(jobId: job.id, status: .complete, noteId: finishedNoteId)
             phase = .done(noteId: finishedNoteId)
             title = ""
-            // Show the fresh note in the window unless the user is reading
-            // another one there.
+            // Show the fresh note unless the user is reading another one.
             if app.selection == nil || app.selection == .capture(jobId: job.id) {
                 app.selection = .capture(jobId: job.id)
             }
@@ -475,9 +424,7 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    /// Put the recording somewhere it will still be tomorrow, and say in
-    /// the banner where it went — a file the person is not told about is
-    /// only technically not lost.
+    /// Put the recording somewhere it will still be tomorrow, and say in the banner where it went.
     private func keep(_ fileURL: URL, title: String, recordedAt: Date, context: CaptureContext,
                       channelLayout: String?, localSpeakerName: String?,
                       timing: CaptureTiming? = nil) {
@@ -511,10 +458,8 @@ final class CaptureViewModel: ObservableObject {
         max(0, Int(Date().timeIntervalSince(recordingStartedAt) * 1000))
     }
 
-    /// The note this capture was typing into is gone (moved to the bin
-    /// here, on another device, or found missing at Stop). Unbind it so
-    /// autosave stops writing into a 404 and Stop drafts a fresh note; the
-    /// typed text stays on the pad. A new idempotency key, because
+    /// The note this capture typed into is gone. Unbind so autosave stops writing into
+    /// a 404 and Stop drafts a fresh note; the text stays. New idempotency key, because
     /// `startMeeting` for the old one answers with the trashed note.
     func forgetNote(_ id: String) {
         guard noteId == id else { return }
@@ -526,9 +471,7 @@ final class CaptureViewModel: ObservableObject {
         if isRecording { persistNow() }
     }
 
-    /// Open the note beside the recording. Never throws and never blocks:
-    /// when it fails the capture keeps running and `attachRecording` opens
-    /// the note at stop instead.
+    /// Open the note beside the recording. Never throws or blocks: on failure `attachRecording` opens it at stop.
     private func openMeetingNote() async {
         do {
             let created = try await app.api.startMeeting(
@@ -541,15 +484,12 @@ final class CaptureViewModel: ObservableObject {
             noteId = created.id
             await loadNoteContent(created.id)
         } catch {
-            // Offline, or the service is down. The meeting matters more;
-            // what is typed is on disk either way.
+            // Offline, or the service is down; what is typed is on disk either way.
             persistNow()
         }
     }
 
-    /// Read the note back so autosave has a baseline to write into — and so
-    /// text typed on another device shows up here rather than being
-    /// overwritten by this one.
+    /// Read the note back so autosave has a baseline, and text typed on another device is not overwritten.
     private func loadNoteContent(_ id: String) async {
         guard let env = try? await app.api.fetchNote(id: id), let content = env.content else { return }
         noteContent = content
@@ -567,8 +507,7 @@ final class CaptureViewModel: ObservableObject {
         stampNewLines()
         persistTask?.cancel()
         persistTask = Task { [weak self] in
-            // Debounced so a fast typist does not write the file per key;
-            // short enough that a crash loses a sentence, not a meeting.
+            // Debounced: not a write per key, but a crash loses a sentence, not a meeting.
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             self?.persistNow()
@@ -592,8 +531,7 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    /// Write the scratchpad to disk. Synchronous and small — this is the
-    /// call that has to survive the app being killed one line later.
+    /// Write the scratchpad to disk. Synchronous and small — must survive the app being killed one line later.
     private func persistNow() {
         guard !myNotes.isEmpty || noteId != nil else { return }
         PendingMeetingNotes.save(PendingMeetingNote(
@@ -611,8 +549,7 @@ final class CaptureViewModel: ObservableObject {
             updatedAt: Date()))
     }
 
-    /// Autosave into the note. The author's text goes in whole; every other
-    /// section is left exactly as it was.
+    /// Autosave into the note: the author's text goes in whole; every other section is left as it was.
     private func saveNotes() async {
         guard let id = noteId, var content = noteContent else { return }
         let typed = myNotes
@@ -632,8 +569,7 @@ final class CaptureViewModel: ObservableObject {
             notesUnsaved = false
             persistNow()
         } catch {
-            // A conflict means another device wrote: re-read and merge
-            // rather than overwrite. Anything else retries on the next key.
+            // Conflict = another device wrote: re-read and merge. Anything else retries on the next key.
             await loadNoteContent(id)
         }
         await flushLineTimes(id)
@@ -646,14 +582,11 @@ final class CaptureViewModel: ObservableObject {
             try await app.api.putLineTimes(noteId: id, lines: batch)
             unsentLineTimes.removeAll()
         } catch {
-            // Timings are a hint: a line that never gets one still anchors
-            // by its words. Keep them for the next flush and move on.
+            // Timings are a hint; keep them for the next flush and move on.
         }
     }
 
-    /// Append one line to "My notes" from somewhere that is not the editor
-    /// — the menu-bar quick field. It is stamped with the moment it was
-    /// written, exactly like a line typed in the window.
+    /// Append one line to "My notes" from the menu-bar quick field, stamped like a typed line.
     func appendQuickNote(_ line: String) {
         let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -668,8 +601,7 @@ final class CaptureViewModel: ObservableObject {
         await saveNotes()
     }
 
-    /// Bind the recording to the note, opening the note first if `start`
-    /// could not. A capture never ends without one.
+    /// Bind the recording to the note, opening the note first if `start` could not.
     private func attachRecording(jobId: String) async {
         if noteId == nil { await openMeetingNote() }
         guard let id = noteId else { return }
@@ -678,9 +610,7 @@ final class CaptureViewModel: ObservableObject {
         persistNow()
     }
 
-    /// Everything typed offline, replayed. Called when a session comes back
-    /// and at launch; safe to call repeatedly, because creating the note is
-    /// idempotent on `clientCaptureId` and a line time is first-wins.
+    /// Everything typed offline, replayed. Safe to call repeatedly: note creation is idempotent on `clientCaptureId`, line times first-wins.
     func syncPendingMeetingNotes() async {
         for pending in PendingMeetingNotes.all(identityId: app.identityId) {
             // The capture in front of the user right now is not "pending".
@@ -724,8 +654,7 @@ final class CaptureViewModel: ObservableObject {
         "\(placeholderPrefix)\(placeholderFormatter().string(from: Date()))"
     }
 
-    /// Whether `title` is the placeholder `defaultTitle()` made — today or
-    /// on the day a kept recording was made — rather than one a person typed.
+    /// Whether `title` is the placeholder `defaultTitle()` made (today or on the recording's day).
     nonisolated static func isPlaceholderTitle(_ title: String) -> Bool {
         guard title.hasPrefix(placeholderPrefix) else { return false }
         let rest = String(title.dropFirst(placeholderPrefix.count))
@@ -742,10 +671,8 @@ final class CaptureViewModel: ObservableObject {
     }
 }
 
-/// The capture screen's "People" choice (Sprint 29). Auto and 6+ send no
-/// hint — the diarizer counts; 1–5 is an exact number stated by a person.
-/// Kept as a choice rather than an `Int?` so "6+" is still shown as picked
-/// after a relaunch.
+/// The capture screen's "People" choice. Auto and 6+ send no hint; 1–5 is exact.
+/// A choice rather than `Int?` so "6+" is still shown as picked after a relaunch.
 enum PeopleCount: String, CaseIterable, Hashable, Sendable {
     case auto
     case one = "1", two = "2", three = "3", four = "4", five = "5"

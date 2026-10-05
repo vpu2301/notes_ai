@@ -1,26 +1,7 @@
-"""Markdown-lite → HTML for the note PDF body.
-
-A generated meeting note is not flat prose: it arrives as bullets,
-numbered decisions, checkbox action items, bold run-in leads and the
-occasional small table. Rendered with ``white-space: pre-wrap`` (what
-the PDF template used to do) all of that lands in the document as raw
-``- `` and ``**…**`` — a text dump wearing a page.
-
-This module turns that text into real block structure so the renderer
-can typeset it: paragraphs, lists, checklists, headings, quotes and
-pipe tables.
-
-Safety
-------
-The input is user/model text and the output is injected into the Jinja
-template *unescaped*, so escaping happens HERE and first:
-:func:`_escape` runs over the raw text before any markup is produced,
-and every tag emitted afterwards is our own literal. No attribute ever
-carries user bytes (no links, no ``style``, no ``class`` from input),
-so there is nothing for a crafted note to break out of.
-
-Determinism: pure function of the input string — no time, no locale,
-no dict ordering.
+"""Markdown-lite → HTML for the note PDF body: paragraphs, lists, checklists,
+headings, quotes, pipe tables. The output is injected UNESCAPED, so
+:func:`_escape` runs over the raw text first and no attribute ever carries user
+bytes. Pure function of the input string.
 """
 
 from __future__ import annotations

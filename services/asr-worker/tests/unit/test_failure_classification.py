@@ -1,10 +1,6 @@
 """Which failures are terminal, which get another go, and who writes the row.
 
-The rule these tests hold: when the worker stops working on a job, either
-the job row says why, or the message is still on the queue. Never neither.
-That "neither" is exactly what used to happen — a retryable failure that
-exhausted its retries left the DLQ holding the message and the row holding
-``running``, forever.
+Rule: when the worker stops, either the row says why or the message is still queued.
 """
 
 from __future__ import annotations
@@ -98,8 +94,7 @@ def marked(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 async def test_retry_leaves_the_row_alone(marked: list[dict[str, Any]]) -> None:
-    # Still retrying is not a failure of the job — it is a failure of one
-    # attempt. The row stays `running` and the message comes back.
+    # One failed attempt: the row stays `running` and the message comes back.
     consumer = _Consumer(dead_letters=False)
     err = _RetryableError(str(JobErrorKind.STORAGE_UNAVAILABLE), "object store down")
 
@@ -119,16 +114,14 @@ async def test_dead_letter_closes_the_job_out(marked: list[dict[str, Any]]) -> N
     assert len(marked) == 1
     assert marked[0]["job_id"] == payload.job_id
     assert marked[0]["kind"] == str(JobErrorKind.RETRY_EXHAUSTED)
-    # The kind that kept failing is preserved in the detail — without it an
-    # operator reading the row knows only that it gave up, not on what.
+    # The kind that kept failing is preserved in the detail.
     assert str(JobErrorKind.STORAGE_UNAVAILABLE) in marked[0]["detail"]
 
 
 async def test_dead_letter_of_an_unreadable_payload_marks_nothing(
     marked: list[dict[str, Any]],
 ) -> None:
-    # There is no job id to fail. The DLQ entry is the whole record, which
-    # is why bad_payload is never retried in the first place.
+    # No job id to fail: the DLQ entry is the whole record.
     consumer = _Consumer(dead_letters=True)
     err = _RetryableError(str(JobErrorKind.UNHANDLED), "boom")
 

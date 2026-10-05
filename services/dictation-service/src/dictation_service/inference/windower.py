@@ -1,22 +1,6 @@
-"""Sliding-window orchestrator for streaming Whisper.
+"""Sliding-window orchestrator for streaming Whisper: slice → infer → align overlap → commit.
 
-Per-window flow (called every ``window_tick_interval_ms``):
-
-1. If less than ``min_window_for_partial_seconds`` of fresh audio →
-   no-op.
-2. Otherwise, slice ``[cursor − overlap_s, cursor + window_s)`` from
-   the session buffer.
-3. Submit to the inference queue.
-4. Run :func:`align_overlap` between the new window's overlap region
-   and the previous window's overlap region. Pick higher-probability
-   tokens per aligned pair.
-5. Apply commitment policy: words older than one full window + with a
-   silence boundary after them + with no_speech_prob ≤ threshold → FINAL.
-6. Return :class:`TickOutput` with partials, finals, and warnings; the
-   session loop sends them on the wire.
-
-The windower is stateful per-session; one instance lives in each
-:class:`SessionContext`.
+One stateful instance per session.
 """
 
 from __future__ import annotations
@@ -74,22 +58,11 @@ class StreamingWindower:
     finalized_words: list[WordTiming] = field(default_factory=list)
     last_overlap_words: list[WordTiming] = field(default_factory=list)
     committer: Committer = field(default_factory=Committer)
-    # Words decoded but still inside the revision horizon at the last tick.
-    # Retained so end-of-session can commit them (see `flush_provisional`).
+    # Still inside the revision horizon; committed at end of session.
     pending_words: list[WordTiming] = field(default_factory=list)
 
     def next_slice(self, buffer_total_ms: int, *, force: bool = False) -> WindowSlice | None:
-        """Decide if there's enough fresh audio to run a new window.
-
-        ``force`` waives the ``min_partial_s`` gate so a short remainder
-        still gets a window. Only end-of-session should use it: mid-session
-        it would spend a full window's inference on a sliver of audio.
-
-        Without a forced final window the trailing audio shorter than one
-        hop is never handed to the model at all — an unconditional loss of
-        up to ``min_partial_s`` from the end of every session, and the
-        reason a throughput-tuned wide hop cannot be adopted on its own.
-        """
+        """Next window slice if enough fresh audio; ``force`` waives the gate (end of session only)."""
         fresh_ms = buffer_total_ms - self.cursor_ms
         if fresh_ms <= 0:
             return None
@@ -102,23 +75,7 @@ class StreamingWindower:
         return WindowSlice(start_ms=start_ms, end_ms=end_ms, pcm=np.zeros(0, dtype=np.float32))
 
     def flush_provisional(self) -> list[Segment]:
-        """Commit whatever is still provisional. Call once, at end of session.
-
-        The commit rules deliberately hold a word back until it is past the
-        revision horizon AND has a silence boundary after it. That is right
-        mid-session, but at end-of-session there is no next window to revise
-        anything and no further audio to produce a boundary — so the words
-        still held are simply dropped, and `finalize` persists a transcript
-        that stops short of what was actually said.
-
-        The loss is one commit-horizon's worth of speech (the trailing
-        ``overlap_s``) on EVERY session, which is also why it went unnoticed:
-        at the 2 s default it looks like a clipped last word rather than a
-        bug. It scales with the overlap, so any deployment that widens the
-        window to buy throughput would lose proportionally more.
-
-        Idempotent: a second call returns nothing.
-        """
+        """Commit whatever is still provisional at end of session. Idempotent."""
         if not self.pending_words:
             return []
         already_final = {(w.start_ms, w.text) for w in self.finalized_words}
@@ -184,10 +141,7 @@ class StreamingWindower:
         decisions: list[CommitDecision] = self.committer.evaluate(
             candidates=candidates,
             now_ms=window_end_ms,
-            # The next window re-transcribes the trailing `overlap_s`;
-            # anything older than that cannot be revised again, so it is
-            # commit-eligible. Passing the full window here meant no
-            # candidate ever qualified (see committer docstring).
+            # Only the trailing overlap_s is re-transcribed; older words are commit-eligible.
             commit_horizon_ms=int(self.overlap_s * 1000),
             no_speech_prob=window_no_speech_prob,
             last_silence_boundary_ms=silence_boundary_ms,
